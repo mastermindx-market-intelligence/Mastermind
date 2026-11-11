@@ -1269,7 +1269,42 @@ class T3LivePortReworkTests(unittest.IsolatedAsyncioTestCase):
         receipt = await adapter.collect_result(ref)
         entry = adapter.result_ledger_entry("run-1")
         self.assertEqual(entry.result_ref, f"t3://thread/{thread}/run/{native_run}/item/i-2")
-        self.assertEqual(receipt.result.structured_output["text"], "FINAL-ANSWER")
+        self.assertEqual(receipt.result.structured_output["summary"], "FINAL-ANSWER")
+
+    async def test_collect_presents_the_engine_closed_completed_envelope(self) -> None:
+        """L10 (lease-expiry journey round 9, 2026-11-11): the supervisor's
+        recovered-run finisher sealed a SUCCEEDED provider run as FAILED
+        ("worker result validations must be an array") because this adapter
+        passed the provider's natural read ({"text", "item_id",
+        "text_truncated"}) straight through as WorkerResult.structured_output.
+        The engine's worker contract is the closed COMPLETED envelope every
+        other adapter presents (claude/codex workers validate against the
+        job's result schema; the commission prompt demands it); the t3
+        boundary must translate the provider's terminal read into it."""
+        transport = FakeMcpTransport()
+        adapter, _ = _live_adapter(transport)
+        ref = await adapter.start(_launch_spec())
+        native_run = adapter.launch_receipt("run-1").run_id
+        thread = ref.provider_session_id
+        transport.items[thread] = [
+            {"position": 1, "itemId": "i-1", "runId": native_run,
+             "type": "user_message", "text": "do the work"},
+            {"position": 2, "itemId": "i-2", "runId": native_run,
+             "type": "assistant_message", "text": "FINAL-ANSWER"},
+        ]
+        transport.run_status[native_run] = "completed"
+        receipt = await adapter.collect_result(ref)
+        output = receipt.result.structured_output
+        self.assertEqual(output["status"], "COMPLETED")
+        # WorkerResult freezes sequences; both empty shapes satisfy the
+        # engine's "validations must be an array" law
+        self.assertEqual(list(output["validations"]), [])
+        self.assertEqual(output["summary"], "FINAL-ANSWER")
+        self.assertEqual(list(output["artifacts"]), [])
+        # provenance of the provider read rides along; the engine's scope
+        # and payload laws ignore unknown keys
+        self.assertEqual(output["item_id"], "i-2")
+        self.assertFalse(output["text_truncated"])
 
     async def test_collect_refuses_when_the_exact_run_has_no_final_reply(self) -> None:
         transport = FakeMcpTransport()

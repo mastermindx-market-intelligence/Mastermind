@@ -1854,7 +1854,12 @@ class CodingJobDoor:
 
         collected = asyncio.run(adapter.collect_result(ref))
         output = dict(collected.result.structured_output or {})
-        summary = str(output.get("text", ""))[:8000]
+        # L10 (lease-expiry journey round 9, 2026-11-11): the adapter now
+        # presents the engine's closed COMPLETED envelope on a SUCCEEDED
+        # run, so the worker's final text rides ``summary``; failure
+        # verdicts keep the natural read (``text`` is the worker's own
+        # failure report the F2 seal quotes).
+        summary = str(output.get("summary") or output.get("text") or "")[:8000]
         artifacts = list(output.get("artifacts") or []) or [
             f"branch:{branch}", f"thread:{ref.provider_session_id}"]
 

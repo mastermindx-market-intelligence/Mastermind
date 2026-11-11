@@ -951,6 +951,128 @@ def test_a_fenced_out_finisher_never_cancels_the_provider_run(
 
 
 # ---------------------------------------------------------------------------
+# L10 (lease-expiry journey round 9): the recovered finisher must seal the
+# REAL t3 adapter's collected receipt as COMPLETED
+# ---------------------------------------------------------------------------
+
+
+def _real_t3_collected_output() -> dict:
+    """Collect one SUCCEEDED run through the REAL T3ExecutionAdapter over a
+    fake MCP transport and return its WorkerResult.structured_output — the
+    exact shape the production boundary hands the engine's finisher."""
+    import hashlib
+    from pathlib import Path
+
+    from tests.test_t3_execution_adapter import (
+        FakeMcpTransport,
+        _launch_spec,
+        _live_adapter,
+    )
+
+    async def collect():
+        transport = FakeMcpTransport()
+        adapter, _port = _live_adapter(transport)
+        ref = await adapter.start(_launch_spec())
+        native_run = adapter.launch_receipt("run-1").run_id
+        thread = ref.provider_session_id
+        transport.items[thread] = [
+            {"position": 1, "itemId": "i-1", "runId": native_run,
+             "type": "user_message", "text": "do the work"},
+            {"position": 2, "itemId": "i-2", "runId": native_run,
+             "type": "assistant_message",
+             "text": "T4B-JOB-OK run complete with durable proof"},
+        ]
+        transport.run_status[native_run] = "completed"
+        receipt = await adapter.collect_result(ref)
+        return dict(receipt.result.structured_output or {})
+
+    return asyncio.run(collect())
+
+
+def test_the_recovered_finisher_seals_a_succeeded_provider_run_completed(
+        tmp_path, monkeypatch):
+    """L10 (lease-expiry journey round 9, 2026-11-11): the service's
+    recovered-run finisher sealed a SUCCEEDED, exit-0 provider run as
+    FAILED ("worker result validations must be an array") — the adapter
+    presented the provider's natural read where the engine's terminal law
+    demands the closed worker envelope.  Every prior receipt-recovery test
+    fed the finisher FakeAdapter's hand-built envelope, so the mismatch
+    between the REAL t3 boundary and the engine never met.  This test wires
+    the real adapter's collected structured_output into the recovery lane
+    and requires the honest COMPLETED seal."""
+    import hashlib
+    from pathlib import Path
+
+    from control_plane.worker_execution_contract import (
+        CollectionReceipt,
+        WorkerResult,
+        WorkerRunStatus,
+    )
+
+    real_output = _real_t3_collected_output()
+
+    class _RealT3ShapeAdapter(ComposedBoundaryAdapter):
+        """Stands at the same seam with the real adapter's output shape.
+
+        ``reattach`` stays synchronous: the supervisor stores the plain
+        return value (the production async bridge lives in the composed
+        boundary projection, which this harness does not install)."""
+
+        def reattach(self, spec, binding):
+            return ReceiptCapableAdapter.reattach(self, spec, binding)
+
+        async def collect_result(self, ref):
+            result = WorkerResult(
+                job_id=self.spec.job_id,
+                run_id=self.spec.run_id,
+                worker_id=self.spec.worker_id,
+                status=WorkerRunStatus.SUCCEEDED,
+                structured_output=dict(real_output),
+                artifact_manifest=(),
+                git_manifest={"base_sha": "b" * 40, "head_sha": "b" * 40},
+                usage={},
+                provider_session_id=ref.provider_session_id,
+                exit_code=0,
+                started_at=ref.started_at,
+                finished_at="2026-11-11T00:00:01+00:00",
+                error=None,
+            )
+            return CollectionReceipt(
+                process_ref=ref,
+                result=result,
+                stdout_sha256=hashlib.sha256(
+                    Path(ref.stdout_path).read_bytes()).hexdigest(),
+                stderr_sha256=hashlib.sha256(
+                    Path(ref.stderr_path).read_bytes()).hexdigest(),
+                result_sha256=hashlib.sha256(
+                    Path(ref.result_path).read_bytes()).hexdigest(),
+            )
+
+    (runtime, job_id, attempt_id, adapter, now) = _crash_between_receipt_and_record(
+        tmp_path, monkeypatch,
+        adapter_factory=lambda inspector: _RealT3ShapeAdapter(inspector))
+    now[0] += 2_000  # the crashed claimant's lease expires
+    finisher = _restart_supervisor(
+        runtime, tmp_path, adapter, instance_id="finisher")
+    outcomes = finisher.reconcile_restart(requeue_lost=False)
+    assert outcomes, "the expired lease must reconcile to an adoption"
+    actives = finisher.take_recovered_runs()
+    assert len(actives) == 1
+
+    asyncio.run(finisher.finish_job(actives[0]))
+
+    row = runtime.attempts.get_attempt(attempt_id)
+    job = runtime.jobs.get_job(job_id)
+    assert row.status is owner.AttemptStatus.COMPLETED, (
+        "a SUCCEEDED provider run sealed through any engine-owned lane "
+        "must complete, never fail")
+    assert job.status is JobStatus.COMPLETED
+    summary = str((job.result or {}).get("summary", ""))
+    assert "T4B-JOB-OK" in summary, (
+        f"the worker's own final text must ride the sealed payload; got {summary!r}")
+
+
+# ---------------------------------------------------------------------------
 # the attack round (step 5): F1 — the bound path never fences a live lease,
 # and a fenced-out finisher is visibility, not a service-wide poison
 # ---------------------------------------------------------------------------

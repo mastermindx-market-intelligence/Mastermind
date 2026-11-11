@@ -2578,6 +2578,32 @@ class T3ExecutionAdapter:
         )
         return self._build_collection_receipt(original, read, state)
 
+    @staticmethod
+    def _worker_output(
+        state: WorkerRunStatus, result_payload: Mapping[str, Any]
+    ) -> Mapping[str, Any] | None:
+        """Present the worker's structured output in the engine's contract.
+
+        SUCCEEDED: the closed COMPLETED envelope (the supervisor's terminal
+        law validates ``validations``/``status`` before any completion; the
+        provider's final text rides ``summary``, the read's provenance keys
+        ride along and are ignored by the engine's scope/payload laws).
+        Every failure verdict keeps the natural read (the worker's own
+        failure report); failure prose must never be translated into a
+        completion envelope.
+        """
+        payload = dict(result_payload)
+        if state is not WorkerRunStatus.SUCCEEDED:
+            return payload or None
+        return {
+            "status": "COMPLETED",
+            "validations": [],
+            "summary": str(payload.get("text", "")),
+            "artifacts": [],
+            "item_id": str(payload.get("item_id", "")),
+            "text_truncated": bool(payload.get("text_truncated", False)),
+        }
+
     def _build_collection_receipt(
         self,
         original: WorkerProcessRef,
@@ -2596,7 +2622,21 @@ class T3ExecutionAdapter:
             run_id=original.run_id,
             worker_id=spec.worker_id,
             status=state,
-            structured_output=dict(read.result_payload) or None,
+            # L10 (lease-expiry journey round 9, 2026-11-11): the engine's
+            # worker contract is the closed COMPLETED envelope — every other
+            # adapter presents it (the claude/codex workers validate their
+            # structured output against the job's result schema; the
+            # commission prompt demands it) and the supervisor's terminal
+            # law rejects anything else, so passing the provider's natural
+            # read straight through made the recovered-run finisher seal a
+            # SUCCEEDED provider run as FAILED ("worker result validations
+            # must be an array").  A SUCCEEDED read is translated into the
+            # envelope; the provider's own failure prose stays in its
+            # natural shape for failure verdicts — no engine acceptance
+            # path consumes it, and the door's honest-failure seal quotes
+            # it.  The natural read remains durable in the collection
+            # receipt + write-once result ledger either way.
+            structured_output=self._worker_output(state, read.result_payload),
             artifact_manifest=(),
             git_manifest={},
             usage={},

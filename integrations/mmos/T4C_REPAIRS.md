@@ -262,3 +262,70 @@ advance, L9b pid-None misfire, secret surfaces, mint pinning, crash hooks)
 was re-checked and stands.  The bounded cost of the F1(a) law: a restart
 recovery now waits at most one lease window before adoption — the price of
 never fencing a live owner, which is the diff's own claimed invariant 2.
+
+## L10 — the recovered-run finisher sealed a SUCCEEDED provider run as FAILED
+
+Found live in the round-9 lease-expiry journey (step 5): the first
+exercise of the service-finisher-seals path (rounds 1–8 the door lane
+owned the seal) showed the provider verdict SUCCEEDED, exit 0, canary
+text delivered — and the attempt sealed FAILED with
+`errors: ["worker result validations must be an array"]`, job
+`JOB_FAILED {"status":"FAILED"}`.  The journey PASSed anyway: its
+criteria assert delivery, same attempt, one launch — never the seal
+verdict, which is exactly how the defect hid until the durable receipt
+was inspected by hand.
+
+Root cause: the t3 adapter passed the provider's natural terminal read
+(`{"text", "item_id", "text_truncated"}`) straight through as
+`WorkerResult.structured_output`, but the engine's worker contract is the
+closed COMPLETED envelope — `_validate_output_scope` requires
+`validations` to be an array and `_terminalize` gates every completion on
+`str(output.get("status")) == "COMPLETED"`.  Every other adapter presents
+the envelope (the claude/codex workers validate their structured output
+against the job's result schema; the supervisor's commission prompt
+demands it).  The door's own seal lane never runs `_terminalize`, so the
+two lanes disagreed on the same receipt — and every prior
+receipt-recovery test fed the finisher FakeAdapter's hand-built envelope,
+so the real boundary's mismatch never met.
+
+Repair (fail-first: the finisher-integration test reproduced the FAILED
+seal from the REAL adapter's collected output before the fix):
+
+- `control_plane/t3_execution_adapter.py` — a SUCCEEDED read is
+  translated into the engine's closed envelope
+  (`status: COMPLETED`, `validations: []`, the provider's final text in
+  `summary`, `artifacts: []`, the read's provenance keys riding along);
+  failure verdicts keep the natural read — the worker's own failure
+  report, which no engine acceptance path consumes and the door's F2
+  honest-failure seal quotes.  The natural read stays durable in the
+  collection receipt and the write-once result ledger either way.
+- `tools/mmos_coding_job/door.py` — the seal summary reads the envelope's
+  `summary` first, the natural `text` second (failure verdicts).
+- The engine's terminal law is unchanged: the envelope is the contract,
+  the adapter is the translating boundary, and the worker prompt is
+  untouched (a lane rule).
+
+Two stale tests surfaced by the repair, both fixed:
+
+- `tests/test_t3_native_composition.py::
+  test_crash_before_the_running_ack_recovers_with_zero_native_launches`
+  — stale law from F1(a) (`15f769d6c`, missed by the step-5 sweep: the
+  file was not in any batch): reconcile at a LIVE lease now defers
+  (`AWAITING_LEASE_EXPIRY`) and recovers the same execution with zero
+  native launches only after expiry.  The test now proves both phases.
+- `tests/test_t3_adapter_durability.py::
+  test_collect_uses_a_terminal_read_not_the_status_cursor` — stale since
+  L8b (`aba13e7ef`): collect lawfully POLLS STATUS until terminal
+  (L8b's "completes at terminal" contract) and each status poll advances
+  the read cursor as a side effect; the #13 invariant (the result comes
+  only from the head read, never an incremental page) was and is the
+  asserted line above it.  The "cursor untouched" over-specification now
+  documents the one lawful status poll.
+
+Proving tests:
+`tests/test_t3_execution_adapter.py::
+test_collect_presents_the_engine_closed_completed_envelope`,
+`tests/test_executive_supervisor_receipt_recovery_t4c.py::
+test_the_recovered_finisher_seals_a_succeeded_provider_run_completed`
+(wires the REAL adapter's collected structured_output into the recovery
+lane — RED on the FAILED seal before the fix, GREEN COMPLETED after).

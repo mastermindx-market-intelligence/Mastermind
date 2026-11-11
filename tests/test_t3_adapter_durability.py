@@ -1134,7 +1134,13 @@ class AuditReworkAdapterTests(unittest.IsolatedAsyncioTestCase):
         receipt = await adapter.collect_result(ref)
         self.assertEqual(receipt.result.status, WorkerRunStatus.SUCCEEDED)
         self.assertEqual(port.reads[-1][2], "")      # head (terminal) read
-        self.assertEqual(adapter.read_cursor("run-1"), "1")  # cursor untouched
+        # L8b (aba13e7ef): collect lawfully POLLS STATUS until the run is
+        # terminal ("completes at terminal"), and each status poll advances
+        # the read cursor as a side effect — here exactly one poll, since
+        # the run is already terminal.  The #13 invariant stands: the
+        # RESULT comes only from the head read above, never from an
+        # incremental page.
+        self.assertEqual(adapter.read_cursor("run-1"), "2")
 
     async def test_collect_refuses_a_bare_thread_id_as_result_reference(self) -> None:
         port = FakeT3Port()
