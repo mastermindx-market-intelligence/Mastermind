@@ -41,6 +41,7 @@ from control_plane.operator_harness_contract import (
 from control_plane.operator_harness_contract import SupportsCheckpoint
 from control_plane.executive_orchestration_principal import (
     OSProcessCredentialObservation,
+    base_process_identity,
     OperatorPrincipalObservation,
     ProviderHomeIdentityObservation,
 )
@@ -372,7 +373,7 @@ class OperatorHarnessOrchestrator:
             "process_start_identity": process.process_start_identity,
             "boot_id": process.boot_id,
         }
-        if credentials.process_identity != expected_process:
+        if base_process_identity(credentials.process_identity) != expected_process:
             raise OperatorHarnessOrchestrationError(
                 "principal process credentials do not match session observation"
             )
@@ -465,72 +466,10 @@ class OperatorHarnessOrchestrator:
         try:
             observed = self.attestation_reader(self.adapter, generation)
             launch = compare_launch(requested, observed)
-            principal: OperatorPrincipalObservation | None = None
-            principal_required = bool(
-                getattr(self.runtime, "operator_principal_required", lambda _value: False)(
-                    attempt_id
-                )
+            principal = self._observe_required_principal(
+                attempt_id=attempt_id, generation=generation, observation=observation,
             )
-            if principal_required:
-                existing_principal = getattr(
-                    self.runtime,
-                    "existing_operator_principal",
-                    lambda _attempt_id, _generation: None,
-                )(attempt_id, generation)
-                if existing_principal is not None and not isinstance(
-                    existing_principal, OperatorPrincipalObservation
-                ):
-                    raise OperatorHarnessOrchestrationError(
-                        "runtime returned untyped principal replay evidence"
-                    )
-                credential_reader = getattr(
-                    self.adapter, "observe_process_credentials", None
-                )
-                home_reader = getattr(
-                    self.adapter, "observe_provider_home_identity", None
-                )
-                if existing_principal is None and (
-                    not callable(credential_reader) or not callable(home_reader)
-                ):
-                    raise OperatorHarnessOrchestrationError(
-                        "orchestration adapter lacks typed principal observations"
-                    )
-                if existing_principal is not None:
-                    principal = existing_principal
-                else:
-                    credentials = credential_reader(generation)
-                    home = home_reader(generation)
-                    if not isinstance(credentials, OSProcessCredentialObservation) or not isinstance(
-                        home, ProviderHomeIdentityObservation
-                    ):
-                        raise OperatorHarnessOrchestrationError(
-                            "orchestration adapter returned untyped principal evidence"
-                        )
-                    process = observation.process
-                    expected_process = {
-                        "pid": process.pid,
-                        "pgid": process.pgid,
-                        "process_start_identity": process.process_start_identity,
-                        "boot_id": process.boot_id,
-                    }
-                    if credentials.process_identity != expected_process:
-                        raise OperatorHarnessOrchestrationError(
-                            "principal process credentials do not match TX-3 observation"
-                        )
-                    principal = OperatorPrincipalObservation.from_dict(
-                        {
-                            "schema_version": "mastermind.operator_principal_observation/v1",
-                            "attempt_id": attempt_id,
-                            "worker_id": generation.worker_id,
-                            "process_generation_id": generation.process_generation_id,
-                            "provider_session_id": observation.provider_session_id,
-                            "process_identity": credentials.process_identity,
-                            "os_principal_name": credentials.os_principal_name,
-                            "os_principal_uid": credentials.os_principal_uid,
-                            "provider_home_identity": home.provider_home_identity,
-                            "observed_at_ms": int(time.time() * 1000),
-                        }
-                    )
+            if principal is not None:
                 self.runtime.seal_operator_attestation(
                     attempt_id, generation, observed, launch, principal
                 )
@@ -563,10 +502,15 @@ class OperatorHarnessOrchestrator:
         operation_id: OperationId,
         cursor: EventCursor | None = None,
         timeout_seconds: float = 30.0,
+        _before_role_seal: Callable[
+            [OperatorTurnReceipt, RawRoleResultObservation], None
+        ] | None = None,
     ) -> OperatorTurnReceipt:
         """Issue one turn and persist only a candidate result, never Job completion."""
 
         self._assert_replayable(operation_id)
+        if _before_role_seal is not None and not callable(_before_role_seal):
+            raise OperatorHarnessOrchestrationError("trusted turn consumer is invalid")
         bounded_timeout = float(timeout_seconds)
         if (
             not math.isfinite(bounded_timeout)
@@ -595,6 +539,14 @@ class OperatorHarnessOrchestrator:
             or any(char not in "0123456789abcdef" for char in initial_plan)
         ):
             raise OperatorHarnessOrchestrationError("interactive plan seal is invalid")
+        if _before_role_seal is not None and (
+            initial_plan is not None
+            or not bool(getattr(self.runtime, "operator_principal_required", lambda _: False)(
+                session.attempt_id))
+        ):
+            raise OperatorHarnessOrchestrationError(
+                "trusted turn consumer requires one unsealed admitted role turn"
+            )
         turn = self.runtime.begin_operator_turn(
             session.attempt_id, session.generation, operation_id
         )
@@ -672,6 +624,14 @@ class OperatorHarnessOrchestrator:
                 error=exc,
             )
             raise OperatorEffectUnknown("turn result effect is unknown") from exc
+        receipt = OperatorTurnReceipt(
+            attempt_id=session.attempt_id,
+            turn=turn,
+            start=started,
+            events=tuple(events),
+            cursor=next_cursor,
+            candidate=candidate,
+        )
         if initial_plan is not None:
             # The follow-up candidate is already recorded by Runtime. It is
             # not a new plan and must not replace the initial accepted seal.
@@ -688,6 +648,11 @@ class OperatorHarnessOrchestrator:
                 )
             try:
                 raw_observation = self.adapter.observe_raw_role_result(turn)
+                # Private normal-factory composition only. The native turn and
+                # candidate are already acquired, while the existing actionable
+                # writer binding still qualifies. This grants no completion.
+                if _before_role_seal is not None:
+                    _before_role_seal(receipt, raw_observation)
                 self.runtime.seal_operator_role_result(
                     session.attempt_id, turn, raw_observation
                 )
@@ -695,14 +660,7 @@ class OperatorHarnessOrchestrator:
                 raise OperatorHarnessOrchestrationError(
                     "orchestration role result could not be sealed"
                 ) from exc
-        return OperatorTurnReceipt(
-            attempt_id=session.attempt_id,
-            turn=turn,
-            start=started,
-            events=tuple(events),
-            cursor=next_cursor,
-            candidate=candidate,
-        )
+        return receipt
 
     def graceful_stop(
         self,

@@ -52,11 +52,20 @@ STATUS_FIELDS = frozenset(
 _SAFE_REFUSAL = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
+class WorkerStatusVisibilityError(RuntimeError):
+    """A protected slot cannot be inspected; absence was NOT established."""
+
+
 def _lstat_present(path: Path) -> bool:
     try:
         path.lstat()
-    except OSError:
+    except FileNotFoundError:
         return False
+    except OSError:
+        # EACCES, EPERM, ENOTDIR and other observation errors are NOT
+        # evidence that an Executive credential/home is missing. Never leak
+        # the underlying protected path or error message through this CLI.
+        raise WorkerStatusVisibilityError("worker_slot_visibility_unavailable") from None
     return True
 
 
@@ -220,8 +229,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.slot_id is not None
         else worker_slots.all_slots()
     )
+    try:
+        observations = [inspect_slot(slot) for slot in slots]
+    except WorkerStatusVisibilityError:
+        # Never emit a partial roster or pretend an unreadable root-owned
+        # realm is absent. The caller must use authorized root inspection.
+        print("worker_slot_visibility_unavailable", file=sys.stderr)
+        return 2
     json.dump(
-        [inspect_slot(slot) for slot in slots],
+        observations,
         sys.stdout,
         sort_keys=True,
         separators=(",", ":"),

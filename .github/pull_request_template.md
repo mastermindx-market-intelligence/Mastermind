@@ -31,95 +31,39 @@ or the issue URL; merge must not erase proof, natural-time, independent-review, 
 acceptance obligations.
 -->
 
-## Observable mission
-
-<!-- One independently useful user or machine capability. Outcome before mechanism. -->
-
-## Why it matters
-
-<!-- Name the executive/user job, machine job, security boundary, operating burden, or capability unlocked. -->
-
-## Authority and current-state receipt
-
 <!--
-List document precedence and the exact state verified immediately before editing:
-- repository default-branch SHA;
-- relevant open PRs and live worktree/path owners;
-- accepted Executive architecture and direct organizational records;
-- current boot/readiness/provider/canary/production state where relevant.
-
-Stop rather than silently combining incompatible authority.
+Keep this description proportional to the change. Fill applicable sections only.
+A small source or documentation repair does not need a new project plan, authority
+ceremony, full local test suite, independent reviewer or deployment solely because
+this template mentions them. Actual source law, required CI, repository rules,
+CODEOWNERS and explicit holds still apply.
 -->
 
-## Exact scope
+## Change and outcome
 
-<!-- Repositories, owned capabilities/paths, protocols, schemas, producer and real consumer. -->
+<!-- Explain the concrete problem, what changes, and the resulting behavior.
+Link the existing issue/plan when useful; do not duplicate its entire contract. -->
 
-## Explicit non-goals
+## Verification
 
-<!--
-Name adjacent phases and authorities excluded. For Executive work, distinguish CEO
-admission from worker execution, provider readiness, Wake, scheduling, production
-installation, Slack networking, MCP schema, and autonomous continuation.
--->
+<!-- List relevant checks actually run and their results, reused evidence, and
+material limits. Run the smallest useful local checks while iterating and preserve
+mandatory hosted CI. Add security, failure/recovery, accessibility or real-path
+proof only where the change or assigned outcome needs it. Do not report unrun
+tests, requested reviews, pending CI or fixtures as completed acceptance. -->
 
-## Complete user / machine journey
+## Release and remaining work
 
-<!-- Include unavailable, refusal, duplicate/replay, ambiguous response, degraded, quarantine, split-deploy, and correction states. -->
+<!-- State any actual hold and next action. Source-only changes do not require a
+VPS restart. When runtime rollout is assigned and authorized, release through the
+existing protected path using this operation's exact merged commit and verify the
+affected consumer. Merge is not installation or production proof.
+A review-only assignment does not authorize release. A broader delivery assignment
+continues through its next safe authorized step; creating this PR is not a stop. -->
 
-## Data, identity, time, null, and correction law
+## Author check
 
-<!--
-State exact operation/intent/job/attempt identities, grounding, idempotency, clocks,
-readback/reconciliation, null/refusal behavior, and durable correction rules. A caller
-or model must not author privileged fields or silently re-ground stale work.
--->
-
-## Method and authority boundary
-
-<!-- Distinguish deterministic first-party policy from model-authored prose. Name what may not dispatch, execute, mutate, or widen authority. -->
-
-## Security / authorization / failure states
-
-<!-- Enumerate closed protocol schemas, peer/principal scope, fail-closed states, secret handling, timeout/readback law, and unsafe-state refusals. -->
-
-## Ordered implementation sequence
-
-1. Refresh current heads, open PRs, worktrees, and accepted architecture.
-2. Freeze discriminating authorization/idempotency/failure tests before implementation.
-3. Implement the smallest admission-to-canonical-consumer vertical.
-4. Run adversarial/mutation/security and compatibility proof.
-5. Prove the real production path only when this PR is authorized to arm it.
-6. Update durable architecture/handoff state.
-7. Stop at this PR's bounded capability.
-
-## Acceptance tests and real proof
-
-<!--
-List exact commands, negative authorization matrix, idempotency/crash-window proof,
-one-created/one-created counts, compatibility snapshots, production identity, or state
-why production proof is explicitly not owed. Green CI alone is not acceptance.
--->
-
-## Stop condition and continuation handoff
-
-<!-- State the exact terminal condition, what remains unauthorized, and the cold-stranger return required for Sol. Do not absorb the next phase. -->
-
-## Author checklist
-
-- [ ] Exact `WS:<KEY>` / `MAS-###` / portfolio mode / wave / authority / completion fields are resolved.
-- [ ] Current default branch, open PRs, worktrees, and path/semantic collisions were checked before editing.
-- [ ] Relevant tests pass and `git diff --check` passes.
-- [ ] No secrets, environment files, runtime state, logs, caches, or backups are included.
-- [ ] This branch was created from current `origin/master` in an isolated worktree.
-- [ ] One independently useful capability is delivered; infrastructure names its real caller and canonical consumer.
-- [ ] Scope and non-goals preserve accepted architecture and no-duplicate-control-plane boundaries.
-- [ ] CEO admission, worker execution, provider readiness, Wake, installation, and production arming remain separate unless explicitly commissioned together.
-- [ ] No duplicate identity, event, queue, scheduler, store, auth, grounding, dedupe, or lifecycle plane was created.
-- [ ] Privileged fields are derived by trusted deterministic code; caller/model authority is bounded.
-- [ ] Failure, timeout, replay, ambiguity, stale grounding, quarantine, and correction behavior is explicit and fail-closed.
-- [ ] Tests discriminate the intended law; relevant mutations/adversarial attacks were executed.
-- [ ] Real production proof is attached where `Completion` requires it—or the PR states why none is owed.
-- [ ] Merge is not represented as proof, readiness, execution, or acceptance when another gate remains.
-- [ ] Durable architecture/Agent OS/Linear state is reconciled with one exact lawful next action.
-- [ ] After merge, deploy the exact `origin/master` merge SHA with `scripts/deploy_from_git.sh` and verify the VPS `/health` endpoint returns HTTP 200.
+- [ ] The six header fields identify the real scope; existing writers and unknown effects are preserved.
+- [ ] The scoped diff and relevant verification were inspected; secrets, runtime state and backups are excluded.
+- [ ] Required CI, actual approvals and release holds remain enforced; no self-approval, self-merge or bypass.
+- [ ] Remaining work and its next executable action are accurate; deployment is included only when owed.

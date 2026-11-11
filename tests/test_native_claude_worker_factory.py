@@ -122,7 +122,11 @@ def test_sealed_v7_factory_binds_real_claude_primary_and_codex_validator(
         lambda: (ClaudeCodeWorkerAdapter, PersonalMaxManagedPolicyObserver),
     )
 
-    broker = worker._build_broker(value, autonomy_guard=None)
+    broker = worker._build_broker(
+        value,
+        autonomy_guard=None,
+        native_realm_guard=lambda: None,  # reviewed-only, no provider work fixture
+    )
 
     assert type(broker.adapter) is ClaudeCodeWorkerAdapter
     assert broker.adapter_id == "claude-code"

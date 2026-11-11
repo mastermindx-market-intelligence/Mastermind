@@ -39,15 +39,35 @@ discovery. Current fleet truth is narrower: Ryan Business has the accepted live 
 prepare/edit journey; C1/C2/C3/C4/Chris Admin host tunnel services are live/ready but each still
 requires its own attended ChatGPT app enrollment before that seat's direct app is accepted.
 
-## Paper release compatibility — 2026-09-30
+## Future Paper releases: isolated tool compatibility (proposed; not installed)
 
-Write qualification must not lock to a Paper release number. The bridge records the observed
+A later source candidate replaces normal production full-catalog SHA
+matching with reviewed per-tool structural input contracts; see
+docs/PAPER_DESIGN_INTEGRATION.md. Paper's version number remains
+observational. Added unrelated tools and description-only changes cannot
+disable existing edits. Only tools with changed required inputs,
+semantics-bearing input schemas or safety annotations are withheld, with a
+typed TOOL_SCHEMA_CHANGED response, while unaffected tools remain usable.
+Global write refusal remains for changes to the critical document identity
+schema or server name. The adapter does not silently update upstream
+mutations, change the underlying tunnel, or restart Paper Desktop. The
+normal existing direct app will benefit automatically only after the reviewed
+source is merged and its seat runtime installer-selected with real guarded
+scratch-file acceptance.
+
+## Paper release compatibility — 2026-10-01
+
+Write qualification does not lock to a Paper release number. The bridge records the observed
 `server_version` for diagnostics, requires the `paper-desktop` server identity, and gates writes on
-the exact reviewed full catalog digest. Paper 0.5.14 was observed with the same reviewed
-`8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb` catalog previously
-qualified on 0.5.12, so runtime v9 / bridge 0.1.3 admits it without weakening schema checks.
-A changed catalog remains read-only until separately reviewed. Deploying v9 to an existing seat is
-still a distinct immutable-runtime effect; source merge alone does not update a running tunnel.
+the exact reviewed full catalog digest. Paper 0.5.14 now reports catalog
+`ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9`. Exact canonical
+reconstruction from the previously accepted `ca90...` and `8cd...` catalogs proves the only delta
+from accepted `8cd...` is removal of read tool `list_files` and addition of blocked tools
+`list_resources` and `rename_resource`; all surviving tool descriptors, including blocked
+`rename_pages`, are byte-equivalent under the bridge encoding. Bridge 0.1.4 therefore removes
+`list_files` from the read allowlist without exposing either replacement resource tool. Runtime v10
+owns these new bridge bytes; v9 remains immutable historical evidence. A future catalog change still
+returns read-only until separately reviewed, and source merge alone never updates a running seat.
 
 ## Implementation
 
@@ -157,13 +177,26 @@ Do not publish a skills-only placeholder and describe it as a working Paper conn
    `service/com.mastermind.paper-direct.business.<seat>.plist`; legacy v2 retains the historical
    unsuffixed label. Do not also launch a manual client for the same seat. Health binds only to
    `127.0.0.1:0`; its assigned address is in `state/health.url`.
-5. In the actual Business workspace, the authorized admin enables developer mode and creates
-   private **Mastermind Paper**, choosing Connection **Tunnel** and the existing tunnel ID.
+5. In the actual Business workspace, the authorized admin opens **ChatGPT Plugins**,
+   selects **Add custom MCP server** and creates the private **Mastermind Paper** plugin
+   with Connection **Tunnel** pointing at the existing tunnel ID. **Developer Mode is not
+   required** by the current Plugins setup. If the particular workspace still exposes
+   the legacy Developer Mode / Apps path, use its documented flow for the same app and
+   tunnel; never duplicate the connection.
    A plugin name or successful registration is not proof of any Paper operation. When an accepted
    source/runtime revision changes tool descriptions or collaboration metadata, review and refresh
-   the **same app's** approved action snapshot. If ChatGPT still shows older file-exclusive wording
-   after the runtime is current, record `DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`; do not
-   create a duplicate app/tunnel or treat stale transport metadata as a document lease.
+   the **same app's** approved action snapshot. For a developer-mode MCP connection, deploy/restart
+   the reviewed server, open that existing connection in ChatGPT Plugins, select **Refresh**, confirm
+   the advertised tool metadata changed, and then start a new conversation. A published Plugin Directory
+   plugin uses continuous review/rescan. **Business and Enterprise/Edu**
+   admins can **Refresh existing published custom workspace MCP app tools in place**
+   from workspace settings with management permission and a valid connection,
+   then review/publish action updates and start a new chat. Enterprise/Edu Action control also supports
+   per-action Refresh. Keep reusing the existing tunnel/backend; if Refresh
+   is unavailable, hold the exact admin/platform
+   gate instead of creating a parallel duplicate app/tunnel. If
+   ChatGPT still shows older file-exclusive wording after the runtime is current, record
+   `DIRECT_TOOL_PUBLICATION_DRIFT / EFFECT_NONE`; do not treat stale transport metadata as a document lease.
 6. Discover exactly the accepted tools in a fresh ChatGPT session. Use the assigned direct app
    for the approved scratch-file inspect/catalog/read -> one bounded edit -> post-read ->
    screenshot inspection -> JSX journey. Preserve file ID, snapshot and stable operation ID.
@@ -279,6 +312,62 @@ a UI-focus operation; its source description reflects the implementation. Active
 focus is reported as unknown rather than guessed. Its conservative existing
 annotation and workspace confirmation policy are unchanged in this source slice.
 
+### Immutable v20 Paper bridge — guarded release pending
+
+A later independent exact-head source review (#1942, review 5743595952)
+found one residual v19 TOCTOU issue: an explicit-file
+`paper_read(get_basic_info)` first qualified the getter but then called a
+second implicit file-only snapshot getter without requalifying its live
+contract. A vendor descriptor change after the first read could therefore
+dispatch a newly unsafe getter. Source-only recorder reproduction; no
+production Paper mutation.
+
+The proposed v20 bridge SHA-256
+`1a73ab002e89c87b489e8cee9f5c821530929a5b701eb0aaac7eed03a5a22ced`
+requalifies the current server identity, getter input schema and safety
+annotations immediately BEFORE that second file-only getter. On newly
+unreviewed safety drift it refuses `UPSTREAM_SCHEMA_UNREVIEWED` with zero
+second getter calls, rather than minting an unsafe target guard. The
+positive explicit-file bootstrap remains valid, preserving file-only
+snapshot hashes, page-specific read results and execution-binding
+provenance. The v19 bridge, like v17/v18, is preserved but superseded;
+its already staged seat packages MUST NOT be activated.
+
+A reviewer reproduced three **source-only v17** read-boundary defects: an unsafe
+read annotation could still dispatch, an unreviewed optional reader argument could be
+forwarded, and numeric `1` could be mistaken for Boolean `true` on safety hints.
+No live Paper design was altered by this diagnosis.
+
+The corrected v19 bridge (SHA-256
+`2223f9a9119cc68ab29f1b9d741f5602c7396b902503128be5780063184904ae`)
+validates read schemas/inputs before dispatch, including the implicit `get_basic_info`
+used for status, guarded reads and `paper_prepare`. After a mutation it
+requalifies the live snapshot getter before verification. Unsafe post-write
+drift returns `EFFECT_UNKNOWN` without a second Paper tool call or effect replay.
+v18 was an intermediate source-only candidate, never deployed. The older v17/v18 digests remain
+pinned in `runtime_stage.py` for immutable audit of already staged v17 bundles,
+**not** as permission to activate them. Never mutate the old staged generation,
+relabel its source, or treat a previous v17 scratch receipt as v18 acceptance.
+
+Release in order: #1925 merged; #1935 accepted independent review and
+entered the normal protected merge queue; then #1942 with **fresh v20 exact-head
+CI, independent source re-review and protected merge-group qualification**.
+Only the authorized original host installer/custody owner may stage v20 as a
+new generation, verify the same-label
+source-to-process and manifest bindings, and cut over the intended Paper seat.
+This document is not permission to deploy, restart, change credentials, or
+overwrite existing Paper runtime state. The previous Ryan v13 client is the
+incumbent until an actual owner-controlled installation receipt proves otherwise.
+
+After release/authorized cutover, prove one new exact scratch `fileId` path:
+`paper_read(get_basic_info)` -> `paper_prepare` -> guarded rich HTML
+`paper_edit` -> same-file post-read -> screenshot/JSX -> reconnect, preserving
+stable operation IDs and the existing no-replay rule. Do not duplicate the
+Paper app/tunnel. The Business workspace admin refreshes the existing custom
+MCP action list through its approved app settings (when permission/connection
+are valid), then verifies the new tool definitions in a fresh conversation.
+Staged source, synthetic tests and a tool-list refresh are not live canary proof.
+
 ### Remaining multi-host implementation and acceptance
 
 The next slice must connect host selection to the existing fleet transport owner,
@@ -293,3 +382,33 @@ and file -> verified bound bundle -> same-account real MCP inspect/catalog/read
 -> specifically authorized scratch proof where owed -> same-carrier post-read
 and screenshot -> reconnect without duplicate clients. Synthetic protocol tests
 and successful staging do not satisfy these proofs.
+
+## Source readiness and named-seat diagnostics (v22; not installed)
+
+The reconciled #1409 source adds early write-readiness reporting to
+`paper_inspect` while retaining the current `TOOL_SCOPED_CONTRACT_V1` policy.
+Its `write_schema` reports compatible and incompatible write tools separately.
+An incompatible unrelated writer does not disable qualified operations; a
+connected document can also report no compatible writers. The live critical
+`get_basic_info` contract is still checked before its implicit call. Catalog
+failure remains a typed refusal and is never converted into `CONNECTED`.
+
+Named v3/v4 direct-service receipts additionally expose only
+`schema`, `seat_id`, `source_revision` and `bridge_sha256` under
+`transport_diagnostic`. The stdio projection validates the exact key set and
+value formats. Legacy unnamed bundles omit this field. These verified-install
+diagnostics identify source provenance, confer no authority and do not enter
+snapshot hashes, execution bindings, write permission or retry decisions.
+Refusals and unknown-effect receipts retain their original state and operation.
+
+The additive source generation is **v22**, bridge SHA-256
+`af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b`. Every existing generation remains immutable,
+including v12 `82bc7f2d75aec423711922198b68f317618a83de177bf4934b73d7b418a6ecfb`
+and v21 `dfbf0b11c49a595610d1ac0e663d95f7291b500cb84d31ef8169bc3b909a2eaa`.
+The old #1409 proposal to replace the v12 binding or restore whole-catalog-only
+write admission is superseded by the accepted protected implementation.
+
+This is source integration only. It changes no installed selector, service,
+tunnel or design. The historical #1409 staging denial remains unreplayed;
+another generation name is not permission to repeat that action. An authorized
+runtime release and same-carrier real-app acceptance remain separate.

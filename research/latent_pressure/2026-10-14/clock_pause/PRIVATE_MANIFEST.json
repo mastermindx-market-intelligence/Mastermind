@@ -1,0 +1,10 @@
+{
+  "input_sha256": "d967e15a6148b96d155f733b64154c2256df07cfb3443c62c2df3be8ca54afe1",
+  "predictions_sha256": "a19071651576d11647dcb579cb6ca1064719995dd768b99eb535edd2b44b8c85",
+  "files_not_published": [
+    "private/run01/predictions.csv.gz",
+    "private/run01.log"
+  ],
+  "raw_vendor_records_not_published": true,
+  "preserve_original_results": true
+}

@@ -1,0 +1,230 @@
+{
+  "status": "PASS",
+  "scope": "Exact source-path presence; not runtime authentication or full semantic proof.",
+  "references": [
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "2151a89f7ea3a340ec04932cbcfdf6a838df79b1",
+      "path": "docs/sol_skills/ACTIVE_EXECUTION.md",
+      "exists_at_reference": true,
+      "basis": "Exact final protected file fetched and material delta read."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "2151a89f7ea3a340ec04932cbcfdf6a838df79b1",
+      "path": "ops/native_fabric/quota_continuity/PLAIN_PACKET_SAME_PATH_REPAIR_20261021.md",
+      "exists_at_reference": true,
+      "basis": "Exact final protected file fetched and material delta read."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "7ab47f0b62d9a22ff16a13f6b99b96b681874a93",
+      "path": "docs/runbooks/codex-instruction-completeness.md",
+      "exists_at_reference": true,
+      "basis": "Exact pinned file retrieved through GitHub and read during final material source refresh."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "7ab47f0b62d9a22ff16a13f6b99b96b681874a93",
+      "path": "integrations/session_bridge/AGENTOS_SESSION_START.md",
+      "exists_at_reference": true,
+      "basis": "Exact pinned file retrieved through GitHub and read during final material source refresh."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "7ab47f0b62d9a22ff16a13f6b99b96b681874a93",
+      "path": "integrations/session_bridge/STOP_RETURN.md",
+      "exists_at_reference": true,
+      "basis": "Exact pinned file retrieved through GitHub and read during final material source refresh."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "c9dca175e461e53f79426a95efecb9fe0bb97c63",
+      "path": "docs/design/MASTERMIND_OS_PRODUCTION_ACCEPTANCE.md",
+      "exists_at_reference": true,
+      "basis": "Exact open1256 candidate file fetched, not protected master."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "app/mastermind_os/src/App.tsx",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "app/mastermind_os/src/host.ts",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "config/executive_physical_resources.json",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "config/executive_worker_routes.json",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "control_plane/context_fabric_evaluation.py",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "control_plane/context_resolver.py",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "control_plane/executive_coo_policy.py",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "control_plane/executive_runtime.py",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "control_plane/project_atlas.py",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "docs/runbooks/claude-executive-mcp-client.md",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "docs/runbooks/mastermind-os-macos-release.md",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "docs/runbooks/mastermind-os-update-signatures.md",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "docs/superpowers/plans/2026-10-03-mastermind-context-fabric-master-plan.md",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "integrations/claude_executive_mcp/README.md",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "integrations/context_mcp/app.py",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "ops/executive_os/provider_worker_slots.py",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "research/EXECUTIVE_ECOSYSTEM_COMPLETION_CAPABILITY_LEDGER_2026-10-17.md",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "research/EXECUTIVE_ECOSYSTEM_COMPLETION_PROGRAMME_PLAN_2026-10-17.md",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "research/mastermind_meta_ceo_master_plan_r2_2026-10-12.md",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "d010b161386853586198a43f9ea9f535bbebb377",
+      "path": "skills/mastermind-fabric-orchestration/SKILL.md",
+      "exists_at_reference": true,
+      "basis": "Pinned protected recursive tree."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "1482371dd9055fc84583110272a86bf367b3c24d",
+      "path": "agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md",
+      "exists_at_reference": true,
+      "basis": "Exact pinned file retrieved through GitHub and read during final material source refresh."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "1c99ae69ad45eda700f74337485669ee7a692e5b",
+      "path": "research/ORCHESTRATOR_PROJECT_CONTINUITY_IMPLEMENTATION.md",
+      "exists_at_reference": true,
+      "basis": "Exact pinned file retrieved through GitHub and read during final material source refresh."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "b9b0759af6b8f347a7d729e3b13b8925857c5f8f",
+      "path": "agentos/workstreams/WS-AGENT-EVAL-FABRIC.md",
+      "exists_at_reference": true,
+      "basis": "Fetched pinned Macro source snapshot."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "b9b0759af6b8f347a7d729e3b13b8925857c5f8f",
+      "path": "agentos/workstreams/WS-AGENT-OS.md",
+      "exists_at_reference": true,
+      "basis": "Fetched pinned Macro source snapshot."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "b9b0759af6b8f347a7d729e3b13b8925857c5f8f",
+      "path": "agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md",
+      "exists_at_reference": true,
+      "basis": "Fetched pinned Macro source snapshot."
+    },
+    {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "b9b0759af6b8f347a7d729e3b13b8925857c5f8f",
+      "path": "scripts/agentos.py",
+      "exists_at_reference": true,
+      "basis": "Fetched pinned Macro source snapshot."
+    }
+  ]
+}

@@ -55,7 +55,9 @@ def installation(tmp_path, monkeypatch):
     receipt = root / "attestation.json"
     def publish(value=document):
         receipt.chmod(0o600) if receipt.exists() else None
-        receipt.write_text(json.dumps(value)); receipt.chmod(0o440)
+        receipt.write_text(json.dumps(value))
+        os.chown(receipt, -1, os.getegid())
+        receipt.chmod(0o440)
     publish()
     def load():
         return att.load_native_claude_attestation(receipt, expected_binary_path=binary,
@@ -69,6 +71,36 @@ def test_reader_reuses_installed_authority_without_launching_provider(installati
     assert result.path==str(i.binary) and result.sha256==i.document['cli']['sha256']
     assert result.team_identifier==att.CLAUDE_TEAM
     assert len(i.calls)==calls
+
+
+
+
+def test_v2_receipt_excludes_boot_local_device_identity(installation):
+    i = installation
+    assert i.document["schema_version"] == att.SCHEMA
+    assert att.SCHEMA.endswith("/v2")
+    assert "device" not in i.document["cli"]["identity"]
+    assert "device" not in i.document["sdk"]["python"]["identity"]
+    assert set(i.document["cli"]["identity"]) == set(att._DURABLE_IDENTITY)
+
+
+def test_device_renumber_after_receipt_does_not_invalidate_durable_installation(
+    installation, monkeypatch
+):
+    i = installation
+    original = att._identity
+    original_device = os.stat(i.binary).st_dev
+
+    def renumbered(info):
+        value = original(info)
+        value["device"] += 4096
+        return value
+
+    monkeypatch.setattr(att, "_identity", renumbered)
+    result = i.load()
+    assert result.sha256 == i.document["cli"]["sha256"]
+    assert result.inode == i.document["cli"]["identity"]["inode"]
+    assert result.device == original_device + 4096
 
 
 def test_same_bytes_replaced_cli_is_stale(installation):
@@ -127,3 +159,59 @@ def test_reader_refuses_cli_replacement_during_sdk_observation(installation,monk
         return result
     monkeypatch.setattr(att,'_sdk_tree',observe)
     with pytest.raises(att.NativeAttestationError,match='during SDK'):i.load()
+
+
+@pytest.mark.parametrize('target', ['binary', 'python', 'both'])
+def test_reader_refuses_device_change_between_executable_observations(
+    installation, monkeypatch, target
+):
+    i = installation
+    paths = (i.binary, i.python) if target == 'both' else (getattr(i, target),)
+    inodes = {os.stat(path).st_ino for path in paths}
+    identity, sdk_tree = att._identity, att._sdk_tree
+    device_delta = 0
+
+    def observed(info):
+        result = identity(info)
+        if info.st_ino in inodes:
+            result['device'] += device_delta
+        return result
+
+    def scan_then_renumber(root, **kwargs):
+        nonlocal device_delta
+        result = sdk_tree(root, **kwargs)
+        device_delta = 4096
+        return result
+
+    monkeypatch.setattr(att, '_identity', observed)
+    monkeypatch.setattr(att, '_sdk_tree', scan_then_renumber)
+    with pytest.raises(att.NativeAttestationError, match='during SDK'):
+        i.load()
+
+
+@pytest.mark.parametrize('target', ['binary', 'python'])
+def test_producer_refuses_device_change_between_hash_and_runtime_snapshot(
+    installation, monkeypatch, target
+):
+    i = installation
+    inode = os.stat(getattr(i, target)).st_ino
+    identity, file_observation = att._identity, att._file_observation
+    device_delta = 0
+
+    def observed(info):
+        result = identity(info)
+        if info.st_ino == inode:
+            result['device'] += device_delta
+        return result
+
+    def hash_then_renumber(path, **kwargs):
+        nonlocal device_delta
+        result = file_observation(path, **kwargs)
+        if path == i.python and kwargs.get('content'):
+            device_delta = 4096
+        return result
+
+    monkeypatch.setattr(att, '_identity', observed)
+    monkeypatch.setattr(att, '_file_observation', hash_then_renumber)
+    with pytest.raises(att.NativeAttestationError, match='executable differs'):
+        att.build_native_claude_attestation(**i.args)

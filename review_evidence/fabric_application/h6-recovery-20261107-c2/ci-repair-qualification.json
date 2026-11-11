@@ -1,0 +1,159 @@
+{
+  "guard_changes": false,
+  "hosted_before_repair": {
+    "conclusion": "failure",
+    "failures": [
+      {
+        "job_id": 128426787642,
+        "reason": "The pinned worker plist directory was absent from the sparse fixture checkout.",
+        "shard": 0,
+        "step": "Verify exact scoped Fabric model composition",
+        "test": "test_qwen_resolves_worker_override_before_yaml"
+      },
+      {
+        "job_id": 128426787416,
+        "reason": "The historical H3 source URL in composition-qualification-v2.json matched the executable/config read-transport guard.",
+        "shard": 2,
+        "step": "Run repository test shard",
+        "test": "test_no_anonymous_macro_reads_in_executable_or_config_surfaces"
+      }
+    ],
+    "head": "a88488670bc99f7156eff193101b76795c16733f",
+    "isolated_transport_test_count": 507,
+    "native_admission_test_count": 53,
+    "passed_component_steps": [
+      "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+      "Verify native application admission and dispatch custody",
+      "Verify closed application transport in isolated root fixtures"
+    ],
+    "run_id": 42380455963,
+    "studio_python_test_count": 684,
+    "successful_shards": [
+      1,
+      3,
+      4,
+      5
+    ],
+    "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42380455963"
+  },
+  "observed_at": "2026-11-07T15:04:03.315369+00:00",
+  "paired_archive_limitation": "117/118 passed. The sole local failure is test_run_e3a_eval_hermetic_end_to_end requiring a nonempty actual git_head. This archive has no Git metadata, unlike the hosted actions/checkout fixture. No source assertion was changed and this is not full-suite success.",
+  "paired_macro_commit": "9eb5cb6b28b510ea9e2bf05ae9040528523339df",
+  "paired_macro_path": "/private/tmp/h6-paired-ci-qwen-3zvv5q1e",
+  "parallel_workflow_structure": "PASS",
+  "provider_calls": false,
+  "release_preflight": {
+    "errors": 0,
+    "failures": 0,
+    "interpretation": "One policy case passed; two R0-only cases skipped in this local context. Not three passing cases.",
+    "skipped": 2,
+    "suite_counters": [
+      {
+        "errors": "0",
+        "failures": "0",
+        "hostname": "m2studio",
+        "name": "pytest",
+        "skipped": "2",
+        "tests": "3",
+        "time": "3.378",
+        "timestamp": "2026-11-07T08:01:48.835175-07:00"
+      }
+    ],
+    "testcase_records": 3
+  },
+  "repairs": [
+    "Include the pinned worker plist directory in the existing authenticated paired fixture checkout.",
+    "Represent historical H3 provenance as repository, commit and path metadata; no acquisition URL or read transport."
+  ],
+  "runtime_installation": false,
+  "schema": "mastermind.h6-hosted-ci-repair.v1",
+  "source_pre_head": "35dcd7c6eafca3429b088f26568170c90cbcff6f",
+  "source_sha256": {
+    ".github/workflows/ci.yml": "c5994c4e1d1df2467ccedceeea6b2db0bb800b9d980fddc8bee9d1c6ccee73b5",
+    "review_evidence/fabric_application/h6-recovery-20261107-c2/composition-qualification-v2.json": "a792c880aaff1e036c131645b650c6bc290b42f185d58133112e969d02e288a7"
+  },
+  "targeted_qwen_regression": {
+    "name": "test_qwen_resolves_worker_override_before_yaml",
+    "passed": true
+  },
+  "tests": [
+    {
+      "command": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "-m",
+        "pytest",
+        "-q",
+        "--tb=short",
+        "--junitxml=/private/tmp/h6-paired-ci-qwen-3zvv5q1e/anonymous_macro_guard.xml",
+        "tests/test_no_anonymous_macro_reads.py"
+      ],
+      "errors": 0,
+      "failures": 0,
+      "junit_suites": [
+        {
+          "errors": "0",
+          "failures": "0",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "0",
+          "tests": "27",
+          "time": "3.858",
+          "timestamp": "2026-11-07T07:59:44.819722-07:00"
+        }
+      ],
+      "log": "/private/tmp/h6-paired-ci-qwen-3zvv5q1e/anonymous_macro_guard.log",
+      "log_sha256": "a82a0b51cd86fa0131904e08c34ef556963104f0e3677f688117e093ebf2d3fe",
+      "name": "anonymous_macro_guard",
+      "returncode": 0,
+      "seconds": 5.069,
+      "skipped": 0,
+      "testcase_records": 27,
+      "xml": "/private/tmp/h6-paired-ci-qwen-3zvv5q1e/anonymous_macro_guard.xml"
+    },
+    {
+      "command": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "-m",
+        "pytest",
+        "-q",
+        "--tb=short",
+        "--junitxml=/private/tmp/h6-paired-ci-qwen-3zvv5q1e/exact_paired_composition.xml",
+        "--noconftest",
+        "-c",
+        "/dev/null",
+        "tests/test_fabric_exact_scoped_model_composition.py",
+        "tests/test_company_intelligence_event_compiler_e3a.py"
+      ],
+      "errors": 0,
+      "failures": 1,
+      "junit_suites": [
+        {
+          "errors": "0",
+          "failures": "1",
+          "hostname": "m2studio",
+          "name": "pytest",
+          "skipped": "0",
+          "tests": "118",
+          "time": "17.713",
+          "timestamp": "2026-11-07T07:59:49.281069-07:00"
+        }
+      ],
+      "log": "/private/tmp/h6-paired-ci-qwen-3zvv5q1e/exact_paired_composition.log",
+      "log_sha256": "80853727ac6201e58ee123d4ab0a31c55b8ede993d0239935bba56c48812f101",
+      "name": "exact_paired_composition",
+      "returncode": 1,
+      "seconds": 18.192,
+      "skipped": 0,
+      "testcase_records": 118,
+      "xml": "/private/tmp/h6-paired-ci-qwen-3zvv5q1e/exact_paired_composition.xml"
+    }
+  ],
+  "upstream_h2": {
+    "all_six_shards": "success",
+    "does_not_qualify_changed_integration_head": true,
+    "head": "69ead1bdc1b7f6e1b62ef186d955d07cbd718dce",
+    "required_test": "success",
+    "run_id": 42376635292
+  },
+  "worker_plist_sha256": "79723529de2c187db23ab8821d21018723d35b2fdf6397cf7db57e1f1b9dd651"
+}

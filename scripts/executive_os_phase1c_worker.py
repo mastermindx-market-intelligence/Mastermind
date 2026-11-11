@@ -111,6 +111,14 @@ _CONFIG_FIELDS = frozenset(
 )
 _SUBSCRIPTION_CONFIG_FIELDS = _CONFIG_FIELDS | frozenset({"harness_binding_id"})
 _SUBSCRIPTION_OPTIONAL_CONFIG_FIELDS = frozenset({"subscription_realm_enrollment"})
+_FINITE_ATTENDED_BINDING = "minimax-token-plan.claude-code-anthropic"
+_FINITE_ATTENDED_FIELDS = (_SUBSCRIPTION_CONFIG_FIELDS - frozenset({
+    "codex_binary", "codex_attestation_receipt", "allowed_codex_versions",
+    "required_team_identifier",
+})) | frozenset({"subscription_realm_enrollment", "control_gid", "claude_binary",
+    "claude_attestation_receipt", "claude_attestation_sha256", "allowed_claude_versions"})
+_FINITE_ATTENDED_PROBE = {"schema_version": "mastermind.attended_secret_canary_definition/v1",
+                          "environment_probe": "darwin-same-host/v1"}
 _NATIVE_CONFIG_FIELDS = _CONFIG_FIELDS | frozenset({
     "native_provider", "native_realm_enrollment",
 })
@@ -185,7 +193,14 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise WorkerConfigError("worker config fields do not match the schema")
     schema_version = value.get("schema_version")
-    if schema_version == CONFIG_SCHEMA_VERSION:
+    if schema_version == SEALED_NATIVE_CONFIG_SCHEMA_VERSION:
+        # Sealed v7 composes the native v6 contract plus its sealed fields;
+        # resolve it before the shared version chain so the v6 branch below
+        # stays exactly as master carries it.
+        if value.get("native_provider") != "claude":
+            raise WorkerConfigError("sealed native worker supports only Claude")
+        expected_fields = _SEALED_NATIVE_CLAUDE_CONFIG_FIELDS
+    elif schema_version == CONFIG_SCHEMA_VERSION:
         expected_fields = _CONFIG_FIELDS
     elif schema_version == SUBSCRIPTION_CONFIG_SCHEMA_VERSION:
         expected_fields = _SUBSCRIPTION_CONFIG_FIELDS | (
@@ -193,29 +208,50 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
             if "subscription_realm_enrollment" in value
             else frozenset()
         )
-    elif schema_version in _NATIVE_CONFIG_SCHEMA_VERSIONS:
-        if schema_version == SEALED_NATIVE_CONFIG_SCHEMA_VERSION:
-            if value.get("native_provider") != "claude":
-                raise WorkerConfigError("sealed native worker supports only Claude")
-            expected_fields = _SEALED_NATIVE_CLAUDE_CONFIG_FIELDS
-        else:
-            expected_fields = (
-                _NATIVE_CLAUDE_CONFIG_FIELDS
-                if value.get("native_provider") == "claude"
-                else _NATIVE_CONFIG_FIELDS
-            )
+        if value.get("harness_binding_id") == _FINITE_ATTENDED_BINDING:
+            expected_fields = _FINITE_ATTENDED_FIELDS | (
+                {"attended_secret_canary"} if "attended_secret_canary" in value else set())
+            if 'capacity_capability_id' in value:
+                expected_fields |= {'capacity_capability_id'}
+            if 'native_capacity_enrollment' in value:
+                expected_fields |= {'native_capacity_enrollment'}
+    elif schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
+        expected_fields = (_NATIVE_CLAUDE_CONFIG_FIELDS if value.get("native_provider") == "claude"
+                           else _NATIVE_CONFIG_FIELDS)
         if value.get("native_provider") == "claude" and "claude_sdk_python" in value:
             expected_fields = expected_fields | frozenset({"claude_sdk_python"})
     else:
         raise WorkerConfigError("worker config schema version is unsupported")
     if set(value) != expected_fields:
         raise WorkerConfigError("worker config fields do not match the schema")
-    if schema_version in _NATIVE_CONFIG_SCHEMA_VERSIONS:
+    if schema_version == NATIVE_CONFIG_SCHEMA_VERSION:
         if value.get("native_provider") not in {"codex", "claude"}:
             raise WorkerConfigError("native provider is not supported")
         if not isinstance(value.get("native_realm_enrollment"), dict):
             raise WorkerConfigError("native realm enrollment must be an object")
-    provider = "claude" if value.get("native_provider") == "claude" else "codex"
+    finite = (schema_version == SUBSCRIPTION_CONFIG_SCHEMA_VERSION
+              and value.get("harness_binding_id") == _FINITE_ATTENDED_BINDING)
+    provider = "claude" if value.get("native_provider") == "claude" or finite else "codex"
+    if finite:
+        if 'native_capacity_enrollment' in value:
+            from ops.executive_os.capacity_source_contract import validate_native_subscription_capacity_enrollment
+            try:
+                validate_native_subscription_capacity_enrollment(value['native_capacity_enrollment'])
+            except ValueError:
+                raise WorkerConfigError('finite native capacity enrollment is invalid') from None
+            if 'capacity_capability_id' not in value:
+                raise WorkerConfigError('finite native enrollment requires its source identity')
+        if ('capacity_capability_id' in value and (
+                type(value['capacity_capability_id']) is not str
+                or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', value['capacity_capability_id']) is None)):
+            raise WorkerConfigError('finite capacity identity is invalid')
+        if (type(value.get("control_gid")) is not int or value["control_gid"] <= 0
+                or value["control_gid"] == value.get("worker_gid")
+                or type(value.get("claude_attestation_sha256")) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", value["claude_attestation_sha256"]) is None
+                or ("attended_secret_canary" in value
+                    and value["attended_secret_canary"] != _FINITE_ATTENDED_PROBE)):
+            raise WorkerConfigError("finite attended definition differs from its fixed probe contract")
     versions = value.get(f"allowed_{provider}_versions")
     if (
         not isinstance(versions, list)
@@ -258,6 +294,8 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
             or value.get("validation_required_team_identifier") != _OPENAI_TEAM_IDENTIFIER
         ):
             raise WorkerConfigError("sealed native Claude model/validation policy is invalid")
+        if not isinstance(value.get("native_realm_enrollment"), dict):
+            raise WorkerConfigError("native realm enrollment must be an object")
         for field in (
             "validation_codex_binary",
             "validation_codex_attestation_receipt",
@@ -279,6 +317,8 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         if binding.implementation_state == "SPEC_ONLY":
             raise WorkerConfigError("subscription harness binding is not implemented")
         enrollment = value.get("subscription_realm_enrollment")
+        if finite and not isinstance(enrollment, dict):
+            raise WorkerConfigError("finite attended worker requires its original realm enrollment")
         if (
             enrollment is not None and (
                 not isinstance(enrollment, dict)
@@ -298,7 +338,10 @@ def _load_config(path: Path, *, require_root_owner: bool) -> dict[str, Any]:
         or any(type(group_id) is not int or group_id <= 0 for group_id in allowed_groups)
         or allowed_groups != sorted(set(allowed_groups))
         or int(value["worker_gid"]) in allowed_groups
-        or frozenset(allowed_groups) not in _REVIEWED_AMBIENT_GID_SETS
+        # The finite bridge seals assignments under an isolated primary group.
+        # Ordinary Codex realms retain their reviewed ambient group contract.
+        or (finite and allowed_groups != [])
+        or (not finite and frozenset(allowed_groups) not in _REVIEWED_AMBIENT_GID_SETS)
     ):
         raise WorkerConfigError("allowed supplementary groups are invalid")
     return value
@@ -312,6 +355,12 @@ def _resolve_subscription_binding(value: Any) -> SubscriptionHarnessBinding:
         descriptor = adapter_descriptor(binding.adapter_id)
     except (HarnessBindingError, ValueError) as exc:
         raise WorkerConfigError("subscription harness binding is not reviewed") from exc
+    if value == _FINITE_ATTENDED_BINDING:
+        if (binding.adapter_id != "claude-compatible-subscription"
+                or binding.protocol != "anthropic" or binding.autonomous_allowed
+                or binding.implementation_state == "SPEC_ONLY"):
+            raise WorkerConfigError("finite attended harness binding is not implemented")
+        return binding
     if binding.adapter_id != "codex-cli" or not descriptor.implemented:
         raise WorkerConfigError("subscription harness binding is not implemented by Codex")
     wire_api = binding.protocol
@@ -361,6 +410,8 @@ def _assert_service_activation_allowed(config: Mapping[str, Any]) -> None:
     binding = _subscription_binding_for_config(config)
     if binding is None:
         return
+    if binding.binding_id == _FINITE_ATTENDED_BINDING:
+        raise WorkerConfigError("finite attended definition requires the existing Fabric bridge owner")
     # A root-owned v5 config with a valid subscription_realm_enrollment is the
     # attended-only lane: the broker only accepts that request through the
     # typed interactive-canary operation, which the underlying binding
@@ -424,11 +475,17 @@ def _build_autonomy_canary_factory(
     workspace_root = Path(str(config["workspace_root"])).resolve(strict=True)
     run_root = Path(str(config["run_root"])).resolve(strict=True)
     provider_home = Path(str(config["provider_home"])).resolve(strict=True)
-    runtime_root = workspace_root.parents[1]
+    if config.get('attended_secret_canary') is not None:
+        from control_plane.fabric_attended_canary import host_root
+        runtime_root = host_root(config)
+        assignment_root = runtime_root / 'workers' / str(config['worker_id'])
+    else:
+        runtime_root = workspace_root.parents[1]
+        assignment_root = runtime_root
     worker_id = str(config["worker_id"])
     if (
-        workspace_root != runtime_root / "jobs" / "workspaces"
-        or run_root != runtime_root / "jobs" / "runs"
+        workspace_root != assignment_root / "jobs" / "workspaces"
+        or run_root != assignment_root / "jobs" / "runs"
         or provider_home
         != runtime_root / "workers" / worker_id / "provider-home"
     ):
@@ -647,7 +704,9 @@ def _sealed_native_claude_adapter_types():
     return ClaudeCodeWorkerAdapter, PersonalMaxManagedPolicyObserver
 
 
-def _build_native_claude_broker(config: dict[str, Any], *, autonomy_guard):
+def _build_native_claude_broker(
+    config: dict[str, Any], *, autonomy_guard, native_realm_guard=None
+) -> ExecutiveWorkerBroker:
     _assert_service_activation_allowed(config)
     policy = _broker_policy(config)
     binary = _load_native_claude_binary(config)
@@ -717,6 +776,7 @@ def _build_native_claude_broker(config: dict[str, Any], *, autonomy_guard):
             validation_adapter=validation_adapter,
             validation_adapter_id="codex-cli",
             operator_harness_armed=False,
+            native_realm_guard=native_realm_guard,
         )
 
     adapter_type, observer_type = _native_claude_adapter_types()
@@ -816,6 +876,11 @@ def _build_subscription_realm_owner(
         or observed["realm_generation"] != enrollment["generation"]
     ):
         raise WorkerConfigError("subscription realm owner disagrees with enrollment")
+    if 'native_capacity_enrollment' in config:
+        native = owner.observe_capacity_enrollment()
+        if (native['capacity_capability_id'] != config.get('capacity_capability_id')
+                or native['realm_generation'] != enrollment['generation']):
+            raise WorkerConfigError('native capacity realm differs from current source')
     return owner
 
 
@@ -825,11 +890,16 @@ def _build_broker(
     config_path: Path | None = None,
     autonomy_guard=None,
     native_account: CodexAccountEnvironment | None = None,
+    native_realm_guard=None,
 ) -> ExecutiveWorkerBroker:
     if config.get("native_provider") == "claude":
         if native_account is not None:
             raise WorkerConfigError("native Claude cannot borrow a Codex account scope")
-        return _build_native_claude_broker(config, autonomy_guard=autonomy_guard)
+        return _build_native_claude_broker(
+            config,
+            autonomy_guard=autonomy_guard,
+            native_realm_guard=native_realm_guard,
+        )
     if config.get("schema_version") == NATIVE_CONFIG_SCHEMA_VERSION and native_account is None:
         raise WorkerConfigError("native broker requires its lifetime account scope")
     policy = _broker_policy(config)
@@ -974,8 +1044,19 @@ async def _serve(config: dict[str, Any], *, config_path: Path | None = None,
             or config["control_uid"] == config["worker_uid"]):
         raise WorkerConfigError("native scope requires the configured distinct worker principal")
     if config.get("native_provider") == "claude":
-        broker = _build_broker(config, config_path=config_path,
-                               autonomy_guard=autonomy_guard)
+        # The flat Claude broker revalidates the host-owned native realm on
+        # every admission; consume the same root-owned identity guard the
+        # armed path uses rather than inventing a second realm check.
+        broker = _build_broker(
+            config,
+            config_path=config_path,
+            autonomy_guard=autonomy_guard,
+            native_realm_guard=(
+                _native_identity_guard(config, config_path)
+                if config_path is not None
+                else None
+            ),
+        )
         await _serve_broker(broker, str(config["launchd_socket_name"]))
         return
     scope = (nullcontext(None) if _subscription_binding_for_config(config) is not None

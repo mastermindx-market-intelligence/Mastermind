@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -33,6 +34,36 @@ E1_PROFILE_SHA256 = hashlib.sha256(
 
 _Receive = Callable[[], Awaitable[Mapping[str, Any]]]
 _Send = Callable[[Mapping[str, Any]], Awaitable[None]]
+
+
+def strict_json_loads(raw: bytes) -> Any:
+    """Decode UTF-8 JSON without duplicate names or nonfinite numbers.
+
+    Callers retain their existing framing and byte limits. This validates the
+    original bytes; a transport must replay those bytes without reserializing.
+    """
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in items:
+            if key in value:
+                raise ValueError("duplicate JSON key")
+            value[key] = item
+        return value
+
+    def finite_float(value: str) -> float:
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("nonfinite JSON number")
+        return number
+
+    def reject_constant(_value: str) -> Any:
+        raise ValueError("nonfinite JSON number")
+
+    try:
+        return json.loads(raw.decode("utf-8"), object_pairs_hook=pairs,
+                          parse_float=finite_float, parse_constant=reject_constant)
+    except (UnicodeError, RecursionError) as exc:
+        raise ValueError("invalid JSON encoding or nesting") from exc
 
 
 class _RequestTooLarge(Exception):
@@ -204,7 +235,7 @@ class BoundedRequestApp:
 
 
 class PreAuthMcpBodyApp:
-    """Measure received POST /mcp bytes before Authentication/RequireAuth.
+    """Bound one compiled MCP path before Authentication/RequireAuth.
 
     Generic ``BoundedRequestApp`` still replays empty bodies for direct
     non-MCP mounts. This wrapper is the MCP-only empty-transport guard.
@@ -215,15 +246,25 @@ class PreAuthMcpBodyApp:
         app: Callable[[Mapping[str, Any], _Receive, _Send], Awaitable[None]],
         *,
         deadline_seconds: float | None = None,
+        foreground_requests: bool = False,
+        mcp_path: str = "/mcp",
+        strict_json: bool = False,
     ):
         self._app = app
         self._deadline_seconds = deadline_seconds
+        if type(foreground_requests) is not bool:
+            raise ValueError("compiled foreground selection must be boolean")
+        self._foreground_requests = foreground_requests
+        if mcp_path not in ("/mcp", "/mcp/coo") or type(strict_json) is not bool:
+            raise ValueError("compiled MCP path and strict JSON selection required")
+        self._mcp_path = mcp_path
+        self._strict_json = strict_json
 
     async def __call__(self, scope: Mapping[str, Any], receive: _Receive, send: _Send) -> None:
         if (
             scope.get("type") != "http"
             or scope.get("method") != "POST"
-            or scope.get("path") != "/mcp"
+            or scope.get("path") != self._mcp_path
         ):
             await self._app(scope, receive, send)
             return
@@ -249,6 +290,12 @@ class PreAuthMcpBodyApp:
         if not request_body:
             await _error(send, 400, "invalid_input", "request body is empty")
             return
+        if self._strict_json:
+            try:
+                strict_json_loads(request_body)
+            except ValueError:
+                await _error(send, 400, "invalid_input", "request body must be strict JSON")
+                return
         replayed = False
 
         async def replay_receive() -> Mapping[str, Any]:
@@ -258,7 +305,24 @@ class PreAuthMcpBodyApp:
                 return {"type": "http.request", "body": request_body, "more_body": False}
             return {"type": "http.disconnect"}
 
-        await self._app(scope, replay_receive, send)
+        # Only this compiled MCP composition can enable the finite lifetime.
+        # Selection is not authentication; the real call handler still validates
+        # arguments and verifies its current principal before binding it.
+        eligible = False
+        if self._foreground_requests:
+            try:
+                body = json.loads(request_body)
+                eligible = (isinstance(body, dict) and body.get("method") == "tools/call"
+                    and "id" in body and isinstance(body.get("params"), dict)
+                    and body["params"].get("name") == "session_summon")
+            except (ValueError, TypeError):
+                pass
+        if eligible:
+            from integrations.session_bridge.http_foreground import owned_request
+            async with owned_request(scope, receive) as current:
+                await self._app(current, replay_receive, send)
+        else:
+            await self._app(scope, replay_receive, send)
 
 
 class FixedE1App(BoundedE1App):

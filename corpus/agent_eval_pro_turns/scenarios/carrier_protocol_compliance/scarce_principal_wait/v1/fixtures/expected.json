@@ -1,0 +1,4 @@
+{
+  "answer": "CHECKPOINT_AND_YIELD_TO_THE_DURABLE_RETURN",
+  "rationale": "A proven durable wait with no local work is a legitimate stop; passive principal waiting and duplicate execution are not."
+}

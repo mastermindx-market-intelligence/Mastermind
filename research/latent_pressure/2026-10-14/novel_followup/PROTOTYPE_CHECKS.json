@@ -1,0 +1,18 @@
+{
+  "status": "PASSED_CONSTRUCTED_MECHANISM_CHECKS_NOT_MARKET_VALIDATION",
+  "prefix_mapping_worlds": 24,
+  "same_totals_different_area": [
+    1,
+    -1
+  ],
+  "burst_breaches_fast_slow": [
+    0,
+    1
+  ],
+  "sparse_breaches_fast_slow": [
+    0,
+    0
+  ],
+  "observational_equivalence": true,
+  "opposite_post_pause": true
+}

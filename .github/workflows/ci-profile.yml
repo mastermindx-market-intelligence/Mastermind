@@ -1,0 +1,68 @@
+name: CI performance report
+
+# Diagnostic consumer of completed CI. This workflow is deliberately absent
+# from required checks, the CI fan-in, and every release controller.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Existing CI run ID in this repository
+        required: true
+        type: string
+      run_attempt:
+        description: Exact completed attempt number
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ci-profile-${{ github.event.workflow_run.id || inputs.run_id }}-${{ github.event.workflow_run.run_attempt || inputs.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  profile:
+    if: github.event_name == 'workflow_run' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      # workflow_run executes this protected default-branch revision, never the
+      # triggering PR head. No candidate cache, log or artifact is consumed.
+      - name: Check out the reporting implementation
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/ci_run_profile.py
+            /scripts/ci_profile_capture.py
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Capture the exact completed CI attempt
+        id: capture
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt || inputs.run_attempt }}
+        run: |
+          set -euo pipefail
+          python -m scripts.ci_profile_capture \
+            --repository "$GITHUB_REPOSITORY" \
+            --run-id "$SOURCE_RUN_ID" \
+            --attempt "$SOURCE_RUN_ATTEMPT" \
+            --output "$RUNNER_TEMP/ci-profile"
+          cat "$RUNNER_TEMP/ci-profile/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain source metadata and derived timing
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-profile-${{ github.event.workflow_run.id || inputs.run_id }}-${{ github.event.workflow_run.run_attempt || inputs.run_attempt }}
+          path: ${{ runner.temp }}/ci-profile/
+          if-no-files-found: error
+          retention-days: 30

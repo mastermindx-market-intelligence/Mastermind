@@ -23,6 +23,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
+from control_plane.claude_native_helper_projection import ClaudeNativeHelperProjection
 from control_plane.codex_worker import (
     CodexWorkerAdapter,
     LaunchValidationError,
@@ -128,6 +129,8 @@ _MAX_PROCESS_CENSUS_BYTES = 64 * 1024
 _MAX_PROCESS_CENSUS_MEMBERS = 256
 _DARWIN_PROCESS_RUN_STATES = frozenset("IRSTUZ")
 _DARWIN_PROCESS_STATE_FLAGS = frozenset("+<>AELNSsVWX")
+# procps ps state= is one character; Darwin state= may include flags.
+_LINUX_PROCESS_RUN_STATES = frozenset("DIRSTtWXZ")
 _LAUNCH_QUARANTINE_CLEANUP_SECONDS = 0.2
 _LOCAL_TASK_SETTLEMENT_SECONDS = 0.2
 _DENIED_PROVIDER_ENV_KEYS = frozenset(
@@ -247,6 +250,21 @@ class ClaudeInvocation:
 
     argv: tuple[str, ...]
     environment: ClaudeLaunchEnvironment
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ClaudeNativeHelperLaunchCandidate:
+    """Production-inert exact composition of one native-helper parent launch.
+
+    This object is intentionally not accepted by :meth:`start`.  It exists so
+    installed/provider conformance can prove the merged Claude syntax before a
+    separately reviewed production binding is allowed to reach the lifecycle.
+    """
+
+    argv: tuple[str, ...]
+    environment_overrides: tuple[tuple[str, str], ...]
+    runtime_ceiling_seconds: int
+    production_armed: bool = dataclasses.field(default=False, init=False)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -667,6 +685,12 @@ def _tool_policy(
     spec: WorkerLaunchSpec,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     requested = _requested_capabilities(spec)
+    return _compile_tool_policy(requested, write_paths=(
+        _allowed_write_paths(spec) if "WRITE_BRANCH" in requested else ()))
+
+
+def _compile_tool_policy(requested, *, write_paths=()):
+    """Pure policy compiler; callers separately validate actual authority."""
     tools: list[str] = []
     preapproved: list[str] = []
     forbidden = list(_FORBIDDEN_TOOLS)
@@ -675,7 +699,7 @@ def _tool_policy(
         tools.extend(_READ_TOOLS)
         preapproved.extend(f"{tool}(./**)" for tool in _READ_TOOLS)
     if "WRITE_BRANCH" in requested:
-        paths = _allowed_write_paths(spec)
+        paths = write_paths
         if not paths:
             raise ClaudeWorkerContractError("unsupported or unmapped Claude capabilities")
         tools.extend(_WRITE_TOOLS)
@@ -1274,7 +1298,9 @@ class PersonalMaxManagedPolicyObserver:
 def _process_group_member_pids(pgid: int) -> tuple[_ProcessGroupMember, ...]:
     """Observe group membership through the OS, never infer it from a PGID alone."""
 
-    exact_group_query = platform.system() == "Darwin"
+    observed_platform = platform.system()
+    exact_group_query = observed_platform == "Darwin"
+    linux_state_column = observed_platform == "Linux"
     argv = (
         ("/bin/ps", "-g", str(pgid), "-o", "pid=,pgid=,state=")
         if exact_group_query
@@ -1329,11 +1355,14 @@ def _process_group_member_pids(pgid: int) -> tuple[_ProcessGroupMember, ...]:
             if pid > 0 and observed_group == pgid:
                 if (
                     not state_token
-                    or state_token[0] not in _DARWIN_PROCESS_RUN_STATES
-                    or any(
-                        flag not in _DARWIN_PROCESS_STATE_FLAGS
-                        for flag in state_token[1:]
-                    )
+                    or (linux_state_column and (
+                        len(state_token) != 1 or state_token not in _LINUX_PROCESS_RUN_STATES
+                    ))
+                    or (not linux_state_column and (
+                        state_token[0] not in _DARWIN_PROCESS_RUN_STATES
+                        or any(flag not in _DARWIN_PROCESS_STATE_FLAGS
+                               for flag in state_token[1:])
+                    ))
                 ):
                     raise ValueError
                 members.append(_ProcessGroupMember(pid, state_token[0]))
@@ -1650,6 +1679,132 @@ class ClaudeCodeWorkerAdapter:
             spec.prompt,
         )
         return ClaudeInvocation(argv=argv, environment=ClaudeLaunchEnvironment())
+
+    def compile_native_helper_candidate_launch(
+        self,
+        spec: WorkerLaunchSpec,
+        projection: ClaudeNativeHelperProjection,
+    ) -> ClaudeNativeHelperLaunchCandidate:
+        """Compile, but never arm, the reviewed same-Attempt helper syntax.
+
+        V1 deliberately proves the smallest useful integration first: a
+        read-only parent and read-only helpers with no MCP grants.  Durable or
+        write-capable fan-out remains an Executive child Job.  The ordinary
+        ``compile_launch``/``start`` path is untouched, so constructing this
+        candidate cannot enable native helpers in production.
+        """
+
+        if not isinstance(projection, ClaudeNativeHelperProjection):
+            raise ClaudeWorkerContractError(
+                "typed native-helper projection is required"
+            )
+        if projection.production_armed:
+            raise ClaudeWorkerContractError(
+                "native-helper projection must remain production-inert"
+            )
+        if (
+            projection.permission_mode != "dontAsk"
+            or projection.execution_mode != "noninteractive"
+        ):
+            raise ClaudeWorkerContractError(
+                "native-helper projection does not match the worker parent mode"
+            )
+        tools, preapproved, forbidden = _tool_policy(spec)
+        if tools != tuple(sorted(_READ_TOOLS)):
+            raise ClaudeWorkerContractError(
+                "native-helper candidate requires a read-only parent"
+            )
+        if (
+            projection.source_mcp_grant_digests
+            or projection.source_mcp_tool_schema_digests
+            or any(tool.startswith("mcp__") for tool in projection.enabled_tools)
+            or any(tool.startswith("mcp__") for tool in projection.auto_approved_tools)
+        ):
+            raise ClaudeWorkerContractError(
+                "native-helper candidate v1 requires a zero-MCP projection"
+            )
+        if set(projection.enabled_tools) != set(_READ_TOOLS):
+            raise ClaudeWorkerContractError(
+                "native-helper child tools must match the read-only ceiling"
+            )
+        if not projection.external_runtime_enforcement_required:
+            raise ClaudeWorkerContractError(
+                "native-helper runtime ceiling lost external enforcement"
+            )
+
+        parent_tools = tuple(sorted(set(tools) | {"Agent"}))
+        parent_allowed = tuple(sorted(set(preapproved) | {"Agent"}))
+        parent_denied = tuple(
+            sorted(
+                (set(forbidden) - {"Agent"})
+                | set(projection.parent_denied_tools)
+            )
+        )
+        if (
+            "Agent" in parent_denied
+            or "Agent" not in parent_tools
+            or "Agent" not in parent_allowed
+        ):
+            raise ClaudeWorkerContractError(
+                "native-helper parent Agent admission is inconsistent"
+            )
+
+        settings = self.requested_settings(spec)
+        permissions = dict(settings["permissions"])
+        protected_denies = list(_protected_file_tool_denies(parent_tools))
+        permissions["allow"] = list(parent_allowed)
+        permissions["deny"] = list(parent_denied) + protected_denies
+        settings = dict(settings)
+        settings["permissions"] = permissions
+        self.validate_settings(settings)
+
+        agents_payload = projection.cli_arguments()[-1]
+        argv = (
+            self.binary.real_path,
+            "-p",
+            "--output-format",
+            "json",
+            "--safe-mode",
+            "--restricted",
+            "--no-chrome",
+            "--no-session-persistence",
+            "--max-turns",
+            str(self.max_turns),
+            "--model",
+            self.exact_model,
+            "--permission-mode",
+            "dontAsk",
+            "--tools",
+            ",".join(parent_tools),
+            "--allowedTools",
+            ",".join(parent_allowed),
+            "--disallowedTools",
+            ",".join(parent_denied),
+            "--strict-mcp-config",
+            "--mcp-config",
+            '{"mcpServers":{}}',
+            "--disable-slash-commands",
+            "--agents",
+            agents_payload,
+            "--settings",
+            _canonical_json(settings),
+            spec.prompt,
+        )
+        environment = projection.environment()
+        if len(environment) != len(set(environment)) or any(
+            not isinstance(key, str)
+            or not isinstance(value, str)
+            or not key.startswith("CLAUDE_")
+            for key, value in environment.items()
+        ):
+            raise ClaudeWorkerContractError(
+                "native-helper environment projection is invalid"
+            )
+        return ClaudeNativeHelperLaunchCandidate(
+            argv=argv,
+            environment_overrides=tuple(sorted(environment.items())),
+            runtime_ceiling_seconds=projection.runtime_ceiling_seconds,
+        )
 
     def observe_auth_status(self, *, timeout_seconds: float = 15.0) -> ClaudeAuthObservation:
         """Observe only the documented native auth state, never its identity data."""
@@ -2043,6 +2198,7 @@ class ClaudeCodeWorkerAdapter:
                 binary=self.binary,
                 rendered_argv=_redacted_launch_argv(argv),
                 environment_keys=tuple(sorted(environment)),
+                isolation_manifest_sha256=spec.isolation_manifest_sha256,
                 permission_profile_sha256=self.permission_profile_digest(spec),
                 prompt_sha256=hashlib.sha256(spec.prompt.encode("utf-8", "strict")).hexdigest(),
                 expected_base_sha=spec.expected_base_sha,
@@ -2585,6 +2741,7 @@ __all__ = [
     "ClaudeAuthObservation",
     "ClaudeCodeWorkerAdapter",
     "ClaudeInvocation",
+    "ClaudeNativeHelperLaunchCandidate",
     "ClaudeLaunchEnvironment",
     "ClaudeLaunchEnvironmentUnavailableError",
     "ClaudeWorkerContractError",

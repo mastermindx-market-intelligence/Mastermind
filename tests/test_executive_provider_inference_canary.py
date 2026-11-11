@@ -30,6 +30,7 @@ def _config(tmp_path: Path) -> object:
     return canary.ProviderCanaryConfig(
         canary_id="canary-aaaaaaaaaaaa",
         worker_user="_mastermind_worker",
+        worker_group="_mastermind_worker",
         worker_uid=451,
         worker_gid=451,
         provider_home=tmp_path / "provider-home",
@@ -442,21 +443,24 @@ def test_production_config_is_derived_from_exact_worker_slot() -> None:
         operator_home=canary.LIVE_OPERATOR_HOME,
         slot_id="codex-pro-03",
     )
-    assert (company.worker_user, company.worker_uid, company.worker_gid) == (
-        "_mastermind_worker",
-        451,
-        451,
-    )
-    assert (first.worker_user, first.worker_uid, first.worker_gid) == (
-        "_mastermind_codex_01",
-        454,
-        454,
-    )
-    assert (third.worker_user, third.worker_uid, third.worker_gid) == (
-        "_mastermind_codex_03",
-        456,
-        456,
-    )
+    assert (
+        company.worker_user,
+        company.worker_group,
+        company.worker_uid,
+        company.worker_gid,
+    ) == ("_mastermind_worker", "_mastermind_worker", 451, 451)
+    assert (
+        first.worker_user,
+        first.worker_group,
+        first.worker_uid,
+        first.worker_gid,
+    ) == ("_mastermind_codex_01", "_mastermind_codex_01", 454, 454)
+    assert (
+        third.worker_user,
+        third.worker_group,
+        third.worker_uid,
+        third.worker_gid,
+    ) == ("_mastermind_codex_03", "_mastermind_codex_03", 456, 456)
     assert str(first.provider_home).endswith(
         "/workers/codex-pro-01/provider-home"
     )
@@ -607,6 +611,53 @@ def test_corrected_451_hierarchy_is_worker_traversable(tmp_path: Path) -> None:
     assert canary.WORKER_GID == 451
 
 
+@pytest.mark.parametrize(
+    ("slot_id", "worker_user", "worker_gid"),
+    [
+        ("codex-01", "_mastermind_worker", 451),
+        ("codex-pro-01", "_mastermind_codex_01", 454),
+        ("codex-pro-02", "_mastermind_codex_02", 455),
+        ("codex-pro-03", "_mastermind_codex_03", 456),
+    ],
+)
+def test_live_runner_preserves_selected_slot_principal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    slot_id: str,
+    worker_user: str,
+    worker_gid: int,
+) -> None:
+    config = canary.production_config(
+        probe_root=tmp_path / "probe",
+        operator_home=canary.LIVE_OPERATOR_HOME,
+        slot_id=slot_id,
+    )
+    config.probe_root.mkdir()
+    invocation = canary.prepare_probe(config)
+    # Capture the privileged process boundary without changing host principals
+    # or invoking Codex. The hierarchy's fail-closed behavior is tested below.
+    monkeypatch.setattr(canary, "assign_probe_tree_to_worker", lambda *_: None)
+    monkeypatch.setattr(canary, "assert_worker_probe_hierarchy", lambda *_: None)
+    calls: list[object] = []
+
+    def capture(inner: object, *, timeout_seconds: float) -> object:
+        calls.append(inner)
+        assert timeout_seconds == config.timeout_seconds
+        assert inner.argv[:4] == ("/usr/bin/sudo", "-n", "-u", worker_user)
+        assert inner.argv[4] == "-g"
+        assert inner.argv[5] in {worker_user, f"#{worker_gid}"}
+        assert inner.argv[6:8] == ("/usr/bin/env", "-i")
+        assert inner.env == {}
+        assert inner.cwd == invocation.cwd
+        assert inner.stdin == invocation.stdin
+        assert inner.argv[-len(invocation.argv):] == invocation.argv
+        return canary.CodexRunResult(0, b"", b"", timed_out=False)
+
+    monkeypatch.setattr(canary, "subprocess_runner", capture)
+    assert canary.live_worker_runner(config, invocation).exit_code == 0
+    assert len(calls) == 1
+
+
 def test_outer_root_not_worker_owned_never_invokes_codex(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -667,3 +718,486 @@ def test_root_cleanup_removes_worker_owned_probe(
     child.mkdir(mode=0o700)
     canary.cleanup_live_probe_root(probe)
     assert probe.exists() is False
+
+
+@pytest.mark.parametrize(
+    ("slot_id", "provider", "model", "realm_id", "worker_user", "numeric_id"),
+    (
+        (
+            "alibaba-token-01",
+            "alibaba",
+            "qwen3.8-flash",
+            "alibaba-token-plan-sg",
+            "_mastermind_alibaba_01",
+            459,
+        ),
+        (
+            "minimax-token-01",
+            "minimax",
+            "MiniMax-M3",
+            "minimax-token-plan",
+            "_mastermind_minimax_01",
+            460,
+        ),
+    ),
+)
+def test_subscription_config_resolves_exact_reviewed_codex_realm(
+    tmp_path: Path,
+    slot_id: str,
+    provider: str,
+    model: str,
+    realm_id: str,
+    worker_user: str,
+    numeric_id: int,
+) -> None:
+    probe = tmp_path / slot_id
+    probe.mkdir()
+    config = canary.subscription_production_config(
+        probe_root=probe,
+        operator_home=canary.LIVE_OPERATOR_HOME,
+        slot_id=slot_id,
+    )
+    assert config.subscription_slot_id == slot_id
+    assert config.provider_alias == provider
+    assert config.model == model
+    assert config.provider_realm_id == realm_id
+    assert config.harness_binding_id.endswith(".codex-responses")
+    assert config.worker_user == config.worker_group == worker_user
+    assert (config.worker_uid, config.worker_gid) == (numeric_id, numeric_id)
+
+
+
+def test_subscription_probe_is_secret_free_but_contains_reviewed_provider_config(
+    tmp_path: Path,
+) -> None:
+    probe = tmp_path / "probe"
+    probe.mkdir()
+    config = dataclasses.replace(
+        canary.subscription_production_config(
+            probe_root=probe,
+            operator_home=canary.LIVE_OPERATOR_HOME,
+            slot_id="alibaba-token-01",
+        ),
+        canary_id="canary-bbbbbbbbbbbb",
+    )
+    invocation = canary.prepare_probe(config)
+    rendered = "\0".join(invocation.argv)
+    assert 'model_provider="mastermind_alibaba_token_plan_sg"' in rendered
+    assert 'base_url="https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"' in rendered
+    assert 'env_key="ALIBABA_TOKEN_PLAN_KEY"' in rendered
+    assert "ALIBABA_TOKEN_PLAN_KEY" not in invocation.env
+    assert "opaque-subscription-secret" not in rendered
+    assert "opaque-subscription-secret" not in json.dumps(invocation.env)
+    assert "ALIBABA_TOKEN_PLAN_KEY" not in next(
+        item for item in invocation.argv if item.startswith("shell_environment_policy=")
+    )
+    canary._scrub_probe_secrets(invocation)
+
+
+
+def test_subscription_live_runner_injects_secret_only_in_exec_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    probe = tmp_path / "probe"
+    probe.mkdir()
+    config = dataclasses.replace(
+        canary.subscription_production_config(
+            probe_root=probe,
+            operator_home=canary.LIVE_OPERATOR_HOME,
+            slot_id="minimax-token-01",
+        ),
+        canary_id="canary-cccccccccccc",
+    )
+    invocation = canary.prepare_probe(config)
+    observed: dict[str, object] = {}
+
+    monkeypatch.setattr(canary, "assign_probe_tree_to_worker", lambda *_args: None)
+    monkeypatch.setattr(canary, "assert_worker_probe_hierarchy", lambda *_args: None)
+    monkeypatch.setattr(
+        canary,
+        "provider_home_credential_loader",
+        lambda *_args, **_kwargs: (lambda: "opaque-subscription-secret"),
+    )
+
+    def fake_run(argv, **kwargs):
+        observed["argv"] = tuple(argv)
+        observed["env"] = dict(kwargs["env"])
+        observed["preexec_fn"] = kwargs["preexec_fn"]
+        return subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout=_completed_stdout(),
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(canary.subprocess, "run", fake_run)
+    result = canary.subscription_live_worker_runner(config, invocation)
+    assert result.exit_code == 0
+    assert observed["env"]["MINIMAX_TOKEN_PLAN_KEY"] == "opaque-subscription-secret"
+    assert "opaque-subscription-secret" not in "\0".join(observed["argv"])
+    assert "MINIMAX_TOKEN_PLAN_KEY" not in invocation.env
+    assert callable(observed["preexec_fn"])
+    canary._scrub_probe_secrets(invocation)
+
+
+
+def test_subscription_receipt_is_attributed_and_cannot_masquerade_as_native_readiness(
+    tmp_path: Path,
+) -> None:
+    probe = tmp_path / "probe"
+    probe.mkdir()
+    config = dataclasses.replace(
+        canary.subscription_production_config(
+            probe_root=probe,
+            operator_home=canary.LIVE_OPERATOR_HOME,
+            slot_id="alibaba-token-01",
+        ),
+        canary_id="canary-dddddddddddd",
+    )
+
+    def runner(invocation: canary.CodexInvocation) -> canary.CodexRunResult:
+        invocation.result_path.write_text('{"ok": true}', encoding="utf-8")
+        return canary.CodexRunResult(
+            exit_code=0, stdout=_completed_stdout(), stderr=b"", timed_out=False
+        )
+
+    receipt = canary.run_subscription_canary(
+        config,
+        runner=runner,
+        binary_sha256="b" * 64,
+        observed_version=canary.PINNED_CODEX_VERSION,
+    )
+    assert receipt["schema_version"] == canary.SUBSCRIPTION_SCHEMA_VERSION
+    assert receipt["slot_id"] == "alibaba-token-01"
+    assert receipt["provider"] == "alibaba"
+    assert receipt["profile_id"] == "alibaba-token-plan-personal"
+    assert receipt["harness_binding_id"] == "alibaba-token-plan-personal.codex-responses"
+    assert receipt["provider_realm_id"] == "alibaba-token-plan-sg"
+    assert receipt["execution_mode"] == "interactive_canary"
+    assert receipt["autonomous_allowed"] is False
+    assert receipt["passed"] is True
+    assert receipt["inference_canary"]["schema_version"] == canary.SCHEMA_VERSION
+    assert receipt["inference_canary"]["model"] == "qwen3.8-flash"
+    assert "opaque-subscription-secret" not in json.dumps(receipt)
+
+
+
+def test_native_live_runner_uses_exact_slot_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = dataclasses.replace(
+        _config(tmp_path),
+        worker_user="_mastermind_codex_02",
+        worker_group="_mastermind_codex_02",
+        worker_uid=455,
+        worker_gid=455,
+    )
+    invocation = canary.prepare_probe(config)
+    observed: dict[str, tuple[str, ...]] = {}
+    monkeypatch.setattr(canary, "assign_probe_tree_to_worker", lambda *_args: None)
+    monkeypatch.setattr(canary, "assert_worker_probe_hierarchy", lambda *_args: None)
+
+    def fake_runner(inner, *, timeout_seconds):
+        observed["argv"] = inner.argv
+        return canary.CodexRunResult(0, b"", b"", timed_out=False)
+
+    monkeypatch.setattr(canary, "subprocess_runner", fake_runner)
+    canary.live_worker_runner(config, invocation)
+    argv = observed["argv"]
+    group_index = argv.index("-g") + 1
+    assert argv[group_index] == "#455"
+    canary._scrub_probe_secrets(invocation)
+
+
+
+def test_parser_requires_explicit_subscription_slot_mode() -> None:
+    parser = canary._parser()
+    assert parser.parse_args([]).slot_id is None
+    assert parser.parse_args([]).subscription_slot_id is None
+    assert parser.parse_args(["--slot-id", "codex-pro-01"]).slot_id == "codex-pro-01"
+    assert (
+        parser.parse_args(["--subscription-slot-id", "alibaba-token-01"]).subscription_slot_id
+        == "alibaba-token-01"
+    )
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            [
+                "--slot-id",
+                "codex-01",
+                "--subscription-slot-id",
+                "alibaba-token-01",
+            ]
+        )
+
+
+
+def test_subscription_config_cannot_cross_bind_slot_realm_or_model(tmp_path: Path) -> None:
+    probe = tmp_path / "probe-cross"
+    probe.mkdir()
+    config = canary.subscription_production_config(
+        probe_root=probe,
+        operator_home=canary.LIVE_OPERATOR_HOME,
+        slot_id="alibaba-token-01",
+    )
+    mutations = (
+        dataclasses.replace(config, provider_realm_id="minimax-token-plan"),
+        dataclasses.replace(config, provider_alias="minimax"),
+        dataclasses.replace(config, model="MiniMax-M3"),
+        dataclasses.replace(config, worker_uid=460, worker_gid=460),
+        dataclasses.replace(
+            config,
+            harness_binding_id="minimax-token-plan.codex-responses",
+        ),
+    )
+    for mutated in mutations:
+        with pytest.raises(canary.ProviderCanaryError) as refused:
+            canary._provider_realm(mutated)
+        assert refused.value.code == "configuration_invalid"
+
+
+
+def _subscription_case(tmp_path, slot_id="alibaba-token-01"):
+    probe = tmp_path / "subscription-probe"
+    probe.mkdir()
+    config = dataclasses.replace(
+        canary.subscription_production_config(
+            probe_root=probe, operator_home=canary.LIVE_OPERATOR_HOME, slot_id=slot_id
+        ),
+        canary_id="canary-eeeeeeeeeeee",
+    )
+    return config, canary.prepare_probe(config)
+
+
+@pytest.mark.parametrize("slot_id,identity", [
+    ("alibaba-token-01", 459), ("minimax-token-01", 460),
+])
+@pytest.mark.parametrize("failed_step", [None, "groups", "gid", "uid"])
+def test_subscription_process_exec_follows_exact_privilege_drop(
+    tmp_path, monkeypatch, slot_id, identity, failed_step
+):
+    config, invocation = _subscription_case(tmp_path, slot_id)
+    events = []
+    environment = {}
+    secret = "opaque-subscription-boundary-secret"
+    monkeypatch.setenv("MM855_AMBIENT_SECRET", "ambient-secret-marker")
+    monkeypatch.setattr(canary, "assign_probe_tree_to_worker", lambda *_: events.append("assign"))
+    monkeypatch.setattr(canary, "assert_worker_probe_hierarchy", lambda *_: events.append("hierarchy"))
+
+    def loader_factory(home, realm, *, expected_uid, expected_gid):
+        events.append("loader")
+        assert home == config.provider_home
+        assert realm.realm_id == config.provider_realm_id
+        assert type(expected_uid) is type(expected_gid) is int
+        assert expected_uid == expected_gid == identity
+
+        def read():
+            events.append("credential")
+            return secret
+        return read
+
+    def groups(values):
+        assert type(values) is list and values == []
+        events.append("groups")
+        if failed_step == "groups":
+            raise OSError(secret)
+
+    def gid(value):
+        assert type(value) is int and value == identity
+        events.append("gid")
+        if failed_step == "gid":
+            raise OSError(secret)
+
+    def uid(value):
+        assert type(value) is int and value == identity
+        events.append("uid")
+        if failed_step == "uid":
+            raise OSError(secret)
+
+    def spawn(argv, **kwargs):
+        events.append("spawn")
+        realm = canary._provider_realm(config)
+        environment["value"] = kwargs["env"]
+        environment["key"] = realm.env_key
+        assert kwargs["env"] == {**invocation.env, realm.env_key: secret}
+        assert "MM855_AMBIENT_SECRET" not in kwargs["env"]
+        assert secret not in "\0".join(argv)
+        assert secret.encode() not in kwargs["input"]
+        assert realm.env_key not in invocation.env
+        try:
+            kwargs["preexec_fn"]()
+        except OSError:
+            raise subprocess.SubprocessError(secret) from None
+        events.append("exec")
+        return subprocess.CompletedProcess(argv, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(canary, "provider_home_credential_loader", loader_factory)
+    monkeypatch.setattr(canary.os, "setgroups", groups)
+    monkeypatch.setattr(canary.os, "setgid", gid)
+    monkeypatch.setattr(canary.os, "setuid", uid)
+    monkeypatch.setattr(canary.subprocess, "run", spawn)
+    if failed_step is None:
+        assert canary.subscription_live_worker_runner(config, invocation).exit_code == 0
+        assert events == ["assign", "hierarchy", "loader", "credential", "spawn", "groups", "gid", "uid", "exec"]
+    else:
+        with pytest.raises(canary.ProviderCanaryError) as error:
+            canary.subscription_live_worker_runner(config, invocation)
+        assert error.value.code == "process_failed"
+        assert str(error.value) == "process_failed"
+        assert error.value.__suppress_context__ is True
+        steps = ["groups", "gid", "uid"]
+        assert events == ["assign", "hierarchy", "loader", "credential", "spawn"] + steps[:steps.index(failed_step) + 1]
+        assert "exec" not in events
+    assert events.count("spawn") == 1
+    assert environment["key"] not in environment["value"]
+    assert secret not in json.dumps(invocation.env)
+    canary._scrub_probe_secrets(invocation)
+
+
+@pytest.mark.parametrize("fault", ["oserror", "preexec", "timeout"])
+def test_subscription_process_failure_scrubs_temporary_environment(
+    tmp_path, monkeypatch, fault
+):
+    config, invocation = _subscription_case(tmp_path)
+    secret = "opaque-process-failure-secret"
+    attempts = []
+    monkeypatch.setattr(canary, "assign_probe_tree_to_worker", lambda *_: None)
+    monkeypatch.setattr(canary, "assert_worker_probe_hierarchy", lambda *_: None)
+    monkeypatch.setattr(canary, "provider_home_credential_loader", lambda *_a, **_k: lambda: secret)
+
+    def fail(argv, **kwargs):
+        attempts.append(kwargs["env"])
+        if fault == "timeout":
+            raise subprocess.TimeoutExpired(argv, 1, output=secret.encode(), stderr=secret.encode())
+        if fault == "preexec":
+            raise subprocess.SubprocessError(secret)
+        raise OSError(secret)
+
+    monkeypatch.setattr(canary.subprocess, "run", fail)
+    if fault == "timeout":
+        result = canary.subscription_live_worker_runner(config, invocation)
+        assert result.exit_code == 124 and result.timed_out is True
+    else:
+        with pytest.raises(canary.ProviderCanaryError) as error:
+            canary.subscription_live_worker_runner(config, invocation)
+        assert error.value.code == "process_failed"
+        assert str(error.value) == "process_failed"
+        assert error.value.__suppress_context__ is True
+    assert len(attempts) == 1
+    realm = canary._provider_realm(config)
+    assert realm.env_key not in attempts[0]
+    assert realm.env_key not in invocation.env
+    assert secret not in json.dumps(invocation.env)
+    canary._scrub_probe_secrets(invocation)
+
+
+@pytest.mark.parametrize("fault", ["hierarchy", "realm", "loader", "credential"])
+def test_subscription_preconditions_refuse_before_process_attempt(
+    tmp_path, monkeypatch, fault
+):
+    config, invocation = _subscription_case(tmp_path)
+    secret = "opaque-precondition-secret"
+    events = []
+    monkeypatch.setattr(canary, "assign_probe_tree_to_worker", lambda *_: events.append("assign"))
+
+    def hierarchy(*_):
+        events.append("hierarchy")
+        if fault == "hierarchy":
+            raise canary.ProviderCanaryError("isolation_violation")
+
+    def loader(*_args, **_kwargs):
+        events.append("loader")
+        if fault == "loader":
+            raise OSError(secret)
+
+        def read():
+            events.append("credential")
+            raise OSError(secret)
+        return read
+
+    def forbidden_spawn(*_args, **_kwargs):
+        events.append("spawn")
+        pytest.fail("process attempted after invalid precondition")
+
+    monkeypatch.setattr(canary, "assert_worker_probe_hierarchy", hierarchy)
+    monkeypatch.setattr(canary, "provider_home_credential_loader", loader)
+    monkeypatch.setattr(canary.subprocess, "run", forbidden_spawn)
+    if fault == "realm":
+        config = dataclasses.replace(config, profile_id="wrong-profile")
+    with pytest.raises(canary.ProviderCanaryError) as error:
+        canary.subscription_live_worker_runner(config, invocation)
+    expected = "isolation_violation" if fault == "hierarchy" else "configuration_invalid" if fault == "realm" else "provider_credential_unavailable"
+    assert error.value.code == expected
+    assert secret not in str(error.value)
+    assert "spawn" not in events
+    if fault in {"hierarchy", "realm"}:
+        assert events == ["assign", "hierarchy"]
+    elif fault == "loader":
+        assert events == ["assign", "hierarchy", "loader"]
+    else:
+        assert events == ["assign", "hierarchy", "loader", "credential"]
+    canary._scrub_probe_secrets(invocation)
+
+
+@pytest.mark.parametrize("timed_out", [False, True])
+def test_subscription_receipt_retains_current_redaction_on_failure(tmp_path, timed_out):
+    probe = tmp_path / "redaction-probe"
+    probe.mkdir()
+    config = dataclasses.replace(
+        canary.subscription_production_config(
+            probe_root=probe, operator_home=canary.LIVE_OPERATOR_HOME, slot_id="minimax-token-01"
+        ),
+        canary_id="canary-ffffffffffff",
+    )
+    secret = "opaque-provider-error-secret"
+    raw = (json.dumps({"type": "error", "message": "rate limit " + secret + " private@example.invalid"}) + "\n").encode()
+
+    def runner(_invocation):
+        return canary.CodexRunResult(
+            exit_code=124 if timed_out else 1,
+            stdout=raw, stderr=secret.encode(), timed_out=timed_out,
+        )
+
+    receipt = canary.run_subscription_canary(
+        config, runner=runner, binary_sha256="b" * 64, observed_version=canary.PINNED_CODEX_VERSION
+    )
+    assert receipt["schema_version"] == canary.SUBSCRIPTION_SCHEMA_VERSION
+    assert receipt["inference_canary"]["schema_version"] == "mastermind.executive_provider_inference_canary/v2"
+    assert receipt["provider"] == "minimax"
+    assert receipt["autonomous_allowed"] is False
+    assert receipt["passed"] is False
+    assert receipt["inference_canary"]["terminal_event_class"] == ("timeout" if timed_out else "provider_rate_limited")
+    public = json.dumps(receipt)
+    assert secret not in public
+    assert "private@example.invalid" not in public
+
+
+@pytest.mark.parametrize("subscription", [False, True])
+def test_cli_root_refusal_keeps_selected_schema(tmp_path, monkeypatch, capsys, subscription):
+    monkeypatch.setattr(canary.os, "geteuid", lambda: 1)
+
+    def forbidden_probe(**_kwargs):
+        pytest.fail("live probe creation preceded root admission")
+
+    monkeypatch.setattr(canary, "create_live_probe_root", forbidden_probe)
+    arguments = ["--subscription-slot-id", "alibaba-token-01"] if subscription else []
+    assert canary.main(arguments) == 2
+    value = json.loads(capsys.readouterr().out)
+    assert value["schema_version"] == (canary.SUBSCRIPTION_SCHEMA_VERSION if subscription else canary.SCHEMA_VERSION)
+    assert value["refusal"] == "live_canary_requires_darwin_root"
+    assert value["passed"] is False
+
+
+@pytest.mark.parametrize("field", ["worker_uid", "worker_gid"])
+@pytest.mark.parametrize("kind", ["float", "int_subclass"])
+def test_subscription_rederived_identity_requires_exact_integer(tmp_path, field, kind):
+    config, invocation = _subscription_case(tmp_path)
+
+    class IntegerAlias(int):
+        pass
+
+    invalid = 459.0 if kind == "float" else IntegerAlias(459)
+    changed = dataclasses.replace(config, **{field: invalid})
+    with pytest.raises(canary.ProviderCanaryError) as error:
+        canary._provider_realm(changed)
+    assert error.value.code == "configuration_invalid"
+    canary._scrub_probe_secrets(invocation)

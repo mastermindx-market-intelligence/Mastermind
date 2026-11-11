@@ -1,0 +1,80 @@
+--- a/ops/native_fabric/quota_continuity/candidate/fabric_task.py
++++ b/ops/native_fabric/quota_continuity/candidate/fabric_task.py
+@@ -47,6 +47,30 @@
+ 
+ class FabricTaskError(RuntimeError):
+     pass
++
++
++# Diagnostic values only: never admission, retry, routing or parent attestation.
++_REQUEST_REFUSAL_CODES = frozenset({
++    "NO_ROUTE", "ROUTE_INCOMPLETE", "REQUEST_ROUTING_RETURN_UNQUALIFIED",
++    "REQUEST_MAX_TURNS_INVALID", "REQUEST_MAX_TURNS_ROUTE_UNSUPPORTED",
++    "ECONOMIC_POLICY_REFUSED", "UNCLASSIFIED_PRELAUNCH_REFUSAL",
++})
++
++
++def _safe_request_refusal_code(exc: BaseException) -> str:
++    unknown = "UNCLASSIFIED_PRELAUNCH_REFUSAL"
++    if type(exc) is not FabricTaskError:
++        return unknown
++    # Only the owner-assigned route marker and exact allowlisted error prefixes
++    # survive. Never serialize exception text, arguments, credentials or paths.
++    marker = getattr(exc, "_request_refusal_code", None)
++    if type(marker) is str and len(marker) <= 64 and marker in _REQUEST_REFUSAL_CODES:
++        return marker
++    args = exc.args
++    if not args or type(args[0]) is not str or len(args[0]) > 1024:
++        return unknown
++    code = args[0].partition(":")[0]
++    return code if code in _REQUEST_REFUSAL_CODES else unknown
+ 
+ 
+ def validate_run_id(value: object) -> str:
+@@ -384,6 +408,7 @@
+                 if row.get("schema") != "mastermind.fabric_request_artifact.v1" or row.get("run_id") != rid:
+                     raise FabricTaskError("retained_request_invalid")
+                 state = "REQUEST_RETAINED_NO_START_EVIDENCE"
++                refusal_diagnostic: dict[str, str] = {}
+                 refused = retained.with_name(rid + ".request-refused.json")
+                 launch = retained.with_name(rid + ".request-launch.json")
+                 if refused.exists() and not (launch.exists() or launch.is_symlink()):
+@@ -396,6 +421,10 @@
+                             or proof.get("launch_attempted") is not False):
+                         raise FabricTaskError("retained_refusal_invalid")
+                     state = "REQUEST_REFUSED_BEFORE_LAUNCH"
++                    code = proof.get("refusal_code")
++                    refusal_diagnostic["request_refusal_code"] = (
++                        code if type(code) is str and code in _REQUEST_REFUSAL_CODES
++                        else "UNCLASSIFIED_PRELAUNCH_REFUSAL")
+                 return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
+                     "state": state, "rc": None, "signal": None,
+                     "result_available": False, "result_bytes": None,
+@@ -403,7 +432,7 @@
+                     "request_root_id": row.get("root_id"), "request_parent_run_id": row.get("parent_run_id"),
+                     "execution_absence_proven": state == "REQUEST_REFUSED_BEFORE_LAUNCH",
+                     "background_execution": False, "request_retained": True,
+-                    "same_run_replay_allowed": False}
++                    "same_run_replay_allowed": False, **refusal_diagnostic}
+             except (OSError, ValueError, FabricTaskError, AttributeError):
+                 return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
+                     "state": "STATUS_UNREADABLE", "rc": None, "signal": None,
+@@ -613,7 +642,9 @@
+ 
+ def _parse_route(line: str) -> dict[str, str]:
+     if not isinstance(line, str) or not line.startswith("POOL="):
+-        raise FabricTaskError(line.strip() or "NO_ROUTE")
++        error = FabricTaskError(line.strip() or "NO_ROUTE")
++        error._request_refusal_code = "NO_ROUTE"
++        raise error
+     fields: dict[str, str] = {}
+     for token in shlex.split(line):
+         if "=" not in token:
+@@ -1043,6 +1074,7 @@
+                     "request_sha256": provider_outcome.digest(
+                         provider_outcome.regular_bytes(request_file, 32768)),
+                     "reason": "prelaunch_" + type(exc).__name__,
++                    "refusal_code": _safe_request_refusal_code(exc),
+                     **({"eligible_at": exc.eligible_at} if hasattr(exc, "eligible_at") else {}),
+                     "launch_attempted": False, "created_at": time.time(),
+                 })

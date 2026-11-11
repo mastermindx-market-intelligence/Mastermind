@@ -1,0 +1,164 @@
+{
+  "all_commands_passed": false,
+  "backend_sha256": "bcdf8f1900f07fd096da1e242cdda8d3860518db9e1964c747d3b45b19d023c5",
+  "commands": [
+    {
+      "command": [
+        "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/def19b3c9d1241239cfb81df97b1f7e4/venv/bin/python",
+        "-c",
+        "import runpy,site,sys\nfrom pathlib import Path\nnative=Path('/Users/chriswong/.hermes/hermes-agent')\nsys.path.insert(0,str(native))\nfrom pm.environments import committed_venv,site_packages\nsite.addsitedir(str(site_packages(committed_venv(native))))\nsys.path.insert(0,str(Path.cwd()))\nrunpy.run_path('integrations/hermes_attended_fabric/tests/native_owner_qualification.py',run_name='__main__')\n"
+      ],
+      "log_sha256": "d3c241d22e3b2c9e9682dc5d3731b4fff9ad17caabfcecc243955adeedc1e20c",
+      "name": "native_owner",
+      "returncode": 1,
+      "seconds": 1.391,
+      "tail": [
+        "Traceback (most recent call last):",
+        "  File \"<string>\", line 1, in <module>",
+        "    import sys, runpy; sys.path.insert(0, '/Users/chriswong/.hermes/hermes-agent'); sys.argv = ['integrations/hermes_attended_fabric/tests/native_owner_qualification.py']; sys._hermes_relaunched = True; runpy.run_path('/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/integrations/hermes_attended_fabric/tests/native_owner_qualification.py', run_name='__main__')",
+        "                                                                                                                                                                                                           ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+        "  File \"<frozen runpy>\", line 294, in run_path",
+        "  File \"<frozen runpy>\", line 98, in _run_module_code",
+        "  File \"<frozen runpy>\", line 88, in _run_code",
+        "  File \"/Volumes/Mastermind/agent-workspaces/web/h6-contract-compose-20261107-c2/integrations/hermes_attended_fabric/tests/native_owner_qualification.py\", line 18, in <module>",
+        "    from hermes_cli.plugins import (",
+        "        LoadedPlugin, PluginContext, PluginManifest, get_plugin_manager,",
+        "    )",
+        "  File \"/Users/chriswong/.hermes/hermes-agent/hermes_cli/plugins.py\", line 31, in <module>",
+        "    from utils import env_var_enabled",
+        "  File \"/Users/chriswong/.hermes/hermes-agent/utils.py\", line 20, in <module>",
+        "    import hermes_yaml as yaml",
+        "  File \"/Users/chriswong/.hermes/hermes-agent/hermes_yaml.py\", line 10, in <module>",
+        "    from ruamel.yaml import YAML",
+        "ModuleNotFoundError: No module named 'ruamel'"
+      ]
+    },
+    {
+      "command": [
+        "/opt/homebrew/opt/python@3.14/bin/python3.14",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "integrations/hermes_attended_fabric/tests",
+        "-p",
+        "test_*.py",
+        "-q"
+      ],
+      "log_sha256": "07140848e8691bfd908f39e4f366c2d8292e5d5720bbfaf95248d3f93d432021",
+      "name": "package",
+      "returncode": 0,
+      "seconds": 1.669,
+      "tail": [
+        "----------------------------------------------------------------------",
+        "Ran 68 tests in 1.273s",
+        "",
+        "OK"
+      ]
+    },
+    {
+      "command": [
+        "node",
+        "--test",
+        "integrations/studio_direct_mcp/fabric-backend.test.mjs",
+        "integrations/studio_direct_mcp/fabric-backend-capacity.test.mjs",
+        "integrations/studio_direct_mcp/fabric-diagnostics.test.mjs"
+      ],
+      "log_sha256": "4e52f7984bea2f6e23aa0c89c3ff88da06db2794ca8c38ec0603ea91c0820128",
+      "name": "node_backend",
+      "returncode": 0,
+      "seconds": 3.404,
+      "tail": [
+        "\u2714 identity guard remains binding: ROOT_UNVERIFIED (0.059916ms)",
+        "\u2714 identity guard remains binding: CONTROLLER_NOT_BOUND (0.054ms)",
+        "\u2714 technical observation is not a safety assertion: ADAPTER_OBSERVATION_UNAVAILABLE (0.08075ms)",
+        "\u2714 technical observation is not a safety assertion: PROCESS_TRANSPORT_ERROR (0.0595ms)",
+        "\u2714 technical observation is not a safety assertion: CAPTURE_INVALID (0.072125ms)",
+        "\u2714 technical observation is not a safety assertion: MANUAL_ROUTE_UNAVAILABLE (0.055417ms)",
+        "\u2714 result paging is a retrieval requirement, not a reason to rerun worker (0.089458ms)",
+        "\u2714 composed facade status exposes typed diagnosis without new processes (3.110708ms)",
+        "\u2714 composed invalid request adds useful diagnosis without dispatch (0.140875ms)",
+        "\u2714 capabilities explain replay scope without granting runtime authority (0.334875ms)",
+        "\u2139 tests 135",
+        "\u2139 suites 0",
+        "\u2139 pass 135",
+        "\u2139 fail 0",
+        "\u2139 cancelled 0",
+        "\u2139 skipped 0",
+        "\u2139 todo 0",
+        "\u2139 duration_ms 3343.661417"
+      ]
+    }
+  ],
+  "committed_environment_after": "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/def19b3c9d1241239cfb81df97b1f7e4/venv",
+  "committed_environment_selection_unchanged": true,
+  "current_qualification": {
+    "native_dependency_repair_attempted": false,
+    "native_failure": "Startup relaunched the explicit runpy suite; the relaunched interpreter could not import ruamel even though that module is present in the selected committed site-packages.",
+    "native_failure_diagnostic_budget": "One bounded diagnostic consumed; no unchanged replay.",
+    "native_suite_cases_completed": 0,
+    "native_suite_status": "IMPORT_FAILED_BEFORE_CASES",
+    "node_tests": 135,
+    "package_tests": 68,
+    "upstream_native_22_cases": "Retained author contribution evidence, not relabeled as current integrated execution."
+  },
+  "live_installation": false,
+  "native_environment": {
+    "committed_venv": "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/def19b3c9d1241239cfb81df97b1f7e4/venv",
+    "native_head": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+    "native_source": "/Users/chriswong/.hermes/hermes-agent",
+    "native_status": [
+      " M agent/agent_init_fallback.py",
+      " M agent/chat_completion_helpers.py",
+      " M tests/tui_gateway/test_kanban_resume_guard.py",
+      " M tests/tui_gateway/test_protocol.py",
+      " M tests/tui_gateway/test_tui_gateway_server.py",
+      " M tui_gateway/methods_session.py",
+      "?? tests/test_fallback_family_first.py",
+      "?? tests/tui_gateway/test_omit_messages_resume_bounded_ack.py"
+    ],
+    "python": "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/def19b3c9d1241239cfb81df97b1f7e4/venv/bin/python",
+    "python_exists": true,
+    "site_packages": "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/def19b3c9d1241239cfb81df97b1f7e4/venv/lib/python3.14/site-packages"
+  },
+  "native_head_after": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+  "native_modified_source_after": {
+    "agent/agent_init_fallback.py": "d711241adccb370b64a70e440b16175aa33e3f5bb9425ff2d377efe73ef14668",
+    "agent/chat_completion_helpers.py": "dc6a16b6e34f7397f7b42e7fdc6ba9d542d8f488b43ee91a58b903e1f341ac8c",
+    "tests/tui_gateway/test_kanban_resume_guard.py": "e25a4ea47ade78982a4fb0a9c0f4e962a83170b4bfea838538b3c6bbf8c799cc",
+    "tests/tui_gateway/test_protocol.py": "4aa138c12cc41be298059be8e8a9b77471dce9f443c5108c464c8d8096106e03",
+    "tests/tui_gateway/test_tui_gateway_server.py": "77f67dd2c7b0fba928fcecd00daa1366822849ffa67a3acb75a4fb494c2ff535",
+    "tui_gateway/methods_session.py": "69b00256bd55956c53fb6ab86ab3af9be0fc637cc4f52b34a66143d86247e0a9"
+  },
+  "native_modified_source_before": {
+    "agent/agent_init_fallback.py": "d711241adccb370b64a70e440b16175aa33e3f5bb9425ff2d377efe73ef14668",
+    "agent/chat_completion_helpers.py": "dc6a16b6e34f7397f7b42e7fdc6ba9d542d8f488b43ee91a58b903e1f341ac8c",
+    "tests/tui_gateway/test_kanban_resume_guard.py": "e25a4ea47ade78982a4fb0a9c0f4e962a83170b4bfea838538b3c6bbf8c799cc",
+    "tests/tui_gateway/test_protocol.py": "4aa138c12cc41be298059be8e8a9b77471dce9f443c5108c464c8d8096106e03",
+    "tests/tui_gateway/test_tui_gateway_server.py": "77f67dd2c7b0fba928fcecd00daa1366822849ffa67a3acb75a4fb494c2ff535",
+    "tui_gateway/methods_session.py": "69b00256bd55956c53fb6ab86ab3af9be0fc637cc4f52b34a66143d86247e0a9"
+  },
+  "native_profile_mutated": false,
+  "native_status_after": [
+    " M agent/agent_init_fallback.py",
+    " M agent/chat_completion_helpers.py",
+    " M tests/tui_gateway/test_kanban_resume_guard.py",
+    " M tests/tui_gateway/test_protocol.py",
+    " M tests/tui_gateway/test_tui_gateway_server.py",
+    " M tui_gateway/methods_session.py",
+    "?? tests/test_fallback_family_first.py",
+    "?? tests/tui_gateway/test_omit_messages_resume_bounded_ack.py"
+  ],
+  "native_worktree_stable_during_tests": true,
+  "observed_at": "2026-11-07T15:27:20.542631+00:00",
+  "output": "/private/tmp/h6-worker-current-6ofnnue2",
+  "parents": [
+    "87cc3e6e25d0b7254a2f60229fc988e963577052",
+    "7425d029c7e2afbe38d07abfa3cf95c1527d4439"
+  ],
+  "provider_calls": false,
+  "runtime_package_sha256": "c099a74d4ec0f68a4623ba56191e93c0a64e7d3384e6bdd9773793887e7de927",
+  "schema": "mastermind.h6-worker-current-composition.v1",
+  "tested_tree": "f8b3ca27b43095de00a6fa87f10224efda7e5085",
+  "worker_started": false
+}
