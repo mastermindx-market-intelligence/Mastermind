@@ -1370,6 +1370,96 @@ def test_the_legacy_return_op_is_adopted_by_the_oldest_child():
     assert not any("OLD" in b for b in bodies)       # answer, not the stale
 
 
+def test_three_finished_children_served_newest_first_return_oldest_first():
+    # Delta-3 N1, the required three-child fixture: the children list serves
+    # newest-activity-first (captured children_query_dev.json — the done,
+    # oldest row is served LAST), while the return walk assumed the list was
+    # oldest-first. With every child fresh the turns went out
+    # newest-child-first and the asker's last-seen answer was the OLDER
+    # child's. The walk is ordered oldest-first by createdAt: each child's
+    # turn is sent exactly once, oldest first, and the newest child's answer
+    # is the asker's final word.
+    issues, ask_op, child1 = blocked_parent_with_done_child()
+    child1 = dict(child1, createdAt="2026-11-11T10:00:00.000Z")
+    child2 = dict(child1, id="ch-2", identifier="MMO-3",
+                  assigneeAgentId="ag-vega", title="Review it",
+                  createdAt="2026-11-11T11:00:00.000Z")
+    child3 = dict(child1, id="ch-3", identifier="MMO-4",
+                  assigneeAgentId="ag-hera", title="Check the math",
+                  createdAt="2026-11-11T12:00:00.000Z")
+    issues["is-1"]["blockedBy"] = board.blocked_by(child1, child2, child3)
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [child3, child2, child1]  # served newest-first
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    pc.comment_rows["ch-2"] = [board.served_comment(
+        "the review agrees", author_agent_id="ag-vega")]
+    pc.comment_rows["ch-3"] = [board.served_comment(
+        "the math checks out", author_agent_id="ag-hera")]
+    t3 = FakeT3(replies=["after the count", "after the review",
+                         "FINAL: all three agree"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert len(t3.sends) == 3                      # each child, exactly once
+    assert "MMO-2" in t3.sends[0] and "MMO-4" not in t3.sends[0]
+    assert "MMO-3" in t3.sends[1]                  # oldest child's turn first
+    assert "MMO-4" in t3.sends[2] and "MMO-2" not in t3.sends[2]
+    assert pc.issues["is-1"]["status"] == "in_review"
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"
+              and not c[2].startswith("[t2-carrier]")]
+    assert bodies == ["FINAL: all three agree"]    # one delivery: the answer
+    # to the newest child's turn — the asker's final word
+
+
+def test_reconciled_children_served_newest_first_deliver_the_newest_answer():
+    # Delta-3 N1's stale twin: both return turns were answered in an earlier
+    # run; serving the walk newest-first made the LAST turn reconciled the
+    # OLDER child's answer, so the asker's newest word was dropped at
+    # delivery. Ordered oldest-first, the newest child's answered turn is
+    # the last one reconciled and its answer is delivered.
+    issues, ask_op, child1 = blocked_parent_with_done_child()
+    child1 = dict(child1, createdAt="2026-11-11T10:00:00.000Z")
+    child2 = dict(child1, id="ch-2", identifier="MMO-3",
+                  assigneeAgentId="ag-vega", title="Review it",
+                  createdAt="2026-11-11T11:00:00.000Z")
+    issues["is-1"]["blockedBy"] = board.blocked_by(child1, child2)
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [child2, child1]      # served newest-first
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    pc.comment_rows["ch-2"] = [board.served_comment(
+        "the review agrees", author_agent_id="ag-vega")]
+    ret1, ret2 = f"{ask_op}-ch-1-ret", f"{ask_op}-ch-2-ret"
+    t3 = FakeT3(messages=[
+        ("user", "r1", f"[{ret1}]\n\nthe ask came back"),
+        ("assistant", "r1", "OLDER: the file has 12 lines"),
+        ("user", "r2", f"[{ret2}]\n\nthe second ask came back"),
+        ("assistant", "r2", "NEWER: the review agrees"),
+    ])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert t3.sends == []                          # both answered, no resend
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"
+              and not c[2].startswith("[t2-carrier]")]
+    assert bodies == ["NEWER: the review agrees"]  # the newest word, once
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_a_family_row_without_createdAt_refuses_the_return_order():
+    # Delta-3 N1 + N3 in the family: one finished child row without
+    # createdAt among several — the oldest-first order the return edge
+    # promises cannot be derived, and walking the served (newest-first)
+    # order is the N1 bug again. The return edge refuses the read loudly
+    # instead of delivering turns in an order it cannot defend.
+    issues, ask_op, child1 = blocked_parent_with_done_child()
+    child1 = dict(child1, createdAt="2026-11-11T10:00:00.000Z")
+    child2 = dict(child1, id="ch-2", identifier="MMO-3",
+                  assigneeAgentId="ag-vega", title="Review it")
+    child2.pop("createdAt")
+    issues["is-1"]["blockedBy"] = board.blocked_by(child1, child2)
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [child2, child1]
+    t3 = FakeT3(replies=["a", "b"])
+    with pytest.raises(wc.CarrierError):
+        run_with_roster(pc, t3, {})
+
+
 def test_a_cancelled_ask_child_is_terminal_for_the_return_edge():
     # Panel-2 q1-10: a cancelled child counted as open work, so the parent
     # stayed blocked forever with nothing left to wait for. Cancelled is

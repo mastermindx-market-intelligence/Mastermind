@@ -1749,10 +1749,11 @@ def handle_return(pc, t3, issue, ask_op, opts):
     final answer on the parent like any task.
 
     R2a finding 19: when several asks of one parent are done, every child's
-    answer reaches the asker as its own return turn, OLDEST first (the
-    children list serves them oldest first), and the parent's final delivery
-    happens only when no ask child is open; the asker's newest answer is the
-    one delivered."""
+    answer reaches the asker as its own return turn, OLDEST first (ordered
+    by createdAt — delta-3 N1: the children list itself serves
+    newest-activity-first, captured children_query_dev.json), and the
+    parent's final delivery happens only when no ask child is open; the
+    asker's newest answer is the one delivered."""
     blocker_ids = set(recorded_blocker_ids(issue))
     family = []
     for row in untruncated_children(pc, issue["id"]):
@@ -1792,7 +1793,12 @@ def handle_return(pc, t3, issue, ask_op, opts):
             f"{open_rows[0].get('identifier')} is still open; the parent "
             "stays blocked")
         return 0
-    done_rows = family  # all done here; oldest first as the list serves them
+    # Delta-3 N1: the children list serves newest-activity-first (captured),
+    # so the walk orders the done family oldest-first by createdAt — the
+    # turns go out oldest first and the newest child's answer is the asker's
+    # final word. A family row without createdAt is refused (N3's law):
+    # walking the served order instead would silently be the N1 bug.
+    done_rows = ordered_oldest_first(family)
     single = len(done_rows) == 1
     stale_reply = None   # reconciled from a turn an earlier run sent
     fresh_reply = None   # produced by THIS run's send/wait
