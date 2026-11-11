@@ -8,6 +8,7 @@ import json
 import os
 import stat
 import subprocess
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -440,6 +441,46 @@ def test_turn_refuses_catalog_canary_and_autonomous_blockers(tmp_path: Path):
         )
 
 
+def test_byteplus_built_canary_requires_hermetic_owner_sealed_facts():
+    """A built binding admits only the existing owner-proved interactive canary.
+
+    Keys/enrollment are test-injected by the existing fixture; no provider
+    account, worker principal or live Capacity source is touched.
+    """
+    byteplus_id = "byteplus-coding-plan-personal.claude-code-anthropic"
+    profiles = json.loads(DEFAULT_PROFILES_PATH.read_text(encoding="utf-8"))
+    bindings = load_bindings(profiles_document=profiles)
+    receipt = issue_provider_realm_enrollment_receipt(
+        binding_id=byteplus_id,
+        bindings_document=bindings,
+        profiles_document=profiles,
+        generation=_REALM_GENERATION,
+    )
+    assert receipt.binding_id == byteplus_id
+    assert receipt.enrollment_state == "enrolled"  # fixture only, not runtime
+    admission = seal_subscription_canary_admission(
+        capacity_fact=_capacity_fact(),
+        realm_receipt=receipt,
+        bindings_document=bindings,
+        profiles_document=profiles,
+    )
+    assert admission.binding_id == byteplus_id
+    assert admission.implementation_state == "BUILT_NOT_PROVEN"
+    assert admission.execution_mode == "interactive_canary"
+    assert get_binding(byteplus_id, document=bindings, profiles_document=profiles).autonomous_allowed is False
+    assert verify_subscription_canary_admission(
+        admission, adapter_id=admission.adapter_id,
+        bindings_document=bindings, profiles_document=profiles,
+    ) is admission
+    with pytest.raises(CanaryAdmissionError, match="typed capacity fact"):
+        seal_subscription_canary_admission(
+            capacity_fact=None,
+            realm_receipt=receipt,
+            bindings_document=bindings,
+            profiles_document=profiles,
+        )
+
+
 def test_seal_refuses_raw_boolean_activation_inputs():
     for key in (
         "adapter_implemented",
@@ -684,7 +725,13 @@ def test_adapter_refuses_missing_capacity_or_realm_proof_and_changed_catalog(tmp
     bindings, profiles = _documents()
     admission = _owner_seal(bindings=bindings, profiles=profiles)
     changed = json.loads(json.dumps(bindings))
-    changed["verified_at"] = "2026-09-13T23:59:59Z"
+    # A digest-drift test must supply a *valid* profile-fresh review timestamp.
+    # A stale one is now rejected earlier by the BytePlus review provenance
+    # guard, so it cannot exercise the intended canary digest mismatch.
+    reviewed = datetime.strptime(bindings["verified_at"], "%Y-%m-%dT%H:%M:%SZ")
+    changed["verified_at"] = (reviewed + timedelta(seconds=1)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     with pytest.raises((CanaryAdmissionError, ClaudeSubscriptionWorkerError), match="catalog digest"):
         ClaudeSubscriptionWorkerAdapter(
             binary,
@@ -730,13 +777,7 @@ def test_broker_execution_refuses_reviewed_spec_only_adapter_before_config_read(
     wire["model"] = adapter.selected_model
     wire["authorities"] = ["READ"]
     workspace = Path(wire["workspace_path"])
-    _git(workspace, "init", "-q")
-    _git(workspace, "config", "user.email", "fixture@example.invalid")
-    _git(workspace, "config", "user.name", "Fixture")
-    (workspace / "README.md").write_text("fixture\n", encoding="utf-8")
-    _git(workspace, "add", "README.md")
-    _git(workspace, "commit", "-qm", "fixture")
-    wire["expected_base_sha"] = _git(workspace, "rev-parse", "HEAD")
+    assert wire["expected_base_sha"] == _git(workspace, "rev-parse", "HEAD")
     Path(wire["run_dir"]).chmod(0o700)
     isolation_roots = [Path(value) for value in wire["isolation_roots"]]
     run_dir = Path(wire["run_dir"])

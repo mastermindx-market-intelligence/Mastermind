@@ -19,8 +19,10 @@ def test_self_directed_history_failure_is_unknown_and_secret_safe(monkeypatch):
 
     assert payload["history_status"] == "unavailable"
     assert payload["error"] == "self_directed_history_unavailable"
-    assert payload["history"] is None
-    assert payload["pending"] is None
+    assert payload["status"] == "unavailable"
+    assert payload["reason_code"] == "self_directed_history_unreadable"
+    assert payload["history"] == []
+    assert payload["pending"] == []
     assert payload["realized_total"] is None
     assert payload["n_closed"] is None
     assert payload["n_buys"] is None
@@ -31,30 +33,57 @@ def test_self_directed_history_failure_is_unknown_and_secret_safe(monkeypatch):
 
 
 def test_self_history_ui_distinguishes_loading_unavailable_and_empty():
-    html = (Path(__file__).parents[1] / "app" / "static" / "index.html").read_text()
+    import subprocess
 
-    assert "_selfHist = {history_status:'loading'}" in html
-    assert "function _selfHistoryUnavailable()" in html
+    html = (Path(__file__).parents[1] / "app/static/index.html").read_text()
 
-    render_start = html.index("function renderSelfHistory()")
-    render_end = html.index("// ── order ticket", render_start)
-    render = html[render_start:render_end]
-    assert "d.history_status === 'loading'" in render
-    assert "self_directed_history_unavailable" in render
-    assert "Self-Directed trade history unavailable" in render
-    assert render.index("history_status === 'loading'") < render.index("self_directed_history_unavailable") < render.index("!hist.length")
+    def shipped_function(name):
+        start = html.index(f"function {name}(")
+        end = html.index("\n}", start) + 2
+        return html[start:end]
 
-    refresh_start = html.index("function refreshSelf()")
-    refresh_end = html.index("function _heldShares", refresh_start)
-    refresh = html[refresh_start:refresh_end]
-    assert "_selfHistoryUnavailable()" in refresh
+    source = "\n".join(shipped_function(name) for name in (
+        "_selfHistoryUnavailable", "refreshSelf", "_selfHistState", "renderSelfHistory",
+    ))
+    harness = r"""
+const assert = require('node:assert/strict');
+const host = {innerHTML: ''};
+let _self = null, _selfHist = null, _selfSettled = false, _selfHistSettled = false;
+let response;
+function t(key) { return key; }
+function E(id) { return id === 'sd-history-host' ? host : null; }
+function renderSelf() { renderSelfHistory(); }
+async function fetch(url) {
+  if (url.endsWith('/history')) return response();
+  return {ok: true, json: async () => ({nav: 2000})};
+}
+""" + source + r"""
+(async () => {
+  renderSelfHistory();
+  assert.match(host.innerHTML, /load/i);
+  assert.doesNotMatch(host.innerHTML, /sd\.hist_empty/);
 
-    details_start = html.index("function _fetchPortfolioDetails")
-    details_end = html.index("function _fetchPortfolioSnapshot", details_start)
-    details = html[details_start:details_end]
-    assert "selfHistory: history || _selfHistoryUnavailable()" in details
+  response = () => ({ok: true, json: async () => ({history: []})});
+  await refreshSelf();
+  assert.match(host.innerHTML, /sd\.hist_empty/);
 
-    switch_start = html.index("window.setPortfolio = function(id)")
-    switch_end = html.index("async function loadPortfolios", switch_start)
-    switch = html[switch_start:switch_end]
-    assert "if (id === 'self_directed') _selfHist = {history_status:'loading'}" in switch
+  for (const failed of [
+    () => ({ok: false}),
+    () => { throw new Error('offline'); },
+    () => ({ok: true, json: async () => ({history: [], history_status: 'unavailable'})}),
+    () => ({ok: true, json: async () => ({history: [], error: 'self_directed_history_unavailable'})}),
+    () => ({ok: true, json: async () => ({history: [], status: 'unavailable'})}),
+  ]) {
+    response = failed;
+    await refreshSelf();
+    assert.match(host.innerHTML, /sd\.hist_unavailable/);
+    assert.doesNotMatch(host.innerHTML, /sd\.hist_empty/);
+    assert.equal(_selfHistSettled, true);
+  }
+
+  response = () => ({ok: true, json: async () => ({history: []})});
+  await refreshSelf();
+  assert.match(host.innerHTML, /sd\.hist_empty/);
+})().catch(error => { console.error(error); process.exitCode = 1; });
+"""
+    subprocess.run(["node", "-e", harness], check=True, timeout=20)

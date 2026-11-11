@@ -1,0 +1,23 @@
+F..F..                                                                   [100%]
+=================================== FAILURES ===================================
+_ test_emitted_quota_readers_keep_original_owners_and_repeatable_inspection[application] _
+ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py:56: in test_emitted_quota_readers_keep_original_owners_and_repeatable_inspection
+    again = entry.inspect(verified_root=published.release, verified_metadata=published.meta)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/private/tmp/pytest-of-chriswong/pytest-2992/test_emitted_quota_readers_kee0/kit/native-code-releases/677b994cb14de7331c3e5a3064104f7ea64bea1b830ec3013856dd6bae42ac94/ext/native_go_entry.py:154: in inspect
+    _module_identity(name, root / relative, expected)
+/private/tmp/pytest-of-chriswong/pytest-2992/test_emitted_quota_readers_kee0/kit/native-code-releases/677b994cb14de7331c3e5a3064104f7ea64bea1b830ec3013856dd6bae42ac94/ext/native_go_entry.py:87: in _module_identity
+    raise ValueError("native Go module conflict: " + name)
+E   ValueError: native Go module conflict: glm_keys
+_ test_emitted_quota_readers_keep_original_owners_and_repeatable_inspection[http] _
+ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py:56: in test_emitted_quota_readers_keep_original_owners_and_repeatable_inspection
+    again = entry.inspect(verified_root=published.release, verified_metadata=published.meta)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/private/tmp/pytest-of-chriswong/pytest-2992/test_emitted_quota_readers_kee1/kit/native-code-releases/4e7ce46a50c88619a87daae0d8d14509d042ce70d86987f44fd5b032e5e8250c/ext/native_go_entry.py:154: in inspect
+    _module_identity(name, root / relative, expected)
+/private/tmp/pytest-of-chriswong/pytest-2992/test_emitted_quota_readers_kee1/kit/native-code-releases/4e7ce46a50c88619a87daae0d8d14509d042ce70d86987f44fd5b032e5e8250c/ext/native_go_entry.py:87: in _module_identity
+    raise ValueError("native Go module conflict: " + name)
+E   ValueError: native Go module conflict: glm_keys
+=========================== short test summary info ============================
+FAILED ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py::test_emitted_quota_readers_keep_original_owners_and_repeatable_inspection[application]
+FAILED ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py::test_emitted_quota_readers_keep_original_owners_and_repeatable_inspection[http]

@@ -52,8 +52,11 @@ def test_decision_ui_preserves_unavailable_and_clears_cross_book_state():
     assert "Array.isArray(snapshot.decisions)" in apply
     assert "_decisionsStatus = snapshot.decisionsStatus || null" in apply
 
-    switch_start = html.index("window.setPortfolio = function(id)")
+    switch_start = html.index("window.setPortfolio = function(id, opts)")
     switch_end = html.index("async function loadPortfolios", switch_start)
     switch = html[switch_start:switch_end]
-    assert "_decisions = []" in switch
-    assert "_decisionsStatus = 'loading'" in switch
+    reset_start = html.index("function _invalidateBookScopedState()")
+    reset = html[reset_start:html.index("\n}", reset_start)]
+    assert "_decisions = []" in reset
+    assert switch.index("_invalidateBookScopedState();") < switch.index("_portfolio = id;")
+    assert switch.index("_decisionsStatus = 'loading'") < switch.index("_portfolio = id;")

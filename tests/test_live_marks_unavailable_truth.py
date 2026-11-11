@@ -32,7 +32,9 @@ def test_live_marks_failure_is_unavailable_not_empty_and_secret_safe(monkeypatch
     assert response.headers["cache-control"] == "no-store"
     assert payload["error"] == "live_marks_unavailable"
     assert payload["positions"] == []
-    assert payload["performance"] == {}
+    assert payload["performance"]["availability"]["status"] == "unavailable"
+    assert payload["performance"]["current_nav"] is None
+    assert payload["performance"]["cash"] is None
     assert payload["pricing"] == {
         "priced_positions": None,
         "total_positions": None,

@@ -1,0 +1,65 @@
+{
+  "schema": "mastermind.h6-native-loader-build-qualification.v1",
+  "source_pre_head": "35dcd7c6eafca3429b088f26568170c90cbcff6f",
+  "native_entry_sha256": "e9cce0ab5bb0d9de7e5cfe009488f16759c1a41733db70130ad83ba39c51a721",
+  "output": "/private/tmp/h6-loader-complete-native-bjl3la7l",
+  "results": [
+    {
+      "name": "default",
+      "files": 107,
+      "manifest_sha256": "c7f5d2e62980e4cb38580496ef82125673015881f70d4fc4d6763137eed30459",
+      "inventory_sha256": "8ea3e85095428833c78ce08309ca1a2db748a92e69f3023f03679df54298bc5f",
+      "go_component_sha256": "f3bccab074532b3ec3dd79f6738a08afd6bcf50c07d01435946dd45ffccf4cb4",
+      "native_entry_sha256": null,
+      "installer_component_validated": false
+    },
+    {
+      "name": "application",
+      "files": 109,
+      "manifest_sha256": "f5064b6ede765313e2fce2e865d29d6ab9e4eb7a94acc6e61256d2c458e7325d",
+      "inventory_sha256": "3b4f0c0a278c378bc019a68e880c15d1082b0b353ce88d23e0d8d253d261dede",
+      "go_component_sha256": "f3bccab074532b3ec3dd79f6738a08afd6bcf50c07d01435946dd45ffccf4cb4",
+      "native_entry_sha256": "e9cce0ab5bb0d9de7e5cfe009488f16759c1a41733db70130ad83ba39c51a721",
+      "installer_component_validated": true
+    },
+    {
+      "name": "http",
+      "files": 112,
+      "manifest_sha256": "643fd74c290d3f4bb5010b5f65361dd92a7cc010d9c6289c4c02b9f4adb38f95",
+      "inventory_sha256": "ef9967deec10bc22ee32b69c77288f0819534a904f81dff8cceab22715179df0",
+      "go_component_sha256": "f3bccab074532b3ec3dd79f6738a08afd6bcf50c07d01435946dd45ffccf4cb4",
+      "native_entry_sha256": "e9cce0ab5bb0d9de7e5cfe009488f16759c1a41733db70130ad83ba39c51a721",
+      "installer_component_validated": true
+    },
+    {
+      "name": "h2-base",
+      "files": 107,
+      "manifest_sha256": "d07566feab8355ecaa7f1a1e189a26de8c19242b0365c00121a76f88f773aa55",
+      "inventory_sha256": "d4d0a2001ad41a4f340799cabe41277578ef611d97e2a02405f5c0c86fa6e7e3",
+      "go_component_sha256": "e608d836a0925a4129c1a9f064470c97f429fecb948dbfefde989461038cb878",
+      "native_entry_sha256": null,
+      "installer_component_validated": false
+    },
+    {
+      "name": "h2-application",
+      "files": 109,
+      "manifest_sha256": "057e16c39db2f1e745136e24c72d2a2511fe5c350f4774cb0fd0cd52a07c38fe",
+      "inventory_sha256": "bdd9e2beac9d99325d2854ba1d01148ad1c059064d896ca0b5fb3f5f88ccf49b",
+      "go_component_sha256": "e608d836a0925a4129c1a9f064470c97f429fecb948dbfefde989461038cb878",
+      "native_entry_sha256": "e9cce0ab5bb0d9de7e5cfe009488f16759c1a41733db70130ad83ba39c51a721",
+      "installer_component_validated": true
+    },
+    {
+      "name": "h2-http",
+      "files": 112,
+      "manifest_sha256": "bdf0848bddb2aa5c57bca25a91efd767b8266e02d7661dfa8639c95895f62375",
+      "inventory_sha256": "23dd02678e0bc8365a4b65e3634519c4e8c0f0238747e675eefd5a87d15d219e",
+      "go_component_sha256": "e608d836a0925a4129c1a9f064470c97f429fecb948dbfefde989461038cb878",
+      "native_entry_sha256": "e9cce0ab5bb0d9de7e5cfe009488f16759c1a41733db70130ad83ba39c51a721",
+      "installer_component_validated": true
+    }
+  ],
+  "installation": false,
+  "selection": false,
+  "provider_calls": false
+}

@@ -1,0 +1,93 @@
+{
+  "operation": "paperclip-fleet-readiness-20261109",
+  "status": "HISTORICAL_WITHDRAWN_CANDIDATE",
+  "procedure_pin": "fe42651763a8c71e71dece27a2d5b7dd02aa913d",
+  "composed_on_mastermind_head": "7734f25d1258bc98ba24cff56df918db897df6ae",
+  "installed_hermes_head": "ba4ddf9945a213ede9dda016602a86591ed634f9",
+  "qualification_baseline": "80cd0e781a9b9ca3ed5657243a7f961dada8e149",
+  "qualification_tree": "bed6c6569d7f8adf23cb0aab1b49aaffbceb6bb8",
+  "source_sha256": {
+    "integrations/paperclip_hermes/build_overlay.py": "7da2d93218f9228e3c2b02f33ffaf4dfdf435799cec7200071fb0a754716e7f1",
+    "integrations/paperclip_hermes/core_overlay/agent/launch_credential_binding.py": "376e06c81f0cf6dbf859931f76e58fb9784ccee3cc56236cb9f5fac20c45c318",
+    "integrations/paperclip_hermes/tests/test_launch_credential_auxiliary_review.py": "ed1c801066841c7c64f2a5c7031ee858e4098b4cfc2bf4392c04a3b7a8a31c11",
+    "tests/executive_fabric_release_identity_review.py": "c99d1460f8930e7b455baae26986b01900f4a90eb11be8485c0e7d0adc95d66b",
+    "tests/test_paperclip_identity_review.py": "9f61c95eea694f039cf34951d2fac775176784fa07642d14e6df1c77e17af6ef"
+  },
+  "native_tests": {
+    "runner": "scripts/run_tests.sh",
+    "isolated_home_and_runtime": true,
+    "file_retries": 0,
+    "files": 17,
+    "passed": 157,
+    "failed": 0,
+    "new_auxiliary_cases": 7,
+    "unchanged_predecessor_compatibility_cases": 66,
+    "distinct_cases_with_predecessor": 223,
+    "log": "native-tests-learning-v10.log",
+    "log_sha256": "329b2ecb11bbf3aead39c761f079db3cb2ac5931027a96780cb9b5c4dec4a39c"
+  },
+  "mastermind_guard_tests": {
+    "passed": 26,
+    "unrelated_unmaterialized_donor_fixture_failures": 4,
+    "required_hosted_ci": "PENDING_NEW_HEAD"
+  },
+  "source_check": {
+    "passed_checks": 12,
+    "total_checks": 14,
+    "overall_exit_code": 1,
+    "failed_checks": [
+      "footguns",
+      "ruff"
+    ],
+    "footgun_findings": 3,
+    "ruff_findings": 13,
+    "failure_sections_equal_predecessor_after_temporary_path_normalization": true,
+    "health_blocking": 0,
+    "health_advisory": 0,
+    "log": "native-checks-learning-v10.log",
+    "log_sha256": "247f87690688a54c45da121fd235e9ad80bea16cc509ab3185a2aa8db70b4407"
+  },
+  "prepared_patch": {
+    "runtime_files": 26,
+    "sha256": "3ba4354c2b9f9839d4585c9e69d7c6c0bb147567116d7ff08b6153a98cc9cc21",
+    "apply_check_exit": 0,
+    "installed": false,
+    "overlay_manifest_sha256": "38d54a8af284593bda29a57adbb942cf46ad9486d07791ad44c9addd365c1c65"
+  },
+  "review_boundary": {
+    "bearer_authority_inherited": false,
+    "exact_value_redaction_retained": true,
+    "parent_lease_mutated": false,
+    "native_profile_provider_cancel_usage_owners_preserved": true,
+    "new_learning_daemon": false,
+    "real_model_or_live_memory_calls_in_qualification": false,
+    "live_learning_proof": false
+  },
+  "holds": [
+    "CodeQL 272/273 disposition; original dismissal was denied by automatic approval review",
+    "Native baseline source-check failures remain disclosed and unwaived",
+    "Current live work, installed-source custody and native safe cutover",
+    "Original MAS-2 consumer acceptance and learning/later-run proof"
+  ],
+  "history": {
+    "source_pr": 2406,
+    "source_merge": "f357bd0b3c31ee40f028590909678f01a3a9d413",
+    "issue": "MAS-3",
+    "sessions": 3368,
+    "stored_messages": 153543,
+    "native_attachments": 1131,
+    "native_documents": 19,
+    "wake_requests": 0,
+    "publication_receipt_sha256": "250fd8355085b6c228da3d65e192891eb5698c5c052fee605143a6af0953ac08",
+    "media_supplement": "PENDING"
+  },
+  "disposition": {
+    "candidate_commit": "c99446e7b9decdeb86e9329a682a34df4be8a943",
+    "auxiliary_runtime_change": "withdrawn; native finite Paperclip execution suppresses automatic background review",
+    "qualification_scope": "Direct native review-worker invocation with generation stubbed; no live model or memory calls",
+    "automatic_review_reachability_proven": false,
+    "omh_retention_or_later_run_retrieval_proven": false,
+    "replacement": "existing foreground OMH save/recall and native skill_manage during the finite run; live acceptance remains open",
+    "current_credential_runtime": "exact bytes from qualified predecessor7734f25d, preserving the port-zero repair"
+  }
+}

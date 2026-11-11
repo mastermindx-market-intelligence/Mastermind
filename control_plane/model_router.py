@@ -23,8 +23,17 @@ from typing import Any, Mapping, Sequence
 from control_plane.executive_agent_capabilities import (
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
+    adapter_supports_execution_surface,
 )
 from control_plane.worker_adapter import adapter_descriptor
+from control_plane.executive_responsibility import (
+    ResponsibilityIntent, ResponsibilityIntentError, normalize_responsibility_intent,
+)
+from control_plane.child_execution_contracts import (
+    C3_FRONTIER_JUDGMENT,
+    CANONICAL_TASK_COMPLEXITIES,
+    canonical_task_complexity,
+)
 
 
 ROUTER_SCHEMA_VERSION = "mastermind.executive_worker_routes/v2"
@@ -40,7 +49,8 @@ _WORKER_TASKS = frozenset(
 _RISKS = frozenset({"routine", "elevated", "critical"})
 _AMBIGUITIES = frozenset({"low", "medium", "high"})
 _METERED_TEXT_MAX = 2048
-_PRO_MODE_MIN_DURATION_MINUTES = 80
+# Duration describes the work; it is not a minimum utilization target.
+_PRO_MODE_MIN_DURATION_MINUTES = 1
 _PRO_MODE_MAX_DURATION_MINUTES = 1440
 _PRO_MODE_REFUSAL = "PRO_MODE_REFUSED / USE_NON_PRO_MODE"
 _METERED_ROUTE_REFUSAL = "METERED_ROUTE_REFUSED / WAITING_FOR_LAWFUL_ROUTE"
@@ -451,8 +461,19 @@ class WorkRequest:
     ambiguity: str = "low"
     required_capabilities: tuple[str, ...] = ()
     excluded_worker_ids: tuple[str, ...] = ()
+    responsibility_intent: ResponsibilityIntent | dict[str, str] | None = None
+    effective_complexity: str = ""
 
     def __post_init__(self) -> None:
+        raw_role = self.responsibility_intent
+        if raw_role is not None:
+            try:
+                role = normalize_responsibility_intent(
+                    raw_role.to_dict() if type(raw_role) is ResponsibilityIntent else raw_role
+                )
+            except ResponsibilityIntentError as exc:
+                raise RoutingPolicyError(str(exc)) from exc
+            object.__setattr__(self, "responsibility_intent", role)
         task_kind = str(self.task_kind).strip().lower()
         risk = str(self.risk).strip().lower()
         ambiguity = str(self.ambiguity).strip().lower()
@@ -462,6 +483,19 @@ class WorkRequest:
             raise RoutingPolicyError(f"unsupported risk {risk!r}")
         if ambiguity not in _AMBIGUITIES:
             raise RoutingPolicyError(f"unsupported ambiguity {ambiguity!r}")
+        # The wrapper's effective complexity is the authority for child
+        # cognition class (WO-06 / OQ-8): accept the shared canonical
+        # vocabulary (long names, C0..C3 shorthand) and refuse anything the
+        # shared law has not classified. The reviewer lane is a lane, not a
+        # complexity rung, so it is not a lawful effective_complexity here.
+        complexity = canonical_task_complexity(self.effective_complexity)
+        if complexity:
+            if complexity not in CANONICAL_TASK_COMPLEXITIES:
+                raise RoutingPolicyError(
+                    "effective_complexity must be a canonical class, got "
+                    f"{self.effective_complexity!r}"
+                )
+        object.__setattr__(self, "effective_complexity", complexity)
         capabilities = tuple(
             sorted(
                 {
@@ -512,6 +546,9 @@ class RoutingDecision(_RoutingDecisionCompatibility):
     chat_reasoning_mode: ChatReasoningMode | None = None
     metered_cognition_receipt: MeteredCognitionReceipt | None = None
     pro_mode_receipt: ProModeReceipt | None = None
+    responsibility_intent: ResponsibilityIntent | None = None
+    effective_complexity: str | None = None
+    principal_review_required: bool = False
 
     @property
     def worker_eligible(self) -> bool:
@@ -529,6 +566,11 @@ class RoutingDecision(_RoutingDecisionCompatibility):
         value = dataclasses.asdict(self)
         value["mode"] = self.mode.value
         value["worker_eligible"] = self.worker_eligible
+        if self.responsibility_intent is None:
+            value.pop("responsibility_intent", None)
+        else:
+            value["responsibility_intent"] = self.responsibility_intent.to_dict()
+            value["responsibility_intent_digest"] = self.responsibility_intent.digest
         value["suitability_tiers"] = [
             tier.to_dict() for tier in self.suitability_tiers
         ]
@@ -560,13 +602,33 @@ class RoutingDecision(_RoutingDecisionCompatibility):
         return value
 
     def job_constraints(self) -> dict[str, Any]:
-        """Return worker-placement constraints, never raw credentials or authority."""
+        """Return worker-placement constraints only for a dispatchable preview.
+
+        Principal-reviewed admission belongs to the incumbent owner. Until
+        that disposition is integrated, a required-review preview cannot be
+        converted into an executable worker request by a legacy caller.
+        """
 
         if not self.worker_eligible:
             raise RoutingPolicyError(
                 "frontier-lead work must be decomposed or adjudicated before worker dispatch"
             )
+        if self.principal_review_required:
+            raise RoutingPolicyError(
+                "principal review required before worker dispatch"
+            )
+        role_fields: dict[str, Any] = {}
+        if self.responsibility_intent is not None:
+            try:
+                self.responsibility_intent.require_phase("work")
+            except ResponsibilityIntentError as exc:
+                raise RoutingPolicyError("coordinate intent requires Executive coordinator admission") from exc
+            role_fields = {
+                "responsibility_intent": self.responsibility_intent.to_dict(),
+                "responsibility_intent_digest": self.responsibility_intent.digest,
+            }
         return {
+            **role_fields,
             "task_kind": self.task_kind,
             "risk": self.risk,
             "ambiguity": self.ambiguity,
@@ -610,12 +672,17 @@ class ModelRouter:
         capability_policy_path: str | Path | None = None,
     ) -> "ModelRouter":
         source = Path(path or DEFAULT_POLICY_PATH).expanduser().resolve(strict=True)
+        # Keep the incumbent policy validator, but never compose a torn or
+        # ambiguous live configuration read. There is no last-good fallback:
+        # a missing/changed configuration must not revive removed eligibility.
+        from control_plane.model_router_configuration import (
+            ConfigurationError, read_configuration_source,
+        )
         try:
-            raw = json.loads(source.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RoutingPolicyError(
-                f"routing policy is unreadable: {type(exc).__name__}"
-            ) from exc
+            observed_source = read_configuration_source(source)
+            raw = observed_source.document
+        except ConfigurationError as exc:
+            raise RoutingPolicyError(str(exc)) from None
         if not isinstance(raw, dict):
             raise RoutingPolicyError("routing policy root must be an object")
         if raw.get("schema_version") != ROUTER_SCHEMA_VERSION:
@@ -700,12 +767,11 @@ class ModelRouter:
                 raise RoutingPolicyError(
                     f"worker alias {alias!r} requires an enabled autonomous provider"
                 )
-            if worker_eligible and execution_profile.execution_surface not in {
-                "codex-exec",
-                "codex-app-server",
-            }:
+            if worker_eligible and not adapter_supports_execution_surface(
+                provider.adapter_id, execution_profile.execution_surface
+            ):
                 raise RoutingPolicyError(
-                    f"worker alias {alias!r} requires an implemented Codex execution surface"
+                    f"worker alias {alias!r} has an adapter/execution-surface mismatch"
                 )
             model_aliases[alias] = ModelAlias(
                 model_alias=alias,
@@ -762,7 +828,11 @@ class ModelRouter:
                     required_capabilities=capabilities,
                 )
             routes[task_kind] = normalized
-        return cls(
+        try:
+            observed_source.require_current()
+        except ConfigurationError as exc:
+            raise RoutingPolicyError(str(exc)) from None
+        router = cls(
             policy_version=policy_version,
             providers=providers,
             model_aliases=model_aliases,
@@ -770,6 +840,18 @@ class ModelRouter:
             capability_registry=capability_registry,
             source_path=source,
         )
+        router._configuration_source_sha256 = observed_source.source_sha256
+        return router
+
+    def configuration_snapshot(self) -> dict[str, Any]:
+        """Describe this exact loaded policy, not current live pool capacity.
+
+        Revision includes the capability owner digest. Existing Jobs/Attempts
+        retain their original bindings; observing a revision grants no reload,
+        account rotation, admission or new execution authority.
+        """
+        from control_plane.model_router_configuration import describe_configuration
+        return describe_configuration(self)
 
     def resolve_model_alias(self, model_alias: str) -> ModelAlias:
         alias = _bounded_id(model_alias, field="model_alias")
@@ -781,26 +863,76 @@ class ModelRouter:
             raise RoutingPolicyError(f"model alias {alias!r} is not worker eligible")
         return profile
 
+    def resolve_frontier_model_alias(self, model_alias: str) -> ModelAlias:
+        """Resolve a reviewed logical lead without conferring execution authority.
+
+        Provider enablement and capacity remain admission concerns. A successful
+        resolution may describe included-chat cognition, never a worker claim.
+        """
+        if not isinstance(model_alias, str):
+            raise RoutingPolicyError("frontier_model_alias must be a string")
+        alias = _bounded_id(model_alias, field="frontier_model_alias")
+        try:
+            profile = self.model_aliases[alias]
+        except KeyError as exc:
+            raise RoutingPolicyError(f"unknown frontier model alias {alias!r}") from exc
+        if profile.worker_eligible:
+            raise RoutingPolicyError(f"frontier model alias {alias!r} must be non-worker")
+        if not _LEAD_TASKS.issubset(profile.capabilities):
+            raise RoutingPolicyError(
+                f"frontier model alias {alias!r} lacks required lead capabilities"
+            )
+        return profile
+
+    def resolve_attended_model_alias(self, model_alias: str, binding_id: str) -> ModelAlias:
+        """Resolve finite attended catalogue eligibility, never claim authority."""
+        from control_plane.fabric_attended_routing import resolve_attended_alias
+
+        return resolve_attended_alias(self, model_alias, binding_id)[0]
+
     def route(
         self,
         request: WorkRequest,
         *,
+        frontier_model_alias: str | None = None,
         cognition_route: CognitionRoute | str | None = None,
         chat_reasoning_mode: ChatReasoningMode | str | None = None,
         metered_cognition_receipt: MeteredCognitionReceipt | None = None,
         pro_mode_receipt: ProModeReceipt | None = None,
     ) -> RoutingDecision:
         reasons: list[str] = []
-        lead_required = False
-        if request.task_kind in _LEAD_TASKS:
-            lead_required = True
+        review_reasons: list[str] = []
+        lead_required = request.task_kind in _LEAD_TASKS
+        if lead_required:
             reasons.append(f"task_kind_{request.task_kind}")
+        # OQ-8 (WO-06): critical risk / high ambiguity no longer inflate child
+        # cognition to frontier-lead. Each worker's cognition is classified
+        # independently by its wrapper-asserted effective_complexity; the
+        # required principal/authority review survives as a flag the caller
+        # reads off RoutingDecision.principal_review_required.
         if request.risk == "critical":
-            lead_required = True
-            reasons.append("critical_risk")
+            review_reasons.append("critical_risk")
         if request.ambiguity == "high":
-            lead_required = True
-            reasons.append("high_ambiguity")
+            review_reasons.append("high_ambiguity")
+        principal_review_required = bool(review_reasons)
+        if principal_review_required:
+            review_reasons.append("principal_review_required")
+        if request.effective_complexity == C3_FRONTIER_JUDGMENT:
+            if not lead_required:
+                raise RoutingPolicyError(
+                    "effective_complexity C3_FRONTIER_JUDGMENT requires a lead "
+                    "task_kind; worker cognition cannot self-select frontier"
+                )
+            reasons.append("effective_complexity_frontier_judgment")
+        elif request.effective_complexity:
+            if lead_required:
+                raise RoutingPolicyError(
+                    "a non-frontier effective_complexity cannot downgrade a "
+                    "lead task_kind"
+                )
+            reasons.append(
+                f"effective_complexity_{request.effective_complexity.lower()}"
+            )
 
         if lead_required:
             resolved_cognition_route = (
@@ -866,11 +998,23 @@ class ModelRouter:
                         )
                     reasons.append("non_pro_default")
 
-            lead_profile = self.model_aliases["frontier.orchestrator"]
+            if frontier_model_alias is None:
+                lead_profile = self.model_aliases["frontier.orchestrator"]
+            else:
+                lead_profile = self.resolve_frontier_model_alias(frontier_model_alias)
+                if not set(request.required_capabilities).issubset(
+                    lead_profile.capabilities
+                ):
+                    raise RoutingPolicyError(
+                        f"frontier model alias {lead_profile.model_alias!r} "
+                        "cannot satisfy requested capabilities"
+                    )
+                reasons.append("frontier_model_selected")
             return RoutingDecision(
                 mode=RouteMode.FRONTIER_LEAD,
                 policy_version=self.policy_version,
                 task_kind=request.task_kind,
+                responsibility_intent=request.responsibility_intent,
                 risk=request.risk,
                 ambiguity=request.ambiguity,
                 execution_profile_id=lead_profile.execution_profile_id,
@@ -879,18 +1023,26 @@ class ModelRouter:
                 capability_policy_digest=lead_profile.capability_policy_digest,
                 suitability_tiers=(
                     SuitabilityTier(
-                        "frontier.lead", ("frontier.orchestrator",)
+                        "frontier.lead", (lead_profile.model_alias,)
                     ),
                 ),
                 required_capabilities=request.required_capabilities,
                 excluded_worker_ids=request.excluded_worker_ids,
-                reason_codes=tuple(reasons),
+                reason_codes=tuple(reasons + review_reasons),
                 cognition_route=resolved_cognition_route,
                 chat_reasoning_mode=resolved_chat_reasoning_mode,
                 metered_cognition_receipt=metered_cognition_receipt,
                 pro_mode_receipt=pro_mode_receipt,
+                effective_complexity=(
+                    request.effective_complexity or None
+                ),
+                principal_review_required=principal_review_required,
             )
 
+        if frontier_model_alias is not None:
+            raise RoutingPolicyError(
+                "worker work does not accept a frontier model selection"
+            )
         if pro_mode_receipt is not None:
             raise RoutingPolicyError(
                 f"{_PRO_MODE_REFUSAL}: a Pro receipt cannot be attached to worker work"
@@ -914,7 +1066,12 @@ class ModelRouter:
             )
 
         route = self.routes[request.task_kind]
-        suitability_tiers = tuple(route[request.risk])
+        # The bounded policy grammar defines routine/elevated tiers only. A
+        # critical-risk child (OQ-8) is served at the strictest bounded tier
+        # instead of being re-inflated; the principal review requirement stays
+        # on the RoutingDecision flag the caller reads.
+        bounded_risk = "elevated" if request.risk == "critical" else request.risk
+        suitability_tiers = tuple(route[bounded_risk])
         first_profile = self.model_aliases[
             suitability_tiers[0].model_aliases[0]
         ]
@@ -938,12 +1095,16 @@ class ModelRouter:
                 "economical_worker_first",
             ]
         )
+        if request.risk == "critical":
+            reasons.append("critical_risk_elevated_tiers")
+        reasons.extend(review_reasons)
         if request.task_kind == "review" and request.excluded_worker_ids:
             reasons.append("review_worker_exclusion")
         return RoutingDecision(
             mode=RouteMode.WORKER,
             policy_version=self.policy_version,
             task_kind=request.task_kind,
+            responsibility_intent=request.responsibility_intent,
             risk=request.risk,
             ambiguity=request.ambiguity,
             execution_profile_id=first_profile.execution_profile_id,
@@ -954,7 +1115,100 @@ class ModelRouter:
             required_capabilities=capabilities,
             excluded_worker_ids=request.excluded_worker_ids,
             reason_codes=tuple(reasons),
+            effective_complexity=(request.effective_complexity or None),
+            principal_review_required=principal_review_required,
         )
+
+    def explain_route(
+        self,
+        request: WorkRequest,
+        *,
+        considered_aliases: Sequence[str] = (),
+    ) -> dict[str, Any]:
+        """Explain source eligibility, never observed price or live placement.
+
+        Reuse the authoritative pure route decision. An alias, model name or
+        admission cost class is not measured economics, qualification, current
+        capacity, a worker selection, or authority to execute. Unknown requested
+        aliases are reported rather than enrolled or silently discarded.
+        """
+        if (
+            not isinstance(considered_aliases, Sequence)
+            or isinstance(considered_aliases, (str, bytes))
+            or len(considered_aliases) > 32
+        ):
+            raise RoutingPolicyError("considered_aliases must be a sequence of at most 32 aliases")
+        considered: set[str] = set()
+        for alias in considered_aliases:
+            if not isinstance(alias, str):
+                raise RoutingPolicyError("considered alias must be a bounded identifier")
+            considered.add(_bounded_id(alias, field="considered_alias"))
+
+        decision = self.route(request)
+        positions = {
+            alias: (index, tier.tier_id)
+            for index, tier in enumerate(decision.suitability_tiers)
+            for alias in tier.model_aliases
+        }
+        required = set(decision.required_capabilities)
+        rows: list[dict[str, Any]] = []
+        for alias in sorted(set(self.model_aliases) | considered):
+            profile = self.model_aliases.get(alias)
+            position = positions.get(alias)
+            missing = sorted(required - set(profile.capabilities)) if profile else None
+            if profile is None:
+                disposition = "NOT_CONFIGURED"
+            elif decision.mode is RouteMode.FRONTIER_LEAD:
+                disposition = (
+                    "FRONTIER_JUDGMENT_ROUTE" if position is not None
+                    else "PRINCIPAL_JUDGMENT_REQUIRED"
+                )
+            elif not profile.worker_eligible:
+                disposition = "NOT_WORKER_ELIGIBLE"
+            elif missing:
+                disposition = "MISSING_REQUIRED_CAPABILITIES"
+            elif position is None:
+                disposition = "NOT_IN_TASK_ROUTE"
+            elif position[0] == 0:
+                disposition = "FIRST_LAWFUL_TIER"
+            else:
+                disposition = "LATER_SUITABILITY_TIER"
+            rows.append({
+                "model_alias": alias,
+                "configured": profile is not None,
+                "source_disposition": disposition,
+                "source_tier": position[1] if position else None,
+                "provider_alias": profile.provider_alias if profile else None,
+                "model": profile.model if profile else None,
+                "effort": profile.effort if profile else None,
+                "execution_profile_id": profile.execution_profile_id if profile else None,
+                "source_worker_eligible": profile.worker_eligible if profile else None,
+                "admission_cost_class": profile.cost_class if profile else None,
+                "missing_capabilities": missing,
+                "measured_cost": None,
+            })
+        return {
+            "schema": "mastermind.model_route_explanation/v1",
+            "authority": "NONE_SOURCE_PREVIEW_ONLY",
+            "source_policy_version": self.policy_version,
+            "decision": decision.to_dict(),
+            "aliases": rows,
+            "providers": [
+                {
+                    "provider_alias": alias,
+                    "enabled_in_source": provider.enabled,
+                    "autonomous_allowed_in_source": provider.autonomous_allowed,
+                    "live_readiness": "NOT_OBSERVED",
+                }
+                for alias, provider in sorted(self.providers.items())
+            ],
+            "runtime_observation": "NOT_PERFORMED",
+            "economic_comparison": "NOT_PERFORMED",
+            "selected_worker": None,
+            "live_admission": False,
+            "claim_time_revalidation_required": True,
+        }
+
 
 
 def route_work(
@@ -964,12 +1218,15 @@ def route_work(
     ambiguity: str = "low",
     required_capabilities: Sequence[str] = (),
     excluded_worker_ids: Sequence[str] = (),
+    frontier_model_alias: str | None = None,
     cognition_route: CognitionRoute | str | None = None,
     chat_reasoning_mode: ChatReasoningMode | str | None = None,
     metered_cognition_receipt: MeteredCognitionReceipt | None = None,
     pro_mode_receipt: ProModeReceipt | None = None,
     policy_path: str | Path | None = None,
     capability_policy_path: str | Path | None = None,
+    responsibility_intent: ResponsibilityIntent | dict[str, str] | None = None,
+    effective_complexity: str = "",
 ) -> RoutingDecision:
     """Convenience entry point used by CLI and future 1F child-job creation."""
 
@@ -978,11 +1235,14 @@ def route_work(
     ).route(
         WorkRequest(
             task_kind=task_kind,
+            responsibility_intent=responsibility_intent,
             risk=risk,
             ambiguity=ambiguity,
             required_capabilities=tuple(required_capabilities),
             excluded_worker_ids=tuple(excluded_worker_ids),
+            effective_complexity=effective_complexity,
         ),
+        frontier_model_alias=frontier_model_alias,
         cognition_route=cognition_route,
         chat_reasoning_mode=chat_reasoning_mode,
         metered_cognition_receipt=metered_cognition_receipt,
@@ -1155,3 +1415,104 @@ __all__ = [
     "set_capacity_owner_test_key",
     "verify_capacity_owner_fact",
 ]
+
+
+SUBSCRIPTION_CLAIM_SCHEMA = "mastermind.subscription_canary_claim/v1"
+SUBSCRIPTION_CLAIM_MAX_AGE_MS = 15_000
+
+
+def observe_subscription_canary_claim(runtime: Any, *, attempt_id: str, binding_id: str) -> dict[str, Any]:
+    """Read a current, already-claimed READ canary from the canonical Runtime.
+
+    The result is secret-free, non-bearer evidence for the existing authenticated
+    Control-to-worker broker request. It is NOT an admission capability, claim,
+    lease, reservation or replacement for kernel peer authentication. No owner
+    key, credential or Runtime lease token crosses that boundary. Recovery uses
+    the already-started broker run rather than minting another observation.
+    """
+    from datetime import datetime
+    from control_plane.executive_runtime import Runtime, AttemptStatus, JobStatus, WorkerStatus
+    from control_plane.subscription_catalog import compose_catalog_digest, get_binding
+    from control_plane.subscription_provider_profiles import get_profile
+
+    def refuse():
+        raise RoutingPolicyError("SUBSCRIPTION_CANARY_CLAIM_UNAVAILABLE")
+
+    if (type(runtime) is not Runtime or type(attempt_id) is not str
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", attempt_id)):
+        refuse()
+    try:
+        binding = get_binding(binding_id)
+        profile = get_profile(binding.profile_id)
+    except ValueError:
+        refuse()
+    if (binding.adapter_id != "codex-cli" or binding.implementation_state == "SPEC_ONLY"
+            or binding.autonomous_allowed is not False or profile.autonomous_allowed is not False):
+        refuse()
+    attempt = runtime.attempts.get_attempt(attempt_id)
+    if attempt is None or attempt.status is not AttemptStatus.CLAIMED:
+        refuse()
+    job = runtime.jobs.get_job(attempt.job_id)
+    worker = runtime.workers.get_worker(attempt.worker_id)
+    quota = runtime.workers.get_quota_class(attempt.worker_id, attempt.quota_class)
+    if (job is None or worker is None or quota is None
+            or job.status is not JobStatus.RUNNING
+            or job.current_attempt_id != attempt_id
+            or job.assigned_worker_id != attempt.worker_id
+            or job.assigned_quota_class != attempt.quota_class
+            or job.requested_authorities != ["READ"]
+            or job.allowed_write_paths or job.validation_commands
+            or worker.provider != binding.provider or quota.provider != binding.provider
+            or worker.status is not WorkerStatus.BUSY or quota.status is not WorkerStatus.BUSY
+            or worker.active_job_id != job.job_id or quota.active_job_id != job.job_id
+            or quota.active_attempt_id != attempt_id
+            or quota.fence_generation != attempt.fence_generation
+            or type(attempt.fence_generation) is not int or attempt.fence_generation < 1
+            or "read" not in quota.capabilities):
+        refuse()
+    models = {binding.model_for(profile, key).casefold(): binding.model_for(profile, key)
+              for key in binding.model_classes}
+    if type(quota.model) is not str or quota.model.casefold() not in models:
+        refuse()
+    selected_model = models[quota.model.casefold()]
+    realm = quota.metadata.get("subscription_canary_realm")
+    if (type(realm) is not dict or set(realm) != {"binding_id", "config_sha256", "generation"}
+            or realm["binding_id"] != binding.binding_id
+            or type(realm["config_sha256"]) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", realm["config_sha256"]) is None
+            or type(realm["generation"]) is not int or not 1 <= realm["generation"] < 2**63):
+        refuse()
+    try:
+        expiry = datetime.fromisoformat(attempt.lease_expires_at.replace("Z", "+00:00"))
+        if expiry.tzinfo is None:
+            refuse()
+        expiry_ms = int(expiry.timestamp() * 1000)
+    except (ValueError, TypeError, OverflowError):
+        refuse()
+    # Bracket public owner reads. A changed attempt or registration refuses;
+    # the existing Runtime claim remains the sole atomic occupancy operation.
+    if (runtime.attempts.get_attempt(attempt_id) != attempt
+            or runtime.jobs.get_job(job.job_id) != job
+            or runtime.workers.get_worker(worker.worker_id) != worker
+            or runtime.workers.get_quota_class(quota.worker_id, quota.quota_class) != quota):
+        refuse()
+    now_ms = runtime.store.now_ms()
+    if expiry_ms <= now_ms:
+        refuse()
+    payload = {
+        "schema": SUBSCRIPTION_CLAIM_SCHEMA,
+        "execution_mode": "interactive_canary",
+        "run_id": attempt_id, "job_id": job.job_id, "worker_id": worker.worker_id,
+        "quota_class": quota.quota_class, "fence_generation": attempt.fence_generation,
+        "capacity_generation": quota.fence_generation, "capacity_state": "BUSY",
+        "held_attempt_id": quota.active_attempt_id, "current_attempt_id": job.current_attempt_id,
+        "binding_id": binding.binding_id, "profile_id": binding.profile_id,
+        "adapter_id": binding.adapter_id, "model": selected_model,
+        "realm_config_sha256": realm["config_sha256"], "realm_generation": realm["generation"],
+        "catalog_digest": compose_catalog_digest(), "issued_at_ms": now_ms,
+        "expires_at_ms": min(expiry_ms, now_ms + SUBSCRIPTION_CLAIM_MAX_AGE_MS),
+    }
+    payload["observation_digest"] = hashlib.sha256(json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False,
+    ).encode("utf-8")).hexdigest()
+    return payload

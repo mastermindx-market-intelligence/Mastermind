@@ -1,0 +1,386 @@
+"""Static same-listener CEO/COO MCP composition; real JWT verification."""
+from __future__ import annotations
+
+import asyncio
+import json
+import sys
+from pathlib import Path
+
+import httpx
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    import test_executive_coo_app as fixture
+finally:
+    sys.path.pop(0)
+
+from integrations.executive_mcp import server
+from integrations.executive_mcp.coo import COO_TOOL_NAMES
+from integrations.mastermind_executive_app.coo_binding import BINDING_SCHEMA
+
+rsa_key = fixture.rsa_key
+
+
+async def rpc(client, token, path, method="tools/list", params=None):
+    headers = {"authorization": "Bearer " + token, "accept": "application/json, text/event-stream",
+               "mcp-protocol-version": "2025-06-18"}
+    data = {"jsonrpc": "2.0", "id": 1, "method": method}
+    if params is not None:
+        data["params"] = params
+    return await client.post(path, headers=headers, json=data)
+
+
+def test_same_process_preserves_ceo_surface_and_separates_coo(rsa_key, tmp_path):
+    _, token, current, settings = fixture.setup(rsa_key, tmp_path)
+    app = server.build_web_ceo_v2_with_coo_mcp_app(settings.executive,
+        coo_settings=settings, audit_sink=fixture.Sink())
+    async def exercise():
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+                result = await rpc(client, token, "/mcp/coo")
+                assert result.status_code == 200, result.text
+                tools = result.json()["result"]["tools"]
+                assert tuple(t["name"] for t in tools) == COO_TOOL_NAMES
+                assert all(t["securitySchemes"][0]["scopes"] == list(settings.policy.required_scopes) for t in tools)
+                reader = fixture.fixture._read_token(rsa_key)
+                legacy = await rpc(client, reader, "/mcp")
+                assert legacy.status_code == 200, legacy.text
+                assert "submit_ceo_intent" in {t["name"] for t in legacy.json()["result"]["tools"]}
+                assert (await rpc(client, reader, "/mcp/coo")).status_code in (401, 403)
+                assert (await rpc(client, token, "/mcp")).status_code in (401, 403)
+                current["binding"] = {"schema": BINDING_SCHEMA, "enabled": False, "binding": None}
+                assert (await rpc(client, token, "/mcp/coo")).status_code in (401, 403)
+    asyncio.run(exercise())
+
+
+def test_same_process_preserves_web_ceo_v3_and_separates_coo(rsa_key, tmp_path):
+    _, token, current, settings = fixture.setup(rsa_key, tmp_path)
+
+    async def unused_mdm(**_kwargs):
+        raise AssertionError("tools/list must not call MDM")
+
+    class Mdm:
+        list_macos_devices = unused_mdm
+        device = unused_mdm
+
+    app = server.build_web_ceo_v3_with_coo_mcp_app(
+        settings.executive,
+        coo_settings=settings,
+        audit_sink=fixture.Sink(),
+        mdm_reader=Mdm(),
+        session_target_projector=lambda *_args: [],
+        session_reply_handler=lambda *_args: {},
+        session_summon_handler=lambda *_args: {},
+    )
+
+    async def exercise():
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://127.0.0.1",
+            ) as client:
+                coo = await rpc(client, token, "/mcp/coo")
+                assert coo.status_code == 200, coo.text
+                assert tuple(tool["name"] for tool in coo.json()["result"]["tools"]) == COO_TOOL_NAMES
+
+                reader = fixture.fixture._read_token(rsa_key)
+                ceo = await rpc(client, reader, "/mcp")
+                assert ceo.status_code == 200, ceo.text
+                ceo_names = {tool["name"] for tool in ceo.json()["result"]["tools"]}
+                assert "executive_mdm" in ceo_names
+                assert "reconcile_ceo_request" in ceo_names
+                assert "submit_ceo_intent" in ceo_names
+
+                assert (await rpc(client, reader, "/mcp/coo")).status_code in (401, 403)
+                assert (await rpc(client, token, "/mcp")).status_code in (401, 403)
+
+    asyncio.run(exercise())
+
+
+def test_signed_mcp_request_reaches_real_socket_and_one_durable_job(rsa_key, tmp_path):
+    import dataclasses
+    import tempfile
+    import runpy
+    from control_plane.executive_runtime import Runtime
+    host_fixture = runpy.run_path(str(Path(__file__).with_name("test_executive_principal_ingress.py")))
+    _, token, current, settings = fixture.setup(rsa_key, tmp_path)
+    async def exercise():
+        with tempfile.TemporaryDirectory(prefix="mmx-coo-api-", dir="/tmp") as directory:
+            socket_root = Path(directory)
+            host = host_fixture["service"](tmp_path, socket_root)
+            base = dataclasses.replace(settings.executive, ceo_ingress_socket_path=socket_root / "principal.sock")
+            selected = dataclasses.replace(settings, executive=base)
+            app = server.build_web_ceo_v2_with_coo_mcp_app(base, coo_settings=selected, audit_sink=fixture.Sink())
+            await host.start()
+            try:
+                async with app._app.router.lifespan_context(app._app):
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+                        async def call(tool, arguments):
+                            response = await rpc(client, token, "/mcp/coo", "tools/call", {"name": tool, "arguments": arguments})
+                            assert response.status_code == 200, response.text
+                            return json.loads(response.json()["result"]["content"][0]["text"])
+                        first = await call("submit_principal_intent", fixture.payload())
+                        assert first["ok"] is True, first
+                        assert first["receipt"]["principal"]["seat"] == "coo"
+                        assert first["receipt"]["dispatched"] is False
+                        duplicate = await call("submit_principal_intent", fixture.payload())
+                        assert duplicate["receipt"]["duplicate"] is True
+                        assert duplicate["receipt"]["job_id"] == first["receipt"]["job_id"]
+                        host._ceo_ingress_app_binding = dataclasses.replace(host._ceo_ingress_app_binding, principal_admission_armed=False)
+                        current["mission"] = None  # status must not reacquire current dynamic state
+                        status = await call("principal_intent_status", {"request_ref": first["request_ref"], "work_ref": "WS:ONE"})
+                        assert status["receipt"]["job_id"] == first["receipt"]["job_id"]
+                        conflict = await call("submit_principal_intent", {**fixture.payload(), "objective": "Different semantic request"})
+                        assert conflict["status"] == "operation_conflict"
+                        jobs = Runtime.at(tmp_path / "runtime").jobs.list_jobs()
+                        assert len(jobs) == 1 and jobs[0].attempt_count == 0
+            finally:
+                await host.close()
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("path", ["/mcp/coo/", "/mcp/coo?x=1", "/mcp%2Fcoo", "/mcp/coo/extra"])
+def test_coo_path_aliases_are_not_new_authority_routes(rsa_key, tmp_path, path):
+    _, token, _, settings = fixture.setup(rsa_key, tmp_path)
+    app = server.build_web_ceo_v2_with_coo_mcp_app(settings.executive,
+        coo_settings=settings, audit_sink=fixture.Sink())
+    async def exercise():
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+                response = await rpc(client, token, path)
+                assert response.status_code == 404
+    asyncio.run(exercise())
+
+
+def test_duplicate_headers_are_refused_before_jwt_selection(rsa_key, tmp_path):
+    _, token, _, settings = fixture.setup(rsa_key, tmp_path)
+    app = server.build_web_ceo_v2_with_coo_mcp_app(settings.executive,
+        coo_settings=settings, audit_sink=fixture.Sink())
+    async def exercise():
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+                result = await client.post("/mcp/coo", headers=[("authorization", "Bearer " + token),
+                    ("authorization", "Bearer bad")], json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+                assert result.status_code == 401
+    asyncio.run(exercise())
+
+
+def test_shared_metadata_advertises_roles_without_changing_legacy_builder(rsa_key, tmp_path):
+    _, token, _, settings = fixture.setup(rsa_key, tmp_path)
+    app = server.build_web_ceo_v2_with_coo_mcp_app(settings.executive,
+        coo_settings=settings, audit_sink=fixture.Sink())
+    from urllib.parse import urlsplit
+    path = urlsplit(settings.policy.resource_metadata_url).path
+    async def exercise():
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+                response = await client.get(path)
+                assert response.status_code == 200
+                assert response.json()["resource"] == settings.policy.resource
+                assert set(response.json()["scopes_supported"]) == {"mastermind.executive.read",
+                    "mastermind.executive.intent.submit", "mastermind.executive.coo.act"}
+                assert (await client.get(path + "?unexpected=1")).status_code == 404
+    asyncio.run(exercise())
+
+
+def test_metadata_cannot_shadow_static_coo_route(rsa_key, tmp_path):
+    import dataclasses
+    _, _, _, settings = fixture.setup(rsa_key, tmp_path)
+    path = "https://executive-app.mastermind.example.test/mcp/coo"
+    policies = fixture.AppPolicies(dataclasses.replace(settings.executive.policies.read, resource_metadata_url=path),
+                                   dataclasses.replace(settings.executive.policies.submit, resource_metadata_url=path))
+    base = dataclasses.replace(settings.executive, policies=policies)
+    selected = dataclasses.replace(settings, executive=base, policy=dataclasses.replace(settings.policy, resource_metadata_url=path))
+    with pytest.raises(ValueError, match="metadata"):
+        server.build_web_ceo_v2_with_coo_mcp_app(base, coo_settings=selected, audit_sink=fixture.Sink())
+
+
+def _event_composition(settings, reply_reader, event_rpc):
+    """Test-only composition; no durable store, callback, or installation."""
+    import dataclasses
+    from types import SimpleNamespace
+
+    async def unused(**_kwargs):
+        raise AssertionError("event discovery must not call MDM")
+
+    installed = dataclasses.replace(settings.executive, read_from_ceo_ingress=True)
+    return server.build_web_ceo_v3_with_coo_mcp_app(
+        installed,
+        coo_settings=dataclasses.replace(settings, executive=installed),
+        audit_sink=fixture.Sink(),
+        mdm_reader=SimpleNamespace(list_macos_devices=unused, device=unused),
+        session_target_projector=lambda *_args: [],
+        session_reply_handler=lambda *_args: {},
+        session_summon_handler=lambda *_args: {},
+        session_reply_read_tool=reply_reader,
+        reply_event_rpc=event_rpc,
+    )
+
+
+def test_combined_host_events_keep_ceo_and_coo_authorities_separate(rsa_key, tmp_path):
+    from integrations.session_bridge.web_reply_event_rpc import WebReplyEventRpc
+    from test_session_bridge_return_tools import tool as canonical_read_tool
+
+    _, coo_token, _, settings = fixture.setup(rsa_key, tmp_path)
+    calls = []
+
+    class DiscoveryOwner:
+        async def can_discover(self, principal):
+            calls.append(principal.subject_digest)
+            return True
+
+        async def subscribe(self, principal, requested):
+            raise AssertionError("discovery must not create a subscription")
+
+        async def unsubscribe(self, principal, requested):
+            raise AssertionError("discovery must not remove a subscription")
+
+    reader, _ = canonical_read_tool()
+    event_rpc = WebReplyEventRpc(DiscoveryOwner(), clock=settings.executive.clock)
+    app = _event_composition(settings, reader, event_rpc)
+
+    async def exercise():
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+            ) as client:
+                reader_token = fixture.fixture._read_token(rsa_key)
+
+                async def events(token, path):
+                    return await client.post(path, headers={
+                        "authorization": "Bearer " + token,
+                        "accept": "application/json, text/event-stream",
+                        "mcp-protocol-version": "2026-07-28",
+                    }, json={"jsonrpc": "2.0", "id": 1, "method": "events/list", "params": {}})
+
+                listed = await events(reader_token, "/mcp")
+                assert listed.status_code == 200, listed.text
+                assert listed.json()["result"]["events"][0]["name"] == "session.reply_committed"
+                assert len(calls) == 1
+                denied = await events(coo_token, "/mcp")
+                assert denied.status_code in (401, 403)
+                assert len(calls) == 1
+                assert (await events(reader_token, "/mcp/coo")).status_code in (401, 403)
+                coo = await rpc(client, coo_token, "/mcp/coo")
+                assert coo.status_code == 200, coo.text
+                assert tuple(tool["name"] for tool in coo.json()["result"]["tools"]) == COO_TOOL_NAMES
+                ceo = await rpc(client, reader_token, "/mcp")
+                assert ceo.status_code == 200, ceo.text
+                assert "session_reply_read" in {tool["name"] for tool in ceo.json()["result"]["tools"]}
+
+    asyncio.run(exercise())
+
+
+def test_combined_host_events_require_canonical_reply_reader(rsa_key, tmp_path):
+    from integrations.session_bridge.web_reply_event_rpc import WebReplyEventRpc
+    import test_session_bridge_web_reply_event_asgi as event_fixture
+
+    _, _, _, settings = fixture.setup(rsa_key, tmp_path)
+    event_rpc = WebReplyEventRpc(event_fixture.Owner(), clock=settings.executive.clock)
+    with pytest.raises(ValueError, match="installed original-reply reader"):
+        _event_composition(settings, None, event_rpc)
+
+
+def test_combined_host_events_refuse_noncanonical_rpc(rsa_key, tmp_path):
+    from test_session_bridge_return_tools import tool as canonical_read_tool
+
+    _, _, _, settings = fixture.setup(rsa_key, tmp_path)
+    reader, _ = canonical_read_tool()
+    with pytest.raises(ValueError, match="exact authenticated v3 reply-read composition"):
+        _event_composition(settings, reader, object())
+
+
+@pytest.mark.parametrize("opt_in", [False, True])
+def test_route_preview_real_mcp_consumer_is_opt_in_and_read_only(
+        rsa_key, tmp_path, monkeypatch, opt_in):
+    """Construct the real COO app and exercise its signed MCP transport."""
+    import sqlite3
+    from control_plane.executive_runtime import Runtime
+    from control_plane.child_execution_contracts import RoutePreview
+    from integrations.executive_mcp.route_preview import RoutePreviewSource
+    from integrations.mastermind_executive_app.gateway import CeoIngressClient
+
+    _, token, current, settings = fixture.setup(rsa_key, tmp_path)
+    assert settings.catalogue_provider is None
+    Runtime.at(tmp_path)
+    database = tmp_path / "data" / "control_plane" / "executive.sqlite3"
+
+    def counts():
+        with sqlite3.connect(database) as connection:
+            return tuple(connection.execute(
+                f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                for table in ("jobs", "attempts", "worker_quota_classes"))
+
+    ingress_calls = []
+
+    async def no_ingress(*args, **kwargs):
+        ingress_calls.append((args, kwargs))
+        raise AssertionError("route preview must not dispatch an ingress frame")
+
+    monkeypatch.setattr(CeoIngressClient, "send_frame", no_ingress)
+    before = counts()
+    assert before == (0, 0, 0)
+    app = server.build_coo_mcp_app(settings, audit_sink=fixture.Sink(),
+        route_preview_source=RoutePreviewSource() if opt_in else None)
+
+    async def exercise():
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app),
+                    base_url="http://127.0.0.1", trust_env=False) as client:
+                listed = await rpc(client, token, "/mcp/coo")
+                assert listed.status_code == 200, listed.text
+                tools = listed.json()["result"]["tools"]
+                expected = COO_TOOL_NAMES + (("route_preview",) if opt_in else ())
+                assert tuple(tool["name"] for tool in tools) == expected
+                if opt_in:
+                    descriptor = tools[-1]
+                    assert descriptor["annotations"]["readOnlyHint"] is True
+                    assert descriptor["securitySchemes"][0]["scopes"] == list(
+                        settings.policy.required_scopes)
+
+                async def preview(arguments, selected_token=token):
+                    return await rpc(client, selected_token, "/mcp/coo",
+                        "tools/call", {"name": "route_preview", "arguments": arguments})
+
+                for route, complexity in (
+                        ("routine", "C1_ROUTINE_BOUNDED"),
+                        ("frontier", "C2_COMPLEX_BOUNDED")):
+                    response = await preview({"route_option": route, "goal": "bounded module"})
+                    assert response.status_code == 200, response.text
+                    result = response.json()["result"]
+                    if not opt_in:
+                        assert result["isError"] is True
+                        continue
+                    assert result["isError"] is False, result
+                    payload = json.loads(result["content"][0]["text"])
+                    assert payload["schema"] == "RoutePreview.v1"
+                    assert payload["authority"] == "NONE_SOURCE_PREVIEW_ONLY"
+                    assert payload["production_armed"] is False
+                    assert payload["effective_complexity"] == complexity
+                    assert payload["suitability_tiers"][0] == "implementation.routine.primary"
+                    assert not any(tier.startswith("frontier.") for tier in payload["suitability_tiers"])
+                    assert "effective_complexity_" + complexity.lower() in payload["candidate_reason_codes"]
+                    assert payload["capacity_knowledge"] == "unknown"
+                    assert payload["rank_basis"] == "suitability_only"
+                    assert payload["decision_id"] == payload["attempt_ref"] == ""
+                    assert RoutePreview.from_dict(payload).to_dict() == payload
+                    if route == "frontier":
+                        assert payload["witness_disposition"] == "downgraded"
+
+                refused = await preview({
+                    "route_option": "routine", "goal": "bounded module", "pool": "caller-pool"})
+                assert refused.status_code == 200, refused.text
+                assert refused.json()["result"]["isError"] is True
+                reader = fixture.fixture._read_token(rsa_key)
+                assert (await preview({"route_option": "routine", "goal": "bounded module"},
+                    reader)).status_code in (401, 403)
+                current["binding"] = {
+                    "schema": BINDING_SCHEMA, "enabled": False, "binding": None}
+                assert (await preview({"route_option": "routine", "goal": "bounded module"}
+                    )).status_code in (401, 403)
+
+    asyncio.run(exercise())
+    assert counts() == before
+    assert ingress_calls == []

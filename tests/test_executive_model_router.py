@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from control_plane import worker_adapter as worker_adapter_module
 from control_plane.executive_runtime import Runtime
 from control_plane.model_router import (
     DEFAULT_POLICY_PATH,
@@ -39,7 +40,7 @@ _V1_EQUIVALENT_FIRST_TIERS = {
     ("review", "elevated"): ("standard.review",),
 }
 
-_V1_ROUTING_POLICY_VERSION = "2026-08-24.stage4"
+_CURRENT_ROUTING_POLICY_VERSION = "2026-10-14.attended-qualification"
 
 _JOB_CONSTRAINT_KEYS = {
     "task_kind",
@@ -92,7 +93,7 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
     assert implementation.required_capabilities == ("code",)
     assert implementation.execution_profile_id == "sealed.worker.write.no-extensions.v1"
     assert len(implementation.execution_profile_digest) == 64
-    assert implementation.capability_policy_version == "2026-08-29.browser-b1"
+    assert implementation.capability_policy_version == "2026-10-14.attended-qualification"
     assert len(implementation.capability_policy_digest) == 64
 
     elevated = router.route(WorkRequest("implementation", risk="elevated"))
@@ -115,26 +116,101 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
         WorkRequest("planning"),
         WorkRequest("judgment"),
         WorkRequest("escalation"),
-        WorkRequest("implementation", risk="critical"),
-        WorkRequest("implementation", ambiguity="high"),
     ):
         decision = router.route(request)
         assert decision.mode is RouteMode.FRONTIER_LEAD
         assert decision.preferred_model_aliases == ("frontier.orchestrator",)
         assert decision.execution_profile_id == "operator.appserver.readonly.v1"
+        assert decision.principal_review_required is False
+        assert decision.effective_complexity is None
         with pytest.raises(RoutingPolicyError, match="frontier-lead work"):
             decision.job_constraints()
 
+    # OQ-8 (WO-06): critical risk / high ambiguity no longer inflate child
+    # cognition to frontier-lead. The bounded worker route stands and the
+    # required principal review is surfaced on the decision instead.
+    for request in (
+        WorkRequest("implementation", risk="critical"),
+        WorkRequest("implementation", ambiguity="high"),
+    ):
+        decision = router.route(request)
+        assert decision.mode is RouteMode.WORKER
+        assert decision.worker_eligible
+        assert decision.principal_review_required is True
+        assert {"critical_risk", "high_ambiguity"} & set(decision.reason_codes)
+        assert "principal_review_required" in decision.reason_codes
+        with pytest.raises(
+            RoutingPolicyError, match="principal review required before worker dispatch"
+        ):
+            decision.job_constraints()
 
-def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible():
+
+def test_sol61_project_executive_alias_is_exact_inert_and_not_worker_claimable():
+    router = ModelRouter.load()
+
+    candidate = router.model_aliases["project.executive.sol61"]
+    assert candidate.provider_alias == "codex"
+    assert candidate.adapter_id == "codex-cli"
+    assert candidate.execution_profile_id == "operator.appserver.readonly.v1"
+    assert candidate.model == "gpt-6.1-sol"
+    assert candidate.effort == "xhigh"
+    assert candidate.cost_class == "small"
+    assert candidate.capabilities == ("planning", "judgment", "escalation")
+    assert candidate.worker_eligible is False
+
+    for route in router.routes.values():
+        for risk in ("routine", "elevated"):
+            assert all(
+                "project.executive.sol61" not in tier.model_aliases
+                for tier in route[risk]
+            )
+
+    with pytest.raises(RoutingPolicyError, match="not worker eligible"):
+        router.resolve_model_alias("project.executive.sol61")
+
+
+def test_policy_preserves_closed_provider_seams_and_pins_paid_source_identity():
     router = ModelRouter.load()
 
     assert router.providers["codex"].enabled
     assert router.providers["codex"].autonomous_allowed
-    for provider in ("qwen", "glm", "xai"):
+    assert router.providers["anthropic"] == ProviderAlias(
+        "anthropic",
+        "claude-code",
+        False,
+        False,
+    )
+    for provider in ("qwen", "xai"):
         assert not router.providers[provider].enabled
         assert not router.providers[provider].autonomous_allowed
         assert router.providers[provider].adapter_id == "openai-compatible"
+
+    # Canonical paid glm catalogue identity (PR1794). enabled/autonomous_allowed
+    # and the worker_eligible paid alias below are closed-catalogue policy facts
+    # only: this pin does NOT assert live eligibility, runtime activation, or
+    # any R1/live receipt. canonical-paid-fabric is source-implemented
+    # (CanonicalPaidFabricWorkerAdapter) and stays BUILT_NOT_PROVEN.
+    assert router.providers["glm"] == ProviderAlias(
+        "glm",
+        "canonical-paid-fabric",
+        True,
+        True,
+    )
+    glm_paid_aliases = [
+        alias
+        for alias in router.model_aliases.values()
+        if alias.execution_profile_id == "fabric.paid.glm.sealed-input.v1"
+    ]
+    assert len(glm_paid_aliases) == 1
+    glm_paid = glm_paid_aliases[0]
+    assert glm_paid.model_alias == "glm.paid.sealed-input"
+    assert glm_paid.provider_alias == "glm"
+    assert glm_paid.adapter_id == "canonical-paid-fabric"
+    assert glm_paid.model == "glm-5.3-flash"
+    assert glm_paid.effort == "medium"
+    assert glm_paid.cost_class == "small"
+    assert list(glm_paid.capabilities) == ["research"]
+    assert glm_paid.worker_eligible
 
     luna = router.resolve_model_alias("fast.engineering")
     assert luna.model == "gpt-5.6-luna"
@@ -145,7 +221,12 @@ def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible(
     assert terra.execution_profile_id == "sealed.worker.readonly.no-extensions.v1"
 
     assert adapter_descriptor("codex-cli").implemented
+    assert adapter_descriptor("canonical-paid-fabric").implemented
+    assert not adapter_descriptor("claude-code").implemented
     assert not adapter_descriptor("openai-compatible").implemented
+    assert not adapter_descriptor("acp").implemented
+    assert all(provider.adapter_id != "acp" for provider in router.providers.values())
+    assert all(alias.adapter_id != "acp" for alias in router.model_aliases.values())
 
 
 def test_policy_refuses_production_arming_or_an_unimplemented_live_provider(tmp_path):
@@ -164,6 +245,47 @@ def test_policy_refuses_production_arming_or_an_unimplemented_live_provider(tmp_
     with pytest.raises(RoutingPolicyError, match="unimplemented adapter"):
         ModelRouter.load(unimplemented)
 
+
+
+def test_native_claude_worker_alias_requires_reviewed_surface_and_arming(
+    tmp_path, monkeypatch
+):
+    raw = _v2_policy()
+    raw["providers"]["anthropic"]["enabled"] = True
+    raw["providers"]["anthropic"]["autonomous_allowed"] = True
+    raw["model_aliases"]["claude.native.fixture"] = {
+        "provider_alias": "anthropic",
+        "execution_profile_id": "sealed.worker.claude.write.no-extensions.v1",
+        "model": "claude-fixture-exact",
+        "effort": "high",
+        "cost_class": "small",
+        "capabilities": ["code", "tests"],
+        "worker_eligible": True,
+    }
+
+    with pytest.raises(RoutingPolicyError, match="unimplemented adapter"):
+        _load_policy(tmp_path, raw)
+
+    descriptor = adapter_descriptor("claude-code")
+    monkeypatch.setitem(
+        worker_adapter_module.ADAPTER_DESCRIPTORS,
+        "claude-code",
+        dataclasses.replace(descriptor, implemented=True),
+    )
+    router = _load_policy(tmp_path, raw)
+    alias = router.resolve_model_alias("claude.native.fixture")
+    assert alias.adapter_id == "claude-code"
+    assert alias.execution_profile_id == "sealed.worker.claude.write.no-extensions.v1"
+
+    mismatched = json.loads(json.dumps(raw))
+    mismatched["model_aliases"]["claude.native.fixture"][
+        "execution_profile_id"
+    ] = "sealed.worker.write.no-extensions.v1"
+    with pytest.raises(
+        RoutingPolicyError,
+        match="adapter/execution-surface mismatch",
+    ):
+        _load_policy(tmp_path, mismatched)
 
 def test_heterogeneous_pair_does_not_arm_general_routing_or_bypass_capacity(tmp_path):
     checked_in = ModelRouter.load()
@@ -197,7 +319,10 @@ def test_heterogeneous_pair_does_not_arm_general_routing_or_bypass_capacity(tmp_
     with pytest.raises(RoutingPolicyError, match="not worker eligible"):
         fixture.resolve_model_alias("hf1q.claude.fixture")
 
-    for provider in ("qwen", "glm", "xai"):
+    # glm is now the enabled canonical-paid-fabric provider (identity pinned in
+    # test_policy_preserves_closed_provider_seams_and_pins_paid_source_identity);
+    # only qwen/xai remain disabled openai-compatible seams.
+    for provider in ("qwen", "xai"):
         assert not checked_in.providers[provider].enabled
         assert not checked_in.providers[provider].autonomous_allowed
 
@@ -316,7 +441,7 @@ def test_runtime_claim_honors_alias_order_before_worker_id_and_records_receipt(t
         "fast.engineering",
         "standard.engineering",
     ]
-    assert event.payload["routing_policy_version"] == _V1_ROUTING_POLICY_VERSION
+    assert event.payload["routing_policy_version"] == _CURRENT_ROUTING_POLICY_VERSION
     assert event.payload["execution_profile_id"] == "sealed.worker.write.no-extensions.v1"
     assert event.payload["execution_profile_digest"] == decision.execution_profile_digest
     assert event.payload["capability_policy_version"] == decision.capability_policy_version
@@ -575,7 +700,7 @@ def test_current_v2_schema_preserves_the_complete_v1_codex_route_and_policy_cont
     router = ModelRouter.load()
 
     assert ROUTER_SCHEMA_VERSION == "mastermind.executive_worker_routes/v2"
-    assert router.policy_version == _V1_ROUTING_POLICY_VERSION
+    assert router.policy_version == _CURRENT_ROUTING_POLICY_VERSION
     for (task_kind, risk), aliases in _V1_EQUIVALENT_FIRST_TIERS.items():
         decision = router.route(WorkRequest(task_kind, risk=risk))
         assert decision.suitability_tiers == (
@@ -585,7 +710,7 @@ def test_current_v2_schema_preserves_the_complete_v1_codex_route_and_policy_cont
         assert decision.to_dict()["preferred_model_aliases"] == list(aliases)
         assert decision.job_constraints()["preferred_model_aliases"] == list(aliases)
         assert decision.job_constraints()["routing_policy_version"] == (
-            _V1_ROUTING_POLICY_VERSION
+            _CURRENT_ROUTING_POLICY_VERSION
         )
 
 
@@ -715,10 +840,17 @@ def test_v2_model_provider_identity_does_not_grant_authority_or_re_admit_frontie
 
     with pytest.raises(RoutingPolicyError, match="not worker eligible"):
         router.resolve_model_alias("frontier.orchestrator")
-    frontier = router.route(WorkRequest("implementation", ambiguity="high"))
-    assert frontier.mode is RouteMode.FRONTIER_LEAD
-    assert not frontier.worker_eligible
-    assert frontier.suitability_tiers == (
+    # OQ-8 (WO-06): provider identity or high ambiguity cannot re-admit
+    # frontier; the bounded worker route stands with review required.
+    downgraded = router.route(WorkRequest("implementation", ambiguity="high"))
+    assert downgraded.mode is RouteMode.WORKER
+    assert downgraded.worker_eligible
+    assert downgraded.principal_review_required is True
+    assert "high_ambiguity" in downgraded.reason_codes
+    assert "principal_review_required" in downgraded.reason_codes
+    lead = router.route(WorkRequest("planning"))
+    assert lead.mode is RouteMode.FRONTIER_LEAD
+    assert lead.suitability_tiers == (
         SuitabilityTier("frontier.lead", ("frontier.orchestrator",)),
     )
 
@@ -734,3 +866,301 @@ def test_v2_review_exclusions_survive_structured_tiers_and_claim_projection():
     assert review.excluded_worker_ids == ("builder-01",)
     assert review.to_dict()["excluded_worker_ids"] == ["builder-01"]
     assert review.job_constraints()["excluded_worker_ids"] == ["builder-01"]
+
+
+
+def test_byteplus_plan_remains_unroutable_without_private_realm():
+    router = ModelRouter.load()
+    assert router.providers["byteplus"] == ProviderAlias(
+        "byteplus", "attended-fabric", False, False
+    )
+    alias = router.model_aliases["byteplus.attended"]
+    assert alias.model == "glm-5.3-flash"
+    assert not alias.worker_eligible
+    assert not adapter_descriptor("attended-fabric").implemented
+    for tiers in router.routes.values():
+        for risk in ("routine", "elevated"):
+            assert all(
+                "byteplus.attended" not in tier.model_aliases
+                for tier in tiers[risk]
+            )
+    with pytest.raises(RoutingPolicyError, match="not worker eligible"):
+        router.resolve_model_alias("byteplus.attended")
+    with pytest.raises(RoutingPolicyError, match="attended model alias refused"):
+        router.resolve_attended_model_alias(
+            "byteplus.attended",
+            "byteplus-coding-plan-personal.claude-code-anthropic",
+        )
+
+
+def test_minimax_attended_catalogue_remains_closed_and_unarmed():
+    router = ModelRouter.load()
+
+    assert router.providers["minimax"] == ProviderAlias(
+        "minimax", "attended-fabric", False, False
+    )
+    alias = router.model_aliases["minimax.attended"]
+    assert alias.provider_alias == "minimax"
+    assert alias.adapter_id == "attended-fabric"
+    assert alias.model == "MiniMax-M3"
+    assert alias.effort == "medium"
+    assert alias.capabilities == ("research",)
+    assert alias.worker_eligible is False
+    assert alias.execution_profile_id == "fabric.attended.claude.bounded.v1"
+    assert "coo.sealed.minimax" not in router.model_aliases
+
+    profile = router.capability_registry.resolve(alias.execution_profile_id)
+    assert profile.execution_surface == "claude-code"
+    assert profile.sandbox_policy == "read-only"
+    assert profile.write_capable is False
+    assert profile.network_policy == "disabled"
+
+
+def test_minimax_attended_alias_cannot_resolve_as_an_ordinary_worker():
+    router = ModelRouter.load()
+
+    assert router.resolve_model_alias("coo.sealed").worker_eligible is True
+    assert "minimax.attended" in router.model_aliases
+    with pytest.raises(RoutingPolicyError, match="not worker eligible"):
+        router.resolve_model_alias("minimax.attended")
+
+
+@pytest.mark.parametrize("risk", ["routine", "elevated"])
+def test_minimax_attended_alias_is_refused_in_capable_research_tiers(tmp_path, risk):
+    raw = _v2_policy()
+    router = _load_policy(tmp_path, raw)
+    assert "research" in router.model_aliases["minimax.attended"].capabilities
+    assert router.route(WorkRequest("research", risk=risk)).mode is RouteMode.WORKER
+
+    raw["routes"]["research"][risk][0]["model_aliases"].append("minimax.attended")
+    with pytest.raises(RoutingPolicyError, match="ineligible alias"):
+        _load_policy(tmp_path, raw)
+
+
+def test_minimax_attended_alias_is_absent_from_all_ordinary_route_projections():
+    router = ModelRouter.load()
+    raw = _v2_policy()
+
+    for task_kind, route in raw["routes"].items():
+        for risk in ("routine", "elevated"):
+            decision = router.route(WorkRequest(task_kind, risk=risk))
+            assert decision.mode is RouteMode.WORKER
+            for tier in decision.suitability_tiers:
+                assert "minimax.attended" not in tier.model_aliases
+            assert "minimax.attended" not in decision.preferred_model_aliases
+            assert "minimax.attended" not in (
+                decision.job_constraints()["preferred_model_aliases"]
+            )
+            assert all(
+                "minimax.attended" not in tier["model_aliases"]
+                for tier in route[risk]
+            )
+
+
+def _minimax_guard_binding_service(alias_name):
+    from types import SimpleNamespace
+
+    from control_plane.executive_service import ExecutiveControlService
+
+    service = object.__new__(ExecutiveControlService)
+    service.config = SimpleNamespace(
+        coo_model_alias=alias_name,
+        coo_operator_model_alias="coo.operator.readonly",
+        coo_quota_class="codex-coo",
+        coo_default_quota_class="codex-coo-default",
+        coo_operator_quota_class="codex-coo-operator",
+        proof_base_sha="a" * 40,
+        operator_harness_binary_digest="b" * 64,
+        operator_harness_version="fixture-v1",
+        coo_operator_harness_armed=False,
+        coo_attended_work_placements=(),
+        coo_paid_work_placements=(),
+    )
+    return service
+
+
+def test_minimax_attended_alias_cannot_source_the_coo_host_binding():
+    assert "minimax.attended" in ModelRouter.load().model_aliases
+    with pytest.raises(
+        ValueError,
+        match="configured COO alias must be a sealed, extension-free, write-capable worker",
+    ):
+        _minimax_guard_binding_service(
+            "minimax.attended"
+        )._load_coo_execution_binding()
+
+
+def test_minimax_binding_refusal_preserves_the_current_coo_binding_and_defaults():
+    from control_plane.executive_service import ServiceConfig
+
+    defaults = {field.name: field.default for field in dataclasses.fields(ServiceConfig)}
+    assert defaults["coo_model_alias"] == "coo.sealed"
+    assert defaults["coo_attended_work_placements"] == ()
+    assert defaults["coo_paid_work_placements"] == ()
+
+    binding = _minimax_guard_binding_service("coo.sealed")._load_coo_execution_binding()
+    assert binding["provider"] == "codex"
+    assert binding["execution_profile_id"] == "sealed.worker.write.no-extensions.v1"
+    assert binding["operator_provider"] == "codex"
+    assert binding["work_placement_union"] == [
+        {"provider_realm": "codex", "quota_class": "codex-coo"},
+        {"provider_realm": "codex", "quota_class": "codex-coo-default"},
+    ]
+
+
+def test_minimax_attended_resolution_refuses_the_unpromoted_provider():
+    router = ModelRouter.load()
+
+    assert "minimax.attended" in router.model_aliases
+    with pytest.raises(RoutingPolicyError, match="implemented nonautonomous provider"):
+        router.resolve_attended_model_alias(
+            "minimax.attended", "minimax-token-plan.claude-code-anthropic"
+        )
+
+
+# --- WO-06 (OQ-8): consume effective_complexity, never re-inflate -------------
+
+
+def test_wo06_c2_downgraded_critical_child_stays_worker_while_review_is_preserved():
+    """Acceptance evidence (WO-06): a C2-downgraded child with risk=critical
+    stays non-frontier for worker cognition while the principal review
+    requirement remains visible and prevents premature worker dispatch."""
+    router = ModelRouter.load()
+
+    decision = router.route(
+        WorkRequest(
+            "research",
+            risk="critical",
+            required_capabilities=("research",),
+            effective_complexity="C2_COMPLEX_BOUNDED",
+        )
+    )
+    assert decision.mode is RouteMode.WORKER
+    assert decision.worker_eligible
+    assert decision.principal_review_required is True
+    assert decision.effective_complexity == "C2_COMPLEX_BOUNDED"
+    assert {"critical_risk", "principal_review_required"} <= set(
+        decision.reason_codes
+    )
+    assert "effective_complexity_c2_complex_bounded" in decision.reason_codes
+    assert decision.preferred_model_aliases != ("frontier.orchestrator",)
+    persisted = decision.to_dict()
+    assert persisted["principal_review_required"] is True
+    assert persisted["effective_complexity"] == "C2_COMPLEX_BOUNDED"
+    with pytest.raises(
+        RoutingPolicyError, match="principal review required before worker dispatch"
+    ):
+        decision.job_constraints()
+
+    # C0..C3 shorthand normalizes to the canonical long name at the boundary.
+    shorthand = router.route(WorkRequest("research", effective_complexity="C2"))
+    assert shorthand.mode is RouteMode.WORKER
+    assert shorthand.effective_complexity == "C2_COMPLEX_BOUNDED"
+
+    # Frontier complexity composes with a lead task_kind and keeps the review
+    # requirement visible on the frontier decision.
+    frontier = router.route(
+        WorkRequest("judgment", risk="critical", effective_complexity="C3")
+    )
+    assert frontier.mode is RouteMode.FRONTIER_LEAD
+    assert frontier.effective_complexity == "C3_FRONTIER_JUDGMENT"
+    assert frontier.principal_review_required is True
+    assert "effective_complexity_frontier_judgment" in frontier.reason_codes
+
+
+def test_wo06_effective_complexity_vocabulary_is_canonical_and_coherent():
+    router = ModelRouter.load()
+
+    with pytest.raises(RoutingPolicyError, match="canonical class"):
+        WorkRequest("research", effective_complexity="ultra")
+    # The reviewer lane is a lane, not a complexity rung.
+    with pytest.raises(RoutingPolicyError, match="canonical class"):
+        WorkRequest("research", effective_complexity="reviewer")
+    # Worker cognition cannot self-select frontier judgment.
+    with pytest.raises(RoutingPolicyError, match="requires a lead task_kind"):
+        router.route(WorkRequest("mechanical", effective_complexity="C3"))
+    # A wrapper downgrade cannot be applied to lead cognition either.
+    with pytest.raises(
+        RoutingPolicyError, match="cannot downgrade a lead task_kind"
+    ):
+        router.route(WorkRequest("planning", effective_complexity="C2"))
+
+
+def test_wo06_required_capabilities_still_bind_downgraded_worker_cognition(
+    tmp_path,
+):
+    raw = _v2_policy()
+    router = _load_policy(tmp_path, raw)
+    # Research worker tiers cannot satisfy a code capability even when the
+    # child was downgraded: route keeps consuming required capabilities.
+    with pytest.raises(
+        RoutingPolicyError, match="cannot satisfy requested capabilities"
+    ):
+        router.route(
+            WorkRequest(
+                "research",
+                effective_complexity="C1_ROUTINE_BOUNDED",
+                required_capabilities=("code",),
+            )
+        )
+    ok = router.route(
+        WorkRequest(
+            "research",
+            effective_complexity="C1_ROUTINE_BOUNDED",
+            required_capabilities=("research",),
+        )
+    )
+    assert ok.mode is RouteMode.WORKER
+    assert ok.principal_review_required is False
+    assert "effective_complexity_c1_routine_bounded" in ok.reason_codes
+
+
+@pytest.mark.parametrize("route_args", [
+    ("--risk", "critical"),
+    ("--ambiguity", "high"),
+])
+@pytest.mark.parametrize("sibling_review_required", [False, True])
+def test_wo06_cli_refuses_principal_review_before_creating_any_job(
+    tmp_path, capsys, route_args, sibling_review_required
+):
+    root = tmp_path / "runtime"
+    common = ["--root", str(root)]
+
+    # A bounded preview remains available and does not open runtime state.
+    assert phase1b_main([*common, "route", "implementation", *route_args]) == 0
+    preview = json.loads(capsys.readouterr().out)
+    assert preview["mode"] == "worker"
+    assert preview["principal_review_required"] is True
+    assert not (root / "data" / "control_plane" / "executive.sqlite3").exists()
+
+    submission = [
+        *common, "create-job", "Review-gated bounded work",
+        "--task-kind", "implementation", *route_args,
+    ]
+    if sibling_review_required:
+        submission.append("--review-required")
+    assert phase1b_main(submission) == 2
+    captured = capsys.readouterr()
+    assert "principal review required before worker dispatch" in captured.err
+
+    # Ordinary sibling review is not a principal disposition. The real CLI
+    # must refuse before a Job or JOB_CREATED receipt reaches the temp store.
+    runtime = Runtime.at(root)
+    assert runtime.jobs.list_jobs() == []
+    assert all(
+        event.event_type != "JOB_CREATED"
+        for event in runtime.events.list_events()
+    )
+
+
+@pytest.mark.parametrize("task_kind", ["research", "planning"])
+@pytest.mark.parametrize("complexity", ["", " \t\n"])
+def test_wo06_blank_complexity_normalizes_to_the_default(task_kind, complexity):
+    request = WorkRequest(task_kind, effective_complexity=complexity)
+    assert request.effective_complexity == ""
+    decision = ModelRouter.load().route(request)
+    assert decision.effective_complexity is None
+    assert decision.principal_review_required is False
+    assert decision.mode is (
+        RouteMode.WORKER if task_kind == "research" else RouteMode.FRONTIER_LEAD
+    )

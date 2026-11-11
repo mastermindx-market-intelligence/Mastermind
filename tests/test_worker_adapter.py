@@ -1,27 +1,87 @@
-"""Pin ADAPTER_DESCRIPTORS implemented=True to the master-reviewed set.
+"""Pin ADAPTER_DESCRIPTORS implemented=True to the reviewed set.
 
-Every implemented=True entry must be one of the adapters implemented on
-origin/master today. A new True requires a real-turn receipt path documented
-in this docstring (BUILT_NOT_PROVEN → PROVEN_LIVE). Updating only the
-descriptor table, without expanding this pin and documenting that receipt
-path here, must fail CI.
+Every implemented=True entry must be one of the adapters pinned in this file.
+A new True requires expanding this pin and documenting, in this docstring,
+the existing real-turn receipt path (BUILT_NOT_PROVEN -> PROVEN_LIVE).
+The one PR1794 source-only addition is explicitly recorded below; it does not
+create a general substitute for other adapters' required receipt paths. Updating
+only the descriptor table, without expanding this pin and documenting that
+status here, must fail CI.
 
 Master-implemented set (read from origin/master:control_plane/worker_adapter.py
 ADAPTER_DESCRIPTORS on 2026-09-13):
     - codex-cli
 
-Receipt path for a new True: attach the real-turn receipt ruling R5 requires
-and move the corresponding catalog rows off SPEC_ONLY in the same change.
-There is no such receipt for claude-compatible-subscription.
+PR1794 source-implementation addition (BUILT_NOT_PROVEN; this records a source
+implementation only and is NOT a master merge, NOT runtime activation, and NOT
+an R1/live receipt):
+    - canonical-paid-fabric: exact class CanonicalPaidFabricWorkerAdapter
+      exists in the source tree for sealed-input READ/RESEARCH subjects; no
+      native/tools/write or absent physical qualification admission is
+      implied.
+
+WO-10 source-implementation addition (BUILT_NOT_PROVEN; MMOS V1 Rev 4 §S3.D,
+stacked on feat/mmos-v1-shared-contracts):
+    - hermes-native: exact class HermesWorkerAdapter exists in the source tree
+      and implements the WorkerExecutionAdapter floor plus reattach.  This is
+      NOT a master merge, NOT runtime activation, and NOT an R1/live receipt.
+      The adapter is BUILT but UNSELECTED until the incumbent runtime selects
+      it (Rev 4 l.253 honest-behavior table); registering the descriptor
+      selects nothing, and no routing policy may bind a live worker through
+      this id before that selection.  The proven-live receipt path remains:
+      a real-turn receipt through the selected incumbent runtime.
+
+Receipt path for a PROVEN_LIVE entry: attach the real-turn receipt ruling R5
+requires and move the corresponding catalog rows off SPEC_ONLY in the same
+change. There is no such receipt for claude-compatible-subscription, and no
+R1/live receipt exists for canonical-paid-fabric either.
 """
 from __future__ import annotations
 
-from control_plane.worker_adapter import ADAPTER_DESCRIPTORS
+import unittest
+from pathlib import Path
+
+from control_plane.child_execution_contracts import (
+    C2_COMPLEX_BOUNDED,
+    ExecutionBinding,
+)
+from control_plane.hermes_worker_adapter import (
+    HermesWorkerAdapter,
+    HermesWorkerAdapterError,
+    NativeCancelOutcome,
+)
+from control_plane.worker_adapter import (
+    ADAPTER_DESCRIPTORS,
+    RecoverableWorkerExecutionAdapter,
+    WorkerExecutionAdapter,
+    adapter_descriptor,
+    adapter_implementation,
+    bind_reviewed_adapter,
+    construct_reviewed_adapter,
+)
+from control_plane.worker_execution_contract import (
+    BinaryAttestation,
+    CancelReceipt,
+    CollectionReceipt,
+    ProcessInspector,
+    ValidationReceipt,
+    WorkerLaunchSpec,
+    WorkerProcessRef,
+    WorkerRecoveryBinding,
+    WorkerResult,
+    WorkerRunStatus,
+)
 
 
-# Named explicitly from origin/master's implemented=True rows. Do not add a
-# name here unless this docstring records the receipt path that authorizes it.
-MASTER_IMPLEMENTED_ADAPTER_IDS = frozenset({"codex-cli"})
+# "codex-cli" is named explicitly from origin/master's implemented=True rows.
+# "canonical-paid-fabric" is the PR1794 source-implementation entry documented
+# above (BUILT_NOT_PROVEN). "hermes-native" is the WO-10 source-implementation
+# entry documented above (BUILT_NOT_PROVEN; built but unselected). Do not add
+# a name here unless this docstring records the receipt path or
+# source-implementation status that authorizes it.
+MASTER_IMPLEMENTED_ADAPTER_IDS = frozenset(
+    {"codex-cli", "canonical-paid-fabric", "hermes-native"}
+)
 
 
 def test_implemented_true_requires_master_set_or_documented_receipt_path() -> None:
@@ -31,3 +91,645 @@ def test_implemented_true_requires_master_set_or_documented_receipt_path() -> No
         if descriptor.implemented is True
     )
     assert implemented == MASTER_IMPLEMENTED_ADAPTER_IDS
+
+
+# =============================================================================
+# WO-10 — HermesWorkerAdapter (built but unselected)
+# =============================================================================
+
+_HEX64 = "a" * 64
+_OTHER_HEX64 = "b" * 64
+_LEASE_FUTURE = "2099-01-01T00:00:00Z"
+_LEASE_PAST = "2000-01-01T00:00:00Z"
+
+
+def _binary() -> BinaryAttestation:
+    return BinaryAttestation(
+        path="/usr/local/bin/hermes", real_path="/usr/local/bin/hermes",
+        version="1.0.0", sha256=_HEX64, team_identifier=None,
+        size=1024, device=1, inode=2, mode=0o755, uid=501, gid=20, mtime_ns=3,
+    )
+
+
+def _process_ref(run_id: str, pid: int = 4242) -> WorkerProcessRef:
+    return WorkerProcessRef(
+        run_id=run_id, pid=pid, pgid=pid,
+        process_start_identity=f"identity-{run_id}",
+        boot_session_id="boot-1", launch_nonce=f"nonce-{run_id}",
+        provider_session_id=None,
+        stdout_path=f"/var/lib/mastermind/runs/{run_id}/stdout",
+        stderr_path=f"/var/lib/mastermind/runs/{run_id}/stderr",
+        result_path=f"/var/lib/mastermind/runs/{run_id}/result.json",
+        started_at="2026-11-08T12:00:00Z", binary=_binary(), base_sha="b" * 40,
+    )
+
+
+def _launch_spec(run_id: str = "run-1", worker_id: str = "workers/12",
+                 prompt: str = "do the work",
+                 run_dir: Path = Path("/tmp/mmos-run")) -> WorkerLaunchSpec:
+    return WorkerLaunchSpec(
+        run_id=run_id, job_id="jobs/77", worker_id=worker_id,
+        workspace_path=Path("/tmp/mmos-ws"), run_dir=run_dir,
+        prompt=prompt, result_schema_path=Path("/tmp/mmos-run/input/schema.json"),
+    )
+
+
+def _binding(**overrides) -> ExecutionBinding:
+    kwargs = dict(
+        root_run_ref="root-1", immediate_parent_run_ref="parent-7",
+        logical_child_key="child-a", request_digest=_HEX64,
+        effective_complexity=C2_COMPLEX_BOUNDED, adapter_id="hermes-native",
+        worker_id="workers/12", job_ref="jobs/77", attempt_ref="run-1",
+        fence_counter=7, lease_expiry=_LEASE_FUTURE,
+    )
+    kwargs.update(overrides)
+    return ExecutionBinding(**kwargs)
+
+
+def _foreign_child_binding() -> ExecutionBinding:
+    """A binding that is entirely valid — for a DIFFERENT child (probe P4)."""
+    return _binding(
+        root_run_ref="root-foreign", immediate_parent_run_ref="parent-foreign",
+        logical_child_key="child-foreign", request_digest=_OTHER_HEX64,
+        job_ref="jobs/66", attempt_ref="run-9",
+    )
+
+
+class FakeInspector(ProcessInspector):
+    """Minimal ProcessInspector stand-in for the native session owner."""
+
+    def boot_session_id(self) -> str:
+        return "boot-1"
+
+    def identity(self, pid: int) -> tuple[str, int]:
+        return (f"identity-run-1", pid)
+
+    def inspect(self, pid: int) -> object:
+        return {"pid": pid}
+
+
+class FakeNativeRunner:
+    """In-memory HermesNativeRunnerPort owned by the tests."""
+
+    def __init__(self) -> None:
+        self.launches: list[WorkerLaunchSpec] = []
+        self.terminations: list[tuple[str, str]] = []
+        self.collections: list[str] = []
+        self.validations: list[tuple[WorkerLaunchSpec, tuple[str, ...]]] = []
+        self.refs: dict[str, WorkerProcessRef] = {}
+        self.state_by_run: dict[str, WorkerRunStatus] = {}
+        self.known_runs: set[str] = set()
+        self.settle_immediately = False
+        self.collect_receipt_run: str | None = None
+
+    async def launch(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
+        self.launches.append(spec)
+        ref = _process_ref(spec.run_id)
+        self.refs[spec.run_id] = ref
+        self.state_by_run[spec.run_id] = WorkerRunStatus.RUNNING
+        self.known_runs.add(spec.run_id)
+        return ref
+
+    async def native_state(self, ref: WorkerProcessRef) -> WorkerRunStatus:
+        return self.state_by_run[ref.run_id]
+
+    async def collect(self, ref: WorkerProcessRef) -> CollectionReceipt:
+        run_id = self.collect_receipt_run or ref.run_id
+        self.collections.append(ref.run_id)
+        return CollectionReceipt(
+            process_ref=_process_ref(run_id),
+            result=WorkerResult(
+                job_id="jobs/77", run_id=run_id, worker_id="workers/12",
+                status=WorkerRunStatus.SUCCEEDED, structured_output=None,
+                artifact_manifest=(), git_manifest={}, usage={},
+                provider_session_id=None, exit_code=0,
+                started_at="2026-11-08T12:00:00Z",
+                finished_at="2026-11-08T12:01:00Z", error=None,
+            ),
+            stdout_sha256=_HEX64, stderr_sha256=_HEX64, result_sha256=_HEX64,
+        )
+
+    async def terminate(
+        self, ref: WorkerProcessRef, reason: str
+    ) -> NativeCancelOutcome:
+        self.terminations.append((ref.run_id, reason))
+        if self.settle_immediately:
+            self.state_by_run[ref.run_id] = WorkerRunStatus.CANCELLED
+        return NativeCancelOutcome(
+            requested=True,
+            settled=self.settle_immediately,
+            already_exited=False,
+            escalated_to_sigkill=False,
+            finished_at="2026-11-08T12:02:00Z",
+        )
+
+    async def validate_argv(
+        self, spec: WorkerLaunchSpec, argv: tuple[str, ...], *,
+        timeout_seconds: float = 300.0,
+    ) -> ValidationReceipt:
+        self.validations.append((spec, argv))
+        return ValidationReceipt(
+            argv=argv, exit_code=0, stdout_sha256=_HEX64, stdout_size=1,
+            stderr_sha256=_HEX64, stderr_size=0, timed_out=False, error=None,
+        )
+
+    def knows_execution(self, ref: WorkerProcessRef) -> bool:
+        return ref.run_id in self.known_runs
+
+
+def _adapter(
+    runner: FakeNativeRunner | None = None,
+    binding=None,
+    binding_error: Exception | None = None,
+    fence=None,
+):
+    runner = runner or FakeNativeRunner()
+
+    def binding_source(spec: WorkerLaunchSpec):
+        if binding_error is not None:
+            raise binding_error
+        return binding
+
+    adapter = HermesWorkerAdapter(
+        runner, binding_source, FakeInspector(), fence_source=fence,
+    )
+    return adapter, runner
+
+
+class HermesNativeDescriptorTests(unittest.TestCase):
+    def test_descriptor_is_registered_resolvable_and_documented(self) -> None:
+        descriptor = adapter_descriptor("hermes-native")
+        self.assertTrue(descriptor.implemented)
+        self.assertEqual(descriptor.adapter_id, "hermes-native")
+        implementation = adapter_implementation("hermes-native")
+        self.assertIs(implementation, HermesWorkerAdapter)
+        self.assertEqual(implementation.adapter_id, "hermes-native")
+
+    def test_constructed_adapter_binds_and_satisfies_protocols(self) -> None:
+        runner = FakeNativeRunner()
+        adapter = construct_reviewed_adapter(
+            "hermes-native", runner, lambda spec: None, FakeInspector()
+        )
+        self.assertIsInstance(adapter, WorkerExecutionAdapter)
+        self.assertIsInstance(adapter, RecoverableWorkerExecutionAdapter)
+        descriptor = bind_reviewed_adapter(adapter, "hermes-native")
+        self.assertTrue(descriptor.implemented)
+
+
+class HermesStartTests(unittest.IsolatedAsyncioTestCase):
+    async def test_start_refused_without_valid_execution_binding(self) -> None:
+        cases = [
+            ("no binding", None),
+            ("wrong type", object()),
+            ("other adapter", _binding(adapter_id="codex-cli")),
+            ("worker mismatch", _binding(worker_id="workers/99")),
+            ("empty worker", _binding(worker_id="")),
+            ("expired lease", _binding(lease_expiry=_LEASE_PAST)),
+            ("malformed lease", _binding(lease_expiry="not-a-time")),
+        ]
+        for label, binding in cases:
+            with self.subTest(label):
+                adapter, runner = _adapter(binding=binding)
+                with self.assertRaises(HermesWorkerAdapterError):
+                    await adapter.start(_launch_spec())
+                self.assertEqual(runner.launches, [])
+
+    async def test_start_refused_for_foreign_or_unissued_binding_shapes(
+        self,
+    ) -> None:
+        # WO-10 M1: foreign-child, zero-fence and empty-lease bindings refuse
+        # through the shared gate even without a fence anchor.
+        cases = [
+            ("foreign child", _foreign_child_binding()),
+            ("empty job_ref", _binding(job_ref="")),
+            ("empty attempt_ref", _binding(attempt_ref="")),
+            ("zero fence", _binding(fence_counter=0)),
+            ("empty lease", _binding(lease_expiry="")),
+        ]
+        for label, binding in cases:
+            with self.subTest(label):
+                adapter, runner = _adapter(binding=binding)
+                with self.assertRaises(HermesWorkerAdapterError):
+                    await adapter.start(_launch_spec())
+                self.assertEqual(runner.launches, [])
+
+    async def test_start_refused_when_binding_source_raises(self) -> None:
+        adapter, runner = _adapter(binding_error=RuntimeError("broker down"))
+        with self.assertRaises(HermesWorkerAdapterError):
+            await adapter.start(_launch_spec())
+        self.assertEqual(runner.launches, [])
+
+    async def test_start_accepts_current_fence_under_fence_anchor(self) -> None:
+        # WO-10 M1: with the broker's current fence anchored, the honest
+        # binding for THIS launch is still accepted — the probes below only
+        # refuse what drifts.
+        adapter, runner = _adapter(binding=_binding(), fence=lambda spec: 7)
+        spec = _launch_spec()
+        ref = await adapter.start(spec)
+        self.assertEqual(runner.launches, [spec])
+        self.assertEqual(await adapter.status(ref), WorkerRunStatus.RUNNING)
+
+    async def test_probe_wrong_fence_refused_under_fence_anchor(self) -> None:
+        # Probe P1: fence_counter=3, valid shape, unexpired — REFUSED before
+        # the native launch (accepted-and-launched on d869179a).
+        adapter, runner = _adapter(
+            binding=_binding(fence_counter=3), fence=lambda spec: 7
+        )
+        with self.assertRaises(HermesWorkerAdapterError) as ctx:
+            await adapter.start(_launch_spec())
+        self.assertIn("EXECUTION_BINDING_FENCE_NOT_CURRENT", str(ctx.exception))
+        self.assertEqual(runner.launches, [])
+
+    async def test_probe_zero_fence_refused_without_anchor(self) -> None:
+        # Probe P2: fence_counter=0 is the WO-02 contract default of a
+        # binding nobody issued — REFUSED even with no fence anchor.
+        adapter, runner = _adapter(binding=_binding(fence_counter=0))
+        with self.assertRaises(HermesWorkerAdapterError) as ctx:
+            await adapter.start(_launch_spec())
+        self.assertIn("EXECUTION_BINDING_FENCE_NOT_CURRENT", str(ctx.exception))
+        self.assertEqual(runner.launches, [])
+
+    async def test_probe_sub_one_or_mistyped_fence_refused_without_anchor(
+        self,
+    ) -> None:
+        # Probe P1 variant: no coordinator-side anchor reachable, but a
+        # wrong-typed / sub-1 fence still refuses (P2's rule; the P1
+        # fence-vs-current comparison is WO-11's residual guard here).
+        # (Fence < 0 or non-numeric fences are refused at WO-02 construction.)
+        for bad in (0, True, 3.0):
+            with self.subTest(repr(bad)):
+                adapter, runner = _adapter(binding=_binding(fence_counter=bad))
+                with self.assertRaises(HermesWorkerAdapterError):
+                    await adapter.start(_launch_spec())
+                self.assertEqual(runner.launches, [])
+
+    async def test_probe_foreign_child_refused_without_anchor(self) -> None:
+        # Probe P4: a binding fencing a DIFFERENT child (its own root /
+        # parent / child key / digest / job / attempt), same adapter+worker,
+        # unexpired — REFUSED on the Job/Attempt identity mismatch.
+        adapter, runner = _adapter(binding=_foreign_child_binding())
+        with self.assertRaises(HermesWorkerAdapterError) as ctx:
+            await adapter.start(_launch_spec())
+        self.assertIn("EXECUTION_BINDING_IDENTITY_MISMATCH", str(ctx.exception))
+        self.assertEqual(runner.launches, [])
+
+    async def test_probe_empty_lease_refused_without_anchor(self) -> None:
+        # Probe (empty lease_expiry, WO-02 contract default '' used to skip
+        # the expiry check entirely) — REFUSED.
+        adapter, runner = _adapter(binding=_binding(lease_expiry=""))
+        with self.assertRaises(HermesWorkerAdapterError) as ctx:
+            await adapter.start(_launch_spec())
+        self.assertIn("EXECUTION_BINDING_LEASE_REQUIRED", str(ctx.exception))
+        self.assertEqual(runner.launches, [])
+
+    async def test_start_retains_original_native_ref_before_ack(self) -> None:
+        adapter, runner = _adapter(binding=_binding())
+        spec = _launch_spec(run_dir=_recovery_run_dir())
+        ref = await adapter.start(spec)
+        self.assertEqual(runner.launches, [spec])
+        # The ACK returns exactly the original native ref from the owner.
+        self.assertIs(ref, runner.refs[spec.run_id])
+        # Retention is observable before any later operation: status and
+        # reattach both resolve to the same original object.
+        self.assertEqual(await adapter.status(ref), WorkerRunStatus.RUNNING)
+        self.assertIs(adapter.reattach(spec, _recovery_binding(spec, ref)), ref)
+
+    async def test_start_refuses_duplicate_run_and_native_identity_mismatch(
+        self,
+    ) -> None:
+        adapter, runner = _adapter(binding=_binding())
+        spec = _launch_spec()
+        await adapter.start(spec)
+        with self.assertRaises(HermesWorkerAdapterError):
+            await adapter.start(spec)
+        self.assertEqual(len(runner.launches), 1)
+
+
+class HermesStatusCollectTests(unittest.IsolatedAsyncioTestCase):
+    async def test_status_reports_actual_native_state(self) -> None:
+        adapter, runner = _adapter(binding=_binding())
+        ref = await adapter.start(_launch_spec())
+        runner.state_by_run[ref.run_id] = WorkerRunStatus.SUCCEEDED
+        self.assertEqual(await adapter.status(ref), WorkerRunStatus.SUCCEEDED)
+
+    async def test_collect_result_reads_original_retained_execution(self) -> None:
+        adapter, runner = _adapter(binding=_binding())
+        ref = await adapter.start(_launch_spec())
+        receipt = await adapter.collect_result(ref)
+        self.assertEqual(receipt.process_ref, ref)
+        self.assertIsNot(receipt.process_ref, ref)
+        self.assertEqual(receipt.result.run_id, ref.run_id)
+        self.assertEqual(runner.collections, [ref.run_id])
+        # A result minted for a different run is a replacement: refused.
+        runner.collect_receipt_run = "run-other"
+        with self.assertRaises(HermesWorkerAdapterError):
+            await adapter.collect_result(ref)
+
+    async def test_collection_refuses_same_run_replacements_and_malformed_receipts(self):
+        import dataclasses
+
+        adapter, runner = _adapter(binding=_binding())
+        ref = await adapter.start(_launch_spec())
+        original = await runner.collect(ref)
+        changed_refs = (
+            dataclasses.replace(ref, pid=ref.pid + 1),
+            dataclasses.replace(ref, pgid=ref.pgid + 1),
+            dataclasses.replace(ref, process_start_identity="replacement-start"),
+            dataclasses.replace(ref, boot_session_id="replacement-boot"),
+            dataclasses.replace(ref, launch_nonce="replacement-nonce"),
+        )
+        receipts = [
+            ("same-run process replacement", dataclasses.replace(original, process_ref=changed))
+            for changed in changed_refs
+        ] + [
+            ("foreign result run", dataclasses.replace(original,
+                result=dataclasses.replace(original.result, run_id="run-other"))),
+            ("invalid receipt", object()),
+            ("invalid process ref", dataclasses.replace(original, process_ref=None)),
+            ("invalid result", dataclasses.replace(original, result=None)),
+        ]
+        for label, receipt in receipts:
+            with self.subTest(label=label, receipt=repr(receipt)):
+                async def collect(_ref):
+                    return receipt
+                runner.collect = collect
+                with self.assertRaises(HermesWorkerAdapterError):
+                    await adapter.collect_result(ref)
+        self.assertEqual(len(runner.launches), 1)
+        self.assertEqual(runner.terminations, [])
+
+    async def test_collection_after_reattach_survives_expired_launch_lease(self):
+        import tempfile
+        from datetime import datetime, timedelta, timezone
+
+        started = datetime(2026, 11, 8, 12, tzinfo=timezone.utc)
+        runner = FakeNativeRunner()
+        binding = _binding(lease_expiry=(started + timedelta(minutes=1)).isoformat())
+        first = HermesWorkerAdapter(runner, lambda spec: binding,
+            FakeInspector(), clock=lambda: started)
+        with tempfile.TemporaryDirectory(prefix="mmos-wo10-collect-") as directory:
+            run_dir = Path(directory)
+            (run_dir / "input").mkdir()
+            spec = _launch_spec(run_dir=run_dir)
+            ref = await first.start(spec)
+            recovery = _recovery_binding(spec, ref)
+
+            def no_new_binding(spec):
+                raise AssertionError("original collection must not reacquire launch admission")
+
+            recovered = HermesWorkerAdapter(runner, no_new_binding, FakeInspector(),
+                clock=lambda: started + timedelta(minutes=2),
+                fence_source=no_new_binding)
+            reattached = recovered.reattach(spec, recovery)
+            receipt = await recovered.collect_result(reattached)
+            self.assertEqual(receipt.process_ref, ref)
+            self.assertIsNot(receipt.process_ref, ref)
+            self.assertEqual(receipt.result.run_id, ref.run_id)
+        self.assertEqual(len(runner.launches), 1)
+        self.assertEqual(runner.terminations, [])
+
+    async def test_unknown_or_swapped_refs_are_refused(self) -> None:
+        adapter, _ = _adapter(binding=_binding())
+        unknown = _process_ref("run-unknown")
+        for op in (
+            lambda: adapter.status(unknown),
+            lambda: adapter.collect_result(unknown),
+            lambda: adapter.cancel(unknown, "stop"),
+        ):
+            with self.assertRaises(HermesWorkerAdapterError):
+                await op()
+
+
+class HermesCancelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cancel_reports_requested_versus_settled(self) -> None:
+        adapter, runner = _adapter(binding=_binding())
+        ref = await adapter.start(_launch_spec())
+        receipt = await adapter.cancel(ref, "superseded")
+        self.assertIsInstance(receipt, CancelReceipt)
+        self.assertTrue(receipt.signal_sent)
+        # Requested, NOT yet settled.
+        report = adapter.cancel_report(ref.run_id)
+        self.assertIsNotNone(report)
+        self.assertTrue(report.requested)
+        self.assertFalse(report.settled)
+        self.assertIsNone(report.settled_at)
+        self.assertEqual(
+            await adapter.status(ref), WorkerRunStatus.CANCELLING
+        )
+        # The native side settles; only then does the report and status.
+        runner.state_by_run[ref.run_id] = WorkerRunStatus.CANCELLED
+        self.assertEqual(await adapter.status(ref), WorkerRunStatus.CANCELLED)
+        report = adapter.cancel_report(ref.run_id)
+        self.assertTrue(report.settled)
+        self.assertEqual(report.settled_state, "CANCELLED")
+        self.assertIsNotNone(report.settled_at)
+
+    async def test_cancel_settled_immediately_when_owner_confirms(self) -> None:
+        adapter, runner = _adapter(binding=_binding())
+        ref = await adapter.start(_launch_spec())
+        runner.settle_immediately = True
+        await adapter.cancel(ref, "duplicate")
+        report = adapter.cancel_report(ref.run_id)
+        self.assertTrue(report.requested)
+        self.assertTrue(report.settled)
+
+    async def test_cancel_requires_nonempty_reason(self) -> None:
+        adapter, _ = _adapter(binding=_binding())
+        ref = await adapter.start(_launch_spec())
+        with self.assertRaises(HermesWorkerAdapterError):
+            await adapter.cancel(ref, "  ")
+
+
+class HermesValidationArgvTests(unittest.IsolatedAsyncioTestCase):
+    async def test_preserves_explicitly_authorized_command_contract(self) -> None:
+        adapter, runner = _adapter(binding=_binding())
+        receipt = await adapter.run_validation_argv(
+            _launch_spec(), ["hermes", "--version"]
+        )
+        self.assertEqual(receipt.exit_code, 0)
+        self.assertEqual(runner.validations[-1][1], ("hermes", "--version"))
+
+    async def test_refuses_unauthorized_argv(self) -> None:
+        adapter, runner = _adapter(binding=_binding())
+        for bad in ([], ["ok", 5], "hermes --version"):
+            with self.subTest(repr(bad)):
+                with self.assertRaises(HermesWorkerAdapterError):
+                    await adapter.run_validation_argv(_launch_spec(), bad)
+        with self.assertRaises(HermesWorkerAdapterError):
+            await adapter.run_validation_argv(
+                _launch_spec(), ["hermes"], timeout_seconds=0
+            )
+        self.assertEqual(runner.validations, [])
+
+
+class HermesReattachTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reattach_returns_the_same_original_ref(self) -> None:
+        adapter, runner = _adapter(binding=_binding())
+        spec = _launch_spec(run_dir=_recovery_run_dir())
+        ref = await adapter.start(spec)
+        binding = _recovery_binding(spec, ref)
+        reattached = adapter.reattach(spec, binding)
+        self.assertIs(reattached, ref)
+        # Never created a replacement: exactly one launch ever happened.
+        self.assertEqual(len(runner.launches), 1)
+        self.assertEqual(runner.terminations, [])
+
+    async def test_reattach_after_restart_adopts_original_never_replaces(
+        self,
+    ) -> None:
+        runner = FakeNativeRunner()
+
+        def binding_source(spec):
+            return _binding()
+
+        first = HermesWorkerAdapter(runner, binding_source, FakeInspector())
+        spec = _launch_spec(run_dir=_recovery_run_dir())
+        ref = await first.start(spec)
+        binding = _recovery_binding(spec, ref)
+        # Coordinator restart: a fresh adapter instance, same native owner.
+        second = HermesWorkerAdapter(runner, binding_source, FakeInspector())
+        reattached = second.reattach(spec, binding)
+        self.assertEqual(reattached, ref)
+        self.assertEqual(len(runner.launches), 1)
+
+    async def test_reattach_refuses_unknown_execution_instead_of_replacing(
+        self,
+    ) -> None:
+        runner = FakeNativeRunner()
+
+        def binding_source(spec):
+            return _binding()
+
+        first = HermesWorkerAdapter(runner, binding_source, FakeInspector())
+        spec = _launch_spec(run_dir=_recovery_run_dir())
+        ref = await first.start(spec)
+        binding = _recovery_binding(spec, ref)
+        runner.known_runs.discard(ref.run_id)
+        second = HermesWorkerAdapter(runner, binding_source, FakeInspector())
+        with self.assertRaises(HermesWorkerAdapterError):
+            second.reattach(spec, binding)
+        self.assertEqual(len(runner.launches), 1)
+
+    async def test_reattach_refuses_foreign_or_drifted_bindings(self) -> None:
+        adapter, runner = _adapter(binding=_binding())
+        spec = _launch_spec(run_dir=_recovery_run_dir())
+        ref = await adapter.start(spec)
+        foreign = _recovery_binding(spec, ref)
+        object.__setattr__(foreign, "adapter_id", "codex-cli")
+        with self.assertRaises(HermesWorkerAdapterError):
+            adapter.reattach(spec, foreign)
+        drifted = _recovery_binding(
+            _launch_spec(prompt="a different task", run_dir=_recovery_run_dir()),
+            ref, name="prompt2.txt",
+        )
+        with self.assertRaises(HermesWorkerAdapterError):
+            adapter.reattach(spec, drifted)
+        other_run = _recovery_binding(spec, ref)
+        object.__setattr__(
+            other_run, "process_ref", _process_ref("run-other")
+        )
+        with self.assertRaises(HermesWorkerAdapterError):
+            adapter.reattach(spec, other_run)
+        with self.assertRaises(HermesWorkerAdapterError):
+            adapter.reattach(spec, object())
+        self.assertEqual(len(runner.launches), 1)
+
+
+def _recovery_run_dir() -> Path:
+    import tempfile
+
+    run_dir = Path(tempfile.mkdtemp(prefix="mmos-wo10-recovery-"))
+    (run_dir / "input").mkdir()
+    return run_dir
+
+
+def _recovery_binding(
+    spec: WorkerLaunchSpec, ref: WorkerProcessRef, name: str = "prompt.txt"
+) -> WorkerRecoveryBinding:
+    """Build a real WorkerRecoveryBinding over a private prompt file."""
+
+    import os
+
+    prompt_path = spec.run_dir / "input" / name
+    prompt_path.write_bytes(spec.prompt.encode("utf-8"))
+    os.chmod(prompt_path, 0o600)
+    return WorkerRecoveryBinding.bind(
+        adapter_id="hermes-native", spec=spec, process_ref=ref,
+        prompt_path=prompt_path,
+    )
+
+
+
+
+class ExecutionBindingCompatOptInTests(unittest.TestCase):
+    def test_default_contract_values_remain_compatible_as_record_and_mapping(self):
+        from control_plane.execution_binding_compat import binding_for_launch_spec
+
+        binding = _binding(fence_counter=0, lease_expiry="")
+        for payload in (binding, binding.to_dict()):
+            with self.subTest(wire=isinstance(payload, dict)):
+                admitted = binding_for_launch_spec(_launch_spec(), payload, required=True)
+                self.assertEqual(admitted, binding)
+
+    def test_issuance_is_required_only_when_explicitly_requested(self):
+        from control_plane.execution_binding_compat import (
+            BINDING_FENCE_NOT_CURRENT, BINDING_LEASE_REQUIRED,
+            ExecutionBindingCompatError, binding_for_launch_spec,
+        )
+
+        for binding, code in (
+                (_binding(lease_expiry=""), BINDING_LEASE_REQUIRED),
+                (_binding(fence_counter=0), BINDING_FENCE_NOT_CURRENT)):
+            with self.subTest(code=code):
+                with self.assertRaises(ExecutionBindingCompatError) as error:
+                    binding_for_launch_spec(_launch_spec(), binding,
+                        required=True, require_issued=True)
+                self.assertEqual(error.exception.code, code)
+        binding = _binding()
+        self.assertIs(binding_for_launch_spec(_launch_spec(), binding,
+            required=True, require_issued=True), binding)
+
+    def test_current_fence_is_independent_of_the_issuance_lease_requirement(self):
+        from control_plane.execution_binding_compat import (
+            BINDING_FENCE_NOT_CURRENT, ExecutionBindingCompatError,
+            binding_for_launch_spec,
+        )
+
+        binding = _binding(lease_expiry="")
+        self.assertIs(binding_for_launch_spec(_launch_spec(), binding,
+            required=True, current_fence=7), binding)
+        for current in (0, -1, True, 7.0, "7", 8):
+            with self.subTest(current=current):
+                with self.assertRaises(ExecutionBindingCompatError) as error:
+                    binding_for_launch_spec(_launch_spec(), binding,
+                        required=True, current_fence=current)
+                self.assertEqual(error.exception.code, BINDING_FENCE_NOT_CURRENT)
+        for fence in (0, True, 7.0):
+            with self.subTest(binding_fence=fence):
+                with self.assertRaises(ExecutionBindingCompatError) as error:
+                    binding_for_launch_spec(_launch_spec(),
+                        _binding(lease_expiry="", fence_counter=fence),
+                        required=True, current_fence=7)
+                self.assertEqual(error.exception.code, BINDING_FENCE_NOT_CURRENT)
+
+    def test_issuance_and_current_fence_can_both_be_required(self):
+        from control_plane.execution_binding_compat import (
+            BINDING_FENCE_NOT_CURRENT, BINDING_LEASE_REQUIRED,
+            ExecutionBindingCompatError, binding_for_launch_spec,
+        )
+
+        binding = _binding()
+        self.assertIs(binding_for_launch_spec(_launch_spec(), binding,
+            required=True, require_issued=True, current_fence=7), binding)
+        for binding, current, code in (
+                (_binding(), 8, BINDING_FENCE_NOT_CURRENT),
+                (_binding(lease_expiry=""), 7, BINDING_LEASE_REQUIRED)):
+            with self.subTest(code=code):
+                with self.assertRaises(ExecutionBindingCompatError) as error:
+                    binding_for_launch_spec(_launch_spec(), binding,
+                        required=True, require_issued=True, current_fence=current)
+                self.assertEqual(error.exception.code, code)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()

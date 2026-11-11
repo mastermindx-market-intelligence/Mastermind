@@ -332,3 +332,135 @@ __all__ = [
     "seal_subscription_canary_admission",
     "verify_subscription_canary_admission",
 ]
+
+
+# Process-local consumption of the existing authenticated broker carrier. The
+# wire observation is deliberately not a bearer token or a legacy owner HMAC.
+_BROKER_CANARY_SEAL = object()
+_CLAIM_FIELDS = frozenset({
+    "schema", "execution_mode", "run_id", "job_id", "worker_id", "quota_class",
+    "fence_generation", "capacity_generation", "capacity_state", "held_attempt_id",
+    "current_attempt_id", "binding_id", "profile_id", "adapter_id", "model",
+    "realm_config_sha256", "realm_generation", "catalog_digest", "issued_at_ms",
+    "expires_at_ms", "observation_digest",
+})
+
+
+def _claim_now_ms() -> int:
+    import time
+    return time.time_ns() // 1_000_000
+
+
+def _broker_canary_refuse() -> None:
+    raise CanaryAdmissionError("BROKER_SUBSCRIPTION_CANARY_REFUSED")
+
+
+def _validate_broker_claim(observation: Any, *, realm_owner: Any, peer: Any, spec: Any) -> dict[str, Any]:
+    from control_plane.codex_provider_realm import SubscriptionRealmOwner
+    from control_plane.executive_worker_broker import PeerCredentials
+    from control_plane.model_router import SUBSCRIPTION_CLAIM_SCHEMA, SUBSCRIPTION_CLAIM_MAX_AGE_MS
+    from control_plane.worker_execution_contract import WorkerLaunchSpec
+    from control_plane.subscription_provider_profiles import get_profile
+
+    if (type(observation) is not dict or set(observation) != _CLAIM_FIELDS
+            or type(realm_owner) is not SubscriptionRealmOwner
+            or type(peer) is not PeerCredentials or type(spec) is not WorkerLaunchSpec):
+        _broker_canary_refuse()
+    value = observation.copy()
+    for key in ("run_id", "job_id", "worker_id", "quota_class", "held_attempt_id",
+                "current_attempt_id", "binding_id", "profile_id", "adapter_id", "model"):
+        _require_token(value[key], key)
+    for key in ("realm_config_sha256", "catalog_digest", "observation_digest"):
+        if type(value[key]) is not str or _DIGEST_RE.fullmatch(value[key]) is None:
+            _broker_canary_refuse()
+    for key in ("fence_generation", "capacity_generation", "realm_generation", "issued_at_ms", "expires_at_ms"):
+        if type(value[key]) is not int or not 0 < value[key] < 2**63:
+            _broker_canary_refuse()
+    now = _claim_now_ms()
+    if (value["schema"] != SUBSCRIPTION_CLAIM_SCHEMA
+            or value["execution_mode"] != "interactive_canary"
+            or value["capacity_state"] != "BUSY"
+            or value["capacity_generation"] != value["fence_generation"]
+            or value["held_attempt_id"] != value["run_id"]
+            or value["current_attempt_id"] != value["run_id"]
+            or not value["issued_at_ms"] <= now < value["expires_at_ms"]
+            or value["expires_at_ms"] - value["issued_at_ms"] > SUBSCRIPTION_CLAIM_MAX_AGE_MS
+            or (spec.run_id, spec.job_id, spec.worker_id, spec.model)
+               != (value["run_id"], value["job_id"], value["worker_id"], value["model"])
+            or spec.authorities != ("READ",) or spec.authority is not None):
+        _broker_canary_refuse()
+    digest_fields = {key: item for key, item in value.items() if key != "observation_digest"}
+    if not hmac.compare_digest(value["observation_digest"], _seal_digest(digest_fields)):
+        _broker_canary_refuse()
+    local = realm_owner.observe()
+    if type(peer.uid) is not int or peer.uid != local["control_uid"]:
+        _broker_canary_refuse()
+    for key in ("worker_id", "binding_id", "profile_id", "adapter_id",
+                "realm_config_sha256", "realm_generation", "catalog_digest"):
+        if value[key] != local[key]:
+            _broker_canary_refuse()
+    binding = get_binding(value["binding_id"])
+    profile = get_profile(binding.profile_id)
+    if (binding.adapter_id != "codex-cli" or binding.implementation_state == "SPEC_ONLY"
+            or binding.autonomous_allowed is not False or profile.autonomous_allowed is not False
+            or value["model"] not in {binding.model_for(profile, key) for key in binding.model_classes}):
+        _broker_canary_refuse()
+    if not value["issued_at_ms"] <= _claim_now_ms() < value["expires_at_ms"]:
+        _broker_canary_refuse()
+    return value
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
+class BrokerSubscriptionCanaryAdmission:
+    """One exact peer-authenticated launch, valid only in this broker process."""
+    _observation_json: str
+    _launch_spec_sha256: str
+    _realm_owner: Any = dataclasses.field(repr=False, compare=False)
+    _peer: Any = dataclasses.field(repr=False, compare=False)
+    _seal: object = dataclasses.field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self._seal is not _BROKER_CANARY_SEAL:
+            _broker_canary_refuse()
+
+    @property
+    def observation_digest(self) -> str:
+        return json.loads(self._observation_json)["observation_digest"]
+
+    @property
+    def binding_id(self) -> str:
+        return json.loads(self._observation_json)["binding_id"]
+
+    @property
+    def model(self) -> str:
+        return json.loads(self._observation_json)["model"]
+
+
+def seal_broker_subscription_canary_admission(
+    observation: Any, *, realm_owner: Any, peer: Any, spec: Any,
+) -> BrokerSubscriptionCanaryAdmission:
+    """Called only by the existing broker after kernel peer authorization.
+
+    Python code already executing inside the trusted broker can call its
+    internal composition functions. This is a transport/serialization boundary,
+    not a sandbox against arbitrary code in that same interpreter.
+    """
+    from control_plane.worker_execution_contract import worker_launch_spec_sha256
+    value = _validate_broker_claim(observation, realm_owner=realm_owner, peer=peer, spec=spec)
+    return BrokerSubscriptionCanaryAdmission(
+        _canonical_json(value), worker_launch_spec_sha256(spec), realm_owner, peer, _BROKER_CANARY_SEAL,
+    )
+
+
+def verify_broker_subscription_canary_admission(
+    admission: Any, *, spec: Any,
+) -> BrokerSubscriptionCanaryAdmission:
+    """Recheck identity, revocation, catalog, freshness and exact launch bytes."""
+    from control_plane.worker_execution_contract import worker_launch_spec_sha256
+    if (type(admission) is not BrokerSubscriptionCanaryAdmission
+            or admission._seal is not _BROKER_CANARY_SEAL
+            or worker_launch_spec_sha256(spec) != admission._launch_spec_sha256):
+        _broker_canary_refuse()
+    _validate_broker_claim(json.loads(admission._observation_json),
+                          realm_owner=admission._realm_owner, peer=admission._peer, spec=spec)
+    return admission

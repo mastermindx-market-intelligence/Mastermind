@@ -29,19 +29,19 @@ def _slice(start: str, end: str) -> str:
 
 
 def test_cross_book_switch_hides_previous_owner_before_critical_read() -> None:
-    switch = _slice("window.setPortfolio = function(id)", "async function loadPortfolios()")
+    switch = _slice("window.setPortfolio = function(id, opts)", "async function loadPortfolios()")
     assert 'class="page-mm mm-pf-scope-loading"' in HTML
     assert 'id="portfolio-scope-state"' in HTML
     assert "function _setPortfolioScopeState(state)" in HTML
-    assert "function _resetPortfolioScopedState()" in HTML
+    assert "function _invalidateBookScopedState()" in HTML
     assert "_setPortfolioScopeState('loading')" in switch
-    assert "_resetPortfolioScopedState()" in switch
+    assert "_invalidateBookScopedState()" in switch
     assert switch.index("_setPortfolioScopeState('loading')") < switch.index("_portfolio = id;")
-    assert switch.index("_resetPortfolioScopedState()") < switch.index("_portfolio = id;")
+    assert switch.index("_invalidateBookScopedState()") < switch.index("_portfolio = id;")
 
 
 def test_critical_snapshot_rebinds_every_detail_panel_before_reveal() -> None:
-    critical = _slice("function _fetchPortfolioCritical(id)", "function _fetchPortfolioDetails(id, base)")
+    critical = _slice("function _fetchPortfolioCritical(id, onAvailability)", "function _fetchPortfolioDetails(id, base)")
     paint = _slice("function _paintPortfolioSnapshot(snapshot, requestLive)", "function _schedulePortfolioPrefetch()")
 
     assert "criticalStatus: book ? 'ready' : 'unavailable'" in critical
@@ -130,15 +130,16 @@ def test_background_prefetch_never_stores_an_unavailable_envelope() -> None:
 
 def _inline_script() -> str:
     """Return the page's inline portfolio JavaScript exactly as served."""
-    start = HTML.rindex("<script>")
-    end = HTML.rindex("</script>")
+    hydration = HTML.index("async function fetchAll(opts)")
+    start = HTML.rindex("<script>", 0, hydration)
+    end = HTML.index("</script>", hydration)
     script = HTML[start + len("<script>"):end]
     for required in (
         "function _fetchPortfolioSnapshot(id)",
         "function _schedulePortfolioPrefetch()",
         "async function fetchAll(opts)",
         "function _hydrateShared()",
-        "window.setPortfolio = function(id)",
+        "window.setPortfolio = function(id, opts)",
     ):
         assert required in script, f"inline script is missing {required!r}"
     return script
@@ -216,7 +217,7 @@ function buildContext(registry) {
   const document = {
     hidden: false,
     documentElement: { lang: 'en', getAttribute() { return 'en'; }, setAttribute() {}, style: {} },
-    body: { classList: { toggle() {}, add() {}, remove() {} }, style: {}, dataset: {} },
+    body: mkEl('body'),
     head: { appendChild() {} },
     getElementById(id) {
       if (!elements[id]) elements[id] = mkEl(id);

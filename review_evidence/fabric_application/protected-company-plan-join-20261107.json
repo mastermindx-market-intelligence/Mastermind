@@ -1,0 +1,104 @@
+{
+  "schema": "mastermind.protected_company_plan_join.v1",
+  "parent": "d9494d6f79da8ea8a39e45c28cd0a0c37c0d8fea",
+  "protected": "3f79e30ae184dc991102f6044f7c74f677a86040",
+  "paper_composition": {
+    "path": "brain/research_paper.py",
+    "preimages": {
+      "1": "2cc3e0d02d778954a9a7a918c46851bc45576b34",
+      "2": "5cae3a50df1ffd7ed17276a96a1c8290bc74dd13",
+      "3": "859594290fac87178b5bb79900147b9e64d66334"
+    },
+    "composed_sha256": "b601b4fa84295aa19e2c4dd6331842824e99030b2499e995359a83250afe8ffb",
+    "composition": "Preserve bounded no-follow Fabric saved-paper read and redigest projection; append every incoming strict canonical evidence check before de-duplication. No retry/authority/lifecycle change."
+  },
+  "initial_scoped_run": {
+    "returncode": 1,
+    "seconds": 23.131,
+    "cases": {
+      "total": 480,
+      "failures": 0,
+      "errors": 27,
+      "skipped": 4
+    },
+    "log_sha256": "8d05c29cc2b0e449f28fbb82e44252de52f8a951dcee6846dc8a0bd34c20fe96"
+  },
+  "historical_fixture_repair": {
+    "historical_blob": "47813b1e3fc75d7ab20faf9f313a8cb6ddc77740",
+    "historical_sha256": "44dcbb648bfdd0d0c4b6d5866529aec9341779baf5afd5071330997d1b227a83",
+    "historical_bytes": 103052,
+    "current_collector_sha256": "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d",
+    "changed_member": "ext/original_delivery_collector.py",
+    "all_116_file_hashes_and_production_profile_preserved": true,
+    "other_115_source_entries_preserved": true,
+    "fixture_sha256": "7b95799a42583d400e2f66b89383e59052b2ad9305689af71713e60d9a800cb5",
+    "source_aliases": 98,
+    "embedded_members": 18,
+    "qualification": {
+      "returncode": 0,
+      "seconds": 12.875,
+      "cases": {
+        "total": 27,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "log_sha256": "a82a0b51cd86fa0131904e08c34ef556963104f0e3677f688117e093ebf2d3fe",
+      "tail": "...........................                                              [100%]\n"
+    }
+  },
+  "strict_saved_paper_integration": {
+    "source_head": "d9494d6f79da8ea8a39e45c28cd0a0c37c0d8fea",
+    "protected_merge": "3f79e30ae184dc991102f6044f7c74f677a86040",
+    "macro_ref": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+    "fixture_files_verified": 2531,
+    "rows": [
+      {
+        "kind": "paper",
+        "selectors": [
+          "tests/integration/test_research_paper_fabric_composition.py"
+        ],
+        "returncode": 0,
+        "seconds": 5.604,
+        "log": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/protected-paper-v12-paper-v11.log",
+        "sha256": "2a08006524b8ffa303a7836215fb01d12224d48dae9c39af1a0a67d3e080c214",
+        "cases": {
+          "total": 22,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "failures": []
+      }
+    ],
+    "vendor_restored": true,
+    "fixture_config_restored": true
+  },
+  "identity": {
+    "returncode": 0,
+    "seconds": 13.953,
+    "cases": 205,
+    "failed": 0,
+    "skipped": 0,
+    "log_sha256": "38b80f9adf06621e56eac9aa7e24e5d2ffbd24080e7ca702bc0de16943e3a1cf"
+  },
+  "native_builds": [
+    {
+      "cohort": "107",
+      "manifest_sha256": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+      "inventory_sha256": "d6590d214f0a2a0e6e4885f4da9ed1c05811bdc1c1cc4c2c258220d8de43ec47"
+    },
+    {
+      "cohort": "109",
+      "manifest_sha256": "f3d9ae365345a7dddfbe0aba7e257b248684678e821d4dc13f76762f4d9166f2",
+      "inventory_sha256": "b614541ff709ec062b9fead189cc413fb3ccb7beb912841e95aadc912e4586cf"
+    },
+    {
+      "cohort": "112",
+      "manifest_sha256": "38368f3a7d2438a191049088b44000abb3e0fac04a03cff3ffcf016de2fddd44",
+      "inventory_sha256": "eb0c8984da72c40d044a36f2cbd069ef19194198c079a9cbf8c84e392cb9a76b"
+    }
+  ],
+  "remaining_data_fixture_skips": 4,
+  "scope": "Original carrier source composition only; no runtime publication, selection, enrollment, provider probe or VPS activation."
+}

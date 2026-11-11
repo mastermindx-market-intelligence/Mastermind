@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,7 +45,7 @@ def llm_enabled() -> bool:
 
 _ROOT = Path(__file__).resolve().parent.parent
 _PAPERS = _ROOT / "data" / "research" / "papers"
-_INDEX = _PAPERS / "index.jsonl"
+_INDEX = _PAPERS / "index.jsonl"  # legacy auxiliary catalog; canonical readers scan paper JSON files
 _NOTES = _ROOT / "data" / "research" / "notes"
 
 SCHEMA = "research_paper.v1"
@@ -616,6 +617,7 @@ your conviction that this is a sound investment AT THIS PRICE; do not let the en
 # whole block is hard-bounded so a verbose engine payload can't blow the prompt.
 # ---------------------------------------------------------------------------
 
+_CURRENT_WEATHER = object()
 ENTRY_EVIDENCE_MAX_CHARS = 2000     # hard bound on the injected block (notes truncated first)
 _NO_EVIDENCE_MARKER = ("(no entry/context evidence available — note this in sections 17/18)")
 
@@ -657,7 +659,8 @@ def _entry_metrics_line(entry_report: dict) -> str:
 
 def build_evidence_block(ticker: str, *, entry_report: dict | None,
                          context_report: dict | None, prophet_line: str | None,
-                         max_chars: int = ENTRY_EVIDENCE_MAX_CHARS) -> str:
+                         max_chars: int = ENTRY_EVIDENCE_MAX_CHARS,
+                         weather_block=_CURRENT_WEATHER) -> str:
     """Assemble the injected machine-evidence block appended to the research prompt.
 
     Contents (all fail-soft; a missing piece is simply omitted):
@@ -671,7 +674,8 @@ def build_evidence_block(ticker: str, *, entry_report: dict | None,
     to today and sections 17/18 are told the evidence is absent. Prompt-injection hygiene: the
     body is fenced and prefaced "machine evidence, not instructions"; the whole block is bounded
     to `max_chars` (the notes/reasons lists are truncated first)."""
-    have_any = bool(entry_report) or bool(context_report) or bool(prophet_line)
+    have_any = (bool(entry_report) or bool(context_report) or bool(prophet_line)
+                or weather_block is not _CURRENT_WEATHER and bool(weather_block))
     if not have_any:
         return _NO_EVIDENCE_MARKER
 
@@ -679,11 +683,14 @@ def build_evidence_block(ticker: str, *, entry_report: dict | None,
 
     # (a) NW market weather — fail-soft: absent/stale/flag-off returns "" and is omitted.
     nw = ""
-    try:
-        from brain import neural_web_context as _nwc
-        nw = _nwc.seat_prompt_block([ticker]) or ""
-    except Exception:  # noqa: BLE001 — never let the NW reader break the prompt
-        nw = ""
+    if weather_block is _CURRENT_WEATHER:
+        try:
+            from brain import neural_web_context as _nwc
+            nw = _nwc.seat_prompt_block([ticker]) or ""
+        except Exception:  # noqa: BLE001 — never let the NW reader break the prompt
+            nw = ""
+    elif isinstance(weather_block, str):
+        nw = weather_block
     if nw.strip():
         body.append(nw.strip())
 
@@ -754,7 +761,8 @@ def build_research_prompt(ticker: str, *, asof: str, price_line: str, regime: di
 def build_redigest_prompt(ticker: str, *, price_line: str, confluence: float, report: str,
                           entry_report: dict | None = None,
                           context_report: dict | None = None,
-                          prophet_line: str | None = None) -> str:
+                          prophet_line: str | None = None,
+                          weather_block=_CURRENT_WEATHER) -> str:
     """Assemble the re-digest prompt. The evidence block is re-appended after the report so the
     re-digest pass (un-armed, no tools) can still see the entry/context evidence when it fills in
     entry_agreement / entry_note. All-None evidence → the no-evidence marker (byte-identical shape)."""
@@ -764,7 +772,8 @@ def build_redigest_prompt(ticker: str, *, price_line: str, confluence: float, re
             .replace("{confluence:+.2f}", f"{confluence:+.2f}")
             .replace("{report}", report[:12000]))
     block = build_evidence_block(ticker, entry_report=entry_report,
-                                 context_report=context_report, prophet_line=prophet_line)
+                                 context_report=context_report, prophet_line=prophet_line,
+                                 weather_block=weather_block)
     return base + "\n\n=== INJECTED ENGINE EVIDENCE (already reflected in the report above) ===\n" + block
 
 
@@ -1056,51 +1065,908 @@ def render_markdown(paper: dict) -> str:
     return "\n".join(out).strip()
 
 
+class _PaperSaveNotCommittedError(OSError):
+    """This save attempt failed before canonical replacement was invoked."""
+
+
+
+# ---------------------------------------------------------------------------
+# Explicit saved-paper re-digest. The existing paper owns the original request
+# and filing plan; the shared Fabric cache owns inference, usage and close.
+# ---------------------------------------------------------------------------
+
+_REDI_KEY = "_fabric_saved_redigest"
+_REDI_LANE = "mastermind-paper-redigest"
+_REDI_WORKLOAD = "portfolio_analysis"
+_REDI_MAX_TOKENS = 1500
+_REDI_SYSTEM = (
+    "Regrade only the already-filed report and its saved point-in-time evidence. "
+    "You have no tools and no current quote, web search, or refreshed market context. "
+    "Do not claim new research or fresh facts. Use the supplied historical price and date. "
+    "Return the requested complete verdict JSON. If no saved entry evidence exists, "
+    "entry_agreement must be null. The original deterministic entry and risk gates retain authority."
+)
+_REDI_PHASES = frozenset({"prepared", "pending", "held", "rejected", "ready", "complete"})
+
+
+def _paper_json(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False).encode("utf-8")
+
+
+def _paper_hash(value):
+    import hashlib
+    return hashlib.sha256(_paper_json(value)).hexdigest()
+
+
+def _paper_bytes_hash(raw):
+    import hashlib
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _paper_decode(raw):
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("paper_duplicate_key")
+            result[key] = value
+        return result
+    def invalid(_):
+        raise ValueError("paper_nonfinite")
+    return json.loads(raw, object_pairs_hook=pairs, parse_constant=invalid)
+
+
+def _paper_sync(path):
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _paper_directory(path):
+    """Resolve the configured storage anchor; sync each new directory link."""
+    path = Path(path).absolute()
+    if path.is_symlink():
+        raise ValueError("paper_directory_invalid")
+    missing, current = [], path
+    while not current.exists():
+        missing.append(current.name)
+        current = current.parent
+    current = current.resolve(strict=True)
+    if not current.is_dir():
+        raise ValueError("paper_directory_invalid")
+    for part in reversed(missing):
+        child = current / part
+        child.mkdir(exist_ok=True)
+        if child.is_symlink() or not child.is_dir():
+            raise ValueError("paper_directory_invalid")
+        _paper_sync(current)
+        current = child
+    bound = Path(_ROOT).resolve()
+    anchor = current
+    while anchor == bound or bound in anchor.parents:
+        _paper_sync(anchor)
+        if anchor == bound:
+            break
+        anchor = anchor.parent
+    _paper_sync(current)
+    return current
+
+
+def _paper_lock(path):
+    """Same stable path.json.lock inode used by the existing Fabric cache."""
+    from contextlib import contextmanager
+    @contextmanager
+    def locked():
+        import fcntl
+        import stat
+        owned_path = Path(path)
+        parent = _paper_directory(owned_path.parent)
+        actual = parent / owned_path.name
+        fd = os.open(str(actual) + ".lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("paper_lock_invalid")
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            named = os.lstat(str(actual) + ".lock")
+            if (named.st_dev, named.st_ino) != (info.st_dev, info.st_ino):
+                raise ValueError("paper_lock_replaced")
+            _paper_sync(parent)
+            yield
+        finally:
+            os.close(fd)
+    return locked()
+
+
+def _paper_bytes(path, *, limit=4 * 1024 * 1024):
+    import stat
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return None, None
+    with os.fdopen(fd, "rb") as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+            raise ValueError("paper_file_invalid")
+        raw = source.read(limit + 1)
+    if len(raw) > limit:
+        raise ValueError("paper_file_invalid")
+    return raw, info
+
+
+
+def _paper_confirm_bytes(path, expected):
+    """Readback also re-establishes durability after a visible but failed write."""
+    import stat
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        opened, named = os.fstat(fd), os.lstat(path)
+        if (not stat.S_ISREG(opened.st_mode)
+                or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+                or opened.st_size != len(expected)):
+            raise ValueError("paper_file_changed")
+        chunks, left = [], len(expected)
+        while left:
+            chunk = os.read(fd, min(left, 65536))
+            if not chunk:
+                raise ValueError("paper_file_changed")
+            chunks.append(chunk)
+            left -= len(chunk)
+        if b"".join(chunks) != expected or os.read(fd, 1):
+            raise ValueError("paper_file_changed")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    _paper_sync(Path(path).parent)
+    raw, current = _paper_bytes(path, limit=max(4 * 1024 * 1024, len(expected)))
+    if raw != expected or (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+        raise ValueError("paper_file_changed")
+
+
+def _paper_read(path):
+    raw, _ = _paper_bytes(path)
+    value = _paper_decode(raw) if raw is not None else None
+    if value is not None and type(value) is not dict:
+        raise ValueError("paper_document_invalid")
+    return value
+
+
+def _paper_write(path, value):
+    import secrets
+    raw = _paper_json(value)
+    if len(raw) > 4 * 1024 * 1024:
+        raise ValueError("paper_file_bound")
+    _paper_bytes(path)
+    temporary = path.with_name(path.name + ".tmp-" + secrets.token_hex(12))
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as target:
+            target.write(raw)
+            target.flush()
+            os.fsync(target.fileno())
+        os.replace(temporary, path)
+        _paper_sync(path.parent)
+        if _paper_bytes(path)[0] != raw:
+            raise ValueError("paper_write_unconfirmed")
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _paper_identity(paper_id):
+    from datetime import date
+    if (type(paper_id) is not str
+            or re.fullmatch(r"\d{4}-\d{2}-\d{2}-[A-Z0-9][A-Z0-9._^-]{0,31}", paper_id) is None):
+        raise ValueError("paper_identity_invalid")
+    day, ticker = paper_id[:10], paper_id[11:]
+    if date.fromisoformat(day).isoformat() != day:
+        raise ValueError("paper_identity_invalid")
+    return day, ticker
+
+
+def _paper_path(paper_id, *, create=False):
+    day, ticker = _paper_identity(paper_id)
+    base = Path(_PAPERS)
+    if base.is_symlink():
+        raise ValueError("paper_directory_invalid")
+    root = _paper_directory(base) if create else base.resolve()
+    return root / f"{day}_{ticker}.json"
+
+
+def _paper_public(paper):
+    return {key: value for key, value in paper.items() if key != _REDI_KEY}
+
+
+def _redigest_source(path, paper_id):
+    return {"consumer": _REDI_LANE, "root": str(path.parent), "paper_id": paper_id}
+
+
+def _redigest_owner():
+    from brain import fabric_inference
+    modes, shared, root = fabric_inference._owner()
+    from engine import catalyst_tone as cache
+    if Path(cache.__file__).resolve().parent.parent != root:
+        raise ValueError("paper_cache_owner_mismatch")
+    return modes, shared, root, cache
+
+
+def _redigest_verdict(text):
+    """Closed selected contract; never salvage prose, truncation or loose JSON."""
+    import math
+    if type(text) is not str or not text.strip() or len(text.encode()) > 32768:
+        return None
+    candidate = text.strip()
+    fence = re.fullmatch(chr(96) * 3 + r"json\s*(\{.*\})\s*" + chr(96) * 3, candidate, re.DOTALL)
+    if fence:
+        candidate = fence.group(1)
+    try:
+        value = _paper_decode(candidate)
+        fields = {"research_score", "viability", "recommend", "confidence", "fair_value",
+                  "price_assessment", "key_risks", "entry_agreement", "entry_note", "summary"}
+        if (type(value) is not dict or set(value) != fields
+                or type(value["research_score"]) is not int or not 0 <= value["research_score"] <= 100
+                or value["viability"] not in VIABILITIES or type(value["recommend"]) is not bool
+                or value["confidence"] not in ("low", "medium", "high")
+                or value["entry_agreement"] not in (*_ENTRY_AGREEMENTS, None)
+                or type(value["key_risks"]) is not list or not 2 <= len(value["key_risks"]) <= 4):
+            return None
+        fair = value["fair_value"]
+        if fair is not None and (type(fair) not in (int, float) or not math.isfinite(fair) or fair < 0):
+            return None
+        for key, bound in (("price_assessment", 2000), ("summary", 1000), ("entry_note", 1000)):
+            if type(value[key]) is not str or len(value[key]) > bound or "\x00" in value[key]:
+                return None
+        if not value["price_assessment"].strip() or not value["summary"].strip():
+            return None
+        if any(type(risk) is not str or not risk.strip() or len(risk) > 1000 or "\x00" in risk
+               for risk in value["key_risks"]):
+            return None
+        _paper_json(value)
+        return value
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def _redigest_input(paper, paper_id):
+    import math
+    day, ticker = _paper_identity(paper_id)
+    if (paper.get("schema") != SCHEMA or paper.get("id") != paper_id
+            or paper.get("ticker") != ticker or paper.get("asof") != day
+            or type(paper.get("generated_at")) is not str
+            or type(paper.get("report_md")) is not str
+            or not 200 <= len(paper["report_md"]) <= 1024 * 1024):
+        raise ValueError("saved_paper_input_invalid")
+    datetime.fromisoformat(paper["generated_at"].replace("Z", "+00:00"))
+    confluence, price = paper.get("confluence"), paper.get("price_at_review")
+    if type(confluence) not in (int, float) or not math.isfinite(confluence):
+        raise ValueError("saved_confluence_missing")
+    if type(price) not in (int, float) or not math.isfinite(price) or price <= 0:
+        raise ValueError("saved_price_invalid")
+    evidence = {key: paper.get(key) for key in ("entry_report", "context_report", "prophet_line", "weather_block")}
+    if (any(evidence[k] is not None and type(evidence[k]) is not dict
+            for k in ("entry_report", "context_report"))
+            or any(evidence[k] is not None and type(evidence[k]) is not str
+                   for k in ("prophet_line", "weather_block"))
+            or len(_paper_json(evidence)) > 128 * 1024):
+        raise ValueError("saved_evidence_invalid")
+    value = {"paper": _paper_public(paper), "report_sha256": _paper_bytes_hash(paper["report_md"].encode()),
+             "asof": day, "confluence": confluence, "price": price, "evidence": evidence}
+    return _paper_decode(_paper_json(value))
+
+
+def _redigest_request(frozen, operation_id):
+    paper = frozen["paper"]
+    price = frozen["price"]
+    line = f"The saved review price was ${price:.2f} as of {frozen['asof']}; this is not a live quote."
+    user = build_redigest_prompt(paper["ticker"], price_line=line, confluence=frozen["confluence"],
+        report=paper["report_md"], **frozen["evidence"])
+    return {"system": _REDI_SYSTEM, "user": user, "max_tokens": _REDI_MAX_TOKENS,
+            "context": {"paper_id": paper["id"], "operation_id": operation_id,
+                        "input_digest": _paper_hash(frozen), "workload": _REDI_WORKLOAD}}
+
+
+def _redigest_guard(frozen, operation_id, phase):
+    paper = _paper_decode(_paper_json(frozen["paper"]))
+    paper.update(recommend=False, confirmed=False,
+                 gate_reason="Saved-paper re-digest is not yet completely filed.")
+    paper["redigest"] = {"operation_id": operation_id, "state": phase,
+        "point_in_time": True, "source_asof": frozen["asof"],
+        "source_generated_at": frozen["paper"]["generated_at"],
+        "source_report_sha256": frozen["report_sha256"]}
+    return paper
+
+
+def _redigest_result(frozen, operation_id, row):
+    paper = _paper_decode(_paper_json(frozen["paper"]))
+    verdict, receipt = row["result"], row["receipt"]
+    for key in ("research_score", "viability", "recommend", "confidence", "fair_value",
+                "price_assessment", "key_risks", "entry_agreement", "entry_note", "summary"):
+        paper[key] = verdict[key]
+    if frozen["evidence"]["entry_report"] is None:
+        paper["entry_agreement"] = None
+    paper["verdict_parsed"] = True
+    paper["sections"] = _split_sections(frozen["paper"]["report_md"])
+    paper["sections"]["redigest"] = paper["price_assessment"]
+    _attach_gate(paper, frozen["confluence"])
+    body = frozen["paper"]["report_md"].rsplit("\n\n## Re-digest — viability at this price\n\n", 1)[0]
+    paper["report_md"] = body.rstrip() + "\n\n" + _verdict_footer(paper)
+    paper["redigest"] = {"operation_id": operation_id, "state": "complete", "point_in_time": True,
+        "source_asof": frozen["asof"], "source_generated_at": frozen["paper"]["generated_at"],
+        "source_report_sha256": frozen["report_sha256"], "model": receipt["served_model"],
+        "provider": receipt["provider"], "completed_at": receipt["completed_at"],
+        "usage": receipt["usage"],
+        "entry_gate": apply_entry_deescalation(frozen["evidence"]["entry_report"], paper["entry_agreement"])}
+    paper["report_md"] += (f"\n\n*Saved-report re-digest; evidence and price remain as of {frozen['asof']}. "
+                           "No new market research or current quote was obtained.*")
+    return paper
+
+
+def _paper_index_row(paper, path):
+    return {"id": paper["id"], "ticker": paper["ticker"], "asof": paper["asof"],
+            "generated_at": paper["generated_at"], "file": path.name}
+
+
+def _paper_index_read():
+    raw, info = _paper_bytes(Path(_INDEX), limit=16 * 1024 * 1024)
+    if raw is None:
+        return b"", None, []
+    if raw and not raw.endswith(b"\n"):
+        raise ValueError("paper_index_partial")
+    rows = []
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        value = _paper_decode(line)
+        if type(value) is not dict:
+            raise ValueError("paper_index_invalid")
+        rows.append(value)
+    return raw, info, rows
+
+
+def _paper_index_append(row):
+    raw = _paper_json(row) + b"\n"
+    fd = os.open(_INDEX, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        if os.write(fd, raw) != len(raw):
+            raise ValueError("paper_index_partial")
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    _paper_sync(Path(_INDEX).parent)
+
+
+def _paper_note_body(paper):
+    title = f"{paper['ticker']} — Research Report ({paper['viability']}, {paper['research_score']}/100)"
+    body = re.sub(r"^#\s+.*\n", "", render_markdown(paper), count=1).lstrip()
+    suffix = ("\n\n*Saved-report re-digest; no new market research or current quote.*"
+              if paper.get("redigest", {}).get("point_in_time") else "")
+    return f"# {title}\n\n*tickers: {paper['ticker']} · {paper['generated_at']}*\n\n{body}{suffix}\n"
+
+
+def _redigest_filing(paper, path, operation_id, *, prior_note=None):
+    notes = _paper_directory(_NOTES)
+    before, name = None, None
+    expected = _paper_note_body(paper).encode()
+    slug = re.sub(r"[^a-z0-9]+", "-", f"{paper['ticker']}-research".lower())[:48].strip("-")
+    candidates = [notes / prior_note] if prior_note is not None else sorted(notes.glob(f"*_{slug}.md"))
+    if len(candidates) > 4096:
+        raise ValueError("paper_notes_bound")
+    for candidate in candidates:
+        raw, _ = _paper_bytes(candidate)
+        if raw == expected:
+            name, before = candidate.name, _paper_bytes_hash(raw)
+            break
+    if name is None and prior_note is not None:
+        raise ValueError("paper_note_original_changed")
+    if name is None:
+        suffix = _paper_hash({"paper_id": paper["id"], "operation_id": operation_id})[:16]
+        name = f"{int(time.time())}_{slug}-{suffix}.md"
+        raw, _ = _paper_bytes(notes / name)
+        if raw is not None:
+            raise ValueError("paper_note_collision")
+    with _paper_lock(Path(_INDEX)):
+        raw, info, _ = _paper_index_read()
+        if info is None:
+            fd = os.open(_INDEX, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            _paper_sync(Path(_INDEX).parent)
+            raw, info, _ = _paper_index_read()
+        index = {"row": _paper_index_row(paper, path), "device": info.st_dev, "inode": info.st_ino,
+                 "prefix_bytes": len(raw), "prefix_sha256": _paper_bytes_hash(raw)}
+    return {"index": index, "note": {"name": name, "before_sha256": before}}
+
+
+def _redigest_document(document, path, cache):
+    if type(document) is not dict or document.get("schema") != SCHEMA:
+        raise ValueError("saved_paper_invalid")
+    if _REDI_KEY not in document:
+        return document
+    owned = document[_REDI_KEY]
+    if (type(owned) is not dict or set(owned) != {"schema", "source", "cache", "operations"}
+            or owned["schema"] != "mastermind.saved_paper_redigest.fabric.v1"
+            or owned["source"] != _redigest_source(path, document["id"])
+            or type(owned["operations"]) is not list or not 1 <= len(owned["operations"]) <= 64):
+        raise ValueError("saved_redigest_invalid")
+    state = cache._fabric_cache_value(owned["cache"], owned["source"])
+    rows = {row["operation_id"]: row for row in state["entries"]}
+    external, internal = set(), set()
+    for number, operation in enumerate(owned["operations"]):
+        fields = {"operation_id", "input", "input_digest", "request", "inspection", "mode_id",
+                  "cache_operation_id", "phase", "filing", "result", "result_digest"}
+        if (type(operation) is not dict or set(operation) != fields
+                or not _redigest_id(operation["operation_id"]) or operation["operation_id"] in external
+                or operation["phase"] not in _REDI_PHASES
+                or number < len(owned["operations"]) - 1 and operation["phase"] not in ("complete", "rejected")):
+            raise ValueError("saved_redigest_operation_invalid")
+        frozen = operation["input"]
+        if (_redigest_input(frozen["paper"], document["id"]) != frozen
+                or operation["input_digest"] != _paper_hash(frozen)
+                or operation["request"] != _redigest_request(frozen, operation["operation_id"])):
+            raise ValueError("saved_redigest_input_changed")
+        from engine import fabric_inference_client as transport
+        transport.validate_auto_inspection(operation["inspection"])
+        request, filing = operation["request"], operation["filing"]
+        if (type(filing) is not dict or set(filing) != {"index", "note"}
+                or type(filing["index"]) is not dict
+                or set(filing["index"]) != {"row", "device", "inode", "prefix_bytes", "prefix_sha256"}
+                or filing["index"]["row"] != _paper_index_row(frozen["paper"], path)
+                or any(type(filing["index"][key]) is not int or filing["index"][key] < 0
+                       for key in ("device", "inode", "prefix_bytes"))
+                or not _redigest_digest(filing["index"]["prefix_sha256"])
+                or type(filing["note"]) is not dict or set(filing["note"]) != {"name", "before_sha256"}
+                or type(filing["note"]["name"]) is not str
+                or re.fullmatch(r"[0-9]+_[a-z0-9-]+\.md", filing["note"]["name"]) is None
+                or filing["note"]["before_sha256"] is not None
+                   and not _redigest_digest(filing["note"]["before_sha256"])):
+            raise ValueError("saved_redigest_filing_invalid")
+        oid = operation["cache_operation_id"]
+        result = None
+        if oid is None:
+            if operation["phase"] != "prepared":
+                raise ValueError("saved_redigest_original_missing")
+        else:
+            if oid not in rows or oid in internal:
+                raise ValueError("saved_redigest_original_missing")
+            row = rows[oid]
+            commitment = {"system": request["system"], "user": request["user"],
+                "max_tokens": request["max_tokens"], "context": request["context"],
+                "application_inspection": operation["inspection"], "application_mode": operation["mode_id"]}
+            original, canonical = cache._cache_auto_request(oid, request["system"], request["user"], request["max_tokens"])
+            if (row.get("schema") != cache._AUTO_CACHE_ENTRY or row["request"] != canonical
+                    or row["inspection"] != operation["inspection"] or row["mode_id"] != operation["mode_id"]
+                    or row["input_digest"] != cache._cache_hash(commitment)):
+                raise ValueError("saved_redigest_request_changed")
+            cache._cache_auto_validate(row, original)
+            if row["result"] is not None and row["result"] != _redigest_verdict(row["text"]):
+                raise ValueError("saved_redigest_verdict_changed")
+            if row["state"] == "terminal" and row["result"] is not None:
+                if row["receipt"]["close"] != {"disposition": "closed", "closed": True,
+                                               "effect_unknown": False, "attempted": True}:
+                    raise ValueError("saved_redigest_close_unsettled")
+                result = _redigest_result(frozen, operation["operation_id"], row)
+                if operation["phase"] not in ("ready", "complete"):
+                    raise ValueError("saved_redigest_phase_invalid")
+            elif operation["phase"] != {"pending": "pending", "held": "held", "terminal": "rejected"}[row["state"]]:
+                raise ValueError("saved_redigest_phase_invalid")
+            internal.add(oid)
+        if operation["result"] != result or operation["result_digest"] != (_paper_hash(result) if result is not None else None):
+            raise ValueError("saved_redigest_result_changed")
+        external.add(operation["operation_id"])
+    if internal != set(rows):
+        raise ValueError("saved_redigest_original_set_changed")
+    last = owned["operations"][-1]
+    expected = (last["result"] if last["phase"] == "complete"
+                else _redigest_guard(last["input"], last["operation_id"], last["phase"]))
+    if _paper_public(document) != expected:
+        raise ValueError("saved_redigest_publication_changed")
+    return document
+
+
+def _redigest_id(value):
+    return (type(value) is str and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", value) is not None)
+
+
+def _redigest_digest(value):
+    return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+
+def _redigest_status(document, operation_id):
+    last = document[_REDI_KEY]["operations"][-1]
+    phase = last["phase"] if last["operation_id"] == operation_id else "superseded"
+    return {"ok": phase == "complete", "paper_id": document["id"], "operation_id": operation_id,
+            "original_operation_id": last["operation_id"], "state": phase, "paper": _paper_public(document)}
+
+
+def _redigest_publish(path, operation_id, cache):
+    with _paper_lock(path):
+        document = _redigest_document(_paper_read(path), path, cache)
+        owned = document[_REDI_KEY]
+        operation = owned["operations"][-1]
+        if operation["operation_id"] != operation_id or operation["phase"] != "ready":
+            return _redigest_status(document, operation_id)
+        target, filing = operation["result"], operation["filing"]
+        # Both exact publication preimages were frozen before the provider.
+        # Completed local effects reconcile without another inference.
+        with _paper_lock(Path(_INDEX)):
+            raw, info, rows = _paper_index_read()
+            pre = filing["index"]
+            if (info is None or (info.st_dev, info.st_ino) != (pre["device"], pre["inode"])
+                    or len(raw) < pre["prefix_bytes"]
+                    or _paper_bytes_hash(raw[:pre["prefix_bytes"]]) != pre["prefix_sha256"]):
+                raise ValueError("paper_index_original_changed")
+            if pre["row"] not in rows:
+                _paper_index_append(pre["row"])
+                after, _, found = _paper_index_read()
+                if not after.startswith(raw) or found.count(pre["row"]) != 1:
+                    raise ValueError("paper_index_write_unconfirmed")
+                raw = after
+            _paper_confirm_bytes(Path(_INDEX), raw)
+        notes = _paper_directory(_NOTES)
+        note = notes / filing["note"]["name"]
+        wanted = _paper_note_body(target).encode()
+        current, _ = _paper_bytes(note)
+        if current != wanted:
+            if (_paper_bytes_hash(current) if current is not None else None) != filing["note"]["before_sha256"]:
+                raise ValueError("paper_note_original_changed")
+            if current is None:
+                fd = os.open(note, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, "wb") as output:
+                    output.write(wanted)
+                    output.flush()
+                    os.fsync(output.fileno())
+            else:
+                import secrets
+                temporary = note.with_name(note.name + ".tmp-" + secrets.token_hex(12))
+                try:
+                    with temporary.open("xb") as output:
+                        output.write(wanted)
+                        output.flush()
+                        os.fsync(output.fileno())
+                    os.replace(temporary, note)
+                finally:
+                    if temporary.exists():
+                        temporary.unlink()
+            _paper_sync(notes)
+            if _paper_bytes(note)[0] != wanted:
+                raise ValueError("paper_note_write_unconfirmed")
+        _paper_confirm_bytes(note, wanted)
+        operation["phase"] = "complete"
+        complete = {**target, _REDI_KEY: owned}
+        _redigest_document(complete, path, cache)
+        _paper_write(path, complete)
+        _redigest_document(_paper_read(path), path, cache)
+        return _redigest_status(complete, operation_id)
+
+
+def redigest_saved_paper(paper_id: str, *, operation_id: str) -> dict:
+    """Explicit model-only regrade of a saved paper; same original on every replay.
+
+    No quote/web/tool call or fresh armed research is performed. Existing report
+    authorship and time stay unchanged; Fabric verdict provenance is separate.
+    """
+    try:
+        if not _redigest_id(operation_id):
+            raise ValueError("redigest_operation_id_invalid")
+        path = _paper_path(paper_id)
+        modes, shared, macro_root, cache = _redigest_owner()
+        with _paper_lock(path):
+            document = _redigest_document(_paper_read(path), path, cache)
+            owned = document.get(_REDI_KEY)
+            if owned is not None:
+                found = next((row for row in owned["operations"] if row["operation_id"] == operation_id), None)
+                last = owned["operations"][-1]
+                if found is not None and found is not last:
+                    return _redigest_status(document, operation_id)
+                if found is None and last["phase"] not in ("complete", "rejected"):
+                    return _redigest_status(document, operation_id)
+                if found is not None and last["phase"] not in ("prepared", "ready"):
+                    return _redigest_status(document, operation_id)
+            else:
+                found = None
+            if found is None:
+                if (not cli_bridge._application_fabric_selected()
+                        or shared.application_mode_id() is None
+                        or os.environ.get("MASTERMIND_RESEARCH_LLM", "1").strip().lower() in ("0", "false", "no", "")):
+                    return {"ok": False, "paper_id": paper_id, "operation_id": operation_id, "state": "disabled"}
+                frozen = _redigest_input(_paper_public(document), paper_id)
+                cfg = {"provider_order": ["fabric"], "workload_profile": _REDI_WORKLOAD,
+                       "max_tokens": _REDI_MAX_TOKENS}
+                factory = modes.make_application_fabric_factory(mode_id=shared.application_mode_id(),
+                    lane=_REDI_LANE, workload_cfg=cfg, root=macro_root, service_mode_id="macro_portfolio_fabric")
+                if type(factory) is not modes.ApplicationFabricFactory:
+                    raise ValueError("redigest_binding_unavailable")
+                from engine import fabric_inference_client as transport
+                inspection = transport.validate_auto_inspection(factory.inspect(cfg))
+                request = _redigest_request(frozen, operation_id)
+                if owned is None:
+                    source = _redigest_source(path, paper_id)
+                    owned = {"schema": "mastermind.saved_paper_redigest.fabric.v1", "source": source,
+                             "cache": cache._fabric_cache_value(None, source), "operations": []}
+                if len(owned["operations"]) >= 64:
+                    raise ValueError("redigest_history_bound")
+                operation = {"operation_id": operation_id, "input": frozen, "input_digest": _paper_hash(frozen),
+                    "request": request, "inspection": inspection, "mode_id": shared.application_mode_id(),
+                    "cache_operation_id": None, "phase": "prepared",
+                    "filing": _redigest_filing(frozen["paper"], path, operation_id,
+                        prior_note=owned["operations"][-1]["filing"]["note"]["name"]
+                        if owned["operations"] and owned["operations"][-1]["phase"] == "complete" else None),
+                    "result": None, "result_digest": None}
+                owned["operations"].append(operation)
+                document = {**_redigest_guard(frozen, operation_id, "prepared"), _REDI_KEY: owned}
+                _redigest_document(document, path, cache)
+                _paper_write(path, document)
+                _redigest_document(_paper_read(path), path, cache)
+            operation = owned["operations"][-1]
+            phase = operation["phase"]
+            request = operation["request"]
+        if phase == "ready":
+            return _redigest_publish(path, operation_id, cache)
+        if (not cli_bridge._application_fabric_selected()
+                or shared.application_mode_id() != operation["mode_id"]
+                or os.environ.get("MASTERMIND_RESEARCH_LLM", "1").strip().lower() in ("0", "false", "no", "")):
+            return _redigest_status(document, operation_id)
+        def read():
+            return _redigest_document(_paper_read(path), path, cache)
+        def load_cache():
+            current = read()
+            if current[_REDI_KEY]["operations"][-1]["operation_id"] != operation_id:
+                raise ValueError("redigest_original_changed")
+            return current[_REDI_KEY]["cache"]
+        def store_cache(value):
+            current = read()
+            owner = current[_REDI_KEY]
+            original = owner["operations"][-1]
+            if original["operation_id"] != operation_id:
+                raise ValueError("redigest_original_changed")
+            before, after = owner["cache"]["entries"], value["entries"]
+            if original["phase"] == "prepared":
+                if (len(after) != len(before) + 1 or after[:-1] != before
+                        or after[-1]["state"] != "pending"
+                        or after[-1]["inspection"] != original["inspection"]
+                        or after[-1]["mode_id"] != original["mode_id"]):
+                    raise ValueError("redigest_claim_changed")
+                original["cache_operation_id"] = after[-1]["operation_id"]
+            else:
+                if (original["phase"] != "pending" or len(before) != len(after)
+                        or before[:-1] != after[:-1] or before[-1]["state"] != "pending"
+                        or before[-1]["operation_id"] != after[-1]["operation_id"]
+                        or after[-1]["state"] not in ("terminal", "held")):
+                    raise ValueError("redigest_transition_invalid")
+            row = after[-1]
+            original["phase"] = {"pending": "pending", "held": "held", "terminal": "rejected"}[row["state"]]
+            if row["state"] == "terminal" and row["result"] is not None:
+                original["phase"] = "ready"
+                original["result"] = _redigest_result(original["input"], operation_id, row)
+                original["result_digest"] = _paper_hash(original["result"])
+            owner["cache"] = value
+            current = {**_redigest_guard(original["input"], operation_id, original["phase"]), _REDI_KEY: owner}
+            _redigest_document(current, path, cache)
+            _paper_write(path, current)
+            read()
+        cache._fabric_cached_document(path=path, root=macro_root, cache_root=path.parent,
+            logical_source=owned["source"], cfg={"provider_order": ["fabric"],
+                "workload_profile": _REDI_WORKLOAD, "max_tokens": _REDI_MAX_TOKENS},
+            lane=_REDI_LANE, system=request["system"], user=request["user"],
+            input_context=request["context"], validate=_redigest_verdict,
+            load_cache=load_cache, store_cache=store_cache, startup_workload=_REDI_WORKLOAD)
+        return _redigest_publish(path, operation_id, cache)
+    except Exception as exc:
+        public_reasons = {"saved_confluence_missing", "saved_price_invalid", "saved_paper_input_invalid",
+            "saved_evidence_invalid", "paper_identity_invalid", "redigest_operation_id_invalid",
+            "redigest_binding_unavailable", "redigest_history_bound", "paper_index_original_changed",
+            "paper_note_original_changed", "paper_index_partial", "paper_write_unconfirmed",
+            "paper_note_write_unconfirmed", "paper_index_write_unconfirmed"}
+        reason = str(exc) if type(exc) is ValueError and str(exc) in public_reasons else "redigest_unavailable"
+        return {"ok": False, "paper_id": paper_id, "operation_id": operation_id,
+                "state": "held", "reason": reason}
+
+
 def save_paper(paper: dict) -> Path:
-    """Persist a paper to data/research/papers/<asof>_<TICKER>.json and append to the index."""
-    _PAPERS.mkdir(parents=True, exist_ok=True)
-    path = _PAPERS / f"{paper['asof']}_{paper['ticker']}.json"
-    path.write_text(json.dumps(paper, indent=2, default=str, ensure_ascii=False))
-    with _INDEX.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"id": paper["id"], "ticker": paper["ticker"], "asof": paper["asof"],
-                             "generated_at": paper["generated_at"], "file": path.name}, default=str) + "\n")
+    """Save one canonical paper while preserving original Fabric custody.
+
+    Failures before replacement are classified as not committed. Once replacement
+    is attempted, failures retain an unknown outcome; the auxiliary index cannot
+    revoke a confirmed canonical save.
+    """
+    tmp_name: str | None = None
+    replacement_attempted = False
+    try:
+        path = _paper_path(paper["id"], create=True)
+        day, ticker = _paper_identity(paper["id"])
+        if paper["asof"] != day or paper["ticker"] != ticker:
+            raise ValueError("paper_identity_conflict")
+        with _paper_lock(path):
+            current = _paper_read(path)
+            if current is not None and _REDI_KEY in current:
+                _, _, _, cache = _redigest_owner()
+                current = _redigest_document(current, path, cache)
+                if _paper_public(paper) != _paper_public(current):
+                    raise ValueError("paper_original_owned")
+                return path
+            if _REDI_KEY in paper:
+                raise ValueError("paper_original_not_owned")
+            value = _paper_decode(json.dumps(
+                paper, default=str, ensure_ascii=False, allow_nan=False))
+            payload = json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False)
+            if len(payload.encode("utf-8")) > 4 * 1024 * 1024:
+                raise ValueError("paper_file_bound")
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent,
+                prefix=f".{path.name}.", suffix=".tmp", delete=False,
+            ) as tmp:
+                tmp_name = tmp.name
+                tmp.write(payload)
+                tmp.flush()
+                os.fsync(tmp.fileno())
+            replacement_attempted = True
+            os.replace(tmp_name, path)
+            tmp_name = None
+            _paper_confirm_bytes(path, payload.encode("utf-8"))
+            # Ordinary filing keeps the legacy index auxiliary. Re-digest filing
+            # retains its original index and notes transaction checks.
+            try:
+                with _paper_lock(Path(_INDEX)):
+                    _paper_index_read()
+                    _paper_index_append(_paper_index_row(value, path))
+            except Exception:
+                pass
+    except Exception as exc:
+        # Custody/schema refusals retain their established validation contract.
+        if replacement_attempted or isinstance(exc, ValueError):
+            raise
+        raise _PaperSaveNotCommittedError(
+            "research paper replacement was not attempted"
+        ) from exc
+    finally:
+        if tmp_name:
+            try:
+                Path(tmp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
     return path
 
 
-def load_papers() -> list[dict]:
-    """All saved papers, newest first, de-duplicated on id (latest generated_at wins)."""
-    if not _PAPERS.exists():
-        return []
-    by_id: dict[str, dict] = {}
-    for p in _PAPERS.glob("*.json"):
+def load_papers(*, strict: bool = False) -> list[dict]:
+    """Saved papers, newest first, de-duplicated on id.
+
+    Default callers retain the historical tolerant read. Decision callers may opt
+    into a complete read: unreadable or malformed canonical entries must not make
+    an older confirmed paper look like the newest available evidence.
+    """
+    if strict:
+        import stat
+
         try:
-            paper = json.loads(p.read_text())
+            # glob suppresses some scan errors; a decision requires an observed listing.
+            paths = [p for p in _PAPERS.iterdir() if p.name.endswith(".json")]
+        except FileNotFoundError as error:
+            # Only observed absence under a real directory is an empty store.
+            # A dangling link or a path appearing after the failed read stays unavailable.
+            candidate = _PAPERS
+            while True:
+                try:
+                    info = candidate.lstat()
+                except FileNotFoundError:
+                    if candidate.parent == candidate:
+                        raise error
+                    candidate = candidate.parent
+                    continue
+                if candidate != _PAPERS and stat.S_ISDIR(info.st_mode):
+                    return []
+                raise error
+    else:
+        if not _PAPERS.exists():
+            return []
+        paths = _PAPERS.glob("*.json")
+
+    def order_key(paper: dict):
+        value = paper.get("generated_at") or ""
+        if not strict:
+            return value
+        if not isinstance(value, str) or not value:
+            raise TypeError("paper generation time is malformed")
+        stamp = datetime.fromisoformat(value)
+        if stamp.tzinfo is None or stamp.utcoffset() is None:
+            raise ValueError("paper generation time has no timezone")
+        return stamp
+
+    by_id: dict[str, dict] = {}
+    for p in paths:
+        try:
+            paper = _paper_read(p)
+            if _REDI_KEY in paper:
+                _, _, _, cache = _redigest_owner()
+                paper = _paper_public(_redigest_document(paper, p.resolve(), cache))
+            if strict:
+                if not isinstance(paper, dict):
+                    raise TypeError("paper is not a mapping")
+                if (
+                    not isinstance(paper.get("ticker"), str)
+                    or not paper["ticker"]
+                    or paper["ticker"] != paper["ticker"].strip()
+                ):
+                    raise TypeError("paper ticker is malformed")
+                if not isinstance(paper.get("id"), str) or not paper["id"].strip():
+                    raise TypeError("paper identity is malformed")
+                order_key(paper)
         except Exception:
+            if strict:
+                raise
             continue
         pid = paper.get("id") or p.stem
         cur = by_id.get(pid)
-        if cur is None or (paper.get("generated_at") or "") >= (cur.get("generated_at") or ""):
+        if strict and cur is not None:
+            if paper["ticker"].upper() != cur["ticker"].upper():
+                raise ValueError("paper identity conflicts across tickers")
+            if order_key(paper) == order_key(cur) and paper != cur:
+                raise ValueError("paper identity has conflicting same-time revisions")
+        if cur is None or order_key(paper) >= order_key(cur):
             by_id[pid] = paper
-    return sorted(by_id.values(), key=lambda x: x.get("generated_at") or "", reverse=True)
+    return sorted(by_id.values(), key=order_key, reverse=True)
 
 
-def latest_for(ticker: str) -> dict | None:
-    """The most recent saved paper for a ticker, or None."""
+def latest_for(ticker: str, *, strict: bool = False) -> dict | None:
+    """The most recent saved paper for a ticker, or None.
+
+    Strict reads require complete canonical evidence and a comparable clock.
+    """
     t = ticker.upper()
-    cands = [p for p in load_papers() if (p.get("ticker") or "").upper() == t]
+    papers = load_papers(strict=True) if strict else load_papers()
+    cands = [p for p in papers if (p.get("ticker") or "").upper() == t]
     return cands[0] if cands else None
 
 
 def write_feed_note(paper: dict) -> Path:
-    """Mirror the paper into data/research/notes/ so the Research Feed (/api/research) shows it.
+    """Mirror a paper without minting a second note for an owned re-digest."""
+    path = _paper_path(paper["id"], create=True)
+    with _paper_lock(path):
+        current = _paper_read(path)
+        if current is not None and _REDI_KEY in current:
+            _, _, _, cache = _redigest_owner()
+            current = _redigest_document(current, path, cache)
+            operation = current[_REDI_KEY]["operations"][-1]
+            if (operation["phase"] != "complete" or _paper_public(paper) != _paper_public(current)):
+                raise ValueError("paper_original_owned")
+            note = _paper_directory(_NOTES) / operation["filing"]["note"]["name"]
+            if _paper_bytes(note)[0] != _paper_note_body(current).encode():
+                raise ValueError("paper_note_original_changed")
+            return note
+        if _REDI_KEY in paper:
+            raise ValueError("paper_original_not_owned")
+        notes = _paper_directory(_NOTES)
+        slug = re.sub(r"[^a-z0-9]+", "-", f"{paper['ticker']}-research".lower())[:48].strip("-")
+        note = notes / f"{int(time.time())}_{slug}.md"
+        _paper_bytes(note)
+        raw = _paper_note_body(paper).encode()
+        fd = os.open(note, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "wb") as output:
+            output.write(raw)
+            output.flush()
+            os.fsync(output.fileno())
+        _paper_sync(notes)
+        if _paper_bytes(note)[0] != raw:
+            raise ValueError("paper_note_write_unconfirmed")
+        return note
 
-    Uses the `# Title` + `*tickers: … · ISO*` header app/web._parse_note expects."""
-    _NOTES.mkdir(parents=True, exist_ok=True)
-    slug = re.sub(r"[^a-z0-9]+", "-", f"{paper['ticker']}-research".lower())[:48].strip("-")
-    path = _NOTES / f"{int(time.time())}_{slug}.md"
-    title = f"{paper['ticker']} — Research Report ({paper['viability']}, {paper['research_score']}/100)"
-    body = render_markdown(paper)
-    # drop the duplicate H1 from the rendered body (the note has its own title line)
-    body = re.sub(r"^#\s+.*\n", "", body, count=1).lstrip()
-    path.write_text(f"# {title}\n\n*tickers: {paper['ticker']} · {paper['generated_at']}*\n\n{body}\n")
-    return path
+
+def _main(argv=None):
+    import argparse
+    parser = argparse.ArgumentParser(description="Research paper operations")
+    commands = parser.add_subparsers(dest="command", required=True)
+    command = commands.add_parser("redigest", help="Regrade an already-filed paper using saved evidence")
+    command.add_argument("--paper-id", required=True)
+    command.add_argument("--operation-id", required=True)
+    args = parser.parse_args(argv)
+    result = redigest_saved_paper(args.paper_id, operation_id=args.operation_id)
+    print(json.dumps(result, ensure_ascii=False))
+    return 0 if result.get("ok") else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

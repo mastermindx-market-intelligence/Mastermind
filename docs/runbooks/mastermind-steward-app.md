@@ -18,7 +18,86 @@ resolve_surface
 ```
 
 Every tool is read-only, idempotent, closed-world, structured, and requires
-`mastermind.steward.read` in authenticated HTTP mode.
+`mastermind.steward.read` in authenticated HTTP mode. This remains the
+installed/default `secretary-v2` generation and its exact six-tool contract is
+unchanged.
+
+## Explicit research-v3 app generation
+
+Company Knowledge / Deep Research compatibility is implemented as an opt-in
+Steward application generation, not as a seventh/eighth tool silently added to
+the protected Secretary contract:
+
+```text
+secretary-v2 (default)
+  -> protected six Secretary tools exactly as before
+
+research-v3 (candidate)
+  -> the same protected six tools
+  -> search(query)
+  -> fetch(id)
+```
+
+`search` is a deterministic catalog adapter over the existing protected
+`list_responsibilities` result. It does not crawl GitHub, Slack, Linear,
+Studio Direct, the filesystem, hosts, browser state, or the web. A stable
+research document id is a one-way SHA-256 identity derived from the protected
+responsibility reference (plus a fixed global attention document). No lookup
+table, cache, index authority, vector database, corpus, or persistent document
+store is created.
+
+`fetch` validates the id, rebuilds the current catalog, and then reconstructs
+the selected document only by invoking the existing protected Secretary reads.
+For a responsibility document those reads are `get_responsibility`,
+`explain_blocker`, `get_current_runtime`, `resolve_surface`, and
+`get_attention`; for the global attention document only `get_attention` is
+added after catalog resolution. Existing `DEGRADED`, `UNKNOWN`, freshness,
+reason-code, and source-attribution truth is rendered without inference.
+
+The research tool contract is pinned separately from the six-tool Secretary
+contract:
+
+```text
+research server version: 3.0.0
+research generation: 1
+research schema sha256: 89602f8d6baa76f644b5c41aa931531698a0626bb85e1eb36a593569e8982c7a
+research tool schema digest: 8eec65289bf72818fe8362cb02587b6cc78c6eb526a1f602edbd22ffff030918
+```
+
+Both tools advertise `readOnlyHint=true`, `destructiveHint=false`,
+`idempotentHint=true`, and `openWorldHint=false`. Successful research calls
+return structured MCP output plus the same JSON-encoded payload as text.
+
+### Citation URL proof boundary
+
+The current Steward/Control Room deployment has no truthful citation URL
+surface. The existing public edge admits only the OAuth protected-resource
+metadata path and the MCP resource path. The Control Room UI is an in-chat
+`ui://` resource, not an absolute browser URL. The HTTP app deliberately owns
+no users, browser sessions, cookies, or authorization-code store, and a bearer-
+authenticated MCP request is not proof that a citation click is user-openable.
+
+Therefore research-v3 currently returns `url=""` and fetch metadata
+`citation_status=CITATION_URL_SURFACE_MISSING`. The empty URL is deliberate:
+it suppresses citation metadata rather than inventing a non-resolving or
+unauthorized URL.
+
+The smallest acceptable future surface is a same-host authenticated
+`GET /evidence/steward/v1/<research-id>` view that:
+
+1. reuses an already-authoritative browser authentication/session owner;
+2. authorizes before any company-state read;
+3. recomputes the research id from current protected Steward evidence rather
+   than looking it up in a new store;
+4. renders only the same bounded, secret-sanitized fetched document;
+5. returns not-found for stale, forged, or unknown ids and fails closed on
+   source/auth changes; and
+6. creates no new session, token, retry, cache, index, or research database.
+
+No such browser-auth owner is present in the current Steward architecture, so
+this carrier does not create one. Until that owner exists and a real browser
+canary proves click-through, the truthful result is
+`CITATION_URL_SURFACE_MISSING`.
 
 ## Truthful capability ledger
 
@@ -29,6 +108,7 @@ cockpit:
 | Surface | Maximum truthful claim |
 |---|---|
 | Grouped-v2 six-tool protocol, exact A1 app/verifier policy binding, Host/raw-path/media/body guards, structured/JSON-text fallback, and inert UI source | `BUILT_NOT_PROVEN / PRODUCTION_INERT` |
+| research-v3 deterministic `search`/`fetch` adapter over the six-tool contract | `BUILT_NOT_PROVEN / STEWARD_RESEARCH_ADAPTER / PRODUCTION_INERT / CITATION_URL_SURFACE_MISSING` |
 | `list_responsibilities` | Complete `FACTS` when its current Agent OS source bundle is complete |
 | `explain_blocker` | Complete `FACTS` when the blocker source bundle is complete |
 | `get_responsibility` | `PARTIAL / DEGRADED`: the current Control Room source carries no authoritative objective |
@@ -96,6 +176,18 @@ Machine-readable surface:
 ~/.venvs/mastermind-steward/bin/python scripts/mastermind_steward_app.py \
   --describe
 ```
+
+Inspect the source-only research generation without changing the default:
+
+```bash
+~/.venvs/mastermind-steward/bin/python scripts/mastermind_steward_app.py \
+  --app-generation research-v3 \
+  --describe
+```
+
+A private-tunnel research canary can likewise use
+`--app-generation research-v3 --transport stdio`. This does not publish,
+install, or replace the existing Business app generation.
 
 ## Authenticated HTTP mode
 

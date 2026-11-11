@@ -1,0 +1,45 @@
+{
+  "schema": "hermes-v9-retained-source-join.v1",
+  "head": "8fa790f9d8c0dab55dda4e19050b62d8ff54adf7",
+  "incoming": "02fa64c7a342600212f28831fab03ddb2b784c43",
+  "resolution": "Retain v9 production changes, original strict completed-Go reader and all original eight installer fence cases; combine reusable service fixture with schema-aware retained history and integration case.",
+  "builds": [
+    {
+      "files": 109,
+      "manifest_sha256": "62b9c602b2f64575d3f3653d568d0054fdfd40e28cbe894980a8cd732c6c8945",
+      "inventory_sha256": "af3c804b937db667fed1f0772e6d6403a02c0789281f20803cc6e848acb7a110"
+    },
+    {
+      "files": 112,
+      "manifest_sha256": "2585deabe5f420729e10aebb3a4de87bdb514aa94f33f69a2dfaa645edf481c1",
+      "inventory_sha256": "71f3726bf1331f222e1024465d628ddb19b8ffdffe26593984d9eb62d1fdb634"
+    }
+  ],
+  "initial_enrollment_attempt": {
+    "state": "INCOMPLETE_TIMEOUT",
+    "timeout_seconds": 300,
+    "parent_process_exit": 1,
+    "junit_complete": false,
+    "log_sha256": "4a62a185b1531f88bbd9237e23f32d165ae86b269e7e10eb53e2891989c8d504",
+    "log_bytes": 118,
+    "qualification_claim": false,
+    "remaining_matching_processes": 0
+  },
+  "next_proof": "Existing eleven-file enrollment gate with its 45-minute budget on final composed source; positive JUnit count and zero failures/errors/skips required.",
+  "runtime_activated": false,
+  "source_whitespace_normalization": [
+    {
+      "path": "ops/native_fabric/quota_continuity/candidate/native_go_entry.py",
+      "before_sha256": "36128047df407955975392e3daffe53aa080bb7488c693154357fe6d35f1e47e",
+      "after_sha256": "88b335bcd6a6ebc33650b36387f4afab9c05a4c632dfff388c1a708be253d52c",
+      "change": "Remove one extra EOF newline; Python AST unchanged."
+    },
+    {
+      "path": "ops/native_fabric/quota_continuity/rollout/native_install.py",
+      "before_sha256": "347a950560e048929991e0da10d2ca0be4d24c5f4f1760242938efb6a48ce7c9",
+      "after_sha256": "8758c9227534c6538327af61c509ce95173837af0c8842dc3f281dd853b12c8b",
+      "change": "Remove one extra EOF newline; Python AST unchanged."
+    }
+  ],
+  "initial_build_scope": "Before the EOF-only normalization; final native109/112 builds and full enrollment proof remain required."
+}
