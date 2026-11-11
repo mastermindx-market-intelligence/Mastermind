@@ -1,0 +1,4 @@
+#!/bin/sh
+# A "server" that never answers: exits immediately, binds nothing, prints no
+# banner. Used to prove install's truthful never-answered failure path.
+exit 1

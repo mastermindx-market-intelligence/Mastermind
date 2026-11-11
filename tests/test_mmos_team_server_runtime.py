@@ -72,14 +72,18 @@ class TestInstall:
         # tree and receipt together.
         in_tree = destination / "INSTALL_RECEIPT.json"
         assert in_tree.is_file()
-        assert json.loads(in_tree.read_text())["schemaVersion"] == 1  # F2
+        assert json.loads(in_tree.read_text())["schemaVersion"] == node_install.SCHEMA_VERSION
         assert json.loads(in_tree.read_text())["nodePath"] == receipt["nodePath"]
         # activation markers carry the same payload
         config = json.loads((root / "config" / "node-runtime.json").read_text())
-        assert config["schemaVersion"] == 1
+        assert config["schemaVersion"] == node_install.SCHEMA_VERSION
         assert (root / "runtime" / "install-receipt.json").read_text() == in_tree.read_text()
         assert Path(receipt["nodePath"]).stat().st_mode & stat.S_IXUSR
         assert (root / "runtime" / "install-receipt.json").stat().st_mode & 0o077 == 0
+        # the interpreter the runner must later use is recorded (item 13)
+        recorded = (root / "config" / "python3-path").read_text().strip()
+        assert os.path.isabs(recorded) and os.path.isfile(recorded)
+        assert (root / "config" / "python3-path").stat().st_mode & 0o077 == 0
         # staging is REALLY empty after success — no copy, no leftovers
         assert os.listdir(root / "runtime" / "staging") == []
         assert list(root.glob("runtime/.node-install-*")) == []
@@ -92,7 +96,69 @@ class TestInstall:
         (root / "config" / "node-runtime.json").unlink()
         node_install.install_node(str(root), str(archive), str(checksum))
         assert "activation repaired" in capsys.readouterr().out
-        assert json.loads((root / "config" / "node-runtime.json").read_text())["schemaVersion"] == 1
+        assert json.loads((root / "config" / "node-runtime.json").read_text())["schemaVersion"] == node_install.SCHEMA_VERSION
+
+    def test_repair_rerecords_the_interpreter(self, inputs, capsys):
+        # Attack finding 1: a kill between the publish rename and the
+        # interpreter write leaves config/python3-path absent; the retry takes
+        # the repair branch. Repairing without re-recording the interpreter
+        # printed success while every later runner start would exit 78.
+        root, archive, checksum = inputs
+        node_install.install_node(str(root), str(archive), str(checksum))
+        (root / "config" / "python3-path").unlink()
+        node_install.install_node(str(root), str(archive), str(checksum))
+        out = capsys.readouterr().out
+        assert "activation repaired" in out
+        recorded = (root / "config" / "python3-path").read_text().strip()
+        assert os.path.isabs(recorded) and os.path.isfile(recorded)
+
+    def test_stale_python3_path_temp_cleaned_under_lock(self, inputs, capsys):
+        # Attack finding 2: a kill during private_write(python3-path) leaves
+        # config/python3-path.tmp; O_EXCL then refuses every later install
+        # forever. The dead-leftover cleanup must remove it so the runbook's
+        # "re-run this exact command" actually succeeds.
+        root, archive, checksum = inputs
+        node_install.install_node(str(root), str(archive), str(checksum))
+        (root / "config" / "python3-path").unlink()
+        (root / "config" / "python3-path.tmp").write_text("")
+        node_install.install_node(str(root), str(archive), str(checksum))
+        assert "activation repaired" in capsys.readouterr().out
+        assert (root / "config" / "python3-path").is_file()
+        assert not (root / "config" / "python3-path.tmp").exists()
+
+    def test_marker_failure_after_publish_retry_completes_activation(self, inputs, capsys):
+        # Attack finding 3: an OS error in the instant after the publish rename
+        # (here: config/ unwritable exactly when the markers are written)
+        # leaves the tree published with markers missing. The re-run must
+        # complete the WHOLE activation — including the interpreter record —
+        # not report success over an unstartable runtime.
+        root, archive, checksum = inputs
+        (root / "config").mkdir(mode=0o700)
+        os.chmod(root / "config", 0o500)
+        with pytest.raises(OSError):
+            node_install.install_node(str(root), str(archive), str(checksum))
+        # the publish rename happened: the tree (with its in-tree receipt) is
+        # on disk — the honest intermediate state — but no config markers
+        assert (root / "runtime" / PREFIX / "INSTALL_RECEIPT.json").is_file()
+        assert not (root / "config" / "node-runtime.json").exists()
+        os.chmod(root / "config", 0o700)
+        node_install.install_node(str(root), str(archive), str(checksum))
+        out = capsys.readouterr().out
+        assert "activation repaired" in out
+        assert (root / "config" / "node-runtime.json").is_file()
+        recorded = (root / "config" / "python3-path").read_text().strip()
+        assert os.path.isabs(recorded) and os.path.isfile(recorded)
+
+    def test_staging_leftover_names_its_removal(self, inputs):
+        # Attack finding 10: a non-directory .node-install-* leftover refused
+        # without naming the removal, leaving the operator a one-line refusal
+        # and no next action.
+        root, archive, checksum = inputs
+        staging = root / "runtime" / "staging"
+        staging.mkdir(parents=True, mode=0o700)
+        (staging / ".node-install-notadir").write_text("debris\n")
+        with pytest.raises(node_install.InstallError, match=r"rm -rf"):
+            node_install.install_node(str(root), str(archive), str(checksum))
 
     def test_destination_with_foreign_receipt_refused(self, inputs):
         root, archive, checksum = inputs
@@ -197,12 +263,16 @@ class TestInstall:
         with pytest.raises(node_install.InstallError, match="without this exact receipt"):
             node_install.install_node(str(root), str(archive), str(checksum))
         # even a FULLY forged receipt — correct fields plus a treeSha256
-        # recomputed over the tampered tree — refuses: the published tree must
-        # still be byte-identical to a fresh extraction of the official archive.
+        # recomputed over the tampered tree, planted in the tree AND in both
+        # outside receipts — refuses: the published tree must still be
+        # byte-identical to a fresh extraction of the official archive.
         forged = json.loads(planted.read_text())
         forged["version"] = "v" + node_install.VERSION
         forged["treeSha256"] = node_install.tree_sha256(root / "runtime" / PREFIX)
-        planted.write_text(json.dumps(forged, indent=2) + "\n")
+        payload = json.dumps(forged, indent=2) + "\n"
+        planted.write_text(payload)
+        (root / "runtime" / "install-receipt.json").write_text(payload)
+        (root / "config" / "node-runtime.json").write_text(payload)
         with pytest.raises(node_install.InstallError, match="fresh extraction"):
             node_install.install_node(str(root), str(archive), str(checksum))
 
@@ -240,14 +310,56 @@ class TestInstall:
         node_install.install_node(str(root), str(archive), str(checksum))
         assert stat.S_IMODE((root / "config").stat().st_mode) == 0o700
 
-    def test_half_finished_staging_rejected(self, inputs):
+    def test_leftover_staging_from_dead_run_is_cleaned(self, inputs):
+        # F5: a killed install leaves .node-install-* staging behind; the next
+        # run holds the install lock, recognizes its own debris and succeeds.
         root, archive, checksum = inputs
         (root / "runtime/staging/.node-install-unfinished").mkdir(parents=True, mode=0o700)
-        for p in (root / "runtime", root / "runtime/staging"):
-            p.chmod(0o700)
-        with pytest.raises(node_install.InstallError, match="half-finished"):
+        (root / "runtime/staging/.node-install-unfinished/junk").write_text("x")
+        node_install.install_node(str(root), str(archive), str(checksum))
+        assert (root / "config" / "node-runtime.json").is_file()
+        assert os.listdir(root / "runtime" / "staging") == []
+
+    def test_leftover_receipt_temp_from_dead_run_is_cleaned(self, inputs):
+        # F6: a kill between open() and replace() leaves node-runtime.json.tmp;
+        # the retry removes it under the lock instead of refusing forever.
+        root, archive, checksum = inputs
+        (root / "runtime" / "staging").mkdir(parents=True, mode=0o700)
+        (root / "config").mkdir()
+        (root / "config" / "node-runtime.json.tmp").write_text("")
+        node_install.install_node(str(root), str(archive), str(checksum))
+        assert (root / "config" / "node-runtime.json").is_file()
+        assert not (root / "config" / "node-runtime.json.tmp").exists()
+
+    def test_conflicting_outside_receipt_refuses_before_publish(self, inputs):
+        # F4: a stale/foreign runtime/install-receipt.json must refuse with
+        # nothing published: no destination tree, no activation marker.
+        root, archive, checksum = inputs
+        (root / "runtime" / "staging").mkdir(parents=True, mode=0o700)
+        (root / "runtime" / "install-receipt.json").write_text('{"stale": true}\n')
+        with pytest.raises(node_install.InstallError, match="conflicting existing receipt"):
             node_install.install_node(str(root), str(archive), str(checksum))
-        assert not (root / "config/node-runtime.json").exists()
+        assert not (root / "runtime" / PREFIX).exists()
+        assert not (root / "config" / "node-runtime.json").exists()
+        assert os.listdir(root / "runtime" / "staging") == []
+
+    def test_second_installer_refuses_while_lock_held(self, inputs):
+        # F5: the install lock means one installer at a time per root.
+        root, archive, checksum = inputs
+        import fcntl
+        runtime = root / "runtime" / "staging"
+        runtime.mkdir(parents=True, mode=0o700)
+        lock_path = root / "runtime" / "install.lock"
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            with pytest.raises(node_install.InstallError, match="already running"):
+                node_install.install_node(str(root), str(archive), str(checksum))
+        finally:
+            os.close(fd)
+        # and once released the install proceeds
+        node_install.install_node(str(root), str(archive), str(checksum))
+        assert (root / "config" / "node-runtime.json").is_file()
 
 
 class TestCheckedMembers:
@@ -341,7 +453,9 @@ def _sym(name, target):
 
 
 def fake_runtime(tmp_path):
-    """A root whose receipts name an in-root node and a complete fake dist."""
+    """A root whose receipts name an in-root pinned node tree and a fake dist.
+    The in-tree receipt agrees with the config receipt on treeSha256, exactly
+    as a real install leaves them (item 12)."""
     root = tmp_path / "server"
     root.mkdir(mode=0o700)
     install_dir = root / "runtime" / PREFIX
@@ -350,23 +464,92 @@ def fake_runtime(tmp_path):
     node.write_text("#!/bin/sh\n")
     node.chmod(0o700)
     build = root / "runtime" / "packed" / "dist"
+    recorded = []
     for name in node_install.REQUIRED_DIST_FILES:
         target = build / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("x")
+        body = b"x"
+        recorded.append({"path": name, "bytes": len(body),
+                         "sha256": hashlib.sha256(body).hexdigest()})
+    # Panel R1: the packed tree carries file-digests.json beside dist/ and the
+    # post-hash BUILD_RECEIPT inside it, as pack_server.mjs leaves them.
+    (build / "BUILD_RECEIPT.json").write_text("{}\n")
+    (root / "runtime" / "packed" / "file-digests.json").write_text(
+        json.dumps(recorded))
+    tree_digest = node_install.tree_sha256(install_dir)
     node_receipt = {
-        "schemaVersion": 1, "version": "v" + node_install.VERSION,
+        "schemaVersion": node_install.SCHEMA_VERSION,
+        "version": "v" + node_install.VERSION,
         "archiveSha256": node_install.OFFICIAL_SHA256,
         "nodePath": str(node), "installDir": str(install_dir),
+        "treeSha256": tree_digest,
     }
     server_receipt = {
-        "schemaVersion": 1, "serverBin": str(build / "bin.mjs"),
+        "schemaVersion": node_install.SCHEMA_VERSION,
+        "serverBin": str(build / "bin.mjs"),
         "buildDir": str(build),
     }
+    (install_dir / "INSTALL_RECEIPT.json").write_text(json.dumps(node_receipt))
     (root / "config").mkdir()
     (root / "config" / "node-runtime.json").write_text(json.dumps(node_receipt))
     (root / "config" / "server-runtime.json").write_text(json.dumps(server_receipt))
     return root, node, build
+
+
+class TestItem12PinnedResolve:
+    def test_runtime_paths_resolves_fake_tree_with_digest(self, tmp_path):
+        # resolve verifies the tree digest by default (measured ~0.3s on the
+        # real tree): the fake tree's digest was computed from the tree.
+        root, node, build = fake_runtime(tmp_path)
+        assert node_install.runtime_paths(str(root)) == (str(node), str(build / "bin.mjs"))
+
+    def test_receipt_install_dir_not_pinned_refused(self, tmp_path):
+        # Item 12: any other in-root directory with an executable bin/node
+        # must be refused even though the shape checks pass.
+        root, _, _ = fake_runtime(tmp_path)
+        sneaky = root / "runtime" / "impostor"
+        (sneaky / "bin").mkdir(parents=True)
+        sneaky_node = sneaky / "bin" / "node"
+        sneaky_node.write_text("#!/bin/sh\n")
+        sneaky_node.chmod(0o700)
+        receipt = json.loads((root / "config" / "node-runtime.json").read_text())
+        receipt["installDir"] = str(sneaky)
+        receipt["nodePath"] = str(sneaky_node)
+        (root / "config" / "node-runtime.json").write_text(json.dumps(receipt))
+        with pytest.raises(node_install.InstallError, match="pinned"):
+            node_install.runtime_paths(str(root))
+
+    def test_missing_in_tree_receipt_refused(self, tmp_path):
+        root, _, _ = fake_runtime(tmp_path)
+        (root / "runtime" / PREFIX / "INSTALL_RECEIPT.json").unlink()
+        with pytest.raises(node_install.InstallError, match="in-tree"):
+            node_install.runtime_paths(str(root))
+
+    def test_in_tree_receipt_tree_digest_disagreement_refused(self, tmp_path):
+        root, _, _ = fake_runtime(tmp_path)
+        in_tree = root / "runtime" / PREFIX / "INSTALL_RECEIPT.json"
+        tampered = json.loads(in_tree.read_text())
+        tampered["treeSha256"] = "0" * 64
+        in_tree.write_text(json.dumps(tampered))
+        with pytest.raises(node_install.InstallError, match="disagree on treeSha256"):
+            node_install.runtime_paths(str(root))
+
+    def test_tampered_node_file_fails_digest_verify(self, tmp_path):
+        # F23/item 12: resolve recomputes the digest and refuses a swapped
+        # bin/node even when every receipt still agrees with itself.
+        root, node, _ = fake_runtime(tmp_path)
+        node.write_text("#!/bin/sh\n# replaced\n")
+        node.chmod(0o700)
+        with pytest.raises(node_install.InstallError, match="treeSha256"):
+            node_install.runtime_paths(str(root))
+
+    def test_no_verify_tree_skips_digest(self, tmp_path):
+        root, node, build = fake_runtime(tmp_path)
+        node.write_text("#!/bin/sh\n# replaced\n")
+        node.chmod(0o700)
+        assert node_install.runtime_paths(str(root), verify_tree=False) == \
+            (str(node), str(build / "bin.mjs"))
 
 
 class TestRuntimePaths:
@@ -377,9 +560,9 @@ class TestRuntimePaths:
     def test_wrong_schema_version_rejected(self, tmp_path):
         root, _, _ = fake_runtime(tmp_path)
         receipt = json.loads((root / "config" / "server-runtime.json").read_text())
-        receipt["schemaVersion"] = 2
+        receipt["schemaVersion"] = 1
         (root / "config" / "server-runtime.json").write_text(json.dumps(receipt))
-        with pytest.raises(node_install.InstallError, match="unsupported runtime receipt"):
+        with pytest.raises(node_install.InstallError, match="reinstall"):
             node_install.runtime_paths(str(root))
 
     def test_symlinked_node_rejected(self, tmp_path):
@@ -419,7 +602,8 @@ class TestRuntimePaths:
         receipt["installDir"] = str(outside)
         receipt["nodePath"] = str(outside / "bin" / "node")
         (root / "config" / "node-runtime.json").write_text(json.dumps(receipt))
-        with pytest.raises(node_install.InstallError, match="escapes the server root"):
+        # item 12: the pinned-installDir refusal fires before any escape check
+        with pytest.raises(node_install.InstallError, match="pinned"):
             node_install.runtime_paths(str(root))
 
     def test_nodepath_install_dir_crosscheck(self, tmp_path):
@@ -428,7 +612,7 @@ class TestRuntimePaths:
         receipt["nodePath"] = str(root / "runtime" / PREFIX / "bin" / "node2")
         (root / "config" / "node-runtime.json").write_text(json.dumps(receipt))
         with pytest.raises(node_install.InstallError,
-                           match="does not resolve to installDir/bin/node"):
+                           match="nodePath must be installDir/bin/node"):
             node_install.runtime_paths(str(root))
 
     def test_resolve_validates_root_like_install(self, tmp_path, monkeypatch):
@@ -450,7 +634,23 @@ class TestDoctor:
         with patch.object(node_install, "runtime_paths",
                           side_effect=node_install.InstallError("missing packed runtime")):
             assert node_install.doctor(str(root), "com.mastermind.t3-team-dev-tsh") == 1
-        assert "run/access.txt" not in str(node_install.doctor.__code__.co_consts)
+
+    def test_doctor_never_prints_pairing_file_contents(self, tmp_path, capsys):
+        # F26 (replaces the vacuous co_consts assert): a sentinel token in the
+        # pairing file must never reach doctor's output.
+        from unittest.mock import Mock, patch
+        root, _, _ = fake_runtime(tmp_path)
+        (root / "run").mkdir()
+        (root / "run" / "port").write_text("50809\n")
+        access = root / "run" / "access.txt"
+        access.write_text("Token: PAIRTOKEN-SENSITIVE-123\n")
+        access.chmod(0o600)
+        with patch.object(node_install.subprocess, "run",
+                          return_value=Mock(returncode=1, stdout="")):
+            assert node_install.doctor(str(root), "com.mastermind.t3-team-dev-tsh") == 1
+        out = capsys.readouterr().out
+        assert "PAIRTOKEN-SENSITIVE-123" not in out
+        assert "pairingFileAgeSeconds" in out
 
     def test_doctor_never_executes_the_installed_node(self, tmp_path, capsys):
         # Attack finding 6: doctor attests provenance and must never execute
@@ -468,6 +668,72 @@ class TestDoctor:
         out = capsys.readouterr().out
         assert "nodeExecCheck=skipped-receipt-attested" in out
         assert f"nodeVersion=v{node_install.VERSION}" in out
+        assert "treeVerified=node+server" in out  # F23+R1: both trees re-digested
+
+    def test_doctor_success_path_returns_zero(self, tmp_path, capsys):
+        # The reviewer found doctor's success path untested: loaded + answering
+        # must return 0 and print the health rows.
+        from unittest.mock import Mock, patch
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        root, _, _ = fake_runtime(tmp_path)
+        (root / "run").mkdir()
+        port = 0
+        holder = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"ok")
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(("127.0.0.1", 0), Handler)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        holder.append(server)
+        try:
+            (root / "run" / "port").write_text(f"{port}\n")
+            with patch.object(node_install.subprocess, "run",
+                              return_value=Mock(returncode=0, stdout=f"pid = {os.getpid()}\n")):
+                assert node_install.doctor(str(root), "com.mastermind.t3-team-dev-tsh") == 0
+            out = capsys.readouterr().out
+            assert "loaded=yes" in out and f"pid={os.getpid()}" in out
+            assert f"answeringPort={port}" in out
+            assert "treeVerified=node+server" in out
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_doctor_failure_line_for_down_server(self, tmp_path, capsys):
+        # Attack finding 6: the runbook documents "failure prints one line
+        # doctor_error=<reason>"; the commonest failure (label not loaded)
+        # used to print only the metadata block and exit 1.
+        from unittest.mock import Mock, patch
+        root, _, _ = fake_runtime(tmp_path)
+        (root / "run").mkdir()
+        (root / "run" / "port").write_text("50809\n")
+        with patch.object(node_install.subprocess, "run",
+                          return_value=Mock(returncode=1, stdout="")):
+            assert node_install.doctor(str(root), "com.mastermind.t3-team-dev-tsh") == 1
+        out = capsys.readouterr().out
+        assert "doctor_error=" in out and "not loaded" in out
+
+    def test_doctor_failure_line_for_unanswered_port(self, tmp_path, capsys):
+        # Attack finding 6, second shape: loaded but not answering must also
+        # print its one doctor_error= line, not just the metadata block.
+        from unittest.mock import Mock, patch
+        root, _, _ = fake_runtime(tmp_path)
+        (root / "run").mkdir()
+        (root / "run" / "port").write_text("50809\n")  # nothing listens here
+        with patch.object(node_install.subprocess, "run",
+                          return_value=Mock(returncode=0, stdout="pid = 4242\n")):
+            assert node_install.doctor(str(root), "com.mastermind.t3-team-dev-tsh") == 1
+        out = capsys.readouterr().out
+        assert "doctor_error=port 50809 not answering" in out
 
     def test_attack_reproducer_exists(self):
         attack = (REPO / "tools/mmos_team_server/attack_tsh_node_install.py").read_text()

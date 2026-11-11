@@ -25,6 +25,23 @@ PORT_MAX=3810
 
 die() { echo "t3_dev: $1" >&2; exit 1; }
 
+# Item 13 / F27: never pick the interpreter from the caller's PATH — whoever
+# controls PATH would choose the program that guards every check. An explicit
+# absolute interpreter only; a missing one dies in one line (the old code
+# silently fell back to /usr/bin/python3 and, when that was absent too,
+# refused every root with a misleading "refusing unsafe root").
+PYTHON3_BIN="${PYTHON3_BIN:-}"
+if [ -z "$PYTHON3_BIN" ]; then
+  if [ -x /opt/homebrew/bin/python3.12 ]; then PYTHON3_BIN=/opt/homebrew/bin/python3.12
+  elif [ -x /usr/bin/python3 ]; then PYTHON3_BIN=/usr/bin/python3
+  fi
+fi
+case "$PYTHON3_BIN" in
+  /*) [ -f "$PYTHON3_BIN" ] && [ -x "$PYTHON3_BIN" ] \
+    || die "python3 interpreter missing or not executable: ${PYTHON3_BIN:-none found} (set PYTHON3_BIN to an absolute python3)" ;;
+  *) die "PYTHON3_BIN must be an absolute path, got: $PYTHON3_BIN" ;;
+esac
+
 realpath_of() { (cd "$1" 2>/dev/null && pwd -P) || echo ""; }
 
 resolved_home() { realpath_of "$HOME_DIR"; }
@@ -43,7 +60,29 @@ port_forbidden() {
   return 1
 }
 
-port_busy() { nc -z 127.0.0.1 "$1" >/dev/null 2>&1; }
+# Item 11: one port probe method that FAILS CLOSED — if we cannot tell
+# whether the port is busy (no interpreter, non-numeric input, tool error),
+# we report it busy. nc behaved inconsistently on odd inputs ("03773" open,
+# "003773" closed) and disappears with Xcode CLT.
+port_busy() {
+  "$PYTHON3_BIN" -c 'import socket,sys
+try:
+    busy = socket.socket().connect_ex(("127.0.0.1", int(sys.argv[1]))) == 0
+except ValueError:
+    busy = True
+sys.exit(0 if busy else 1)' "$1" >/dev/null 2>&1
+  _rc=$?
+  [ "$_rc" -eq 1 ] && return 1
+  return 0
+}
+
+# F10/F21: a port is acceptable only as a canonical decimal 1024..65535 —
+# no leading zero ("03773" passed the old integer check and reached the live
+# server on 3773 through curl, nc and Node alike).
+canonical_port() {
+  case "$1" in ''|*[!0-9]*|0*) return 1 ;; esac
+  [ "$1" -ge 1024 ] && [ "$1" -le 65535 ]
+}
 
 pick_port() {
   p="$PORT_MIN"
@@ -66,6 +105,7 @@ cmd_start() {
   check_home_safe
   PORT="${MMOS_T3_DEV_PORT:-}"
   if [ -z "$PORT" ]; then PORT=$(pick_port) || die "no free port in $PORT_MIN..$PORT_MAX"; fi
+  canonical_port "$PORT" || die "port must be a canonical decimal integer 1024..65535 without leading zero, got: $PORT"
   port_forbidden "$PORT" && die "port $PORT is reserved for the live T3 servers"
   port_busy "$PORT" && die "port $PORT is busy"
   mkdir -p "$RUN_DIR" "$HOME_DIR" "$DEV_ROOT/claude-home" "$DEV_ROOT/scratch-project"
@@ -91,17 +131,32 @@ cmd_start() {
     i=$((i + 1)); sleep 1
   done
   [ "$code" = "200" ] || { kill "$pid" 2>/dev/null; die "server not ready on :$PORT (last code $code)"; }
-  # Capture the pairing credential into the 0600 access file; never print it.
-  # The banner flushes shortly after the port answers; poll for it briefly.
-  i=0
-  while [ "$i" -lt 15 ]; do
-    grep -E '^(Connection string|Token|Pairing URL):' "$LOG_FILE" > "$ACCESS_FILE" || true
-    grep -q '^Pairing URL:' "$ACCESS_FILE" && break
-    i=$((i + 1)); sleep 1
+  # F16: capture into a temp and replace ACCESS_FILE only on success — the
+  # old loop truncated the live credential on a failed grep; and STARTED must
+  # never claim a saved credential that was not captured.
+  if capture_access_dev; then
+    echo "STARTED pid=$pid port=$PORT home=$HOME_DIR"
+    echo "pairing access saved to $ACCESS_FILE (mode 0600; not printed)"
+  else
+    echo "STARTED pid=$pid port=$PORT home=$HOME_DIR"
+    echo "pairing access NOT captured; the banner is in $LOG_FILE (0600) — grep '^Pairing URL:' it into $ACCESS_FILE by hand if needed"
+  fi
+}
+
+capture_access_dev() {
+  _tmp="$ACCESS_FILE.new"
+  [ -d "$ACCESS_FILE" ] && return 1
+  rm -f "$_tmp"
+  _i=0
+  while [ "$_i" -lt 15 ]; do
+    grep -E '^(Connection string|Token|Pairing URL):' "$LOG_FILE" > "$_tmp" 2>/dev/null || true
+    grep -q '^Pairing URL:' "$_tmp" 2>/dev/null && break
+    _i=$((_i + 1)); sleep 1
   done
-  chmod 600 "$ACCESS_FILE"
-  echo "STARTED pid=$pid port=$PORT home=$HOME_DIR"
-  echo "pairing access saved to $ACCESS_FILE (mode 0600; not printed)"
+  grep -q '^Pairing URL:' "$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 1; }
+  chmod 600 "$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 1; }
+  mv "$_tmp" "$ACCESS_FILE" 2>/dev/null || { rm -f "$_tmp"; return 1; }
+  return 0
 }
 
 cmd_stop() {
@@ -140,7 +195,10 @@ cmd_selftest() {
   fail=0
   port_forbidden 3773 && echo "guard 3773 forbidden: ok" || { echo "guard 3773 forbidden: FAIL"; fail=1; }
   port_forbidden 3774 && echo "guard 3774 forbidden: ok" || { echo "guard 3774 forbidden: FAIL"; fail=1; }
-  port_forbidden 3790 || echo "guard 3790 allowed: ok" || { echo "guard 3790 allowed: FAIL"; fail=1; }
+  # F9: the old `port_forbidden 3790 || echo ok || { FAIL }` could never
+  # fail — the middle echo always succeeded. Every allowed/refused guard is
+  # now an if-test of the guard itself, so a broken guard fails selftest.
+  if port_forbidden 3790; then echo "guard 3790 allowed: FAIL"; fail=1; else echo "guard 3790 allowed: ok"; fi
   ( HOME_DIR="$REAL_T3_HOME" check_home_safe ) 2>/dev/null && { echo "guard real-home refuse: FAIL"; fail=1; } \
     || echo "guard real-home refuse: ok"
   ( HOME_DIR="$REAL_T3_HOME/foo" check_home_safe ) 2>/dev/null && { echo "guard inside-real-home refuse: FAIL"; fail=1; } \

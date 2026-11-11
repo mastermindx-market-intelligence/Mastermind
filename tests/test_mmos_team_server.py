@@ -40,7 +40,10 @@ def run_tool(*args, env_extra=None, input=None):
         env.update(env_extra)
     return subprocess.run(
         ["/bin/sh", str(TOOL), *args], capture_output=True, text=True, env=env,
-        timeout=60, input=input,
+        # 180 s, not 60: this Mac runs at load >100 during lane work and a
+        # healthy install (which itself waits up to 180 s for first boot)
+        # can exceed 60 s of wall clock without anything being wrong.
+        timeout=180, input=input,
     )
 
 
@@ -52,12 +55,17 @@ def launchagents_dir():
 
 @pytest.fixture()
 def dev_root(tmp_path):
-    """A plausible root outside ~/.t3 with a 0600 fabric.env, as seed leaves it."""
+    """A plausible root outside ~/.t3 with a 0600 fabric.env, as seed leaves
+    it. Panel R5: --server-bin roots must carry runbook step 3's interpreter
+    record, exactly as a real root does after step 3."""
     root = tmp_path / "t3-team"
     root.mkdir()
     envf = root / "fabric.env"
     envf.write_text("ANTHROPIC_BASE_URL=https://example.internal/api\n")
     envf.chmod(0o600)
+    (root / "config").mkdir()
+    (root / "config" / "python3-path").write_text(
+        "/opt/homebrew/bin/python3.12\n")
     return root
 
 
@@ -257,6 +265,10 @@ class TestAttackRoundFixes:
         root.mkdir(mode=0o700)
         (root / "fabric.env").write_text("ANTHROPIC_BASE_URL=https://x\n")
         (root / "fabric.env").chmod(0o600)
+        (root / "config").mkdir()
+        # Panel R5: a rollback root carries step 3's interpreter record.
+        (root / "config" / "python3-path").write_text(
+            "/opt/homebrew/bin/python3.12\n")
         victim = tmp_path / "victim"
         victim.mkdir()
         os.symlink(victim, root / "home")
@@ -276,6 +288,11 @@ class TestAttackRoundFixes:
         root.chmod(0o755)
         (root / "fabric.env").write_text("ANTHROPIC_BASE_URL=https://x\n")
         (root / "fabric.env").chmod(0o600)
+        (root / "config").mkdir()
+        # Panel R5: interpreter record present, so the test reaches the root-
+        # mode refusal it exists to check.
+        (root / "config" / "python3-path").write_text(
+            "/opt/homebrew/bin/python3.12\n")
         r = install(root, free_port(), "com.example.a5-loose",
                     "--server-bin", "/usr/bin/true",
                     env_extra={"TEAM_SERVER_LAUNCHAGENTS_DIR": launchagents_dir})
@@ -288,6 +305,24 @@ class TestAttackRoundFixes:
         # default must be gone from the script text.
         root = tmp_path / "root"
         run = root / "run"
+        cfg = root / "config"
+        run.mkdir(parents=True)
+        cfg.mkdir(parents=True)
+        (root / "fabric.env").write_text("DUMMY=1\n")
+        (root / "fabric.env").chmod(0o600)
+        (cfg / "python3-path").write_text("/opt/homebrew/bin/python3.12\n")
+        (run / "port").write_text(str(free_port()))
+        r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
+                           capture_output=True, text=True, timeout=30)
+        assert r.returncode == 78
+        assert "refusing to guess" in (r.stdout + r.stderr)
+        assert ".t3/bin/t3" not in RUNNER.read_text()
+
+    def test_runner_refuses_without_recorded_interpreter(self, tmp_path):
+        # Item 13: no recorded interpreter means a one-line refusal — never a
+        # PATH search for python3.
+        root = tmp_path / "root"
+        run = root / "run"
         run.mkdir(parents=True)
         (root / "fabric.env").write_text("DUMMY=1\n")
         (root / "fabric.env").chmod(0o600)
@@ -295,8 +330,51 @@ class TestAttackRoundFixes:
         r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
                            capture_output=True, text=True, timeout=30)
         assert r.returncode == 78
-        assert "refusing to guess" in (r.stdout + r.stderr)
-        assert ".t3/bin/t3" not in RUNNER.read_text()
+        assert "python3-path" in (r.stdout + r.stderr)
+        # and a relative or non-executable recording is refused just the same
+        for bad in ("usr/bin/python3", "/nonexistent/python3"):
+            (root / "config").mkdir(exist_ok=True)
+            (root / "config" / "python3-path").write_text(bad + "\n")
+            r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
+                               capture_output=True, text=True, timeout=30)
+            assert r.returncode == 78, bad
+            assert "python3-path" in (r.stdout + r.stderr)
+
+    def test_runner_refuses_non_canonical_port_file(self, tmp_path):
+        # F21: an empty or leading-zero port file must refuse at the runner,
+        # not pass through to T3CODE_PORT.
+        root = tmp_path / "root"
+        run = root / "run"
+        cfg = root / "config"
+        run.mkdir(parents=True)
+        cfg.mkdir(parents=True)
+        (root / "fabric.env").write_text("DUMMY=1\n")
+        (root / "fabric.env").chmod(0o600)
+        (cfg / "python3-path").write_text("/opt/homebrew/bin/python3.12\n")
+        (cfg / "server-bin").write_text("/usr/bin/false\n")
+        for bad in ("", "03773", "65536", "37x3"):
+            (run / "port").write_text(bad + "\n")
+            r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
+                               capture_output=True, text=True, timeout=30)
+            assert r.returncode == 78, repr(bad)
+            assert "non-canonical port" in (r.stdout + r.stderr), repr(bad)
+
+    def test_runner_fails_closed_when_run_dir_cannot_exist(self, tmp_path):
+        # F28: a read-only root must produce one operator-readable line, not a
+        # python traceback every ThrottleInterval.
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "fabric.env").write_text("DUMMY=1\n")
+        (root / "fabric.env").chmod(0o600)
+        root.chmod(0o500)  # read+execute only: run/ cannot be created
+        try:
+            r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
+                               capture_output=True, text=True, timeout=30)
+            assert r.returncode == 73
+            assert "cannot create" in (r.stdout + r.stderr)
+            assert "Traceback" not in (r.stdout + r.stderr)
+        finally:
+            root.chmod(0o700)
 
 
 class TestRunnerHygiene:
@@ -328,6 +406,7 @@ class TestRunnerHygiene:
         cfg.mkdir(parents=True)
         (root / "fabric.env").write_text("DUMMY=1\n")
         (root / "fabric.env").chmod(0o600)
+        (cfg / "python3-path").write_text("/opt/homebrew/bin/python3.12\n")
         (cfg / "server-bin").write_text("/usr/bin/false\n")
         (cfg / "log-cap").write_text("1024\n")
         (run / "port").write_text(str(free_port()))
@@ -357,8 +436,10 @@ class TestLibraryReuse:
 class TestPlistShape:
     def test_plist_wellformed_and_minimal(self, dev_root, launchagents_dir):
         # Extract the heredoc plist from the script and validate its shape.
+        # LOW4: the heredoc targets the temp file ($PLIST_TMP) that is renamed
+        # into place, not $PLIST directly.
         text = TOOL.read_text()
-        m = re.search(r"cat > \"\$PLIST\" <<EOF\n(.*?)\nEOF", text, re.S)
+        m = re.search(r"cat > \"\$PLIST_TMP\" <<EOF\n(.*?)\nEOF", text, re.S)
         assert m, "plist heredoc not found"
         body = m.group(1)
         body = body.replace("$LABEL", "com.example.shape").replace("$ROOT", "/tmp/root")

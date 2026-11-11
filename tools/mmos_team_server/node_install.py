@@ -8,13 +8,22 @@ bytes that reach the destination are exactly the bytes that were verified.
 The install receipt travels inside the staged tree, and one atomic rename
 publishes tree and receipt together. The caller must create the private
 server root; this tool never chmods a pre-existing root into private.
+
+Failure-path contract (lane TSHc): every refusal prints one line —
+`team_runtime: …` for install/resolve, `doctor_error=…` for doctor — never a
+traceback; a refusal publishes nothing (every outside receipt that could
+conflict is checked before the publishing rename); a killed install leaves
+only staging debris and a stale temp, both of which the next run removes
+under an exclusive install lock before doing any work.
 """
 import argparse
+import fcntl
 import hashlib
 import json
 import os
 import re
 import shutil
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -30,6 +39,10 @@ BUILD_REQUIREMENT = "^22.18.0 || ^24.11.0 || >=26.0.0"
 MEMBER_BUDGET = 30000
 BYTE_BUDGET = 2 * 1024 ** 3
 HEX64 = re.compile(r"[0-9a-f]{64}")
+# Receipt schema 2: the tree digest now covers every entry (type, mode bits,
+# link targets, empty and symlinked directories) instead of regular files
+# only. Receipts written by schema-1 code must be reinstalled, never blessed.
+SCHEMA_VERSION = 2
 # The official archive ships exactly these relative links in bin/.
 ALLOWED_LINKS = {
     "npm": "../lib/node_modules/npm/bin/npm-cli.js",
@@ -43,6 +56,19 @@ REQUIRED_DIST_FILES = (
     "node_modules/playwright-core/package.json",
     "node_modules/node-pty/package.json",
 )
+INSTALL_DIR_NAME = f"node-v{VERSION}-darwin-arm64"
+# Panel R3: the server release folder is a single safe-named component under
+# <root>/runtime/ (pack_server.mjs enforces the same shape on --release-ID).
+RELEASE_ID_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,60}")
+DIGESTS_NAME = "file-digests.json"
+# Written into dist AFTER hashing (pack_server.mjs:265), so it is the one file
+# the digest list deliberately does not record.
+PACK_EXCLUDED = {"BUILD_RECEIPT.json"}
+# Measured 2026-11-11 on this M2 Studio over the real 199 MB / ~4.7k-entry
+# pinned Node tree: full schema-2 digest 1.22 s cold, 0.33-0.38 s warm. That
+# is fast enough to recompute at EVERY server start, so resolve (the runner's
+# pre-execve gate) verifies the tree by default; doctor verifies too.
+VERIFY_TREE_AT_RESOLVE = True
 
 
 class InstallError(Exception):
@@ -173,6 +199,21 @@ def checked_members(tf, prefix):
     return members, prefix
 
 
+def fsync_dir(path):
+    """F22: make a completed rename durable. Best effort on filesystems that
+    refuse directory fsync; a refusal to fsync must not fail the install."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def private_write(path, payload, mode=0o600):
     """F3: write to a private temp, fsync, atomically replace; clean the temp
     only when the replace did not happen. The temp is never unlinked before
@@ -189,9 +230,34 @@ def private_write(path, payload, mode=0o600):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temp, path)
+        fsync_dir(os.path.dirname(path) or ".")
     finally:
         if os.path.lexists(temp):
             os.unlink(temp)
+
+
+def ensure_receipt_writable(path, payload):
+    """F4: refuse BEFORE publication when an existing outside receipt
+    conflicts with the payload this install is about to publish. An equal
+    receipt is fine (retry repair); anything else — foreign, older schema,
+    unreadable, a symlink — refuses with the recovery move spelled out, and
+    the caller has not published anything yet."""
+    if not os.path.lexists(path):
+        return
+    if os.path.islink(path):
+        raise InstallError(f"symlinked receipt refused: {path} — move it away and re-run install")
+    regular_file(path)
+    try:
+        with open(path, encoding="utf-8") as stream:
+            existing = stream.read()
+    except OSError as exc:
+        raise InstallError(
+            f"cannot read existing receipt: {path} — inspect it, move it away "
+            f"(mv {path} {path}.conflict) and re-run install") from exc
+    if existing != payload:
+        raise InstallError(
+            f"conflicting existing receipt: {path} — inspect it and move it away "
+            f"(mv {path} {path}.conflict), then re-run install")
 
 
 def idempotent_receipt(path, payload):
@@ -213,28 +279,48 @@ def idempotent_receipt(path, payload):
 
 def tree_sha256(directory):
     """Deterministic digest of a published tree, excluding its own receipt
-    (which embeds this digest and so cannot cover itself). Regular files
-    contribute path+size+bytes; symlinks contribute path+target. Used to
-    verify, on a retry, that an existing destination is still the tree this
-    exact archive produced — a planted receipt over a different tree must
-    not be blessed (attack finding 5)."""
+    (which embeds this digest and so cannot cover itself). Schema 2: every
+    entry contributes — directories (including empty ones) contribute
+    path+mode; symlinked directories and file symlinks contribute
+    path+target; regular files contribute path+mode+size+bytes. Any entry
+    that is not a regular file, a directory or a symlink (a FIFO, socket or
+    device) is refused WITHOUT being opened, so a planted FIFO cannot hang
+    the digest. Used to verify, on a retry and in doctor, that an existing
+    destination is still the tree this exact archive produced."""
     digest = hashlib.sha256()
+
+    def feed(relative, kind, extra):
+        digest.update(relative.encode("utf-8") + b"\0" + kind.encode("ascii") +
+                      extra.encode("utf-8") + b"\0")
+
     for current, dirnames, filenames in os.walk(directory):
         dirnames.sort()
+        for name in dirnames:
+            absolute = os.path.join(current, name)
+            relative = os.path.relpath(absolute, directory)
+            if os.path.islink(absolute):
+                # os.walk does not descend into symlinked directories
+                # (followlinks=False), but they still must contribute.
+                feed(relative, "l", os.readlink(absolute))
+            else:
+                info = os.lstat(absolute)
+                feed(relative, "d", oct(stat.S_IMODE(info.st_mode) & 0o7777))
         for name in sorted(filenames):
             absolute = os.path.join(current, name)
             relative = os.path.relpath(absolute, directory)
             if relative == "INSTALL_RECEIPT.json":
                 continue
-            if os.path.islink(absolute):
-                digest.update(relative.encode("utf-8") + b"\0l" +
-                              os.readlink(absolute).encode("utf-8") + b"\0")
-                continue
-            digest.update(relative.encode("utf-8") + b"\0f" +
-                          str(os.path.getsize(absolute)).encode("ascii") + b"\0")
-            with open(absolute, "rb") as stream:
-                for block in iter(lambda: stream.read(1024 * 1024), b""):
-                    digest.update(block)
+            info = os.lstat(absolute)
+            if stat.S_ISLNK(info.st_mode):
+                feed(relative, "l", os.readlink(absolute))
+            elif not stat.S_ISREG(info.st_mode):
+                # FIFO, socket, device: refused before any open() can block.
+                raise InstallError(f"non-regular tree entry refused: {relative}")
+            else:
+                feed(relative, "f", f"{stat.S_IMODE(info.st_mode) & 0o7777:o}:{info.st_size}")
+                with open(absolute, "rb") as stream:
+                    for block in iter(lambda: stream.read(1024 * 1024), b""):
+                        digest.update(block)
     return digest.hexdigest()
 
 
@@ -286,6 +372,72 @@ def verified_extract(archive, expected, stage, prefix):
     os.unlink(private_copy)
 
 
+def trusted_interpreter(path, root):
+    """Item 13: the interpreter recorded for later runs must be an absolute
+    path to a regular executable file owned by root or the current user, and
+    must not live inside the server root (nothing inside the root is pinned
+    by an outside authority). The caller records the RESOLVED realpath, so
+    nothing is re-resolved — and thus interceptable — at run time."""
+    if not path or not os.path.isabs(path):
+        raise InstallError(f"interpreter must be an absolute path: {path!r}")
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        raise InstallError(f"interpreter not found: {path}") from exc
+    if not stat.S_ISREG(info.st_mode):
+        raise InstallError(f"interpreter is not a regular file: {path}")
+    if info.st_uid not in (0, os.getuid()):
+        raise InstallError(f"interpreter belongs to another user: {path}")
+    if realpath_inside(path, root):
+        raise InstallError(f"interpreter must not live inside the server root: {path}")
+    if not os.access(path, os.X_OK):
+        raise InstallError(f"interpreter is not executable: {path}")
+    return path
+
+
+def install_lock(runtime_dir):
+    """F5/F6: one installer at a time per root. The lock is an flock on a
+    private file inside runtime/; a second installer refuses in one line.
+    The fd is returned and must be closed by the caller to release."""
+    lock_path = os.path.join(runtime_dir, "install.lock")
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        raise InstallError(
+            "another install is already running for this root; let it finish "
+            "before retrying")
+    return fd
+
+
+def clean_dead_leftovers(root, runtime_dir, staging_parent, config_dir):
+    """F5/F6: called with the install lock held, so any leftover that carries
+    this installer's own names is debris from a killed run, not live work.
+    Remove staging directories and receipt temps so the retry the runbook
+    prescribes actually succeeds."""
+    for name in os.listdir(staging_parent):
+        if name.startswith(".node-install-"):
+            target = os.path.join(staging_parent, name)
+            if os.path.islink(target) or not os.path.isdir(target):
+                # Attack finding 10: name the removal — a one-line refusal
+                # with no next action is not a recovery.
+                raise InstallError(
+                    f"unexpected staging leftover (not a directory): {target} "
+                    f"— inspect it, remove it by hand (rm -rf {target}), "
+                    f"then re-run install")
+            shutil.rmtree(target)
+    # Attack finding 2: python3-path.tmp is this installer's temp too; a kill
+    # during private_write left it behind and O_EXCL refused every later run.
+    for temp in (os.path.join(runtime_dir, "install-receipt.json.tmp"),
+                 os.path.join(config_dir, "node-runtime.json.tmp"),
+                 os.path.join(config_dir, "python3-path.tmp")):
+        if os.path.lexists(temp):
+            if os.path.islink(temp):
+                raise InstallError(f"symlinked temp refused: {temp}")
+            os.unlink(temp)
+
+
 def install_node(root, archive, checksum, version=VERSION):
     if version != VERSION:
         raise InstallError(f"Node version must be exactly {VERSION}")
@@ -299,85 +451,114 @@ def install_node(root, archive, checksum, version=VERSION):
     runtime_dir = private_dir(os.path.join(root, "runtime"), create=True)
     staging_parent = private_dir(os.path.join(runtime_dir, "staging"), create=True)
     config_dir = private_dir(os.path.join(root, "config"), create=True)
-    prefix = f"node-v{VERSION}-darwin-arm64"
-    destination = os.path.join(runtime_dir, prefix)
-    if any(os.path.basename(p).startswith(".node-install-")
-           for p in os.listdir(staging_parent)):
-        raise InstallError("half-finished staging installation found; inspect it before retrying")
-    receipt = {
-        "schemaVersion": 1,
-        "kind": "official-nodejs-install",
-        "version": "v" + VERSION,
-        "architecture": "arm64",
-        "platform": "darwin",
-        "nodePath": os.path.join(destination, "bin", "node"),
-        "installDir": destination,
-        "archiveSha256": OFFICIAL_SHA256,
-        "checksumRecord": f"https://nodejs.org/dist/v{VERSION}/SHASUMS256.txt",
-        "archiveUrl": f"https://nodejs.org/dist/v{VERSION}/{ARCHIVE}",
-        "supportedBy": {"server": NODE_REQUIREMENT, "vitePlus": BUILD_REQUIREMENT},
-        "verification": "one private copy hashed, member-checked and extracted "
-                        "from a single open file; receipt published by one rename",
-    }
-    # A destination with this exact in-tree receipt is an interrupted-after-
-    # publish install: the receipt's fields AND its treeSha256 are verified
-    # against the tree actually on disk before any marker is repaired — a
-    # planted receipt over a tampered tree must refuse, not be blessed with
-    # the official sha attestation (attack finding 5).
-    if os.path.lexists(destination):
-        if os.path.islink(destination):
-            raise InstallError(f"symlinked destination refused: {destination}")
-        in_tree = os.path.join(destination, "INSTALL_RECEIPT.json")
-        content = None
-        try:
-            regular_file(in_tree)
-            with open(in_tree, encoding="utf-8") as stream:
-                content = stream.read()
-            existing = json.loads(content)
-        except (InstallError, OSError, ValueError):
-            raise InstallError(
-                "destination already exists without this exact receipt; "
-                "inspect and move it away before retrying")
-        expected_fields = {
-            "schemaVersion": 1, "kind": "official-nodejs-install",
-            "version": "v" + VERSION, "architecture": "arm64", "platform": "darwin",
+    destination = os.path.join(runtime_dir, INSTALL_DIR_NAME)
+    lock_fd = install_lock(runtime_dir)
+    try:
+        clean_dead_leftovers(root, runtime_dir, staging_parent, config_dir)
+        receipt = {
+            "schemaVersion": SCHEMA_VERSION,
+            "kind": "official-nodejs-install",
+            "version": "v" + VERSION,
+            "architecture": "arm64",
+            "platform": "darwin",
             "nodePath": os.path.join(destination, "bin", "node"),
-            "installDir": destination, "archiveSha256": OFFICIAL_SHA256,
+            "installDir": destination,
+            "archiveSha256": OFFICIAL_SHA256,
+            "checksumRecord": f"https://nodejs.org/dist/v{VERSION}/SHASUMS256.txt",
+            "archiveUrl": f"https://nodejs.org/dist/v{VERSION}/{ARCHIVE}",
+            "supportedBy": {"server": NODE_REQUIREMENT, "vitePlus": BUILD_REQUIREMENT},
+            "verification": "one private copy hashed, member-checked and extracted "
+                            "from a single open file; receipt published by one rename",
         }
-        recorded = existing.get("treeSha256")
-        if any(existing.get(k) != v for k, v in expected_fields.items()) or \
-                not isinstance(recorded, str) or not HEX64.fullmatch(recorded):
-            raise InstallError(
-                "destination already exists without this exact receipt; "
-                "inspect and move it away before retrying")
-        if tree_sha256(destination) != recorded:
-            raise InstallError(
-                "destination tree no longer matches its receipt (treeSha256 "
-                "mismatch); inspect and move it away before retrying")
-        # A forged receipt whose digest was recomputed over a tampered tree
-        # still refuses here: the official archive is re-verified end-to-end
-        # and the published tree must be byte-identical to a fresh extraction
-        # of it (attack finding 5).
-        stage = tempfile.mkdtemp(prefix=".node-install-", dir=staging_parent)
-        try:
-            verified_extract(archive, expected, stage, prefix)
-            if tree_sha256(os.path.join(stage, prefix)) != recorded:
-                raise InstallError(
-                    "destination does not match a fresh extraction of the "
-                    "official archive; inspect and move it away before retrying")
-        finally:
-            if os.path.isdir(stage) and not os.path.islink(stage):
-                shutil.rmtree(stage)
-        payload = content  # the verified in-tree bytes are the canonical payload
-        idempotent_receipt(os.path.join(runtime_dir, "install-receipt.json"), payload)
-        idempotent_receipt(os.path.join(config_dir, "node-runtime.json"), payload)
-        print(f"NODE_INSTALLED version=v{VERSION} node={receipt['nodePath']} "
-              f"sha256={OFFICIAL_SHA256} (activation repaired; tree verified)")
-        return existing
+        if os.path.lexists(destination):
+            return _repair_activation(root, archive, expected, destination,
+                                      runtime_dir, config_dir, staging_parent,
+                                      receipt)
+        return _fresh_install(archive, expected, destination, runtime_dir,
+                              config_dir, staging_parent, receipt)
+    finally:
+        os.close(lock_fd)
+
+
+def _repair_activation(root, archive, expected, destination, runtime_dir,
+                       config_dir, staging_parent, receipt):
+    """A destination with this exact in-tree receipt is an interrupted-after-
+    publish install: the receipt's fields AND its treeSha256 are verified
+    against the tree actually on disk before any marker is repaired — a
+    planted receipt over a tampered tree must refuse, not be blessed with
+    the official sha attestation (attack finding 5)."""
+    if os.path.islink(destination):
+        raise InstallError(f"symlinked destination refused: {destination}")
+    in_tree = os.path.join(destination, "INSTALL_RECEIPT.json")
+    content = None
+    try:
+        regular_file(in_tree)
+        with open(in_tree, encoding="utf-8") as stream:
+            content = stream.read()
+        existing = json.loads(content)
+    except (InstallError, OSError, ValueError):
+        raise InstallError(
+            "destination already exists without this exact receipt; "
+            "inspect and move it away before retrying")
+    expected_fields = {
+        "schemaVersion": SCHEMA_VERSION, "kind": "official-nodejs-install",
+        "version": "v" + VERSION, "architecture": "arm64", "platform": "darwin",
+        "nodePath": os.path.join(destination, "bin", "node"),
+        "installDir": destination, "archiveSha256": OFFICIAL_SHA256,
+    }
+    recorded = existing.get("treeSha256")
+    if any(existing.get(k) != v for k, v in expected_fields.items()) or \
+            not isinstance(recorded, str) or not HEX64.fullmatch(recorded):
+        raise InstallError(
+            "destination already exists without this exact receipt; "
+            "inspect and move it away before retrying")
+    if tree_sha256(destination) != recorded:
+        raise InstallError(
+            "destination tree no longer matches its receipt (treeSha256 "
+            "mismatch); inspect and move it away before retrying")
+    # F4: refuse on a conflicting OUTSIDE receipt before any work, so this
+    # branch never repairs half way and never has to publish anything.
+    ensure_receipt_writable(os.path.join(runtime_dir, "install-receipt.json"), content)
+    ensure_receipt_writable(os.path.join(config_dir, "node-runtime.json"), content)
+    # A forged receipt whose digest was recomputed over a tampered tree
+    # still refuses here: the official archive is re-verified end-to-end
+    # and the published tree must be byte-identical to a fresh extraction
+    # of it (attack finding 5).
     stage = tempfile.mkdtemp(prefix=".node-install-", dir=staging_parent)
     try:
-        verified_extract(archive, expected, stage, prefix)
-        extracted = os.path.join(stage, prefix)
+        verified_extract(archive, expected, stage, INSTALL_DIR_NAME)
+        if tree_sha256(os.path.join(stage, INSTALL_DIR_NAME)) != recorded:
+            raise InstallError(
+                "destination does not match a fresh extraction of the "
+                "official archive; inspect and move it away before retrying")
+    finally:
+        if os.path.isdir(stage) and not os.path.islink(stage):
+            shutil.rmtree(stage)
+    payload = content  # the verified in-tree bytes are the canonical payload
+    idempotent_receipt(os.path.join(runtime_dir, "install-receipt.json"), payload)
+    idempotent_receipt(os.path.join(config_dir, "node-runtime.json"), payload)
+    # Attack finding 1: an interrupted-after-publish install can be missing
+    # config/python3-path (the sole fresh-install writer never ran). The
+    # repair must complete the WHOLE activation — re-record the validated
+    # interpreter this run is executing under — or a later runner start
+    # wedges on exit 78 while this command reports success. The same branch
+    # also heals an interpreter that disappeared after it was recorded
+    # (Homebrew removed it): the recorded path is replaced by the one this
+    # verified run actually uses.
+    interpreter = trusted_interpreter(os.path.realpath(sys.executable),
+                                      destination_root(destination))
+    private_write(os.path.join(config_dir, "python3-path"), interpreter + "\n")
+    print(f"NODE_INSTALLED version=v{VERSION} node={receipt['nodePath']} "
+          f"sha256={OFFICIAL_SHA256} (activation repaired; tree verified)")
+    return existing
+
+
+def _fresh_install(archive, expected, destination, runtime_dir,
+                   config_dir, staging_parent, receipt):
+    stage = tempfile.mkdtemp(prefix=".node-install-", dir=staging_parent)
+    try:
+        verified_extract(archive, expected, stage, INSTALL_DIR_NAME)
+        extracted = os.path.join(stage, INSTALL_DIR_NAME)
         executable = os.path.join(extracted, "bin", "node")
         info = os.lstat(executable)
         if not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o100:
@@ -387,15 +568,27 @@ def install_node(root, archive, checksum, version=VERSION):
         # this destination is later "repaired" (attack finding 5).
         receipt["treeSha256"] = tree_sha256(extracted)
         payload = json.dumps(receipt, indent=2) + "\n"
-        # F1: the receipt travels inside the staged tree; one atomic rename
+        # The receipt travels inside the staged tree; one atomic rename
         # publishes tree and receipt together. No bytes are published without
         # their receipt, and no receipt is written after publication.
         private_write(os.path.join(extracted, "INSTALL_RECEIPT.json"), payload)
+        # F4: everything that can refuse AFTER the rename is checked BEFORE
+        # it — a conflicting outside receipt must leave nothing published.
+        ensure_receipt_writable(os.path.join(runtime_dir, "install-receipt.json"), payload)
+        ensure_receipt_writable(os.path.join(config_dir, "node-runtime.json"), payload)
         os.rename(extracted, destination)
-        # Activation markers live outside the tree and are repairable on a
-        # retry via the matching-receipt branch above.
+        fsync_dir(runtime_dir)  # F22: the tree rename is the publish
+        # Attack finding 3 (honest state): every REFUSAL fires above, before
+        # the rename. An OS error below it (unwritable config/, full disk) can
+        # leave the tree published with markers missing — that is not a
+        # refusal, and the retry completes the whole activation via the
+        # matching-receipt repair branch above (receipts AND interpreter).
         idempotent_receipt(os.path.join(runtime_dir, "install-receipt.json"), payload)
         idempotent_receipt(os.path.join(config_dir, "node-runtime.json"), payload)
+        interpreter = trusted_interpreter(os.path.realpath(sys.executable),
+                                          destination_root(destination))
+        private_write(os.path.join(config_dir, "python3-path"),
+                      interpreter + "\n")
         print(f"NODE_INSTALLED version=v{VERSION} node={receipt['nodePath']} "
               f"sha256={OFFICIAL_SHA256}")
         return receipt
@@ -404,16 +597,170 @@ def install_node(root, archive, checksum, version=VERSION):
             shutil.rmtree(stage)
 
 
+def destination_root(destination):
+    """The server root that contains this install destination."""
+    return os.path.dirname(os.path.dirname(destination))
+
+
 def load_receipt(path):
     with open(regular_file(path), encoding="utf-8") as stream:
         receipt = json.load(stream)
-    if receipt.get("schemaVersion") != 1:
-        raise InstallError("unsupported runtime receipt schema")
+    if receipt.get("schemaVersion") != SCHEMA_VERSION:
+        raise InstallError(
+            f"runtime receipt schema {receipt.get('schemaVersion')!r} is not "
+            f"supported (this build requires {SCHEMA_VERSION}); move "
+            f"{os.path.basename(path)} aside and reinstall with "
+            f"'node_install.py install'")
     return receipt
 
 
-def runtime_paths(root):
+def _load_stat_cache(path):
+    """Best-effort load of the (size, mtime_ns, ctime_ns) skip-cache."""
+    try:
+        with open(path, encoding="utf-8") as stream:
+            data = json.load(stream)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    clean = {}
+    for rel, triple in data.items():
+        if (isinstance(rel, str) and isinstance(triple, list) and len(triple) == 3
+                and all(isinstance(v, int) and not isinstance(v, bool)
+                        for v in triple)):
+            clean[rel] = triple
+    return clean
+
+
+def _save_stat_cache(path, fresh):
+    """Best-effort persist; a read-only release dir only costs re-hashing."""
+    if not fresh:
+        return
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as stream:
+            json.dump(fresh, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def verify_packed_server(build_dir):
+    """Panel R1: verify the packed server tree against its recorded digests.
+
+    file-digests.json (written by pack_server.mjs beside dist/) is the
+    authority: every recorded file must exist as a regular non-link file with
+    the recorded size and sha256, and every file in the tree except
+    BUILD_RECEIPT.json (written after hashing) must be recorded — verifying
+    only the recorded set would bless a planted payload. Returns the number
+    of verified files. Raises InstallError naming the server tree and the
+    offending file, so the refusal is operator-readable wherever it surfaces
+    (resolve, doctor, or the runner's boot gate).
+
+    Boot-time cost: a real packed tree is ~4500 files / 344 MB and a full
+    re-hash measures ~15 s per pass (the runner resolves twice per boot, and
+    resolve ran again at install and doctor), so every boot paying three
+    full digests was both slow and the reason a first install could outrun
+    its own wait window. After a file's content digest matches the record
+    once, its (size, mtime_ns, ctime_ns) triple is remembered beside the
+    record in verify-stat-cache.json; a later verify that sees the identical
+    triple skips re-hashing that file. Any rewrite, truncate, chmod or
+    replace changes at least one of mtime_ns/ctime_ns — ctime is set by the
+    kernel and cannot be restored without root — so a changed file falls
+    back to a full digest and fails. The record, not the cache, stays the
+    anchor: cache entries exist only for paths the record names, and the
+    record's own tamper model (same-user writer of the root) is unchanged.
+    """
+    release_dir = os.path.dirname(build_dir)
+    digests_path = os.path.join(release_dir, DIGESTS_NAME)
+    try:
+        with open(regular_file(digests_path), encoding="utf-8") as stream:
+            recorded = json.load(stream)
+    except InstallError:
+        raise
+    except FileNotFoundError as exc:
+        raise InstallError(
+            f"server tree cannot be verified: {DIGESTS_NAME} is missing next "
+            f"to {build_dir}; repack, or roll back per the runbook") from exc
+    except (OSError, ValueError) as exc:
+        raise InstallError(f"cannot read {digests_path}: {exc}") from exc
+    if not isinstance(recorded, list) or not recorded:
+        raise InstallError(f"{digests_path} is not a non-empty digest list")
+
+    def refuse(detail):
+        raise InstallError(
+            f"server tree no longer matches {DIGESTS_NAME} ({detail}); repack, "
+            f"or roll back per the runbook")
+
+    cache = _load_stat_cache(os.path.join(release_dir, "verify-stat-cache.json"))
+    verified = {}
+    for entry in recorded:
+        if not isinstance(entry, dict):
+            refuse(f"{digests_path} has a malformed entry")
+        rel, size, sha = entry.get("path"), entry.get("bytes"), entry.get("sha256")
+        if (not isinstance(rel, str) or not rel or rel.startswith("/") or
+                rel == "." or "\\" in rel or
+                any(part in ("", ".", "..") for part in rel.split("/")) or
+                not isinstance(size, int) or isinstance(size, bool) or size < 0 or
+                not isinstance(sha, str) or not HEX64.fullmatch(sha)):
+            refuse(f"{digests_path} has a malformed entry: {entry!r}")
+        if rel in verified or rel in PACK_EXCLUDED:
+            refuse(f"{digests_path} records {rel} twice or records an excluded file")
+        target = os.path.join(build_dir, *rel.split("/"))
+        if os.path.islink(target) or not os.path.isfile(target):
+            refuse(f"{rel} is missing (or not a regular file)")
+        info = os.stat(target)
+        triple = [info.st_size, info.st_mtime_ns, info.st_ctime_ns]
+        if cache.get(rel) == triple:
+            verified[rel] = triple
+            continue
+        if info.st_size != size:
+            refuse(f"{rel} is {info.st_size} bytes, recorded {size}")
+        with open(target, "rb") as stream:
+            if hashlib.sha256(stream.read()).hexdigest() != sha:
+                refuse(f"{rel} content digest mismatch")
+        verified[rel] = triple
+    # Everything on disk must be recorded: an unlisted file is a plant.
+    for current, dirnames, filenames in os.walk(build_dir):
+        dirnames.sort()
+        for name in dirnames:
+            if os.path.islink(os.path.join(current, name)):
+                refuse(f"{os.path.relpath(os.path.join(current, name), build_dir)} "
+                       f"is a symlink")
+        for name in sorted(filenames):
+            absolute = os.path.join(current, name)
+            rel = os.path.relpath(absolute, build_dir)
+            if os.path.islink(absolute):
+                refuse(f"{rel} is a symlink")
+            if rel not in verified and rel not in PACK_EXCLUDED:
+                refuse(f"unrecorded file in the server tree: {rel}")
+    if verified != cache:
+        _save_stat_cache(os.path.join(release_dir, "verify-stat-cache.json"),
+                         verified)
+    return len(verified)
+
+
+def runtime_paths(root, verify_tree=True):
+    """Resolve the pinned node and packed server entrypoint.
+
+    Item 12: installDir is not taken from the receipt's word — it must be
+    exactly <root>/runtime/node-v<VERSION>-darwin-arm64 as computed from the
+    pinned constants, the in-tree INSTALL_RECEIPT.json must exist and agree
+    with the config receipt on treeSha256, and nodePath must be that exact
+    folder's bin/node as a regular non-link file. A writer of the one config
+    file can therefore no longer point the runner at an arbitrary in-root
+    executable. (A writer who can replace the runner script itself is outside
+    what any receipt check can stop; the defence there is the 0700 root.)
+    verify_tree=True (the default) additionally recomputes the full tree
+    digest before the caller may exec anything from it.
+    """
     root = validated_root(root)
+    expected_install_dir = os.path.join(root, "runtime", INSTALL_DIR_NAME)
     node = load_receipt(os.path.join(root, "config", "node-runtime.json"))
     server = load_receipt(os.path.join(root, "config", "server-runtime.json"))
     if (node.get("version") != "v" + VERSION or
@@ -425,12 +772,40 @@ def runtime_paths(root):
     server_bin = server.get("serverBin") or ""
     if not (install_dir and node_path and build_dir and server_bin):
         raise InstallError("runtime receipt is missing a required path")
+    if os.path.realpath(install_dir) != os.path.realpath(expected_install_dir):
+        raise InstallError(
+            f"installDir must be the pinned {expected_install_dir}, not: {install_dir}")
+    if node_path != os.path.join(install_dir, "bin", "node"):
+        raise InstallError("nodePath must be installDir/bin/node")
+    in_tree_path = os.path.join(install_dir, "INSTALL_RECEIPT.json")
+    if os.path.islink(in_tree_path) or not os.path.isfile(in_tree_path):
+        raise InstallError(f"missing in-tree install receipt: {in_tree_path}")
+    try:
+        with open(in_tree_path, encoding="utf-8") as stream:
+            in_tree = json.load(stream)
+    except (OSError, ValueError) as exc:
+        raise InstallError(f"cannot read in-tree install receipt: {in_tree_path}") from exc
+    if in_tree.get("treeSha256") != node.get("treeSha256"):
+        raise InstallError("config receipt and in-tree receipt disagree on treeSha256")
     # F7: cross-check nodePath against installDir, serverBin against buildDir.
     if os.path.realpath(node_path) != os.path.realpath(
             os.path.join(install_dir, "bin", "node")):
         raise InstallError("nodePath does not resolve to installDir/bin/node")
     if os.path.basename(os.path.normpath(build_dir)) != "dist":
         raise InstallError("server runtime receipt does not name a dist directory")
+    # Panel R3: Item 12's guarantee held for Node only — buildDir was
+    # free-form, so a writer of config/server-runtime.json alone pointed
+    # serverBin at any in-root */dist. The release folder must be exactly
+    # <root>/runtime/<safe-release-ID> (computed on realpath, so a symlinked
+    # path inside the root cannot launder an outsider either).
+    real_build = os.path.realpath(build_dir)
+    release_dir = os.path.dirname(real_build)
+    runtime_dir = os.path.realpath(os.path.join(root, "runtime"))
+    if (os.path.dirname(release_dir) != runtime_dir or
+            not RELEASE_ID_RE.fullmatch(os.path.basename(release_dir))):
+        raise InstallError(
+            f"buildDir must be <root>/runtime/<release-ID>/dist "
+            f"(pack_server.mjs layout), not: {build_dir}")
     if os.path.realpath(server_bin) != os.path.realpath(
             os.path.join(build_dir, "bin.mjs")):
         raise InstallError("serverBin does not resolve to buildDir/bin.mjs")
@@ -450,11 +825,25 @@ def runtime_paths(root):
     for name in REQUIRED_DIST_FILES:
         if not os.path.isfile(os.path.join(build_dir, name)):
             raise InstallError(f"packed runtime is missing {name}")
+    if verify_tree:
+        recorded = node.get("treeSha256")
+        if not isinstance(recorded, str) or not HEX64.fullmatch(recorded):
+            raise InstallError("config receipt lacks a valid treeSha256")
+        if tree_sha256(install_dir) != recorded:
+            raise InstallError(
+                "pinned Node tree no longer matches its receipt (treeSha256 "
+                "mismatch); reinstall the runtime")
+        # Panel R1: the packed SERVER tree — the code that actually executes
+        # on every boot — is verified against file-digests.json too, not just
+        # the Node tree that launches it.
+        verify_packed_server(build_dir)
     return node_path, server_bin
 
 
-def resolve_command(root, command):
-    node, server = runtime_paths(root)
+def resolve_command(root, command, verify_tree=None):
+    if verify_tree is None:
+        verify_tree = VERIFY_TREE_AT_RESOLVE
+    node, server = runtime_paths(root, verify_tree=verify_tree)
     return node if command == "node" else server
 
 
@@ -467,36 +856,153 @@ def http_status(port):
         return "unanswered"
 
 
-def doctor(root, label):
-    """Only metadata: no access token, environment, cookies or log contents."""
+# Panel R8: absolute paths for the system tools attribution relies on — a
+# PATH-injected fake lsof/ps/launchctl must not be able to fake "ours" or
+# "loaded". The MMOS_*_BIN seams exist for the test harness's fake launchd.
+LSOF_BIN = os.environ.get("MMOS_LSOF_BIN", "/usr/sbin/lsof")
+PS_BIN = os.environ.get("MMOS_PS_BIN", "/bin/ps")
+LAUNCHCTL_BIN = os.environ.get("MMOS_LAUNCHCTL_BIN", "/bin/launchctl")
+
+
+def _listener_pids(port):
+    """Pids with a LISTEN socket on port (panel R4)."""
+    try:
+        probe = subprocess.run([LSOF_BIN, "-tP", f"-iTCP:{port}", "-sTCP:LISTEN"],
+                               capture_output=True, text=True, timeout=10)
+    except subprocess.SubprocessError:
+        return []
+    return [int(p) for p in (probe.stdout or "").split() if p.isdigit()]
+
+
+def _parent_of(pid):
+    try:
+        probe = subprocess.run([PS_BIN, "-o", "ppid=", "-p", str(pid)],
+                               capture_output=True, text=True, timeout=10)
+    except subprocess.SubprocessError:
+        return None
+    parent = (probe.stdout or "").strip()
+    return int(parent) if parent.isdigit() else None
+
+
+def _pid_descendant_of(child, ancestor, hops=20):
+    """True when child's parent chain (bounded) includes ancestor."""
+    current, seen = child, 0
+    while current and current > 1 and seen < hops:
+        if current == ancestor:
+            return True
+        current = _parent_of(current)
+        seen += 1
+    return False
+
+
+def answering_process(port, job_pid):
+    """Panel R4: attribute an answering port to this label's job.
+
+    'ours' only when some listener pid is the job pid or one of its
+    descendants; otherwise the foreign listener is named. Never 'ours' when
+    the job has no running pid (a crash-looping job beside a foreign
+    listener)."""
+    try:
+        job_pid = int(job_pid)
+    except (TypeError, ValueError):
+        job_pid = None
+    listeners = _listener_pids(port)
+    if job_pid and any(p == job_pid or _pid_descendant_of(p, job_pid)
+                       for p in listeners):
+        return "ours"
+    named = f"pid {listeners[0]}" if listeners else "no listener identified"
+    return f"foreign({named}, job pid {job_pid or 'none'})"
+
+
+def doctor(root, label, verify_tree=True):
+    """Only metadata: no access token, environment, cookies or log contents.
+    F23/panel R1: both trees are recomputed against their receipts — the
+    pinned Node tree (treeSha256, ~0.3-1.2 s measured) and the packed server
+    tree (file-digests.json); treeVerified names which. --no-verify-tree
+    skips both. A rollback root (no server receipt) is reported as such, not
+    refused."""
     root = validated_root(root)
     try:
-        probe = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{label}"],
-                               capture_output=True, text=True, timeout=10)
-        loaded = probe.returncode == 0
+        try:
+            probe = subprocess.run([LAUNCHCTL_BIN, "print", f"gui/{os.getuid()}/{label}"],
+                                   capture_output=True, text=True, timeout=10)
+            loaded = probe.returncode == 0
+        except subprocess.TimeoutExpired:
+            raise InstallError(f"launchctl print timed out for label {label}")
         match = re.search(r"^\s*pid = ([0-9]+)", probe.stdout, re.MULTILINE) if loaded else None
+        # Panel atk-7: which plist is the job actually loaded from? A squatted
+        # /tmp plist under the same label serves instead of this root's job.
+        plist_match = re.search(r"^\s*path = (\S+)", probe.stdout or "",
+                                re.MULTILINE) if loaded else None
+        job_plist = plist_match.group(1) if plist_match else "unknown"
+        expected_plist = os.path.join(
+            os.path.expanduser("~/Library/LaunchAgents"), f"{label}.plist")
         port = "unknown"
         try:
             with open(os.path.join(root, "run", "port"), encoding="ascii") as stream:
                 candidate = stream.read().strip()
-            if candidate.isdigit() and 1 <= int(candidate) <= 65535:
+            if re.fullmatch(r"[1-9][0-9]{0,4}", candidate) and 1024 <= int(candidate) <= 65535:
                 port = candidate
         except OSError:
             pass
         answering = port if port != "unknown" and http_status(port) == "200" else "unanswered"
-        node, server = runtime_paths(root)
+        # Panel R4: loaded + HTTP-200 is not health. Attribute the responder:
+        # 'ours' only when the listener pid is the job's pid or a descendant.
+        if answering != "unanswered":
+            attributed = answering_process(port, match.group(1) if match else None)
+        else:
+            attributed = "none"
+        # LOW-13: a printed recovery must be runnable as written, so it
+        # carries the root/label/port doctor was invoked against (port only
+        # when run/port still records one), not just the subcommand.
+        port_arg = f" --port {port}" if port != "unknown" else ""
+        base_install = (f"team_server.sh install --replace --root {root}"
+                        f" --label {label}{port_arg}")
+        server_receipt = os.path.join(root, "config", "server-runtime.json")
+        if os.path.isfile(server_receipt):
+            # Panel R1/LOW-13: packed mode verifies BOTH trees and says
+            # exactly what was verified; rollback mode (receipts moved aside
+            # per the runbook's 'Going back') reports the operator-named
+            # binary instead of dying on the missing receipt — and its
+            # recovery line names the command that works on such a root.
+            node, server = runtime_paths(root, verify_tree=verify_tree)
+            node_row, node_version = node, "v" + VERSION
+            build_row = server
+            if verify_tree:
+                server_files = verify_packed_server(os.path.dirname(server))
+                tree_row = "node+server"
+                node_exec_check = "skipped-receipt-attested"
+            else:
+                server_files, tree_row = "not-checked", "not-checked"
+                node_exec_check = "not-checked"
+            recovery_install = base_install
+        else:
+            legacy_conf = os.path.join(root, "config", "server-bin")
+            try:
+                with open(regular_file(legacy_conf), encoding="utf-8") as stream:
+                    legacy_bin = stream.read().strip().splitlines()[0]
+            except (OSError, ValueError, IndexError) as exc:
+                raise InstallError(
+                    f"no packed server receipt and no readable {legacy_conf} "
+                    f"— doctor cannot say what boots: {exc}") from exc
+            if (not legacy_bin or not legacy_bin.startswith("/") or
+                    os.path.islink(legacy_bin) or not os.path.isfile(legacy_bin)):
+                raise InstallError(
+                    f"rollback {legacy_conf} does not name an absolute regular "
+                    f"file: {legacy_bin!r}")
+            node_row = node_version = node_exec_check = "none(rollback)"
+            build_row = legacy_bin
+            tree_row, server_files = "none(rollback)", 0
+            recovery_install = f"{base_install} --server-bin {legacy_bin}"
         # Never execute the installed binary: attesting provenance is doctor's
         # job, and running the bytes under inspection would let a tampered tree
         # execute attacker code (attack finding 6). The version below is
         # receipt-attested (and the receipt's tree was digest-verified at
         # install); the runbook has the operator run `<node> --version` once
         # by hand when they want a live check.
-        node_version = "v" + VERSION
-        node_exec_check = "skipped-receipt-attested"
         migration = "not initialized"
         db = os.path.join(root, "home", "userdata", "statev2.sqlite")
         if os.path.isfile(db):
-            import sqlite3
             with sqlite3.connect(f"file:{db}?mode=ro", uri=True) as conn:
                 migration = conn.execute("SELECT COALESCE(MAX(migration_id), 'none') "
                                          "FROM effect_sql_migrations").fetchone()[0]
@@ -518,15 +1024,49 @@ def doctor(root, label):
             age = max(0, int(time.time() - info.st_mtime))
         rows = [("label", label), ("loaded", "yes" if loaded else "no"),
                 ("pid", match.group(1) if match else "none"), ("port", port),
-                ("answeringPort", answering), ("nodePath", node),
+                ("answeringPort", answering), ("answeringProcess", attributed),
+                ("jobPlist", job_plist),
+                ("nodePath", node_row),
                 ("nodeVersion", node_version), ("nodeExecCheck", node_exec_check),
-                ("buildPath", server),
+                ("buildPath", build_row), ("treeVerified", tree_row),
+                ("serverTreeFiles", server_files),
                 ("migrationHead", migration), ("serverLogBytes", size),
                 ("serverLogCapBytes", cap), ("pairingFileAgeSeconds", age)]
         for key, value in rows:
             print(f"{key}={value}")
-        return 0 if loaded and answering == port else 1
-    except (InstallError, OSError, ValueError) as exc:
+        # Attack finding 6: exit 1 without a doctor_error= line sent an
+        # operator grepping for the documented token to an empty result on
+        # the commonest failure (server down). The two down states name
+        # themselves and their recovery.
+        if not loaded:
+            # LOW-13: the printed recovery must be runnable as written — on a
+            # rollback root that means naming config/server-bin's binary.
+            print(f"doctor_error=label not loaded — recovery: runbook step 6 "
+                  f"({recovery_install}), then re-run doctor")
+            return 1
+        # Panel atk-7: a job loaded from a foreign plist is a squatted label —
+        # even a healthy-looking pid is not this root's server.
+        if job_plist != "unknown" and os.path.realpath(job_plist) != os.path.realpath(
+                expected_plist):
+            print(f"doctor_error=job runs from a foreign plist: {job_plist} "
+                  f"(expected {expected_plist}) — a squatted label; recovery: "
+                  f"launchctl bootout gui/{os.getuid()}/{label}, remove the "
+                  f"foreign plist, re-run runbook step 6")
+            return 1
+        # Panel R4: an answered port served by a foreign process is not
+        # health — the job is crash-looping (or dead) beside an impostor.
+        if attributed.startswith("foreign"):
+            print(f"doctor_error=port {port} answered by a foreign process "
+                  f"({attributed}) — this label's job is not serving; find it: "
+                  f"lsof -nP -iTCP:{port} -sTCP:LISTEN")
+            return 1
+        if answering != port:
+            print(f"doctor_error=port {port} not answering — recovery: runbook "
+                  f"step 6 ({recovery_install}), then re-run doctor")
+            return 1
+        return 0
+    except (InstallError, OSError, ValueError, EOFError, tarfile.TarError,
+            sqlite3.Error, subprocess.SubprocessError) as exc:
         print(f"doctor_error={str(exc)[:180]}")
         return 1
 
@@ -543,18 +1083,26 @@ def main(argv=None):
             p.add_argument("--version", default=VERSION)
         elif name == "doctor":
             p.add_argument("--label", required=True)
+            p.add_argument("--verify-tree", action=argparse.BooleanOptionalAction,
+                           default=True,
+                           help="recompute the full pinned-Node tree digest "
+                                "against the receipt (default: yes)")
         else:
             p.add_argument("--command", choices=("node", "serve"), default="serve")
+            p.add_argument("--verify-tree", action=argparse.BooleanOptionalAction,
+                           default=None,
+                           help="override whether resolve recomputes the tree digest")
     args = parser.parse_args(argv)
     try:
         if args.command == "install":
             install_node(args.root, args.archive, args.checksum, args.version)
         elif args.command == "doctor":
-            return doctor(args.root, args.label)
+            return doctor(args.root, args.label, verify_tree=args.verify_tree)
         else:
             # F8: resolve applies the same root validation as install/doctor.
-            print(resolve_command(validated_root(args.root), args.command))
-    except (InstallError, OSError, ValueError) as exc:
+            print(resolve_command(validated_root(args.root), args.command,
+                                  verify_tree=args.verify_tree))
+    except (InstallError, OSError, ValueError, EOFError, tarfile.TarError) as exc:
         print(f"team_runtime: {exc}", file=sys.stderr)
         return 1
     return 0

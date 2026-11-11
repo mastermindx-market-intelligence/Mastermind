@@ -1,0 +1,6 @@
+#!/bin/sh
+# Fake `id` for the team-server ops harness: a uid with no launchd domain, so
+# the tool's absolute `/bin/launchctl bootstrap gui/<uid>` is a harmless
+# refusal and every PATH `launchctl` call lands on fake_launchctl.py.
+if [ "${1:-}" = "-u" ]; then echo 59999; exit 0; fi
+exec /usr/bin/id "$@"
