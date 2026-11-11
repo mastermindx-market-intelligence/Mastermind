@@ -482,7 +482,12 @@ def test_a_fresh_supervisor_recovers_the_receipt_adopted_attempt_normally(
         RECEIPT_RECOVERED]
     restarted.take_recovered_runs()
 
-    # a later door restart: brand-new supervisor over the same durable state
+    # a later door restart: brand-new supervisor over the same durable
+    # state.  Attack F1(a) (step 5): the restart must wait out the renewed
+    # lease first — a fresh instance no longer adopts a LIVE lease on the
+    # bound path (that fenced the previous owner's finisher); the engine's
+    # own lease expiry is the adoption proof.
+    now[0] += 2_000  # past the receipt adoption's renewed 1s lease
     reopened2 = Runtime.at(tmp_path, clock=lambda: now[0], lease_seconds=1)
     third = _supervisor(
         reopened2, tmp_path, adapter,
@@ -752,7 +757,10 @@ def test_the_composed_t3_native_supervisor_recovers_the_receipt_claim(
     assert row.provider_session_id == adapter.durable[attempt_id]["session"]
 
     # a later door restart: the T3NativeProcessController answers
-    # TERMINAL_OWNED for the bound row and the ordinary path recovers it
+    # TERMINAL_OWNED for the bound row and the ordinary path recovers it —
+    # but only at the engine's own lease-expiry proof (attack F1(a), step
+    # 5: the renewed lease is live, so a fresh instance defers first)
+    now[0] += 2_000  # past the receipt adoption's renewed 1s lease
     reopened2 = Runtime.at(tmp_path, clock=lambda: now[0], lease_seconds=1)
     outcomes = _compose(reopened2, instance_id="composed-third").reconcile_restart(
         requeue_lost=True)
@@ -940,3 +948,103 @@ def test_a_fenced_out_finisher_never_cancels_the_provider_run(
         assert adapter.start_calls == 1, "exactly one native launch, ever"
 
     asyncio.run(main())
+
+
+# ---------------------------------------------------------------------------
+# the attack round (step 5): F1 — the bound path never fences a live lease,
+# and a fenced-out finisher is visibility, not a service-wide poison
+# ---------------------------------------------------------------------------
+
+
+def test_bound_recovery_defers_at_a_live_lease_and_adopts_at_expiry(
+        tmp_path, monkeypatch):
+    """Attack F1(a) (step 5, 2026-11-11): the BOUND recovery path adopted a
+    LIVE lease — ``adopt_expired_lease=False`` only refuses the EXPIRED
+    shape, so the CAS on the fence generation succeeded against a lease
+    still held by another live writer.  The door's cadence supervisor
+    instance then fenced the service's in-process recovered-run finisher;
+    its next heartbeat raised StateConflict (and pre-F1(b) quarantined the
+    whole Executive service).  The bound path defers exactly like the
+    identity-less receipt path: the engine's own lease expiry is the proof
+    the owner lost its rights, and adoption happens only then."""
+    (runtime, job_id, attempt_id, adapter, now) = _crash_between_receipt_and_record(
+        tmp_path, monkeypatch)
+    now[0] += 2_000  # the crashed claimant's 1s lease expires
+    reopened = Runtime.at(tmp_path, clock=lambda: now[0], lease_seconds=1)
+    restarted = _restart_supervisor(
+        reopened, tmp_path, adapter, instance_id="supervisor-restarted")
+    assert [item.status for item in restarted.reconcile_restart()] == [
+        RECEIPT_RECOVERED]
+    restarted.take_recovered_runs()
+    adopted = reopened.attempts.get_attempt(attempt_id)
+    assert adopted.lease_owner == "supervisor-restarted"
+
+    # the cadence lane (a SECOND supervisor instance over the same store)
+    # reconciles NOW, while the adoption's renewed lease is still LIVE: it
+    # must defer — never rotate the fence under the live finisher
+    cadence = _restart_supervisor(
+        reopened, tmp_path, adapter, instance_id="supervisor-cadence")
+    outcome = cadence.reconcile_restart()[0]
+    assert outcome.status is ReconcileStatus.AWAITING_LEASE_EXPIRY, (
+        "a live lease is never fenced on the bound path")
+    row = reopened.attempts.get_attempt(attempt_id)
+    assert row.fence_generation == adopted.fence_generation, (
+        "no fence rotation while the lease is live")
+    assert row.lease_owner == "supervisor-restarted"
+    assert len(adapter.reattach_calls) == 1, "no second reattach while deferred"
+
+    # at expiry the cadence instance adopts lawfully — the owners hand over
+    # in sequence and there is still exactly one native launch
+    now[0] += 2_000
+    late = cadence.reconcile_restart()[0]
+    assert late.status is ReconcileStatus.TERMINAL_RECOVERED
+    assert len(cadence.take_recovered_runs()) == 1
+    assert adapter.start_calls == 1
+    row = reopened.attempts.get_attempt(attempt_id)
+    assert row.lease_owner == "supervisor-cadence"
+
+
+def test_a_stateconflict_finisher_is_visibility_not_a_service_quarantine(
+        tmp_path):
+    """Attack F1(b) (step 5): ``_finish_dispatched`` quarantined the WHOLE
+    Executive service on ANY finisher exception — including the
+    StateConflict of a finisher lawfully fenced out by another engine owner
+    (the F1(a) timeline) or of an attempt another lane already terminalized.
+    Ownership loss is the engine's identity-safe answer: record it for
+    visibility and stay READY — the next reconcile owns the recovery.
+    Unknown seal failures still quarantine."""
+    from types import SimpleNamespace
+
+    from control_plane.executive_service import ExecutiveControlService
+    from tests.test_executive_service import _config
+
+    class _FencedOut:
+        async def finish_job(self, _active):
+            raise StateConflict(
+                "attempt a1 fence generation is stale; another owner "
+                "adopted the lease")
+
+    class _CorruptSeal:
+        async def finish_job(self, _active):
+            raise RuntimeError("seal wrote a torn row")
+
+    async def exercise():
+        service = ExecutiveControlService(
+            _config(tmp_path),
+            supervisor_factory=lambda _runtime: _FencedOut(),
+            terminal_return_projector=lambda _candidate: None,
+        )
+        service.supervisor = _FencedOut()
+        await service._finish_dispatched("job-fenced", SimpleNamespace())
+        assert service.service_state == "READY", (
+            "a fenced-out finisher must not poison every mutating lane")
+        assert "StateConflict" in service._dispatch_errors.get(
+            "job-fenced", ""), "the ownership loss stays visible"
+
+        service.supervisor = _CorruptSeal()
+        await service._finish_dispatched("job-corrupt", SimpleNamespace())
+        assert service.service_state == "QUARANTINED", (
+            "unknown seal failures still quarantine the service")
+        await service.close()
+
+    asyncio.run(exercise())

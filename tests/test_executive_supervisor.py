@@ -1721,12 +1721,19 @@ class RestartCapableFakeAdapter(FakeAdapter):
 def test_restart_adopts_and_reattaches_live_worker_without_terminating_or_restarting(
     tmp_path: Path, monkeypatch,
 ) -> None:
-    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    # T4c attack F1(a): a live lease is never fenced, so bound recovery
+    # adopts only once the crashed claimant's lease has expired.
+    now = [1_800_000_000_000]
+    clock = lambda: now[0]
+    runtime, job_id, _workspace = _runtime_and_job(
+        tmp_path, clock=clock, lease_seconds=1
+    )
     inspector = FakeInspector()
     first_adapter = RestartCapableFakeAdapter(inspector)
     active = asyncio.run(_supervisor(runtime, tmp_path, first_adapter).start_job(job_id))
     original_fence = active.lease.attempt.fence_generation
-    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    now[0] += 2_000  # past the claim's 1s lease: adoption is now lawful
+    reopened = Runtime.at(tmp_path, clock=clock, lease_seconds=1)
     second_adapter = RestartCapableFakeAdapter(inspector)
     restarted = _supervisor(reopened, tmp_path, second_adapter)
     def forbidden_unbound_cleanup(_attempt_id):
@@ -1824,12 +1831,19 @@ def test_restart_target_history_mismatch_quarantines_before_reattach(
 def test_restart_recovers_terminal_result_race_instead_of_marking_attempt_lost(
     tmp_path: Path,
 ) -> None:
-    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    # T4c attack F1(a): a live lease is never fenced, so bound recovery
+    # adopts only once the crashed claimant's lease has expired.
+    now = [1_800_000_000_000]
+    clock = lambda: now[0]
+    runtime, job_id, _workspace = _runtime_and_job(
+        tmp_path, clock=clock, lease_seconds=1
+    )
     inspector = FakeInspector()
     first_adapter = RestartCapableFakeAdapter(inspector)
     active = asyncio.run(_supervisor(runtime, tmp_path, first_adapter).start_job(job_id))
     inspector.live = False
-    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    now[0] += 2_000  # past the claim's 1s lease: adoption is now lawful
+    reopened = Runtime.at(tmp_path, clock=clock, lease_seconds=1)
     second_adapter = RestartCapableFakeAdapter(inspector)
     restarted = _supervisor(reopened, tmp_path, second_adapter)
     outcomes = restarted.reconcile_restart(requeue_lost=False)
@@ -1884,7 +1898,13 @@ def test_restart_live_worker_with_expired_lease_recovers_the_same_attempt(
 def test_restart_cancel_pending_preserves_same_attempt_and_terminalizes_cancelled(
     tmp_path: Path,
 ) -> None:
-    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    # T4c attack F1(a): a live lease is never fenced, so bound recovery
+    # adopts only once the crashed claimant's lease has expired.
+    now = [1_800_000_000_000]
+    clock = lambda: now[0]
+    runtime, job_id, _workspace = _runtime_and_job(
+        tmp_path, clock=clock, lease_seconds=1
+    )
     inspector = FakeInspector()
     active = asyncio.run(
         _supervisor(runtime, tmp_path, RestartCapableFakeAdapter(inspector)).start_job(
@@ -1892,7 +1912,8 @@ def test_restart_cancel_pending_preserves_same_attempt_and_terminalizes_cancelle
         )
     )
     runtime.jobs.cancel_job(job_id)
-    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    now[0] += 2_000  # past the claim's 1s lease: adoption is now lawful
+    reopened = Runtime.at(tmp_path, clock=clock, lease_seconds=1)
     restarted = _supervisor(
         reopened, tmp_path, RestartCapableFakeAdapter(inspector)
     )
@@ -1906,14 +1927,21 @@ def test_restart_cancel_pending_preserves_same_attempt_and_terminalizes_cancelle
 
 
 def test_duplicate_restart_reconcile_does_not_reattach_twice(tmp_path: Path) -> None:
-    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    # T4c attack F1(a): a live lease is never fenced, so bound recovery
+    # adopts only once the crashed claimant's lease has expired.
+    now = [1_800_000_000_000]
+    clock = lambda: now[0]
+    runtime, job_id, _workspace = _runtime_and_job(
+        tmp_path, clock=clock, lease_seconds=1
+    )
     inspector = FakeInspector()
     asyncio.run(
         _supervisor(runtime, tmp_path, RestartCapableFakeAdapter(inspector)).start_job(
             job_id
         )
     )
-    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    now[0] += 2_000  # past the claim's 1s lease: adoption is now lawful
+    reopened = Runtime.at(tmp_path, clock=clock, lease_seconds=1)
     adapter = RestartCapableFakeAdapter(inspector)
     restarted = _supervisor(reopened, tmp_path, adapter)
     assert restarted.reconcile_restart(requeue_lost=False)[0].status is (
@@ -2005,7 +2033,13 @@ async def _persist_recoverable_launch_boundary(
 def test_restart_recovers_immediately_after_process_identity_persistence(
     tmp_path: Path,
 ) -> None:
-    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    # T4c attack F1(a): a live lease is never fenced, so bound recovery
+    # adopts only once the crashed claimant's lease has expired.
+    now = [1_800_000_000_000]
+    clock = lambda: now[0]
+    runtime, job_id, _workspace = _runtime_and_job(
+        tmp_path, clock=clock, lease_seconds=1
+    )
     inspector = FakeInspector()
     first_adapter = RestartCapableFakeAdapter(inspector)
     first = _supervisor(runtime, tmp_path, first_adapter)
@@ -2020,7 +2054,8 @@ def test_restart_recovers_immediately_after_process_identity_persistence(
     persisted = runtime.attempts.get_attempt(lease.attempt.attempt_id)
     assert persisted is not None and persisted.status is AttemptStatus.CLAIMED
 
-    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    now[0] += 2_000  # past the claim's 1s lease: adoption is now lawful
+    reopened = Runtime.at(tmp_path, clock=clock, lease_seconds=1)
     second_adapter = RestartCapableFakeAdapter(inspector)
     restarted = _supervisor(reopened, tmp_path, second_adapter)
     outcomes = restarted.reconcile_restart(requeue_lost=False)
@@ -2037,7 +2072,13 @@ def test_restart_recovers_immediately_after_process_identity_persistence(
 def test_restart_recovers_after_running_before_checkpoint_or_heartbeat(
     tmp_path: Path,
 ) -> None:
-    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    # T4c attack F1(a): a live lease is never fenced, so bound recovery
+    # adopts only once the crashed claimant's lease has expired.
+    now = [1_800_000_000_000]
+    clock = lambda: now[0]
+    runtime, job_id, _workspace = _runtime_and_job(
+        tmp_path, clock=clock, lease_seconds=1
+    )
     inspector = FakeInspector()
     first_adapter = RestartCapableFakeAdapter(inspector)
     first = _supervisor(runtime, tmp_path, first_adapter)
@@ -2052,7 +2093,8 @@ def test_restart_recovers_after_running_before_checkpoint_or_heartbeat(
     persisted = runtime.attempts.get_attempt(lease.attempt.attempt_id)
     assert persisted is not None and persisted.status is AttemptStatus.RUNNING
 
-    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    now[0] += 2_000  # past the claim's 1s lease: adoption is now lawful
+    reopened = Runtime.at(tmp_path, clock=clock, lease_seconds=1)
     second_adapter = RestartCapableFakeAdapter(inspector)
     restarted = _supervisor(reopened, tmp_path, second_adapter)
     outcomes = restarted.reconcile_restart(requeue_lost=False)
@@ -2069,7 +2111,13 @@ def test_restart_stale_fence_quarantines_without_signal_or_second_start(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    # T4c attack F1(a): a live lease is never fenced, so bound recovery
+    # adopts only once the crashed claimant's lease has expired.
+    now = [1_800_000_000_000]
+    clock = lambda: now[0]
+    runtime, job_id, _workspace = _runtime_and_job(
+        tmp_path, clock=clock, lease_seconds=1
+    )
     inspector = FakeInspector()
     asyncio.run(
         _supervisor(
@@ -2078,7 +2126,8 @@ def test_restart_stale_fence_quarantines_without_signal_or_second_start(
             RestartCapableFakeAdapter(inspector),
         ).start_job(job_id)
     )
-    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    now[0] += 2_000  # past the claim's 1s lease: adoption is now lawful
+    reopened = Runtime.at(tmp_path, clock=clock, lease_seconds=1)
     adapter = RestartCapableFakeAdapter(inspector)
     restarted = _supervisor(reopened, tmp_path, adapter)
 
@@ -2212,7 +2261,13 @@ class UnknownExitRestartAdapter(RestartCapableFakeAdapter):
 def test_local_orphan_without_truthful_exit_code_remains_quarantined(
     tmp_path: Path,
 ) -> None:
-    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    # T4c attack F1(a): a live lease is never fenced, so bound recovery
+    # adopts only once the crashed claimant's lease has expired.
+    now = [1_800_000_000_000]
+    clock = lambda: now[0]
+    runtime, job_id, _workspace = _runtime_and_job(
+        tmp_path, clock=clock, lease_seconds=1
+    )
     inspector = FakeInspector()
     asyncio.run(
         _supervisor(
@@ -2221,7 +2276,8 @@ def test_local_orphan_without_truthful_exit_code_remains_quarantined(
             RestartCapableFakeAdapter(inspector),
         ).start_job(job_id)
     )
-    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    now[0] += 2_000  # past the claim's 1s lease: adoption is now lawful
+    reopened = Runtime.at(tmp_path, clock=clock, lease_seconds=1)
     restarted = _supervisor(
         reopened,
         tmp_path,
@@ -2258,7 +2314,13 @@ def test_recovery_error_bounds_the_complete_rendered_diagnostic() -> None:
 def test_restart_quarantine_bounds_complete_reattach_failure(
     tmp_path: Path,
 ) -> None:
-    runtime, job_id, _workspace = _runtime_and_job(tmp_path)
+    # T4c attack F1(a): a live lease is never fenced, so bound recovery
+    # adopts only once the crashed claimant's lease has expired.
+    now = [1_800_000_000_000]
+    clock = lambda: now[0]
+    runtime, job_id, _workspace = _runtime_and_job(
+        tmp_path, clock=clock, lease_seconds=1
+    )
     inspector = FakeInspector()
     first_adapter = RestartCapableFakeAdapter(inspector)
     asyncio.run(_supervisor(runtime, tmp_path, first_adapter).start_job(job_id))
@@ -2270,7 +2332,8 @@ def test_restart_quarantine_bounds_complete_reattach_failure(
         def reattach(self, spec, binding):
             raise failure
 
-    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    now[0] += 2_000  # past the claim's 1s lease: adoption is now lawful
+    reopened = Runtime.at(tmp_path, clock=clock, lease_seconds=1)
     restarted = _supervisor(
         reopened, tmp_path, FailingReattachAdapter(inspector)
     )
@@ -3458,11 +3521,24 @@ class CommissionRecoverableAdapter(RestartCapableFakeAdapter):
         return self.ref
 
 
-def _commission_recovery_fixture(tmp_path, monkeypatch, mode="valid"):
+def _commission_recovery_fixture(tmp_path, monkeypatch, mode="valid", *, recover_at_expiry=False):
     # This campaign exercises actual recovery/containment with a controlled
     # canonical commission result; strict-v2 resolver tests remain separate.
+    # T4c attack F1(a): with recover_at_expiry the fixture runs on a
+    # controllable clock with a 1s lease and returns the mutable `now`
+    # handle as its last element — the caller advances it past the crashed
+    # claimant's lease at the exact moment adoption should become lawful
+    # (bound recovery defers at a live lease and adopts only at expiry;
+    # cancels that must land on the live lease advance AFTER cancelling).
+    # Without the flag the original real-clock live-lease timing is
+    # preserved for the containment campaigns that never adopt.
     from control_plane.executive_supervisor import VerifiedCommission
-    runtime, job_id, workspace = _runtime_and_job(tmp_path)
+    now = [1_800_000_000_000] if recover_at_expiry else None
+    clock = (lambda: now[0]) if recover_at_expiry else None
+    lease_seconds = 1 if recover_at_expiry else 30
+    runtime, job_id, workspace = _runtime_and_job(
+        tmp_path, clock=clock, lease_seconds=lease_seconds
+    )
     planner = runtime.jobs.get_job(job_id)
     content = b"# Exact persisted commission\n"
     commission = VerifiedCommission("mastermindx-market-intelligence/Mastermind",
@@ -3483,16 +3559,19 @@ def _commission_recovery_fixture(tmp_path, monkeypatch, mode="valid"):
             return original_prompt(*args, **kwargs)
         monkeypatch.setattr(first, "_prompt", changed_prompt)
     active = asyncio.run(first.start_job(planner.job_id))
-    reopened = Runtime.at(tmp_path, lease_seconds=30)
+    reopened = Runtime.at(tmp_path, clock=clock, lease_seconds=lease_seconds)
     second = CommissionRecoverableAdapter(inspector)
     restarted = _supervisor(reopened, tmp_path, second)
     monkeypatch.setattr(restarted, "verified_commission", lambda *_: commission)
-    return reopened, planner, active, inspector, second, restarted
+    return reopened, planner, active, inspector, second, restarted, now
 
 
 @pytest.mark.parametrize("mode", ["valid", "pre-feature", "missing-inline", "wrong-inline", "wrong-ref"])
 def test_recovery_attests_the_original_strict_commission_prompt(tmp_path, monkeypatch, mode):
-    runtime, planner, active, inspector, adapter, supervisor = _commission_recovery_fixture(tmp_path, monkeypatch, mode)
+    runtime, planner, active, inspector, adapter, supervisor, now = _commission_recovery_fixture(
+        tmp_path, monkeypatch, mode, recover_at_expiry=(mode == "valid"))
+    if now is not None:
+        now[0] += 2_000  # attack F1(a): past the 1s lease — adoption is lawful
     revalidated = []
     original_revalidate = supervisor._revalidate_recovery_inputs
     def tracked_revalidate(attempt, spec):
@@ -3512,8 +3591,11 @@ def test_recovery_attests_the_original_strict_commission_prompt(tmp_path, monkey
 
 @pytest.mark.parametrize("unavailable", ["commission", "target", "cancel-during-read"])
 def test_cancelled_recovery_does_not_depend_on_fresh_launch_inputs(tmp_path, monkeypatch, unavailable):
-    runtime, planner, active, inspector, adapter, supervisor = _commission_recovery_fixture(tmp_path, monkeypatch)
-    if unavailable != "cancel-during-read": runtime.jobs.cancel_job(planner.job_id)
+    runtime, planner, active, inspector, adapter, supervisor, now = _commission_recovery_fixture(
+        tmp_path, monkeypatch, recover_at_expiry=True)
+    if unavailable != "cancel-during-read":
+        runtime.jobs.cancel_job(planner.job_id)  # lands on the live lease
+        now[0] += 2_000  # attack F1(a): past the 1s lease — adoption is lawful
     calls = []
     def refused(*args):
         calls.append(unavailable)
@@ -3522,6 +3604,13 @@ def test_cancelled_recovery_does_not_depend_on_fresh_launch_inputs(tmp_path, mon
     if unavailable == "target": supervisor._exact_target_provider = refused
     else: monkeypatch.setattr(supervisor, "verified_commission", refused)
     result = supervisor.reconcile_restart(requeue_lost=False)
+    if unavailable == "cancel-during-read":
+        # The cancel landed during the input read while the claimant's lease
+        # was still live, so the first reconcile defers (attack F1(a));
+        # adoption happens on the reconcile after the lease expires.
+        assert [row.status for row in result] == [ReconcileStatus.AWAITING_LEASE_EXPIRY]
+        now[0] += 2_000
+        result = supervisor.reconcile_restart(requeue_lost=False)
     assert [item.status for item in result] == [ReconcileStatus.LIVE_RECOVERED]
     pending = supervisor.take_recovered_runs()
     assert len(pending) == 1 and adapter.start_calls == 0
@@ -3534,7 +3623,7 @@ def test_cancelled_recovery_does_not_depend_on_fresh_launch_inputs(tmp_path, mon
 
 
 def test_recovered_commission_prompt_must_match_launch_attestation(tmp_path, monkeypatch):
-    runtime, planner, active, inspector, adapter, supervisor = _commission_recovery_fixture(tmp_path, monkeypatch)
+    runtime, planner, active, inspector, adapter, supervisor, _now = _commission_recovery_fixture(tmp_path, monkeypatch)
     attempt = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
     metadata = copy.deepcopy(attempt.launch_metadata)
     metadata["launch_attestation"]["prompt_sha256"] = "0" * 64
@@ -3546,7 +3635,7 @@ def test_recovered_commission_prompt_must_match_launch_attestation(tmp_path, mon
 
 
 def test_cancel_during_input_failure_cannot_adopt_a_newer_writer_fence(tmp_path, monkeypatch):
-    runtime, planner, active, inspector, adapter, supervisor = _commission_recovery_fixture(tmp_path, monkeypatch)
+    runtime, planner, active, inspector, adapter, supervisor, _now = _commission_recovery_fixture(tmp_path, monkeypatch)
     original = runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
     def owner_changed(*_args):
         runtime.attempts.adopt_attempt(original.attempt_id,
@@ -3567,7 +3656,8 @@ def test_cancel_during_input_failure_cannot_adopt_a_newer_writer_fence(tmp_path,
 @pytest.mark.parametrize("cancel_during_source", [False, True])
 def test_production_target_source_error_preserves_recovery_containment(tmp_path, monkeypatch, cancel_during_source):
     from test_executive_launchd_config import _hf1b_control_fixture, _hf1b_bind
-    runtime, planner, active, inspector, adapter, supervisor = _commission_recovery_fixture(tmp_path, monkeypatch)
+    runtime, planner, active, inspector, adapter, supervisor, now = _commission_recovery_fixture(
+        tmp_path, monkeypatch, recover_at_expiry=cancel_during_source)
     config_root = tmp_path / "target-config"
     config_root.mkdir()
     cli, _, _, _, _, raw, path, attestation = _hf1b_control_fixture(config_root)
@@ -3589,6 +3679,13 @@ def test_production_target_source_error_preserves_recovery_containment(tmp_path,
     assert len(results) == 1 and calls == [planner.job_id]
     assert adapter.start_calls == 0
     if cancel_during_source:
+        # The cancel landed during the source read while the claimant's
+        # lease was still live, so the first reconcile defers (attack
+        # F1(a)); adoption happens on the reconcile after the lease
+        # expires — the cancelled recovery needs no fresh launch inputs.
+        assert results[0].status is ReconcileStatus.AWAITING_LEASE_EXPIRY
+        now[0] += 2_000
+        results = supervisor.reconcile_restart(requeue_lost=False)
         assert results[0].status is ReconcileStatus.LIVE_RECOVERED
         pending = supervisor.take_recovered_runs()
         receipt = asyncio.run(supervisor.finish_job(pending[0]))

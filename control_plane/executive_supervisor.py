@@ -5361,6 +5361,28 @@ class ExecutiveSupervisor:
                     "worker adapter does not support existing-execution recovery"
                 ),
             )
+        if not lease_expired:
+            # T4c attack F1(a) (step 5, 2026-11-11): the bound path used to
+            # adopt a LIVE lease (adopt_expired_lease=False only refuses the
+            # expired shape), so the door's second supervisor instance
+            # fenced the service's in-process recovered-run finisher on the
+            # cadence reconcile.  The bound path defers exactly like the
+            # identity-less receipt path above: while the lease is live its
+            # owner may be a live finisher collecting and heartbeating, and
+            # the engine's own lease expiry is the only proof that owner
+            # lost its rights.  The in-transaction expiry re-verify inside
+            # adopt_attempt still refuses a lease renewed in between.
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id,
+                job_id=attempt.job_id,
+                status=ReconcileStatus.AWAITING_LEASE_EXPIRY,
+                process_was_live=process_was_live,
+                error=(
+                    "bound attempt holds a live lease owned by "
+                    f"{attempt.lease_owner!r}; adoption deferred to lease "
+                    "expiry — a live owner is never fenced"
+                ),
+            )
         try:
             adopted = self.runtime.attempts.adopt_attempt(
                 attempt.attempt_id,

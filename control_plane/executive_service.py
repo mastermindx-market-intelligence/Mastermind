@@ -10092,6 +10092,17 @@ class ExecutiveControlService:
             await (_direct_owner if _direct_owner is not None else self._require_supervisor()).finish_job(active)
         except asyncio.CancelledError:
             raise
+        except StateConflict as exc:
+            # T4c attack F1(b) (step 5, 2026-11-11): a StateConflict from a
+            # finisher is the engine's identity-safe answer — this finisher
+            # lost the attempt to another lawful owner (adoption CAS, the
+            # F1(a) fence handover) or another lane already terminalized it.
+            # Ownership loss is recorded for visibility, never a service-
+            # wide poison: the next reconcile owns the recovery, and
+            # quarantining here turned one routine ownership handover into
+            # every mutating lane refusing until an operator restart.
+            self._dispatch_errors[job_id] = (
+                f"{type(exc).__name__}: {str(exc)[:500]}")
         except Exception as exc:
             self._dispatch_errors[job_id] = f"{type(exc).__name__}: {str(exc)[:500]}"
             # A finish/seal failure cannot be treated as an ordinary completed
