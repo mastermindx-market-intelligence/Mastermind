@@ -32,15 +32,29 @@ def health_client(monkeypatch):
     """The REAL /health and /ready handlers, without firing the startup hook."""
     import app.main as main_mod
 
+    # ``app.state`` is a starlette ``State``; its ``__delattr__`` deletes the
+    # backing dict key directly.  ``monkeypatch.setattr(..., raising=False)``
+    # records a previously absent attribute and therefore *deletes* it on undo,
+    # which raises ``KeyError`` for the slot this fixture created.  Restore the
+    # exact pre-test presence here instead of relying on that path.
+    state = main_mod.app.state
+    _missing = object()
+    previous = state._state.get("scheduler", _missing)
+
     def _client(*, serve_only: bool, scheduler) -> TestClient:
         if serve_only:
             monkeypatch.setenv("MASTERMIND_SERVE_ONLY", "1")
         else:
             monkeypatch.delenv("MASTERMIND_SERVE_ONLY", raising=False)
-        monkeypatch.setattr(main_mod.app.state, "scheduler", scheduler, raising=False)
+        state.scheduler = scheduler
         return TestClient(main_mod.app, raise_server_exceptions=True)
 
-    return _client
+    yield _client
+
+    if previous is _missing:
+        state._state.pop("scheduler", None)
+    else:
+        state.scheduler = previous
 
 
 # ---------------------------------------------------------------------------

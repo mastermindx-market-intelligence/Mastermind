@@ -5717,6 +5717,17 @@ def test_cap_s1_observer_temp_root_normalizes_only_verified_descriptor(
     fstats = iter((expected, normalized))
     calls = []
 
+    def _next_fstat(_fd):
+        # Never let the exhausted iterator raise ``StopIteration`` from an
+        # arbitrary caller: under PEP 479 that surfaces as ``RuntimeError:
+        # generator raised StopIteration`` from whichever generator happens to
+        # be running (observed during CI teardown).  Incidental extra
+        # observations settle on the normalized state.
+        try:
+            return next(fstats)
+        except StopIteration:
+            return normalized
+
     class _BoundPath:
         def __fspath__(self):
             return "/owned/observer-output"
@@ -5732,7 +5743,7 @@ def test_cap_s1_observer_temp_root_normalizes_only_verified_descriptor(
         "open",
         lambda path, flags: calls.append(("open", os.fspath(path), flags)) or 91,
     )
-    monkeypatch.setattr(canary_module.os, "fstat", lambda fd: next(fstats))
+    monkeypatch.setattr(canary_module.os, "fstat", _next_fstat)
     monkeypatch.setattr(
         canary_module.os,
         "fchown",
