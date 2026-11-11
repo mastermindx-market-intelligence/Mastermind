@@ -36,9 +36,12 @@ edits take effect without a restart; apply still works against a stopped
 server.
 """
 import argparse
+import fcntl
+import hashlib
 import json
 import os
 import re
+import shlex
 import sqlite3
 import stat
 import subprocess
@@ -49,6 +52,8 @@ import urllib.parse
 import urllib.request
 
 RESERVED_PORTS = (3773, 3774)  # the Chairman's own T3 Code app
+
+SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 # A teammate's primary thread is titled exactly "Name — one-word-role". The
 # sidebar ellipsizes long titles, so the whole title must fit in 24 characters.
@@ -101,22 +106,44 @@ def load_spec(path):
             "home silently disable Read/Glob/Grep deny rules (live-proved "
             "2026-11-11); tool-limits.json stays in the home, protected by "
             "the HOME_LOCKED write denies")
+    for key in ("allow_read_roots", "deny_read_roots", "deny_write_roots",
+                "home_write_allow"):
+        # repair round 1, P10: a string where a list is expected would be
+        # iterated character-by-character, silently granting one-character
+        # roots (proved by the panel: "allow_read_roots": "~/x" grants
+        # Read($HOME/**))
+        value = spec.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, list):
+            die(f"spec key '{key}' must be a list of paths, got "
+                f"{type(value).__name__}")
+        for entry in value:
+            if not isinstance(entry, str) or not entry.strip():
+                die(f"spec key '{key}' has a non-string entry {entry!r}")
     for name in spec.get("home_write_allow") or []:
         # attack round, finding 10: a locked/config name here would emit an
         # allow for it (only the unconditional deny loop keeps it bound
         # today — do not rely on that coincidence), and an absolute or
-        # traversal name joins into an allow string outside the home
-        if name in HOME_CONFIG or name in HOME_LOCKED:
+        # traversal name joins into an allow string outside the home.
+        # repair round 1, P11: compare the rstrip'd name — "settings.json/"
+        # passed the raw compare and emitted a grant for a locked name
+        base = name[:-1] if name.endswith("/") else name
+        if base in HOME_CONFIG or base in HOME_LOCKED:
             die(f"home_write_allow entry {name!r} is a config or locked "
                 "name and can never be granted")
-        if not isinstance(name, str):
-            die(f"home_write_allow entry {name!r} must be a string")
-        base = name[:-1] if name.endswith("/") else name
         if (not base or name.startswith("/")
                 or name.startswith("~") or base != os.path.normpath(base)
                 or ".." in base.split(os.sep)):
             die(f"home_write_allow entry {name!r} must be a relative "
                 "home-directory name like 'CLAUDE.md' or 'notes/'")
+    for entry in spec.get("deny_write_roots") or []:
+        # repair round 1, P12: this list used to be the one root list never
+        # expand()ed, so a "~" spelling silently emitted a junk rule
+        expanded = expand(entry)
+        if not os.path.isabs(expanded):
+            die(f"deny_write_roots entry {entry!r} does not expand to an "
+                f"absolute path ({expanded})")
     server, project = spec["server"], spec["project"]
     for key in ("root", "home", "t3_bin", "port"):
         if key not in server:
@@ -135,6 +162,12 @@ def load_spec(path):
     dot_t3 = os.path.realpath(expand("~/.t3"))
     if root == dot_t3 or root.startswith(dot_t3 + os.sep):
         die(f"server root {root} is at or inside ~/.t3; refusing")
+    # repair round 1, P9: the home guard was missing — a spec home at/inside
+    # ~/.t3 would merge roster instances straight into the Chairman's real
+    # T3 settings.json
+    home_real = os.path.realpath(expand(server["home"]))
+    if home_real == dot_t3 or home_real.startswith(dot_t3 + os.sep):
+        die(f"server home {home_real} is at or inside ~/.t3; refusing")
     if spec.get("paperclip_base"):
         # Parsed, never prefix-compared: a userinfo or subdomain trick must
         # not smuggle a foreign host past the loopback requirement.
@@ -167,6 +200,14 @@ def load_spec(path):
             die(f"duplicate teammate name {mate['name']!r}")
         if mate["instance"] in instances:
             die(f"duplicate instance id {mate['instance']!r}")
+        # repair round 1, P8: the slug becomes a directory name under the
+        # server root and part of the launch args — an absolute, traversal,
+        # trailing-slash or space-carrying slug re-roots the fence or breaks
+        # the launch so no limits load while apply reports success
+        if not isinstance(mate["slug"], str) or not SLUG_RE.fullmatch(
+                mate["slug"]):
+            die(f"{where}.slug must match ^[A-Za-z0-9_-]+$, got "
+                f"{mate['slug']!r}")
         if mate["slug"] in slugs:
             die(f"duplicate slug {mate['slug']!r}")
         if mate["accent_color"].lower() in colors:
@@ -403,6 +444,148 @@ HOME_CONFIG = ("settings.json", "settings.local.json", "managed-settings.json",
 # Always denied for Write/Edit, in every spec, new keys or not.
 SERVER_INFRASTRUCTURE = ("bin", "config", "runtime", "run")
 
+# User-level autoload, credential, config and personal folders a teammate
+# never needs, denied for Read/Glob/Grep AND Write/Edit whether or not the
+# name exists (repair round 1, P3/P5: the write fence only enumerated
+# existing siblings, so an absent ~/.zshenv was creatable, and the
+# production spec's curated read list omitted ~/Library/Containers,
+# ~/.claude.json, ~/.git-credentials, shell histories, Documents, Desktop
+# and Downloads). Entries are user-home-relative; a trailing * is a prefix
+# family (the TSHc window-dev* folders).
+USER_PROTECTED = (
+    # shells load these at every interactive start: writing one is code
+    # execution as the user (P3)
+    ".zshenv", ".zprofile", ".zshrc", ".zlogin", ".zsh_history",
+    ".bash_profile", ".bashrc", ".bash_history", ".profile", ".inputrc",
+    ".wgetrc", ".curlrc",
+    # credentials and tool config
+    ".ssh", ".gnupg", ".aws", ".kube", ".docker", ".config", ".claude",
+    ".codex", ".claude.json", ".gitconfig", ".git-credentials", ".netrc",
+    ".npmrc", ".t3", ".hermes", ".paperclip",
+    # the user's personal folders (P5)
+    "Documents", "Desktop", "Downloads",
+    # per-user state that carries tokens and secrets
+    "Library/Keychains", "Library/Cookies", "Library/Application Support",
+    "Library/Containers", "Library/Group Containers", "Library/Preferences",
+    "Library/HTTPStorages", "Library/Caches", "Library/Mail", "Library/Logs",
+    # a launchd agent planted here runs as the user at next login (TSHc)
+    "Library/LaunchAgents",
+    # other lane/window surfaces (TSHc panel): window state and every dev
+    # team server except this spec's own root
+    ".mastermind/window", ".mastermind/mmos_dev/window-dev*",
+    ".mastermind/mmos_dev", ".mastermind/t3-team-server",
+)
+
+# Bare tool denies beyond Bash/Agent/NotebookEdit (repair round 1 census,
+# live-proved on the dev server): the default claudeAgent toolset exposes
+# these unless denied, and none of them is in any charter. Workflow spawns
+# subagents; SendMessage/ListAgents are lateral agent channels;
+# request_secret would ask the T3 server for stored secrets; Skill loads
+# skill files from outside the fence; ScheduleWakeup self-arms a timer.
+# ToolSearch is deliberately NOT denied: it is how WebFetch/WebSearch load,
+# and the gate refuses every non-allowlisted tool at call time anyway.
+EXTRA_TOOL_DENIES = ("Workflow", "SendMessage", "ListAgents",
+                     "ScheduleWakeup", "Skill", "CronCreate", "CronDelete",
+                     "CronList", "mcp__t3-code__request_secret")
+
+# The primary fence (repair round 1 design ruling): one PreToolUse hook
+# program, stored where no teammate can write, wired into every teammate's
+# tool-limits.json. Live-proved on the RL dev server (evidence 12): hooks in
+# the --settings file fire inside teammate turns, exit 2 blocks with the
+# reason shown to the model, and a missing or crashing hook lets the call
+# THROUGH (fail-open) — which is why the gate itself fails closed on every
+# internal error and apply/status verify its presence and sha256.
+GATE_SOURCE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "teammate_gate.py")
+GATE_INSTALL_NAME = "teammate_gate.py"
+
+
+def gate_install_path(spec):
+    return os.path.join(os.path.realpath(expand(spec["server"]["root"])),
+                        "bin", GATE_INSTALL_NAME)
+
+
+def gate_config_path(spec, mate):
+    return os.path.join(os.path.realpath(expand(spec["server"]["root"])),
+                        "config", "teammate-gate",
+                        f"{mate['slug']}.json")
+
+
+def gate_command(spec, mate):
+    return " ".join([gate_install_path(spec), "--config",
+                     shlex.quote(gate_config_path(spec, mate))])
+
+
+def gate_hook_block(spec, mate):
+    return {"PreToolUse": [
+        {"matcher": "*",
+         "hooks": [{"type": "command", "command": gate_command(spec, mate),
+                    "timeout": 20}]}]}
+
+
+def _user_protected_paths(spec):
+    """Absolute USER_PROTECTED paths, minus any entry that is an ancestor
+    of (or equal to) a path this spec must keep reachable — the teammate
+    homes, the read roots and workspace, the server root and the server
+    home. A directory deny matches its whole subtree (live-proved), so an
+    unfiltered entry would fence the spec's own tree: the dev spec lives
+    under ~/.mastermind/mmos_dev, which is exactly such an entry."""
+    base = os.path.realpath(expand("~"))
+    keep = set()
+    for mate in spec.get("teammates", []):
+        keep.add(os.path.realpath(teammate_home(spec, mate)))
+    keep.add(os.path.realpath(expand(spec["project"]["workspace_root"])))
+    keep.add(os.path.realpath(expand(spec["server"]["root"])))
+    keep.add(os.path.realpath(expand(spec["server"]["home"])))
+    keep.update(os.path.realpath(expand(r))
+                for r in spec.get("allow_read_roots") or [])
+    # existing teammate homes too (dropped or not-yet-in-spec slugs): they
+    # are fenced as other-homes, not denied as subtrees of their own
+    # parent chain
+    root = os.path.realpath(expand(spec["server"]["root"]))
+    teammates_dir = os.path.join(root, "teammates")
+    if os.path.isdir(teammates_dir):
+        try:
+            for name in os.listdir(teammates_dir):
+                keep.add(os.path.realpath(os.path.join(teammates_dir, name)))
+        except OSError:
+            pass
+    out = []
+    for name in USER_PROTECTED:
+        entry = os.path.join(base, name.rstrip("*").rstrip("/"))
+        blocked = any(p == entry or p.startswith(entry + os.sep)
+                      for p in keep)
+        if not blocked:
+            out.append(os.path.join(base, name))
+    return out
+
+
+def other_home_paths(spec, mate):
+    """Every OTHER teammate home this teammate must not touch: all spec
+    slugs (repair round 1, P1 — a home added by this very apply must be
+    fenced in the same run even before its directory exists) plus every
+    directory under <root>/teammates that exists on disk (P6 — a dropped
+    teammate's home stays fenced)."""
+    root = os.path.realpath(expand(spec["server"]["root"]))
+    own = os.path.realpath(teammate_home(spec, mate))
+    paths = set()
+    for other in spec["teammates"]:
+        if other["slug"] != mate["slug"]:
+            paths.add(os.path.realpath(teammate_home(spec, other)))
+    teammates_dir = os.path.join(root, "teammates")
+    if os.path.isdir(teammates_dir):
+        try:
+            for name in os.listdir(teammates_dir):
+                candidate = os.path.realpath(os.path.join(teammates_dir,
+                                                          name))
+                if candidate != own:
+                    paths.add(candidate)
+        except OSError as exc:
+            if os.path.exists(teammates_dir):
+                die(f"cannot enumerate {teammates_dir} for the limits "
+                    f"fence ({exc}); refusing to emit a fence with holes")
+    return sorted(paths)
+
 
 def limits_paths(spec, mate):
     """(limits_path, charter_path) this teammate's launch args point at.
@@ -418,12 +601,87 @@ def limits_paths(spec, mate):
             os.path.join(home, "CHARTER.md"))
 
 
+def gate_config(spec, mate):
+    """The per-teammate config the gate program reads at every tool call.
+
+    Read policy is ALWAYS rooted (home + the team workspace + the spec's
+    allow_read_roots) — this is the P5 fix at the primary-fence level: the
+    production spec has no allow_read_roots, and its curated deny list
+    alone left Documents, Library/Containers, ~/.claude.json and friends
+    readable; the gate roots reads even when the rule layer stays in
+    deny-list mode. deny_reads are checked after resolution and carry only
+    entries that can still matter inside the roots (spec deny_read_roots
+    under a root; the firmlink/case spelling work happens inside the gate).
+    write_names mirrors home_write_allow (None = default home-wide write
+    minus protected names).
+    """
+    home = os.path.realpath(teammate_home(spec, mate))
+    workspace = os.path.realpath(expand(spec["project"]["workspace_root"]))
+    read_roots = [workspace]
+    for r in spec.get("allow_read_roots") or []:
+        candidate = os.path.realpath(expand(r))
+        if candidate not in read_roots and candidate != home:
+            read_roots.append(candidate)
+    def under(path, root):
+        return path == root or path.startswith(root.rstrip("/") + "/")
+    deny_reads = []
+    for r in spec.get("deny_read_roots") or []:
+        candidate = os.path.realpath(expand(r))
+        if under(candidate, home) or any(under(candidate, root)
+                                         for root in read_roots):
+            deny_reads.append(candidate)
+    write_names = spec.get("home_write_allow")
+    if write_names is not None and not write_names:
+        write_names = []
+    return {
+        "home": home,
+        "read_roots": read_roots,
+        "deny_reads": deny_reads,
+        "write_names": write_names,
+    }
+
+
+def gate_sha256():
+    with open(GATE_SOURCE, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
+
+
+def ensure_gate(spec):
+    """Install the gate program under <server root>/bin (write-denied for
+    every teammate; the gate itself refuses writes outside the home, so it
+    protects its own binary). Dies loudly when the source is missing — a
+    missing hook lets every tool call through (live-proved fail-open)."""
+    if not os.path.isfile(GATE_SOURCE):
+        die(f"gate program missing from the installation: {GATE_SOURCE}; "
+            "refusing to apply limits whose primary fence cannot exist")
+    root = os.path.realpath(expand(spec["server"]["root"]))
+    staging = os.path.join(root, "run")
+    os.makedirs(staging, exist_ok=True)
+    os.makedirs(os.path.join(root, "bin"), exist_ok=True)
+    with open(GATE_SOURCE) as fh:
+        text = fh.read()
+    expected = gate_sha256()
+    target = gate_install_path(spec)
+    write_if_changed(target, text, 0o555, staging_dir=staging)
+    actual = hashlib.sha256(open(target, "rb").read()).hexdigest()
+    if actual != expected:
+        die(f"gate at {target} does not match the installation (sha256 "
+            f"{actual} != {expected}); refusing")
+    os.chmod(target, 0o555)  # not writable even by the owning user
+    return expected
+
+
 def _read_deny(path):
-    """Deny rules for one path: always the file+tree pair. A directory deny
-    matches its whole subtree; an exact-path rule alone is not trusted to
-    bind (the Write/Edit exact form proved inert live — evidence 10 D3 —
-    so no emitter relies on an exact form alone for any tool)."""
-    return [f"Read(/{path})", f"Read(/{path}/**)"]
+    """Deny rules for one path, for every read tool (repair round 1, P4:
+    these used to compile to Read rules only, leaving ~/.ssh, <root>/run
+    and other homes open to Grep for content and Glob for names). Always
+    the file+tree pair: a directory deny matches its whole subtree, and an
+    exact-path rule alone is not trusted to bind for any tool (the
+    Write/Edit exact form proved inert live — evidence 10 D3)."""
+    rules = []
+    for tool in READ_TOOLS:
+        rules += [f"{tool}(/{path})", f"{tool}(/{path}/**)"]
+    return rules
 
 
 def firmlink_aliases(path):
@@ -450,13 +708,18 @@ def deny_read_paths(spec, mate):
     """
     root = os.path.realpath(expand(spec["server"]["root"]))
     paths = [os.path.join(root, name) for name in SERVER_PRIVATE]
-    for other in spec["teammates"]:
-        if other["slug"] != mate["slug"]:
-            paths.append(os.path.realpath(teammate_home(spec, other)))
+    # every other teammate home: spec slugs AND directories that exist
+    # (P1: a home added by this apply; P6: a dropped teammate's home)
+    paths += other_home_paths(spec, mate)
     home = teammate_home(spec, mate)
     paths += [os.path.join(home, name) for name in HOME_UNREADABLE]
     paths += [os.path.realpath(expand(r))
               for r in spec.get("deny_read_roots", [])]
+    # always-on user-level protected folders (P5): the production spec has
+    # no read rooting, so its only read fence is this curated list — it
+    # must cover the credential and personal folders whether or not a
+    # later spec remembers to name them
+    paths += _user_protected_paths(spec)
     if spec.get("deny_read_root_siblings"):
         parent = os.path.dirname(root)
         if os.path.isdir(parent):
@@ -586,7 +849,14 @@ def rooted_home_write_rules(spec, mate):
             deny += [f"{tool}(/{target})", f"{tool}(/{target}/**)"]
         try:
             children = os.listdir(home)
-        except OSError:
+        except OSError as exc:
+            # repair round 1, P15: fail CLOSED, like the sibling enumeration
+            # — an unlistable existing home silently published a weakened
+            # write fence
+            if os.path.exists(home):
+                die(f"cannot enumerate the teammate home {home} for the "
+                    f"write rules ({exc}); refusing to emit a fence with "
+                    f"holes")
             children = []
         for name in sorted(children):
             if name in allowed_files or name in allowed_dirs:
@@ -599,12 +869,13 @@ def rooted_home_write_rules(spec, mate):
 def tool_limits(spec, mate):
     home = os.path.realpath(teammate_home(spec, mate))
     deny_roots = [os.path.realpath(expand(spec["project"]["workspace_root"]))]
-    deny_roots += [os.path.realpath(r) for r in spec.get("deny_write_roots", [])]
+    deny_roots += [os.path.realpath(expand(r))
+                   for r in spec.get("deny_write_roots", [])]
     # symlink spellings must not dodge a deny: the matcher resolves links,
     # so every deny string is built from the real path (attack round,
     # finding 8); /Users paths also get their firmlink twin (finding 7)
     deny_roots += [a for r in deny_roots for a in firmlink_aliases(r)]
-    deny = ["Bash", "Agent", "NotebookEdit"]
+    deny = ["Bash", "Agent", "NotebookEdit"] + list(EXTRA_TOOL_DENIES)
     for root in deny_roots:
         # root itself too: if the folder does not exist (yet), a Write could
         # otherwise create a file at that exact path (server-infrastructure
@@ -623,6 +894,12 @@ def tool_limits(spec, mate):
         config = os.path.join(home, name)
         for tool in ("Write", "Edit"):
             deny += [f"{tool}(/{config})", f"{tool}(/{config}/**)"]
+    # other teammates' homes, Write/Edit too (P1/P6: spec slugs and dropped
+    # homes, not only directories that existed before this apply) — a
+    # rewrite of another mate's tool-limits.json binds at its next start
+    for path in other_home_paths(spec, mate):
+        for tool in ("Write", "Edit"):
+            deny += [f"{tool}(/{path})", f"{tool}(/{path}/**)"]
     root = os.path.realpath(expand(spec["server"]["root"]))
     for name in SERVER_INFRASTRUCTURE:
         infra = os.path.join(root, name)
@@ -636,6 +913,20 @@ def tool_limits(spec, mate):
     t3_dir = os.path.dirname(os.path.realpath(expand(spec["server"]["t3_bin"])))
     for tool in ("Write", "Edit"):
         deny += [f"{tool}(/{t3_dir})", f"{tool}(/{t3_dir}/**)"]
+    # user-level protected folders, Write/Edit whether or not they exist
+    # (P3: the sibling enumeration only covers names that exist at apply
+    # time, so an absent ~/.zshenv was creatable — writing one is code
+    # execution as the user at the next shell start). The trailing-*
+    # entries are prefix families (window-dev*); a * wildcard inside a
+    # deny path binds (live-proved, evidence 09)
+    for path in _user_protected_paths(spec):
+        base = path[:-1] if path.endswith("*") else path
+        if path.endswith("*"):
+            for tool in ("Write", "Edit"):
+                deny += [f"{tool}(/{base}*)", f"{tool}(/{base}*/**)"]
+        else:
+            for tool in ("Write", "Edit"):
+                deny += [f"{tool}(/{base})", f"{tool}(/{base}/**)"]
     for path in deny_read_paths(spec, mate):
         deny += _read_deny(path)
     read_rooted = bool(spec.get("allow_read_roots"))
@@ -651,15 +942,15 @@ def tool_limits(spec, mate):
     # apply executes it), and none of the user's own config surfaces
     # (~/.zshenv, ~/.ssh, ~/Library/LaunchAgents, ~/.claude, ...). All of
     # those are non-chain siblings of the teammate home, so one
-    # Write/Edit sibling enumeration covers them; with the rooted keys on,
-    # the fence widens to the read roots (previous behavior).
-    write_fence_roots = (_read_allow_roots(spec, mate)
-                         if (read_rooted or write_named) else [home])
-    deny += rooted_read_denies(spec, mate, ("Write", "Edit"),
-                               roots=write_fence_roots)
+    # Write/Edit sibling enumeration covers them.
+    # repair round 1, P2: the fence is rooted at the teammate home in
+    # EVERY spec — naming a folder as a read root never makes it writable
+    # (the previous widening let allow_read_roots: [<root>/home] remove
+    # that home's write deny entirely)
+    deny += rooted_read_denies(spec, mate, ("Write", "Edit"), roots=[home])
     allow = [
         "Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite",
-        f"Write(/{home}/**)", f"Edit(/{home}/**)",
+        "ToolSearch", f"Write(/{home}/**)", f"Edit(/{home}/**)",
     ]
     if read_rooted:
         allow = [a for a in allow if a not in READ_TOOLS]
@@ -681,15 +972,20 @@ def tool_limits(spec, mate):
             "nor deny is silently allowed, so every restriction here is a "
             "deny. Limits bind at session-process start, not on file "
             "change (apply reports limitsPendingRestart).")
-    note += (" Writes are fenced to the teammate home in every spec "
-             "(Write/Edit sibling enumeration); directories created after "
-             "this apply get no deny until the next apply — re-apply "
-             "after changing the team layout.")
+    note += (" SECOND LAYER. The primary fence is the PreToolUse hook "
+             "below: it resolves every path (symlinks, .., case, Unicode, "
+             "firmlinks) at call time, so a folder created after this "
+             "apply is still refused by the hook; these enumerated deny "
+             "rules are the snapshot second layer and are regenerated by "
+             "re-running apply. A missing or crashing hook lets calls "
+             "through (live-proved, fail-open) — status verifies the "
+             "hook's presence and sha256.")
     if read_rooted or write_named:
         note += (" allow_read_roots/home_write_allow compiled to deny "
                  "rules by sibling enumeration (rooted_read_denies).")
     return {
         "permissions": {"allow": allow, "deny": deny},
+        "hooks": gate_hook_block(spec, mate),
         "_note": note,
     }
 
@@ -712,9 +1008,19 @@ def write_file_assets(spec, mate):
     home = teammate_home(spec, mate)
     os.makedirs(home, exist_ok=True)
     os.chmod(home, 0o700)
-    staging = os.path.join(os.path.realpath(expand(spec["server"]["root"])),
-                           "run")
+    root = os.path.realpath(expand(spec["server"]["root"]))
+    staging = os.path.join(root, "run")
     os.makedirs(staging, exist_ok=True)
+    # the gate config lands under <root>/config/teammate-gate/ (0600):
+    # config/ is server-private for reads and infrastructure for writes,
+    # so no teammate can alter its own fence policy. Written BEFORE
+    # tool-limits.json, which wires the hook that reads it.
+    config_dir = os.path.join(root, "config", "teammate-gate")
+    os.makedirs(config_dir, exist_ok=True)
+    gate_conf = os.path.join(config_dir, f"{mate['slug']}.json")
+    write_if_changed(gate_conf,
+                     json.dumps(gate_config(spec, mate), indent=2) + "\n",
+                     0o600, staging_dir=staging)
     limits_path, charter_path = limits_paths(spec, mate)
     seed = ("<!-- Long-term memory of {name}. Append durable facts below; "
             "they persist across conversations and server restarts. -->\n"
@@ -765,12 +1071,22 @@ def instance_for(spec, mate):
     }
 
 
-def ensure_instances(spec):
+def ensure_instances(spec, disable=()):
     """Merge each teammate's provider instance into settings.json.
 
-    Preserves every other instance, every unknown key, and the file's 0600
-    mode; copies customModels from the source instance at apply time. A
-    no-change apply performs no write.
+    Preserves every other instance, every unknown key — including unknown
+    keys INSIDE a teammate's own instance (repair round 1, P14: the
+    wholesale replace silently deleted any field the server had added) —
+    and the file's 0600 mode; copies customModels from the source instance
+    at apply time. A no-change apply performs no write. ``disable`` names
+    instances to disable in place (dropped teammates, P6): their entry and
+    every unknown field survive, ``enabled`` turns false, so a dropped
+    teammate's instance can no longer be spawned with its stale limits.
+
+    Before the write, the current settings.json is saved as a 0600 preimage
+    beside the state file (repair round 1, P19): a mid-apply death has a
+    way back. The preimage is never printed and never leaves the server
+    root's run/ folder.
     """
     settings = load_settings(spec)
     source_id = spec["server"].get("provider_source_instance")
@@ -784,13 +1100,45 @@ def ensure_instances(spec):
         want = instance_for(spec, mate)
         want["config"]["customModels"] = models
         have = instances.get(mate["instance"])
-        if have != want:
-            instances[mate["instance"]] = want
+        if have is None:
+            merged = want
+        else:
+            merged = dict(have)
+            for key, value in want.items():
+                if key != "config":
+                    merged[key] = value
+            have_config = have.get("config")
+            base_config = dict(have_config) if isinstance(
+                have_config, dict) else {}
+            base_config.update(want["config"])
+            merged["config"] = base_config
+        if have != merged:
+            instances[mate["instance"]] = merged
             changed.append(mate["instance"])
+    for instance_id in disable:
+        have = instances.get(instance_id)
+        if have is None:
+            continue
+        if have.get("enabled") is not False:
+            merged = dict(have)
+            merged["enabled"] = False
+            instances[instance_id] = merged
+            changed.append(f"{instance_id} (disabled)")
     if changed:
+        preimage = os.path.join(
+            expand(spec.get("state_file") or
+                   os.path.join(spec["server"]["root"], "run",
+                                "team_roster_state.json")),
+            os.pardir, "team_roster_settings.preimage.json")
+        preimage = os.path.normpath(preimage)
+        os.makedirs(os.path.dirname(preimage), exist_ok=True)
+        with open(settings_path(spec)) as fh:
+            previous = fh.read()
+        atomic_write(preimage, previous, 0o600)
         atomic_write(settings_path(spec), json.dumps(settings, indent=2), 0o600)
         log(f"provider instances written: {', '.join(changed)} "
-            "(settings.json is watched live by the running server)")
+            "(settings.json is watched live by the running server; "
+            "preimage saved 0600 beside the state file)")
     else:
         log("provider instances already up to date; settings.json untouched")
     return changed
@@ -971,15 +1319,97 @@ def ensure_threads(spec, project_id):
                 f"thread {info['threadId']}; refusing")
         seen[info["threadId"]] = name
     by_name = {mate["name"]: mate for mate in spec["teammates"]}
-    state["teammates"] = {name: {"instance": by_name[name]["instance"],
-                                 "threadId": info["threadId"],
-                                 "title": info["title"],
-                                 "threadInstance": info["instance"],
-                                 "recoveredBy": info["recoveredBy"]}
-                          for name, info in threads.items()}
+    fresh = {name: {"instance": by_name[name]["instance"],
+                    "threadId": info["threadId"],
+                    "title": info["title"],
+                    "threadInstance": info["instance"],
+                    "recoveredBy": info["recoveredBy"]}
+             for name, info in threads.items()}
+    # P6: a teammate dropped from the spec keeps its state entry (with the
+    # thread id and a removal stamp) instead of being silently erased —
+    # the entry is the durable evidence of which thread was whose
+    for name, entry in state["teammates"].items():
+        if name not in fresh and entry:
+            kept = dict(entry)
+            kept.setdefault("removedAt",
+                            time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            fresh[name] = kept
+    state["teammates"] = fresh
     state["appliedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     save_state(spec, state, state_path)
     return threads, state_path
+
+
+def acquire_apply_lock(spec):
+    """One apply at a time per server root (repair round 1, P7/P13): two
+    concurrent applies both passed the Paperclip pre-check and created two
+    primary threads, wedging recovery and losing a settings.json update.
+    The lock is an flock on <root>/run/team_roster.apply.lock held for the
+    process lifetime; a second apply refuses loudly instead of waiting."""
+    root = os.path.realpath(expand(spec["server"]["root"]))
+    lock_dir = os.path.join(root, "run")
+    os.makedirs(lock_dir, exist_ok=True)
+    path = os.path.join(lock_dir, "team_roster.apply.lock")
+    fh = open(path, "a+")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        die(f"another team_roster apply holds {path}; refusing to run "
+            f"concurrently (the loser would create duplicate primary "
+            f"threads and lose the settings.json update)")
+    return fh
+
+
+def dropped_teammates(spec):
+    """Names of teammates that exist on disk or in state but left the spec.
+
+    Sources: directories under <root>/teammates whose slug is not in the
+    spec, and state entries whose name is not in the spec (P6). A dropped
+    teammate's home, instance and thread must never silently lose their
+    fences — apply refuses unless the operator confirms each drop."""
+    spec_slugs = {mate["slug"] for mate in spec["teammates"]}
+    spec_names = {mate["name"] for mate in spec["teammates"]}
+    root = os.path.realpath(expand(spec["server"]["root"]))
+    teammates_dir = os.path.join(root, "teammates")
+    dropped = set()
+    if os.path.isdir(teammates_dir):
+        try:
+            for name in os.listdir(teammates_dir):
+                if name not in spec_slugs:
+                    dropped.add(name)
+        except OSError:
+            pass
+    state, _ = load_state(spec)
+    for name, entry in state["teammates"].items():
+        if name not in spec_names and entry and not entry.get("removedAt"):
+            dropped.add(name)
+    return sorted(dropped)
+
+
+def confirm_drops(spec, dropped, confirmed):
+    unknown = [d for d in confirmed if d not in dropped]
+    if unknown:
+        die(f"--drop names not recognized as dropped teammates: "
+            f"{', '.join(unknown)}; droppable: {', '.join(dropped)}")
+    still = [d for d in dropped if d not in confirmed]
+    if still:
+        die(f"spec drops existing teammate(s) {', '.join(still)}; refusing "
+            f"to apply. Their home, instance and thread stay as they are. "
+            f"To actually remove them, re-run apply with "
+            f"--drop {','.join(dropped)} (their instance is disabled in "
+            f"place, their home and state entry are kept, and every other "
+            f"teammate's fences keep denying their home)")
+    # instance ids for the confirmed drops: from state (by name), else the
+    # directory slug as the instance id (the shipped specs use slug ids)
+    state, _ = load_state(spec)
+    instances = []
+    for name in confirmed:
+        entry = (state["teammates"].get(name) or {})
+        if entry.get("instance"):
+            instances.append(entry["instance"])
+        else:
+            instances.append(name)
+    return instances
 
 
 def rename_threads(spec, threads):
@@ -1039,10 +1469,18 @@ def rename_threads(spec, threads):
                    f"{tid.replace(':', '%3A')}")
             result_path = (f"{evidence_path}.tmp.{os.getpid()}."
                            f"{mate['slug']}.json")
-            proc = subprocess.run(
-                [expand(node_bin), driver, "rename", profile, url, tid,
-                 current_title, title, result_path],
-                cwd="/tmp", capture_output=True, text=True, timeout=120)
+            try:
+                # repair round 1, P18: a driver timeout used to crash apply
+                # with a raw traceback mid-flight; it is one failed rename,
+                # reported like any other
+                proc = subprocess.run(
+                    [expand(node_bin), driver, "rename", profile, url, tid,
+                     current_title, title, result_path],
+                    cwd="/tmp", capture_output=True, text=True, timeout=120)
+            except subprocess.TimeoutExpired:
+                proc = subprocess.CompletedProcess((), 124, "",
+                                                   "rename driver timed "
+                                                   "out after 120s")
             ok = proc.returncode == 0 and os.path.isfile(result_path)
             live = None
             if ok:
@@ -1134,24 +1572,11 @@ def session_processes(*paths):
     return out
 
 
-def cmd_apply(spec):
-    project_id = ensure_project(spec)
-    pending = {}
-    for mate in spec["teammates"]:
-        wrote = write_file_assets(spec, mate)
-        home = teammate_home(spec, mate)
-        log(f"{mate['name']}: home {home} "
-            + (f"(wrote {', '.join(wrote)})" if wrote else "(unchanged)"))
-        # tool-limits.json and CHARTER.md are read when the session process
-        # starts, so a running session keeps the old limits until it restarts
-        pending[mate["name"]] = [name for name in
-                                 ("tool-limits.json", "CHARTER.md")
-                                 if name in wrote]
-    ensure_instances(spec)
-    threads, _ = ensure_threads(spec, project_id)
-    renames, rename_failures = rename_threads(spec, threads)
-    urls_path = write_urls_file(spec, threads)
-    log(f"thread URLs written: {urls_path} (0600, no credentials)")
+def report_pending_restarts(spec, pending):
+    """The limitsPendingRestart warning (repair round 1, P16): emitted as
+    soon as the file assets are written, BEFORE any stage that can still
+    die (Paperclip refusal, ambiguity, rename crash) — a later die() must
+    never leave new limits on disk with no warning and no report."""
     workspace = expand(spec["project"]["workspace_root"])
     workspace_sessions = session_processes(workspace)
     for mate in spec["teammates"]:
@@ -1180,8 +1605,41 @@ def cmd_apply(spec):
             log(f"{mate['name']}: new limits ({', '.join(changed)}) are "
                 f"NOT IN FORCE until that teammate's session process starts; "
                 f"none is running now")
+
+
+def cmd_apply(spec, drop=()):
+    acquire_apply_lock(spec)
+    dropped = dropped_teammates(spec)
+    disable = confirm_drops(spec, dropped, drop) if dropped else []
+    project_id = ensure_project(spec)
+    gate_sha = ensure_gate(spec)
+    # every home exists BEFORE any limits are generated (repair round 1,
+    # P1): the sibling enumeration of <root>/teammates then sees every
+    # home this apply is creating, in this same run
+    for mate in spec["teammates"]:
+        home = teammate_home(spec, mate)
+        os.makedirs(home, exist_ok=True)
+        os.chmod(home, 0o700)
+    pending = {}
+    for mate in spec["teammates"]:
+        wrote = write_file_assets(spec, mate)
+        home = teammate_home(spec, mate)
+        log(f"{mate['name']}: home {home} "
+            + (f"(wrote {', '.join(wrote)})" if wrote else "(unchanged)"))
+        # tool-limits.json and CHARTER.md are read when the session process
+        # starts, so a running session keeps the old limits until it restarts
+        pending[mate["name"]] = [name for name in
+                                 ("tool-limits.json", "CHARTER.md")
+                                 if name in wrote]
+    report_pending_restarts(spec, pending)
+    ensure_instances(spec, disable=disable)
+    threads, _ = ensure_threads(spec, project_id)
+    renames, rename_failures = rename_threads(spec, threads)
+    urls_path = write_urls_file(spec, threads)
+    log(f"thread URLs written: {urls_path} (0600, no credentials)")
     report = {
         "projectId": project_id,
+        "gate": {"path": gate_install_path(spec), "sha256": gate_sha},
         "teammates": [
             {"name": mate["name"], "instance": mate["instance"],
              "home": teammate_home(spec, mate),
@@ -1202,6 +1660,74 @@ def cmd_apply(spec):
     return 0
 
 
+def _fence_status(spec, mate):
+    """(limits_ok, gate_ok, problems) for one teammate's FENCE — the thing
+    status exists to report (repair round 1, P17: it used to report
+    homeOk/instanceOk without checking tool-limits.json, the launch wiring
+    or the gate). Verifies, against regeneration from the spec:
+
+    - tool-limits.json exists and is byte-identical to what apply would
+      write now (stale content = stale fence);
+    - the provider instance's homePath and launchArgs actually point at
+      this home and this limits file (an unwired instance loads no
+      limits);
+    - the gate program exists at <root>/bin, matches the installation's
+      sha256 and is exactly what tool-limits.json wires as the
+      PreToolUse hook (a missing or altered hook lets every call through
+      — live-proved fail-open).
+    """
+    problems = []
+    limits_path, _ = limits_paths(spec, mate)
+    expected_limits = json.dumps(tool_limits(spec, mate), indent=2) + "\n"
+    limits_ok = (os.path.isfile(limits_path) and
+                 open(limits_path).read() == expected_limits)
+    if not limits_ok:
+        problems.append(f"tool-limits.json missing or not what apply would "
+                        f"write now: {limits_path}")
+    home = teammate_home(spec, mate)
+    gate_path = gate_install_path(spec)
+    config_path = gate_config_path(spec, mate)
+    try:
+        with open(GATE_SOURCE, "rb") as fh:
+            gate_sha = hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        problems.append(f"gate program missing from the installation: "
+                        f"{GATE_SOURCE}")
+        gate_sha = None
+    sha_ok = False
+    if gate_sha is not None:
+        if not os.path.isfile(gate_path):
+            problems.append(f"gate not installed: {gate_path}")
+        else:
+            actual = hashlib.sha256(open(gate_path, "rb").read()).hexdigest()
+            sha_ok = actual == gate_sha
+            if not sha_ok:
+                problems.append(f"gate at {gate_path} does not match the "
+                                f"installation (sha256 {actual} != "
+                                f"{gate_sha}); every tool call would pass "
+                                f"through an altered gate")
+    config_ok = (os.path.isfile(config_path) and
+                 json.loads(open(config_path).read()) ==
+                 gate_config(spec, mate))
+    if not config_ok:
+        problems.append(f"gate config missing or stale: {config_path}")
+    wiring_ok = False
+    if limits_ok:
+        wired = json.loads(open(limits_path).read()).get("hooks") or {}
+        commands = [h.get("command") for block in wired.get("PreToolUse", [])
+                    for h in block.get("hooks", [])]
+        expected_command = gate_command(spec, mate)
+        wiring_ok = (any(block.get("matcher") == "*" for block
+                         in wired.get("PreToolUse", [])) and
+                     expected_command in commands)
+        if not wiring_ok:
+            problems.append(f"tool-limits.json does not wire the gate hook "
+                            f"({expected_command})")
+    gate_ok = bool(gate_sha) and os.path.isfile(gate_path) and sha_ok and \
+        config_ok and wiring_ok
+    return limits_ok, gate_ok, problems
+
+
 def cmd_status(spec):
     project = project_by_root(spec)
     settings = load_settings(spec)
@@ -1211,20 +1737,33 @@ def cmd_status(spec):
     recorded_by_name = {name: (entry or {}).get("threadId")
                         for name, entry in state["teammates"].items()}
     rows = []
+    fence_broken = []
     for mate in spec["teammates"]:
         home = teammate_home(spec, mate)
         instance = instances.get(mate["instance"])
         title = teammate_title(mate)
         thread, problem = _recover_thread(mate, live, recorded_by_name)
+        limits_ok, gate_ok, problems = _fence_status(spec, mate)
+        fence_broken += [f"{mate['name']}: {p}" for p in problems]
+        launch = ((instance or {}).get("config") or {}).get("launchArgs", "")
         rows.append({
             "name": mate["name"],
             "home": home,
             "homeOk": os.path.isdir(home) and
                       os.path.exists(os.path.join(home, "CHARTER.md")),
             "instance": mate["instance"],
-            "instanceOk": instance is not None and
-                          instance.get("displayName") == mate["name"] and
-                          instance.get("accentColor") == mate["accent_color"],
+            "instanceOk": (instance is not None and
+                           instance.get("displayName") == mate["name"] and
+                           instance.get("accentColor") ==
+                           mate["accent_color"] and
+                           ((instance.get("config") or {}).get("homePath")
+                            == home) and
+                           f"--settings {limits_paths(spec, mate)[0]}" in
+                           launch and
+                           f"--append-system-prompt-file "
+                           f"{limits_paths(spec, mate)[1]}" in launch),
+            "limitsOk": limits_ok,
+            "gateOk": gate_ok,
             "threadTitle": title,
             "threadId": (thread or {}).get("threadId"),
             "threadCurrentTitle": (thread or {}).get("title"),
@@ -1233,6 +1772,13 @@ def cmd_status(spec):
         })
     print(json.dumps({"project": project, "teammates": rows,
                       "environmentId": environment_id(spec)}, indent=2))
+    if fence_broken:
+        # fail LOUDLY (design ruling): a missing or altered hook lets every
+        # tool call through (live-proved fail-open), so a quiet yellow row
+        # is not an acceptable report
+        print("team_roster: FENCE BROKEN for: " + "; ".join(fence_broken),
+              file=sys.stderr)
+        return 1
     return 0
 
 
@@ -1240,10 +1786,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("command", choices=["apply", "status"])
     ap.add_argument("spec")
+    ap.add_argument("--drop", default="",
+                    help="comma-separated teammates to actually drop when "
+                    "the spec removes them (their instance is disabled in "
+                    "place, home and state entry kept, fences kept)")
     args = ap.parse_args()
     spec = load_spec(args.spec)
     if args.command == "apply":
-        return cmd_apply(spec)
+        drop = [d.strip() for d in args.drop.split(",") if d.strip()]
+        return cmd_apply(spec, drop=drop)
     return cmd_status(spec)
 
 

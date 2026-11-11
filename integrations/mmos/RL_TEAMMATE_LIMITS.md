@@ -6,6 +6,19 @@ Every claim below is either cited to server source (pin
 live on the lane dev server (`~/.mastermind/mmos_dev/rl`, port 50821) with
 evidence files in `~/.mastermind/mmos_evidence/rl-20261111/`.
 
+> **Repair round 1 (2026-11-11, after the blind panel's 19 findings):**
+> the fence now has a PRIMARY layer — a PreToolUse hook gate
+> (`teammate_gate.py`) installed by `apply` at `<server root>/bin`
+> (0555, no teammate can write there) and wired into every
+> tool-limits.json as `{"matcher": "*"}` — plus the deny-rule snapshot
+> (this document's sections 2–3) as the SECOND layer. See §3a. The gate
+> resolves every path (symlinks, `..`, `//`, `/./`, case on a
+> case-insensitive volume, Unicode form, firmlinks) at call time, roots
+> reads (home + workspace + `allow_read_roots`), fences writes to the
+> home minus protected names, refuses loopback/private/link-local web
+> targets by resolved address, and refuses every tool not on the
+> teammate's allowlist. Fail-open caveat stated in §3a.
+
 ## 1. How a teammate session actually launches
 
 A teammate is a T3 thread pinned to a per-teammate provider instance
@@ -64,6 +77,84 @@ Consequences:
    That is why the `HOME_CONFIG` write denies matter: a steered teammate
    that could write its home's `settings.json`/`.mcp.json`/`skills/` gains
    arbitrary command execution on the next restart.
+
+## 3a. The PRIMARY fence: the PreToolUse hook gate (repair round 1)
+
+One program, `tools/mmos_team_server/teammate_gate.py`, installed by
+`apply` at `<server root>/bin/teammate_gate.py` (mode 0555 — `bin` is
+Write-denied for every teammate, and the gate itself refuses writes
+outside the home, so it protects its own binary). Each teammate's
+`tool-limits.json` wires it as:
+
+```json
+{"hooks": {"PreToolUse": [{"matcher": "*", "hooks":
+  [{"type": "command",
+    "command": "<root>/bin/teammate_gate.py --config <root>/config/teammate-gate/<slug>.json",
+    "timeout": 20}]}]}}
+```
+
+The per-teammate config (0600, under server-private `config/`) carries
+`home`, `read_roots` (workspace + spec `allow_read_roots` — **always
+rooted**, which is the P5 fix: the production spec needs no new key to
+get read rooting), `deny_reads`, and `write_names` (mirrors
+`home_write_allow`).
+
+What it enforces at every tool call (all live-proved from a real seat,
+evidence 12):
+
+- **writes** (Write/Edit/NotebookEdit/MultiEdit): only inside the home,
+  never a protected name (`HOME_LOCKED` ∪ `HOME_CONFIG` ∪
+  `.claude.json.backup`); with `write_names`, only those entries.
+- **reads** (Read): only inside home + read roots, minus `deny_reads`,
+  checked AFTER resolution. In deny-list mode (spec without
+  `allow_read_roots`) the deny list alone decides, matching the rule
+  layer's semantics — but the production shape still gets rooting
+  because the gate always roots to home + workspace + spec roots.
+- **searches** (Glob/Grep): the search root must pass the read policy
+  AND must not sit at or above a denied folder (P4: enumerating a
+  denied folder's parent leaks its names); patterns must be relative
+  and non-climbing.
+- **web** (WebFetch + any `webReader` tool): the host is resolved;
+  loopback, link-local, private and reserved addresses are refused —
+  `localhost` was refused as `127.0.0.1` (probe 12), no request sent.
+- **unknown tools / unparseable input / unreadable config**: refused.
+  The live census surface (Workflow, SendMessage, ListAgents,
+  ScheduleWakeup, Skill, `mcp__t3-code__request_secret`) is refused
+  here AND bare-denied in the rule layer (`EXTRA_TOOL_DENIES`); those
+  tools are NOT denied in the real server's shipped limits today —
+  that gap is part of the install recommendation.
+
+**Spelling family closed by resolution**: the gate resolves symlinks,
+`..`, `//`, `/./`, expands `~`, canonicalizes each component to its
+on-disk spelling (case) and compares NFC-casefold keys, and strips the
+`/System/Volumes/Data` firmlink prefix. Live: case flips of protected
+names, `~/.SSH/...`, `/USERS/...`, `//Users/...`, `/./`, and a symlink
+inside the home pointing out were ALL refused (evidence 12, items 1–8;
+the rule layer refused them — the matcher canonicalizes case and
+firmlinks too — and the gate refuses them independently).
+
+**Fail-open, stated plainly** (design ruling requirement): a hook that
+exits any code other than 0/2, or a missing hook binary, lets the tool
+call THROUGH (live-proved in the calibration round). Mitigations: the
+gate wraps every decision in a fail-closed handler (any internal error
+→ exit 2), refuses when its config is missing/corrupt, and
+`apply`/`status` verify presence + sha256 + wiring, with `status`
+exiting 1 and printing `FENCE BROKEN` on any problem. If the server's
+hook support were ever removed, the second layer (deny rules) still
+stands on its own.
+
+**A new folder needs no regeneration** (step 6 of the panel score): the
+gate resolves and roots at CALL time, so a folder created after apply is
+still refused (unit test `test_gate_refuses_post_apply_folder_without_
+regeneration`; live items 9–10 refused a fresh stand-in in `run/`). The
+deny-rule snapshot is the layer that needs regeneration — re-running
+`apply` regenerates it; no separate `refresh` command exists or is
+needed.
+
+**Cost**: 171–740 ms per gated tool call (Python startup + path
+canonicalization), measured on a production-shaped config. Rule volume
+is unchanged in kind: the dev seat ran 8,560 rules / 486 KB fully
+enforced; the production shape generates 66,386 rules / 3.9 MB.
 
 ## 3. The rooted design (spec keys; absent = exactly today's rules)
 
@@ -131,30 +222,34 @@ generates byte-identical permissions to today's (regression test
 
 ## 4. What the rooted design still does not cover (stated plainly)
 
-- **Glob/Grep name enumeration on a chain directory** (accepted residual):
-  chain dirs carry no rule (see D2), so a Glob whose path IS a chain
-  directory runs and lists its names — revealing sibling names one level
-  above an allowed root (R4 in the final probe: 3 names). Names only,
-  never content: the siblings themselves stay denied (R3/R5 refused).
-  Listing `/` itself is likewise not denied. Closing this would require
-  denying a chain directory, which denies the allowed root beneath it.
-- **Future top-level names in the home** (and anywhere else): a file
+- **Glob/Grep name enumeration on a chain directory** (rule-layer
+  residual, CLOSED by the gate for search roots at/above denied folders
+  and outside the read roots — gate §3a; live items 9–10): chain dirs
+  carry no RULE (see D2), so the snapshot alone still lets a Glob whose
+  path IS a chain directory list sibling NAMES one level above an
+  allowed root. The gate refuses any search root outside home+roots and
+  any root at/above a deny entry, so through the gate this is closed;
+  it remains open only if the hook is missing/crashing (fail-open).
+- **Future top-level names in the home** (rule-layer residual, CLOSED
+  by the gate: `write_names` mode refuses every non-named entry, and
+  default mode still refuses nothing NEW outside the home): a file
   named neither in `HOME_CONFIG`/`HOME_LOCKED` nor among existing
-  children at apply time is creatable under `home_write_allow` (W7 in
-  the final probe: ALLOWED); the same applies one level up — a brand-new
-  name directly under the user home or the server root is creatable
-  because chain directories cannot be denied without killing the
-  subtree. It is writable-but-not-loaded: the load surfaces (shell
-  startup files, launchd plists dir contents, `HOME_CONFIG`) are all
-  EXISTING names, all denied. Re-apply after changing the team layout;
-  `_note` says so.
-- **Symlink escapes are blocked by the matcher** (it resolves links —
-  evidence 09), so a link inside an allowed root pointing outside is
-  refused when the target is denied (R6 in the final probe). A link to an
-  *undenied* target is readable, same as the target itself; rooting
-  denies the targets.
-- **Web tools** remain unrestricted for all teammates (Q5, evidence 07);
-  a domain allowlist is not enforceable under bypass (allow rules inert).
+  children at apply time was creatable under `home_write_allow` (W7).
+  Under the gate, a post-apply folder OUTSIDE the home/roots is refused
+  without regeneration (§3a, step 6); inside the home the spec's own
+  `write_names` decides. Load surfaces (shell startup files, launchd
+  plists dir, `HOME_CONFIG`) are denied at both layers whether or not
+  they exist (P3).
+- **Symlink escapes are blocked by the matcher AND by the gate** (both
+  resolve links — evidence 09, gate unit tests, live item 8): a link
+  inside an allowed root pointing outside is refused when the target is
+  outside the roots or denied.
+- **Web tools**: the GATE refuses loopback/link-local/private/reserved
+  targets by resolved address and requires http(s) (live, evidence 12,
+  items 11–12; closed port also refused). Remaining rule-layer residual
+  without the gate: a public-destination WebFetch is unrestricted (Q5,
+  evidence 07) — exfiltration to a public host is NOT prevented by
+  either layer; that is a charter/trust matter, stated plainly.
 - **Deny beats allow at any specificity** (evidence 09b): a more-specific
   allow inside a tree deny does NOT unlock the subtree. There is no
   gitignore-style cascade, so a compact deny/allow cascade is impossible
@@ -162,9 +257,11 @@ generates byte-identical permissions to today's (regression test
 - **Rule volume**: the always-on write fence alone compiles to ~3,400
   deny rules on this Mac (838 non-chain sibling paths, 710 of them in
   the user home alone, × 4); with the rooted read keys the final
-  measured file is 8,475 deny rules / ~480 KB. No cap was observed —
-  files of that size load and enforce fully — but apply time and file
-  size are the practical cost of deny-only fencing.
+  measured dev file is 8,560 rules / ~486 KB, and the production shape
+  (no rooted keys, P3/P5 user-protected family included) generates
+  66,386 rules / 3.9 MB. No cap was observed — files of that size load
+  and enforce fully (panel scratch runs to 167k) — but apply time, file
+  size and per-call hook latency (§3a) are the cost.
 
 ## 5. Safe session restart (for installing new limits)
 
@@ -191,6 +288,7 @@ and resumes the same thread with full history (transcript-based resume,
 | round-2 rule semantics: settings-in-home requirement (D1), directory-subtree matching (D2), exact-write forms (D3), single-slash forms (D4), no rule cap; final 21-action proof of the rooted design incl. infrastructure refusals; invalid runs disclosed | `10-rule-semantics-round2.md` + `10-probe-reply.txt` |
 | HOME_LOCKED exact-form hole and the tree-member fix, live-proved on today's-shape rules | `10b-locked-tree-member-proof.md` + `10b-probe-reply.txt` |
 | attack round: 12 findings + dispositions, exact-Read binding (S1), firmlink canonicalization (S2), final 8-action fence proof on the 445c2662e-generated file (N1-N7 refused, N8 allowed, disk clean) | `11-attack-round-and-fixes.md`, `11-attack-findings.txt`, `11-fence-probe-reply.txt` |
+| repair round 1: the hook gate live from a real seat (12/12 probes refused, hook-text refusals for search/web), hook freshness in a running session, restart semantics, `.claude.json` corruption blocks start (backup not honored), volume + latency, status verification | `12-gate-hook-live-proof.md` |
 | Q1 source citations and reconciliation (incl. two child claims refuted by live proof) | `08-q1-child-answers.md`, `08-q1-reconciliation.md` |
 | web-tool facts for the three real charters | `07-q5-web-facts.md` |
 | Part A atomic writes / Paperclip binding / pairing URL | ledger lines 1-5 in `LEDGER.md` |
@@ -236,16 +334,32 @@ are spec-level; all three teammates get the same compile):
   rule).
 
 Install procedure (section 5): edit the spec, `team_roster.py apply`
-(writes new `tool-limits.json` per home, reports
-`limitsPendingRestart` with the running PIDs), let each teammate's
-session restart at a safe boundary (30-min idle self-exit or an
-attended `thread.stop`/`releaseUnlessBusy` — never from this lane on
-the real server), then confirm the new processes started after the
-file mtimes. Expected size: ~8,500 deny rules per teammate on this Mac
-(~480 KB; loads fully — evidence 10/11). Apply is content-diffed: when
+(writes new `tool-limits.json` per home + installs the gate + writes
+gate configs, reports `limitsPendingRestart` with the running PIDs),
+let each teammate's session restart at a safe boundary (30-min idle
+self-exit or an attended `thread.stop`/`releaseUnlessBusy` — never from
+this lane on the real server), then confirm the new processes started
+after the file mtimes. Expected size: ~8,500 deny rules per teammate on
+this Mac (~480 KB; loads fully — evidence 10/11); the production shape
+(no rooted keys) generates ~66,000 rules / ~3.9 MB per teammate with
+the P3/P5 user-protected family included. Apply is content-diffed: when
 the surrounding directories change, the generated rules change and the
 next apply rewrites the file — re-run apply after any team-layout
-change (the `_note` in each generated file says so).
+change (the `_note` in each generated file says so). The GATE layer
+needs no regeneration for new folders (§3a, step 6).
+
+Two install notes from repair round 1:
+
+1. The gate program (`teammate_gate.py`) must ship beside
+   `team_roster.py` in the installed tools tree — `apply` refuses to run
+   without it (a missing hook is fail-open, so absence is fatal, not
+   cosmetic).
+2. The real server's currently-shipped limits do NOT deny
+   Workflow/SendMessage/ListAgents/ScheduleWakeup/Skill/
+   `mcp__t3-code__request_secret` (live census, evidence 12 round C3).
+   The generated limits now bare-deny them (`EXTRA_TOOL_DENIES`) and the
+   gate refuses them at call time; installing the new limits closes
+   that gap on the real roster.
 
 ## 8. What could not be proved
 
@@ -267,3 +381,10 @@ change (the `_note` in each generated file says so).
   outside the dev root before deletion, is disclosed in
   `10-rule-semantics-round2.md`. Only runs with verified
   process-start > limits-mtime count as proof.
+- Repair round 1: the gate was live-proved on the DEV seat only; the
+  real roster's fence must be verified with `status` (which now checks
+  limits-bytes, gate sha, hook wiring and instance launchArgs) plus one
+  spelling-family probe from a real seat before any credential-bearing
+  roster relies on it (the panel's own condition). WebFetch
+  exfiltration to PUBLIC hosts remains possible at both layers (only
+  loopback/private is refused); that is accepted residual, §4.

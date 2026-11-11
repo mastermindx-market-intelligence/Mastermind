@@ -8,6 +8,8 @@ import importlib.util
 import json
 import os
 import stat
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -239,6 +241,22 @@ class TestToolLimitsCredentials:
         assert not any(d.startswith(f"Read(/{root}/**") for d in deny)
 
 
+def freeze_listings(monkeypatch):
+    """Snapshot each directory listing once: the equality and idempotence
+    tests compare two enumerations of the LIVE filesystem, and the rooted
+    fence walks the home chain all the way to /, so a world-writable
+    parent like /tmp churns underneath them — a file appearing between
+    the two calls would change the deny rules spuriously."""
+    real = os.listdir
+    cache = {}
+    def frozen(path):
+        key = os.path.realpath(path)
+        if key not in cache:
+            cache[key] = list(real(path))
+        return cache[key]
+    monkeypatch.setattr(team_roster.os, "listdir", frozen)
+
+
 class TestToolLimitsNewKeys:
     """Part B Q2/Q3: allow_read_roots and home_write_allow compile to deny
     rules; a spec WITHOUT the keys must generate exactly the default rules
@@ -263,7 +281,8 @@ class TestToolLimitsNewKeys:
                        for r in spec.get("deny_write_roots", [])]
         deny_roots += [a for r in deny_roots
                        for a in team_roster.firmlink_aliases(r)]
-        deny = ["Bash", "Agent", "NotebookEdit"]
+        deny = ["Bash", "Agent", "NotebookEdit"] + \
+            list(team_roster.EXTRA_TOOL_DENIES)
         for r in deny_roots:
             deny += [f"Write(/{r})", f"Write(/{r}/**)",
                      f"Edit(/{r})", f"Edit(/{r}/**)"]
@@ -275,6 +294,10 @@ class TestToolLimitsNewKeys:
             config = os.path.join(home, name)
             for tool in ("Write", "Edit"):
                 deny += [f"{tool}(/{config})", f"{tool}(/{config}/**)"]
+        # other teammates' homes deny writes too (repair round 1, P1/P6)
+        for path in team_roster.other_home_paths(spec, mate):
+            for tool in ("Write", "Edit"):
+                deny += [f"{tool}(/{path})", f"{tool}(/{path}/**)"]
         for name in team_roster.SERVER_INFRASTRUCTURE:
             infra = os.path.join(root, name)
             for tool in ("Write", "Edit"):
@@ -283,6 +306,14 @@ class TestToolLimitsNewKeys:
             team_roster.expand(spec["server"]["t3_bin"])))
         for tool in ("Write", "Edit"):
             deny += [f"{tool}(/{t3_dir})", f"{tool}(/{t3_dir}/**)"]
+        # user-level protected names, absent or not (repair round 1, P3)
+        for path in team_roster._user_protected_paths(spec):
+            base = path[:-1] if path.endswith("*") else path
+            for tool in ("Write", "Edit"):
+                if path.endswith("*"):
+                    deny += [f"{tool}(/{base}*)", f"{tool}(/{base}*/**)"]
+                else:
+                    deny += [f"{tool}(/{base})", f"{tool}(/{base}/**)"]
         for path in team_roster.deny_read_paths(spec, mate):
             deny += team_roster._read_deny(path)
         # always-on write fence (attack round): own home only when no
@@ -296,7 +327,7 @@ class TestToolLimitsNewKeys:
         seen = set()
         deny = [d for d in deny if not (d in seen or seen.add(d))]
         allow = ["Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite",
-                 f"Write(/{home}/**)", f"Edit(/{home}/**)"]
+                 "ToolSearch", f"Write(/{home}/**)", f"Edit(/{home}/**)"]
         return {"permissions": {"allow": allow, "deny": deny}}
 
     def test_infrastructure_folders_never_writable(self, tmp_path):
@@ -331,18 +362,9 @@ class TestToolLimitsNewKeys:
 
     @staticmethod
     def freeze_listings(monkeypatch):
-        """Snapshot each directory listing once: the equality tests below
-        compare two enumerations of the LIVE filesystem, and /private/tmp
-        (on pytest's tmp_path chain) churns underneath them — a file
-        appearing between the two calls would break equality spuriously."""
-        real = os.listdir
-        cache = {}
-        def frozen(path):
-            key = os.path.realpath(path)
-            if key not in cache:
-                cache[key] = list(real(path))
-            return cache[key]
-        monkeypatch.setattr(team_roster.os, "listdir", frozen)
+        # resolves to the module-level helper (class scope is not in a
+        # function body's lookup chain)
+        freeze_listings(monkeypatch)
 
     def test_absent_keys_give_exactly_today_rules(self, tmp_path,
                                                   monkeypatch):
@@ -543,6 +565,7 @@ class TestAtomicWrites:
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
     def test_home_assets_replaced_atomically(self, tmp_path, monkeypatch):
+        freeze_listings(monkeypatch)
         spec = load(tmp_path, make_spec(tmp_path))
         mate = spec["teammates"][0]
         home = team_roster.teammate_home(spec, mate)
@@ -881,7 +904,12 @@ class TestLimitsPendingRestart:
         monkeypatch.setattr(
             team_roster, "write_file_assets",
             lambda s, m: wrote_by_name.get(m["name"], []))
-        monkeypatch.setattr(team_roster, "ensure_instances", lambda s: [])
+        monkeypatch.setattr(team_roster, "ensure_instances",
+                            lambda s, disable=(): [])
+        monkeypatch.setattr(team_roster, "acquire_apply_lock",
+                            lambda s: None)
+        monkeypatch.setattr(team_roster, "ensure_gate",
+                            lambda s: "0" * 64)
         threads = {m["name"]: {"threadId": f"t-{m['slug']}", "title": "x",
                                "created": False} for m in spec["teammates"]}
         monkeypatch.setattr(team_roster, "ensure_threads",
@@ -1026,7 +1054,8 @@ class TestSessionProcesses:
 
 
 class TestFileAssets:
-    def test_write_and_rewrite_home(self, tmp_path):
+    def test_write_and_rewrite_home(self, tmp_path, monkeypatch):
+        freeze_listings(monkeypatch)
         spec = load(tmp_path, make_spec(tmp_path))
         mate = spec["teammates"][0]
         wrote = team_roster.write_file_assets(spec, mate)
@@ -1147,13 +1176,16 @@ class TestAttackRoundFixes:
         assert all(c[1] == os.path.join(root, "run") for c in calls), calls
 
     def test_existing_file_read_denies_have_tree_member(self, tmp_path):
-        """Finding 6: _read_deny never relies on an exact-path rule alone
-        — the Write/Edit exact form proved inert live (evidence 10 D3),
-        so no emitter may depend on an exact form binding."""
+        """Finding 6 + P4: _read_deny never relies on an exact-path rule
+        alone — the Write/Edit exact form proved inert live (evidence 10
+        D3), so no emitter may depend on an exact form binding — and every
+        read deny covers Grep/Glob too (content and names)."""
         f = tmp_path / "secret.txt"
         f.write_text("x")
         assert team_roster._read_deny(str(f)) == \
-            [f"Read(/{f})", f"Read(/{f}/**)"]
+            [f"Read(/{f})", f"Read(/{f}/**)",
+             f"Glob(/{f})", f"Glob(/{f}/**)",
+             f"Grep(/{f})", f"Grep(/{f}/**)"]
 
     def test_firmlink_alias_read_denies(self, tmp_path):
         """Finding 7: a /Users deny root also emits its firmlink twin
@@ -1244,3 +1276,507 @@ class TestAttackRoundFixes:
         paths = team_roster.deny_read_paths(spec, mate)
         for name in ("bin", "runtime"):
             assert os.path.join(root, name) in paths, name
+
+
+class TestRepairRound1:
+    """The blind panel's 19 findings (P1–P19, commit 4f10f4345 vs trunk),
+    each pinned by the test the score named. The gate-side companions live
+    in tests/test_mmos_teammate_gate.py; these pin the GENERATOR (the
+    second layer) and the apply/status machinery."""
+
+    # ---- P1: one apply that adds a teammate fences it everywhere ----
+
+    def test_add_teammate_apply_fences_new_home_same_apply(self, tmp_path,
+                                                           monkeypatch):
+        freeze_listings(monkeypatch)
+        spec = load(tmp_path, make_spec(tmp_path))
+        team_roster.write_file_assets(spec, spec["teammates"][0])
+        # mate E joins the roster; its home dir does not exist yet
+        raw = make_spec(tmp_path)
+        raw["teammates"].append(
+            {"name": "E", "slug": "e", "role": "extra", "role_line": "extra",
+             "accent_color": "#aa33cc", "instance": "e",
+             "charter": "# E charter\n"})
+        spec2 = load(tmp_path, raw)
+        for mate in spec2["teammates"]:
+            team_roster.write_file_assets(spec2, mate)
+        for mate in spec2["teammates"]:
+            if mate["slug"] == "e":
+                continue
+            limits = json.load(open(os.path.join(
+                team_roster.teammate_home(spec2, mate),
+                "tool-limits.json")))
+            e_home = team_roster.teammate_home(spec2, spec2["teammates"][2])
+            for tool in ("Write", "Edit"):
+                assert f"{tool}(/{e_home})" in limits["permissions"]["deny"]
+                assert f"{tool}(/{e_home}/**)" in \
+                    limits["permissions"]["deny"]
+
+    # ---- P2: a read root never becomes writable ----
+
+    def test_read_root_never_becomes_writable(self, tmp_path):
+        """Naming another teammate's home as a read root must not remove
+        its write deny (the panel proved the old code did exactly
+        that)."""
+        raw = make_spec(tmp_path)
+        b_home = os.path.join(raw["server"]["root"], "teammates", "b")
+        raw["allow_read_roots"] = [b_home]
+        spec = load(tmp_path, raw)
+        mate = spec["teammates"][0]
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        b_real = os.path.realpath(b_home)
+        for tool in ("Write", "Edit"):
+            assert f"{tool}(/{b_real})" in deny
+            assert f"{tool}(/{b_real}/**)" in deny
+        # the gate side: the home is a read root AND still write-refused
+        cfg = team_roster.gate_config(spec, mate)
+        assert os.path.realpath(b_home) in cfg["read_roots"]
+
+    # ---- P3: absent user-level autoload names are not creatable ----
+
+    def test_absent_user_autoload_names_denied(self, tmp_path, monkeypatch):
+        fake_user = tmp_path / "userhome"
+        fake_user.mkdir()
+        real_expanduser = os.path.expanduser
+
+        def fake_expanduser(path):
+            if path == "~":
+                return str(fake_user)
+            if path.startswith("~/"):
+                return str(fake_user / path[2:])
+            return real_expanduser(path)
+
+        monkeypatch.setattr(team_roster.os.path, "expanduser",
+                            fake_expanduser)
+        assert not (fake_user / ".zshenv").exists()  # absent, like the attack
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        for name in (".zshenv", ".zprofile", ".zshrc", ".bash_profile",
+                     ".gitconfig", ".ssh", ".gnupg", "Library/LaunchAgents"):
+            target = str(fake_user / name)
+            for tool in ("Write", "Edit"):
+                assert f"{tool}(/{target})" in deny, name
+                assert f"{tool}(/{target}/**)" in deny, name
+
+    # ---- P4: deny_read_paths compiles for Grep/Glob too ----
+
+    def test_deny_read_paths_emit_grep_glob_too(self, tmp_path):
+        raw = make_spec(tmp_path)
+        secret = tmp_path / "secret.d"
+        secret.mkdir()
+        raw["deny_read_roots"] = [str(secret)]
+        spec = load(tmp_path, raw)
+        mate = spec["teammates"][0]
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        for tool in ("Read", "Glob", "Grep"):
+            assert f"{tool}(/{secret})" in deny, tool
+            assert f"{tool}(/{secret}/**)" in deny, tool
+
+    # ---- P5: the production spec's read fence covers Containers and
+    # ~/.claude.json, by rule or by rooting ----
+
+    def test_production_spec_read_fence_covers_containers_and_claude_json(
+            self, tmp_path):
+        prod = json.loads((REPO / "tools" / "mmos_team_server" / "specs" /
+                           "team_roster.json").read_text())
+        prod["server"]["root"] = str(tmp_path / "prod-team")
+        prod["server"]["home"] = str(tmp_path / "prod-home")
+        spec = load(tmp_path, prod)
+        mate = spec["teammates"][0]
+        user = os.path.realpath(os.path.expanduser("~"))
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        for name in ("Library/Containers", ".claude.json", ".git-credentials",
+                     "Documents", "Desktop", "Downloads"):
+            target = os.path.join(user, name)
+            assert f"Read(/{target})" in deny, name
+            assert f"Read(/{target}/**)" in deny, name
+        # and the primary fence roots reads, so the same paths are outside
+        # every root the gate would allow
+        cfg = team_roster.gate_config(spec, mate)
+        for root in cfg["read_roots"]:
+            assert not (os.path.join(user, "Library/Containers")
+                        .startswith(root.rstrip("/") + "/")), root
+
+    # ---- P6: dropping a teammate is defined behavior, never silent ----
+
+    def _drop_rig(self, tmp_path, monkeypatch):
+        raw = make_spec(tmp_path)
+        raw["teammates"].append(
+            {"name": "C", "slug": "c", "role": "gone", "role_line": "gone",
+             "accent_color": "#33aa55", "instance": "c",
+             "charter": "# C charter\n"})
+        home, _ = fake_home(tmp_path, extra_instances={
+            "c": {"driver": "claudeAgent", "displayName": "C",
+                  "enabled": True, "config": {"homePath": "/c"}}})
+        spec = load(tmp_path, raw)
+        for mate in spec["teammates"]:  # C's home exists on disk
+            os.makedirs(team_roster.teammate_home(spec, mate), exist_ok=True)
+        state_path = tmp_path / "t3-team" / "run" / "team_roster_state.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps({"teammates": {
+            "C": {"instance": "c", "threadId": "mcp:c-1", "title": "C — gone",
+                  "threadInstance": "c", "recoveredBy": None}}}))
+        monkeypatch.setattr(team_roster, "ensure_project", lambda s: "proj-1")
+        monkeypatch.setattr(team_roster, "acquire_apply_lock",
+                            lambda s: None)
+        monkeypatch.setattr(team_roster, "ensure_gate", lambda s: "0" * 64)
+        monkeypatch.setattr(team_roster, "session_processes",
+                            lambda *paths: [])
+        # the real ensure_threads runs (state preservation is part of the
+        # P6 behavior under test); only the T3 CLI and web list are faked
+        monkeypatch.setattr(team_roster, "list_threads", lambda s, p: [])
+
+        def fake_t3(spec, args, stdin_text=None, timeout=900):
+            title = args[args.index("--title") + 1]
+
+            class Proc:
+                returncode = 0
+                stdout = json.dumps({"threadId": f"t-{title}"})
+                stderr = ""
+            return Proc()
+
+        monkeypatch.setattr(team_roster, "t3", fake_t3)
+        monkeypatch.setattr(team_roster, "rename_threads",
+                            lambda s, t: ({n: False for n in t}, []))
+        monkeypatch.setattr(team_roster, "write_urls_file",
+                            lambda s, t: "/tmp/urls.json")
+        return raw, spec
+
+    def test_drop_teammate_defined_behavior(self, tmp_path, monkeypatch,
+                                            capsys):
+        raw, spec = self._drop_rig(tmp_path, monkeypatch)
+        # spec without C; C's home and state entry still exist
+        raw2 = make_spec(tmp_path)
+        spec2 = load(tmp_path, raw2)
+        # 1. unconfirmed drop: apply refuses loudly
+        with pytest.raises(SystemExit):
+            team_roster.cmd_apply(spec2)
+        assert "refusing" in capsys.readouterr().err
+        # 2. confirmed drop (--drop covers both identifiers: the slug from
+        # disk and the name from state): instance disabled in place, home
+        # kept, state entry kept with removedAt, other mates' fences keep
+        # denying C's home
+        assert team_roster.cmd_apply(spec2, drop=("c", "C")) == 0
+        capsys.readouterr()
+        settings = json.load(open(os.path.join(
+            raw["server"]["home"], "userdata", "settings.json")))
+        assert settings["providerInstances"]["c"]["enabled"] is False
+        c_home = os.path.join(raw["server"]["root"], "teammates", "c")
+        assert os.path.isdir(c_home)  # kept, not deleted
+        state = json.load(open(tmp_path / "t3-team" / "run" /
+                               "team_roster_state.json"))
+        assert state["teammates"]["C"]["removedAt"]
+        assert state["teammates"]["C"]["threadId"] == "mcp:c-1"
+        deny = json.load(open(os.path.join(
+            c_home.replace("/c", "/a"), "tool-limits.json"))
+        )["permissions"]["deny"]
+        for tool in ("Write", "Edit", "Read", "Glob", "Grep"):
+            assert f"{tool}(/{os.path.realpath(c_home)})" in deny, tool
+
+    # ---- P7/P13: one apply at a time ----
+
+    def test_apply_lock_serializes_concurrent_applies(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        holder = team_roster.acquire_apply_lock(spec)
+        assert holder is not None
+        # a second apply (its own open file description) must refuse
+        with pytest.raises(SystemExit):
+            team_roster.acquire_apply_lock(spec)
+        lock_path = os.path.join(
+            team_roster.expand(spec["server"]["root"]), "run",
+            "team_roster.apply.lock")
+        assert os.path.isfile(lock_path)
+
+    # ---- P8: slug charset ----
+
+    def test_slug_must_match_charset(self, tmp_path):
+        for bad in ("/tmp/evil", "../..", "a/", "a b", "", "a.b", "a:b"):
+            raw = make_spec(tmp_path)
+            raw["teammates"][0]["slug"] = bad
+            with pytest.raises(SystemExit):
+                load(tmp_path, raw)
+        for good in ("a", "A-1_b", "nightguard"):
+            raw = make_spec(tmp_path)
+            raw["teammates"][0]["slug"] = good
+            load(tmp_path, raw)  # must not raise
+
+    # ---- P9: server.home at/inside ~/.t3 refused ----
+
+    def test_server_home_at_dot_t3_refused(self, tmp_path):
+        for home in ("~/.t3", "~/.t3/sub"):
+            raw = make_spec(tmp_path)
+            raw["server"]["home"] = home
+            with pytest.raises(SystemExit):
+                load(tmp_path, raw)
+
+    # ---- P10: non-list values die ----
+
+    def test_non_list_root_values_die(self, tmp_path):
+        for key in ("allow_read_roots", "deny_read_roots",
+                    "deny_write_roots", "home_write_allow"):
+            raw = make_spec(tmp_path)
+            raw[key] = "~/x"  # the panel's exact string
+            with pytest.raises(SystemExit):
+                load(tmp_path, raw)
+
+    # ---- P11: rstrip before the locked-name check ----
+
+    def test_locked_name_with_trailing_slash_refused(self, tmp_path):
+        raw = make_spec(tmp_path)
+        raw["home_write_allow"] = ["settings.json/"]
+        with pytest.raises(SystemExit):
+            load(tmp_path, raw)
+
+    # ---- P12: ~ entries in deny_write_roots expand ----
+
+    def test_deny_write_roots_tilde_expands(self, tmp_path):
+        raw = make_spec(tmp_path)
+        raw["deny_write_roots"] = ["/tmp", "~/ssh-cache-standin"]
+        spec = load(tmp_path, raw)
+        mate = spec["teammates"][0]
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        expanded = os.path.realpath(os.path.expanduser("~/ssh-cache-standin"))
+        for tool in ("Write", "Edit"):
+            assert f"{tool}(/{expanded})" in deny
+            assert f"{tool}(/{expanded}/**)" in deny
+
+    # ---- P14: unknown fields inside an existing instance survive ----
+
+    def test_unknown_fields_inside_instance_preserved(self, tmp_path):
+        home, path = fake_home(tmp_path, extra_instances={
+            "a": {"driver": "claudeAgent", "displayName": "A",
+                  "enabled": True, "x_server_field": {"keep": "me"},
+                  "config": {"homePath": "/old", "x_nested": 1}}})
+        spec = load(tmp_path, make_spec(tmp_path))
+        team_roster.ensure_instances(spec)
+        settings = json.load(open(path))
+        mine = settings["providerInstances"]["a"]
+        assert mine["x_server_field"] == {"keep": "me"}
+        assert mine["config"]["x_nested"] == 1
+
+    # ---- P15: home-child enumeration fails closed ----
+
+    def test_home_child_enumeration_fails_closed(self, tmp_path,
+                                                 monkeypatch):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        home = team_roster.teammate_home(spec, mate)
+        os.makedirs(home, exist_ok=True)
+        real = os.listdir
+
+        def broken(path):
+            if os.path.realpath(path) == os.path.realpath(home):
+                raise OSError("permission denied (planted)")
+            return real(path)
+
+        monkeypatch.setattr(team_roster.os, "listdir", broken)
+        with pytest.raises(SystemExit):
+            team_roster.rooted_home_write_rules(spec, mate)
+
+    # ---- P16: the pending-restart warning precedes later failures ----
+
+    def test_pending_restart_warning_precedes_later_failure(
+            self, tmp_path, monkeypatch, capsys):
+        spec = load(tmp_path, make_spec(tmp_path))
+        monkeypatch.setattr(team_roster, "ensure_project",
+                            lambda s: "proj-1")
+        monkeypatch.setattr(team_roster, "acquire_apply_lock",
+                            lambda s: None)
+        monkeypatch.setattr(team_roster, "ensure_gate", lambda s: "0" * 64)
+        monkeypatch.setattr(team_roster, "session_processes",
+                            lambda *paths: [])
+
+        def die_later(spec, disable=()):
+            raise SystemExit("paperclip refusal (simulated)")
+
+        monkeypatch.setattr(team_roster, "ensure_instances", die_later)
+        with pytest.raises(SystemExit):
+            team_roster.cmd_apply(spec)
+        out = capsys.readouterr().out
+        assert "NOT IN FORCE" in out  # warned before the die()
+        assert "tool-limits.json" in out
+
+    # ---- P17: status checks the limits file, wiring and the gate ----
+
+    def test_status_reports_limits_instance_gate_state(self, tmp_path,
+                                                       monkeypatch, capsys):
+        freeze_listings(monkeypatch)
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        # untouched roster: limits missing -> problems
+        limits_ok, gate_ok, problems = team_roster._fence_status(spec, mate)
+        assert not limits_ok and not gate_ok and problems
+        # apply the file assets and install the gate: clean
+        team_roster.write_file_assets(spec, mate)
+        team_roster.ensure_gate(spec)
+        limits_ok, gate_ok, problems = team_roster._fence_status(spec, mate)
+        assert limits_ok and gate_ok and not problems, problems
+        # tamper with the limits file: stale fence is reported
+        limits_path, _ = team_roster.limits_paths(spec, mate)
+        saved = open(limits_path).read()
+        tampered = json.loads(saved)
+        tampered["permissions"]["deny"] = \
+            tampered["permissions"]["deny"][:5]
+        open(limits_path, "w").write(json.dumps(tampered, indent=2) + "\n")
+        limits_ok, gate_ok, problems = team_roster._fence_status(spec, mate)
+        assert not limits_ok and problems
+        # restore, then corrupt the installed gate: reported, loudly
+        open(limits_path, "w").write(saved)
+        gate_path = team_roster.gate_install_path(spec)
+        os.chmod(gate_path, 0o644)  # ensure_gate made it 0555
+        open(gate_path, "a").write("# tampered\n")
+        limits_ok, gate_ok, problems = team_roster._fence_status(spec, mate)
+        assert limits_ok and not gate_ok and problems
+        assert any("does not match" in p for p in problems)
+        os.chmod(gate_path, 0o755)
+
+    def test_cmd_status_fails_loudly_on_broken_fence(self, tmp_path,
+                                                     monkeypatch, capsys):
+        spec = load(tmp_path, make_spec(tmp_path))
+        fake_home(tmp_path)
+        monkeypatch.setattr(team_roster, "project_by_root", lambda s: None)
+        monkeypatch.setattr(team_roster, "list_threads", lambda s, p: [])
+        code = team_roster.cmd_status(spec)
+        out = capsys.readouterr()
+        assert code == 1
+        assert "FENCE BROKEN" in out.err
+
+    # ---- P18: a rename-driver timeout is reported, not a traceback ----
+
+    def test_rename_timeout_caught_reported(self, tmp_path, monkeypatch,
+                                            capsys):
+        raw = make_spec(tmp_path)
+        profile = os.path.join(raw["server"]["root"], "browser-profile")
+        os.makedirs(profile)
+        os.chmod(profile, 0o700)
+        raw["browser_profile"] = profile
+        raw["browser_node"] = "/bin/echo"
+        spec = load(tmp_path, raw)
+        home = tmp_path / "t3-team" / "home" / "userdata"
+        home.mkdir(parents=True)
+        (home / "environment-id").write_text("env-1")
+        threads = {"A": {"threadId": "t-a", "title": "wrong",
+                         "currentTitle": "wrong", "pinnedAt": None,
+                         "projectId": "p1", "instance": "a"},
+                   "B": {"threadId": "t-b", "title": "B — design",
+                         "currentTitle": "B — design", "pinnedAt": None,
+                         "projectId": "p1", "instance": "b"}}
+
+        def hang(*a, **k):
+            raise subprocess.TimeoutExpired(a[0], 120)
+
+        monkeypatch.setattr(team_roster.subprocess, "run", hang)
+        renames, failures = team_roster.rename_threads(spec, threads)
+        assert failures == ["A"]  # B needed no rename
+        assert renames["A"] is False
+        evidence = os.path.join(raw["server"]["root"], "run",
+                                "team_renames.jsonl")
+        row = json.loads(open(evidence).read().splitlines()[-1])
+        assert row["verified"] is False
+        assert "timed out" in row["error"]
+
+    # ---- P19: a 0600 settings.json preimage before the live merge ----
+
+    def test_settings_preimage_written_0600(self, tmp_path):
+        home, path = fake_home(tmp_path)
+        before = open(path).read()
+        spec = load(tmp_path, make_spec(tmp_path))
+        changed = team_roster.ensure_instances(spec)
+        assert changed
+        preimage = tmp_path / "t3-team" / "run" / \
+            "team_roster_settings.preimage.json"
+        assert preimage.exists()
+        assert stat.S_IMODE(os.stat(preimage).st_mode) == 0o600
+        assert open(preimage).read() == before  # the way back
+
+    # ---- TSHc: server run/ unreadable, window/launch surfaces
+    # unwritable ----
+
+    def test_run_tree_unreadable_and_window_unwritable(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        root = os.path.realpath(team_roster.expand(spec["server"]["root"]))
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        # run/ unreadable for every read tool (pairing file, server log,
+        # browser profile)
+        for tool in ("Read", "Glob", "Grep"):
+            assert f"{tool}(/{os.path.join(root, 'run')})" in deny
+            assert f"{tool}(/{os.path.join(root, 'run')}/**)" in deny
+        # server-root infrastructure + TSHc window surfaces unwritable
+        user = os.path.realpath(os.path.expanduser("~"))
+        for target in (os.path.join(root, name)
+                       for name in ("bin", "config", "runtime", "run")):
+            for tool in ("Write", "Edit"):
+                assert f"{tool}(/{target})" in deny, target
+                assert f"{tool}(/{target}/**)" in deny, target
+        for name in ("Library/LaunchAgents", ".mastermind/window",
+                     ".mastermind/mmos_dev/window-dev*", ".t3"):
+            base = os.path.join(user, name.rstrip("*").rstrip("/"))
+            if name.endswith("*"):
+                forms = [f"{tool}(/{base}*)", f"{tool}(/{base}*/**)"]
+            else:
+                forms = [f"{tool}(/{base})", f"{tool}(/{base}/**)"]
+            for tool in ("Write", "Edit"):
+                for form in forms:
+                    assert form in deny, form
+        # any EXISTING sibling of the spec root (other lanes' trees, the
+        # build folder) is denied by the chain enumeration; a sibling
+        # created after apply is refused by the gate instead (the
+        # post-apply-folder test below)
+        sibling = os.path.join(os.path.dirname(root), "sibling-build")
+        os.makedirs(sibling, exist_ok=True)
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        for tool in ("Write", "Edit"):
+            assert f"{tool}(/{sibling})" in deny
+            assert f"{tool}(/{sibling}/**)" in deny
+
+    # ---- step 6: a new folder needs no regeneration (hook is primary) ----
+
+    def test_gate_refuses_post_apply_folder_without_regeneration(
+            self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        team_roster.write_file_assets(spec, mate)
+        team_roster.ensure_gate(spec)
+        cfg_path = team_roster.gate_config_path(spec, mate)
+        gate = team_roster.gate_install_path(spec)
+        home = team_roster.teammate_home(spec, mate)
+        # a folder created AFTER apply, outside every root
+        new_folder = tmp_path / "created-after-apply"
+        new_folder.mkdir()
+        (new_folder / "x.md").write_text("x")
+
+        def call(tool, tool_input):
+            payload = json.dumps({"tool_name": tool,
+                                  "tool_input": tool_input,
+                                  "cwd": home})
+            return subprocess.run([sys.executable, gate, "--config",
+                                   cfg_path], input=payload,
+                                  capture_output=True, text=True, timeout=30)
+
+        assert call("Read", {"file_path": str(
+            new_folder / "x.md")}).returncode == 2
+        assert call("Write", {"file_path": str(
+            new_folder / "y.md"), "content": "x"}).returncode == 2
+        assert call("Glob", {"pattern": "*", "path": str(
+            new_folder)}).returncode == 2
+
+    # ---- the gate is wired into the generated limits ----
+
+    def test_tool_limits_wire_gate_hook(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        limits = team_roster.tool_limits(spec, mate)
+        wired = limits.get("hooks", {}).get("PreToolUse", [])
+        assert wired and wired[0]["matcher"] == "*"
+        command = wired[0]["hooks"][0]["command"]
+        assert team_roster.gate_install_path(spec) in command
+        assert team_roster.gate_config_path(spec, mate) in command
+        # apply writes that config 0600 under server-private config/
+        team_roster.write_file_assets(spec, mate)
+        cfg_path = team_roster.gate_config_path(spec, mate)
+        assert os.path.isfile(cfg_path)
+        assert stat.S_IMODE(os.stat(cfg_path).st_mode) == 0o600
+        assert os.path.dirname(cfg_path).startswith(os.path.join(
+            team_roster.expand(spec["server"]["root"]), "config"))
