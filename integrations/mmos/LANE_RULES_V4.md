@@ -34,6 +34,10 @@ directory your brief names, each on a port you pick and state in your return.
   evidence, never committed.
 - Never trust loopback TCP or request headers to admit a caller. Local admission is by Unix
   socket and kernel peer uid only.
+- The `t3` command line picks its server from `T3CODE_HOME` and `T3CODE_PORT`, never from an
+  address inside your arguments. Set both to the server you mean and confirm that server
+  answers before any pairing command. A helper that skipped this minted pairing codes on the
+  Chairman's app.
 
 ## The desktop
 
@@ -52,6 +56,8 @@ directory your brief names, each on a port you pick and state in your return.
   `origin` under that name. Do not push the trunk `feat/mmos-v1-integration-t3`; the principal
   merges.
 - One writer per checkout.
+- Work in pushed steps: a first push within ten minutes of starting, then a commit and push
+  after every slice that passes its check, and at least every thirty minutes.
 
 ## Children
 
@@ -61,6 +67,10 @@ directory your brief names, each on a port you pick and state in your return.
   `gemini-4-argon`, `grok-4.7`, any Claude or GPT model.
 - An attack on a diff goes to a different model from the one that wrote it. The attacker gets
   this file's git rules word for word and the commit to read; it has no reason to fetch.
+- An attack round is evidence about the defects it found, not about the ones it missed. A
+  diff on a critical surface (admission, credentials, exactly-once, source authority) is
+  accepted by the principal only after an independent review, so say in your return when your
+  diff touches one.
 - A child that fails once on a gateway error is restarted in the same thread. A child that
   fails twice is replaced by you doing that part, after `task_status` then `task_cancel`.
 
@@ -69,6 +79,11 @@ directory your brief names, each on a port you pick and state in your return.
 - "NOT DONE, because <reason>" is an accepted return. An invented result is not.
 - A claim counts when the principal can open the artifact. Keep raw outputs in the evidence
   directory your brief names, with a `LEDGER.md` listing each claim and its file.
+- Mark a step done only after the check that proves it has run and its output is on disk. A
+  ledger line that turns out wrong is superseded by an appended correction line that names it;
+  never edit or delete a line already written.
+- Your first ledger line and your return state the model that drove the lane and the model of
+  every child you started.
 - Do not end your turn while your own background jobs or children still run.
 - End your return with the literal output of: `git rev-parse HEAD`,
   `git ls-remote origin <your branch>`, `ls <your evidence dir>`, and the test command you ran

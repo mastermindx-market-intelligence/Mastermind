@@ -743,3 +743,29 @@ teammates. Evidence: `~/.mastermind/mmos_evidence/cq-20261111/unanswered/`.
 
 **Closed by this:** the carrier halves of review findings 4 and 5, and the blocked-task gap
 from section 19. Still open on the coding job: everything in lane T4c.
+
+
+## 21. Amendment, 2026-11-11 01:45 UTC: the improvement loop has run once
+
+**Lane IMP returned and is merged** (`7781ccc1d`). It read the plan's amendments, the method,
+the findings files and every lane ledger, and produced:
+
+- `IMPROVEMENT_BACKLOG.md`: 29 defects of the working method and its tools, each a real event
+  with its source, ordered by cost, with status checked against the repository. Three are
+  open: Secretary still on Hermes (moves after TSH), the door's loopback check (lane T4c),
+  and steps marked done before their check (now a lane rule).
+- `SCOREBOARD_PROPOSAL_20261111.md`: rows for the V4 lanes. Its main finding is about the
+  record, not the models: ten of twelve V4 lanes never wrote down which model drove them.
+- Changes to the two developer skills, traced to backlog rows.
+
+**What I changed from it.**
+- `LANE_RULES_V4.md` has five new rules: work in pushed steps; a step is done only when its
+  proof is on disk; every return names its models; an attack round is not a review of a
+  critical surface; the `t3` command line picks its server from its environment.
+- `OPERATING_METHOD_V3.md` has the new scoreboard rows, with the four lanes whose model I can
+  state added, and a routing row: an independent review of a critical surface goes to Opus
+  before acceptance.
+- One skill line said readers filter any bracketed prefix. They filter two. Corrected.
+
+DONE_WHEN 10's third part (backlog, scoreboard, skill updated from real lane findings) is met.
+The loop's next run is due when T8, TSH and T4c have returned.

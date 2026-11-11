@@ -136,6 +136,7 @@ the marker.
 |---|---|---|
 | A diff with a test that passes | Run the test | `deepseek-v4.1-flash` first, `glm-5.3`, `kimi-k3.1-pro` |
 | An attack on a diff | The reproducing command, in a file on a branch the writer can read | `glm-5.3`, `kimi-k3.1-pro` (a different model from the writer) |
+| An independent review of a critical surface, before acceptance | Findings with a reproducing command each, read-only | `claude-opus-5-5`. An attack round does not stand in for it: the T4b attack went to `deepseek-v4.1-flash`, off this table, and missed all four critical findings |
 | A statement: census, diagnosis, "I observed X" | Raw output files the parent opens; two independent models when it gates a decision | `deepseek-v4.1-flash` and `kimi-k3.1-pro` as the pair; `glm-5.3` to settle a disagreement |
 | A design or a decision memo | The principal or lead reads it; options carry exact commands | `glm-5.3` at effort high; `kimi-k3.1-pro` as the second read (`deepseek-v4-pro` had no live route on 2026-11-10) |
 | Desktop or app driving, visual comparison | Window-scoped capture plus accessibility text on disk | `minimax-m3`, `kimi-k3.1-pro` |
@@ -168,6 +169,11 @@ on depth. `gemini-4-argon` is not dispatched (Chairman ruling, 2026-11-10). Neve
 | `glm-5.3` wave 3 | 3 drivers (L9r, L4r, L1r) | 3 (L1r, L9r, L4r closed on trunk; every commit, push and evidence file checked) | 0 | 0 | Dies on any generation longer than about 15 minutes; works in pushed steps of 80 to 100 lines. Weekly quota on one key exhausted at 13:49 UTC. L4r caught and discarded its own attacker's invented report. |
 | `gemini-4-argon` | withdrawn | n/a | n/a | n/a | **Not used from 2026-11-10 (Chairman ruling): flaky and inconsistently priced.** Dispatches also died mid-run on a provider function-call error. |
 | `deepseek-v4.1-flash` | wave 2 + 1 investigator | 1 (T2 binding memo: 210 lines, 20 source extracts, spot-checked) | 0 | 0 | Returned in 17 minutes, named what it could not establish. |
+| `claude-opus-5-5` V4 | 1 (R4b review) | 1 | 0 | 0 | 15 findings on the coding-job diff; all five reproductions re-ran true. Found the four critical defects the lane's own attack round missed. |
+| `kimi-k3.1-pro` V4 | 5 (3 attacks, 1 memo, 1 child lost to a router error) | 3 | 0 | 0 | Attack and test authoring on T2, T45 and the L4 listener, all consumed. Said plainly which runs it had not executed. |
+| `deepseek-v4.1-flash` V4 | 2 (1 implementation child, 1 attack) | 2 | 0 | 0 | Everything its T4b attack reported was real, and it missed the four findings that mattered. No false reports and finding what matters are different measures. |
+| `glm-5.3` V4 | 4 drivers (T7, CQ twice, IMP) | 4 | 0 | 0 | CQ: both returns verified on artifacts, installed and proven live (MAS-10, MAS-11). IMP: 29 backlog rows, citations spot-checked. One wrong remark in a CQ return (that a refresh would switch on the door key) and one overstated line in a skill, both caught by reading the diff. |
+| not recorded | 9 V4 lanes, 4 attack rounds | not recorded | not recorded | not recorded | T1, T1s, T1w, T2, T3i, T45, T6, H9 and T4b have no driver model in the durable record. Closed from 2026-11-11 by the lane rule that every return names its models. |
 
 Routing moves with these numbers. A model with two false reports on one output type loses that
 output type. A model with five first-pass accepts on an output type becomes first choice there.
