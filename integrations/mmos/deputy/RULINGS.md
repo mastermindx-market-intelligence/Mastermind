@@ -26,3 +26,13 @@ then escalates the disagreement.
    says ready, or when it is documents only. Merging is not installing.
 6. **Silence.** A default on silence applies only to a reversible choice the deputy names
    in its escalation, and only after the principal's next wake has passed without a ruling.
+7. **Defects that were already there (2026-11-11).** A reviewed patch that neither adds nor
+   worsens a defect in the code it sits on is not held for that defect. Each such MED goes
+   into a follow-up lane with its own review, and the operator rule that covers it meanwhile
+   is written into the lane's document. Applied first to the silent-stop patch: install 4 is
+   not blocked by findings E to J or by the duplicate child after a restart; the rule
+   meanwhile is "after a restart, read the task list before re-sending a delegation, and
+   use a new client request id".
+8. **One restart for many changes (2026-11-11).** While a restart of the real team server
+   can take minutes, changes that each need one are batched: the deputy prepares a single
+   numbered step list for one packed release and one restart, and escalates it once.
