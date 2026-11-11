@@ -227,9 +227,13 @@ class TestReads:
 
 
 class TestSearches:
-    def test_glob_inside_home_allowed(self, rig):
-        rig.allowed("Glob", {"pattern": "**/*.md",
-                             "path": str(rig.home)})
+    def test_glob_inside_home_subfolder_allowed(self, rig):
+        # repair round 2, R3: the home itself sits at/above protected
+        # files and is refused as a search root; a clean subfolder is fine
+        notes = rig.home / "notes"
+        notes.mkdir()
+        rig.allowed("Glob", {"pattern": "**/*.md", "path": str(notes)})
+        rig.refused("Glob", {"pattern": "**/*.md", "path": str(rig.home)})
 
     def test_grep_file_inside_home_allowed(self, rig):
         rig.allowed("Grep", {"pattern": "memory",
@@ -265,11 +269,13 @@ class TestWeb:
                     "http://172.16.0.1/"):
             rig.refused("WebFetch", {"url": url, "prompt": "x"})
 
-    def test_public_literal_allowed(self, rig):
-        # literal global IP: no DNS, no network request is made — the gate
-        # only resolves
-        rig.allowed("WebFetch", {"url": "http://93.184.216.34/",
-                                 "prompt": "x"})
+    def test_public_literal_refused(self, rig):
+        # repair round 2, R2 (principal ruling, stricter than the panel):
+        # the gate must NOT parse like the client — every address literal
+        # is refused before resolution; only a plain DNS name passes
+        for url in ("http://93.184.216.34/", "https://8.8.8.8/",
+                    "http://1.1.1.1:80/"):
+            rig.refused("WebFetch", {"url": url, "prompt": "x"})
 
     def test_unresolvable_host_refused(self, rig):
         rig.refused("WebFetch", {"url": "http://nonexistent.invalid/",
@@ -280,11 +286,16 @@ class TestWeb:
         rig.refused("WebFetch", {"url": "ftp://93.184.216.34/",
                                  "prompt": "x"})
 
-    def test_web_reader_tool_gated_by_url(self, rig):
+    def test_web_reader_tool_gated_by_url(self, rig, monkeypatch):
         rig.refused("mcp__web_reader__webReader",
                     {"url": "http://127.0.0.1:50821/"})
-        rig.allowed("mcp__web_reader__webReader",
-                    {"url": "http://93.184.216.34/"})
+        # allowed case needs a plain DNS name resolving publicly — faked
+        # in-process (no network in tests), R2: literals never pass
+        fake = [(2, 1, 6, "", ("93.184.216.34", 0))]
+        monkeypatch.setattr(teammate_gate.socket, "getaddrinfo",
+                            lambda *a, **k: fake)
+        assert teammate_gate.check_web(
+            {"url": "http://example.com/"}) is None
 
 
 class TestToolAllowlist:
@@ -351,3 +362,189 @@ class TestConstantsSync:
     def test_gate_file_is_executable_and_private(self):
         mode = stat.S_IMODE(GATE.stat().st_mode)
         assert mode & 0o111, "apply installs it executable"
+
+
+class TestRepairRound2:
+    """Panel 2 findings (R1-R6a): each test names the repair it pins."""
+
+    # --- R1: the web check reads exactly the `url` field (H1) ---
+
+    def test_r1_web_reads_exact_url_field(self, rig):
+        # a public `prompt` must not hide a loopback `url` (H1 example)
+        rig.refused("WebFetch", {"prompt": "https://example.com",
+                                 "url": "http://127.0.0.1:50821/"})
+        # uppercase scheme spelled in the url, public decoy first
+        rig.refused("WebFetch", {"prompt": "https://example.com",
+                                 "url": "HTTP://127.0.0.1/"})
+        # missing / non-string url
+        rig.refused("WebFetch", {"prompt": "https://example.com"})
+        rig.refused("WebFetch", {"url": 12345, "prompt": "x"})
+        rig.refused("WebFetch", {"url": None})
+        # leading/trailing whitespace on the url itself
+        rig.refused("WebFetch", {"url": " http://127.0.0.1:50821/"})
+
+    # --- R2: canonical host spelling, no address literals of any form ---
+
+    def test_r2_address_literals_refused(self, rig):
+        for url in ("http://0177.0.0.1/", "http://0177.0.0.0177/",
+                    "http://2130706433/", "http://0x7f000001/",
+                    "http://127.0.0.1\\@example.com/",
+                    "http://example.com\\@127.0.0.1/",
+                    "http://[::1]/", "http://[::ffff:93.184.216.34]/",
+                    "http://::1/", "http://93.184.216.34/",
+                    "http://1.2.3.4.5/", "http://example.1/",
+                    "http://0x7f.0.0.1/"):
+            rig.refused("WebFetch", {"url": url, "prompt": "x"})
+
+    def test_r2_authority_abuse_refused(self, rig):
+        for url in ("http://a:b@public.example/",       # userinfo
+                    "http://ex%31mple.com/",             # percent in authority
+                    "http://exämple.com/",               # non-ASCII authority
+                    "http://pub\rlic.example/",          # control character
+                    "http://pub lic.example/",           # whitespace
+                    "http://public.example\\path/",      # backslash anywhere
+                    "gopher://public.example/",          # scheme (lowercased)
+                    "GOPHER://public.example/",
+                    "file:///etc/passwd",
+                    "http:93.184.216.34"):               # no authority
+            rig.refused("WebFetch", {"url": url, "prompt": "x"})
+
+    def test_r2_non_default_port_refused(self, rig):
+        # refused before any DNS use, so no network is needed
+        rig.refused("WebFetch", {"url": "http://public.example:8080/",
+                                 "prompt": "x"})
+        rig.refused("WebFetch", {"url": "https://public.example:8443/",
+                                 "prompt": "x"})
+        rig.refused("WebFetch", {"url": "http://public.example:notaport/",
+                                 "prompt": "x"})
+
+    def test_r2_plain_dns_allowed_when_resolution_is_public(self, rig,
+                                                            monkeypatch):
+        # in-process: fake resolution, no network. Only a plain DNS name
+        # with a global resolved address passes.
+        fake = [(2, 1, 6, "", ("93.184.216.34", 0))]
+        monkeypatch.setattr(teammate_gate.socket, "getaddrinfo",
+                            lambda *a, **k: fake)
+        assert teammate_gate.check_web(
+            {"url": "http://example.com/", "prompt": "x"}) is None
+        assert teammate_gate.check_web(
+            {"url": "https://example.com:443/x", "prompt": "x"}) is None
+        # DNS name resolving into CGNAT (Tailscale range) is refused
+        cgnat = [(2, 1, 6, "", ("100.101.1.2", 0))]
+        monkeypatch.setattr(teammate_gate.socket, "getaddrinfo",
+                            lambda *a, **k: cgnat)
+        reason = teammate_gate.check_web({"url": "http://example.com/",
+                                          "prompt": "x"})
+        assert reason and "refused" in reason
+
+    def test_r2_dns_timeout_refuses(self, monkeypatch):
+        import socket as _socket
+
+        def hang(*a, **k):
+            import threading
+            threading.Event().wait(30)
+
+        monkeypatch.setattr(teammate_gate.socket, "getaddrinfo", hang)
+        teammate_gate._RESOLVE_JOIN_SECONDS = 1  # keep the test fast
+        reason = teammate_gate.check_web({"url": "http://example.com/",
+                                          "prompt": "x"})
+        assert reason and "timed out" in reason
+
+    # --- R6a: explicit address-class refusal list (M1) ---
+
+    def test_r6a_refused_address_classes(self):
+        for ip_text in ("224.0.0.1",            # multicast v4
+                        "239.1.1.1",
+                        "ff02::1",               # multicast v6
+                        "::127.0.0.1",           # IPv4-compatible
+                        "::ffff:127.0.0.1",      # IPv4-mapped
+                        "64:ff9b::7f00:1",       # NAT64 embedding loopback
+                        "100.64.0.1",            # CGNAT (Tailscale)
+                        "100.127.255.254",
+                        "2002:7f00:1::",         # 6to4 embedding loopback
+                        "2001:0:7f00:1::",       # Teredo prefix
+                        "fe80::1", "fc00::1", "0.0.0.0", "240.0.0.1"):
+            reason = teammate_gate.address_reason(ip_text)
+            assert reason, f"{ip_text} must be refused"
+        for ip_text in ("93.184.216.34", "2600::1"):
+            assert teammate_gate.address_reason(ip_text) is None
+
+    # --- R3: one unreadable set for Read, Glob and Grep (H3 + M5) ---
+
+    def test_r3_unreadable_home_names_refused_for_read(self, rig):
+        for name in ("cutover-preimage.json", ".credentials.json",
+                     ".claude.json", ".claude.json.backup", "carrier.json",
+                     "tool-limits.json", "settings.json",
+                     "settings.local.json", "settings-managed.json"):
+            target = rig.home / name
+            target.write_text("stand-in\n")
+            rig.refused("Read", {"file_path": str(target)})
+
+    def test_r3_projects_folder_unreadable(self, rig):
+        proj = rig.home / "projects" / "session.jsonl"
+        proj.parent.mkdir(parents=True)
+        proj.write_text("transcript stand-in\n")
+        rig.refused("Read", {"file_path": str(proj)})
+
+    def test_r3_search_at_home_refused_with_hints(self, rig):
+        (rig.home / "cutover-preimage.json").write_text("stand-in\n")
+        (rig.home / "notes").mkdir(exist_ok=True)
+        proc = rig.refused("Grep", {"pattern": "STANDIN",
+                                    "path": str(rig.home)})
+        # the refusal names folders the teammate may search instead
+        assert str(rig.ws) in proc.stderr or "search instead" in proc.stderr
+        rig.refused("Glob", {"pattern": "*.json", "path": str(rig.home)})
+        # no path at all: cwd is inside the home -> still refused
+        rig.refused("Grep", {"pattern": "STANDIN"}, cwd=str(rig.home))
+
+    def test_r3_search_in_clean_subfolder_and_workspace_allowed(self, rig):
+        notes = rig.home / "notes"
+        notes.mkdir(exist_ok=True)
+        (notes / "n.md").write_text("word\n")
+        rig.allowed("Grep", {"pattern": "word", "path": str(notes)})
+        rig.allowed("Glob", {"pattern": "*.md", "path": str(rig.ws)})
+
+    def test_r3_brace_and_backslash_patterns_refused(self, rig):
+        for pattern in ("{..}", "{a,..}/x", "{a,/x}", "x/{..}/y", "a\\b"):
+            rig.refused("Glob", {"pattern": pattern, "path": str(rig.ws)})
+            rig.refused("Grep", {"pattern": pattern, "path": str(rig.ws)})
+
+    # --- R5: @ import lines in client-loaded files (N2) ---
+
+    def test_r5_at_import_line_refused(self, rig):
+        target = rig.home / "CLAUDE.md"
+        rig.refused("Write", {"file_path": str(target),
+                              "content": "memory\n@/etc/passwd\n"})
+        rig.refused("Edit", {"file_path": str(target), "old_string": "a",
+                             "new_string": "@/etc/passwd"})
+        rig.refused("MultiEdit", {
+            "file_path": str(target),
+            "edits": [{"old_string": "a", "new_string": "line\n@/x"}]})
+        rig.refused("Write", {"file_path": str(
+            rig.home / "CLAUDE.local.md"), "content": " @ spaced import"})
+        # rules folder under the home
+        rules = rig.home / "rules" / "r.md"
+        rules.parent.mkdir(parents=True)
+        rig.refused("Write", {"file_path": str(rules),
+                              "content": "@/etc/passwd"})
+
+    def test_r5_plain_memory_writes_still_allowed(self, rig):
+        target = rig.home / "CLAUDE.md"
+        rig.allowed("Write", {"file_path": str(target),
+                              "content": "ordinary memory, no imports"})
+        rig.allowed("Write", {"file_path": str(rig.home / "notes.md"),
+                              "content": "contact me @work on slack"})
+        # an @ that is not at line start is not an import line
+        rig.allowed("Edit", {"file_path": str(target), "old_string": "x",
+                             "new_string": "mention @user mid-line"})
+
+    # --- BCU M14: one teammate writing into another teammate's home ---
+
+    def test_bcu_m14_write_into_other_teammate_home_refused(self, rig):
+        # rig.other is a sibling teammate home under the same root
+        rig.refused("Write", {"file_path": str(rig.other / "poison"),
+                              "content": "x"})
+        rig.refused("Write", {"file_path": str(
+            rig.other / "tool-limits.json"), "content": "x"})
+        rig.refused("Edit", {"file_path": str(rig.other / "CLAUDE.md"),
+                             "old_string": "a", "new_string": "b"})

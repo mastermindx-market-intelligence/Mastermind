@@ -281,8 +281,7 @@ class TestToolLimitsNewKeys:
                        for r in spec.get("deny_write_roots", [])]
         deny_roots += [a for r in deny_roots
                        for a in team_roster.firmlink_aliases(r)]
-        deny = ["Bash", "Agent", "NotebookEdit"] + \
-            list(team_roster.EXTRA_TOOL_DENIES)
+        deny = list(team_roster.TOOL_DENY_CENSUS)
         for r in deny_roots:
             deny += [f"Write(/{r})", f"Write(/{r}/**)",
                      f"Edit(/{r})", f"Edit(/{r}/**)"]
@@ -1780,3 +1779,155 @@ class TestRepairRound1:
         assert stat.S_IMODE(os.stat(cfg_path).st_mode) == 0o600
         assert os.path.dirname(cfg_path).startswith(os.path.join(
             team_roster.expand(spec["server"]["root"]), "config"))
+
+
+class TestRepairRound2:
+    """Panel 2 repairs R4/R6b/R6c (R1-R3/R5/R6a live in the gate tests)."""
+
+    # ---- R4: quoted, isolated, fail-closed hook command (M2 + N1) ----
+
+    def test_r4_gate_command_shape(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        command = team_roster.gate_command(spec, mate)
+        assert command.startswith("/usr/bin/env python3 -I ")
+        assert command.endswith("|| exit 2")
+        # both paths quoted: a server root with a space must still parse
+        assert f"'{team_roster.gate_install_path(spec)}'" in command
+        assert f"'{team_roster.gate_config_path(spec, mate)}'" in command
+
+    def test_r4_fail_closed_through_the_wired_command(self, tmp_path):
+        # a root with a SPACE in it: the quoting must survive sh -c
+        root = tmp_path / "server root"
+        spec = load(tmp_path, make_spec(tmp_path, root=str(root)))
+        mate = spec["teammates"][0]
+        team_roster.write_file_assets(spec, mate)
+        team_roster.ensure_gate(spec)
+        command = team_roster.gate_command(spec, mate)
+        allowed = json.dumps({
+            "tool_name": "Read",
+            "tool_input": {"file_path": str(
+                team_roster.teammate_home(spec, mate) + "/CLAUDE.md")},
+            "cwd": team_roster.teammate_home(spec, mate)})
+        # working gate: the allowed call passes through the wired command
+        proc = subprocess.run(command, shell=True, input=allowed,
+                              capture_output=True, text=True, timeout=60)
+        assert proc.returncode == 0, proc.stderr
+        # gate unreadable (python3 cannot open it): refused. NOTE: the exec
+        # bit alone is NOT a failure mode — `env python3 <gate>` reads the
+        # file, so 0644 still runs; integrity of the mode is status's job
+        # (R6c), and the command fails closed on real failures
+        gate_path = team_roster.gate_install_path(spec)
+        os.chmod(gate_path, 0o000)
+        proc = subprocess.run(command, shell=True, input=allowed,
+                              capture_output=True, text=True, timeout=60)
+        assert proc.returncode == 2
+        # gate missing (python3 exits 2 on "can't open file"): refused
+        os.chmod(gate_path, 0o555)
+        os.remove(gate_path)
+        proc = subprocess.run(command, shell=True, input=allowed,
+                              capture_output=True, text=True, timeout=60)
+        assert proc.returncode == 2
+        # gate that raises at import (exit 1): refused
+        open(gate_path, "w").write("raise RuntimeError('boom')\n")
+        os.chmod(gate_path, 0o555)
+        proc = subprocess.run(command, shell=True, input=allowed,
+                              capture_output=True, text=True, timeout=60)
+        assert proc.returncode == 2
+
+    # ---- R6b: the census bare denies (M4 + N4) ----
+
+    def test_r6b_bare_denies_cover_census(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        # every offered non-allowlisted client tool from the live census
+        for tool in ("Agent", "AskUserQuestion", "ListAgents",
+                     "ReportFindings", "ScheduleWakeup", "Skill",
+                     "Workflow"):
+            assert tool in deny, f"census tool {tool} must be bare-denied"
+        # belt: client tools this build may offer under other configs
+        for tool in ("Bash", "Task", "LS", "NotebookEdit", "NotebookRead",
+                     "SlashCommand", "BashOutput", "KillShell",
+                     "EnterPlanMode", "ExitPlanMode", "Monitor",
+                     "ReadMcpResource", "ListMcpResources", "MultiEdit",
+                     "SendMessage", "CronCreate", "CronDelete", "CronList"):
+            assert tool in deny, f"belt tool {tool} must be bare-denied"
+        # MCP names: exact names only — live-proved (N4) that neither the
+        # wildcard mcp__* nor prefix forms bind
+        for tool in ("mcp__t3-code__request_secret",
+                     "mcp__web_reader__webReader"):
+            assert tool in deny
+        assert not any("*" in d and d.startswith("mcp__") for d in deny), \
+            "wildcard mcp denies do not bind (live-proved); name each"
+        # the allowlist is untouched by the census denies
+        for tool in ("Read", "Glob", "Grep", "WebFetch", "WebSearch",
+                     "TodoWrite", "ToolSearch"):
+            assert tool not in deny
+
+    # ---- R6c: status catches mode, interpreter, disabled hooks, canary ----
+
+    def test_r6c_status_catches_mode_python3_hooks_canary(self, tmp_path,
+                                                          monkeypatch):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        team_roster.write_file_assets(spec, mate)
+        team_roster.ensure_gate(spec)
+        limits_ok, gate_ok, problems = team_roster._fence_status(spec, mate)
+        assert limits_ok and gate_ok and not problems, problems
+        # 1) mode must be exactly 0555
+        gate_path = team_roster.gate_install_path(spec)
+        os.chmod(gate_path, 0o755)  # executable but not 0555
+        _, gate_ok, problems = team_roster._fence_status(spec, mate)
+        assert not gate_ok and any("0555" in p for p in problems), problems
+        os.chmod(gate_path, 0o555)
+        # 2) python3 missing for the hook command
+        monkeypatch.setattr(team_roster.shutil, "which",
+                            lambda name: None if name == "python3" else name)
+        _, gate_ok, problems = team_roster._fence_status(spec, mate)
+        assert not gate_ok and any("python3" in p for p in problems)
+        monkeypatch.setattr(team_roster.shutil, "which",
+                            lambda name: name)
+        # 3) hooks disabled in a settings file that applies to the teammate
+        home = team_roster.teammate_home(spec, mate)
+        settings = os.path.join(home, "settings.json")
+        open(settings, "w").write('{"disableAllHooks": true}\n')
+        _, gate_ok, problems = team_roster._fence_status(spec, mate)
+        assert not gate_ok and any("disableAllHooks" in p for p in problems)
+        os.remove(settings)
+        # 4) a canary call that does NOT exit 2 (gate replaced by an
+        #    allow-all stub with the right wiring)
+        with open(gate_path) as fh:
+            original = fh.read()
+        os.chmod(gate_path, 0o644)  # installed 0555 is not writable
+        open(gate_path, "w").write("#!/usr/bin/env python3\nimport sys\n"
+                                   "sys.exit(0)\n")
+        os.chmod(gate_path, 0o555)
+        _, gate_ok, problems = team_roster._fence_status(spec, mate)
+        assert not gate_ok and any("canary" in p for p in problems)
+        os.chmod(gate_path, 0o644)
+        open(gate_path, "w").write(original)
+        os.chmod(gate_path, 0o555)
+        _, gate_ok, problems = team_roster._fence_status(spec, mate)
+        assert gate_ok and not problems, problems
+
+    # ---- R3 rule-layer companion: the unreadable set, extended (M5) ----
+
+    def test_r3_home_unreadable_set_extended_and_synced(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        home = team_roster.teammate_home(spec, mate)
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        for name in ("cutover-preimage.json", ".credentials.json",
+                     ".claude.json", ".claude.json.backup", "carrier.json",
+                     "tool-limits.json", "settings.json", "projects"):
+            for tool in ("Read", "Glob", "Grep"):
+                assert f"{tool}(/{home}/{name})" in deny, (tool, name)
+                assert f"{tool}(/{home}/{name}/**)" in deny, (tool, name)
+        # the gate's unreadable set covers the roster's exact names
+        gate = importlib.util.spec_from_file_location(
+            "teammate_gate_r3", team_roster.GATE_SOURCE)
+        module = importlib.util.module_from_spec(gate)
+        gate.loader.exec_module(module)
+        assert set(team_roster.HOME_UNREADABLE) <= set(
+            module.UNREADABLE_NAMES)

@@ -42,6 +42,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import sqlite3
 import stat
 import subprocess
@@ -421,7 +422,14 @@ SERVER_PRIVATE = ("run", "home", "config", "bin", "runtime", "claude-home",
 # The teammate may not change them; the preimage it may not even read.
 HOME_LOCKED = ("tool-limits.json", "CHARTER.md", "carrier.json",
                "cutover-preimage.json", "cutover-result.json")
-HOME_UNREADABLE = ("cutover-preimage.json",)
+# What a teammate may not even READ in its own home (repair round 2, M5:
+# the set was only the preimage, leaving .credentials.json, .claude.json
+# and the projects/ transcript folder readable to Grep). Keep in sync with
+# UNREADABLE_NAMES in teammate_gate.py — the roster test asserts the sync.
+HOME_UNREADABLE = ("cutover-preimage.json", ".credentials.json",
+                   ".claude.json", ".claude.json.backup", "carrier.json",
+                   "tool-limits.json", "settings.json", "settings.local.json",
+                   "managed-settings.json", "projects")
 
 # A teammate's home is also its Claude configuration folder. A settings file
 # or an MCP entry there can name a command to run, and a skill, agent, rule
@@ -476,17 +484,34 @@ USER_PROTECTED = (
     ".mastermind/mmos_dev", ".mastermind/t3-team-server",
 )
 
-# Bare tool denies beyond Bash/Agent/NotebookEdit (repair round 1 census,
-# live-proved on the dev server): the default claudeAgent toolset exposes
-# these unless denied, and none of them is in any charter. Workflow spawns
-# subagents; SendMessage/ListAgents are lateral agent channels;
-# request_secret would ask the T3 server for stored secrets; Skill loads
-# skill files from outside the fence; ScheduleWakeup self-arms a timer.
-# ToolSearch is deliberately NOT denied: it is how WebFetch/WebSearch load,
-# and the gate refuses every non-allowlisted tool at call time anyway.
-EXTRA_TOOL_DENIES = ("Workflow", "SendMessage", "ListAgents",
-                     "ScheduleWakeup", "Skill", "CronCreate", "CronDelete",
-                     "CronList", "mcp__t3-code__request_secret")
+# Bare tool denies for every tool a teammate session is offered that is
+# not on its allowlist (repair round 2, M4: the deny layer enumerated only
+# a handful, so Task/LS/NotebookRead/SlashCommand/BashOutput/KillShell and
+# the MCP tools were offered and unfenced at the rule layer). The census
+# list is what a live dev-server teammate session actually offered on
+# 2026-11-11 (17 tools incl. Read/Glob/Grep/Write/Edit/WebFetch/ToolSearch
+# and two MCP names); the belt adds client tools other builds/configs of
+# the same client offer. MCP names are EXACT names: live-proved (N4, dev
+# server, transcript-verified forced calls) that no wildcard form binds —
+# neither mcp__*, mcp__server__*, nor the bare local name. mcp__
+# web_reader__webReader stays denied here even though its execution is
+# server-side (see RL_TEAMMATE_LIMITS.md residual: it must also be removed
+# from the server build). ToolSearch is deliberately NOT denied: it is how
+# WebFetch/WebSearch load, and the gate refuses every non-allowlisted tool
+# at call time anyway (the gate is the primary fence; this is the
+# snapshot second layer).
+TOOL_DENY_CENSUS = (
+    # census: client tools a teammate session is actually offered
+    "Agent", "AskUserQuestion", "ListAgents", "ReportFindings",
+    "ScheduleWakeup", "Skill", "Workflow",
+    # belt: same client, other configurations
+    "Bash", "Task", "LS", "NotebookEdit", "NotebookRead", "SlashCommand",
+    "BashOutput", "KillShell", "EnterPlanMode", "ExitPlanMode", "Monitor",
+    "ReadMcpResource", "ListMcpResources", "MultiEdit", "SendMessage",
+    "CronCreate", "CronDelete", "CronList",
+    # MCP tools offered to a teammate session, by exact name
+    "mcp__t3-code__request_secret", "mcp__web_reader__webReader",
+)
 
 # The primary fence (repair round 1 design ruling): one PreToolUse hook
 # program, stored where no teammate can write, wired into every teammate's
@@ -511,9 +536,22 @@ def gate_config_path(spec, mate):
                         f"{mate['slug']}.json")
 
 
+def _shell_single_quote(text):
+    """Always single-quote (repair round 2, R4): shlex.quote leaves a plain
+    path bare, and the wired command must stay one parseable command for
+    every server root, including roots with spaces."""
+    return "'" + text.replace("'", "'\\''") + "'"
+
+
 def gate_command(spec, mate):
-    return " ".join([gate_install_path(spec), "--config",
-                     shlex.quote(gate_config_path(spec, mate))])
+    # R4 (M2 + N1): /usr/bin/env python3 -I defeats usercustomize/site
+    # hijack of a bare `python3`; -I isolates from PYTHON* env and the
+    # user site dir; every non-2 exit of the gate itself (1 on internal
+    # error, 126 not executable, 127 missing, timeout kill) becomes a
+    # refusal through `|| exit 2` — the hook layer fails CLOSED.
+    return (f"/usr/bin/env python3 -I "
+            f"{_shell_single_quote(gate_install_path(spec))} --config "
+            f"{_shell_single_quote(gate_config_path(spec, mate))} || exit 2")
 
 
 def gate_hook_block(spec, mate):
@@ -875,7 +913,7 @@ def tool_limits(spec, mate):
     # so every deny string is built from the real path (attack round,
     # finding 8); /Users paths also get their firmlink twin (finding 7)
     deny_roots += [a for r in deny_roots for a in firmlink_aliases(r)]
-    deny = ["Bash", "Agent", "NotebookEdit"] + list(EXTRA_TOOL_DENIES)
+    deny = list(TOOL_DENY_CENSUS)
     for root in deny_roots:
         # root itself too: if the folder does not exist (yet), a Write could
         # otherwise create a file at that exact path (server-infrastructure
@@ -1674,7 +1712,10 @@ def _fence_status(spec, mate):
     - the gate program exists at <root>/bin, matches the installation's
       sha256 and is exactly what tool-limits.json wires as the
       PreToolUse hook (a missing or altered hook lets every call through
-      — live-proved fail-open).
+      — live-proved fail-open);
+    - the gate's mode is exactly 0555, python3 is on PATH, no settings
+      file that applies to the teammate sets disableAllHooks, and a canary
+      call through the exact wired command exits 2 (repair round 2, R6c).
     """
     problems = []
     limits_path, _ = limits_paths(spec, mate)
@@ -1723,8 +1764,68 @@ def _fence_status(spec, mate):
         if not wiring_ok:
             problems.append(f"tool-limits.json does not wire the gate hook "
                             f"({expected_command})")
+    # R6c (M6): four more things can silently unhook the gate. All four are
+    # checked here so `status` exits non-zero on each.
+    # 1) mode: the gate must be exactly 0555 — group/other-writable (or a
+    #    root that lost its exec bit and relies on the || exit 2 refusal)
+    #    is not an installed fence
+    mode_ok = False
+    if os.path.isfile(gate_path):
+        mode = stat.S_IMODE(os.stat(gate_path).st_mode)
+        mode_ok = mode == 0o555
+        if not mode_ok:
+            problems.append(f"gate mode is {mode:04o}, expected 0555: "
+                            f"{gate_path}")
+    # 2) the hook command's interpreter must exist on PATH
+    python_ok = shutil.which("python3") is not None
+    if not python_ok:
+        problems.append("python3 not found on PATH; the gate hook command "
+                        "cannot run and every call would fail closed to a "
+                        "refusal — fix the launch environment")
+    # 3) hooks disabled in any settings file that applies to the teammate:
+    #    disableAllHooks in any one of them kills the PreToolUse fence
+    settings_files = [
+        os.path.join(home, name) for name in
+        ("settings.json", "settings.local.json", "managed-settings.json")]
+    settings_files.append(limits_path)
+    hooks_enabled = True
+    for path in settings_files:
+        if not os.path.isfile(path):
+            continue
+        try:
+            data = json.loads(open(path).read())
+        except ValueError as exc:
+            hooks_enabled = False
+            problems.append(f"settings file that applies to the teammate "
+                            f"is unparseable (may hide disableAllHooks): "
+                            f"{path}: {exc}")
+            continue
+        if isinstance(data, dict) and data.get("disableAllHooks"):
+            hooks_enabled = False
+            problems.append(f"disableAllHooks is set in {path}; the "
+                            "PreToolUse gate hook would never fire")
+    # 4) canary: run the exact wired command with a call the gate must
+    #    refuse (Bash is not on any teammate allowlist) and require exit 2
+    canary_ok = False
+    if os.path.isfile(gate_path) and mode_ok and python_ok and wiring_ok:
+        payload = json.dumps({"tool_name": "Bash",
+                              "tool_input": {"command": "true"},
+                              "cwd": home, "hook_event_name": "PreToolUse"})
+        try:
+            proc = subprocess.run(gate_command(spec, mate), shell=True,
+                                  input=payload, capture_output=True,
+                                  text=True, timeout=30)
+            canary_ok = proc.returncode == 2
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            canary_ok = False
+        if not canary_ok:
+            problems.append(f"canary call to the gate did not refuse "
+                            f"(expected exit 2, got "
+                            f"{getattr(proc, 'returncode', '?')}); the "
+                            "installed gate is not the fence")
     gate_ok = bool(gate_sha) and os.path.isfile(gate_path) and sha_ok and \
-        config_ok and wiring_ok
+        config_ok and wiring_ok and mode_ok and python_ok and \
+        hooks_enabled and canary_ok
     return limits_ok, gate_ok, problems
 
 

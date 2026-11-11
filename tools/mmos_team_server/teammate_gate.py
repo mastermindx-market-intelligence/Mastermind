@@ -37,9 +37,10 @@ ours to persist). Exit 2 = refuse, 0 = allow.
 import ipaddress
 import json
 import os
-import signal
+import re
 import socket
 import sys
+import threading
 import unicodedata
 import urllib.parse
 
@@ -60,7 +61,29 @@ PROTECTED_NAMES = frozenset({
     ".claude.json.backup", "CLAUDE.md.backup",
 })
 
-UNREADABLE_NAMES = frozenset({"cutover-preimage.json"})
+# One unreadable set (repair round 2, R3 + M5) used by Read, Glob and Grep
+# alike: files in the teammate's OWN home that carry config, credentials or
+# session transcripts. Panel 2 H3: Grep rooted at the home returned the
+# cut-over preimage's content while Read of it refused; M5: .claude.json,
+# .credentials.json, carrier.json and projects/ were fully readable. The
+# families cover every spelling: anything starting with .claude.json (the
+# backups a restart could honor) and settings*.json.
+UNREADABLE_NAMES = frozenset({
+    "cutover-preimage.json", ".credentials.json", ".claude.json",
+    ".claude.json.backup", "carrier.json", "tool-limits.json",
+    "settings.json", "settings.local.json", "managed-settings.json",
+    "projects",
+})
+
+
+def unreadable_name(name):
+    """True if a home-relative first component is in the unreadable set."""
+    key = norm(name)
+    exact = {norm(n) for n in UNREADABLE_NAMES}
+    if key in exact:
+        return True
+    return (key.startswith(norm(".claude.json")) or
+            (key.startswith(norm("settings")) and key.endswith(".json")))
 
 PATH_WRITE_TOOLS = frozenset({"Write", "Edit", "NotebookEdit", "MultiEdit"})
 READ_TOOLS = frozenset({"Read"})
@@ -70,7 +93,13 @@ FREE_TOOLS = frozenset({"TodoWrite", "WebSearch", "ToolSearch"})
 
 
 def refuse(reason):
-    print(f"teammate_gate: {reason}", file=sys.stderr)
+    # R4 (panel 2 M2): a broken stderr pipe (EPIPE while the reason is
+    # printed) must not turn a refusal into exit 1 — which the client would
+    # treat as allow. The refusal itself must survive.
+    try:
+        print(f"teammate_gate: {reason}", file=sys.stderr)
+    except BaseException:
+        pass
     raise SystemExit(2)
 
 
@@ -192,8 +221,9 @@ def check_path_read(path, cfg):
     if deny_hit(path, cfg.get("deny_reads") or [], home):
         return f"path {path} is on the deny list"
     comp = rel_first_component(path, home)
-    if comp is not None and comp in {norm(n) for n in UNREADABLE_NAMES}:
-        return "the preimage is not readable by the teammate"
+    if comp is not None and unreadable_name(comp):
+        return (f"{comp} in the teammate home is not readable by the "
+                "teammate (config/credentials/transcripts)")
     return None
 
 
@@ -218,6 +248,51 @@ def check_path_write(path, cfg):
     return None
 
 
+# R5 (panel 2 N2): the client resolves @path import lines in files it loads
+# by itself (user/project memory), so a written import would read outside
+# every tool fence without a tool call ever happening.
+IMPORT_LINE_RE = re.compile(r"(?m)^[ \t]*@\S")
+
+
+def _new_content_strings(tool_input):
+    out = []
+    if isinstance(tool_input.get("content"), str):
+        out.append(tool_input["content"])
+    if isinstance(tool_input.get("new_string"), str):
+        out.append(tool_input["new_string"])
+    edits = tool_input.get("edits")
+    if isinstance(edits, list):
+        for edit in edits:
+            if isinstance(edit, dict) and isinstance(edit.get("new_string"),
+                                                     str):
+                out.append(edit["new_string"])
+    return out
+
+
+def check_import_lines(path, tool_input, cfg):
+    """Refuse new content that puts an @ import line into a file the client
+    loads by itself inside the teammate home: CLAUDE.md, CLAUDE.local.md,
+    anything under a rules folder."""
+    home = cfg["home"]
+    if not under(path, home):
+        return None
+    base = norm(path.rstrip("/").rsplit("/", 1)[-1])
+    home_comps = [c for c in home.split("/") if c]
+    path_comps = [c for c in path.split("/") if c]
+    rel = path_comps[len(home_comps):] if len(path_comps) > len(home_comps) \
+        else []
+    loaded = base in {norm("CLAUDE.md"), norm("CLAUDE.local.md")} or \
+        any(norm(c) == norm("rules") for c in rel)
+    if not loaded:
+        return None
+    for text in _new_content_strings(tool_input):
+        if IMPORT_LINE_RE.search(text):
+            return (f"an @ import line written into {path} would be "
+                    "resolved by the client outside the tool fence; write "
+                    "the content inline instead")
+    return None
+
+
 def check_pattern(pattern):
     if not isinstance(pattern, str) or not pattern or "\x00" in pattern:
         return "missing or invalid search pattern"
@@ -225,7 +300,40 @@ def check_pattern(pattern):
         return f"search pattern must be relative ({pattern})"
     if ".." in pattern.split("/"):
         return f"search pattern must not climb (..) ({pattern})"
+    # R3 (panel 2 M3): a brace alternative can be absolute or a climb
+    # ({a,/etc/*}, {..}), and whether the client's glob engine expands it
+    # into a real climb is not ours to bet on — braces and backslashes are
+    # refused outright
+    if "{" in pattern or "}" in pattern:
+        return f"brace patterns are not permitted in search patterns " \
+               f"({pattern})"
+    if "\\" in pattern:
+        return f"backslash is not permitted in search patterns ({pattern})"
     return None
+
+
+def _searchable_hints(cfg):
+    """Folders the teammate MAY search, for refusal texts: the workspace and
+    home subfolders whose first component is not unreadable."""
+    hints = []
+    for root in cfg.get("read_roots") or []:
+        if os.path.isdir(root):
+            hints.append(root)
+    home = cfg["home"]
+    try:
+        children = sorted(os.listdir(home))
+    except OSError:
+        children = []
+    for name in children:
+        if len(hints) >= 4:
+            break
+        if unreadable_name(name):
+            continue
+        if norm(name) in {norm(n) for n in PROTECTED_NAMES}:
+            continue  # client config folders are not search targets either
+        if os.path.isdir(os.path.join(home, name)):
+            hints.append(os.path.join(home, name))
+    return hints
 
 
 def check_search(tool_input, cwd, cfg):
@@ -241,10 +349,22 @@ def check_search(tool_input, cwd, cfg):
     reason = check_path_read(root, cfg)
     if reason:
         return reason
+    home = cfg["home"]
+    # R3 (panel 2 H3/M5): a search whose root is, or is an ancestor of, any
+    # unreadable path would enumerate or read it — the unreadable set is one
+    # set for Read, Glob and Grep alike. The home itself always contains
+    # unreadable names (tool-limits.json, projects/), so a search rooted at
+    # the home is refused outright and the text names searchable folders.
+    unreadable = [os.path.join(home, n) for n in UNREADABLE_NAMES]
+    for path in unreadable:
+        if under(path, root):
+            hints = ", ".join(_searchable_hints(cfg)[:3]) or "(none)"
+            return (f"search root {root} sits at or above protected "
+                    f"teammate files ({os.path.basename(path)} and the "
+                    f"other unreadable home names); search instead: {hints}")
     # a search may not start AT or ABOVE a denied folder: enumerating a
     # denied folder's parent leaks its names, and a search rooted above one
     # walks into it (repair round 1, P4)
-    home = cfg["home"]
     for entry in cfg.get("deny_reads") or []:
         base = entry[:-1] if entry.endswith("*") else entry
         if base == home:
@@ -260,58 +380,145 @@ def check_search(tool_input, cwd, cfg):
     return None
 
 
-class _Alarm(Exception):
-    pass
+# R6a (panel 2 M1): an explicit refusal list, not is_global alone — the
+# panel measured 224.0.0.1, ff02::1, ::127.0.0.1 and 64:ff9b::7f00:1 all
+# passing is_global. Loopback, private, link-local, unique-local, multicast,
+# unspecified, reserved, IPv4-mapped and IPv4-compatible IPv6, NAT64
+# (64:ff9b::/96, where this Mac's Tailscale addresses live via 100.64/10),
+# 6to4, Teredo and carrier-grade NAT 100.64.0.0/10.
+REFUSED_ADDRESS_NETS = tuple(ipaddress.ip_network(net) for net in (
+    "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
+    "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24",
+    "192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24",
+    "224.0.0.0/4", "240.0.0.0/4",
+    "::/96", "::1/128", "64:ff9b::/96", "100::/64", "2001::/32",
+    "2001:db8::/32", "2002::/16", "fc00::/7", "fe80::/10", "ff00::/8",
+))
 
 
-def _alarm_handler(signum, frame):
-    raise _Alarm()
+def address_reason(ip_text):
+    """Refusal reason for one resolved address, or None if it may pass."""
+    try:
+        ip = ipaddress.ip_address(str(ip_text).split("%", 1)[0])
+    except ValueError:
+        return f"non-IP address {ip_text}"
+    for net in REFUSED_ADDRESS_NETS:
+        if ip in net:
+            return (f"{ip} falls in the refused range {net} (loopback/"
+                    "private/translated/reserved classes are refused)")
+    if not ip.is_global:
+        return f"{ip} is not a global address"
+    if isinstance(ip, ipaddress.IPv6Address):
+        mapped = ip.ipv4_mapped
+        if mapped is not None and address_reason(str(mapped)):
+            return f"{ip} maps the refused IPv4 {mapped}"
+    return None
+
+
+# R2 (panel 2 H2, principal ruling — deliberately stricter than the score):
+# do not try to parse like the client. Only a plain DNS name reaches
+# resolution; every address-literal spelling (dotted, decimal, octal, hex,
+# IPv6, bracketed), any userinfo, backslash, whitespace, control character,
+# percent-encoding or non-ASCII in the authority, any scheme but http/https
+# and any non-default port is refused outright.
+_DNS_LABEL_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
+
+
+def _authority_reason(netloc, scheme):
+    if netloc.count(":") > 1:
+        return f"bare IPv6 literal or extra colon in authority ({netloc!r})"
+    if any(ch in netloc for ch in "[]@%\\"):
+        return (f"authority {netloc!r} contains an address literal marker, "
+                "userinfo, percent-encoding or backslash")
+    if any(ord(ch) > 0x7F or ord(ch) < 0x20 for ch in netloc):
+        return f"non-ASCII or control character in authority ({netloc!r})"
+    host, _, port_text = netloc.partition(":")
+    host = host.lower()
+    if port_text:
+        if not port_text.isdigit():
+            return f"port {port_text!r} is not numeric"
+        if int(port_text) not in (80, 443):
+            return (f"port {port_text} is not a default web port "
+                    "(teammates fetch plain http/https only)")
+        if (scheme == "https" and int(port_text) == 80) or \
+                (scheme == "http" and int(port_text) == 443):
+            return f"port {port_text} does not match scheme {scheme}"
+    if not host or len(host) > 253:
+        return f"missing or over-long host in {netloc!r}"
+    labels = host.split(".")
+    if any(not _DNS_LABEL_RE.match(label) for label in labels):
+        return f"host {host!r} is not a plain DNS name (address literals, " \
+               "empty or malformed labels are refused)"
+    if any(label.isdigit() for label in labels):
+        return (f"host {host!r} has an all-numeric label — the client "
+                "family parses those as IPv4 (decimal/octal/hex)")
+    if any(label.lower().startswith("0x") for label in labels):
+        return f"host {host!r} has a hex-literal label"
+    return None
+
+
+_RESOLVE_JOIN_SECONDS = 5
+
+
+def _resolve_host(host):
+    """DNS in a daemon thread with a hard 5-second join (R4, panel 2 M2):
+    signal.alarm does not reliably interrupt a blocked getaddrinfo, and a
+    lookup that outlives the client's hook timeout fails OPEN — so the
+    thread is abandoned and the call refused instead."""
+    box = {}
+
+    def worker():
+        try:
+            box["infos"] = socket.getaddrinfo(host, None)
+        except BaseException as exc:  # noqa: BLE001 - any failure refuses
+            box["error"] = exc
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(_RESOLVE_JOIN_SECONDS)
+    if thread.is_alive() or "infos" not in box:
+        return None
+    return box["infos"]
 
 
 def check_web(tool_input):
-    url = None
-    for key, value in tool_input.items():
-        if isinstance(value, str) and value.startswith(("http://",
-                                                        "https://")):
-            url = value
-            break
-    if url is None:
-        return "no URL in web tool input; refusing"
+    # R1 (panel 2 H1): read exactly the url field the fetcher uses — the
+    # old scan took the FIRST http(s)-prefixed string, so a public `prompt`
+    # hid a loopback `url`.
+    url = tool_input.get("url")
+    if not isinstance(url, str) or not url:
+        return "web tool input has no 'url' string; refusing"
+    if url != url.strip():
+        return "web url has leading or trailing whitespace; refusing"
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in url):
+        return "web url contains a control character; refusing"
+    if any(ch.isspace() for ch in url):
+        return "web url contains whitespace; refusing"
+    if "\\" in url:
+        return "web url contains a backslash; refusing"
     try:
         parsed = urllib.parse.urlsplit(url)
     except ValueError:
         return f"unparseable URL {url!r}"
-    if parsed.scheme not in ("http", "https"):
-        return f"web tool scheme {parsed.scheme!r} is not allowed"
-    host = parsed.hostname
-    if not host:
-        return f"no host in {url!r}"
-    try:
-        host = host.encode("idna").decode("ascii")
-    except (UnicodeError, ValueError):
-        return f"unresolvable host {host!r}"
-    previous = signal.signal(signal.SIGALRM, _alarm_handler)
-    signal.alarm(5)
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except _Alarm:
-        return f"DNS lookup for {host} timed out; refusing"
-    except (socket.gaierror, OSError):
-        return f"cannot resolve {host}; refusing"
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, previous)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        return f"web tool scheme {scheme!r} is not allowed (http/https only)"
+    if not parsed.netloc:
+        return f"no authority in {url!r}"
+    reason = _authority_reason(parsed.netloc, scheme)
+    if reason:
+        return reason
+    host = parsed.netloc.partition(":")[0].lower()
+    infos = _resolve_host(host)
+    if infos is None:
+        return f"DNS lookup for {host} failed or timed out; refusing"
     addresses = {info[4][0] for info in infos}
     if not addresses:
         return f"no addresses for {host}; refusing"
     for address in sorted(addresses):
-        try:
-            ip = ipaddress.ip_address(address.split("%", 1)[0])
-        except ValueError:
-            return f"non-IP address {address} for {host}; refusing"
-        if not ip.is_global:
-            return f"{host} resolves to a non-public address ({address}); " \
-                   "loopback and private targets are refused"
+        reason = address_reason(address)
+        if reason:
+            return f"{host} resolves to a refused address ({reason})"
     return None
 
 
@@ -328,7 +535,10 @@ def decide(payload):
         path = resolve(tool_input.get("file_path"), cwd)
         if path is None:
             return f"unparseable path for {tool}"
-        return check_path_write(path, cfg)
+        reason = check_path_write(path, cfg)
+        if reason:
+            return reason
+        return check_import_lines(path, tool_input, cfg)
     if tool in READ_TOOLS:
         path = resolve(tool_input.get("file_path"), cwd)
         if path is None:
