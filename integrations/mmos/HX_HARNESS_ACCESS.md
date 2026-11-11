@@ -21,9 +21,16 @@ evidence files; summary:
   (has no `permissions` key today; the merge only adds one).
 - Rollback: `mv "$F.bak-hx9" "$F"` (or delete the added `permissions.allow`
   entries).
-- Tests: `bash harness/i9-test-readonly-allow.sh` — expects 12 RUN /
-  23 REFUSED / 2 guard refusals (35 checks). Proven live 2026-11-11 with
-  glm-5.3 via the gateway (runs A–E under `~/.mastermind/mmos_dev/hx/i9/`).
+- Tests: `bash harness/i9-test-readonly-allow.sh` — expects 11 RUN /
+  25 REFUSED / 2 guard refusals + filesystem canaries (38 checks), refusal
+  classified by denial wording, not is_error. Proven live 2026-11-11 with
+  glm-5.3 via the gateway (runs A–E + V/W under `~/.mastermind/mmos_dev/hx/i9/`).
+- Adversarial result (deepseek child + HX reproduction): `Bash(git diff:*)`
+  let `git diff --output=<any path> HEAD` write outside the working
+  directories (canary verified, is_error=false). **git diff is therefore
+  NOT allowlisted.** Without the rule the CLI's own analysis denies the
+  `--output` form (re-verified: "requires approval", no file written) while
+  plain `git diff` reads still run via built-in read-only handling.
 - Scope honestly stated: the worktree guard's own two refusal families
   (git-in-complex-form) are **not** bypassable by any permission rule, hook
   allow, or skip-permissions (proven live); the fragment restores prompt-free
