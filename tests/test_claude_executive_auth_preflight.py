@@ -15,7 +15,11 @@ def good():
     coo = {**read, "required_scopes": [COO_SCOPE, READ_SCOPE]}
     installed = {"executive_mcp_profile": "web_ceo_v3",
                  "policies": {"read": read},
-                 "coo": {"policy": coo, "binding": {}}}
+                 "coo": {"policy": coo,
+                         "binding": {"schema": "mastermind.executive_coo_principal_binding.v1",
+                                     "enabled": True,
+                                     "binding": {"fixture": "public-only"}},
+                         "missions": [{"enabled": True}]}}
     claude = {"mcpServers": {"mastermind-executive": {
         "type": "http", "url": "http://127.0.0.1:8444/mcp",
         "oauth": {"clientId": "public-id-never-log",
@@ -127,3 +131,16 @@ def test_probe_does_not_fetch_arbitrary_targets():
     import pytest
     with pytest.raises(ValueError, match="fixed loopback allowlist"):
         _loopback_probe("https://evil.example.test/steal")
+
+
+def test_coo_policy_without_enrolled_mission_is_not_live():
+    args = list(good())
+    args[0]["coo"]["missions"] = []
+    args[0]["coo"]["binding"] = {
+        "schema": "mastermind.executive_coo_principal_binding.v1",
+        "enabled": False, "binding": None,
+    }
+    output = result(args)
+    assert output["status"] == "BLOCKED"
+    assert "COO_PRINCIPAL_BINDING_NOT_ENROLLED" in output["problems"]
+    assert "COO_MISSION_NOT_ENROLLED" in output["problems"]
