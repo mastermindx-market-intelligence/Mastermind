@@ -1013,6 +1013,39 @@ def test_an_answer_beginning_with_a_machine_prefix_is_stored_under_the_answer_li
         Pc(), {"id": "is-1", "assigneeAgentId": "ag-atlas"}) == stored
 
 
+def test_two_done_ask_children_return_oldest_first_then_deliver():
+    # R2a finding 19: when two asks of one parent are both done, each
+    # child's answer reaches the asker as its own return turn, OLDEST first,
+    # each under its own return marker; the parent's final delivery happens
+    # only after both are answered — and a replay sends nothing.
+    issues, ask_op, child1 = blocked_parent_with_done_child()
+    child2 = dict(child1, id="ch-2", identifier="MMO-3",
+                  assigneeAgentId="ag-vega", title="Review it")
+    issues["is-1"]["blockedByIssueIds"] = ["ch-1", "ch-2"]
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [dict(child1), child2]
+    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines",
+                                "authorType": "agent",
+                                "author": {"id": "ag-atlas"}}]
+    pc.comment_rows["ch-2"] = [{"body": "the summary is right",
+                                "authorType": "agent",
+                                "author": {"id": "ag-vega"}}]
+    t3 = FakeT3(replies=["got the count; waiting to see the review",
+                         "FINAL: 12 lines and the review agrees"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert len(t3.sends) == 2
+    assert "12 lines" in t3.sends[0] and "MMO-2" in t3.sends[0]  # oldest first
+    assert "the summary is right" in t3.sends[1]                 # then the next
+    assert pc.issues["is-1"]["status"] == "in_review"  # final delivery once
+    kinds = [c[0] for c in pc.calls]
+    assert kinds.count("interaction") == 1
+    # replay: both return markers answered; nothing sends again
+    t3.sends.clear()
+    t3.replies = ["SHOULD NOT SEND"]
+    assert run_with_roster(pc, t3, {}) == 0
+    assert t3.sends == []
+
+
 def test_return_replay_never_resends_or_duplicates():
     issues, ask_op, child = blocked_parent_with_done_child()
     ret_op = f"{ask_op}-ret"

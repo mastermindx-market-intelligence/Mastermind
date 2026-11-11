@@ -1448,6 +1448,16 @@ def last_result_comment(pc, child):
     return "(no answer comment on the child issue)"
 
 
+def _return_op(ask_op, child, single):
+    """The return marker for one ask child (R2a finding 19): the legacy
+    unsuffixed op when this parent has exactly ONE ask child — existing
+    in-flight threads keep their marker identity — else per-child with the
+    child id, so two children of one parent never share a return turn."""
+    if single:
+        return f"{ask_op}-ret"
+    return f"{ask_op}-{child.get('id')}-ret"
+
+
 def handle_return(pc, t3, issue, ask_op, opts):
     """The issue_blockers_resolved return edge: this teammate's ask came back.
 
@@ -1455,9 +1465,15 @@ def handle_return(pc, t3, issue, ask_op, opts):
     done. Send ONE message with the child's result and link into the asker's
     primary thread — the return op is derived from the ask op, so the marker
     rule makes the send exactly-once across runs — and deliver the asker's
-    final answer on the parent like any task."""
-    child = None
+    final answer on the parent like any task.
+
+    R2a finding 19: when several asks of one parent are done, every child's
+    answer reaches the asker as its own return turn, OLDEST first (the
+    children list serves them oldest first), and the parent's final delivery
+    happens only when no ask child is open; the asker's newest answer is the
+    one delivered."""
     blocker_ids = set(issue.get("blockedByIssueIds") or [])
+    family = []
     for row in pc.children(issue["id"]):
         # Attack finding 5: the ask marker is derivable from public issue
         # text, so marker shape alone never selects the child whose answer
@@ -1466,39 +1482,58 @@ def handle_return(pc, t3, issue, ask_op, opts):
         # parents) marker shape remains the only signal, as before.
         if blocker_ids and row.get("id") not in blocker_ids:
             continue
-        if is_ask_child_of(row, issue) and row.get("status") == "done":
-            child = row
-            break
-    if child is None:
+        if is_ask_child_of(row, issue):
+            family.append(row)
+    if not family:
         log(f"return wake on {issue.get('identifier')} but no done child for "
             f"{ask_op}; leaving the issue for a person")
         return 0
-    result_text = last_result_comment(pc, child)
-    ret_op = f"{ask_op}-ret"
-    # R2a finding 16: the bounded lookback applies to the return marker too.
-    state, existing, thread = scan_marker_deep(t3, ret_op)
-    if state is None:
-        message = (
-            f"[{ret_op}]\n\n"
-            f"The teammate you asked finished. Their child issue "
-            f"{child.get('identifier')} '{child.get('title')}' is done.\n\n"
-            f"Their answer:\n\n{result_text}\n\n"
-            "Use it to finish your original task: your reply to this message "
-            "is posted as the issue comment and completes the issue."
-        )
-        log(f"sending {ret_op} to the asker's thread")
-        reply = send_and_stay(pc, t3, issue, message, ret_op, opts)
-    elif state == "pending":
-        if _pending_requests(thread) > 0:
-            log(f"{ret_op} is pending on a waiting question; staying with it")
-            reply = stay_with_question(pc, t3, issue, ret_op, opts)
-        else:
-            log(f"{ret_op} already in the thread and still pending; waiting, no resend")
-            reply = wait_for_reply(t3, ret_op, opts)
-    else:
-        log(f"{ret_op} already answered in the thread; reconciling, no resend")
-        reply = existing
-    if not reply.strip():
+    open_rows = [row for row in family if row.get("status") != "done"]
+    if open_rows:
+        # R2a finding 19: the parent delivers only when no ask child is
+        # open — a not-yet-done blocker keeps the parent waiting.
+        log(f"return wake on {issue.get('identifier')} but ask child "
+            f"{open_rows[0].get('identifier')} is still open; the parent "
+            "stays blocked")
+        return 0
+    done_rows = family  # all done here; oldest first as the list serves them
+    single = len(done_rows) == 1
+    reply = None
+    for child in done_rows:
+        ret_op = _return_op(ask_op, child, single)
+        # R2a finding 16: the bounded lookback applies to the return marker.
+        state, existing, thread = scan_marker_deep(t3, ret_op)
+        if state == "reply":
+            log(f"{ret_op} already answered in the thread; reconciling, "
+                "no resend")
+            reply = existing  # the newest answered turn wins the delivery
+            continue
+        if state == "window_exhausted":
+            # beyond the lookback bound without an answer this run can read:
+            # nothing to send under the marker rule, nothing to deliver
+            raise CarrierError(
+                f"return marker {ret_op} is beyond the lookback bound and "
+                "unreadable this run")
+        result_text = last_result_comment(pc, child)
+        if state is None:
+            message = (
+                f"[{ret_op}]\n\n"
+                f"The teammate you asked finished. Their child issue "
+                f"{child.get('identifier')} '{child.get('title')}' is done.\n\n"
+                f"Their answer:\n\n{result_text}\n\n"
+                "Use it to finish your original task: your reply to this message "
+                "is posted as the issue comment and completes the issue."
+            )
+            log(f"sending {ret_op} to the asker's thread")
+            reply = send_and_stay(pc, t3, issue, message, ret_op, opts)
+        else:  # pending
+            if _pending_requests(thread) > 0:
+                log(f"{ret_op} is pending on a waiting question; staying with it")
+                reply = stay_with_question(pc, t3, issue, ret_op, opts)
+            else:
+                log(f"{ret_op} already in the thread and still pending; waiting, no resend")
+                reply = wait_for_reply(t3, ret_op, opts)
+    if not (reply or "").strip():
         raise CarrierError("thread reply was empty")
     # Attack finding 12: the asker's post-return reply was never parsed for
     # an ask block — it was delivered raw with a confirmation and the parent
