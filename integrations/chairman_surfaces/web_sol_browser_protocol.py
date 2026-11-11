@@ -209,9 +209,13 @@ def validate_request(value):
         # The editor pipeline issues one execCommand pair per line, so a fill
         # is line-bounded as well as length-bounded (a 30,000-newline fill
         # would otherwise freeze the tab). CR and CRLF both count: the
-        # insertion feed normalizes them to line breaks.
+        # insertion feed normalizes them to line breaks. The length cap counts
+        # UTF-16 code units — what every JavaScript layer of the pipeline
+        # counts — so astral characters cannot slip past Python's code-point
+        # len() and split the cap between layers.
         _require(set(params) == {"text"} and type(params["text"]) is str
-                 and len(params["text"]) <= 30000 and "\x00" not in params["text"]
+                 and len(params["text"].encode("utf-16-le", "surrogatepass")) // 2 <= 30000
+                 and "\x00" not in params["text"]
                  and len(re.sub(r"\r\n?", "\n", params["text"]).split("\n")) - 1 <= 2000)
     elif action == "select":
         _require(set(params) == {"value"} and _text(params["value"], 0, 512))

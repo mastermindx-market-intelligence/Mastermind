@@ -84,6 +84,20 @@ def test_navigation_has_no_privileged_or_credential_urls(url):
     with pytest.raises(legacy.WebSolProtocolError):protocol.validate_request(request("navigate",params={"url":url}))
 
 
+def test_fill_cap_counts_utf16_units_not_code_points():
+    # Every JavaScript layer of the pipeline caps fill length in UTF-16 code
+    # units; Python's len() counts code points. Astral characters are two
+    # units each, so 15,001 of them passed the protocol's 30,000 cap while the
+    # page refused the dispatch. The protocol gate must count the same units.
+    with pytest.raises(legacy.WebSolProtocolError):
+        protocol.validate_window(request("fill", params={"text": "\U0001D54F" * 15001}))
+    accepted = protocol.validate_window(request("fill", params={"text": "\U0001D54F" * 15000}))
+    assert accepted["params"]["text"] == "\U0001D54F" * 15000
+    # Lone surrogates are one UTF-16 unit each and must not crash the gate.
+    with pytest.raises(legacy.WebSolProtocolError):
+        protocol.validate_window(request("fill", params={"text": "\uD800" * 30001}))
+
+
 def test_fill_refuses_line_counts_that_freeze_the_editor_pipeline():
     # The editor pipeline issues one execCommand pair per line; a 30,000-newline
     # fill used to reach the page and freeze the tab (SCORE e2#2). The protocol
