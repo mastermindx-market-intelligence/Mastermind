@@ -10,13 +10,22 @@ import hashlib
 import json
 from pathlib import Path
 
-from test_native_current_source import (
-    APPLICATION_MEMBERS,
-    BASELINE_INVENTORY_SHA,
-    BASELINE_MANIFEST_SHA,
-    canonical,
-    digest,
-)
+import importlib.util as _ilu
+
+# Load the sibling current-source fixture by file location: this module is
+# imported through spec_from_file_location by the composition suites, where
+# the rollout directory is not necessarily on sys.path.
+_spec = _ilu.spec_from_file_location(
+    "grok_current_source_fixture_base",
+    Path(__file__).resolve().parent / "test_native_current_source.py")
+_current_source = _ilu.module_from_spec(_spec)
+assert _spec.loader is not None
+_spec.loader.exec_module(_current_source)
+APPLICATION_MEMBERS = _current_source.APPLICATION_MEMBERS
+BASELINE_INVENTORY_SHA = _current_source.BASELINE_INVENTORY_SHA
+BASELINE_MANIFEST_SHA = _current_source.BASELINE_MANIFEST_SHA
+canonical = _current_source.canonical
+digest = _current_source.digest
 
 # ---------------------------------------------------------------------------
 # Busy-scoped fixture: the converged #2121 AUTO pre-release broker-busy epoch.
