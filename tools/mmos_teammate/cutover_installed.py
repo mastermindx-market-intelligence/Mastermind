@@ -169,6 +169,16 @@ def same(a, b):
     return (a or None) == (b or None)
 
 
+def binding_core(binding):
+    """A binding without its own bookkeeping keys (bindingRevision,
+    rotatedAt — write_binding maintains those), so a spec and the agent's
+    live binding compare by content."""
+    if not isinstance(binding, dict):
+        return binding
+    return {k: v for k, v in binding.items()
+            if k not in ("bindingRevision", "rotatedAt")}
+
+
 def cmd_check(spec):
     http = Http(spec["paperclip_base"])
     agent, open_issues, live = read_state(http, spec)
@@ -232,24 +242,51 @@ def cmd_apply(spec):
         staged = f"{carrier_path}.new-{os.getpid()}"
         shutil.copyfile(source, staged)
         os.replace(staged, carrier_path)
-    with open(config_path, "w") as fh:
-        json.dump(carrier_config(spec), fh, indent=2)
+
+    # R13: an apply on an agent this tool ALREADY moved must not silently
+    # rewrite the live conversation binding from a spec that may predate a
+    # rotate. The spec is authority only for a first move; afterwards the
+    # agent's current binding is the truth — equal means rewrite nothing,
+    # different means a rotate (or another writer) happened and a person
+    # decides.
+    if is_ours(agent, carrier_path):
+        current = ((agent.get("metadata") or {}).get("teammate")
+                   or {}).get("t3")
+        if current is None:
+            pass  # a half-done move (adapter changed, link not written):
+            # the link step below finishes it — the documented recovery.
+        elif binding_core(current) != binding_core(spec["binding"]):
+            die("the agent is already moved and its conversation binding "
+                "has changed since this spec (rotated?); refresh the spec "
+                "or use rotate — refusing to overwrite it")
 
     # Look again right before the change: a wake may have started meanwhile.
     # (The server has no conditional update, so this narrows the gap only.)
     found = blockers(spec, *read_state(http, spec))
     if found:
         die("not moving, state changed while preparing: " + "; ".join(found))
+    # R13: the live config is written only AFTER the final gate — an apply
+    # that dies here must leave what the next wake reads untouched.
+    with open(config_path, "w") as fh:
+        json.dump(carrier_config(spec), fh, indent=2)
     try:
-        http.patch(f"/api/agents/{spec['agent_id']}",
-                   adapter_patch(spec, carrier_path, config_path))
+        patch = adapter_patch(spec, carrier_path, config_path)
+        http.patch(f"/api/agents/{spec['agent_id']}", patch)
         after = http.get(f"/api/agents/{spec['agent_id']}")
         cfg = after.get("adapterConfig") or {}
         if after.get("adapterType") != "process" or cfg.get("env") or \
-                cfg.get("args") != ["-I", carrier_path, config_path]:
+                cfg.get("args") != ["-I", carrier_path, config_path] or \
+                not same(cfg.get("cwd"), expand(spec["agent_dir"])):
             die("agent read-back does not match the requested run command; "
                 "run rollback")
-        binding = write_binding(http, spec["agent_id"], dict(spec["binding"]))
+        if is_ours(agent, carrier_path) and \
+                ((agent.get("metadata") or {}).get("teammate")
+                 or {}).get("t3") is not None:
+            binding = ((agent.get("metadata") or {}).get("teammate")
+                       or {}).get("t3")  # unchanged: no rewrite, no churn
+        else:
+            binding = write_binding(http, spec["agent_id"],
+                                    dict(spec["binding"]))
     except BaseException:
         log("the move may be half done (run command changed, conversation "
             "not linked): run `apply` again to finish it - that is safe. If "
@@ -262,6 +299,7 @@ def cmd_apply(spec):
         "carrierPath": carrier_path,
         "carrierSha256": sha256_file(carrier_path),
         "configPath": config_path, "binding": binding,
+        "adapterPatch": patch,   # R14: rollback checks the live agent
         "adapterConfigKeys": sorted(cfg.keys()),
     }
     with open(os.path.join(agent_dir, "cutover-result.json"), "w") as fh:
@@ -289,6 +327,35 @@ def cmd_rollback(spec):
     found = blockers(spec, agent, open_issues, live)
     if found:
         die("not rolling back: " + "; ".join(found))
+    # R14: the move recorded the exact patch it wrote; when the live agent
+    # no longer matches it (a third party changed the run command or the
+    # runtime config after the move), restoring the saved setup would
+    # silently overwrite that change. Refuse and let a person look. Moves
+    # from before the record carry no adapterPatch and roll back as before.
+    result_path = os.path.join(expand(spec["agent_dir"]),
+                               "cutover-result.json")
+    recorded = None
+    if os.path.exists(result_path):
+        try:
+            with open(result_path) as fh:
+                recorded = json.load(fh).get("adapterPatch")
+        except ValueError:
+            recorded = None
+    if isinstance(recorded, dict):
+        drift = []
+        if agent.get("adapterType") != recorded.get("adapterType"):
+            drift.append("adapterType")
+        got_cfg = agent.get("adapterConfig") or {}
+        want_cfg = recorded.get("adapterConfig") or {}
+        drift += [f"adapterConfig.{k}" for k in
+                  ("command", "args", "cwd", "env", "timeoutSec")
+                  if not same(got_cfg.get(k), want_cfg.get(k))]
+        if not same(agent.get("runtimeConfig"), recorded.get("runtimeConfig")):
+            drift.append("runtimeConfig")
+        if drift:
+            die("the agent changed after the move (" + ", ".join(drift) +
+                "); not rolling back over it — inspect the agent and the "
+                f"saved setup at {preimage} first")
     # R2a finding 10: restore the run command, never the whole metadata
     # object — binding changes written after the move (a rotate's revision
     # bump, another subsystem's key) would be lost. Only the teammate key
@@ -304,14 +371,27 @@ def cmd_rollback(spec):
     })
     after = http.get(f"/api/agents/{spec['agent_id']}")
     got, want = after.get("adapterConfig") or {}, saved["adapterConfig"] or {}
-    wrong = [k for k in ("command", "args", "env", "cwd")
+    wrong = [k for k in ("command", "args", "env", "cwd", "timeoutSec")
              if not same(got.get(k), want.get(k))]
     if after.get("adapterType") != saved["adapterType"]:
         wrong.insert(0, "adapterType")
+    if not same(after.get("runtimeConfig"), saved["runtimeConfig"] or {}):
+        wrong.append("runtimeConfig")
     if wrong:
         # Names only: the values include the old environment.
         die("rollback read-back differs from the saved setup in: "
             + ", ".join(wrong) + f"; the saved setup is still at {preimage}")
+    # R26: the result file must not keep describing a live move.
+    if os.path.exists(result_path):
+        try:
+            with open(result_path) as fh:
+                result = json.load(fh)
+            result["rolledBackAt"] = time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            with open(result_path, "w") as fh:
+                json.dump(result, fh, indent=2)
+        except (ValueError, OSError):
+            pass  # the rollback itself stands; the record is best-effort
     os.replace(preimage, preimage + ".restored-"
                + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()))
     log(f"{after.get('name')} is back on {after.get('adapterType')}")

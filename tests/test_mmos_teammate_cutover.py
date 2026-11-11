@@ -296,7 +296,9 @@ def test_second_apply_keeps_the_first_saved_setup(wired, tmp_path):
     first = (tmp_path / "home" / "cutover-preimage.json").read_text()
     assert co.cmd_apply(spec) == 0  # already moved: no new preimage
     assert (tmp_path / "home" / "cutover-preimage.json").read_text() == first
-    assert http.agent["metadata"]["teammate"]["t3"]["bindingRevision"] == 2
+    # R13: an unchanged binding is NOT rewritten — no revision churn for a
+    # no-op apply (a changed binding refuses instead of reverting).
+    assert http.agent["metadata"]["teammate"]["t3"]["bindingRevision"] == 1
 
 
 def test_rollback_restores_the_saved_setup(wired, tmp_path):
@@ -514,3 +516,84 @@ def test_apply_installs_a_missing_carrier_and_leaves_no_staged_file(wired):
         os.path.join(here, "wake_carrier.py"))
     assert [f for f in os.listdir(os.path.dirname(carrier))
             if ".new-" in f] == []                 # one rename, no leftovers
+
+
+def test_reapply_after_a_rotate_refuses_instead_of_reverting(wired):
+    # R13: a second apply rewrote the live binding from the (now stale)
+    # spec without comparing it to what the agent runs today — a rotate's
+    # fresh thread binding was silently reverted. An apply on an
+    # already-moved agent refuses when the binding changed since the spec;
+    # unchanged, it rewrites nothing.
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    # a rotate happened: the agent's binding moved on past the spec
+    st.write_binding(http, AID, dict(spec["binding"],
+                                     primaryThreadId="mcp:t-rotated"))
+    with pytest.raises(SystemExit):
+        co.cmd_apply(spec)
+    got = http.agent["metadata"]["teammate"]["t3"]
+    assert got["primaryThreadId"] == "mcp:t-rotated"  # the rotate stands
+
+
+def test_reapply_with_an_unchanged_binding_rewrites_nothing(wired):
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    binding_before = copy.deepcopy(http.agent["metadata"]["teammate"])
+    patches_before = len(http.patches)
+    assert co.cmd_apply(spec) == 0
+    assert http.agent["metadata"]["teammate"] == binding_before  # no churn
+    # no METADATA write rides a no-op apply (the adapter patch repeats its
+    # own values; the binding is what a rotate owns)
+    assert not any("metadata" in p for p in http.patches[patches_before:])
+
+
+def test_reapply_blocked_at_the_last_gate_writes_nothing_live(
+        wired, tmp_path, monkeypatch):
+    # R13: the live carrier.json was rewritten BEFORE the final blockers
+    # gate, so an apply that died at the gate had already changed what the
+    # next wake would read. The config write happens only after the gate.
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    config = os.path.join(spec["agent_dir"], "carrier.json")
+    before = open(config).read()
+    spec2 = dict(spec, t3=dict(spec["t3"], port=3781))  # a changed config
+    calls = {"n": 0}
+    real_read_state = co.read_state
+
+    def read_state(http_, spec_):
+        calls["n"] += 1
+        agent_, issues_, live_ = real_read_state(http_, spec_)
+        if calls["n"] >= 2:      # the re-check right before the change
+            live_ = live_ + [{"id": "run-77", "agentId": AID}]
+        return agent_, issues_, live_
+
+    monkeypatch.setattr(co, "read_state", read_state)
+    with pytest.raises(SystemExit):
+        co.cmd_apply(spec2)
+    assert open(config).read() == before   # the live config was untouched
+
+
+def test_rollback_refuses_when_the_agent_changed_after_the_move(wired):
+    # R14: rollback restored the saved setup wholesale with no staleness
+    # check — a third-party change to the run command since the move was
+    # silently overwritten. The move records its exact patch; rollback
+    # refuses when the live agent no longer matches it.
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    http.agent["adapterConfig"] = dict(http.agent["adapterConfig"],
+                                       timeoutSec=99)  # a third party
+    with pytest.raises(SystemExit):
+        co.cmd_rollback(spec)
+    assert http.agent["adapterType"] == "process"  # nothing was rolled back
+
+
+def test_rollback_marks_the_result_file(wired, tmp_path):
+    # R26: rollback left cutover-result.json describing a live move. The
+    # file now records the rollback.
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    assert co.cmd_rollback(spec) == 0
+    result = json.load(open(os.path.join(spec["agent_dir"],
+                                         "cutover-result.json")))
+    assert result.get("rolledBackAt")
+    assert result.get("movedAt")     # the history is kept, not erased
