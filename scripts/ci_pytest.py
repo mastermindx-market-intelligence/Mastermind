@@ -240,48 +240,56 @@ def pytest_argv(
         # one worker (intra-module order preserved). CI_PYTEST_WORKERS=0/1
         # restores today's exact serial argv.
         argv.extend(["-n", str(workers), "--dist", "loadfile"])
-        home = os.environ.get("HOME", "").strip()
-        if os.environ.get("RUNNER_TEMP", "").strip() and home:
-            # Two placement constraints, both learned on hosted runners.
+        if os.environ.get("RUNNER_TEMP", "").strip():
+            # Placement of the tmp tree only, learned on hosted runners over
+            # four full CI waves. The parallel argv pins basetemp into a
+            # short per-process root under /tmp/mmx and loads the worker-env
+            # plugin, which scopes each process's TMPDIR (and the handful of
+            # deliberately-/tmp'd tempfile calls) into sibling roots.
             #
-            # pytest's default tmp root (/tmp/pytest-of-*) cannot stay: under
-            # -n N the four workers churn transient /tmp entries, and tests
-            # that hold-and-double-stat their fixture's whole ancestor chain
-            # (the acceptance-maintenance and native current-source custody
-            # guards) cross that hot /tmp: a sibling worker's transient entry
-            # flips an ancestor's mtime/ctime/nlink between the two stats and
-            # the guard refuses ("retained supersession entry is unsafe", CI
-            # run 42994920108 shard 0; "changed_during_read", shard 1).
+            # Why not pytest's default /tmp/pytest-of-*: every worker's
+            # transient /tmp entries churn /tmp itself, and tests that
+            # hold-and-double-stat their fixture's whole ancestor chain
+            # (acceptance-maintenance, native current-source custody) then
+            # race ("retained supersession entry is unsafe", run 42994920108
+            # shard 0; "changed_during_read", shard 1). Scoping moves that
+            # churn under /tmp/mmx/w<pid>, one level below the shared root.
             #
-            # RUNNER_TEMP itself is also unusable (CI run 43015530899): its
-            # path component "_temp" starts with an underscore, which the
-            # custody component alphabet rejects outright ("custody_path_
-            # invalid" in every current-source worktree fixture, shard 1);
-            # it is a second sticky shared root, which the capacity artifact
-            # ancestor walk does not authenticate -- only one /tmp-style
-            # sticky root is permitted, and every other ancestor must carry
-            # no group/other-write bits ("SOURCE_METADATA_INVALID" for the
-            # whole capacity module, shard 2); and the prefix is too long
-            # for the AF_UNIX socket constructors, which bound the encoded
-            # path at 103 bytes ("AF_UNIX path too long", shard 0; "invalid
-            # principal Company host binding", shard 1; "SERVICE_UNAVAIL-
-            # ABLE" socket-refusal, shard 5).
+            # Why not RUNNER_TEMP (run 43015530899): "_temp" starts with an
+            # underscore, which the custody component alphabet rejects
+            # outright; RUNNER_TEMP is a second sticky shared root the
+            # capacity ancestor walk does not authenticate; and the prefix
+            # crosses the 103-byte AF_UNIX bound the socket constructors
+            # enforce.
             #
-            # So the parallel argv pins basetemp into a short per-process
-            # root under $HOME -- hosted runners use /home/runner, whose
-            # components are clean, ownership is the control uid, there are
-            # no ancestor xattrs, and the prefix keeps tmp-derived socket
-            # paths at ~90 bytes -- and loads the worker-env plugin, which
-            # scopes every worker's TMPDIR to its own sibling root. The pid
-            # in the path keeps concurrent pytest builders distinct: pytest
-            # removes an explicit --basetemp at session start, and every
-            # nested gate/shard child is its own process with its own pid.
-            # Serial argv (the rollback) and local runs without RUNNER_TEMP
-            # stay unchanged.
+            # Why not under $HOME (run 43028788599): the hosted image's
+            # /home carries a default POSIX ACL (system.posix_acl_default),
+            # and the capacity artifact ancestor walk refuses ANY ancestor
+            # xattr name outside its two approved macOS names, so every
+            # home-rooted chain fails wholesale ("SOURCE_METADATA_INVALID"
+            # for the whole capacity module). /home/runner itself would
+            # otherwise pass (control-uid owner, no 022 mode bits, clean
+            # components); only /home kills it.
+            #
+            # /tmp/mmx then satisfies every guard at once: the chain crosses
+            # exactly the one sticky shared root the walk authenticates
+            # (1777 root:root, xattr-free), components are
+            # custody-alphabet-clean, ownership stays at the control uid,
+            # no ancestor carries group/other-write bits, and the short
+            # prefix keeps tmp-derived socket paths far under the 103-byte
+            # bound. The pid component keeps concurrent pytest builders
+            # distinct: pytest removes an explicit --basetemp at session
+            # start, and every nested gate/shard child is its own process
+            # with its own pid. The root honors TMPDIR when set, so a
+            # nested builder spawned by a scoped worker nests its basetemp
+            # inside that worker's own quiet root (the parent blocks while
+            # the child runs) instead of adding entries to the shared
+            # /tmp/mmx level other workers' walks cross. Serial argv (the
+            # rollback) and local runs without RUNNER_TEMP stay unchanged.
             argv.extend([
                 "-p", "scripts.ci_pytest_worker_env",
                 "--basetemp",
-                str(Path(home) / "mmx" / f"b{os.getpid()}"),
+                str(Path(os.environ.get("TMPDIR") or "/tmp") / "mmx" / f"b{os.getpid()}"),
             ])
     return [*argv, *included]
 

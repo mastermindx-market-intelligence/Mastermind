@@ -12,24 +12,32 @@ fixture lives there, and under ``-n 4`` the four workers churn ``/tmp``
 constantly -- production ``mkdtemp`` sites and nested child suites create and
 remove entries in it, flipping an ancestor's identity between the two stats
 (CI runs 42994920108 shard 0 "retained supersession entry is unsafe", shard 1
-"changed_during_read").  This plugin scopes ``TMPDIR`` so every other
-``tempfile`` consumer lands in the worker's own quiet root, whose ancestor
-chain only this worker touches (a worker runs its own tests serially, so
-nothing races underneath it).
+"changed_during_read").  This plugin scopes ``TMPDIR`` so every ``tempfile``
+consumer lands in the worker's own quiet root, whose ancestor chain only this
+worker touches (a worker runs its own tests serially, so nothing races
+underneath it).  A few dozen test fixtures deliberately pass ``dir="/tmp"``
+for short AF_UNIX socket paths; while scoping is active those are redirected
+into the same quiet root too (the scoped prefix is just as short), so no
+pytest-world process creates or removes entries in ``/tmp`` itself mid-run.
 
-The root lives under ``$HOME/mmx`` rather than ``RUNNER_TEMP`` because the
-first scoped attempt, parked under ``RUNNER_TEMP`` (``/home/runner/work/
-_temp/...``), tripped three independent validators on CI run 43015530899:
-the custody component alphabet rejects path components that start with an
-underscore (``custody_path_invalid``, shard 1), the capacity artifact
-ancestor walk refuses RUNNER_TEMP's sticky-shared-root ancestors outright
--- it authenticates exactly one /tmp-style sticky root and requires every
-other ancestor free of group/other-write bits (``SOURCE_METADATA_INVALID``
-for the whole capacity module, shard 2) -- and the longer prefix crossed
-the 103-byte AF_UNIX bound the socket constructors enforce ("AF_UNIX path
-too long", shard 0; "invalid principal Company host binding", shard 1).
-The $HOME placement keeps components clean, ownership at the control uid,
-ancestor modes free of group/other-write bits, and paths short.
+The scoped root lives under ``/tmp/mmx`` because both alternatives were
+refused by real validators on hosted runners:
+
+* ``RUNNER_TEMP`` (run 43015530899): the ``_temp`` component starts with an
+  underscore, which the custody component alphabet rejects outright; the
+  path is a second sticky shared root the capacity artifact ancestor walk
+  does not authenticate; and the prefix crosses the 103-byte AF_UNIX bound
+  the socket constructors enforce.
+* ``$HOME`` (run 43028788599): the hosted image's ``/home`` carries a
+  default POSIX ACL (``system.posix_acl_default``), and the capacity
+  ancestor walk refuses ANY ancestor xattr name outside its two approved
+  macOS names, so every home-rooted chain fails wholesale
+  (``SOURCE_METADATA_INVALID`` for the whole capacity module).
+
+``/tmp/mmx`` satisfies every guard at once: the chain crosses exactly the one
+sticky shared root the walk authenticates (1777 root:root, xattr-free),
+components are custody-alphabet-clean, ownership stays at the control uid,
+and no ancestor carries group/other-write bits.
 
 Serial argv never loads this plugin; local runs without ``RUNNER_TEMP`` keep
 today's behavior unchanged.  The scoped roots are deliberately not cleaned
@@ -38,6 +46,7 @@ shared ancestor.
 """
 
 import os
+import tempfile
 from pathlib import Path
 
 # The switch values that keep the exact serial argv never scope either, so a
@@ -49,20 +58,50 @@ _SERIAL_VALUES = ("", "0", "1")
 def _apply() -> Path | None:
     runner_temp = os.environ.get("RUNNER_TEMP", "").strip()
     workers = os.environ.get("CI_PYTEST_WORKERS", "").strip()
-    home = os.environ.get("HOME", "").strip()
-    if not runner_temp or not home or workers in _SERIAL_VALUES:
+    tmp_root = (os.environ.get("TMPDIR") or "/tmp").rstrip("/") or "/tmp"
+    if not runner_temp or workers in _SERIAL_VALUES:
         return None
     try:
         # One root per process: workers and the controller each get their own,
         # created at bring-up (before any test runs), so no sibling ever
         # creates an entry inside another process's chain during the run.
-        root = Path(home) / "mmx" / f"w{os.getpid()}"
+        # Honoring an already-scoped TMPDIR nests nested builders' roots
+        # inside their parent worker's quiet root.
+        root = Path(tmp_root) / "mmx" / f"w{os.getpid()}"
         root.mkdir(parents=True, exist_ok=True)
     except OSError:
         # A refused mkdir degrades to today's unscoped behavior; it must never
         # fail the run.
         return None
     os.environ["TMPDIR"] = str(root)
+    # tempfile.gettempdir() caches its first answer; pin the cache too so
+    # every dir=None consumer in this process lands in the quiet root even
+    # if something queried it before plugin load.
+    tempfile.tempdir = str(root)
+
+    # Redirect the deliberate dir="/tmp" tempfile calls (short AF_UNIX socket
+    # roots in test fixtures) into this process's quiet root while scoping is
+    # active, so /tmp itself never churns mid-run. Only the exact literal is
+    # redirected: every prefix, suffix and semantic is untouched, and any
+    # other dir argument (including None) keeps stdlib behavior.
+    unscoped_mkdtemp = tempfile.mkdtemp
+    unscoped_tempdir = tempfile.TemporaryDirectory
+
+    def _scoped_dir(directory):
+        return str(root) if directory == "/tmp" else directory
+
+    def _mkdtemp(suffix=None, prefix=None, dir=None, **kwargs):
+        return unscoped_mkdtemp(
+            suffix=suffix, prefix=prefix, dir=_scoped_dir(dir), **kwargs
+        )
+
+    def _temporary_directory(suffix=None, prefix=None, dir=None, **kwargs):
+        return unscoped_tempdir(
+            suffix=suffix, prefix=prefix, dir=_scoped_dir(dir), **kwargs
+        )
+
+    tempfile.mkdtemp = _mkdtemp
+    tempfile.TemporaryDirectory = _temporary_directory
     return root
 
 

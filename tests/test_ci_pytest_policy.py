@@ -902,80 +902,103 @@ def test_worker_switch_parallel_values_add_loadfile_xdist(monkeypatch, switch):
 def test_worker_switch_on_runner_pins_short_unique_basetemp(
         tmp_path, monkeypatch, runner_temp):
     # On hosted runners the parallel argv also pins --basetemp into a short
-    # per-process root under $HOME and loads the worker-env plugin. Both the
-    # default tmp root (/tmp/pytest-of-*, churned by all four workers under
-    # -n 4 and crossed by the hold-and-double-stat custody guards, CI run
-    # 42994920108) and the first attempted placement under RUNNER_TEMP
-    # itself (whose "_temp" component the custody alphabet rejects, whose
-    # sticky-shared-root ancestors the capacity walk does not authenticate,
-    # and whose prefix crosses the 103-byte AF_UNIX bound the socket
-    # constructors enforce, CI run 43015530899) are unusable: $HOME/mmx/
-    # b<pid> keeps components clean, ancestor modes free of group/other-
-    # write bits, socket paths ~90 bytes, and concurrent pytest builders
-    # (each an own process with an own pid) distinct -- pytest removes an
+    # per-process root under <TMPDIR>/mmx and loads the worker-env plugin.
+    # Three placements were refused by real validators on hosted runners:
+    # the default tmp root (/tmp/pytest-of-*, churned by all four workers
+    # under -n 4 and crossed by the hold-and-double-stat custody guards, CI
+    # run 42994920108); RUNNER_TEMP itself ("_temp" fails the custody
+    # component alphabet, a second sticky shared root the capacity walk
+    # does not authenticate, and the prefix crosses the 103-byte AF_UNIX
+    # bound, CI run 43015530899); and $HOME (the hosted image's /home
+    # carries system.posix_acl_default, and the capacity ancestor walk
+    # refuses any ancestor xattr name outside its two approved macOS names,
+    # so every home-rooted chain fails wholesale, CI run 43028788599).
+    # <TMPDIR>/mmx/b<pid> crosses exactly the one authenticated sticky
+    # root, keeps components custody-alphabet-clean and socket paths short,
+    # and keeps concurrent pytest builders distinct -- pytest removes an
     # explicit --basetemp at session start. Serial values never add either.
-    home = tmp_path / "home"
+    tmp = tmp_path / "tmp"
     monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
     monkeypatch.setenv("RUNNER_TEMP", runner_temp)
-    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("TMPDIR", str(tmp))
     modules = ("tests/test_fixture_a.py",)
     argv = cip.pytest_argv(modules)
     assert argv == [
         cip.sys.executable, "-m", "pytest", "--durations=25", "-q",
         "-n", "4", "--dist", "loadfile",
         "-p", "scripts.ci_pytest_worker_env",
-        "--basetemp", str(home / "mmx" / f"b{cip.os.getpid()}"), *modules,
+        "--basetemp", str(tmp / "mmx" / f"b{cip.os.getpid()}"), *modules,
     ]
     monkeypatch.setenv("CI_PYTEST_WORKERS", "1")
     assert cip.pytest_argv(modules) == [
         cip.sys.executable, "-m", "pytest", "--durations=25", "-q", *modules,
     ]
-    # Without HOME the argv degrades to the placement flags only.
+    # Without TMPDIR the root falls back to /tmp (never $HOME or RUNNER_TEMP).
     monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
-    monkeypatch.delenv("HOME", raising=False)
+    monkeypatch.delenv("TMPDIR", raising=False)
     argv = cip.pytest_argv(modules)
     assert argv == [
         cip.sys.executable, "-m", "pytest", "--durations=25", "-q",
-        "-n", "4", "--dist", "loadfile", *modules,
+        "-n", "4", "--dist", "loadfile",
+        "-p", "scripts.ci_pytest_worker_env",
+        "--basetemp", f"/tmp/mmx/b{cip.os.getpid()}", *modules,
     ]
 
 
 def test_worker_env_plugin_scopes_tmpdir_per_process(tmp_path, monkeypatch):
     # The -p plugin applies at import time, before any test asks tempfile for
     # a directory: every process (each xdist worker) gets its own TMPDIR root
-    # under $HOME/mmx, created at bring-up, so no sibling ever creates an
-    # entry inside another worker's ancestor chain.
+    # under <TMPDIR>/mmx, created at bring-up, so no sibling ever creates an
+    # entry inside another worker's ancestor chain. The few deliberate
+    # dir="/tmp" tempfile calls (short AF_UNIX socket roots) are redirected
+    # into the same quiet root while scoping is active, so /tmp itself never
+    # churns mid-run; nothing else about tempfile behavior changes.
     import importlib
+    import tempfile as tempfile_stdlib
 
     import scripts.ci_pytest_worker_env as worker_env
 
-    home = tmp_path / "home"
+    tmp = tmp_path / "tmp"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    saved_mkdtemp = tempfile_stdlib.mkdtemp
+    saved_tempdir_class = tempfile_stdlib.TemporaryDirectory
+    saved_cache = tempfile_stdlib.tempdir
     monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "runner-temp"))
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.delenv("TMPDIR", raising=False)
+    monkeypatch.setenv("TMPDIR", str(tmp))
     reloaded = importlib.reload(worker_env)
     try:
         root = reloaded._ROOT
         assert root is not None
         assert root.is_dir()
-        assert root == home / "mmx" / f"w{cip.os.getpid()}"
+        assert root == tmp / "mmx" / f"w{cip.os.getpid()}"
         assert cip.os.environ["TMPDIR"] == str(root)
+        # dir=None honors the pinned cache; the exact literal "/tmp" is
+        # redirected; every other dir passes through untouched.
+        assert Path(tempfile_stdlib.mkdtemp(prefix="plain-")).parent == root
+        assert Path(tempfile_stdlib.mkdtemp(prefix="lit-", dir="/tmp")).parent == root
+        assert Path(
+            tempfile_stdlib.mkdtemp(prefix="other-", dir=str(elsewhere))
+        ).parent == elsewhere
+        with tempfile_stdlib.TemporaryDirectory(prefix="td-", dir="/tmp") as d:
+            assert Path(d).parent == root
         # Serial switch values and missing RUNNER_TEMP never scope, and never
         # disturb an already-scoped TMPDIR.
         monkeypatch.setenv("CI_PYTEST_WORKERS", "1")
-        monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "runner-temp"))
-        monkeypatch.setenv("HOME", str(home))
         assert importlib.reload(worker_env)._ROOT is None
         monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
         monkeypatch.delenv("RUNNER_TEMP", raising=False)
-        monkeypatch.setenv("HOME", str(home))
         assert importlib.reload(worker_env)._ROOT is None
         assert cip.os.environ["TMPDIR"] == str(root)
     finally:
-        # Leave the module inert for later importers in this process.
+        # Leave stdlib tempfile and the module inert for later importers.
+        tempfile_stdlib.mkdtemp = saved_mkdtemp
+        tempfile_stdlib.TemporaryDirectory = saved_tempdir_class
+        tempfile_stdlib.tempdir = saved_cache
         monkeypatch.setenv("CI_PYTEST_WORKERS", "1")
         importlib.reload(worker_env)
+        assert tempfile_stdlib.mkdtemp is saved_mkdtemp
 
 
 @pytest.mark.parametrize("switch", ["x", "-1", "1.5", "02x", "0x4", "65", "1000000"])
