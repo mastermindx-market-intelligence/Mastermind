@@ -399,6 +399,31 @@ def _route_authorization(route: Route, cfg: Settings) -> str:
     raise ValueError(f"route kind {route.kind} cannot be authorized")
 
 
+def _sanitize_messages(payload: dict) -> None:
+    """Drop non-schema keys from message objects before forwarding.
+
+    Clients (notably T3's claudeAgent driver) can leak generation options such
+    as ``output_config`` into the messages array. The Messages API rejects the
+    whole request with ``messages.N.output_config: Extra inputs are not
+    permitted``, which surfaced as a hard 400 for every Claude model on the
+    shared route. The message object schema is fixed, so this allowlist is
+    lossless for any valid request.
+    """
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            continue
+        extra = [key for key in message if key not in ("role", "content")]
+        if not extra:
+            continue
+        for key in extra:
+            del message[key]
+        _log.warning("fabric sanitized messages.%d dropped=%s model=%s",
+                     index, ",".join(sorted(extra)), payload.get("model"))
+
+
 def _affinity(payload: dict) -> str | None:
     metadata = payload.get("metadata")
     if isinstance(metadata, dict) and isinstance(metadata.get("user_id"), str):
@@ -1099,6 +1124,7 @@ def create_app(cfg: Settings | None = None, *,
                     payload = json.loads(bytes(body))
                     if not isinstance(payload, dict):
                         raise ValueError()
+                    _sanitize_messages(payload)
                     candidates = _model_candidates(payload, cfg.aliases)
                 except (ValueError, RecursionError, WireTranslationError) as exc:
                     state.refused += 1
