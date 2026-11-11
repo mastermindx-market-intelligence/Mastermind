@@ -213,6 +213,14 @@ adds no manual review. See [session review policy](SESSION_LOCAL_REVIEW_POLICY.m
    not merge. Protected integration requires that required PR-head checks and
    all **actually required** reviews pass and queue entry is authorized.
 
+   When the queue removes a PR for failed checks, read that failed
+   `merge_group` job before any new queue entry. A deterministic test failure
+   on an unchanged head fails again and takes down every group built behind
+   it: #506 re-entered unchanged and was removed twice, at roughly 40 minutes
+   per group. Re-enter only after a head change that addresses the failure, or
+   once when the failed job shows an infrastructure cause (runner, dependency
+   install, network, timeout) rather than a test assertion.
+
 7. Deploy only when the assigned change requires runtime rollout and release is authorized.
    A source-only, research, documentation or instruction task must not restart an unrelated
    application. For a required deployment, resolve this operation's actual merge commit from
