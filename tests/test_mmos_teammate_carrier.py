@@ -1731,6 +1731,7 @@ def test_build_opts_maps_every_key_and_reads_the_door_from_config_only():
         "thread_url_template": "http://127.0.0.1:3780/x/{thread}",
         "coding_job_door": "/path/to/door.sock",
         "run_start": 1234.5,
+        "delivery_reserve_sec": 120,
     }
     # an empty config: every default, and the door stays dormant
     minimal = wc.build_opts({}, {}, 0.0)
@@ -1747,6 +1748,7 @@ def test_build_opts_maps_every_key_and_reads_the_door_from_config_only():
         "thread_url_template": None,
         "coding_job_door": None,
         "run_start": 0.0,
+        "delivery_reserve_sec": 120,
     }
     # the door never comes from the environment
     env_door = wc.build_opts({}, {"coding_job_door": "/env/door.sock"}, 0.0)
@@ -1817,7 +1819,11 @@ def test_run_budget_caps_wait_for_reply_too():
             "poll_interval_sec": 10, "run_budget_sec": 50, "run_start": 1000.0}
     with pytest.raises(wc.CarrierError):
         wc.wait_for_reply(t3, op, opts)
-    assert clock.now == 1050.0  # the budget (not the timeout) set the end
+    # R2a finding 8 (addition) changed this end: the wait now stops at budget
+    # end minus the 120s delivery reserve (930), and a 50s budget is smaller
+    # than the reserve — so no wait happens at all. A budget that cannot
+    # leave room to deliver is not spent on waiting.
+    assert clock.now == 1000.0
 
 
 def test_stay_never_sends_again_when_the_marker_fails_to_appear():
@@ -2203,3 +2209,86 @@ def test_comment_read_failure_fails_before_anything_is_posted():
         wc.deliver(pc, pc.issue("is-1"), "the answer", "pc-is-1-aaaaa")
     # Nothing was posted at all: no comment, no confirmation, no status write.
     assert pc.calls == []
+
+
+def test_delivery_reserve_is_stated_and_shortens_wait_deadlines():
+    # R2a finding 8 (addition): the run budget keeps a stated reserve for
+    # delivery. Every wait deadline stops that much earlier than the budget
+    # end: budget ends at 1100, reserve 120 -> the question wait may not run
+    # past 980 even though question_wait_sec would allow 1900.
+    opts = {"clock": lambda: 1000.0, "question_wait_sec": 900,
+            "run_budget_sec": 100, "run_start": 1000.0,
+            "delivery_reserve_sec": 120}
+    assert wc.question_wait_deadline(opts) == 980.0
+    # The default reserve (120) applies when the config says nothing.
+    opts2 = {"clock": lambda: 1000.0, "question_wait_sec": 900,
+             "run_budget_sec": 100, "run_start": 1000.0}
+    assert wc.question_wait_deadline(opts2) == 980.0
+
+
+def test_run_budget_reserve_caps_wait_for_reply():
+    # The slow-turn wait stops at budget end minus the same stated reserve:
+    # budget 200s -> the wait ends at 1080, not 1200.
+    op = "pc-is-1-res"
+    t3 = ScriptedT3(states=[(th(latest="r1", pending=0),
+                             [("user", "r1", f"[{op}]\n\nthe task")])])
+    clock = Clock(1000.0)
+
+    def nap(seconds):
+        clock.nap(seconds)
+        t3.nap(seconds)
+    opts = {"clock": clock.time, "sleep": nap, "pending_timeout_sec": 600,
+            "poll_interval_sec": 10, "run_budget_sec": 200, "run_start": 1000.0}
+    with pytest.raises(wc.CarrierError):
+        wc.wait_for_reply(t3, op, opts)
+    assert clock.now == 1080.0  # budget end 1200 minus the 120s delivery reserve
+
+
+def test_http_timeout_and_retry_sleep_capped_by_remaining_budget(monkeypatch):
+    # R2a finding 8 (addition): every HTTP timeout and every retry sleep is
+    # capped by what is left of the run budget before the delivery reserve.
+    # With 2s left: the 30s stock timeout becomes 2s and the second retry's
+    # 3s sleep becomes 2s. The floor of 1s keeps delivery itself alive when
+    # the reserve is being spent.
+    import urllib.error
+    caps, sleeps, attempts = [], [], {"n": 0}
+    monkeypatch.setattr(wc.time, "sleep", lambda s: sleeps.append(s))
+
+    def flaky(req, timeout=None):
+        attempts["n"] += 1
+        caps.append(timeout)
+        if attempts["n"] < 3:
+            raise urllib.error.HTTPError(req.full_url, 503, "unavailable",
+                                         hdrs=None, fp=None)
+        return _StubResponse(200, {}, b"{}")
+    monkeypatch.setattr(wc.urllib.request, "urlopen", flaky)
+    pc = wc.PaperclipClient("http://127.0.0.1:1", "tok", "run-1",
+                            budget_left=lambda: 2.0)
+    assert pc._request("GET", "/api/x") == {}
+    assert caps == [2, 2, 2]
+    assert sleeps == [1.5, 2.0]
+
+
+def test_t3_send_timeout_comes_from_the_run_budget(monkeypatch, tmp_path):
+    # R2a finding 8: the t3 CLI subprocess timeout is not a free-standing
+    # 1200s — it is capped by what is left of the run budget before the
+    # delivery reserve, and never above the stock 1200s.
+    seen = []
+
+    class FakeProc:
+        returncode = 0
+        stdout = "{}"
+        stderr = ""
+
+    def fake_run(argv, **kw):
+        seen.append(kw.get("timeout"))
+        return FakeProc()
+    monkeypatch.setattr(wc.subprocess, "run", fake_run)
+    t3 = wc.T3Thread("/bin/true", str(tmp_path), "th-1", str(tmp_path),
+                     budget_left=lambda: 77.0)
+    t3._run([])
+    assert seen == [77]
+    t3b = wc.T3Thread("/bin/true", str(tmp_path), "th-1", str(tmp_path),
+                      budget_left=lambda: 9999.0)
+    t3b._run([])
+    assert seen == [77, 1200]  # the stock cap still applies

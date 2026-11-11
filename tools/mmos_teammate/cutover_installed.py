@@ -96,6 +96,10 @@ def carrier_config(spec):
     # Optional (R2a finding 4): the carrier defaults to 3 when absent.
     if spec.get("max_asks_per_issue") is not None:
         cfg["max_asks_per_issue"] = int(spec["max_asks_per_issue"])
+    # Optional (R2a finding 8 addition): the stated delivery reserve; the
+    # carrier defaults to 120s when absent.
+    if spec.get("delivery_reserve_sec") is not None:
+        cfg["delivery_reserve_sec"] = int(spec["delivery_reserve_sec"])
     if spec.get("issue_url_template"):
         cfg["issue_url_template"] = spec["issue_url_template"]
     if spec.get("thread_url_template"):

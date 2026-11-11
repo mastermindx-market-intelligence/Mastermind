@@ -607,11 +607,16 @@ class PaperclipClient:
     never headers or bodies that could echo it back.
     """
 
-    def __init__(self, base_url: str, token: str, run_id: str, timeout: int = 30):
+    def __init__(self, base_url: str, token: str, run_id: str, timeout: int = 30,
+                 budget_left=None):
         self.base = base_url.rstrip("/")
         self._token = token
         self.run_id = run_id
         self._timeout = timeout
+        # R2a finding 8 (addition): a callable returning the seconds this run
+        # may still spend waiting (budget minus the delivery reserve), or
+        # None when unknown. It CAPS every request timeout and retry sleep.
+        self._budget_left = budget_left
 
     def _request(self, method: str, path: str, body=None):
         url = f"{self.base}{path}"
@@ -626,15 +631,27 @@ class PaperclipClient:
         retryable = method in ("GET", "PUT", "PATCH")
         last = None
         for attempt in range(3):
+            cap = self._budget_left() if self._budget_left else None
+            timeout = self._timeout
+            if cap is not None:
+                # Floor of 1s: the delivery writes themselves spend the
+                # reserve and must stay alive (loopback answers in far less).
+                timeout = max(1, min(self._timeout, cap))
             req = urllib.request.Request(url, data=data, method=method, headers=headers)
             try:
-                with _open(req, self._timeout) as resp:
+                with _open(req, timeout) as resp:
                     raw = resp.read()
                     return json.loads(raw) if raw else {}
             except urllib.error.HTTPError as exc:
                 if retryable and exc.code in RETRYABLE_HTTP and attempt < 2:
                     last = exc.code
-                    time.sleep(1.5 * (attempt + 1))
+                    pause = 1.5 * (attempt + 1)
+                    if cap is not None:
+                        # R2a finding 8 (addition): no retry sleep eats the
+                        # delivery reserve; nothing left means retry now.
+                        pause = min(pause, max(0.0, cap))
+                    if pause > 0:
+                        time.sleep(pause)
                     continue
                 detail = ""
                 try:
@@ -645,7 +662,11 @@ class PaperclipClient:
             except urllib.error.URLError as exc:
                 if retryable and attempt < 2:
                     last = str(exc.reason)
-                    time.sleep(1.5 * (attempt + 1))
+                    pause = 1.5 * (attempt + 1)
+                    if cap is not None:
+                        pause = min(pause, max(0.0, cap))
+                    if pause > 0:
+                        time.sleep(pause)
                     continue
                 raise CarrierError(f"{method} {path} unreachable: {exc.reason}") from None
         raise CarrierError(f"{method} {path} failed after retries ({last})")
@@ -767,7 +788,7 @@ class T3Thread:
     """
 
     def __init__(self, t3_bin: str, t3_home: str, thread_id: str, scratch_dir: str,
-                 t3_port=None):
+                 t3_port=None, budget_left=None):
         self._bin = os.path.expanduser(t3_bin)
         self._home = os.path.expanduser(t3_home)
         self.thread_id = thread_id
@@ -775,6 +796,10 @@ class T3Thread:
         # A T3 server that is not on the CLI's default port (the team server)
         # must be named, or the CLI would dial the default port instead.
         self._port = int(t3_port) if t3_port else None
+        # R2a finding 8: the CLI subprocess timeout comes from the run
+        # budget (what is left before the delivery reserve), capped by the
+        # stock 1200s. None when the budget is unknown: the stock 1200s.
+        self._budget_left = budget_left
 
     def _run(self, args, stdin_text=None):
         # The Paperclip run token and run identity stay in this process: the
@@ -784,11 +809,17 @@ class T3Thread:
         env["T3CODE_HOME"] = self._home
         if self._port:
             env["T3CODE_PORT"] = str(self._port)
+        timeout = 1200
+        if self._budget_left:
+            left = self._budget_left()
+            if left is not None:
+                timeout = max(1, min(1200, int(left)))
         # text=True: subprocess wants str input, not bytes
         proc = subprocess.run(  # noqa: S603 - fixed binary, fixed args
             [self._bin, *args],
             input=stdin_text,
-            capture_output=True, text=True, cwd=self._cwd, env=env, timeout=1200,
+            capture_output=True, text=True, cwd=self._cwd, env=env,
+            timeout=timeout,
         )
         return proc
 
@@ -877,13 +908,33 @@ def run_budget_end(opts):
 
 
 def question_wait_deadline(opts):
-    """The earlier of question_wait_sec from now and the run budget's end:
-    no question wait may outlive the carrier's own process limit."""
+    """The earlier of question_wait_sec from now and the run budget's end
+    MINUS the stated delivery reserve: no question wait may outlive the
+    carrier's own process limit, and the budget's tail belongs to delivering
+    the answer, never to more waiting (R2a finding 8 addition)."""
     end = _now(opts) + float(opts.get("question_wait_sec", 900) or 0)
     budget = run_budget_end(opts)
     if budget is not None:
-        end = min(end, budget)
+        end = min(end, budget - float(
+            opts.get("delivery_reserve_sec", DELIVERY_RESERVE_SEC) or 0))
     return end
+
+
+# R2a finding 8 (addition): the delivery reserve — a stated slice of the run
+# budget that no wait, poll, HTTP timeout or retry sleep may eat, so the
+# comment/confirmation/status writes always have time of their own.
+DELIVERY_RESERVE_SEC = 120
+
+
+def budget_left(opts):
+    """Seconds the carrier may still spend WAITING: run budget end minus the
+    delivery reserve, from now. None when the budget is unknown (a test, or
+    an old config): nothing is capped then, as before."""
+    end = run_budget_end(opts)
+    if end is None:
+        return None
+    return end - _now(opts) - float(
+        opts.get("delivery_reserve_sec", DELIVERY_RESERVE_SEC) or 0)
 
 
 def question_waiting(t3):
@@ -1720,7 +1771,10 @@ def wait_for_reply(t3, op, opts):
     deadline = _now(opts) + opts.get("pending_timeout_sec", 600)
     budget = run_budget_end(opts)
     if budget is not None:
-        deadline = min(deadline, budget)
+        # Same law as the question wait (R2a finding 8 addition): the tail of
+        # the budget is the delivery reserve, not more waiting.
+        deadline = min(deadline, budget - float(
+            opts.get("delivery_reserve_sec", DELIVERY_RESERVE_SEC) or 0))
     while _now(opts) < deadline:
         _doze(opts, opts.get("poll_interval_sec", 5))
         thread, msgs = t3.messages()
@@ -1804,6 +1858,10 @@ def build_opts(cfg, environ, now):
         "coding_job_door": cfg.get("coding_job_door"),
         # The budget clock starts once, at process start.
         "run_start": now,
+        # R2a finding 8 (addition): the stated delivery reserve — the slice
+        # of the run budget no wait, poll, HTTP timeout or retry sleep eats.
+        "delivery_reserve_sec": cfg.get("delivery_reserve_sec",
+                                        DELIVERY_RESERVE_SEC),
     }
 
 
@@ -1820,12 +1878,14 @@ def main() -> int:
         return 2
     cfg = load_config(argv_config[0])
     opts = build_opts(cfg, os.environ, time.time())
+    # R2a finding 8: both transports take their waits from the run budget.
     pc = PaperclipClient(os.environ["PAPERCLIP_API_URL"],
                          os.environ["PAPERCLIP_API_KEY"],
-                         os.environ["PAPERCLIP_RUN_ID"])
+                         os.environ["PAPERCLIP_RUN_ID"],
+                         budget_left=lambda: budget_left(opts))
     t3_factory = lambda thread_id: T3Thread(  # noqa: E731
         cfg["t3_bin"], cfg["t3_home"], thread_id, cfg.get("t3_cwd") or "/tmp",
-        t3_port=cfg.get("t3_port"))
+        t3_port=cfg.get("t3_port"), budget_left=lambda: budget_left(opts))
     try:
         return run_carrier(pc, t3_factory, opts)
     except NeedsHuman as nh:

@@ -217,6 +217,9 @@ def write_carrier_config(spec, agent_dir):
     # Optional (R2a finding 4): the carrier defaults to 3 when absent.
     if spec.get("max_asks_per_issue") is not None:
         cfg["max_asks_per_issue"] = int(spec["max_asks_per_issue"])
+    # Optional (R2a finding 8 addition): the carrier defaults to 120s absent.
+    if spec.get("delivery_reserve_sec") is not None:
+        cfg["delivery_reserve_sec"] = int(spec["delivery_reserve_sec"])
     path = os.path.join(agent_dir, "carrier.json")
     with open(path, "w") as fh:
         json.dump(cfg, fh, indent=2)
