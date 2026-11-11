@@ -125,8 +125,22 @@ def evaluate(installed: dict | None, claude: dict | None,
                     or policy.get("issuer") != read.get("issuer")
                     or policy.get("resource_metadata_url") != read.get("resource_metadata_url")):
                 problems.append("COO_RESOURCE_ISSUER_MISMATCH")
-            if type(coo.get("binding")) is not dict:
+            binding = coo.get("binding")
+            if type(binding) is not dict:
                 problems.append("COO_PRINCIPAL_BINDING_MISSING")
+            elif (binding.get("enabled") is not True
+                    or (binding.get("schema") == "mastermind.executive_coo_principal_binding.v1"
+                        and type(binding.get("binding")) is not dict)
+                    or (binding.get("schema") == "mastermind.executive_coo_principal_binding.v2"
+                        and not binding.get("bindings"))
+                    or binding.get("schema") not in {
+                        "mastermind.executive_coo_principal_binding.v1",
+                        "mastermind.executive_coo_principal_binding.v2"}):
+                problems.append("COO_PRINCIPAL_BINDING_NOT_ENROLLED")
+            missions = coo.get("missions")
+            if type(missions) is not list or not any(
+                    type(row) is dict and row.get("enabled") is True for row in missions):
+                problems.append("COO_MISSION_NOT_ENROLLED")
 
     if adapter_source is None:
         problems.append("INSTALLED_ADAPTER_UNREADABLE")
