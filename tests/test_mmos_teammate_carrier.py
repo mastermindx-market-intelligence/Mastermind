@@ -271,7 +271,7 @@ def test_reentry_pending_marker_waits_then_reconciles_no_resend():
     pc = FakePaperclip(issues=one_issue())
     content = "Summarize file X\nWrite a three-line summary."
     op = wc.op_id("is-1", content)
-    pending = [("user", "r0", f"[{op}] old wake")]
+    pending = [("user", "r0", f"[{op}]\n\nold wake")]
     t3 = FakeT3(messages=pending)
     opts = {"poll_interval_sec": 0, "pending_timeout_sec": 1}
     # Simulate the server-side turn finishing during the wait.
@@ -412,10 +412,10 @@ def test_assignment_moved_in_progress_issue_is_picked_up():
 
 
 def test_scan_marker_states():
-    msgs = [("user", "r0", "[pc-is-1-abc] q"), ("assistant", "r0", "partial"),
+    msgs = [("user", "r0", "[pc-is-1-abc]\n\nq"), ("assistant", "r0", "partial"),
             ("assistant", "r0", "final answer")]
     assert wc.scan_marker(msgs, "pc-is-1-abc") == ("reply", "final answer")
-    assert wc.scan_marker([("user", "r0", "[pc-is-1-abc] q")], "pc-is-1-abc") == \
+    assert wc.scan_marker([("user", "r0", "[pc-is-1-abc]\n\nq")], "pc-is-1-abc") == \
         ("pending", None)
     assert wc.scan_marker(msgs, "pc-is-1-zzz") == (None, None)
 
@@ -482,7 +482,7 @@ def test_side_message_after_answer_never_replaces_the_reply():
     content = "Summarize file X\nWrite a three-line summary."
     op = wc.op_id("is-1", content)
     messages = [
-        ("user", "r1", f"[{op}] the task"),
+        ("user", "r1", f"[{op}]\n\nthe task"),
         ("assistant", "r1", "ADVERSARY-5"),          # the real answer
         ("user", "r2", "Side note from the operator"),
         ("assistant", "r2", "a completely newer text"),
@@ -505,7 +505,7 @@ def test_confirmation_replay_is_skipped_not_409():
     # existing interaction and skip the POST.
     content = "Summarize file X\nWrite a three-line summary."
     op = wc.op_id("is-1", content)
-    messages = [("user", "r1", f"[{op}] the task"),
+    messages = [("user", "r1", f"[{op}]\n\nthe task"),
                 ("assistant", "r1", "fake answer")]
     t3 = FakeT3(messages=messages)
     pc = FakePaperclip(
@@ -629,7 +629,7 @@ def test_ask_replay_creates_no_second_child():
     pc2.child_rows = pc.child_rows
     pc2.comment_rows = {"is-1": [{"body": ASK_REPLY}]}  # first run posted it
     real_op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
-    t3.messages_store = [("user", "r1", f"[{real_op}] task"),
+    t3.messages_store = [("user", "r1", f"[{real_op}]\n\ntask"),
                          ("assistant", "r1", ASK_REPLY)]
     assert run_with_roster(pc2, t3, roster) == 0
     assert [c for c in pc2.calls if c[0] == "create_issue"] == []
@@ -718,7 +718,7 @@ def test_return_replay_never_resends_or_duplicates():
     pc = FakePaperclip(issues=issues)
     pc.child_rows["is-1"] = [dict(child)]
     pc.comment_rows["is-1"] = [{"body": "FINAL: the file has 12 lines"}]
-    t3 = FakeT3(messages=[("user", "r1", f"[{ret_op}] the ask came back"),
+    t3 = FakeT3(messages=[("user", "r1", f"[{ret_op}]\n\nthe ask came back"),
                           ("assistant", "r1", "FINAL: the file has 12 lines")],
                 replies=["SHOULD NOT SEND"])
     pc.interaction_rows = [{"id": "ix-1", "kind": "request_confirmation",
@@ -757,7 +757,7 @@ def test_blocked_task_with_answered_marker_finishes():
     # second send.
     op = wc.op_id("is-1", "Wait on infra\nWaiting on a deploy")
     pc = FakePaperclip(issues=blocked_issue())
-    t3 = FakeT3(messages=[("user", "r1", f"[{op}] the task"),
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}]\n\nthe task"),
                           ("assistant", "r1", "deploy done, answer ready")])
     assert run_with_roster(pc, t3, {}) == 0
     assert t3.sends == []
@@ -772,7 +772,7 @@ def test_blocked_task_with_pending_question_stays_with_it():
     # question, says the waiting line once, and at the deadline leaves the
     # issue blocked (nothing released, nothing un-blocked).
     op = wc.op_id("is-1", "Wait on infra\nWaiting on a deploy")
-    asked = [("user", "r1", f"[{op}] the task"),
+    asked = [("user", "r1", f"[{op}]\n\nthe task"),
              ("assistant", "r1", "which environment?")]
     t3 = ScriptedT3(states=[(th(active="r1", latest="r1", pending=1), asked)])
     pc = FakePaperclip(issues=blocked_issue())
@@ -790,7 +790,7 @@ def test_blocked_task_with_slow_marker_waits_then_releases():
     # at its deadline the issue is released for a person (todo, release note).
     op = wc.op_id("is-1", "Wait on infra\nWaiting on a deploy")
     t3 = ScriptedT3(states=[(th(latest="r1", pending=0),
-                             [("user", "r1", f"[{op}] the task")])])
+                             [("user", "r1", f"[{op}]\n\nthe task")])])
     pc = FakePaperclip(issues=blocked_issue())
     clock = Clock()
 
@@ -821,7 +821,7 @@ def test_blocked_issue_with_board_feedback_and_marker_revises():
     pc.interaction_rows = [
         {"kind": "request_confirmation", "status": "rejected",
          "result": {"reason": "line count is off"}}]
-    t3 = FakeT3(messages=[("user", "r1", f"[{op}] task"),
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}]\n\ntask"),
                           ("assistant", "r1", "answer v1")],
                 replies=["answer v2, now correct"])
     assert run_with_roster(pc, t3, {}) == 0
@@ -908,7 +908,7 @@ def test_blocked_parent_with_pending_child_reconciles_ask_not_return():
     pc.child_rows["is-1"] = [dict(child)]
     # the ask reply is already in the thread (marker rule reconciles it)
     real_op = wc.op_id("is-1", "Report the line count\nAsk an engineer for the count.")
-    t3 = FakeT3(messages=[("user", "r1", f"[{real_op}] task"),
+    t3 = FakeT3(messages=[("user", "r1", f"[{real_op}]\n\ntask"),
                           ("assistant", "r1", ASK_REPLY)])
     assert run_with_roster(pc, t3, {"Atlas-TEST": "ag-atlas"}) == 0
     assert t3.sends == []  # no return send while the child is not done
@@ -996,7 +996,7 @@ def test_feedback_replay_after_crash_never_resends():
         {"kind": "request_confirmation", "status": "rejected",
          "result": {"reason": "line count is off"}}]
     # the rev1 turn already answered, but the crash lost the delivery
-    t3 = FakeT3(messages=[("user", "r1", f"[{op}-rev1] board declined"),
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}-rev1]\n\nboard declined"),
                           ("assistant", "r1", "answer v2, now correct")])
     assert run_bound(pc, t3) == 0
     assert t3.sends == []  # marker rule: no resend of the revision
@@ -1017,7 +1017,7 @@ def test_second_feedback_round_gets_rev2():
         {"kind": "request_confirmation", "status": "rejected",
          "idempotencyKey": f"{op}-rev1-confirm",
          "result": {"reason": "still off"}}]
-    t3 = FakeT3(messages=[("user", "r1", f"[{op}-rev1] board declined"),
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}-rev1]\n\nboard declined"),
                           ("assistant", "r1", "answer v2")],
                 replies=["answer v3"])
     assert run_bound(pc, t3) == 0
@@ -1063,7 +1063,7 @@ def test_board_accept_completes_the_issue():
     pc.interaction_rows = [
         {"kind": "request_confirmation", "status": "accepted",
          "idempotencyKey": f"{op}-confirm"}]
-    t3 = FakeT3(messages=[("user", "r1", f"[{op}] task"),
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}]\n\ntask"),
                           ("assistant", "r1", "answer v1")])
     assert run(pc, t3) == 0
     assert t3.sends == []  # no second send of the original task
@@ -1098,7 +1098,7 @@ def test_reject_reaches_the_inbox_path_as_feedback():
         {"kind": "request_confirmation", "status": "rejected",
          "idempotencyKey": f"{op}-confirm",
          "result": {"reason": "lines, not words"}}]
-    t3 = FakeT3(messages=[("user", "r1", f"[{op}] task"),
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}]\n\ntask"),
                           ("assistant", "r1", "answer v1")],
                 replies=["answer v2"])
     assert run(pc, t3) == 0
@@ -1284,7 +1284,7 @@ def test_revision_carries_the_task_when_the_thread_never_had_it():
     pc2 = FakePaperclip(issues=feedback_issue())
     pc2.comment_rows["is-1"] = [{"body": "answer v1", "authorType": "agent"}]
     pc2.interaction_rows = [dict(pc.interaction_rows[0])]
-    t3b = FakeT3(messages=[("user", "r1", f"[{op}] task"),
+    t3b = FakeT3(messages=[("user", "r1", f"[{op}]\n\ntask"),
                            ("assistant", "r1", "answer v1")],
                  replies=["answer v2"])
     assert run_bound(pc2, t3b) == 0
@@ -1370,7 +1370,7 @@ def test_scan_marker_run_not_ended_is_never_a_reply():
     # Rule A (fault 2, MAS-9): assistant text of a run that has not ended is
     # mid-turn prose, never the answer.
     op = "pc-is-1-abc"
-    msgs = [("user", "r1", f"[{op}] the task"),
+    msgs = [("user", "r1", f"[{op}]\n\nthe task"),
             ("assistant", "r1", "I've exhausted every reachable source")]
     # the marker's run is still the thread's active run -> pending
     assert wc.scan_marker(msgs, op, th(active="r1", latest="r1")) == \
@@ -1386,7 +1386,7 @@ def test_scan_marker_run_not_ended_is_never_a_reply():
     # a thread dict without the fields behaves as before
     assert wc.scan_marker(msgs, op, {"threadId": "th-1"}) == \
         ("reply", "I've exhausted every reachable source")
-    assert wc.scan_marker([("user", "r1", f"[{op}] t")], op,
+    assert wc.scan_marker([("user", "r1", f"[{op}]\n\nt")], op,
                           th(active="r1")) == ("pending", None)
     # no thread dict at all (old call shape) behaves as before
     assert wc.scan_marker(msgs, op) == ("reply", "I've exhausted every reachable source")
@@ -1397,7 +1397,7 @@ def test_question_during_turn_carrier_stays_and_finishes():
     # the question answered on the third poll, the final reply delivered
     # once, exactly one send.
     op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
-    asked = [("user", "r1", f"[{op}] the task"),
+    asked = [("user", "r1", f"[{op}]\n\nthe task"),
              ("assistant", "r1", "I've exhausted every reachable source")]
     answered = asked + [("assistant", "r1", "the final answer")]
     t3 = ScriptedT3(states=[
@@ -1440,7 +1440,7 @@ def test_marker_sent_by_another_wake_means_zero_sends():
     # Rule B, entry 3, the other half: the question cleared and another wake
     # had already sent the marker meanwhile, so this run sends nothing.
     op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
-    other = [("user", "r1", f"[{op}] the task"),
+    other = [("user", "r1", f"[{op}]\n\nthe task"),
              ("assistant", "r1", "done by the other wake")]
     t3 = ScriptedT3(states=[
         (th(active="r0", latest="r0", pending=1),
@@ -1493,7 +1493,7 @@ def test_wait_for_reply_deadline_with_question_is_needs_human():
     # Rule C: a pending marker whose turn is simply slow stays CarrierError
     # at the deadline; a question waiting at that deadline is NeedsHuman.
     op = "pc-is-1-wait"
-    msgs = [("user", "r1", f"[{op}] the task")]
+    msgs = [("user", "r1", f"[{op}]\n\nthe task")]
     t3 = ScriptedT3(states=[
         (th(latest="r1", pending=0), msgs),                  # slow, no question
         (th(active="r1", latest="r1", pending=1), msgs),     # then it asked
@@ -1512,7 +1512,7 @@ def test_wait_for_reply_deadline_with_question_is_needs_human():
 def test_wait_for_reply_deadline_without_question_is_carrier_error():
     op = "pc-is-1-wait"
     t3 = ScriptedT3(states=[(th(latest="r1", pending=0),
-                             [("user", "r1", f"[{op}] the task")])])
+                             [("user", "r1", f"[{op}]\n\nthe task")])])
     clock = Clock()
 
     def nap(seconds):
@@ -1587,10 +1587,10 @@ def test_feedback_round_waits_with_the_question_too():
     pc.interaction_rows = [
         {"kind": "request_confirmation", "status": "rejected",
          "result": {"reason": "line count is off"}}]
-    asked = [("user", "r1", f"[{op}-rev1] board declined")]
+    asked = [("user", "r1", f"[{op}-rev1]\n\nboard declined")]
     answered = asked + [("assistant", "r1", "answer v2, now correct")]
     t3 = ScriptedT3(states=[
-        (th(pending=0), [("user", "r0", f"[{op}] the task"),
+        (th(pending=0), [("user", "r0", f"[{op}]\n\nthe task"),
                          ("assistant", "r0", "answer v1")]),
         (th(active="r1", latest="r1", pending=1), asked),
         (th(latest="r1", pending=0), answered),
@@ -1611,7 +1611,7 @@ def test_return_wake_waits_with_the_question_too():
     pc = FakePaperclip(issues=issues)
     pc.child_rows["is-1"] = [dict(child)]
     pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines"}]
-    asked = [("user", "r1", f"[{ret_op}] the ask came back")]
+    asked = [("user", "r1", f"[{ret_op}]\n\nthe ask came back")]
     answered = asked + [("assistant", "r1", "FINAL: the file has 12 lines")]
     t3 = ScriptedT3(states=[
         (th(pending=0), []),
@@ -1631,7 +1631,7 @@ def test_mid_turn_text_is_never_delivered_mas9():
     # run exists, the run is still active with a question waiting. Nothing is
     # delivered; the run stays with the question to its deadline.
     op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
-    msgs = [("user", "r1", f"[{op}] the task"),
+    msgs = [("user", "r1", f"[{op}]\n\nthe task"),
             ("assistant", "r1", "I've exhausted every reachable source")]
     t3 = ScriptedT3(states=[(th(active="r1", latest="r1", pending=1), msgs)])
     pc = FakePaperclip(issues={
@@ -1762,7 +1762,7 @@ class GlitchT3(ScriptedT3):
 
 def test_question_wait_survives_two_failed_reads():
     op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
-    asked = [("user", "r1", f"[{op}] the task"),
+    asked = [("user", "r1", f"[{op}]\n\nthe task"),
              ("assistant", "r1", "mid-turn prose")]
     answered = asked + [("assistant", "r1", "the final answer")]
     t3 = GlitchT3(states=[(th(active="r1", latest="r1", pending=1), asked),
@@ -1775,7 +1775,7 @@ def test_question_wait_survives_two_failed_reads():
 
 def test_question_wait_fails_after_three_reads_in_a_row():
     op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
-    asked = [("user", "r1", f"[{op}] the task")]
+    asked = [("user", "r1", f"[{op}]\n\nthe task")]
     t3 = GlitchT3(states=[(th(active="r1", latest="r1", pending=1), asked)],
                   glitches=99)
     pc = FakePaperclip(issues=one_issue())
@@ -1790,7 +1790,7 @@ def test_run_budget_caps_wait_for_reply_too():
     # run budget: here 50s of budget against a 600s timeout.
     op = "pc-is-1-budget"
     t3 = ScriptedT3(states=[(th(latest="r1", pending=0),
-                             [("user", "r1", f"[{op}] the task")])])
+                             [("user", "r1", f"[{op}]\n\nthe task")])])
     clock = Clock(1000.0)
 
     def nap(seconds):
@@ -1823,3 +1823,38 @@ def test_stay_never_sends_again_when_the_marker_fails_to_appear():
         run(pc, t3, opts)
     assert len(t3.sends) == 2              # one outer, one from the stay
     assert pc.issues["is-1"]["status"] == "in_progress"  # nothing released
+
+
+# --- R2a finding 2: the marker is the FIRST LINE of a user message ------------
+
+def test_marker_only_counts_as_the_first_line_of_a_user_message():
+    # The carrier always writes the marker as the very first line of its
+    # message ("[op]\n\n..."). A marker that appears anywhere else — quoted by
+    # the teammate, inside a side message — is someone's words, never a task.
+    op = "pc-is-1-aaaabbbbcc"
+    real = wc.build_message("MMO-1", "the title", "the body", op)
+    quoted = ("you were asked before:\n\n" + real + "\n\nplease redo it")
+    msgs = [("user", "r1", real),
+            ("assistant", "r1", "the real answer"),
+            ("user", "r2", quoted),
+            ("assistant", "r2", "answer for the quoter")]
+    # the first real marker's answer wins; the quoted one never replaces it
+    assert wc.scan_marker(msgs, op) == ("reply", "the real answer")
+    # a marker that appears ONLY in someone else's words never counts at all
+    only_quoted = [("user", "r9", "earlier I saw [pc-x-1] go by"),
+                   ("assistant", "r9", "not a task")]
+    assert wc.scan_marker(only_quoted, "pc-x-1") == (None, None)
+    # a marker glued to text on the same first line is not the carrier's shape
+    space = [("user", "r1", f"[{op}] the task on one line"),
+             ("assistant", "r1", "answer")]
+    assert wc.scan_marker(space, op) == (None, None)
+    # FIRST marker wins when two real-shaped markers exist (rule: never the
+    # later turn's text)
+    two = [("user", "r1", real), ("assistant", "r1", "first answer"),
+           ("user", "r2", real), ("assistant", "r2", "second answer")]
+    assert wc.scan_marker(two, op) == ("reply", "first answer")
+    # ...and the pending rule holds for the FIRST marker's open run
+    assert wc.scan_marker(
+        [("user", "r1", real), ("assistant", "r1", "half said"),
+         ("user", "r2", real), ("assistant", "r2", "full answer")],
+        op, th(active="r1", latest="r1", pending=1)) == ("pending", None)

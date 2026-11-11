@@ -479,14 +479,22 @@ def scan_marker(messages, op, thread=None):
     message — has a different runId and must never replace it). A marker
     whose run has not answered yet is pending — including when its run is
     still open by rule A, even if assistant text of that run exists.
+
+    R2a finding 2: the marker counts ONLY when a user message BEGINS with
+    exactly "[op]" followed by a newline — the shape every carrier message
+    has always had (build_message writes "[op]\\n\\n...") — and the FIRST
+    such message wins. A marker quoted inside other text (a teammate echoing
+    its instructions, a side message) is someone's words, never a task; a
+    later duplicate never replaces the first turn's answer.
     """
-    tag = f"[{op}]"
+    tag = f"[{op}]\n"
     marker_run = None
     seen_at = None
     for idx, (role, run_id, _text) in enumerate(messages):
-        if role == "user" and tag in (_text or ""):
-            marker_run = run_id  # the last marker for this op wins
+        if role == "user" and (_text or "").startswith(tag):
+            marker_run = run_id  # the FIRST marker for this op wins
             seen_at = idx
+            break
     if marker_run is None:
         return None, None
     reply = None
