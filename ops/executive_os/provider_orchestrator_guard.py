@@ -1133,14 +1133,15 @@ def _wrapper_shaped(word: str) -> bool:
     return False
 
 
-#: r8 (REVIEW_2329 r6 B-R6-1): GLUED process-substitution / command-
-#: substitution openers. Every word scanner above treats a word starting
-#: with ``<``/``>`` as a REDIRECTION, but ``<(cmd)`` / ``>(cmd)`` glued to
-#: the redirect is a PROCESS SUBSTITUTION: bash runs ``cmd`` in a subshell,
-#: so the payload is an executed construct, not data (``$(cmd)`` command
-#: substitution likewise). The payload therefore receives the FULL armed
-#: posture — alone in the token-free leg and beside a faithful launch in
-#: the wrapper-present leg alike — via
+#: r8 (REVIEW_2329 r6 B-R6-1) + r9 (REVIEW_2329 r7 B-R7-1): GLUED
+#: process-substitution / command-substitution openers. Every word scanner
+#: above treats a word starting with ``<``/``>`` as a REDIRECTION, but
+#: ``<(cmd)`` / ``>(cmd)`` glued to the redirect is a PROCESS SUBSTITUTION:
+#: bash runs ``cmd`` in a subshell, so the payload is an executed construct,
+#: not data (``$(cmd)`` command substitution — and its backtick sibling,
+#: r9 — likewise). The payload therefore receives the FULL armed posture —
+#: alone in the token-free leg and beside a faithful launch in the
+#: wrapper-present leg alike — via
 #: :func:`_process_substitution_payloads`. Canon-coordinate scanning (the
 #: module-wide trade): a QUOTED ``'<(…)'`` string is seen as if the quotes
 #: were gone, which can only over-refuse.
@@ -1148,20 +1149,45 @@ _PROC_SUB_OPEN_RE = re.compile(r"\d*[<>]\(|\$\(")
 
 
 def _process_substitution_payloads(canon: str) -> list[str]:
-    """The substituted text of every glued ``<(…``/``>(…``/``$(…`` group.
+    """The substituted text of every glued ``<(…``/``>(…``/``$(…`` group
+    and every backtick `` `…` `` command substitution.
 
-    The walk is nesting-aware (parens counted, so a payload containing
-    further groups is extracted whole); an unterminated group spans to the
-    end of the text — conservative in the refusing direction. Payloads of
-    NESTED groups appear both here and inside their parent's payload; the
-    recursion in :func:`_deny_computed_launch` judges every level, so the
-    duplication is harmless.
+    The paren walk is nesting-aware (parens counted, so a payload
+    containing further groups is extracted whole); an unterminated group
+    spans to the end of the text — conservative in the refusing direction.
+    Payloads of NESTED groups appear both here and inside their parent's
+    payload; the recursion in :func:`_deny_computed_launch` judges every
+    level, so the duplication is harmless.
+
+    r9 (REVIEW_2329 r7 B-R7-1): the backtick is the sibling spelling of
+    ``$(…)`` that the r8 docstring already claimed — bash runs the payload
+    in a subshell wherever it sits, including at ARGUMENT position behind
+    a safe-data head (``cat`` with a substituted ``poo* run …`` argument),
+    where every word scanner above reduces the substituted word to data. The backtick walk uses the
+    same canon-coordinate nesting rule: canon has already deleted
+    backslashes, so the next bare backtick closes the span (a raw escaped
+    ``\\`nested\\` `` spelling therefore splits into pieces, EACH judged
+    with the full posture — the module-wide can-only-over-refuse trade)
+    and an unterminated span runs to the end of the text. Pure-data
+    payloads (a substituted ``git describe --dirty`` fed to ``cat``)
+    reduce inside the recursion and stay allowed: the refusal is the
+    payload's own wrapper-shaped/expansion-dependent launch, never the
+    backtick itself.
     """
     payloads: list[str] = []
     for match in _PROC_SUB_OPEN_RE.finditer(canon):
         body, _ = _read_pattern_group(canon, match.end() - 1)
         payloads.append(body)
-    return payloads
+    index = 0
+    while True:
+        start = canon.find("`", index)
+        if start < 0:
+            return payloads
+        cursor = start + 1
+        while cursor < len(canon) and canon[cursor] != "`":
+            cursor += 1
+        payloads.append(canon[start + 1 : cursor])
+        index = cursor + 1
 
 
 def _unprovable_position_word(canon: str) -> tuple[str, str] | None:
@@ -1349,6 +1375,14 @@ def _deny_computed_launch(canon: str, raw: str | None = None) -> None:
       skips the glued word, so the payload text gets the FULL armed
       posture recursively (:func:`_process_substitution_payloads`), in the
       token-free leg and beside a faithful launch alike.
+    * r9 (REVIEW_2329 r7 B-R7-1): the BACKTICK spelling of command
+      substitution gets the same payload posture — including at ARGUMENT
+      position behind a safe-data head (``cat`` with a substituted
+      ``poo* run …`` argument), where the safe head reduces the
+      substituted word to data in every scanner above. Pure-data payloads
+      (a substituted ``git describe --dirty``) still reduce and stay
+      allowed: the refusal is the payload's own
+      wrapper-shaped/expansion-dependent launch, never the backtick.
     * r8 (REVIEW_2329 r6 B-R6-2/M-R6-1): a shell keyword/prefix head
       (if/while/until/elif/!/time/…) does not occupy its segment's command
       slot — the word the shell EXECUTES after it (the loop/conditional's

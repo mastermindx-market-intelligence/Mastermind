@@ -3726,3 +3726,98 @@ def test_r8_keyword_condition_without_wrapper_token_stays_allowed(
     ):
         _guard_launch(shared_placement, command)
         assert capsys.readouterr().out == "", command
+
+
+# --- rework r9: round-7 posture review blocker (B-R7-1) ------------------------
+#
+# REVIEW_2329 r7 measured the BACKTICK spelling of command substitution
+# ADMITTED token-free behind a safe-data head: a substituted
+# `poo* run grok …` argument was ALLOW because `_PROC_SUB_OPEN_RE`
+# covered the `<(`/`>(`/`$(` openers but not the backtick sibling the r8
+# fix's own docstring claims ("$(cmd) command substitution likewise").
+# The backtick payload now gets the same recursive armed posture — while
+# the substitution's RESULT still feeds the safe head as data, so
+# pure-data payloads stay allowed.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # B-R7-1's four measured shapes: cat head, echo head, the same
+        # payload re-entered through a procsub payload the r8 recursion
+        # judges, and the while-condition multiplexed variant.
+        "cat `poo* run grok 'x' /tmp grok-4.6`",
+        "echo `poo* run grok 'x' /tmp grok-4.6`",
+        "cat <(echo `poo* run grok x`)",
+        "while cat `poo* run grok x` >/dev/null; do :; done",
+        # The class-glob spelling of the same payload (poo[l]).
+        "cat `poo[l] run grok x`",
+    ],
+    ids=["cat-head", "echo-head", "procsub-nested", "while-multiplexed",
+         "class-glob"],
+)
+def test_r9_br71_backtick_payloads_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+def test_r9_backtick_pure_data_stays_allowed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Controls: the substitution's RESULT feeds the safe head as data.
+    # Every payload reduces to safe-data heads/builtins inside the
+    # recursion, so the armed posture admits the command — B-R7-1 refuses
+    # the PAYLOAD's launch, not the backtick.
+    _install(monkeypatch, tmp_path, _binding())
+    for command in (
+        "cat `git describe --dirty`",
+        "echo `date`",
+        "cat `pwd`",
+        "echo `echo hi`",
+    ):
+        _guard_launch(shared_placement, command)
+        assert capsys.readouterr().out == "", command
+
+
+def test_r9_unarmed_sessions_keep_the_backtick_shapes_allowed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Scoped arming (the r7 unarmed pattern): the r9 rule lives only
+    # inside the armed `_deny_computed_launch`; an unarmed session keeps
+    # the legacy freedom for every refusal shape above.
+    home = tmp_path / "home"
+    cwd = home / "lanes" / "work"
+    cwd.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("MASTERMIND_CI_POLL_STATE_DIR", str(tmp_path / "poll-state"))
+    for name in (
+        "MASTERMIND_SHARED_PLACEMENT",
+        "POOL_EXECUTION_BINDING",
+        "MASTERMIND_PLACEMENT_RECEIPT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    for command in (
+        "cat `poo* run grok 'x' /tmp grok-4.6`",
+        "echo `poo* run grok 'x' /tmp grok-4.6`",
+        "cat <(echo `poo* run grok x`)",
+        "while cat `poo* run grok x` >/dev/null; do :; done",
+        "cat `poo[l] run grok x`",
+        "cat `git describe --dirty`",
+    ):
+        guard.guard_bash(_payload(cwd, command), {"command": command})
+        assert capsys.readouterr().out == "", command
