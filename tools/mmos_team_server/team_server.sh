@@ -367,7 +367,10 @@ EOF
   # a failed install step (banner capture may legitimately miss); a server
   # that never answered gets a cleanup whose OWN result is checked and
   # reported truthfully.
-  if ! wait_http "$PORT" 90; then
+  # 180 s, not 90: the first boot after moving receipts runs the state-DB
+  # migrations (the real root carries a large existing DB); measured first
+  # boots on a busy machine exceed 90 s while remaining perfectly healthy.
+  if ! wait_http "$PORT" 180; then
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
     sleep 1
     if label_loaded "$LABEL"; then
