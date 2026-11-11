@@ -2115,3 +2115,73 @@ def test_confirmation_409_for_this_op_is_success():
     assert pc.issues["is-1"]["status"] == "in_review"   # delivered, not failed
     assert not any("did not complete" in (c[2] if c[0] == "comment" else "")
                    for c in pc.calls)
+
+
+class _StubResponse:
+    """Minimal http.client-style response for the opener chain."""
+
+    def __init__(self, code, headers=None, body=b""):
+        self.code = code
+        self.status = code
+        self.msg = "stub"
+        self._headers = dict(headers or {})
+        self.headers = self._headers
+        self._body = body
+
+    def info(self):
+        return self._headers
+
+    def read(self, n=-1):
+        return self._body
+
+    def close(self):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_redirect_is_refused_and_token_never_leaves_base(monkeypatch):
+    # Finding 23: the per-run bearer token must never leave the pinned
+    # loopback base. urllib's default opener follows 3xx and re-sends the
+    # Authorization header to the Location target. The client must use an
+    # opener that refuses every redirect: a 3xx becomes an HTTPError, so the
+    # existing error path raises CarrierError, and nothing is re-sent.
+    import urllib.request
+
+    seen = []
+
+    class StubHandler(urllib.request.BaseHandler):
+        handler_order = 100
+
+        def http_open(self, req):
+            seen.append(req.full_url)
+            if len(seen) == 1:
+                return _StubResponse(
+                    302, {"location": "http://evil.example/steal"})
+            return _StubResponse(200, {}, b"{}")
+
+    stub = StubHandler()
+    # Drive whichever opener the client actually uses: its own (after the
+    # fix) or urllib's default (the defect).
+    if getattr(wc, "_OPENER", None) is not None:
+        monkeypatch.setattr(
+            wc, "_OPENER",
+            urllib.request.build_opener(wc._NoRedirect(), stub))
+    else:
+        monkeypatch.setattr(
+            urllib.request, "_opener", urllib.request.build_opener(stub))
+
+    pc = wc.PaperclipClient("http://127.0.0.1:9", "tok-secret", "run-1")
+    raised = None
+    try:
+        pc._request("GET", "/api/x")
+    except wc.CarrierError as exc:
+        raised = exc
+    # Exactly one request, to the original url. Nothing re-sent to Location.
+    assert seen == ["http://127.0.0.1:9/api/x"]
+    assert raised is not None, "a 3xx must raise CarrierError, not be followed"
+    assert "HTTP 302" in str(raised)

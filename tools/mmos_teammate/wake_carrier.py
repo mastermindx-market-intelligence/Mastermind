@@ -572,6 +572,34 @@ def scan_marker(messages, op, thread=None):
     return "reply", reply
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse every 3xx: a redirect becomes an HTTPError, never a follow.
+
+    The per-run bearer token is pinned to the loopback base. urllib's default
+    opener follows 3xx and re-sends the Authorization header to the Location
+    target, which would leak the token off-base.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect())
+_STOCK_URLOPEN = urllib.request.urlopen
+
+
+def _open(req, timeout):
+    """Open a request through the no-redirect opener.
+
+    urllib.request.urlopen is the transport seam (an embedder or test may
+    replace it); when it is the stock function, route through _OPENER so a
+    3xx is refused instead of followed.
+    """
+    if urllib.request.urlopen is not _STOCK_URLOPEN:
+        return urllib.request.urlopen(req, timeout=timeout)
+    return _OPENER.open(req, timeout=timeout)
+
+
 class PaperclipClient:
     """Minimal agent-authenticated Paperclip API client (stdlib urllib).
 
@@ -600,7 +628,7 @@ class PaperclipClient:
         for attempt in range(3):
             req = urllib.request.Request(url, data=data, method=method, headers=headers)
             try:
-                with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                with _open(req, self._timeout) as resp:
                     raw = resp.read()
                     return json.loads(raw) if raw else {}
             except urllib.error.HTTPError as exc:
