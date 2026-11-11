@@ -262,3 +262,24 @@ named positive cases, a successful pytest exit and zero JUnit failures/errors/sk
 
 Source tests establish no installed launch, no grant and no permission to
 widen one.
+
+
+## Ubuntu1 role services use the existing home client
+
+The v2 role aliases bind on the VPS. Ubuntu1 needs its own local forwards to
+reach them. The same control module now provides a fixed home-client phase
+for the existing mm-chisel-home.service; it does not install another tunnel.
+
+The original home credential is committed by digest and resolved privately
+against the VPS's existing authfile. Only the two anchored normal destinations
+`127.0.0.2:50142` and `127.0.0.3:50142` are added. Its SSH reverse and unrelated
+grants are preserved. Source qualification covers the exact home binary and
+normal-forward ACL semantics in addition to the original reverse contract.
+
+Use stage-home, apply-home-server, reconcile-home-server, apply-home-client,
+restart-home-client and reconcile-home-client through this existing owner.
+The [host integration sequence](../../integrations/hermes_application_fabric/HOST_INTEGRATION.md#ubuntu1-local-application-hop-through-the-existing-home-client)
+defines ordering, original v2 custody, active-stream refusal and the single
+restart boundary. It also links the real binary proof across three separate
+network namespaces. The home phases never reload the server or systemd's unit
+definitions; source proof does not activate a held role service.

@@ -586,7 +586,7 @@ def test_child_request_queue_orders_by_priority_aging_and_root_fairness():
     # A's entries behind it instead of serving the whole A flood in a row.
     assert [item.job_id for item in ordered] == ["B-high", "A-low-1", "A-low-2", "A-low-3"]
     # Aging is capped: 4 hours at one step per 30 minutes would be +8,
-    # the cap holds it at +3 — it never outranks a full priority class.
+    # the cap holds it at +3; this is bounded additive aging.
     a_low_1 = ordered[1]
     assert a_low_1.priority == 0
     # Skip-ineligible: a future entry never blocks the queue behind it.
@@ -605,3 +605,55 @@ def test_child_request_queue_orders_by_priority_aging_and_root_fairness():
     flat, _ = select_next_ready(
         entries, now_ms=now, policy=ReadyQueuePolicy(root_fairness=False))
     assert [item.job_id for item in flat][:2] == ["B-high", "A-low-1"]
+
+
+def test_child_request_command_id_preserves_tuple_boundaries():
+    from control_plane.child_request_admission import admission_command_id
+
+    first = _request("K", root="R", parent="P\x1fX")
+    second = _request("X\x1fK", root="R", parent="P")
+    assert first.idempotency_key() != second.idempotency_key()
+    assert admission_command_id(first) != admission_command_id(second)
+    assert admission_command_id(first) == admission_command_id(
+        _request("K", root="R", parent="P\x1fX"))
+
+
+def test_child_request_snapshot_fairness_interleaves_tied_roots():
+    from control_plane.child_request_admission import (
+        ReadyQueueEntry, ReadyQueuePolicy, select_next_ready,
+    )
+
+    entries = [ReadyQueueEntry(name, name[0], 2, 0)
+               for name in ("A1", "A2", "A3", "B1", "B2")]
+    entries += [ReadyQueueEntry("C-future", "C", 4, 200),
+                ReadyQueueEntry("D-ineligible", "D", 4, 0)]
+    ordered, skipped = select_next_ready(
+        entries, now_ms=100, eligible=lambda entry: entry.root_ref != "D")
+    assert [entry.job_id for entry in ordered] == ["A1", "B1", "A2", "B2", "A3"]
+    assert [entry.job_id for entry in skipped] == ["C-future", "D-ineligible"]
+    flat, _ = select_next_ready(
+        entries, now_ms=100, policy=ReadyQueuePolicy(root_fairness=False),
+        eligible=lambda entry: entry.root_ref != "D")
+    assert [entry.job_id for entry in flat] == ["A1", "A2", "A3", "B1", "B2"]
+
+
+def test_child_request_aging_is_a_capped_additive_priority_boost():
+    from control_plane.child_request_admission import ReadyQueueEntry, select_next_ready
+
+    now = 20_000_000
+    ordered, skipped = select_next_ready([
+        ReadyQueueEntry("old", "A", 0, 0),
+        ReadyQueueEntry("bounded", "B", 2, now),
+        ReadyQueueEntry("frontier", "C", 4, now),
+    ], now_ms=now)
+    assert [entry.job_id for entry in ordered] == ["frontier", "old", "bounded"]
+    assert skipped == ()
+
+
+def test_child_request_ordinary_command_spelling_is_unchanged():
+    from hashlib import sha256
+    from control_plane.child_request_admission import admission_command_id
+
+    request = _request("K", root="R", parent="P")
+    original = "child-request:" + sha256(b"R\x1fP\x1fK").hexdigest()
+    assert admission_command_id(request) == original

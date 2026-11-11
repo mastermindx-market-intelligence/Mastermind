@@ -1154,3 +1154,219 @@ def dataclasses_replace_status(record):
     import dataclasses as _dc
     from control_plane.workspace_lease import STATUS_RELEASED
     return _dc.replace(record, lease_status=STATUS_RELEASED)
+
+
+def _claimed_ohf_placement(tmp_path):
+    from tests.test_ohf_p1b_runtime_orchestrator import _profile
+
+    runtime, clock = _runtime(tmp_path)
+    _worker(runtime, "worker-a", "ubuntu0")
+    job = _job(runtime, "ohf-placement")
+    lease = runtime.attempts.claim_job(
+        job.job_id, placement_observations=_observations()
+    )
+    assert lease is not None
+    runtime.operator_harness.seal_operator_harness_attempt(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        requested=_profile(lease),
+    )
+    return runtime, clock, job, lease
+
+
+@pytest.mark.parametrize("shape", ["sealed", "active"])
+def test_ohf_takeover_reissues_placement_binding_and_settles_once(tmp_path, shape):
+    from datetime import datetime, timedelta, timezone
+    from control_plane.operator_harness_contract import (
+        OperationId,
+        ProcessIdentityObservation,
+        ProcessLiveness,
+        ProviderWriterState,
+        ReconcileObservation,
+    )
+
+    runtime, clock, job, old = _claimed_ohf_placement(tmp_path)
+    attempt_id = old.attempt.attempt_id
+    claimed = ExecutionBinding.from_dict(runtime.attempts.execution_binding(attempt_id))
+    pools = (host_slot_pool("ubuntu0"), root_concurrency_pool(job.job_id),
+             shared_quota_pool(QUOTA))
+    assert _charges(runtime, *pools) == {pool: 1 for pool in pools}
+    epoch = generation = None
+    process = ProcessIdentityObservation(901, 901, "start-901", "boot")
+    if shape == "active":
+        operation = OperationId("ohf-op:placement-start")
+        epoch, generation = runtime.operator_harness.reserve_start(
+            attempt_id, fence_generation=old.attempt.fence_generation,
+            lease_token=old.lease_token, operation_id=operation,
+        )
+        runtime.operator_harness.bind_start_result(
+            epoch=epoch, generation=generation, operation_id=operation,
+            fence_generation=old.attempt.fence_generation, lease_token=old.lease_token,
+            provider_session_id="S1", process=process,
+        )
+
+    owners = [old]
+    expiries = []
+    for index in range(2 if shape == "sealed" else 1):
+        current = owners[-1]
+        clock.value += 60_001 if index == 0 else 30_001
+        if index:
+            before = runtime.attempts.get_attempt(attempt_id)
+            quota_before = _quota_row(runtime, "worker-a")
+            binding_before = runtime.attempts.execution_binding(attempt_id)
+            events_before = len(runtime.store.list_events())
+            with pytest.raises(StateConflict, match="preconditions failed"):
+                runtime.attempts.takeover_expired_operator_harness(
+                    attempt_id, expected_fence_generation=old.attempt.fence_generation,
+                    lease_owner="stale-recovery", lease_seconds=30,
+                )
+            assert runtime.attempts.get_attempt(attempt_id) == before
+            assert _quota_row(runtime, "worker-a") == quota_before
+            assert runtime.attempts.execution_binding(attempt_id) == binding_before
+            assert len(runtime.store.list_events()) == events_before
+        owners.append(runtime.attempts.takeover_expired_operator_harness(
+            attempt_id, expected_fence_generation=current.attempt.fence_generation,
+            lease_owner=f"recovery-{index + 1}", lease_seconds=30,
+        ))
+        with runtime.store.read() as connection:
+            stored_expiry = connection.execute(
+                "SELECT lease_expires_at_ms FROM attempts WHERE attempt_id=?", (attempt_id,)
+            ).fetchone()[0]
+        expiries.append((clock.value + 30_000, stored_expiry))
+    current = owners[-1]
+    for stale in owners[:-1]:
+        for terminal in (runtime.attempts.complete_attempt, runtime.attempts.fail_attempt):
+            with pytest.raises(StateConflict, match="stale fence"):
+                terminal(
+                    attempt_id, fence_generation=stale.attempt.fence_generation,
+                    lease_token=stale.lease_token, payload={"summary": "stale owner"},
+                )
+    assert _commitments(runtime)[0]["state"] == "EFFECT_MAY_HAVE_BEGUN"
+    assert _charges(runtime, *pools) == {pool: 1 for pool in pools}
+
+    if shape == "active":
+        for terminal in (runtime.attempts.complete_attempt, runtime.attempts.fail_attempt):
+            with pytest.raises(StateConflict, match="shutdown/abandon"):
+                terminal(
+                    attempt_id, fence_generation=current.attempt.fence_generation,
+                    lease_token=current.lease_token, payload={"summary": "writer still held"},
+                )
+        assert _charges(runtime, *pools) == {pool: 1 for pool in pools}
+        dead = ReconcileObservation(
+            ProcessLiveness.PROVEN_DEAD, process, True, ProviderWriterState.RELEASED, "S1"
+        )
+        events_before = len(runtime.store.list_events())
+        with pytest.raises(StateConflict, match="stale fence"):
+            runtime.operator_harness.record_hard_process_death(
+                generation=generation, observation=dead,
+                fence_generation=old.attempt.fence_generation, lease_token=old.lease_token,
+            )
+        assert len(runtime.store.list_events()) == events_before
+        runtime.operator_harness.record_hard_process_death(
+            generation=generation, observation=dead,
+            fence_generation=current.attempt.fence_generation, lease_token=current.lease_token,
+        )
+        runtime.operator_harness.abandon_epoch(
+            epoch=epoch, fence_generation=current.attempt.fence_generation,
+            lease_token=current.lease_token,
+        )
+        events_before = len(runtime.store.list_events())
+        with pytest.raises(StateConflict, match="exact CURRENT epoch"):
+            runtime.operator_harness.abandon_epoch(
+                epoch=epoch, fence_generation=current.attempt.fence_generation,
+                lease_token=current.lease_token,
+            )
+        assert len(runtime.store.list_events()) == events_before
+
+    # Exercise lawful public settlement before asserting the repaired binding.
+    # The original takeover leaves the old binding and refuses this owner.
+    terminal = (runtime.attempts.fail_attempt if shape == "sealed"
+                else runtime.attempts.complete_attempt)
+    terminal(
+        attempt_id, fence_generation=current.attempt.fence_generation,
+        lease_token=current.lease_token, payload={"summary": "fixture terminal outcome"},
+    )
+    binding = ExecutionBinding.from_dict(runtime.attempts.execution_binding(attempt_id))
+    assert binding.fence_counter == current.attempt.fence_generation
+    assert binding.fence_counter == _quota_row(runtime, "worker-a")["fence_counter"]
+    epoch_start = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    # Attempt's public display rounds seconds; the binding retains persisted milliseconds.
+    assert all(expected == stored for expected, stored in expiries)
+    assert datetime.fromisoformat(binding.lease_expiry.replace("Z", "+00:00")) == (
+        epoch_start + timedelta(milliseconds=expiries[-1][1])
+    )
+    stable = {k: v for k, v in claimed.to_dict().items()
+              if k not in {"fence_counter", "lease_expiry"}}
+    assert {k: v for k, v in binding.to_dict().items()
+            if k not in {"fence_counter", "lease_expiry"}} == stable
+    takeovers = [e for e in runtime.store.list_events(job_id=job.job_id)
+                 if e.event_type == "OHF_EXPIRED_LEASE_TAKEN_OVER"]
+    assert len(takeovers) == len(owners) - 1
+    for event, owner, (_, expiry) in zip(takeovers, owners[1:], expiries, strict=True):
+        reissued = event.payload["execution_binding"]
+        assert reissued["fence_counter"] == owner.attempt.fence_generation
+        assert event.payload["lease_expires_at_ms"] == expiry
+        assert datetime.fromisoformat(reissued["lease_expiry"].replace("Z", "+00:00")) == (
+            epoch_start + timedelta(milliseconds=expiry)
+        )
+        assert {k: v for k, v in reissued.items()
+                if k not in {"fence_counter", "lease_expiry"}} == stable
+    assert len([e for e in runtime.store.list_events(job_id=job.job_id)
+                if e.event_type == "JOB_CLAIMED"]) == 1
+    with runtime.store.read() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM attempts WHERE job_id=?", (job.job_id,)
+        ).fetchone()[0] == 1
+    assert len(_commitments(runtime)) == 1
+    assert _commitments(runtime)[0]["state"] == "SETTLED"
+    assert _charges(runtime, *pools) == {pool: 0 for pool in pools}
+    expected_status = AttemptStatus.FAILED if shape == "sealed" else AttemptStatus.COMPLETED
+    assert runtime.attempts.get_attempt(attempt_id).status is expected_status
+    for terminal in (runtime.attempts.complete_attempt, runtime.attempts.fail_attempt):
+        with pytest.raises(StateConflict):
+            terminal(
+                attempt_id, fence_generation=current.attempt.fence_generation,
+                lease_token=current.lease_token, payload={"summary": "replayed settlement"},
+            )
+    assert len(_settle_events(runtime)) == 1
+
+
+def test_ohf_placement_binding_reissue_failure_rolls_back_takeover(tmp_path, monkeypatch):
+    from control_plane import executive_runtime as owner
+
+    runtime, clock, job, lease = _claimed_ohf_placement(tmp_path)
+    attempt_id = lease.attempt.attempt_id
+    clock.value += 60_001
+    before = runtime.attempts.get_attempt(attempt_id)
+    quota_before = _quota_row(runtime, "worker-a")
+    binding_before = runtime.attempts.execution_binding(attempt_id)
+    commitments_before = _commitments(runtime)
+    events_before = len(runtime.store.list_events())
+    calls = []
+
+    def refuse_binding(connection, row, *, fence_counter, lease_expires_at_ms):
+        calls.append((fence_counter, lease_expires_at_ms))
+        assert row["fence_generation"] == lease.attempt.fence_generation
+        assert fence_counter == lease.attempt.fence_generation + 1
+        assert connection.execute(
+            "SELECT fence_generation FROM attempts WHERE attempt_id=?", (attempt_id,)
+        ).fetchone()[0] == fence_counter
+        assert connection.execute(
+            "SELECT fence_counter FROM worker_quota_classes WHERE held_attempt_id=?",
+            (attempt_id,),
+        ).fetchone()[0] == fence_counter
+        raise StateConflict("fixture binding reissue refused")
+
+    monkeypatch.setattr(owner, "_reissue_placement_binding", refuse_binding)
+    with pytest.raises(StateConflict, match="fixture binding reissue refused"):
+        runtime.attempts.takeover_expired_operator_harness(
+            attempt_id, expected_fence_generation=lease.attempt.fence_generation,
+            lease_owner="recovery", lease_seconds=30,
+        )
+    assert len(calls) == 1
+    assert runtime.attempts.get_attempt(attempt_id) == before
+    assert _quota_row(runtime, "worker-a") == quota_before
+    assert runtime.attempts.execution_binding(attempt_id) == binding_before
+    assert _commitments(runtime) == commitments_before
+    assert len(runtime.store.list_events()) == events_before

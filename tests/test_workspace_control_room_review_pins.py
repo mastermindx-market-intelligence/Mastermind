@@ -22,7 +22,7 @@ HTTP_PATH = "integrations/mastermind_workspace_app/app.py"
 # shifted by one more line.
 EXPECTED = {
     ACTION_PATH: ((135, 58, 61, "int"),),
-    HTTP_PATH: ((928, 71, 74, 'int'), (939, 71, 74, 'int'), (947, 71, 74, 'int'), (953, 79, 82, 'int'), (962, 71, 74, 'int'), (972, 71, 74, 'int'), (977, 76, 79, 'int'), (983, 71, 74, 'int')),
+    HTTP_PATH: ((933, 71, 74, 'int'), (944, 71, 74, 'int'), (952, 71, 74, 'int'), (958, 79, 82, 'int'), (967, 71, 74, 'int'), (977, 71, 74, 'int'), (982, 76, 79, 'int'), (988, 71, 74, 'int')),
 }
 
 

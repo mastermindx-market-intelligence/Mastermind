@@ -13,7 +13,7 @@ import type {
   WindowDocument,
 } from "./workspace-contract";
 import { observedMissionAssociation } from "./workspace-contract";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { readFreshConversationLocation } from "./conversations/fresh-conversation-location";
 import { useFreshConversationDraftState } from "./conversations/new-conversation/useFreshConversationDraftState";
 import { useFreshConversationJourney } from "./conversations/new-conversation/useFreshConversationJourney";
@@ -190,6 +190,8 @@ import {
 import { TransportDiagnosticFields } from "./TransportDiagnosticFields";
 import { nativeAuthFeedback, nativePartialAuthPresentation } from "./native-partial-auth-presentation";
 import { closedReadFailurePhase, closedReadFailureReason, type DiagnosticPhase, type DiagnosticReadReason } from "./diagnostic-state";
+const CompanyWorkspace = lazy(() => import("./company/CompanyWorkspace").then(module => ({ default: module.CompanyWorkspace })));
+
 export const navigation = [
   "Today",
   "Team",
@@ -5915,7 +5917,10 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
     // surface below is the EXISTING hermes-native panel; never a second
     // transport. The roster is read once through the existing native port's
     // read-only team_roster operation (Director B's authoritative contract).
+    // Company (Paperclip company workspace, #2395) is the secondary view of
+    // Team per the Revision 7 plan: conversations first, Company preserved.
     content = (
+      <>
       <TeamRoute
         key={`team:${authRevision}`}
         locale={locale}
@@ -5924,6 +5929,23 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         onOpenConversations={() => { setProjectTab(null); setActive("Conversations"); }}
         onOpenCode={() => { setCodeAttemptId(null); setActive("Code"); }}
       />
+      <details className="mm-team-company"><summary>{locale === "zh-CN" ? "公司工作区" : "Company workspace"}</summary>
+      <Suspense fallback={<p role="status">{locale === "zh-CN" ? "正在加载团队工作区…" : "Loading the team workspace…"}</p>}><CompanyWorkspace key={authRevision} transport={window.MastermindMissionHost?.company}
+      authGeneration={authRevision} canRead={Boolean(authState?.status === "signed_in" && authState.acquisition)} locale={locale}
+      onNavigate={destination => { setProjectTab(null); setActive(destination); }}
+      onOpenProject={workRef => {
+        if (!currentTodayCatalogue() || index.state !== "AVAILABLE") return false;
+        const matches = index.programs.filter(card => card.workRef === workRef);
+        if (matches.length !== 1) return false;
+        const card = matches[0];
+        if (card.rootState === "RESOLVED" && card.rootJobId && card.rootCandidates.length === 1 && card.rootCandidates[0] === card.rootJobId) {
+          open(card.workRef, card.rootJobId); return true;
+        }
+        setCatalogueProject({ workRef, authRevision, epoch: programIndexEpoch });
+        setProjectTab("More"); setActive("Projects"); return true;
+      }}/></Suspense>
+      </details>
+      </>
     );
   else if (active === "Code")
     // TD04 workbench surface: typed T3 thread projections with documented

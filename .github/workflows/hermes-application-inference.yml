@@ -20,8 +20,10 @@ on:
       - '.github/workflows/hermes-application-inference.yml'
       - '.github/workflows/ci.yml'
       - 'tests/integration/test_fabric_*_cross_pool_auto.py'
-  merge_group:
-    types: [checks_requested]
+  # No merge_group trigger: this workflow is not a required check, so the merge
+  # queue never waits for it, and every built, rebuilt or discarded queue group
+  # would spend runners on it. The path-filtered push run below proves each
+  # landed change instead. Policy: tests/test_ci_merge_group_capacity.py.
   push:
     branches: [master]
     paths:
@@ -45,6 +47,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: hermes-application-inference-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   studio-preflight-observation:

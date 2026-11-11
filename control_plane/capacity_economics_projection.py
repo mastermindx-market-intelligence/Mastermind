@@ -33,8 +33,9 @@ BYTEPLUS_COMMERCIAL_MODEL_PINS = {
 _ZAI_FLASH_MODELS = frozenset({"glm-5.3-flash", "glm-5-3-flash-260828"})
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
-# Typed provider/auth-route/pool identities — exact equality, never preview
-# text matching. Real identities from the owner registry projection
+# Typed provider/auth-route/pool diagnostics. Commercial recognition uses
+# exact identity; normalized family matching only selects refusals.
+# Real identities from the owner registry projection
 # (owner_ext_projection.json, 2026-11-08, 13 pools): pool id "byteplus"
 # (model catalog only; the incumbent native Fabric owns account selection,
 # subscription quotas and physical capacity), commercial provider alias
@@ -77,10 +78,12 @@ BYTEPLUS_ROUTE_NOT_IN_FIRST_TIER = "BYTEPLUS_ROUTE_NOT_IN_FIRST_TIER"
 class BytePlusRouteEligibility:
     """Typed provider/auth-route/pool eligibility verdict for one identity.
 
-    gate_applies is False only when the identity is not a BytePlus identity
-    at all. eligible is True only for the reviewed commercial owner path; the
-    personal Coding Plan route and every unrecognized/unapproved identity
-    stay ineligible with a specific reason_code.
+    gate_applies is False for bounded identities outside this BytePlus gate.
+    eligible=True then means only that this gate does not refuse the identity,
+    not that another provider is registered or admitted. Within BytePlus, only
+    the reviewed commercial owner path can be eligible; personal and unknown
+    routes stay ineligible. Auth-route and pool labels are derived diagnostics,
+    not credential, entitlement or Capacity receipts.
     """
 
     provider: str
@@ -204,19 +207,22 @@ def evaluate_byteplus_route_eligibility(
 ) -> BytePlusRouteEligibility:
     """Typed provider/auth-route/pool eligibility verdict for one option.
 
-    Replaces the historical substring gate. An unselected or unapproved route
-    stays ineligible with a specific reason code, and the personal Coding
-    Plan subscription route is always refused. This is not a provider-denial
-    bypass: eligibility only ever comes from the independently reviewed
-    commercial owner path, never from preview text.
+    Both identity inputs must satisfy the projection's bounded grammar.
+    Conservative normalized family matching selects refusal diagnostics only;
+    a BytePlus commercial route still requires the reviewed owner path. The
+    personal Coding Plan route is always refused. NOT_APPLICABLE only means
+    this BytePlus-specific gate does not apply, not general route permission.
     """
-    if not (isinstance(provider, str) and isinstance(model_alias, str)):
+    if any(
+        not isinstance(value, str) or _ID_RE.fullmatch(value) is None
+        for value in (provider, model_alias)
+    ):
         return BytePlusRouteEligibility(
             provider="", model_alias="",
             auth_route=BYTEPLUS_AUTH_ROUTE_UNRECOGNIZED, pool_id="",
             gate_applies=True, eligible=False,
             reason_code=BYTEPLUS_IDENTITY_UNRECOGNIZED_REFUSED,
-            detail="malformed identity is not a bounded string; refused fail-closed",
+            detail="malformed identity is not a bounded identifier; refused fail-closed",
         )
     identity_class = _byteplus_identity_class(provider, model_alias)
     if identity_class is None:
@@ -437,8 +443,8 @@ def _commercial_byteplus_reviewed(
     Typed wrapper: True exactly when the typed diagnostics above find no
     refusal. The issuer credential, balance, model activation, host and
     claim-time Capacity must still be independently proven by their incumbent
-    owners. No file, provider, broker or network read occurs in this
-    projection.
+    owners. Only the existing canonical-router identity preflight may read
+    local policy files; this projection makes no provider, broker or network call.
     """
     if provider != BYTEPLUS_COMMERCIAL_PROVIDER:
         return False
@@ -690,9 +696,9 @@ def project_quota_preference(
             "suggested model alias is outside the first lawful suitability tier"
         )
     provider = _token(row.get("provider"), field="option.provider")
-    # BytePlus eligibility is typed by provider/auth-route/pool identity, not
-    # by preview text. The personal Coding Plan subscription route and every
-    # unreviewed/unapproved identity are refused with a specific reason code;
+    # Typed BytePlus diagnostics are derived from bounded identity inputs.
+    # The personal Coding Plan route and every unreviewed/unapproved
+    # BytePlus identity are refused with a specific reason code;
     # only the independently reviewed commercial owner path can pass, and it
     # still requires claim-time revalidation by the incumbent owners.
     verdict = evaluate_byteplus_route_eligibility(

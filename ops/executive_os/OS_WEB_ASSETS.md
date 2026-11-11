@@ -177,8 +177,9 @@ adds no new policy approval gate.
 ## Rich client artifact profile
 
 The previous protected 11-file profile (Noir nine plus the two exact third-party
-notices) remains fully supported. Exact admitted profiles are 3, 9, 11, 12 and 13;
-only 12 adds the private-entry JPEG, only 13 adds the two SourceMarkdown lazy chunks, and publication index sizes
+notices) remains fully supported. Exact admitted profiles are 3, 9, 11, 12, 13 and 14;
+12 and 14 include the private-entry JPEG, 13 adds the two SourceMarkdown lazy chunks,
+and 14 adds the two CompanyWorkspace lazy chunks. Publication index sizes
 include one additional manifest entry each. Neither notices nor chunks are
 optional within their respective profiles.
 
@@ -193,6 +194,13 @@ only the existing index JS/CSS; those load the lazy reader through its existing
 bundle. The launcher derives required directories from the already-admitted names
 and retains all current immutable byte/hash, symlink, seal and budget checks.
 
+The fourteen-file Team profile extends the complete private-entry twelve-file
+layout with exactly one `assets/CompanyWorkspace-<hash>.js` and one
+`assets/CompanyWorkspace-<hash>.css`. Both chunks are required, with independent
+content hashes. The existing index JS/CSS remain the only index HTML references.
+A private-entry layout combined with SourceMarkdown chunks is not this profile
+and remains refused, as do partial Team pairs, duplicate chunks and other names.
+
 The existing public-edge planner and static application consume that same closed
 name/MIME owner; adding this profile does not introduce wildcard HTTP routes or
 change authentication, request methods, CSP, provider admission or service arming.
@@ -203,7 +211,7 @@ still use the existing accepted release owner and all of its custody gates.
 ### Staged public-edge publication compatibility
 
 The original publisher's staged file index contains the manifest *plus* each admitted
-asset, so the five closed asset profiles have 4, 10, 12, 13 and 14 index entries.
+asset, so the six closed asset profiles have 4, 10, 12, 13, 14 and 15 index entries.
 `ops/executive_os/os_public_edge_publication.py` obtains the allowed index
 cardinalities from `OS_ASSET_PROFILE_FILE_COUNTS`, the same deterministic
 closed-profile owner used by `os_asset_mimes`. Validate cardinality *before*

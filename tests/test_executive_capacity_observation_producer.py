@@ -701,3 +701,236 @@ def test_quota_preview_requires_the_sealed_trusted_factory_boundary(tmp_path):
     assert "getenv" not in source
     assert "monkeypatch" not in source
 
+
+def _causal_quota_document(tmp_path, *, projection=None, cooldowns=(), held=(), waiters=()):
+    """Only synthetic inputs, exercised through the existing sealed factory."""
+    import sqlite3
+    from datetime import datetime
+    from control_plane import executive_capacity_observation_producer as factory
+    from control_plane import quota_economics_preview_producer as quota
+
+    path = tmp_path / "causal-projection.json"
+    path.write_text(json.dumps(quota_projection() if projection is None else projection))
+    broker = quota_broker(tmp_path / "causal-broker.sqlite", held=held, waiters=waiters)
+    with sqlite3.connect(broker) as connection:
+        for scope, until, mode, soft_cap in cooldowns:
+            connection.execute(
+                "INSERT INTO quota_cooldowns (scope, observed_at, until_ts, mode, soft_cap)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (scope, datetime.fromisoformat("2026-09-17T03:00:00+00:00").timestamp(),
+                 datetime.fromisoformat(until).timestamp(), mode, soft_cap),
+            )
+    return quota.produce_quota_economics_preview(
+        source_config=factory.validate_worker_capacity_source_config(source_config()),
+        projection_path=path, broker_db_path=broker, observed_at=QUOTA_OBSERVED,
+    ).to_dict()
+
+
+def _causal_resource(document, resource_ref="bailian:Chris"):
+    return next(row for row in document["resources"]
+                if row["shared_quota_resource_ref"] == resource_ref)
+
+
+@pytest.mark.parametrize("mode, until, soft_cap, eligible, startable", [
+    ("HARD", "2026-09-17T06:00:00+00:00", None, False, 0),
+    ("HARD", "2026-09-17T04:00:00+00:00", None, True, 1),
+    ("SOFT", "2026-09-17T06:00:00+00:00", 3, True, 3),
+    ("SOFT", "2026-09-17T04:00:00+00:00", 3, True, 7),
+    ("SOFT", "2026-09-17T06:00:00+00:00", 2, True, 7),
+    ("SOFT", "2026-09-17T06:00:00+00:00", None, True, 7),
+])
+def test_quota_causal_cooldowns_match_incumbent_broker_semantics(
+    tmp_path, mode, until, soft_cap, eligible, startable,
+):
+    scope = "bailian:Chris" if mode == "HARD" else "bailian-adaptive429:Chris"
+    doc = _causal_quota_document(tmp_path, cooldowns=[(scope, until, mode, soft_cap)])
+    row = _causal_resource(doc)
+    assert row["configured_concurrency_cap"] == 7
+    assert row["admission_eligibility"] is eligible
+    options = [o for o in doc["options"] if o["option_id"] == "bailian:Chris"]
+    assert (options[0]["estimated_startable_jobs"] if options else 0) == startable
+    assert doc["production_armed"] is False
+    assert doc["authority"] == "NONE_PREVIEW_ONLY"
+
+
+def test_quota_causal_soft_cap_subtracts_same_account_occupancy(tmp_path):
+    doc = _causal_quota_document(
+        tmp_path, held=(("bailian:Chris", "held"), ("bailian:Chris", "rented")),
+        waiters=(("bailian", "Chris"),),
+        cooldowns=[("bailian-adaptive429:Chris", "2026-09-17T06:00:00+00:00", "SOFT", 3)],
+    )
+    assert not _causal_resource(doc)["admission_eligibility"]
+    assert not [o for o in doc["options"] if o["option_id"] == "bailian:Chris"]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_quota_causal_multiple_cooldowns_do_not_overwrite_constraints(tmp_path, reverse):
+    rows = [
+        ("bailian:Chris", "2026-09-17T04:00:00+00:00", "HARD", None),
+        ("bailian-adaptive429:Chris", "2026-09-17T06:00:00+00:00", "SOFT", 3),
+    ]
+    doc = _causal_quota_document(tmp_path, cooldowns=rows[::-1] if reverse else rows)
+    row = _causal_resource(doc)
+    option = next(o for o in doc["options"] if o["option_id"] == "bailian:Chris")
+    assert row["cooldown_until"] == "2026-09-17T06:00:00Z"
+    assert row["configured_concurrency_cap"] == 7
+    assert option["estimated_startable_jobs"] == 1
+
+
+@pytest.mark.parametrize("produced_at", [
+    None, "not-a-time", "2026-09-18T05:00:00Z", "2026-09-09T05:00:00Z",
+])
+def test_quota_causal_stale_or_unqualified_observation_is_not_recommended(tmp_path, produced_at):
+    projection = quota_projection()
+    projection["produced_at"] = produced_at
+    doc = _causal_quota_document(tmp_path, projection=projection)
+    row = _causal_resource(doc)
+    assert not row["admission_eligibility"]
+    assert "eligible_in_preview" not in row["reason_codes"]
+    assert doc["suggested_option"] is None
+    assert doc["live_admission"] is False
+
+
+def test_quota_causal_existing_seven_day_boundary_is_preserved(tmp_path):
+    projection = quota_projection()
+    projection["produced_at"] = "2026-09-10T05:10:00Z"
+    assert _causal_resource(_causal_quota_document(tmp_path, projection=projection))["admission_eligibility"]
+
+
+@pytest.mark.parametrize("target", ["account", "pool"])
+@pytest.mark.parametrize("value", [None, 1, "true"])
+def test_quota_causal_unqualified_enabled_flags_cannot_become_ready(tmp_path, target, value):
+    projection = quota_projection()
+    if target == "pool":
+        projection["pools"][0]["enabled"] = value
+    else:
+        row = next(r for r in projection["shared_quota_resources"]
+                   if r.get("account_name") == "Chris" and r.get("kind") != "inline_key_bucket")
+        row["enabled_flag"] = value
+    row = _causal_resource(_causal_quota_document(tmp_path, projection=projection))
+    assert not row["admission_eligibility"]
+    assert row["readiness_state"] != "ready"
+
+
+@pytest.mark.parametrize("source", ["inline", "pool"])
+@pytest.mark.parametrize("value", [-1, 101, True, "30"])
+def test_quota_causal_invalid_percentages_remain_unknown(tmp_path, source, value):
+    projection = quota_projection()
+    if source == "inline":
+        row = next(r for r in projection["shared_quota_resources"]
+                   if r.get("account_name") == "Chris" and r.get("kind") == "inline_key_bucket")
+        row["pct_7d"] = value
+        ref = "bailian:Chris"
+    else:
+        projection["pools"][2]["windows"]["weekly"]["remaining_pct"] = value
+        ref = "grok:default"
+    row = _causal_resource(_causal_quota_document(tmp_path, projection=projection), ref)
+    assert row["remaining_quota"] is None
+    assert row["quota_knowledge"] == "unknown"
+    assert not row["admission_eligibility"]
+
+
+def test_quota_causal_duplicate_usage_buckets_are_ambiguous(tmp_path):
+    from control_plane import quota_economics_preview_producer as quota
+
+    projection = quota_projection()
+    duplicate = dict(next(r for r in projection["shared_quota_resources"]
+                          if r.get("account_name") == "Chris" and r.get("kind") == "inline_key_bucket"))
+    duplicate["pct_7d"] = 100
+    projection["shared_quota_resources"].append(duplicate)
+    with pytest.raises(quota.QuotaEconomicsPreviewError) as caught:
+        _causal_quota_document(tmp_path, projection=projection)
+    assert caught.value.code == "QUOTA_PREVIEW_PROJECTION_INVALID"
+
+
+def test_quota_causal_projection_digest_binds_parsed_bytes(tmp_path, monkeypatch):
+    from pathlib import Path
+    from control_plane import quota_economics_preview_producer as quota
+
+    path = tmp_path / "projection.json"
+    original = json.dumps(quota_projection()).encode()
+    replacement = json.dumps(quota_projection(), indent=2).encode()
+    path.write_bytes(original)
+    read_bytes = Path.read_bytes
+
+    def read_then_replace(self):
+        raw = read_bytes(self)
+        if self == path:
+            path.write_bytes(replacement)
+        return raw
+
+    monkeypatch.setattr(Path, "read_bytes", read_then_replace)
+    projection, digest = quota._load_projection(path)
+    assert projection == quota_projection()
+    assert digest == hashlib.sha256(original).hexdigest()
+
+
+def test_quota_causal_broker_counters_share_a_read_only_snapshot(tmp_path, monkeypatch):
+    import sqlite3
+    from control_plane import quota_economics_preview_producer as quota
+
+    path = quota_broker(tmp_path / "leases.sqlite")
+    connect = sqlite3.connect
+    writer = connect(path)
+    assert writer.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+    injected = []
+
+    def observed_connect(*args, **kwargs):
+        assert "mode=ro" in args[0] and kwargs.get("uri") is True
+        reader = connect(*args, **kwargs)
+
+        def trace(statement):
+            if statement.startswith("SELECT state, COUNT(*) FROM leases") and not injected:
+                writer.execute(
+                    "INSERT INTO leases (id, state, quota_scope) VALUES ('concurrent', 'held', 'bailian:Chris')"
+                )
+                writer.commit()
+                injected.append(True)
+
+        reader.set_trace_callback(trace)
+        return reader
+
+    monkeypatch.setattr(quota.sqlite3, "connect", observed_connect)
+    try:
+        snapshot = quota.read_broker_observation(path)
+        assert injected == [True]
+        assert snapshot["generation"] == 0
+        assert snapshot["leases_by_state"].get("held", 0) == 0
+        assert snapshot["active_by_quota_scope"].get("bailian:Chris", 0) == 0
+        assert writer.execute("SELECT COUNT(*) FROM leases").fetchone()[0] == 1
+    finally:
+        writer.close()
+
+
+def test_quota_causal_preview_identity_tracks_uncheckpointed_wal_observations(tmp_path):
+    import sqlite3
+    from control_plane import executive_capacity_observation_producer as factory
+    from control_plane import quota_economics_preview_producer as quota
+
+    path = tmp_path / "projection.json"
+    path.write_text(json.dumps(quota_projection()))
+    broker = quota_broker(tmp_path / "leases.sqlite")
+    source = factory.validate_worker_capacity_source_config(source_config())
+    writer = sqlite3.connect(broker)
+    assert writer.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+    try:
+        before = quota.produce_quota_economics_preview(
+            source_config=source, projection_path=path,
+            broker_db_path=broker, observed_at=QUOTA_OBSERVED,
+        ).to_dict()
+        writer.execute(
+            "INSERT INTO leases (id, state, quota_scope) VALUES ('wal-update', 'held', 'bailian:Chris')"
+        )
+        writer.commit()
+        after = quota.produce_quota_economics_preview(
+            source_config=source, projection_path=path,
+            broker_db_path=broker, observed_at=QUOTA_OBSERVED,
+        ).to_dict()
+        assert before["broker"]["sha256"] == after["broker"]["sha256"]
+        assert before["broker"]["generation"] == 0
+        assert after["broker"]["generation"] == 1
+        assert before["preview_id"] != after["preview_id"]
+        assert before["broker"]["snapshot_sha256"] != after["broker"]["snapshot_sha256"]
+        assert after["broker"]["snapshot_basis"] == "single_read_only_sqlite_transaction"
+    finally:
+        writer.close()

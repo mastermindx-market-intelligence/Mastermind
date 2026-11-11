@@ -3,13 +3,19 @@ from pathlib import Path
 import pytest
 
 RECORDS = {
-    'app/mastermind_os/src-tauri/src/auth/authorization_continuation.rs': ('71b76671de68819ac6ed92a4d705800aed84b9d51cf46f3858f6f974788cb2cb', ((542, 58, 61, 'int', '600'), (543, 66, 69, 'int', '600'))),
+    'app/mastermind_os/src-tauri/src/auth/authorization_continuation.rs': ('66a8938bd1488245d2598be46689801d467ba65250df898e6c61636d64e72e05', ((542, 58, 61, 'int', '600'), (543, 66, 69, 'int', '600'))),
     'integrations/mastermind_workspace_app/native_authorization_identity.py': ('db7f7f1e82de28d99d23f1391d542599180e5ac0daf7b7e689432c73b0c13102', ((72, 25, 28, 'int', '400'), (94, 29, 32, 'int', '400'), (100, 25, 28, 'int', '403'), (108, 29, 32, 'int', '400'), (113, 33, 36, 'int', '400'), (119, 29, 32, 'int', '403'))),
     # 2026-11-09 MMOS composition pin moves: PR #2351 capacity-fabric OS read
     # (commit 3838b8b82) and master #2344 primary/work-entry composition both
     # shifted the same three fixture 503 operands down; the reviewed tokens
-    # and columns are byte-identical at their merged positions (3812/3817/3821).
-    "app/mastermind_os/src-tauri/src/auth.rs": ('612e97c934d4407c3b08bdf3c15bf75e8df5a1507d4161435b862896acff4737', ((3812, 68, 71, 'int', '503'), (3817, 69, 72, 'int', '503'), (3821, 67, 70, 'int', '503'))),
+    # and columns are byte-identical at their merged positions.
+    # 2026-11-10: the T3 attempt-fleet read seam (f6bfac18b) shifted them again
+    # to 3878/3883/3887; tokens and columns unchanged.
+    # The accepted Paperclip module insertion (master #2395) moves them by one line.
+    # 2026-11-11 WO-20 master merge (feat/mmos-v1-integration-merge): both parents'
+    # reviewed tokens map byte-identically onto the merged source; only the whole-source
+    # digest and line coordinates are requalified. No new literal site is qualified.
+    "app/mastermind_os/src-tauri/src/auth.rs": ('8b939d76e742a0f7f0190cc330a60644481a66df1285720ef8a16deb32aac2d9', ((3971, 68, 71, 'int', '503'), (3976, 69, 72, 'int', '503'), (3980, 67, 70, 'int', '503'))),
     "app/mastermind_os/src/fixtures/discovery-correction-owner.json": (
         "363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f",
         ((163, 18, 21, "int", "401"),)),

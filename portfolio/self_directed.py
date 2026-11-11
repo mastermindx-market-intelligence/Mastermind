@@ -1182,6 +1182,8 @@ def book(*, prices: dict[str, float] | None = None, now: datetime | None = None,
     Settles pending orders first (if the market is open), then returns positions with live
     marks + weights, the allocation scorecard, the market state, and the pending queue.
     `prices` (TICKER→px) overrides live marks (used by tests / a shared price fetch).
+    An eligible dated persisted market mark is the final local carry, with its original
+    vintage retained. Any unpriced nonzero holding leaves totals and weights unknown.
 
     `read_only=True` skips the settle_pending() side-effect so a GET request does not
     mutate state files.  ``resolve_missing_prices=False`` also prevents per-name live
@@ -1196,40 +1198,54 @@ def book(*, prices: dict[str, float] | None = None, now: datetime | None = None,
 
     positions_raw = state.get("positions", {})
     marks: dict[str, float] = {}
+    carried_asof: dict[str, str] = {}
+    asof = _today()
     for ticker, pos in positions_raw.items():
-        px = prices.get(ticker)
+        px = _positive_price(prices.get(ticker))
         if px is None and resolve_missing_prices:
-            px = _current_price(ticker)
-        if px and px > 0:
-            marks[ticker] = float(px)
+            px = _positive_price(_current_price(ticker))
+        if px is None:
+            px = _persisted_position_mark(pos, asof)
+            if px is not None:
+                carried_asof[ticker] = str(pos["current_price_asof"])[:10]
+        if px is not None:
+            marks[ticker] = px
 
-    invested = 0.0
-    for ticker, pos in positions_raw.items():
-        px = marks.get(ticker, pos.get("avg_cost") or 0.0)
-        invested += pos.get("shares", 0.0) * px
+    # Signed quantities count before display rounding; cost basis is never a mark.
+    unpriced_tickers = sorted(
+        ticker for ticker, pos in positions_raw.items()
+        if float(pos.get("shares") or 0.0) != 0.0 and ticker not in marks
+    )
+    valuation_complete = not unpriced_tickers
+    invested = (
+        sum(float(pos.get("shares") or 0.0) * marks.get(ticker, 0.0)
+            for ticker, pos in positions_raw.items())
+        if valuation_complete else None
+    )
     cash = state.get("cash", 0.0)
-    nav = cash + invested
+    nav = cash + invested if invested is not None else None
 
     positions: list[dict] = []
     for ticker, pos in positions_raw.items():
         shares = float(pos.get("shares") or 0.0)
         avg = float(pos.get("avg_cost") or 0.0)
         px = marks.get(ticker)
-        mv = shares * px if px else None
+        mv = shares * px if px is not None else (0.0 if shares == 0.0 else None)
         th = theses.get(ticker) or {}
         positions.append({
             "ticker": ticker,
             "shares": round(shares, 6),
             "avg_cost": round(avg, 4) if avg else None,
-            "current_price": round(px, 4) if px else None,
+            "current_price": round(px, 4) if px is not None else None,
+            "current_price_asof": carried_asof.get(ticker),
             "market_value": round(mv, 2) if mv is not None else None,
             "unrealized_pnl": round((px - avg) * shares, 2) if (px and avg) else None,
             "unrealized_pct": round((px / avg - 1) * 100, 2) if (px and avg) else None,
-            "weight": round(mv / nav, 6) if (mv is not None and nav > 0) else None,
+            "weight": round(mv / nav, 6) if (mv is not None and nav is not None and nav > 0) else None,
             "thesis": th.get("note"),
             "thesis_updated_at": th.get("updated_at"),
         })
-    # heaviest weight first; un-priced names sink to the bottom
+    # Preserve complete-book ordering; partial books have no comparable weights.
     positions.sort(key=lambda p: (p["weight"] if p["weight"] is not None else -1), reverse=True)
 
     weights = [p["weight"] for p in positions if p["weight"] is not None]
@@ -1240,19 +1256,24 @@ def book(*, prices: dict[str, float] | None = None, now: datetime | None = None,
     return {
         "starting_nav": state.get("starting_nav", _STARTING_NAV),
         "inception_date": state.get("inception_date"),
-        "nav": round(nav, 2),
+        "valuation_complete": valuation_complete,
+        "unpriced_tickers": unpriced_tickers,
+        "nav": round(nav, 2) if nav is not None else None,
         "cash": round(cash, 2),
-        "invested": round(invested, 2),
+        "invested": round(invested, 2) if invested is not None else None,
         "positions": positions,
         "allocation": {
-            "cash_pct": round(cash / nav, 6) if nav > 0 else 1.0,
-            "invested_pct": round(invested / nav, 6) if nav > 0 else 0.0,
-            "gross": round(invested / nav, 6) if nav > 0 else 0.0,
+            "cash_pct": (round(cash / nav, 6) if nav > 0 else 1.0) if valuation_complete else None,
+            "invested_pct": (round(invested / nav, 6) if nav > 0 else 0.0) if valuation_complete else None,
+            "gross": (round(invested / nav, 6) if nav > 0 else 0.0) if valuation_complete else None,
             "n_positions": len(positions),
-            "largest_weight": round(max(weights), 6) if weights else 0.0,
-            "total_unrealized_pnl": round(total_unreal, 2),
-            "total_return_pct": round((nav - state.get("starting_nav", _STARTING_NAV))
-                                      / state.get("starting_nav", _STARTING_NAV) * 100, 4),
+            "largest_weight": (round(max(weights), 6) if weights else 0.0) if valuation_complete else None,
+            "total_unrealized_pnl": round(total_unreal, 2) if valuation_complete else None,
+            "total_return_pct": (
+                round((nav - state.get("starting_nav", _STARTING_NAV))
+                      / state.get("starting_nav", _STARTING_NAV) * 100, 4)
+                if valuation_complete else None
+            ),
         },
         "pending": pending,
         "market": _market_status(),

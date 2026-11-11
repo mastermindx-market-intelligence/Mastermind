@@ -132,6 +132,9 @@ def preview(arguments: dict) -> dict:
     if task not in CLASSES or complexity not in COMPLEXITIES:
         raise ValueError("FABRIC_PREVIEW_ARGUMENTS_INVALID")
     composition = shared_route_preview(task, complexity)
+    effective_complexity = composition.get("effective_complexity") if isinstance(composition, dict) else None
+    if not isinstance(effective_complexity, str) or effective_complexity not in COMPLEXITIES:
+        raise ValueError("FABRIC_PREVIEW_EFFECTIVE_COMPLEXITY_INVALID")
     allowed = {row["pool"] for row in catalog()["pools"]}
     if pool is not None and pool not in allowed:
         raise ValueError("FABRIC_PREVIEW_POOL_NOT_CONFIGURED")
@@ -139,7 +142,7 @@ def preview(arguments: dict) -> dict:
         raise ValueError("FABRIC_OWNER_UNAVAILABLE")
     args = ["/opt/homebrew/bin/python3", str(FABRIC), "preview",
             "--id", "hermes-ro-" + uuid.uuid4().hex,
-            "--class", task, "--task-complexity", complexity]
+            "--class", task, "--task-complexity", effective_complexity]
     if pool is not None:
         args += ["--pool", pool]
     try:

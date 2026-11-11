@@ -40,6 +40,7 @@ blocks the queue behind it.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from hashlib import sha256
@@ -90,7 +91,7 @@ CHILD_REQUEST_DIGEST_CONFLICT = "CHILD_REQUEST_DIGEST_CONFLICT"
 ADMISSION_STATES = ("ADMITTED", "REPLAY", "WAIT")
 
 #: Queue-ordering defaults: one priority step per aging interval, capped,
-#: so aging compensates starvation without ever outranking a full class.
+#: so aging provides a capped additive priority boost.
 DEFAULT_AGING_INTERVAL_SECONDS = 1800
 DEFAULT_AGING_PRIORITY_STEP = 1
 DEFAULT_AGING_PRIORITY_CAP = 3
@@ -195,6 +196,11 @@ class AdmissionOutcome:
             raise ValueError("only a WAIT outcome carries a wait reason")
 
 
+def _legacy_admission_command_id(key: tuple[str, str, str]) -> str:
+    """Original spelling, retained only for ordinary IDs and record lookup."""
+    return "child-request:" + sha256("\x1f".join(key).encode("utf-8")).hexdigest()
+
+
 def admission_command_id(request: ChildExecutionRequest) -> str:
     """The deterministic durable command id for one idempotency triple.
 
@@ -204,7 +210,10 @@ def admission_command_id(request: ChildExecutionRequest) -> str:
     exactly one Job can ever be created per triple.
     """
 
-    material = "\x1f".join(request.idempotency_key())
+    key = request.idempotency_key()
+    if not any("\x1f" in part for part in key):
+        return _legacy_admission_command_id(key)
+    material = json.dumps(key, ensure_ascii=False, separators=(",", ":"))
     return "child-request:" + sha256(material.encode("utf-8")).hexdigest()
 
 
@@ -317,8 +326,8 @@ def select_next_ready(
     (or that fail the optional ``eligible`` predicate) are returned in
     ``skipped`` and never block the entries behind them.  Ordering is
     deterministic: effective priority first, then round-robin across
-    roots (highest-priority waiting root first) so one root's flood
-    cannot starve another, then age, then ``job_id``.
+    roots within each returned round (highest-priority waiting root first),
+    then age, then ``job_id``. This orders one snapshot; it owns no cursor.
     """
 
     resolved = policy if policy is not None else ReadyQueuePolicy()
@@ -373,5 +382,4 @@ def select_next_ready(
             ordered.append(bucket.pop(0))
             if not bucket:
                 del remaining[root]
-            break
     return tuple(ordered), tuple(skipped)

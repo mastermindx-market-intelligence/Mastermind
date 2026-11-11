@@ -104,6 +104,30 @@ class Thread:
 
 
 @dataclass(frozen=True, slots=True)
+class LifecycleSnapshot:
+    """Exact native event revision and target metadata, not a permission grant."""
+    thread: Thread
+    sequence: int
+    title: str
+    updated_at: str
+    provider_id: str
+    model: str
+    archived: bool
+    deleted: bool
+
+    def __post_init__(self) -> None:
+        if type(self.thread) is not Thread:
+            raise ValueError("Original native thread required")
+        _int(self.sequence, "event sequence", 0, 2**53 - 1)
+        if self.title != "":
+            _text(self.title, "exact title", 8192)
+        _text(self.updated_at, "native updatedAt", 64)
+        _id(self.provider_id, "provider"); _id(self.model, "model")
+        if type(self.archived) is not bool or type(self.deleted) is not bool:
+            raise ValueError("Explicit native lifecycle state required")
+
+
+@dataclass(frozen=True, slots=True)
 class Run:
     thread: Thread
     run_id: str
@@ -180,7 +204,14 @@ class T3NativeClient:
 
     def capabilities(self) -> dict[str, bool]:
         names = self.schemas.keys()
-        props = self.schemas.get("t3_thread_control", {}).get("properties", {})
+        lifecycle = self.schemas.get("t3_thread_lifecycle")
+        props = lifecycle.get("properties", {}) if type(lifecycle) is dict else {}
+        props = props if type(props) is dict else {}
+        action = props.get("action")
+        actions = action.get("enum", []) if type(action) is dict else []
+        strict = (type(actions) is list and all(type(a) is str for a in actions)
+                  and {"inspect", "delete", "set_model"} <= set(actions)
+                  and all(k in props for k in ("expectedSequence", "expectedTitle", "modelSelection", "threadId")))
         return {
             "read": "t3_thread_read" in names,
             "list": "t3_thread_list" in names,
@@ -192,7 +223,9 @@ class T3NativeClient:
             "model_configuration": "t3_thread_configure" in names,
             "queue_management": "t3_queue" in names,
             "pending_questions": "t3_pending_request" in names,
-            "lifecycle_extension": all(k in props for k in ("action", "expectedUpdatedAt")),
+            "lifecycle_extension": strict,
+            "atomic_model_selection": strict,
+            "confirmed_delete": strict,
         }
 
     def _target(self, thread: Thread) -> str:
@@ -230,7 +263,7 @@ class T3NativeClient:
                             "thread_conflict", "unsupported_operation", "parent_not_active"}:
                     raise Rejected(code)
                 raise ValueError("Unqualified native error/effect")
-            if value.get("isError") not in (None, False):
+            if value.get("isError") is not None and value.get("isError") is not False:
                 raise ValueError("Invalid native error flag")
             body = value.get("structuredContent")
             if type(body) is not dict:
@@ -455,6 +488,88 @@ class T3NativeClient:
         if type(value.get("sequence")) is not int or value["sequence"] < 0:
             raise EffectUnknown(operation, request_id, thread_id)
         return value  # Native command commit receipt, not terminal user acceptance.
+
+    def _require_lifecycle(self) -> None:
+        if not self.capabilities()["lifecycle_extension"]:
+            raise Unavailable("Strict native event-revision lifecycle support is not installed")
+
+    async def lifecycle_snapshot(self, thread: Thread) -> LifecycleSnapshot:
+        """Read bounded native metadata and its per-thread event sequence."""
+        tid = self._target(thread)
+        self._require_lifecycle()
+        value = await self._call("t3_thread_lifecycle", {"action": "inspect", "threadId": tid})
+        if value.get("threadId") != tid or value.get("projectId") != self.scope.project_id:
+            raise Conflict("Native lifecycle observation changed the target or project")
+        try:
+            selection = value["modelSelection"]
+            if type(selection) is not dict:
+                raise ValueError("Native model selection missing")
+            return LifecycleSnapshot(thread, value["expectedSequence"], value["title"], value["updatedAt"],
+                                     selection["instanceId"], selection["model"], value["archived"], value["deleted"])
+        except (KeyError, TypeError, ValueError):
+            raise Unavailable("Native lifecycle snapshot is incomplete or malformed") from None
+
+    async def _recheck_lifecycle(self, snapshot: LifecycleSnapshot) -> str:
+        if type(snapshot) is not LifecycleSnapshot:
+            raise ValueError("Original lifecycle snapshot required")
+        tid = self._target(snapshot.thread)
+        self._require_lifecycle()
+        # Prove real project membership even for caller-constructed snapshots.
+        # This read is not the CAS: the native serialized/SQL boundary owns it.
+        current = await self.lifecycle_snapshot(snapshot.thread)
+        if current != snapshot or current.deleted:
+            raise Conflict("Native lifecycle target changed; inspect and decide again")
+        return tid
+
+    def _lifecycle_receipt(self, value: dict, snapshot: LifecycleSnapshot, request_id: str) -> dict:
+        try:
+            _id(value.get("commandId"), "native command receipt")
+            _int(value.get("sequence"), "native commit sequence", snapshot.sequence + 1, 2**53 - 1)
+        except (ValueError, TypeError):
+            raise EffectUnknown("t3_thread_lifecycle", request_id, snapshot.thread.thread_id, value) from None
+        return value
+
+    async def delete(self, snapshot: LifecycleSnapshot, *, request_id: str,
+                     confirmation_title: str, confirm_delete: bool) -> dict:
+        """Confirm one exact native tombstone; never remove files/worktrees.
+
+        Returns the native commit receipt, not a claim of filesystem deletion or
+        terminal acceptance. No retry, provider availability check or replacement.
+        """
+        _id(request_id, "request_id")
+        if type(snapshot) is not LifecycleSnapshot or confirm_delete is not True:
+            raise ValueError("Explicit deletion confirmation and original snapshot required")
+        if type(confirmation_title) is not str or confirmation_title != snapshot.title:
+            raise Conflict("Deletion confirmation does not match the exact target title")
+        tid = await self._recheck_lifecycle(snapshot)
+        value = await self._call("t3_thread_lifecycle", {"action": "delete", "threadId": tid,
+            "expectedSequence": snapshot.sequence, "expectedTitle": confirmation_title},
+            modifying=True, request_id=request_id, thread_id=tid)
+        receipt = self._lifecycle_receipt(value, snapshot, request_id)
+        return dict(receipt=receipt, native_atomic_precondition=True, retained_tombstone_only=True)
+
+    async def set_model_atomic(self, snapshot: LifecycleSnapshot, *, request_id: str, model: str) -> dict:
+        """Capacity-only, native revision-guarded model change with real readback."""
+        _id(request_id, "request_id")
+        if type(snapshot) is not LifecycleSnapshot:
+            raise ValueError("Original lifecycle snapshot required")
+        self._target(snapshot.thread); self._require_lifecycle()
+        if snapshot.provider_id != self.scope.capacity_provider_id or snapshot.archived or snapshot.deleted:
+            raise Conflict("Only an unarchived Capacity Fabric target can be re-modeled")
+        selected = await self._model(model)
+        tid = await self._recheck_lifecycle(snapshot)
+        value = await self._call("t3_thread_lifecycle", {"action": "set_model", "threadId": tid,
+            "expectedSequence": snapshot.sequence, "modelSelection": selected},
+            modifying=True, request_id=request_id, thread_id=tid)
+        receipt = self._lifecycle_receipt(value, snapshot, request_id)
+        try:
+            observed = await self.lifecycle_snapshot(snapshot.thread)
+            if (observed.sequence < receipt["sequence"] or observed.provider_id != selected["instanceId"]
+                    or observed.model != selected["model"] or observed.deleted or observed.archived):
+                raise Conflict("Native model selection did not read back on the original target")
+        except (Exception, asyncio.CancelledError):
+            raise EffectUnknown("t3_thread_lifecycle", request_id, tid, receipt) from None
+        return dict(receipt=receipt, observed=observed, native_atomic_precondition=True)
 
     async def configuration(self, thread: Thread) -> dict:
         """Read native model/modes without changing permission or provider settings."""

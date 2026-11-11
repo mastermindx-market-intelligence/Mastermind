@@ -560,3 +560,63 @@ describe('KnowledgeLibrary pending source navigation', () => {
     expect(screen.queryByText(loadingText)).toBeNull();
   });
 });
+
+describe('KnowledgeLibrary Memory return destination', () => {
+  it.each(['en', 'zh-CN'] as const)('returns from Records through Memory to Files in %s', async (locale) => {
+    const zh = locale === 'zh-CN';
+    const readMemory = vi.fn(async () => memoryPayload());
+    const readSource = vi.fn(async (request: SourceRequest) => {
+      const payload = sourcePayload({
+        title: 'Original brief', media_type: 'text/markdown',
+        content_utf8: SOURCE_TEXT, content_sha256: SOURCE_SHA,
+      });
+      if (request.sourceRef === RECORD_REF) {
+        payload.selection.source_ref = RECORD_REF;
+        payload.source.path = 'agentos/workstreams/WS-2026-11-MARKET-INTELLIGENCE.md';
+        payload.source.revision = MEM_SOURCE_REV;
+      }
+      return payload;
+    });
+    const { readCatalogue } = await renderWithOwner({ locale, readMemory, readSource });
+    const filesQuery = () => document.getElementById('knowledge-library-files-query') as HTMLInputElement;
+    const recordsQuery = () => document.getElementById('knowledge-library-records-query') as HTMLInputElement;
+    const browseRecords = () => fireEvent.click(screen.getByRole('button', { name: zh ? '浏览全部记录' : 'Browse all records' }));
+    const open = () => fireEvent.click(screen.getByRole('button', { name: zh ? '打开' : 'Open' }));
+    const back = () => fireEvent.click(screen.getByRole('button', { name: zh ? '返回' : 'Back' }));
+    const memory = () => fireEvent.click(screen.getByRole('tab', { name: zh ? '记忆' : 'Memory' }));
+
+    fireEvent.change(filesQuery(), { target: { value: 'brief' } });
+    browseRecords();
+    fireEvent.change(recordsQuery(), { target: { value: 'workstream' } });
+    memory();
+    await waitFor(() => expect(screen.getByText(PREF_VALUE)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: zh ? '返回文件' : 'Back to files' }));
+
+    expect(document.getElementById('knowledge-library-panel-files')).not.toBeNull();
+    expect(document.getElementById('knowledge-library-panel-records')).toBeNull();
+    expect(filesQuery().value).toBe('brief');
+    expect(screen.getByRole('tab', { name: zh ? '文件' : 'Files' }).getAttribute('aria-selected')).toBe('true');
+
+    // The normal file reader and its existing Back path still work.
+    open();
+    await waitFor(() => expect(screen.getByText('Scope and sources for the market intelligence project.')).toBeTruthy());
+    expect(readSource.mock.calls[0][0].sourceRef).toBe(FILE_REF);
+    back();
+    expect(filesQuery().value).toBe('brief');
+
+    // Records retain their independent filter and normal reader origin.
+    browseRecords();
+    expect(recordsQuery().value).toBe('workstream');
+    open();
+    await waitFor(() => expect(screen.getByText('Scope and sources for the market intelligence project.')).toBeTruthy());
+    expect(readSource.mock.calls[1][0].sourceRef).toBe(RECORD_REF);
+    back();
+    expect(recordsQuery().value).toBe('workstream');
+
+    memory();
+    expect(screen.getByText(PREF_VALUE)).toBeTruthy();
+    expect(readMemory).toHaveBeenCalledTimes(1);
+    expect(readCatalogue).toHaveBeenCalledTimes(1);
+    expect(readSource).toHaveBeenCalledTimes(2);
+  });
+});
