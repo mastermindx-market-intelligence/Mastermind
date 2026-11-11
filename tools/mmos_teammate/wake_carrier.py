@@ -1750,6 +1750,34 @@ def run_carrier(pc, t3_factory, opts):
     thread_id = binding["primaryThreadId"]
     t3 = t3_factory(thread_id)
 
+    # R2a finding 12: the bound thread must belong to the bound provider
+    # instance. A stale roster or a recovery that minted a second primary
+    # thread on another instance would otherwise have this carrier wake a
+    # DIFFERENT teammate's conversation. The thread record names its
+    # instance (providerInstanceId, or the snake form) when the build
+    # serves it; a mismatch is fatal before any checkout or send. A read
+    # that fails here changes nothing — the normal scan below fails the
+    # same way inside the protected flow — and a record that names no
+    # instance cannot be checked (the journey must not break on a build
+    # that lacks the field).
+    try:
+        first = t3.messages(1)[0] or {}
+        instance = first.get("providerInstanceId") or \
+            first.get("provider_instance_id")
+    except Exception as exc:  # noqa: BLE001 - the scan below fails properly
+        instance = None
+        log(f"thread unreadable before the instance check ({exc}); "
+            "continuing to the normal scan")
+    if instance and binding.get("providerInstanceId") and \
+            instance != binding["providerInstanceId"]:
+        raise CarrierError(
+            f"thread {thread_id} belongs to provider instance "
+            f"{instance!r}, the binding says "
+            f"{binding['providerInstanceId']!r}; refusing to send")
+    if not instance:
+        log("thread record names no provider instance; the instance check "
+            "cannot fire this run")
+
     # An in_review issue is not in the inbox (inbox-lite serves
     # todo/in_progress/blocked only), so a board reply on one reaches this run
     # through the run binding: PAPERCLIP_ISSUE_ID names the issue the wake was

@@ -223,6 +223,40 @@ def test_checkout_409_rereads_the_issue_and_holds_it_when_it_is_ours():
     assert t3b.sends == []
 
 
+def test_thread_of_another_provider_instance_is_refused():
+    # R2a finding 12: the binding names this teammate's provider instance;
+    # a thread that belongs to ANOTHER instance (a stale roster, a recovery
+    # that minted a second primary thread elsewhere) must never be woken.
+    # Refused before checkout or any send. A matching instance sends
+    # normally; a thread record that names no instance cannot be checked.
+    binding = {"primaryThreadId": "th-1", "providerInstanceId": "assurance"}
+
+    class InstancedT3(FakeT3):
+        def __init__(self, instance, **kw):
+            super().__init__(**kw)
+            self.instance = instance
+
+        def messages(self, count=60):
+            thread, msgs = super().messages(count)
+            thread["providerInstanceId"] = self.instance
+            return thread, msgs
+
+    pc = FakePaperclip(issues=one_issue(), metadata=binding)
+    t3 = InstancedT3("someone-else", replies=["SHOULD NOT SEND"])
+    with pytest.raises(wc.CarrierError) as ei:
+        run(pc, t3)
+    assert "provider instance" in str(ei.value)
+    assert t3.sends == []
+    assert "checkout" not in [c[0] for c in pc.calls]
+    assert pc.issues["is-1"]["status"] == "todo"  # untouched
+
+    pc2 = FakePaperclip(issues=one_issue(), metadata=binding)
+    t3b = InstancedT3("assurance", replies=["line1\nline2\nline3"])
+    assert run(pc2, t3b) == 0
+    assert len(t3b.sends) == 1
+    assert pc2.issues["is-1"]["status"] == "in_review"
+
+
 def test_happy_path_one_send_one_comment_confirmation_status():
     pc, t3 = FakePaperclip(issues=one_issue()), FakeT3(replies=["line1\nline2\nline3"])
     assert run(pc, t3) == 0
