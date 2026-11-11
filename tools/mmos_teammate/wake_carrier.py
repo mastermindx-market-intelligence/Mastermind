@@ -1895,10 +1895,11 @@ def board_feedback(pc, issue):
     A system notice is not the board speaking."""
     reason = None
     rejected = False
-    try:
-        rows = pc.interactions(issue["id"])
-    except CarrierError:
-        rows = []
+    # An unreadable interaction list must fail the run: reading it as empty
+    # turned a REAL rejection into "nothing to do" — the board's decline
+    # went unanswered while the run exited 0. The board state is unknown,
+    # not empty. (The GET retry law already absorbed transients by here.)
+    rows = pc.interactions(issue["id"])
     if isinstance(rows, dict):
         rows = rows.get("interactions") or rows.get("rows") or []
     pending = False

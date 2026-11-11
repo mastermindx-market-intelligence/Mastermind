@@ -78,6 +78,7 @@ class FakePaperclip:
             {"body": body, "authorType": "agent"})
 
     def interactions(self, issue_id):
+        self._guard("interactions")
         return [dict(row) for row in self.interaction_rows]
 
     def request_confirmation(self, issue_id, idem_key, prompt, target=None):
@@ -1509,6 +1510,23 @@ def test_in_review_without_feedback_is_a_noop():
     t3 = FakeT3()
     assert run_bound(pc, t3) == 0
     assert t3.sends == [] and pc.calls == []
+
+
+def test_an_unreadable_interaction_list_never_reads_as_no_feedback():
+    # A failed interactions read turned a REAL rejection into "nothing to
+    # do": the run exited 0, the board's decline was never answered and the
+    # issue looked parked. The read failure must fail the run — the board
+    # state is unknown, not empty.
+    op = fb_op()
+    pc = FakePaperclip(issues=feedback_issue(), fail=("interactions",))
+    pc.comment_rows["is-1"] = [{"body": "answer v1", "authorType": "agent"}]
+    pc.interaction_rows = [board.served_interaction(
+        status="rejected", idem=f"{op}-confirm",
+        result={"outcome": "rejected", "reason": "needs the count"})]
+    t3 = FakeT3(replies=["SHOULD NOT MATTER"])
+    with pytest.raises(wc.CarrierError):
+        run_bound(pc, t3)
+    assert t3.sends == []   # no revision round was guessed at
 
 
 def test_bound_todo_issue_falls_through_to_the_inbox_path():
