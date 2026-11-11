@@ -145,29 +145,10 @@ def _glm_historical_core_source(root, name):
     return path
 
 
-def _broker_busy_source(root, name):
-    """Exact busy-scoped stage source for one converged busy member."""
-    path = Path(root) / BROKER_BUSY_SOURCE_DIRECTORY / name
-    if path.is_symlink() or not path.is_file():
-        raise ValueError("broker busy source is not a regular file: " + name)
-    raw = path.read_bytes()
-    if sha(raw) != BROKER_BUSY_DIGESTS[name]:
-        raise ValueError("broker busy source differs: " + name)
-    return path, raw
-
-
 def before_glm_application_core(manifest):
     if type(manifest) is not dict:
         raise ValueError("native GLM core manifest invalid")
     reverse = {post: prior for prior, (_, post) in GLM_BROKER_TRANSITIONS.items()}
-    # The complete 2121 broker-busy cohort is an admitted application-core
-    # state: its preimage projection lands exactly on the GLM core preimages.
-    if (all("ext/" + name in manifest for name in BROKER_BUSY_PREIMAGES)
-            and all(manifest.get("ext/" + name) == digest
-                    for name, digest in BROKER_BUSY_DIGESTS.items())):
-        previous = dict(manifest)
-        previous.update(BROKER_BUSY_PREBUSY_MEMBERS)
-        return previous
     marked = any(manifest.get("ext/" + name) == digest
                  for name, digest in GLM_CORE_DIGESTS.items()) or (
                  manifest.get("ext/lease_broker.py") in reverse)
@@ -264,17 +245,6 @@ def go_application_dependencies(root, *, staged_manifest=None):
     dependencies = _go_application_dependencies_before_glm(root, staged_manifest=previous)
     if staged_manifest is not None and previous == staged_manifest:
         return dependencies
-    # The complete 2121 broker-busy cohort already carries the reviewed broker
-    # bytes; the GLM helper composition is not re-derived over them. This only
-    # fires for a staged busy cohort, i.e. an explicit --broker-busy-epoch build.
-    if (_BROKER_BUSY_EPOCH and staged_manifest is not None
-            and all(staged_manifest.get("ext/" + name) == digest
-                    for name, digest in BROKER_BUSY_DIGESTS.items())):
-        source, raw = _broker_busy_source(root, "lease_broker.py")
-        dependencies["lease_broker.py"] = {
-            "sha256": sha(raw), "bytes": len(raw),
-            "source": str(source.relative_to(Path(root)))}
-        return dependencies
     for name in GO_APPLICATION_DEPENDENCIES:
         prior = dependencies[name]
         raw = _glm_core_dependency_bytes(root, name, prior["sha256"])
@@ -295,12 +265,6 @@ def go_staged_dependency_hashes(manifest, candidate_hashes):
     previous = before_glm_application_core(manifest)
     if previous == manifest:
         return _go_staged_dependency_hashes_before_glm(manifest, candidate_hashes)
-    # The complete 2021 broker-busy cohort stages its own reviewed broker bytes;
-    # the GLM helper composition is not re-derived over them.
-    if (all("ext/" + name in manifest for name in BROKER_BUSY_PREIMAGES)
-            and all(manifest.get("ext/" + name) == digest
-                    for name, digest in BROKER_BUSY_DIGESTS.items())):
-        return dict(candidate_hashes)
     old_hashes = dict(candidate_hashes)
     reverse = {post: prior for prior, (_, post) in GLM_BROKER_TRANSITIONS.items()}
     for name in GO_APPLICATION_DEPENDENCIES:
@@ -382,14 +346,6 @@ def verify_glm_core_release_records(root, originals, generated):
 
 def compose_glm_application_core(root, output, manifest, files):
     """Advance one complete admitted source cohort without changing its namespace."""
-    # The 2121 broker-busy epoch advances the broker member itself; the GLM
-    # helper composition is qualified over the pre-busy broker lineage and is
-    # not re-derived here. Busy builds carry the broker at its reviewed busy
-    # bytes; non-busy builds keep the exact GLM composition below.
-    if (all("ext/" + name in manifest for name in BROKER_BUSY_PREIMAGES)
-            and all(manifest.get("ext/" + name) == digest
-                    for name, digest in BROKER_BUSY_DIGESTS.items())):
-        return
     if before_glm_application_core(manifest) != manifest:
         raise ValueError("native GLM core was already composed")
     validate_go_base_manifest(
@@ -535,57 +491,6 @@ GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256 = "44dcbb648bfdd0d0c4b6d5866529aec934177
 # historical collector stay accepted. No other source or entrypoint hash moves.
 GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256 = "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d"
 
-
-
-# Approved successor to the exact #2060 native stage; retain its preimages
-# for historical installer fixtures and Go's original base normalization.
-# Forward digests pin the converged 2121 candidate bytes: pick/quota_circuit/
-# fabric_continuation are the PR's composed blobs; fabric_task, remote_sub.sh
-# and lease_broker.py carry the master-side sparse-cwd/refusal-task lines that
-# survived the converge, so their forward pins are re-derived from the tree.
-BROKER_BUSY_STAGE_PREIMAGES = {
-    "fabric_continuation.py": "7a4050051378fcacada2f2fe6d056649fb514077aacfb02751d61d6e67dfe405",
-    "fabric_task.py": "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd",
-    "remote_sub.sh": "0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c"
-}
-BROKER_BUSY_STAGE_DIGESTS = {
-    "fabric_continuation.py": "8b3ab69abc6e61bdae98dea026c4dc5075ab7bc0b062624cb205df4a27a98030",
-    "fabric_task.py": "0e85036189cc074c3b1a463304f1ccadba82038beadff3b51255c1ef2ec68d66",
-    "remote_sub.sh": "e140eb481c8c61f70eea6e8b8bcba175c18ba31bb3423f1ec182384cb54db449"
-}
-BROKER_BUSY_PICKER_PREIMAGE = "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892"
-BROKER_BUSY_QUOTA_PREIMAGE = "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303"
-BROKER_BUSY_PREIMAGES = {
-    **BROKER_BUSY_STAGE_PREIMAGES,
-    # Converged lineage anchor: master's frozen broker preimage (QUOTA_RESET_
-    # PREIMAGES) is the value the historical parents carry; the PR's own
-    # 9525c86b broker preimage belongs to the unmerged PR lineage only.
-    "lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
-    "pick.py": BROKER_BUSY_PICKER_PREIMAGE,
-    "quota_circuit.py": BROKER_BUSY_QUOTA_PREIMAGE,
-}
-# The pre-busy projection of the six-member busy cohort onto master's
-# accepted current members (busy hunks removed = master bytes).
-BROKER_BUSY_PREBUSY_MEMBERS = {
-    "ext/fabric_continuation.py": "7a4050051378fcacada2f2fe6d056649fb514077aacfb02751d61d6e67dfe405",
-    "ext/fabric_task.py": "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68",
-    "ext/remote_sub.sh": "1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca",
-    "ext/lease_broker.py": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
-    "ext/pick.py": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
-    "ext/quota_circuit.py": "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303",
-}
-BROKER_BUSY_DIGESTS = {
-    **BROKER_BUSY_STAGE_DIGESTS,
-    "lease_broker.py": "5af51da91f8c13cedca525a906d211e0e03f53cdd19c041d638d35d85e60a24c",
-    "pick.py": "c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057",
-    "quota_circuit.py": "ba1f2582505a0350260d0bdc4a00f6374a2e1140bc4b6cead84368b606f9970e",
-}
-# The busy epoch's six converged source members live in their own busy-scoped
-# directory. The default build never reads it: default cohorts stage master's
-# reviewed sources (candidate/ and the sealed GLM preimages) unchanged, and
-# only an explicit --broker-busy-epoch build takes the busy sources.
-BROKER_BUSY_SOURCE_DIRECTORY = "candidate/broker_busy_2121"
-_BROKER_BUSY_EPOCH = False
 
 GO_ORIGINAL_ARTIFACT_ADDITIONS = {
     "original_advertised_artifact.py": "46a06945d0e640794cb52945a5caece440abee6da1c0ba13eaff371d9dc6e3c0",
@@ -756,16 +661,6 @@ def before_host_pull_integrity(manifest):
     """Validate the complete host-pull successor without changing its identity."""
     if type(manifest) is not dict:
         raise ValueError("native host-pull integrity manifest invalid")
-    # The 2121 broker-busy epoch projects its six published members onto the
-    # pre-busy composition (master's accepted current members) before any
-    # parent-identity check. Partial or mixed busy cohorts refuse.
-    if all("ext/" + name in manifest for name in BROKER_BUSY_PREIMAGES):
-        busy = {name: manifest["ext/" + name] for name in BROKER_BUSY_PREIMAGES}
-        if any(busy[name] == digest for name, digest in BROKER_BUSY_DIGESTS.items()):
-            if busy != BROKER_BUSY_DIGESTS:
-                raise ValueError("native broker busy cohort differs")
-            manifest = dict(manifest)
-            manifest.update(BROKER_BUSY_PREBUSY_MEMBERS)
     if not any(manifest.get(name) == digest
                for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
         return dict(manifest)
@@ -1874,15 +1769,6 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         for name in GO_PARTICIPANT_ADDITIONS:
             del normalized["ext/" + name]
         normalized["ext/fabric_operator_owner.py"] = GO_PARTICIPANT_OPERATOR_PREIMAGE
-    # Only the full published six-member busy epoch can be normalized. The
-    # original broker/selector and all pre-lease denial fences stay in force.
-    busy = {name: manifest["ext/" + name] for name in BROKER_BUSY_PREIMAGES}
-    if current_diagnostics and any(
-            busy[name] == digest for name, digest in BROKER_BUSY_DIGESTS.items()):
-        if busy != BROKER_BUSY_DIGESTS:
-            raise ValueError("native broker busy cohort differs")
-        normalized.update({"ext/" + name: digest
-                           for name, digest in BROKER_BUSY_STAGE_PREIMAGES.items()})
     ubuntu4 = {name: normalized["ext/" + name] for name in GO_UBUNTU4_DIGESTS}
     if any(ubuntu4[name] == digest for name, digest in GO_UBUNTU4_DIGESTS.items()):
         if not current_diagnostics or ubuntu4 != GO_UBUNTU4_DIGESTS:
@@ -1914,9 +1800,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
             raise ValueError("native Go base differs from captured application dependency")
         historical["ext/" + name] = original
     if manifest["ext/pick.py"] not in {
-            GO_BASE_PICKER_SHA256, BROKER_BUSY_PICKER_PREIMAGE,
-            BROKER_BUSY_DIGESTS["pick.py"],
-            GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]}:
+            GO_BASE_PICKER_SHA256, GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]}:
         raise ValueError("native Go base picker is not the exact composed source")
     historical["ext/pick.py"] = GO_BASE_PICKER_SHA256
     # The new advice epoch was already qualified against its full107 parent.
@@ -1926,13 +1810,7 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         raise ValueError("native Go executor is not the exact composed source")
     historical["ext/remote_sub_exec.py"] = GO_BASE_EXECUTOR_SHA256
     for name, original in GO_SELECTION_SUPPORT_PREIMAGES.items():
-        allowed = {original, GO_SELECTION_SUPPORT_DIGESTS[name]}
-        if name == "quota_circuit.py":
-            # The complete six-member pre-busy epoch retains the exact
-            # already-published quota-circuit preimage. The busy cohort
-            # guard above rejects any partial/mixed fallback source.
-            allowed.add(BROKER_BUSY_QUOTA_PREIMAGE)
-        if manifest["ext/" + name] not in allowed:
+        if manifest["ext/" + name] not in {original, GO_SELECTION_SUPPORT_DIGESTS[name]}:
             raise ValueError("native Go selection support is not the exact composed source")
         historical["ext/" + name] = original
     if manifest["ext/provider_outcome.py"] not in {
@@ -2659,20 +2537,13 @@ def application_carrier_candidate_digests(root):
                  "support_bundle.py": APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]}
     combined = {**publisher,
                 "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
-    # The 2121 broker-busy epoch: the current APPLICATION carriers with the
-    # converged busy source members. It is a complete cohort on its own; a
-    # partial mixture with any earlier cohort still refuses below.
-    busy = {**combined,
-            "remote_sub.sh": BROKER_BUSY_DIGESTS["remote_sub.sh"]}
-    cohorts = (APPLICATION_CARRIER_DIGESTS, sparse, publisher, combined, busy)
+    cohorts = (APPLICATION_CARRIER_DIGESTS, sparse, publisher, combined)
     # Observe regular candidate files before selecting a complete reviewed
     # cohort. A missing, symlinked or foreign forward member must fail its
     # named guard, never silently reselect an historical base.
     observed = {}
     for name in APPLICATION_CARRIER_DIGESTS:
-        source = (_broker_busy_source(root, name)[0]
-                  if _BROKER_BUSY_EPOCH and name in BROKER_BUSY_DIGESTS
-                  else _glm_historical_core_source(root, name))
+        source = _glm_historical_core_source(root, name)
         observed[name] = (None if source.is_symlink() or not source.is_file()
                           else sha(source.read_bytes()))
         if name in GROK47_CANDIDATE_COMPOSITION_DIGESTS:
@@ -2702,22 +2573,6 @@ def normalize_application_carrier_base_manifest(manifest):
         manifest = before_glm_application_core(manifest)
     if type(manifest) is not dict:
         return manifest
-    # The 2121 broker-busy epoch maps its six published members back to the
-    # frozen pre-busy preimages before any parent-identity check, mirroring
-    # validate_go_base_manifest's normalization. Partial or mixed busy
-    # sources still refuse inside that guard.
-    if type(manifest) is dict and all(
-            "ext/" + name in manifest for name in BROKER_BUSY_PREIMAGES):
-        busy = {name: manifest["ext/" + name] for name in BROKER_BUSY_PREIMAGES}
-        if any(busy[name] == digest for name, digest in BROKER_BUSY_DIGESTS.items()):
-            if busy != BROKER_BUSY_DIGESTS:
-                raise ValueError("native broker busy cohort differs")
-            # Project each busy member onto the value the accepted master
-            # parents carry: the pre-busy composition equals master's current
-            # member bytes (verified member-by-member by the busy inverse
-            # chain in the launcher-upgrade test).
-            manifest = dict(manifest)
-            manifest.update(BROKER_BUSY_PREBUSY_MEMBERS)
     # Qualify the exact repaired parent before the existing APPLICATION inverse.
     # main() and Go validation share this ordering and retain actual output hashes.
     manifest = before_host_pull_integrity(before_sparse_index_advice(before_quota_reset_recovery(manifest)))
@@ -2770,11 +2625,7 @@ def main():
                         help="preserve exact selected43 five native members; source-only profile")
     parser.add_argument("--include-application-glm", action="store_true",
                         help="seal the optional GLM application adapter and coding-plan projection; requires HTTP and Go")
-    parser.add_argument("--broker-busy-epoch", action="store_true",
-                        help="stage the six converged AUTO pre-release broker-busy sources from their busy-scoped directory; the default build keeps master's reviewed sources unchanged")
     args = parser.parse_args()
-    global _BROKER_BUSY_EPOCH
-    _BROKER_BUSY_EPOCH = bool(args.broker_busy_epoch)
     if (args.include_provider_plan_fleet_launch_repair
             and not args.include_provider_plan_memory_support):
         parser.error("--include-provider-plan-fleet-launch-repair requires --include-provider-plan-memory-support")
@@ -2811,12 +2662,7 @@ def main():
     files = {}
     application_carrier = application_carrier_candidate_digests(root)
     for name in sorted(BASE_FILES | ADDITIONS):
-        if _BROKER_BUSY_EPOCH and name in BROKER_BUSY_DIGESTS:
-            # Busy-scoped staging: only an explicit --broker-busy-epoch build
-            # takes the six converged busy sources. Default cohorts never enter
-            # this path, so master's reviewed 107 build stays byte-exact.
-            source, raw = _broker_busy_source(root, name)
-        elif name in GLM_CORE_PREIMAGES:
+        if name in GLM_CORE_PREIMAGES:
             source = _glm_historical_core_source(root, name)
             raw = source.read_bytes()
         else:
@@ -2976,6 +2822,465 @@ def main():
     print(json.dumps({"native_files": len(manifest), "total_bytes": sum(v["bytes"] for v in files.values()),
         "manifest_sha256": sha((output / "native-manifest.json").read_bytes()),
         "source_inventory_sha256": sha((output / "native-source-inventory.json").read_bytes())}))
+
+
+# Upstream (master) definitions are captured before the busy wrappers rebind them.
+_BEFORE_GLM_APPLICATION_CORE_UPSTREAM = before_glm_application_core
+_GO_APPLICATION_DEPENDENCIES_UPSTREAM = go_application_dependencies
+_GO_STAGED_DEPENDENCY_HASHES_UPSTREAM = go_staged_dependency_hashes
+_COMPOSE_GLM_APPLICATION_CORE_UPSTREAM = compose_glm_application_core
+_BEFORE_HOST_PULL_INTEGRITY_UPSTREAM = before_host_pull_integrity
+_APPLICATION_CARRIER_CANDIDATE_DIGESTS_UPSTREAM = application_carrier_candidate_digests
+_NORMALIZE_APPLICATION_CARRIER_BASE_MANIFEST_UPSTREAM = normalize_application_carrier_base_manifest
+_VALIDATE_GO_BASE_MANIFEST_UPSTREAM = validate_go_base_manifest
+_MAIN_UPSTREAM = main
+
+# Additive busy wrappers: master's byte-exact definitions stay above; each
+# wrapper delegates to its upstream for every non-busy input.
+
+
+def _broker_busy_full_cohort(manifest):
+    if type(manifest) is not dict:
+        return False
+    present = all("ext/" + name in manifest for name in BROKER_BUSY_PREIMAGES)
+    if not present:
+        return False
+    busy = {name: manifest["ext/" + name] for name in BROKER_BUSY_PREIMAGES}
+    if any(busy[name] == digest for name, digest in BROKER_BUSY_DIGESTS.items()):
+        if busy != BROKER_BUSY_DIGESTS:
+            raise ValueError("native broker busy cohort differs")
+        return True
+    return False
+
+
+def _project_busy(manifest):
+    projected = dict(manifest)
+    projected.update(BROKER_BUSY_PREBUSY_MEMBERS)
+    return projected
+
+
+def _broker_busy_source(root, name):
+    """Exact busy-scoped stage source for one converged busy member."""
+    path = Path(root) / BROKER_BUSY_SOURCE_DIRECTORY / name
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("broker busy source is not a regular file: " + name)
+    raw = path.read_bytes()
+    if sha(raw) != BROKER_BUSY_DIGESTS[name]:
+        raise ValueError("broker busy source differs: " + name)
+    return path, raw
+
+
+def before_glm_application_core(manifest):
+    """Upstream projection, with the complete busy cohort admitted first."""
+    if _broker_busy_full_cohort(manifest):
+        return _project_busy(manifest)
+    return _BEFORE_GLM_APPLICATION_CORE_UPSTREAM(manifest)
+
+
+def go_application_dependencies(root, *, staged_manifest=None):
+    previous = (before_glm_application_core(dict(staged_manifest))
+                if staged_manifest is not None else None)
+    dependencies = _go_application_dependencies_before_glm(root, staged_manifest=previous)
+    if staged_manifest is not None and previous == staged_manifest:
+        return dependencies
+    # The complete 2121 broker-busy cohort already carries the reviewed broker
+    # bytes; the GLM helper composition is not re-derived over them. This only
+    # fires for a staged busy cohort, i.e. an explicit --broker-busy-epoch build.
+    if (_BROKER_BUSY_EPOCH and staged_manifest is not None
+            and all(staged_manifest.get("ext/" + name) == digest
+                    for name, digest in BROKER_BUSY_DIGESTS.items())):
+        source, raw = _broker_busy_source(root, "lease_broker.py")
+        dependencies["lease_broker.py"] = {
+            "sha256": sha(raw), "bytes": len(raw),
+            "source": str(source.relative_to(Path(root)))}
+        return dependencies
+    for name in GO_APPLICATION_DEPENDENCIES:
+        prior = dependencies[name]
+        raw = _glm_core_dependency_bytes(root, name, prior["sha256"])
+        dependencies[name] = {
+            "sha256": sha(raw), "bytes": len(raw),
+            "source": "candidate/" + name,
+            "composition": {
+                "schema": "mastermind.glm-native-core-source.v1",
+                "preimage_sha256": prior["sha256"],
+                "candidate_sha256": GLM_CORE_DIGESTS[name],
+                "inherited": prior.get("composition"),
+            },
+        }
+    return dependencies
+
+
+def go_staged_dependency_hashes(manifest, candidate_hashes):
+    """Upstream staged hashes, with the complete busy cohort taken verbatim."""
+    if _broker_busy_full_cohort(manifest):
+        return dict(candidate_hashes)
+    return _GO_STAGED_DEPENDENCY_HASHES_UPSTREAM(manifest, candidate_hashes)
+
+
+def compose_glm_application_core(root, output, manifest, files):
+    """Upstream GLM composition, skipped for the complete busy cohort."""
+    if _broker_busy_full_cohort(manifest):
+        return
+    return _COMPOSE_GLM_APPLICATION_CORE_UPSTREAM(root, output, manifest, files)
+
+
+def before_host_pull_integrity(manifest):
+    """Upstream integrity, with the busy cohort projected to its pre-busy parents."""
+    if _broker_busy_full_cohort(manifest):
+        manifest = _project_busy(manifest)
+    return _BEFORE_HOST_PULL_INTEGRITY_UPSTREAM(manifest)
+
+
+def validate_go_base_manifest(manifest, dependency_hashes):
+    """Upstream validation, with the complete busy cohort projected first."""
+    if _broker_busy_full_cohort(manifest):
+        manifest = _project_busy(manifest)
+    return _VALIDATE_GO_BASE_MANIFEST_UPSTREAM(manifest, dependency_hashes)
+
+
+def application_carrier_candidate_digests(root):
+    sparse = {**APPLICATION_CARRIER_DIGESTS,
+              "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
+    publisher = {**APPLICATION_CARRIER_DIGESTS,
+                 "support_bundle.py": APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]}
+    combined = {**publisher,
+                "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
+    # The 2121 broker-busy epoch: the current APPLICATION carriers with the
+    # converged busy source members. It is a complete cohort on its own; a
+    # partial mixture with any earlier cohort still refuses below.
+    busy = {**combined,
+            "remote_sub.sh": BROKER_BUSY_DIGESTS["remote_sub.sh"]}
+    cohorts = (APPLICATION_CARRIER_DIGESTS, sparse, publisher, combined, busy)
+    # Observe regular candidate files before selecting a complete reviewed
+    # cohort. A missing, symlinked or foreign forward member must fail its
+    # named guard, never silently reselect an historical base.
+    observed = {}
+    for name in APPLICATION_CARRIER_DIGESTS:
+        source = (_broker_busy_source(root, name)[0]
+                  if _BROKER_BUSY_EPOCH and name in BROKER_BUSY_DIGESTS
+                  else _glm_historical_core_source(root, name))
+        observed[name] = (None if source.is_symlink() or not source.is_file()
+                          else sha(source.read_bytes()))
+        if name in GROK47_CANDIDATE_COMPOSITION_DIGESTS:
+            accepted = {cohort[name] for cohort in cohorts}
+            accepted.add(GROK47_CANDIDATE_COMPOSITION_DIGESTS[name])
+            if observed[name] not in accepted:
+                raise ValueError("accepted Grok forward composition mismatch: " + name)
+    if any(observed == cohort for cohort in cohorts):
+        return observed
+    if any(observed[name] in {cohort[name] for cohort in cohorts}
+           for name in APPLICATION_CARRIER_DIGESTS):
+        raise ValueError("application carrier candidate cohort is incomplete")
+    return {}
+
+
+def normalize_application_carrier_base_manifest(manifest):
+    """Upstream normalization, with the busy cohort projected to its pre-busy parents."""
+    if _broker_busy_full_cohort(manifest):
+        manifest = _project_busy(manifest)
+        return _NORMALIZE_APPLICATION_CARRIER_BASE_MANIFEST_UPSTREAM(manifest)
+    return _NORMALIZE_APPLICATION_CARRIER_BASE_MANIFEST_UPSTREAM(manifest)
+
+
+def _stage_output_summary(root, output, inventory, manifest, files, pure_yaml, extra):
+    """Busy-epoch build tail: same inventory record and summary as the default
+    build (fields and semantics identical to the upstream main() tail)."""
+    record = {"qualified_pure_yaml": pure_yaml,
+        "schema": "native-code-source-inventory.v1",
+        "native_code_files": len(manifest),
+        "baseline_code_files": len(BASE_FILES) + 1,
+        "new_code_files": sorted(ADDITIONS | extra),
+        "source_status":
+            "SOURCE_INVENTORY_REQUIRES_PROTECTED_RELEASE_AND_INSTALLATION_EVIDENCE",
+        "stable_ext": inventory["stable_ext"], "files": files,
+        "excluded_historical_importer": "fabric_operator_recovery.py",
+        "excluded_comment_only_edges": [["qwen_exec.sh", "lane2.py"],
+            ["qwen_exec.sh", "qwen_review.py"], ["mm_feeder_lib.py", "mm_feeder.sh"]],
+        "external_owners": ["System Python/Bash and installed provider CLIs",
+            "Original glm_shim/go_shim/lane_bin runtime owners",
+            "Original dedicated Claude/Codex profile owners",
+            "Original fixed historical evidence/source-validator locations"],
+        "deployment_rule":
+            "Modified bytes must come from protected merged source; rebuild after any source change."}
+    for name, value in (("native-manifest.json", manifest),
+                        ("native-source-inventory.json", record)):
+        (output / name).write_text(json.dumps(value, sort_keys=True, indent=2) + "\n")
+    print(json.dumps({"native_files": len(manifest),
+        "total_bytes": sum(v["bytes"] for v in files.values()),
+        "manifest_sha256": sha((output / "native-manifest.json").read_bytes()),
+        "source_inventory_sha256":
+            sha((output / "native-source-inventory.json").read_bytes())}))
+
+
+def main():
+    """Master build entry point, plus the explicit --broker-busy-epoch mode."""
+    import sys
+    argv = sys.argv[1:]
+    if "--broker-busy-epoch" not in argv:
+        return _MAIN_UPSTREAM()
+    global _BROKER_BUSY_EPOCH
+    _BROKER_BUSY_EPOCH = True
+    argv = [arg for arg in argv if arg != "--broker-busy-epoch"]
+    draft = Path(__file__).resolve().parent
+    root = draft.parent
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output', type=Path, default=draft,
+                        help='artifact directory outside immutable released source when deploying')
+    parser.add_argument('--include-go-application', action='store_true',
+                        help='include the fixed Go entry/handler source pair; does not enroll or start services')
+    parser.add_argument('--include-application-http', action='store_true',
+                        help='seal fixed HTTP transport metadata; requires Go ingress and grants no application permission')
+    parser.add_argument('--include-provider-plan-application', action='store_true',
+                        help='preserve the exact selected provider plan in the reviewed APPLICATION source')
+    parser.add_argument('--include-quota-reset-recovery', action='store_true',
+                        help='compose the exact four-member H2 successor; does not qualify accounts or select a runtime')
+    parser.add_argument("--include-provider-plan-remote-placement", action="store_true", help="preserve the exact sequence-39 picker in the provider/APPLICATION source; requires provider plan and excludes the separately qualified H2 composition")
+    parser.add_argument("--include-provider-plan-maintenance-guard", action="store_true")
+    parser.add_argument("--include-provider-plan-terminal-diagnostics", action="store_true",
+                        help="preserve installed native41 diagnostics and the retained guard; requires maintenance guard")
+    parser.add_argument("--include-provider-plan-memory-support", action="store_true",
+                        help="preserve the complete native42 memory/support cohort; requires terminal diagnostics")
+    parser.add_argument("--include-provider-plan-fleet-launch-repair", action="store_true",
+                        help="preserve the complete native43 fleet cohort; requires memory support")
+    parser.add_argument("--include-native43-retained-five", action="store_true",
+                        help="preserve exact selected43 five native members; source-only profile")
+    parser.add_argument("--include-application-glm", action="store_true",
+                        help='seal the optional GLM application adapter and coding-plan projection; requires HTTP and Go')
+    args = parser.parse_args(argv)
+    _main_busy_build(args, root)
+
+
+def _main_busy_build(args, root):
+    """Busy-epoch staging: the master 107 build with the six busy members
+    staged from their busy-scoped directory. Every other member keeps
+    master's exact staging semantics (this body mirrors the upstream loop
+    with only the busy-source branch added)."""
+    draft = Path(__file__).resolve().parent
+    output = args.output
+    inventory = json.loads((draft / 'native-preimages.json').read_text())
+    if (inventory.get('schema') != 'native-code-preimages.v1'
+            or set(inventory['files']) != BASE_FILES | {'pool_launcher.sh'}):
+        raise ValueError('explicit native preimage inventory differs')
+    rows = inventory['files']
+    stage = output / "native-code-stage"
+    (stage / "ext").mkdir(parents=True, exist_ok=True)
+    manifest = {}
+    files = {}
+    application_carrier = application_carrier_candidate_digests(root)
+    for name in sorted(BASE_FILES | ADDITIONS):
+        if name in BROKER_BUSY_DIGESTS:
+            source, raw = _broker_busy_source(root, name)
+        elif name in GLM_CORE_PREIMAGES:
+            source = _glm_historical_core_source(root, name)
+            raw = source.read_bytes()
+        else:
+            if application_carrier and name in APPLICATION_CARRIER_DIGESTS:
+                if name in GROK47_MERGED_SOURCE_DIGESTS:
+                    historical = root.parent / "grok47" / "overlay" / name
+                    if (historical.is_symlink() or not historical.is_file()
+                            or sha(historical.read_bytes()) != GROK47_MERGED_SOURCE_DIGESTS[name]):
+                        raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
+                source = root / "candidate" / name
+                if source.is_symlink() or not source.is_file():
+                    raise ValueError("application carrier source is not a regular file: " + name)
+                raw = source.read_bytes()
+                if sha(raw) != application_carrier[name]:
+                    raise ValueError("application carrier source changed during build")
+            elif name in GROK47_MERGED_SOURCE_DIGESTS:
+                source = root.parent / "grok47" / "overlay" / name
+                if source.is_symlink() or not source.is_file():
+                    raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
+                raw = source.read_bytes()
+                if sha(raw) != GROK47_MERGED_SOURCE_DIGESTS[name]:
+                    raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
+                if name in GROK47_CANDIDATE_COMPOSITION_DIGESTS:
+                    source = root / "candidate" / name
+                    if source.is_symlink() or not source.is_file():
+                        raise ValueError("accepted Grok forward composition mismatch: " + name)
+                    raw = source.read_bytes()
+                    if sha(raw) != GROK47_CANDIDATE_COMPOSITION_DIGESTS[name]:
+                        raise ValueError("accepted Grok forward composition mismatch: " + name)
+            else:
+                choices = (root / "candidate" / name,)
+                if name not in PREIMAGE_ONLY:
+                    choices += (root / "source" / name,)
+                source = next((p for p in choices if p.is_file()), None)
+                if source is None or source.is_symlink():
+                    raise ValueError("missing explicit regular code dependency: " + name)
+                raw = source.read_bytes()
+        preimage = rows.get(name)
+        if name in BASE_FILES:
+            original = root / "source" / PREIMAGE_ONLY.get(name, name)
+            if (not preimage or original.is_symlink()
+                    or sha(original.read_bytes()) != preimage):
+                raise ValueError("installed preimage mismatch: " + name)
+        relative = "ext/" + name
+        (stage / relative).write_bytes(raw)
+        manifest[relative] = sha(raw)
+        source_ref = ("../grok47/overlay/" + name if not (application_carrier and name in APPLICATION_CARRIER_DIGESTS) and name in GROK47_MERGED_SOURCE_DIGESTS
+                      and name not in GROK47_CANDIDATE_COMPOSITION_DIGESTS
+                      else str(source.relative_to(root)))
+        if name in GLM_CORE_PREIMAGES:
+            source_ref = str(source.relative_to(root))
+        files[relative] = {"source": source_ref, "sha256": sha(raw),
+                           "installed_preimage_sha256": preimage, "bytes": len(raw)}
+    source = root / "candidate/pool_launcher.sh"
+    if source.is_symlink() or sha((root/'source/pool_launcher.sh').read_bytes()) != rows['pool_launcher.sh']:
+        raise ValueError('installed pool launcher preimage mismatch')
+    raw = source.read_bytes()
+    (stage / "pool").write_bytes(raw)
+    manifest["pool"] = sha(raw)
+    files["pool"] = {"source": str(source.relative_to(root)), "sha256": sha(raw),
+                     "installed_preimage_sha256": rows['pool_launcher.sh'], "bytes": len(raw)}
+    if {p.name for p in (stage / "ext").iterdir()} != BASE_FILES | ADDITIONS:
+        raise ValueError("unexpected staged native file")
+    pure_yaml = json.loads((root/"candidate/paid_pyyaml_provenance.json").read_bytes())
+    pure_archive=(root/"candidate/paid_pyyaml_6_0_3.zip").read_bytes()
+    if sha(pure_archive) != pure_yaml["zip_sha256"]:
+        raise ValueError('qualified pure YAML archive differs')
+    lock=(root.parents[2]/pure_yaml['lock_path']).read_bytes()
+    if (sha(lock)!=pure_yaml['lock_sha256'] or pure_yaml['package']!='PyYAML'
+            or pure_yaml['version']!='6.0.3'
+            or ('PyYAML==6.0.3 --hash=sha256:'+pure_yaml['artifact_sha256']).encode() not in lock):
+        raise ValueError('qualified pure YAML lock differs')
+    import zipfile, io
+    with zipfile.ZipFile(io.BytesIO(pure_archive)) as archive:
+        if len(archive.namelist())!=len(set(archive.namelist())) or set(archive.namelist())!=set(pure_yaml['files']):
+            raise ValueError('qualified pure YAML closure differs')
+        for name,item in pure_yaml['files'].items():
+            raw=archive.read(name)
+            if (name not in {'LICENSE','METADATA'} and not (name.startswith('yaml/') and name.endswith('.py'))
+                    or len(raw)!=item['bytes'] or sha(raw)!=item['sha256']):
+                raise ValueError('qualified pure YAML member differs')
+    if args.include_provider_plan_application:
+        compose_provider_application_stage(root, output, manifest, files)
+    if args.include_provider_plan_remote_placement:
+        compose_provider_remote_placement_stage(root, output, manifest, files)
+    if args.include_provider_plan_maintenance_guard:
+        compose_provider_maintenance_guard_stage(root, output, manifest, files)
+    if args.include_quota_reset_recovery:
+        compose_quota_reset_stage(root, output, manifest, files)
+    normalize_application_carrier_base_manifest(
+        before_provider_application(before_quota_reset_recovery(manifest)))
+    # Qualify the complete repair cohort even when no APPLICATION pair is added.
+    # Provider-plan and quota-reset variants arrive here as the composed
+    # 116-member endpoint; the same historical inversions the adjacent
+    # normalize call applies expose the 107-member admission view (exact
+    # fabric_task/lane_runtime digests, sparse-preflight executor successor,
+    # quiescence broker successor) that the composed parent closure accepts.
+    before_admission_integrity(before_host_pull_integrity(before_sparse_index_advice(
+        before_provider_application(before_quota_reset_recovery(manifest)))))
+    if args.include_provider_plan_terminal_diagnostics:
+        compose_provider_terminal_diagnostics_stage(root, output, manifest, files)
+    if args.include_provider_plan_memory_support:
+        compose_provider_memory_support_stage(root, output, manifest, files)
+    if args.include_provider_plan_fleet_launch_repair:
+        compose_provider_fleet_launch_repair_stage(root, output, manifest, files)
+    compose_glm_application_core(root, output, manifest, files)
+    component = stage_external_go_component(root, output, inventory["stable_ext"], staged_manifest=manifest)
+    if args.include_go_application:
+        compose_go_stage(root, output, manifest, files, component)
+    extra = {"native_go_entry.py", "go_application_handler.py"} if args.include_go_application else set()
+    if args.include_provider_plan_application:
+        extra |= {Path(name).name for name in PROVIDER_APPLICATION_MEMBERS}
+    if args.include_provider_plan_memory_support:
+        extra |= {Path(name).name for name in PROVIDER_MEMORY_SUPPORT_ADDITIONS}
+    if args.include_application_http:
+        if args.include_native43_retained_five:
+            # Freeze the already reviewed H4 GLM source projection at its real
+            # originating commit, rather than embedding this PR's changing HEAD.
+            # The existing GLM compiler rechecks every pinned current input and
+            # requires regenerated bytes to equal this exact captured artifact.
+            projection = root / "rollout/provider_application/native43_retained/application_http_realms.v2.json"
+            if projection.is_symlink() or not projection.is_file():
+                raise ValueError("native43 retained-five GLM projection is not a regular file")
+            raw_projection = projection.read_bytes()
+            if sha(raw_projection) != "d504f7300e06694e45000a0e200a43b80c4e2c9ed4626bae15170d7019491dfa":
+                raise ValueError("native43 retained-five captured GLM projection differs")
+            compose_application_http_stage(
+                root, output, manifest, files, include_glm=True,
+                captured_projection=raw_projection, captured_projection_sha256=sha(raw_projection))
+        else:
+            compose_application_http_stage(
+                root, output, manifest, files, include_glm=args.include_application_glm)
+        extra |= {Path(name).name for name in HTTP_GENERATION_MEMBERS}
+    if args.include_application_glm:
+        extra |= {name.split("/", 1)[1] for name in GLM_HTTP_GENERATION_MEMBERS}
+    if args.include_native43_retained_five:
+        compose_native43_retained_five_stage(root, output, manifest, files)
+    if {p.name for p in (stage / "ext").iterdir()} != BASE_FILES | ADDITIONS | extra:
+        raise ValueError("unexpected composed native file")
+    _stage_output_summary(root, output, inventory, manifest, files, pure_yaml, extra)
+
+
+
+
+# ---------------------------------------------------------------------------
+# Converge 2121 broker-busy epoch (probe-law relocation block).
+#
+# The definitions above are byte-identical to origin/master. Everything the
+# busy epoch adds lives in this cleanly-appended block: the busy cohort pins,
+# additive wrappers around the master functions, and the busy-aware main().
+# Default (non-busy) builds execute master's exact code paths unchanged; the
+# wrappers delegate to the upstream definitions for every non-busy input.
+# ---------------------------------------------------------------------------
+
+# Approved successor to the exact #2060 native stage; retain its preimages
+# for historical installer fixtures and Go's original base normalization.
+# Forward digests pin the converged 2121 candidate bytes: pick/quota_circuit/
+# fabric_continuation are the PR's composed blobs; fabric_task, remote_sub.sh
+# and lease_broker.py carry the master-side sparse-cwd/refusal-task lines that
+# survived the converge, so their forward pins are re-derived from the tree.
+BROKER_BUSY_STAGE_PREIMAGES = {
+    "fabric_continuation.py": "7a4050051378fcacada2f2fe6d056649fb514077aacfb02751d61d6e67dfe405",
+    "fabric_task.py": "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd",
+    "remote_sub.sh": "0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c"
+}
+BROKER_BUSY_STAGE_DIGESTS = {
+    "fabric_continuation.py": "8b3ab69abc6e61bdae98dea026c4dc5075ab7bc0b062624cb205df4a27a98030",
+    "fabric_task.py": "0e85036189cc074c3b1a463304f1ccadba82038beadff3b51255c1ef2ec68d66",
+    "remote_sub.sh": "e140eb481c8c61f70eea6e8b8bcba175c18ba31bb3423f1ec182384cb54db449"
+}
+BROKER_BUSY_PICKER_PREIMAGE = "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892"
+BROKER_BUSY_QUOTA_PREIMAGE = "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303"
+BROKER_BUSY_PREIMAGES = {
+    **BROKER_BUSY_STAGE_PREIMAGES,
+    # Converged lineage anchor: master's frozen broker preimage (QUOTA_RESET_
+    # PREIMAGES) is the value the historical parents carry; the PR's own
+    # 9525c86b broker preimage belongs to the unmerged PR lineage only.
+    "lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
+    "pick.py": BROKER_BUSY_PICKER_PREIMAGE,
+    "quota_circuit.py": BROKER_BUSY_QUOTA_PREIMAGE,
+}
+# The pre-busy projection of the six-member busy cohort onto master's
+# accepted current members (busy hunks removed = master bytes).
+BROKER_BUSY_PREBUSY_MEMBERS = {
+    "ext/fabric_continuation.py": "7a4050051378fcacada2f2fe6d056649fb514077aacfb02751d61d6e67dfe405",
+    "ext/fabric_task.py": "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68",
+    "ext/remote_sub.sh": "1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca",
+    "ext/lease_broker.py": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
+    "ext/pick.py": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
+    "ext/quota_circuit.py": "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303",
+}
+BROKER_BUSY_DIGESTS = {
+    **BROKER_BUSY_STAGE_DIGESTS,
+    "lease_broker.py": "5af51da91f8c13cedca525a906d211e0e03f53cdd19c041d638d35d85e60a24c",
+    "pick.py": "c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057",
+    "quota_circuit.py": "ba1f2582505a0350260d0bdc4a00f6374a2e1140bc4b6cead84368b606f9970e",
+}
+# The busy epoch's six converged source members live in their own busy-scoped
+# directory. The default build never reads it: default cohorts stage master's
+# reviewed sources (candidate/ and the sealed GLM preimages) unchanged, and
+# only an explicit --broker-busy-epoch build takes the busy sources.
+BROKER_BUSY_SOURCE_DIRECTORY = "candidate/broker_busy_2121"
+_BROKER_BUSY_EPOCH = False
+
+
+
+
+
+
+
 
 
 if __name__ == "__main__":
