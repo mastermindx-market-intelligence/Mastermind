@@ -19,9 +19,10 @@ panel does not replace the principal's: the principal runs one on the merged res
    export, not the checkout. Do not change those files until every reviewer has returned.
 2. One reviewer per question, each `deepseek-v4.1-flash` at effort `max`, started together.
    Each gets its own result folder `/tmp/<name>/<q>/`.
-3. One `kimi-k3.1-pro` reviewer with the attacker's brief when the Kimi pool is free. If it
-   fails with a full pool, wait five minutes and restart the same thread once; if it fails
-   again, go on without it and say so.
+3. One more `deepseek-v4.1-flash` reviewer with the attacker's brief. Kimi's limit was cut
+   by 70 percent on 2026-11-11, so `kimi-k3.1-pro` is no longer part of every panel. The
+   principal adds one Kimi attacker only when the surface decides what program runs or who
+   holds a credential and the DeepSeek answers disagree or leave a HIGH unsettled.
 4. Reviewers are blind to each other, to the lane's own attack round and to earlier findings.
    Their session start shows the checkout's recent commit subjects and the memory index, so a
    commit subject must not describe the defect a reviewer is meant to find unprompted.
@@ -42,7 +43,7 @@ Use every question that applies to the diff; add a fifth when the surface has it
 4. **Install and undo.** Installation, cut-over, upgrade and rollback: what is replaced while
    something else is reading it, what a second run does, what rollback restores and loses.
 
-Attacker's brief (Kimi): you control one input the code reads (name which). Get it to run a
+Attacker's brief: you control one input the code reads (name which). Get it to run a
 program of your choosing, disclose a credential, or act as someone else.
 
 ## What every reviewer is told

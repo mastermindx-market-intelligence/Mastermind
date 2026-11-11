@@ -73,13 +73,17 @@ directory your brief names, each on a port you pick and state in your return.
     now and then (a 502 from the gateway, seen twice in one hour on 2026-11-11): tell every
     DeepSeek child to write its result file early and keep adding to it, and restart the same
     thread once when it fails that way.
-  - `kimi-k3.1-pro` is free but slow and shared by every lane (one pool, about 150 tokens a
-    second). Use it for the hardest part of your lane: the design question, the attack on
-    your diff, the bug you failed at twice. One Kimi child per lane at a time. If it fails
-    with `FABRIC_ALL_ROUTES_COOLING`, the pool is full: wait five minutes and restart the
-    same thread once.
+  - `kimi-k3.1-pro` is scarce from 2026-11-11: its provider cut our limit by 70 percent, and
+    one small pool serves every lane. It is for a problem the other models have already
+    failed at, nothing else: a bug a `glm-5.3` child failed at twice, or a design question
+    your own attempt and one GLM attempt both got wrong. Write in your ledger what failed
+    before you start one. Attack rounds, reviews, test writing and desktop driving do not
+    go to Kimi; use `deepseek-v4.1-flash` at effort `max`. One Kimi child per lane at a time,
+    and let one that is already running finish. If it fails with
+    `FABRIC_ALL_ROUTES_COOLING`, the pool is full: do that part with GLM or DeepSeek instead
+    of waiting.
   - `glm-5.3` is cheap. It is the default for a child that owns a slice of implementation.
-    At most two of these (or Kimi) at once per driver.
+    At most two of these at once per driver.
 - You are a driver, and your own attention is the scarce thing in your lane. If a step is a
   lookup, a census, a test run or a mechanical edit, give it to a DeepSeek child with the
   exact check that proves it, and verify that check's output yourself. Do not hand a child a
