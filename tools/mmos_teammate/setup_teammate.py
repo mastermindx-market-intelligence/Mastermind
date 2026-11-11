@@ -220,6 +220,9 @@ def write_carrier_config(spec, agent_dir):
     # Optional (R2a finding 8 addition): the carrier defaults to 120s absent.
     if spec.get("delivery_reserve_sec") is not None:
         cfg["delivery_reserve_sec"] = int(spec["delivery_reserve_sec"])
+    # Optional (R2a finding 13): the pinned loopback base.
+    if spec.get("paperclip_base"):
+        cfg["paperclip_base"] = spec["paperclip_base"]
     path = os.path.join(agent_dir, "carrier.json")
     with open(path, "w") as fh:
         json.dump(cfg, fh, indent=2)

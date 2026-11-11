@@ -46,6 +46,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -1155,6 +1156,59 @@ def binding_of(agent_record):
     return binding
 
 
+def public_error(exc):
+    """An exception as it may appear ON an issue: the type and the status
+    line only (R2a finding 13). HTTP error bodies and the t3 command's
+    stderr carry server text that never belongs on a person's board — the
+    full message still goes to the carrier log."""
+    text = str(exc)
+    text = re.sub(r"(HTTP \d{3})[\s\S]*", r"\1", text)
+    text = re.sub(r"(exit \d+\)?)[\s\S]*", r"\1", text)
+    text = text.split("\n")[0]
+    return f"{type(exc).__name__}: {text[:200]}"
+
+
+def loopback_base_error(url):
+    """None when `url` is a plain loopback http base; a reason otherwise.
+    Parsed with urlsplit, not hand-split, so a userinfo trick
+    (`http://127.0.0.1:3100@evil.example`) or a subdomain lookalike cannot
+    pass (the carrier-side pin of R2a finding 13; finding 29 states the law
+    for the other tools)."""
+    try:
+        parts = urllib.parse.urlsplit(str(url or ""))
+    except ValueError:
+        return "the base does not parse as a URL"
+    if parts.scheme != "http":
+        return f"the scheme {parts.scheme!r} is not http"
+    if parts.hostname not in ("127.0.0.1", "localhost", "::1"):
+        return "the base is not loopback"
+    if parts.username or parts.password:
+        return "the base carries userinfo"
+    if parts.port is None:
+        return "the base names no port"
+    if parts.path not in ("", "/"):
+        return "the base carries a path"
+    return None
+
+
+def base_pin_error(cfg, env):
+    """The refusal that stops the carrier before its first request when the
+    configured `paperclip_base` (loopback only) and the PAPERCLIP_API_URL the
+    adapter passed disagree (R2a finding 13). None when the config pins no
+    base: the environment is then trusted, exactly as before."""
+    pinned = str(cfg.get("paperclip_base") or "").strip()
+    if not pinned:
+        return None
+    bad = loopback_base_error(pinned)
+    if bad:
+        return f"paperclip_base in the config is refused: {bad}"
+    given = str(env.get("PAPERCLIP_API_URL") or "").strip()
+    if given.rstrip("/") != pinned.rstrip("/"):
+        return (f"PAPERCLIP_API_URL {given!r} differs from the pinned "
+                f"paperclip_base in the config; refusing to run")
+    return None
+
+
 def release_issue(pc, issue_id, note):
     """On failure leave the issue visible for a person, never silently held."""
     try:
@@ -1755,7 +1809,7 @@ def run_carrier(pc, t3_factory, opts):
             pass
         raise
     except Exception as exc:  # noqa: BLE001 - ANY failure must release the issue
-        release_issue(pc, issue["id"], f"{type(exc).__name__}: {exc}")
+        release_issue(pc, issue["id"], public_error(exc))
         raise
 
 
@@ -1877,6 +1931,13 @@ def main() -> int:
         log("usage: wake_carrier.py <config.json>")
         return 2
     cfg = load_config(argv_config[0])
+    # R2a finding 13: a configured paperclip_base pins the address —
+    # loopback only — and a different PAPERCLIP_API_URL refuses the run
+    # before any request is made.
+    pin = base_pin_error(cfg, os.environ)
+    if pin:
+        log(pin)
+        return 2
     opts = build_opts(cfg, os.environ, time.time())
     # R2a finding 8: both transports take their waits from the run budget.
     pc = PaperclipClient(os.environ["PAPERCLIP_API_URL"],

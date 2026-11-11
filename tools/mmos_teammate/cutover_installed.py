@@ -100,6 +100,10 @@ def carrier_config(spec):
     # carrier defaults to 120s when absent.
     if spec.get("delivery_reserve_sec") is not None:
         cfg["delivery_reserve_sec"] = int(spec["delivery_reserve_sec"])
+    # Optional (R2a finding 13): the pinned loopback base; the carrier
+    # refuses a PAPERCLIP_API_URL that differs from it.
+    if spec.get("paperclip_base"):
+        cfg["paperclip_base"] = spec["paperclip_base"]
     if spec.get("issue_url_template"):
         cfg["issue_url_template"] = spec["issue_url_template"]
     if spec.get("thread_url_template"):

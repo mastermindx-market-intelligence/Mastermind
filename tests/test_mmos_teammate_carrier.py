@@ -2292,3 +2292,60 @@ def test_t3_send_timeout_comes_from_the_run_budget(monkeypatch, tmp_path):
                       budget_left=lambda: 9999.0)
     t3b._run([])
     assert seen == [77, 1200]  # the stock cap still applies
+
+
+def test_public_error_strips_bodies_and_stderr():
+    # R2a finding 13: what goes ON an issue as a failure note is the error
+    # type and its status line only. HTTP error bodies (server text) and the
+    # t3 command's stderr never belong on a person's board; the full message
+    # still goes to the carrier log.
+    http = wc.CarrierError(
+        "POST /api/issues/is-1/comments -> HTTP 503 "
+        "{\"error\":\"internal SECRET-BODY boom\"}")
+    assert wc.public_error(http) == \
+        "CarrierError: POST /api/issues/is-1/comments -> HTTP 503"
+    t3err = wc.CarrierError(
+        "t3 thread send failed (exit 1): BOOM-STDERR-TEXT "
+        "with task words in it")
+    assert wc.public_error(t3err) == \
+        "CarrierError: t3 thread send failed (exit 1)"
+    unreachable = wc.CarrierError("GET /api/x unreachable: connection refused")
+    assert wc.public_error(unreachable) == \
+        "CarrierError: GET /api/x unreachable: connection refused"
+
+
+def test_release_note_on_a_failed_run_carries_no_error_body():
+    # A failed run still leaves its one release note, but the note carries
+    # the type and status only — not the t3 stderr the failure wrapped.
+    pc = FakePaperclip(issues=one_issue())
+
+    class ExplodingT3(FakeT3):
+        def send(self, message):
+            raise wc.CarrierError(
+                "t3 thread send failed (exit 1): BOOM-STDERR-WORDS")
+    with pytest.raises(wc.CarrierError):
+        run(pc, ExplodingT3(replies=[]))
+    notes = [c for c in pc.calls if c[0] == "comment"]
+    assert notes, "the release note was posted"
+    assert all("BOOM-STDERR-WORDS" not in c[2] for c in notes)
+    assert any("exit 1" in c[2] for c in notes)
+
+
+def test_base_is_pinned_by_the_config_and_loopback_only():
+    # R2a finding 13: the carrier's Paperclip address comes from the config
+    # (paperclip_base, loopback only). A PAPERCLIP_API_URL that differs from
+    # the pinned base is refused before any request is made.
+    cfg = {"paperclip_base": "http://127.0.0.1:3100"}
+    assert wc.base_pin_error(cfg, {"PAPERCLIP_API_URL":
+                                   "http://127.0.0.1:3100"}) is None
+    assert wc.base_pin_error(cfg, {"PAPERCLIP_API_URL":
+                                   "http://127.0.0.1:3100/"}) is None
+    assert wc.base_pin_error(cfg, {"PAPERCLIP_API_URL":
+                                   "http://127.0.0.1:9999"}) is not None
+    # a non-loopback base is refused even when the env agrees with it
+    bad = wc.base_pin_error({"paperclip_base": "http://10.0.0.5:3100"},
+                            {"PAPERCLIP_API_URL": "http://10.0.0.5:3100"})
+    assert bad is not None and "loopback" in bad
+    # no pinned base in the config: nothing to compare, as before
+    assert wc.base_pin_error({}, {"PAPERCLIP_API_URL":
+                                  "http://127.0.0.1:3100"}) is None
