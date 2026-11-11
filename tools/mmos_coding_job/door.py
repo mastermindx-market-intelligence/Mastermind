@@ -1664,6 +1664,16 @@ class CodingJobDoor:
             attempt_id, fence_generation=entry["fence_generation"],
             lease_token=entry["lease_token"],
             payload={"summary": summary, "artifacts": artifacts})
+        if self.config.crash_mode == "after_seal":
+            # the second deterministic window (T4c): the seal is COMMITTED
+            # in the engine, the frozen entry still says "launched" — a
+            # FRESH door must finish it as sealed with the result comment
+            # EXACTLY once (F3's terminal-row check + the seam's single
+            # re-drive).  Same marker discipline as the after_receipt hook.
+            (self.root / "run" / "crash").write_text(json.dumps(
+                {"crashed": _now(), "window": "after_seal",
+                 "attempt_id": attempt_id}), encoding="utf-8")
+            os._exit(91)  # noqa: PLW0160 - the deterministic crash point
         entry["phase"] = "sealed"
         entry["final_status"] = getattr(sealed.status, "value",
                                         str(sealed.status))

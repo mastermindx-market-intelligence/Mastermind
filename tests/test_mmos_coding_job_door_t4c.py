@@ -1006,3 +1006,83 @@ def test_step3_launch_spec_writes_the_engine_binding_prompt_name(
             == b"the worker prompt bytes")
     assert _mode(door_prompt) == 0o600
     assert _mode(engine_prompt) == 0o600
+
+
+# ---------------------------------------------------------------------------
+# Step 4: the after_seal crash window — seal COMMITTED in the engine, the
+# frozen entry still "launched" (journey scenario crash-seal; F3's
+# terminal-row recovery + the seam's single re-drive own the fresh door)
+# ---------------------------------------------------------------------------
+
+
+def test_step4_after_seal_crash_window_leaves_a_committed_seal_behind(
+        scratch, monkeypatch):
+    """crash_mode="after_seal" exits 91 AFTER complete_attempt commits and
+    BEFORE the frozen "sealed" save — the engine row is terminal while the
+    entry still says "launched", exactly the window a FRESH door must
+    finish as sealed with the result comment exactly once.  Without the
+    crash mode the same call saves "sealed" and proceeds to finish."""
+    d = _attack_door(scratch, monkeypatch)
+    d.config.crash_mode = "after_seal"
+
+    exited = []
+
+    class _Crashed(Exception):
+        """os._exit never returns — the stand-in must not either."""
+
+    def fake_exit(code):
+        exited.append(code)
+        raise _Crashed(code)
+
+    # os is the shared singleton; the seam name lives in the door module
+    # instance type(d) came from (this file loads door.py separately), so
+    # patch it through the function's own globals
+    monkeypatch.setattr(door_mod.os, "_exit", fake_exit)
+    monkeypatch.setattr(d, "_wait_terminal",
+                        lambda _a, _r, **_k: (["succeeded"],
+                                              SimpleNamespace(
+                                                  value="succeeded")))
+    monkeypatch.setitem(
+        type(d)._seal_and_deliver.__globals__,
+        "install_execution_return_seam", lambda *a, **k: None)
+    sealed_calls = []
+
+    class _Attempts:
+        def complete_attempt(self, attempt_id, **kwargs):
+            sealed_calls.append((attempt_id, kwargs))
+            return SimpleNamespace(status=SimpleNamespace(value="succeeded"))
+
+    runtime = SimpleNamespace(attempts=_Attempts())
+
+    async def collect_result(_ref):
+        return SimpleNamespace(result=SimpleNamespace(
+            structured_output={"text": "done"}))
+
+    adapter = SimpleNamespace(collect_result=collect_result)
+    ref = SimpleNamespace(provider_session_id="mcp:t")
+    entry = {"attempt_id": "ATT-SEAL", "phase": "launched",
+             "fence_generation": 3, "lease_token": "tok"}
+
+    with pytest.raises(_Crashed):
+        d._seal_and_deliver(runtime, entry, "ATT-SEAL", adapter, ref, "b")
+
+    # the crash point: exit 91, seal committed, entry NOT saved as sealed
+    assert exited == [91]
+    assert sealed_calls and sealed_calls[0][0] == "ATT-SEAL"
+    assert sealed_calls[0][1]["fence_generation"] == 3
+    assert sealed_calls[0][1]["lease_token"] == "tok"
+    assert entry["phase"] == "launched"
+    marker = d.root / "run" / "crash"
+    assert json.loads(marker.read_text())["window"] == "after_seal"
+
+    # counter-law: without the crash mode the same seal SAVES and proceeds
+    finished = []
+    monkeypatch.setattr(d, "_finish_sealed",
+                        lambda _runtime, _entry: finished.append(True))
+    d.config.crash_mode = None
+    entry2 = {"attempt_id": "ATT-SEAL", "phase": "launched",
+              "fence_generation": 3, "lease_token": "tok"}
+    d._seal_and_deliver(runtime, entry2, "ATT-SEAL", adapter, ref, "b")
+    assert exited == [91]  # no second exit
+    assert entry2["phase"] == "sealed"
+    assert finished == [True]
