@@ -63,6 +63,26 @@ evidence files in `~/.mastermind/mmos_evidence/rl-20261111/`.
 > Read/Glob/Grep incl. preimage and Claude config, `|| exit 2` +
 > `python3 -I`.
 
+> **NO-WEB DECISION (2026-11-11, H-1 decided — deputy relaying the
+> principal's acceptance at 18:50): install 3 ships with NO general web
+> fetch for teammates.** Commit `073d3cf44` ("rl: nofetch item 1",
+> red tests first): `teammate_gate.py` refuses every fetch-capable tool
+> BY NAME in `decide()` before any URL logic — `FETCH_FORBIDDEN_TOOLS` =
+> WebFetch, WebSearch, `mcp__web_reader__webReader`,
+> `mcp__t3-code__preview_navigate`, `mcp__t3-code__preview_open` (the
+> last two from the live census, evidence 17: the preview browser
+> navigates URLs, the same fetch-time DNS surface). The `WEB_TOOLS`
+> allow path is deleted; `check_web` and the address classes stay as an
+> unreachable library for the pinned fetch tool. The roster census
+> derives its deny names from the gate's one list (no drift) and the
+> allow list drops the web tools (1,359 deny rules). **The destination
+> is a pinned fetch tool (option 2 of `15-h1-options.md`) as a LATER
+> lane with its own review; teammates get no web access until then.**
+> Live proof: evidence 17 — all four client-side fetch tools refused by
+> exact name (incl. deferred ones loaded via ToolSearch);
+> `mcp__web_reader__webReader` still executes server-side with no hook
+> (W1) and is closed only by the router change (W4, real root).
+
 ## 1. How a teammate session actually launches
 
 A teammate is a T3 thread pinned to a per-teammate provider instance
@@ -213,22 +233,28 @@ evidence 12 for round 1, evidence 13 for the round-2 checks):
   backslashes or `..` are refused outright (R2 family; live: `{..}/*`
   arrives at the hook VERBATIM — the client does not expand braces
   before PreToolUse, N3).
-- **web** (WebFetch + any `webReader` tool): the gate reads exactly
-  the `url` field (R1 — a public address in `prompt` never reaches
-  the check; live item 1a) and refuses BEFORE any request on: any
-  address literal in any notation (dotted, integer, octal `0177.0.0.1`,
-  hex, IPv6), userinfo, backslashes (incl. the `\@` confusion form),
-  whitespace/control characters, percent- or non-ASCII authority,
-  non-http(s) schemes, and non-default ports. Only plain DNS-label
-  hostnames (all-digit and 0x-prefixed labels refused) pass to
-  resolution, and EVERY resolved address must clear an explicit net
-  list (R6a): loopback, private, link-local, ULA, multicast,
-  unspecified, reserved, IPv4-mapped/-compatible, NAT64
-  (`64:ff9b::/96` and the IPv4-translatable well-known prefix),
-  6to4, Teredo, and CGNAT `100.64.0.0/10` — stricter than
-  `ipaddress.is_global`, which passes several of those (M1). DNS
-  lookups run in a thread with a 5-second join (R4), so a hung
-  resolver fails closed rather than hanging the call.
+- **web: there is NO web access** (decision 2026-11-11, H-1 decided).
+  Every fetch-capable tool is refused BY NAME before any URL logic,
+  allowlist or input inspection (`FETCH_FORBIDDEN_TOOLS`: WebFetch,
+  WebSearch, `mcp__web_reader__webReader`,
+  `mcp__t3-code__preview_navigate`, `mcp__t3-code__preview_open`) —
+  the input is never looked at, a tool loaded by ToolSearch is refused
+  identically at call time, and the check-time/fetch-time DNS window of
+  H-1 is unreachable because no fetch runs at the client at all
+  (live-proved per tool, evidence 17). The round-2 URL vetting below is
+  RETAINED AS A LIBRARY, unreachable from `decide()`, for the future
+  pinned fetch tool (option 2 of `15-h1-options.md`): it read exactly
+  the `url` field (R1) and refused before any request on any address
+  literal in any notation (dotted, integer, octal, hex, IPv6),
+  userinfo, backslashes, whitespace/control characters, percent- or
+  non-ASCII authority, non-http(s) schemes and non-default ports;
+  plain DNS-label hostnames passed to resolution where every address
+  had to clear the explicit net list (R6a: loopback, private,
+  link-local, ULA, multicast, unspecified, reserved, IPv4-mapped/
+  -compatible, NAT64, 6to4, Teredo, CGNAT — stricter than
+  `is_global`), DNS in a thread with a 5-second join so a hung
+  resolver failed closed (R4). A fetcher pinned to one resolution must
+  reapply exactly these classes at connect time.
 - **unknown tools / unparseable input / unreadable config**: refused.
   The census surface is refused here AND bare-denied in the rule
   layer (`TOOL_DENY_CENSUS`, §3); those tools are NOT denied in the
@@ -341,26 +367,26 @@ The panel accepted the fence with these known residuals; they are the
 principal's named list plus two round-2 discoveries:
 
 1. **DNS rebinding**: a name that resolves public at check time and
-   private at fetch time. The gate resolves when the hook fires; the
-   client fetches afterwards. **Round 3 (panel 3 H-1): not closeable
-   inside the spec + gate — a PreToolUse hook cannot pin what the client
-   re-resolves at fetch time, and no second-resolve/TTL half-measure was
-   shipped. Five options with costs and real-root requirements are
-   escalated for decision in `15-h1-options.md` (lane recommendation:
-   deny WebFetch now as the bridge, a pinned fetch tool as the
-   destination).**
-2. **Redirects**: a redirect from a public host to a private one. The
-   gate checks the original URL only. **Same root as 1 — the same
-   options close it (deny/proxy/pinned-fetcher); an allowlist alone does
-   not (the client follows redirects with no hook).**
+   private at fetch time. **CLOSED by the no-web decision (2026-11-11,
+   commit `073d3cf44`): every fetch-capable tool is refused by exact
+   name before any URL logic, so no client fetch runs to re-resolve
+   anything — the window itself is gone, not narrowed.** (History:
+   round 3 escalated H-1 with five costed options in
+   `15-h1-options.md`; the principal accepted the deny bridge; the
+   destination is the pinned fetch tool, a later lane with its own
+   review.)
+2. **Redirects**: a redirect from a public host to a private one.
+   **CLOSED by the same decision — no fetch runs, so no redirect is
+   followed.** (An allowlist alone would NOT have closed this: the
+   client follows redirects with no hook.)
 3. **The client timing out or killing the hook process** (20 s
    wired). `|| exit 2` covers the hook failing, not the client
    discarding it; the gate answers in tens of ms, so the margin is
    large but not infinite.
 4. **A teammate sending what it MAY read** — its own home, the shared
-   workspace — **to a public host** by WebFetch. No secrets remain in
-   the readable set, but the channel is open at both layers; a
-   charter/trust matter.
+   workspace — **to a public host.** **CLOSED for the client fetch
+   tools by the same decision (no fetch, no channel). The server-side
+   webReader path is residual 5 until the router close lands.**
 5. **`mcp__web_reader__webReader` executes SERVER-side and is
    unfenced at every client-side layer** (round-2 finding, beyond the
    panel): the transcript records the bare name `webReader` in
@@ -379,7 +405,12 @@ principal's named list plus two round-2 discoveries:
    the close is a router-route change — escalation steps, census and
    rollbacks in `14-webreader-close.md`. The gate fences the name
    whenever a hook does fire and R6b bare-denies the exact name;
-   neither reaches a server-side execution path.
+   neither reaches a server-side execution path. **Re-proved live after
+   the no-web decision (evidence 17): the forced webReader call still
+   executed server-side, no PreToolUse fired — the exact name is now in
+   `FETCH_FORBIDDEN_TOOLS` (refusing it wherever a hook fires) AND
+   bare-denied at the rule layer, but only the W4 router change makes
+   it unfetchable. This is the one web residual left.**
 6. **New MCP tools need exact-name census updates** (consequence of
    N4): a newly offered MCP tool carries no wildcard protection in the
    rule layer until its exact name joins `TOOL_DENY_CENSUS`; the
@@ -430,6 +461,7 @@ and resumes the same thread with full history (transcript-based resume,
 | W-task: webReader source pinned to the router's upstream (full offer census, 96 tools, webReader present, all other MCP = t3-code hook-visible and gate-refused live; restore byte-identical; escalated close steps with checks/rollbacks; the two one-liners) | `14-webreader-close.md` + `probe2/w-census-reply.json` |
 | repair round 3 H-1: DNS rebinding/redirect not closeable in-spec; five options with costs and real-root flags escalated for decision (deny WebFetch bridge, pinned fetch tool, egress proxy, hostname allowlist, accept) | `15-h1-options.md` |
 | repair round 3: all 9 live probes on the round-3 install (the seven re-runs under the pinned `/usr/bin/python3` command, H-2 config-class unreadable at both layers, M-R1 Data-spelled spec canonicalized) incl. as-was baseline showing the PATH-resolved interpreter defect, 1,355-rule count, 20-call latency | `16-repair3-live-probes.md` + `probe2/` |
+| no-web decision (H-1 decided, `073d3cf44`): live census 93 offered, five fetch-capable names denied by exact name at both layers, one forced-call probe per fetch tool transcript-verified (four refused by name incl. ToolSearch-loaded deferred tools; webReader still executes server-side — router close W4 remains) | `17-nofetch-census.md` + `probe2/nf-*.json` |
 | Q1 source citations and reconciliation (incl. two child claims refuted by live proof) | `08-q1-child-answers.md`, `08-q1-reconciliation.md` |
 | web-tool facts for the three real charters | `07-q5-web-facts.md` |
 | Part A atomic writes / Paperclip binding / pairing URL | ledger lines 1-5 in `LEDGER.md` |
@@ -531,9 +563,12 @@ Two install notes from repair round 1:
   applying settings file, and a canary call exiting 2 (R6c) — plus one
   spelling-family probe from a real seat before any credential-bearing
   roster relies on it (the panel's own condition). WebFetch
-  exfiltration to PUBLIC hosts remains possible at both layers; that is
-  accepted residual, §4. The tool census is build-dependent (TodoWrite,
-  WebSearch, LS, Bash were not offered in the probed build but stay in
-  the belt denies) — re-run the census probe after any server/client
-  upgrade. `webReader` executes server-side and stays unfenced until
-  the server lane removes it (§4 item 5).
+  exfiltration to PUBLIC hosts: CLOSED for the client fetch tools by
+  the no-web decision (§4 items 1–2, 4); the webReader server-side path
+  is the remaining channel (§4 item 5). The tool census is
+  build-dependent (TodoWrite, WebSearch, LS, Bash were not offered in
+  the probed build but stay in the belt denies) — re-run the census
+  probe after any server/client upgrade, and add any NEW fetch-capable
+  name to `FETCH_FORBIDDEN_TOOLS` (the census denies derive from it).
+  `webReader` executes server-side and stays unfenced until the router
+  change removes the offer (§4 item 5, W4 in evidence 14).
