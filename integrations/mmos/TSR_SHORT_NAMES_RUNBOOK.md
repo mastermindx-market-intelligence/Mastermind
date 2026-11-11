@@ -46,10 +46,14 @@ skip to step 2. To pair a fresh profile from the server's 0600 access file:
 node tools/mmos_team_server/roster_browser.js pair \
   ~/.mastermind/t3-team/run/access.txt \
   ~/.mastermind/t3-team/run/browser-profile \
+  3780 \
   /tmp/tsr_pair_out.json
 ```
 
-It prints `PAIR_DONE`. The pairing token is read in-process and never
+The last-but-one argument is the team server's port: the pairing URL is
+parsed and must be exactly the loopback team server (`http` on `127.0.0.1`
+or `localhost` with that port); anything else is refused before a browser
+opens. It prints `PAIR_DONE`. The pairing token is read in-process and never
 printed. If pairing fails because the token in `access.txt` has expired
 (tokens rotate on every server start), the current one is at the end of
 `~/.mastermind/t3-team/run/server.log`. Do not grep or cat that log to a
@@ -62,7 +66,7 @@ umask 077
 grep -E '^(Pairing URL|Token):' ~/.mastermind/t3-team/run/server.log \
   | tail -2 > /tmp/team_pair_lines.txt
 node tools/mmos_team_server/roster_browser.js pair /tmp/team_pair_lines.txt \
-  ~/.mastermind/t3-team/run/browser-profile /tmp/tsr_pair_out.json
+  ~/.mastermind/t3-team/run/browser-profile 3780 /tmp/tsr_pair_out.json
 rm -f /tmp/team_pair_lines.txt
 ```
 
