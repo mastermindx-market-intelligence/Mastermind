@@ -263,7 +263,8 @@ class TestToolLimitsNewKeys:
                      f"Edit(/{r})", f"Edit(/{r}/**)"]
         for name in team_roster.HOME_LOCKED:
             locked = os.path.join(home, name)
-            deny += [f"Write(/{locked})", f"Edit(/{locked})"]
+            for tool in ("Write", "Edit"):
+                deny += [f"{tool}(/{locked})", f"{tool}(/{locked}/**)"]
         for name in team_roster.HOME_CONFIG:
             config = os.path.join(home, name)
             for tool in ("Write", "Edit"):
@@ -291,6 +292,22 @@ class TestToolLimitsNewKeys:
             for tool in ("Write", "Edit"):
                 assert f"{tool}(/{infra})" in deny, name
                 assert f"{tool}(/{infra}/**)" in deny, name
+
+    def test_locked_names_have_binding_tree_denies(self, tmp_path):
+        """Every HOME_LOCKED name must carry a Write/Edit tree member
+        (/**): an exact-path Write deny alone never binds (live-proved
+        2026-11-11, evidence 10 D3), and these files are the teammate's
+        own limits and charter — the one overwrite that binds at the next
+        process restart, with no rooted keys needed to mask it."""
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        home = team_roster.teammate_home(spec, mate)
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        for name in team_roster.HOME_LOCKED:
+            locked = os.path.join(home, name)
+            for tool in ("Write", "Edit"):
+                assert f"{tool}(/{locked})" in deny, name
+                assert f"{tool}(/{locked}/**)" in deny, name
 
     def test_absent_keys_give_exactly_today_rules(self, tmp_path):
         spec = load(tmp_path, make_spec(tmp_path))

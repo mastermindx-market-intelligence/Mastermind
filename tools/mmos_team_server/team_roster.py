@@ -548,8 +548,13 @@ def tool_limits(spec, mate):
         deny += [f"Write(/{root})", f"Write(/{root}/**)",
                  f"Edit(/{root})", f"Edit(/{root}/**)"]
     for name in HOME_LOCKED:
+        # file+tree pairs: an exact-path Write deny alone does not bind
+        # (live-proved 2026-11-11, evidence 10 D3), and these are the
+        # teammate's own limits/charter — the one overwrite that matters,
+        # because it binds at the next process start
         locked = os.path.join(home, name)
-        deny += [f"Write(/{locked})", f"Edit(/{locked})"]
+        for tool in ("Write", "Edit"):
+            deny += [f"{tool}(/{locked})", f"{tool}(/{locked}/**)"]
     for name in HOME_CONFIG:
         config = os.path.join(home, name)
         for tool in ("Write", "Edit"):
