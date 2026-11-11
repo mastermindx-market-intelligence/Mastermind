@@ -80,6 +80,7 @@ function section(start, end) {
   if (b < 0) throw Error('source boundary changed');
   return html.slice(a, b);
 }
+const helpers = section('function _deskRecord(', '\nfunction _deskLoadingHtml()');
 const loader = section('window.loadDesk = function()', '\nfunction renderDeskPage()');
 const renderer = section('function renderDeskScheduler()', '\nfunction renderDeskStrategist()');
 const escape = section('\nvar esc = function(s) {', '\nvar pct = function(v)');
@@ -96,7 +97,8 @@ const context = {
   fetch: url => {
     requests.push(url);
     if (url !== '/api/scheduler') {
-      return Promise.resolve({ok: true, json: () => Promise.resolve({source: url})});
+      if (!Object.prototype.hasOwnProperty.call(scenario.siblings, url)) throw Error("unexpected sibling request");
+      return Promise.resolve({ok: true, json: () => Promise.resolve(scenario.siblings[url])});
     }
     if (scenario.mode === 'reject') return Promise.reject(Error('controlled fetch rejection'));
     if (scenario.mode === 'http') {
@@ -114,7 +116,7 @@ context.renderDeskPage = () => {
   if (++renders === 2) complete();
 };
 vm.createContext(context);
-vm.runInContext(escape + '\n' + loader + '\n' + renderer, context);
+vm.runInContext(escape + '\n' + helpers + '\n' + loader + '\n' + renderer, context);
 (async () => {
   const timeout = setTimeout(() => { throw Error('scheduler loader did not settle'); }, 2000);
   context.window.loadDesk();
@@ -125,12 +127,25 @@ vm.runInContext(escape + '\n' + loader + '\n' + renderer, context);
 """
 
 
+_SIBLING_PAYLOADS = {
+    "strategist": {"source": "/api/desk/strategist", "status": "building"},
+    "decisions": {"source": "/api/desk/decisions", "status": "building", "decisions": []},
+    "watchlist": {"source": "/api/desk/watchlist?book=flagship", "watchlist": []},
+    "scorecard": {"source": "/api/desk/scorecard", "status": "building", "seats": []},
+    "firm": {"source": "/api/desk/firm-exposure", "books": []},
+    "macroRisk": {"source": "/api/desk/macro-risk", "status": "building"},
+}
+
+
 def _read_scheduler_ui(mode, value):
     node = shutil.which("node")
     assert node is not None, "Scheduler JavaScript regression requires Node.js"
     path = Path(__file__).parents[1] / "app" / "static" / "index.html"
     result = subprocess.run(
-        [node, "-e", _JS_READ, json.dumps({"mode": mode, "value": value}), str(path)],
+        [node, "-e", _JS_READ, json.dumps({
+            "mode": mode, "value": value,
+            "siblings": {row["source"]: row for row in _SIBLING_PAYLOADS.values()},
+        }), str(path)],
         capture_output=True, text=True, timeout=10, check=False,
     )
     assert result.returncode == 0, result.stderr
@@ -163,16 +178,9 @@ def test_scheduler_actual_loader_and_renderer_keep_read_truth(mode, value, expec
     assert observed["renders"] == 2
     assert observed["requests"].count("/api/scheduler") == 1
     assert len(observed["requests"]) == 7
-    # The new classification is confined to the scheduler; preserve the other Desk payloads.
-    for key, url in {
-        "strategist": "/api/desk/strategist",
-        "decisions": "/api/desk/decisions",
-        "watchlist": "/api/desk/watchlist?book=flagship",
-        "scorecard": "/api/desk/scorecard",
-        "firm": "/api/desk/firm-exposure",
-        "macroRisk": "/api/desk/macro-risk",
-    }.items():
-        assert observed["data"][key] == {"source": url}
+    # Valid sibling envelopes pass through the real normalizer unchanged.
+    for key, payload in _SIBLING_PAYLOADS.items():
+        assert observed["data"][key] == payload
 
     rendered = observed["html"]
     if expected == "unavailable":

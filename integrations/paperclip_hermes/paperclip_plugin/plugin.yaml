@@ -1,0 +1,67 @@
+{
+  "name": "paperclip-launch-credentials",
+  "version": "0.1.0",
+  "kind": "standalone",
+  "description": "Bind Paperclip-issued temporary credentials to one finite Hermes run.",
+  "author": "MastermindX",
+  "launch_credentials": {
+    "paperclip-run": {
+      "version": 1,
+      "withheld_env": ["PAPERCLIP_AGENT_PRIVATE_KEY"],
+      "operation_env": "PAPERCLIP_RUN_ID",
+      "context_env": [
+        "PAPERCLIP_API_URL",
+        "PAPERCLIP_AGENT_ID",
+        "PAPERCLIP_COMPANY_ID",
+        "PAPERCLIP_RUN_ID",
+        "PAPERCLIP_TASK_ID",
+        "PAPERCLIP_RUNTIME_TOOLS_EXPIRES_AT",
+        "PAPERCLIP_RUNTIME_TOOLS_MCP_URL"
+      ],
+      "required_context": [
+        "PAPERCLIP_API_URL",
+        "PAPERCLIP_AGENT_ID",
+        "PAPERCLIP_COMPANY_ID",
+        "PAPERCLIP_RUN_ID"
+      ],
+      "context_types": {
+        "PAPERCLIP_API_URL": "http_url",
+        "PAPERCLIP_AGENT_ID": "uuid",
+        "PAPERCLIP_COMPANY_ID": "uuid",
+        "PAPERCLIP_RUN_ID": "uuid",
+        "PAPERCLIP_TASK_ID": "uuid",
+        "PAPERCLIP_RUNTIME_TOOLS_MCP_URL": "http_url"
+      },
+      "same_origin": [
+        [
+          "PAPERCLIP_API_URL",
+          "PAPERCLIP_RUNTIME_TOOLS_MCP_URL"
+        ]
+      ],
+      "credentials": [
+        {
+          "env": "PAPERCLIP_API_KEY",
+          "required": true,
+          "expiry_env": null,
+          "jwt_exp": true,
+          "jwt_claims": {
+            "sub": "PAPERCLIP_AGENT_ID",
+            "company_id": "PAPERCLIP_COMPANY_ID",
+            "run_id": "PAPERCLIP_RUN_ID"
+          },
+          "required_context": []
+        },
+        {
+          "env": "PAPERCLIP_RUNTIME_TOOLS_TOKEN",
+          "required": false,
+          "expiry_env": "PAPERCLIP_RUNTIME_TOOLS_EXPIRES_AT",
+          "jwt_exp": false,
+          "jwt_claims": {},
+          "required_context": [
+            "PAPERCLIP_RUNTIME_TOOLS_MCP_URL"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -5,6 +5,7 @@ import asyncio
 from functools import partial, wraps
 import json
 import time
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -231,20 +232,31 @@ async def test_inflight_capacity_waits_and_releases(tmp_path):
 
 
 @run_async_test
-async def test_queue_full_fails_503_not_429(tmp_path):
+async def test_queue_full_fails_503_not_429(tmp_path, monkeypatch):
     cfg = settings(tmp_path, api_keys=("upstream-A",), safe_rpm=1, window_s=0.3,
                    max_pending=1, max_queue_wait_s=0.13)
     app = create_app(cfg, transport=httpx.MockTransport(lambda req: streamed_json({"ok": True})))
+    # Advance only the gateway deadline. The event loop keeps its real timeout.
+    deadline_clock = time.monotonic()
+    monkeypatch.setattr(gateway_module, "time", SimpleNamespace(monotonic=lambda: deadline_clock))
     async with app.router.lifespan_context(app):
+        admissions = app.state.admissions
+        reservation_time = time.time()
+        admissions.clock = lambda: reservation_time
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
             headers = {"Authorization": f"Bearer {TOKEN}"}
             assert (await session.get("/v1/models", headers=headers)).status_code == 200
-            pending = asyncio.create_task(session.get("/v1/models", headers=headers))
-            await asyncio.sleep(0.02)
-            third = await session.get("/v1/models", headers=headers)
-            assert third.status_code == 503
-            assert third.json()["error"]["message"] == "local queue full"
-            assert (await pending).status_code == 504
+            async with asyncio.TaskGroup() as tasks, asyncio.timeout(5):
+                pending = tasks.create_task(session.get("/v1/models", headers=headers))
+                while admissions.pending != 1:
+                    await asyncio.sleep(0)
+                third = await session.get("/v1/models", headers=headers)
+                assert third.status_code == 503
+                assert third.json()["error"]["message"] == "local queue full"
+                deadline_clock += cfg.max_queue_wait_s + 1
+                await admissions.notify_change()
+                assert (await pending).status_code == 504
+                assert admissions.pending == 0
 
 
 @run_async_test

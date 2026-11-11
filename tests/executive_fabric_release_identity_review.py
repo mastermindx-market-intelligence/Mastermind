@@ -1293,6 +1293,25 @@ REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256':
 # Complete source hash plus typed span; any byte drift restores the guard.
 REVIEWED_FILES['app/mastermind_os/src/team/NewGroupPanel.tsx'] = {'sha256': 'b84219e674c305e9d57571214e9c970c63508b774573b5d284d0bf8be869459d', 'sites': ((187, 25, 28, 'int', '600'),)}
 
+# Paperclip finite launch origin comparison: standard HTTPS port only, no OS
+# principal or fleet topology change. Exact source/token self-reviewed under the
+# attended Web waiver; any byte, path or context drift restores ordinary D8.
+REVIEWED_FILES["integrations/paperclip_hermes/core_overlay/agent/launch_credential_binding.py"] = {
+    "sha256": "f7b2afe6fb6d14ca607e99f3fe1d54afab2c36dc2e08db1c81412da9c869b679",
+    "sites": ((150, 19, 22, "int", "443"),),
+}
+
+# Paperclip qualification metadata observes the already installed UID at three
+# exact sites: disposable restore target and existing key/storage ownership.
+# It grants no identity, permission or runtime authority. Full record drift or
+# any added identity restores the existing D8 guard.
+REVIEWED_FILES["ops/paperclip_fleet/evidence/2026-11-10-credential-qualification.json"] = {
+    "sha256": "a38fbcfe551c322dfc88d618b328ad9ab1438200493bdd2fe61aaeebe00f6554",
+    "sites": ((604, 17, 20, "int", "501"),
+              (684, 15, 18, "int", "501"),
+              (690, 15, 18, "int", "501")),
+}
+
 # Passive Paperclip asset document pagination: exact row-count bounds only.
 # No identity, permission or runtime topology change; any source drift restores D8.
 REVIEWED_FILES["ops/paperclip_fleet/archive_assets.py"] = {'sha256': 'f96b00c2c238139c67f7be03f79d698c3f0d4f3d7f055e1a20661600c07b57af', 'sites': ((459, 53, 56, 'int', '500'), (460, 182, 185, 'int', '500'), (461, 48, 51, 'int', '500'))}
