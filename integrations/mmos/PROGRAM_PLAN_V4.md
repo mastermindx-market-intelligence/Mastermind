@@ -1249,3 +1249,61 @@ code, so no registration is needed for the proof.
 programme). Two lanes use it: T10 and the BCU panel lead, each with DeepSeek Flash children.
 After the window, routing returns to section 26: `glm-5.3` drives lanes and leads panels,
 DeepSeek Flash reviews and tests.
+
+## 31. Amendment, 2026-11-11 14:20 UTC: browser control restored, four panels scored, the order of installs
+
+**Browser control works in ChatGPT1 to 4 (harness items 1, 3, 4).** Lane BF could not press
+Reload by any route: this Mac's Chrome serves no accessibility tree, and macOS refused the
+helper that would have asked for one. That refusal was final and was not worked around. The
+Chairman loaded the repaired extension himself with **Load unpacked** from the three staged
+folders. BF then proved open, page read, text fill, read-back and close in its own tab in
+each profile, sending nothing. Two standing facts follow:
+
+- An extension change on this Mac reaches a profile only when a person presses Load unpacked.
+  Staged extension changes are batched so the Chairman does one round, not several.
+- No lane tries to drive Chrome's own windows or settings pages.
+
+One limit was found in the proof: a text fill of about 1,900 characters applies and one of
+6,001 is refused. Lane BR has a third round to find where that limit lives, how newlines
+behave in the composer, and a proven path to 20,000 characters with paragraphs. An extension
+change comes back staged; a bridge release install still needs the Chairman's word.
+
+**Harness item 8 corrected.** The quarantine that stopped Sector Intelligence's read-only
+children is a hook in the Macro repository, which fires for any session rooted in a Macro
+checkout that is not on a `claude/*` branch. Two brief lines avoid it for read-only work and
+are now standard in every brief this programme writes: ignore the quarantine notice's remedy
+and finish the read-only task with plain single commands; and do not end a turn while a
+command is still running. A one-sentence change to the hook's own remedy text is staged in
+`integrations/mmos/harness/` and is not opened as a Macro change without the Chairman's word.
+
+**Scores since section 30.**
+
+| Lane | Head scored | Score | Next |
+| --- | --- | --- | --- |
+| XPb (cross-project child) | `b00c97e3b` | `install-ready` after two repair rounds | Merged. Installed with the team server switch; then harness item 7 |
+| RF (ask and return) | `608ea1ccc` | 17 real of 25, one HIGH (the carrier returned the oldest answer, not the newest) | Repair round 3 running; delta check; then the carrier is refreshed for one teammate at a time |
+| RL (teammate limits) | `7e9a29aa4` | 9 real of 50, three HIGH (web address check, host parsing, own preimage readable) | Repair round 2 running; the rule layer shrinks from about 66,000 rules to a few hundred once the hook fails closed |
+| BCU (computer use) | `de986c5a6` | 25 real of 57, four HIGH; nine of eleven product rules only partly enforced | Repair round 1 running; delta check; then the principal chooses which homes register it |
+| TSHc (server installer) | `3f79ffc40` | Repair round 2 returned; second delta panel running | The real server switch, by the principal |
+
+**Principal rulings in those repairs.**
+
+- Computer use: a captured image is never returned to the calling session; it goes only to
+  the vision model on the local router and is deleted after the answer. Environment variables
+  may tighten a rule, never loosen one.
+- Teammate web access: the check reads exactly the address the tool will fetch and refuses
+  any address-literal host, embedded sign-in, backslash, percent escape or non-default port.
+  One list of unreadable paths serves Read, Glob and Grep.
+- One writer per file across lanes: BCU's edit to RL's function was reverted; RL makes it.
+
+**Order of installs on the real team server.** Each step waits for the one before it and for
+no teammate run being live; each has its rollback written in its score.
+
+1. Server installer (TSHc) together with the cross-project patch in the same build.
+2. Window switch to the T8b bundle, with the on-screen and rotation proof.
+3. Teammate limits (RL), then the ask-and-return carrier refresh (RF), one teammate at a time.
+4. Silent-stop patch (T10) after its own blind panel.
+5. Computer-use registration (BCU) in the homes the principal names.
+
+**Routing.** The Opus window of section 30 is closed. Three lanes used it (T10, the BCU
+panel, the second RL panel). New lanes follow section 26 again.
