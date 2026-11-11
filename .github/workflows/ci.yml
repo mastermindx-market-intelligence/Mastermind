@@ -55,11 +55,17 @@ jobs:
           if [ -n "$trusted_base" ] &&
              git cat-file -e "${trusted_base}:scripts/__init__.py" 2>/dev/null &&
              git cat-file -e "${trusted_base}:scripts/ci_pr_scope.py" 2>/dev/null &&
-             git cat-file -e "${trusted_base}:scripts/ci_pr_smoke.py" 2>/dev/null &&
              git cat-file -e "${trusted_base}:control_plane/__init__.py" 2>/dev/null &&
              git cat-file -e "${trusted_base}:control_plane/github_review_risk_policy.py" 2>/dev/null; then
-            git archive "$trusted_base" scripts/__init__.py scripts/ci_pr_scope.py scripts/ci_pr_smoke.py control_plane/__init__.py control_plane/github_review_risk_policy.py |
+            git archive "$trusted_base" scripts/__init__.py scripts/ci_pr_scope.py control_plane/__init__.py control_plane/github_review_risk_policy.py |
               tar -x -C "$trusted"
+            # The current classifier's closure is the four files above. A PR
+            # whose recorded base predates #2439 still classifies with a
+            # protected classifier that imports the smoke selector; only that
+            # legacy classifier receives its own protected-base copy.
+            if grep -q '^from scripts\.ci_pr_smoke import ' "$trusted/scripts/ci_pr_scope.py"; then
+              git archive "$trusted_base" scripts/ci_pr_smoke.py | tar -x -C "$trusted"
+            fi
             if grep -q '^def classify_merge_group(' "$trusted/scripts/ci_pr_scope.py"; then
               PYTHONPATH="$trusted" python "$trusted/scripts/ci_pr_scope.py" \
                 --repo "$GITHUB_WORKSPACE" --event "$GITHUB_EVENT_PATH" \
@@ -77,8 +83,8 @@ jobs:
             echo 'CI_SCOPE source not in protected base: required full suite'
           fi
 
-  # Fast and standard integrated queue candidates reuse the same trusted,
-  # bounded PR checks; critical or unqualified groups run every full shard.
+  # FAST integrated queue candidates reuse the same trusted, bounded PR
+  # checks; standard, critical or unqualified groups run every full shard.
   # The stable protected status context is still the final job named 'test'.
   # Heavy work must stop when this same-PR run is superseded/cancelled.
   # Keep the small final test gate on always() so cancellation cannot look green.
@@ -188,6 +194,13 @@ jobs:
   # (push, dispatch, and full-mode PR/merge group), including pushes that
   # reuse a same-SHA merge-group pytest proof -- reuse may skip only the
   # pytest step, never a qualification gate.
+  # Sixth gate: the web application typecheck. pr_fast typechecks only
+  # fast/smoke candidates, and it is skipped in full mode, so before this
+  # gate no full merge group and no push typechecked app/mastermind_os.
+  # It is unconditional by design: pr_scope does not run on push/dispatch,
+  # and every fail-closed HOLD decision reports needs_node=false, so that
+  # output cannot gate it. pr_fast (mode != full) and this job (mode ==
+  # full) are mutually exclusive, so the typecheck never runs twice.
   # Hosted-only label: the Fabric gate installs from the checkout and
   # refuses group/other-writable or foreign-owned source directories
   # (control_bundle SOURCE_DIRECTORY_INVALID), which the shared persistent
@@ -210,7 +223,9 @@ jobs:
         with:
           node-version: "22.14.0"
           cache: npm
-          cache-dependency-path: integrations/studio_direct_mcp/package-lock.json
+          cache-dependency-path: |
+            integrations/studio_direct_mcp/package-lock.json
+            app/mastermind_os/package-lock.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -246,6 +261,10 @@ jobs:
         run: |
           find scripts ops/executive_os -type f -name '*.sh' -print0 |
             xargs -0 -n1 bash -n
+      - name: Typecheck web application
+        run: |
+          npm ci --prefix app/mastermind_os --ignore-scripts --no-audit --no-fund
+          npm --prefix app/mastermind_os run typecheck
 
   # Run each canonical, disjoint pytest shard on a separate hosted runner.
   # This changes placement only, not discovery, exclusions, selected modules

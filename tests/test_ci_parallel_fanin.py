@@ -630,16 +630,93 @@ def test_new_ci_selector_first_install_fallback_is_real_full_mode(tmp_path):
 # Only canonical plan execution is replaced with a recording stub; separate
 # tests above prove the real discovery plan's exact six-shard coverage.
 # states: (PR_SCOPE, PR_FAST, SHARDS, GUARDS, QUAL)
+# Every case is a path the trusted classifier can actually produce. There is
+# no merge_group smoke case: since #2439 a STANDARD merge group is full, so
+# that path is unreachable (see the never-smoke test below).
 _GATE_PASS_CASES = [
     ("pull_request", "full", ("success", "skipped", "success", "success", "success")),
     ("pull_request", "fast", ("success", "success", "skipped", "success", "skipped")),
     ("pull_request", "smoke", ("success", "success", "skipped", "success", "skipped")),
     ("merge_group", "full", ("success", "skipped", "success", "success", "success")),
     ("merge_group", "fast", ("success", "success", "skipped", "success", "skipped")),
-    ("merge_group", "smoke", ("success", "success", "skipped", "success", "skipped")),
     ("push", "", ("skipped", "skipped", "success", "success", "success")),
     ("workflow_dispatch", "", ("skipped", "skipped", "success", "success", "success")),
 ]
+
+
+@pytest.mark.parametrize("tier", ["FAST", "STANDARD", "CRITICAL", "HOLD"])
+def test_merge_group_scope_is_never_smoke_for_any_review_tier(
+    tmp_path, monkeypatch, tier,
+):
+    """A merge group reaches the fan-in as fast (FAST) or full, never smoke.
+
+    The risk tier is forced so the mapping is covered for every tier the
+    shared policy can return, through the real classifier entry point the
+    workflow calls. The same diff as a pull request does reach smoke, so the
+    assertion is not vacuous.
+    """
+    import json
+    import types
+
+    from control_plane.github_review_risk_policy import ReviewTier
+    from scripts import ci_pr_scope as scope
+
+    repository = "mastermindx-market-intelligence/Mastermind"
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(root), *args], check=True, capture_output=True,
+            text=True, timeout=8,
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "example@example.test")
+    git("config", "user.name", "Test")
+    (root / "app").mkdir()
+    (root / "app" / "customer.py").write_text("value = 1\n")
+    git("add", ".")
+    git("commit", "-qm", "protected base")
+    base = git("rev-parse", "HEAD")
+    (root / "app" / "customer.py").write_text("value = 2\n")
+    git("add", ".")
+    git("commit", "-qm", "queued change")
+    head = git("rev-parse", "HEAD")
+    git("update-ref", "refs/remotes/origin/master", base)
+    monkeypatch.setattr(
+        scope, "assess_review_risk",
+        lambda facts: types.SimpleNamespace(tier=ReviewTier(tier)),
+    )
+
+    group = tmp_path / "merge-group.json"
+    group.write_text(json.dumps({
+        "repository": {"full_name": repository},
+        "merge_group": {
+            "base_sha": base, "head_sha": head, "base_ref": "refs/heads/master",
+            "head_ref": "refs/heads/gh-readonly-queue/master/pr-42-verified",
+        },
+    }))
+    queued = scope.select_scope(
+        root, group, expected_repository=repository,
+        event_type="merge_group", protected_base_sha=base,
+    )
+    assert queued.tier == tier
+    assert queued.mode == ("fast" if tier == "FAST" else "full")
+    assert queued.mode != "smoke"
+
+    pull = tmp_path / "pull-request.json"
+    pull.write_text(json.dumps({
+        "repository": {"full_name": repository},
+        "pull_request": {
+            "number": 42,
+            "head": {"sha": head, "repo": {"full_name": repository}},
+            "base": {"sha": base, "repo": {"full_name": repository}},
+        },
+    }))
+    as_pull_request = scope.select_scope(root, pull, expected_repository=repository)
+    assert (as_pull_request.mode == "smoke") is (tier == "STANDARD")
+    assert not [case for case in _GATE_PASS_CASES if case[:2] == ("merge_group", "smoke")]
 
 
 def _run_exact_workflow_gate(tmp_path, event, mode, states, *, plan_exit=0):

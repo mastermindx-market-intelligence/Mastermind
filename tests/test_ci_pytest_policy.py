@@ -900,13 +900,15 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     assert all(step.get("continue-on-error", False) is False for step in shard_steps)
     # CI Lightning F3: the five qualification gates moved verbatim out of
     # shard zero into the parallel qualification job; they must no longer
-    # appear inside any shard.
+    # appear inside any shard. The web application typecheck joined that job
+    # later and is owned by it in full mode the same way.
     for name in (
         "Verify Paper direct pinned MCP SDK",
         "Verify Paper Studio prepare guard",
         "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
         "Compile source",
         "Validate shell scripts",
+        "Typecheck web application",
     ):
         assert not [step for step in shard_steps if step.get("name") == name]
         qual = [

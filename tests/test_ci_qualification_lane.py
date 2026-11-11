@@ -1,10 +1,15 @@
-"""The parallel qualification lane owns the five non-pytest gates exactly.
+"""The parallel qualification lane owns the six non-pytest gates exactly.
 
 CI Lightning F3 moved the once-per-checkout qualification gates out of shard
 zero so they stop serializing ahead of its pytest mass. The gates must stay
 byte-identical to their released commands, run exactly when the shards run
 (including reuse pushes), and never linger inside a shard. These checks fail
 closed on any drift.
+
+The sixth gate is the web application typecheck. The PR fast lane owns it
+for fast/smoke candidates and is skipped in full mode, so this job is the
+only place a full merge group, a protected push or a manual run typechecks
+``app/mastermind_os``. It must be present, unconditional and run once.
 """
 from __future__ import annotations
 
@@ -21,6 +26,12 @@ _GATE_NAMES = (
     "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
     "Compile source",
     "Validate shell scripts",
+    "Typecheck web application",
+)
+_TYPECHECK = _GATE_NAMES[-1]
+_TYPECHECK_RUN = (
+    "npm ci --prefix app/mastermind_os --ignore-scripts --no-audit --no-fund\n"
+    "npm --prefix app/mastermind_os run typecheck\n"
 )
 
 
@@ -157,7 +168,138 @@ def test_validator_rejects_qualification_lane_drift(mutation: str) -> None:
         fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
 
 
-@pytest.mark.parametrize("index", range(5))
+def _typecheck_step(workflow: dict) -> dict:
+    steps = workflow["jobs"]["qualification"]["steps"]
+    found = [step for step in steps if step.get("name") == _TYPECHECK]
+    assert len(found) == 1
+    return found[0]
+
+
+def test_full_mode_typechecks_the_web_application_unconditionally() -> None:
+    workflow = _workflow()
+    jobs = workflow["jobs"]
+    step = _typecheck_step(workflow)
+    # Unconditional: pr_scope does not run on push/dispatch and every
+    # fail-closed HOLD decision reports needs_node=false, so neither a step
+    # condition nor needs_node may decide whether full mode typechecks.
+    assert set(step) == {"name", "run"}
+    assert step["run"] == _TYPECHECK_RUN
+    assert "needs_node" not in str(jobs["qualification"])
+    # Same commands and the same Node release the PR fast lane typechecks with.
+    fast_steps = jobs["pr_fast"]["steps"]
+    fast_typecheck = next(
+        s for s in fast_steps if s.get("name") == "Typecheck affected web application"
+    )
+    assert fast_typecheck["run"] == step["run"]
+    fast_node = next(s for s in fast_steps if s.get("uses") == "actions/setup-node@v4")
+    qual_node = next(
+        s for s in jobs["qualification"]["steps"]
+        if s.get("uses") == "actions/setup-node@v4"
+    )
+    assert qual_node["with"]["node-version"] == fast_node["with"]["node-version"]
+    assert qual_node["with"]["cache-dependency-path"].splitlines() == [
+        "integrations/studio_direct_mcp/package-lock.json",
+        "app/mastermind_os/package-lock.json",
+    ]
+    for lockfile in qual_node["with"]["cache-dependency-path"].splitlines():
+        assert (ROOT / lockfile).is_file()
+
+
+def test_typecheck_runs_once_per_event_never_in_both_lanes() -> None:
+    jobs = _workflow()["jobs"]
+    # The two job conditions are pinned by the validator and exclude each
+    # other: pr_fast needs a PR/merge-group scope that is not full, the
+    # qualification job needs full mode or an event with no scope at all.
+    fast_if, qual_if = jobs["pr_fast"]["if"], jobs["qualification"]["if"]
+    assert fast_if == fan._REQUIRED_PR_FAST_IF
+    assert qual_if == fan._REQUIRED_QUALIFICATION_IF
+    assert "needs.pr_scope.outputs.mode != 'full'" in fast_if
+    assert "needs.pr_scope.outputs.mode == 'full'" in qual_if
+
+    def lanes(event: str, mode: str) -> tuple[bool, bool]:
+        scoped = event in {"pull_request", "merge_group"}
+        fast = scoped and mode != "full"
+        qualification = event in {"push", "workflow_dispatch"} or (
+            scoped and mode == "full"
+        )
+        return fast, qualification
+
+    for event, modes in {
+        "pull_request": ("fast", "smoke", "full"),
+        "merge_group": ("fast", "full"),
+        "push": ("",),
+        "workflow_dispatch": ("",),
+    }.items():
+        for mode in modes:
+            fast, qualification = lanes(event, mode)
+            assert fast != qualification, (event, mode)
+            if mode in {"full", ""}:
+                assert qualification, (event, mode)
+    # No other job typechecks, so one event runs the command at most once.
+    owners = [
+        name for name, job in jobs.items()
+        if any("run typecheck" in str(s.get("run", "")) for s in job.get("steps", []))
+    ]
+    assert sorted(owners) == ["pr_fast", "qualification"]
+
+
+@pytest.mark.parametrize("mutation", [
+    "removed", "renamed", "conditional-needs-node", "conditional-always",
+    "continue-on-error", "command-cut", "command-echoed", "command-or-true",
+    "duplicated", "moved-into-shard", "moved-into-pin-guards",
+    "lockfile-cache-dropped", "node-version",
+])
+def test_validator_requires_the_qualification_typecheck(mutation: str) -> None:
+    import copy
+
+    import yaml
+
+    workflow = _workflow()
+    jobs = workflow["jobs"]
+    steps = jobs["qualification"]["steps"]
+    step = _typecheck_step(workflow)
+    specific = "must typecheck the web application unconditionally"
+    if mutation == "removed":
+        steps.remove(step)
+    elif mutation == "renamed":
+        step["name"] = "Typecheck"
+    elif mutation == "conditional-needs-node":
+        step["if"] = "${{ needs.pr_scope.outputs.needs_node == 'true' }}"
+    elif mutation == "conditional-always":
+        step["if"] = "${{ always() }}"
+    elif mutation == "continue-on-error":
+        step["continue-on-error"] = True
+    elif mutation == "command-cut":
+        step["run"] = step["run"].splitlines()[0] + "\n"
+    elif mutation == "command-echoed":
+        step["run"] = step["run"].replace("npm --prefix", "echo npm --prefix")
+    elif mutation == "command-or-true":
+        step["run"] = step["run"].rstrip("\n") + " || true\n"
+    elif mutation == "duplicated":
+        steps.append(copy.deepcopy(step))
+    elif mutation == "moved-into-shard":
+        steps.remove(step)
+        jobs["pytest_shards"]["steps"].append(step)
+    elif mutation == "moved-into-pin-guards":
+        steps.remove(step)
+        jobs["pin_guards"]["steps"].append(step)
+    elif mutation == "lockfile-cache-dropped":
+        specific = "qualification lane source or commands drifted"
+        node = next(s for s in steps if s.get("uses") == "actions/setup-node@v4")
+        node["with"]["cache-dependency-path"] = (
+            "integrations/studio_direct_mcp/package-lock.json"
+        )
+    elif mutation == "node-version":
+        specific = "qualification lane source or commands drifted"
+        node = next(s for s in steps if s.get("uses") == "actions/setup-node@v4")
+        node["with"]["node-version"] = "20"
+    with pytest.raises(cip.PolicyError) as raised:
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+    if not mutation.startswith("moved-into-"):
+        assert specific in str(raised.value)
+
+
+@pytest.mark.parametrize("index", range(len(_GATE_NAMES)))
 def test_any_single_shard_side_gate_copy_is_rejected(index: int) -> None:
     import copy
 
