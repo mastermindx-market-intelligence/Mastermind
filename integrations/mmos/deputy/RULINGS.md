@@ -36,3 +36,9 @@ then escalates the disagreement.
 8. **One restart for many changes (2026-11-11).** While a restart of the real team server
    can take minutes, changes that each need one are batched: the deputy prepares a single
    numbered step list for one packed release and one restart, and escalates it once.
+9. **A HIGH first seen late (2026-11-11).** Ruling 2 stops a lane when a HIGH survives its
+   repairs. A HIGH that a third check finds for the first time gets one more repair round
+   and one more delta check, limited to the listed findings. A panel's "strict improvement
+   over what is live" does not install a known HIGH: the install waits for that round.
+   Applied first to ask-and-return (N1, N2: answers of two finished asks delivered in the
+   wrong order) and to the browser fill (wrong content reported as applied).
