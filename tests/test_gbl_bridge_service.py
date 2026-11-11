@@ -79,8 +79,14 @@ class FakeStore:
     def append_ask_event(self, ask_id, event):
         record = self.asks[ask_id]
         stamped = {**event, "trusted": True}
-        stamped["seq"] = ((record["events"][-1].get("seq", -1) + 1)
-                          if record["events"] else 0)
+        # Round-2 contract: seq derives ONLY from the store's own trusted
+        # appends — a foreign/untrusted row (which carries no store seq)
+        # never moves the counter, so a trailing foreign comment cannot
+        # reset the sequence and brick the record.
+        last_trusted = max(
+            (existing.get("seq", -1) for existing in record["events"]
+             if existing.get("trusted") is True), default=-1)
+        stamped["seq"] = last_trusted + 1
         if not any(self._same_event(stamped, existing)
                    for existing in record["events"]):
             record["events"].append(stamped)
@@ -934,8 +940,11 @@ class TestRepairRenudge:
                     if e.get("type") == "nudge_attempt"]
         assert len(attempts) == 1              # persisted independent of outcome
         with pytest.raises(GblBridgeError) as err:
-            core.maybe_renudge(ask_id=ASK_ID)  # immediate retry is cooled down
-        assert err.value.code == "RENUDGE_COOLDOWN"
+            core.maybe_renudge(ask_id=ASK_ID)  # immediate retry is blocked
+        # Round-2 law: an effect-unknown attempt is never re-armed — not by
+        # an immediate retry (cooldown) and not by time (settle via
+        # reconcile). The typed refusal names the unsettled attempt.
+        assert err.value.code == "NUDGE_ATTEMPT_UNSETTLED"
         assert len(sender.calls) == 1          # never a second POST
 
     def test_reconcile_op_settles_without_sending(self):
@@ -949,7 +958,7 @@ class TestRepairRenudge:
         sender.error = WakeEffectUnknownError("submission result unavailable")
         core.maybe_renudge(ask_id=ASK_ID)      # effect unknown, attempt persisted
         sender.error = None
-        result = core.reconcile_nudge(ask_id=ASK_ID)
+        result = core.reconcile_nudge(principal=PRINCIPAL, ask_id=ASK_ID)
         assert result["status"] == "RECONCILED_DELIVERED"
         assert len(sender.reconcile_calls) == 1
         assert len(sender.calls) == 1          # reconcile never sends
@@ -963,7 +972,7 @@ class TestRepairRenudge:
         core = bridge(store, sender=sender)
         core.submit_ask(**submit())
         with pytest.raises(GblBridgeError) as err:
-            core.reconcile_nudge(ask_id=ASK_ID)
+            core.reconcile_nudge(principal=PRINCIPAL, ask_id=ASK_ID)
         assert err.value.code == "NUDGE_ATTEMPT_NOT_FOUND"
         assert sender.reconcile_calls == []
 
@@ -982,8 +991,146 @@ class TestRepairRenudge:
         try:
             response = _exchange(server, {
                 "schema": "mastermind.gbl.request.v1", "op": "reconcile",
-                "arguments": {"ask_id": ASK_ID}})
+                "arguments": {"principal": PRINCIPAL, "ask_id": ASK_ID}})
             assert response["ok"] is True
             assert response["result"]["status"] == "RECONCILED_NOT_DELIVERED"
+        finally:
+            server.close()
+
+
+class TestRepairRound2:
+    """Round-2 rows (panel A delta 1): the M8 residue — an effect-unknown
+    attempt is never re-armed by time, only by reconcile; non-bool ``trusted``
+    stamps are typed refusals; the store's seq derives from trusted events
+    only; ``reconcile`` carries the same party check as every mutating op."""
+
+    def _answered(self, store, sender):
+        core = bridge(store, sender=sender)
+        core.submit_ask(**submit())
+        core.post_answer(principal=PRINCIPAL, ask_id=ASK_ID,
+                         answer="A harmless fixture answer.",
+                         idempotency_key="gb-ans-0001")
+        return core
+
+    def _receipt(self, outcome):
+        from control_plane.wake_dispatcher import TransportOutcome, TransportReceipt
+        return TransportReceipt(outcome=TransportOutcome(outcome),
+                                reason_code="fixture", created_at="2026-11-11T12:00:00Z")
+
+    def _effect_unknown_attempt(self, store, sender):
+        from control_plane.wake_dispatcher import WakeEffectUnknownError
+        sender.error = WakeEffectUnknownError("submission result unavailable")
+        core = self._answered(store, sender)
+        assert core.maybe_renudge(
+            ask_id=ASK_ID)["status"] == "NUDGE_EFFECT_UNKNOWN"
+        sender.error = None
+        return core
+
+    def test_unsettle_blocks_renudge_past_cooldown_clock_probe(self):
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        self._effect_unknown_attempt(store, sender)
+        tick = {"now": T0 + timedelta(seconds=RENUDGE_COOLDOWN_SECONDS * 4)}
+        core = bridge(store, sender=sender, clock=lambda: tick["now"])
+        # The cooldown has long lapsed; time alone may never re-arm an
+        # attempt whose effect is unknown.
+        with pytest.raises(GblBridgeError) as err:
+            core.maybe_renudge(ask_id=ASK_ID)
+        assert err.value.code == "NUDGE_ATTEMPT_UNSETTLED"
+        assert len(sender.calls) == 1              # still never a second POST
+        # And it stays blocked at any later time — no resend exists.
+        tick["now"] = T0 + timedelta(seconds=RENUDGE_COOLDOWN_SECONDS * 40)
+        with pytest.raises(GblBridgeError) as err:
+            core.maybe_renudge(ask_id=ASK_ID)
+        assert err.value.code == "NUDGE_ATTEMPT_UNSETTLED"
+        assert len(sender.calls) == 1
+
+    def test_reconcile_delivered_rearms_after_cooldown(self):
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        sender.reconcile_receipt = self._receipt("DELIVERED")
+        core = self._effect_unknown_attempt(store, sender)
+        result = core.reconcile_nudge(principal=PRINCIPAL, ask_id=ASK_ID)
+        assert result["status"] == "RECONCILED_DELIVERED"
+        core2 = bridge(store, sender=sender,
+                       clock=lambda: T0 + timedelta(
+                           seconds=RENUDGE_COOLDOWN_SECONDS + 1))
+        assert core2.maybe_renudge(ask_id=ASK_ID)["status"] == "RENUDGED"
+        assert len(sender.calls) == 2
+
+    def test_reconcile_not_delivered_rearms_without_budget(self):
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        sender.reconcile_receipt = self._receipt("TARGET_UNAVAILABLE")
+        core = self._effect_unknown_attempt(store, sender)
+        result = core.reconcile_nudge(principal=PRINCIPAL, ask_id=ASK_ID)
+        assert result["status"] == "RECONCILED_NOT_DELIVERED"
+        nudges = [e for e in store.asks[ASK_ID]["events"]
+                  if e.get("type") == "nudge"]
+        assert nudges == []                        # budget never burned
+        core2 = bridge(store, sender=sender,
+                       clock=lambda: T0 + timedelta(
+                           seconds=RENUDGE_COOLDOWN_SECONDS + 1))
+        assert core2.maybe_renudge(ask_id=ASK_ID)["status"] == "RENUDGED"
+        assert len(sender.calls) == 2
+
+    def test_non_bool_trusted_stamp_is_typed_refusal(self):
+        # Only exact bools are lawful stamps: a truthy 1, a "true" string, a
+        # dict and an explicit null must each be a typed refusal — never an
+        # authoritative event that skips the seq law.
+        for bad in (1, "true", {}, None):
+            store = FakeStore()
+            core = bridge(store)
+            core.submit_ask(**submit())
+            store.asks[ASK_ID]["events"].append(
+                {"type": "state", "state": "ANSWERED", "seq": 9,
+                 "trusted": bad})
+            with pytest.raises(GblBridgeError) as err:
+                core.ask_status(principal=PRINCIPAL, ask_id=ASK_ID)
+            assert err.value.code == "EVENT_TRUST_INVALID"
+
+    def test_foreign_trailing_comment_does_not_brick_the_store(self):
+        store = FakeStore()
+        core = bridge(store)
+        core.submit_ask(**submit())
+        core.post_answer(principal=PRINCIPAL, ask_id=ASK_ID,
+                         answer="A harmless fixture answer.",
+                         idempotency_key="gb-ans-0001")
+        # A foreign comment surfaces untrusted and carries no store seq; the
+        # next store append must still derive a strictly greater seq from the
+        # TRUSTED events alone.
+        store.asks[ASK_ID]["events"].append(
+            {"type": "state", "state": "CONSUMED", "trusted": False})
+        result = core.fetch_result(principal=PRINCIPAL, ask_id=ASK_ID)
+        assert result["answer"] == "A harmless fixture answer."
+        assert core.ask_status(
+            principal=PRINCIPAL, ask_id=ASK_ID)["status"] == "CONSUMED"
+
+    def test_reconcile_requires_creator_or_addressee(self):
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        core = self._answered(store, sender)
+        with pytest.raises(GblBridgeError) as err:
+            core.reconcile_nudge(principal="stranger", ask_id=ASK_ID)
+        assert err.value.code == "ASK_NOT_FOR_PRINCIPAL"
+        assert sender.reconcile_calls == []
+        # Both parties pass the gate and reach the same typed no-attempt
+        # refusal the creator sees.
+        for party in (PRINCIPAL, "secretary"):
+            with pytest.raises(GblBridgeError) as err:
+                core.reconcile_nudge(principal=party, ask_id=ASK_ID)
+            assert err.value.code == "NUDGE_ATTEMPT_NOT_FOUND"
+
+    def test_reconcile_wire_op_requires_principal(self, tmp_path):
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        core = self._answered(store, sender)
+        server = _server(tmp_path, core, (os.getuid(),))
+        try:
+            response = _exchange(server, {
+                "schema": "mastermind.gbl.request.v1", "op": "reconcile",
+                "arguments": {"ask_id": ASK_ID}})
+            assert response["ok"] is False
+            assert response["error"]["code"] == "INVALID_ARGUMENTS"
         finally:
             server.close()

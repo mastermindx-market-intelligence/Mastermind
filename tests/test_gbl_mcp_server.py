@@ -114,7 +114,7 @@ class FakeBridge:
         "question": {"principal", "ask_id"},
         "result": {"principal", "ask_id"},
         "status": {"principal", "ask_id"},
-        "reconcile": {"ask_id"},
+        "reconcile": {"principal", "ask_id"},
     }
 
     def __init__(self, result=None, error=None):
@@ -777,6 +777,24 @@ class TestAdvertisedCaps(unittest.IsolatedAsyncioTestCase):
                 {"target": "secretary", "title": "Standing check",
                  "body": "Fixture brief words.",
                  "idempotency_key": "bad key with spaces!"},
+                token=harness.token()))
+            assert error["code"] == "INVALID_ARGUMENTS"
+            assert harness.bridge.calls == []
+        finally:
+            await harness.stop()
+
+    async def test_trailing_newline_is_refused_before_bridge(self):
+        # re.match with a $-anchored pattern admits a trailing newline; the
+        # bridge validates with fullmatch. The edge must agree: a value that
+        # only passes because of the newline is refused at the door.
+        harness = Harness()
+        await harness.start()
+        try:
+            error = tool_error(await harness.call(
+                "team.delegate",
+                {"target": "secretary", "title": "Standing check",
+                 "body": "Fixture brief words.",
+                 "idempotency_key": "gb-edge-key-1\n"},
                 token=harness.token()))
             assert error["code"] == "INVALID_ARGUMENTS"
             assert harness.bridge.calls == []
