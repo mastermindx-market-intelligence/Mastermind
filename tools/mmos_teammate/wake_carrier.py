@@ -1733,10 +1733,14 @@ def wait_for_reply(t3, op, opts):
 
 
 def comment_already_present(pc, issue_id, reply):
-    try:
-        rows = pc.comments(issue_id)
-    except CarrierError:
-        return False
+    """True when the exact reply text is already a comment on the issue.
+
+    R2a finding 20: a failed comments read is NOT "not present". A comment
+    POST is unkeyed (a fresh clientRequestId each time), so posting on a
+    read failure can duplicate an answer that is already there — the read
+    failure must fail the run before anything is posted (the best-effort
+    note paths wrap this in their own try/except, as before)."""
+    rows = pc.comments(issue_id)
     if isinstance(rows, dict):
         rows = rows.get("comments") or rows.get("rows") or []
     for row in rows:

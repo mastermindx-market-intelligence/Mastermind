@@ -2185,3 +2185,21 @@ def test_redirect_is_refused_and_token_never_leaves_base(monkeypatch):
     assert seen == ["http://127.0.0.1:9/api/x"]
     assert raised is not None, "a 3xx must raise CarrierError, not be followed"
     assert "HTTP 302" in str(raised)
+
+
+def test_comment_read_failure_fails_before_anything_is_posted():
+    # R2a finding 20: a failed comments read used to answer False ("not
+    # posted yet"), so deliver went on to POST the answer — and a comment
+    # POST is unkeyed, so a read failure that hid an already-posted answer
+    # turned into a duplicate. The read failure must fail the run before
+    # anything is posted.
+    pc = FakePaperclip(issues=one_issue())
+
+    def unreadable(issue_id):
+        raise wc.CarrierError(
+            "GET /api/issues/is-1/comments -> HTTP 503 unreadable")
+    pc.comments = unreadable
+    with pytest.raises(wc.CarrierError):
+        wc.deliver(pc, pc.issue("is-1"), "the answer", "pc-is-1-aaaaa")
+    # Nothing was posted at all: no comment, no confirmation, no status write.
+    assert pc.calls == []
