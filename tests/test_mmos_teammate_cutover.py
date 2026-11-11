@@ -98,6 +98,73 @@ def test_paperclip_base_must_be_plain_loopback_http():
         assert st.Http(ok).base.rstrip("/") == ok.rstrip("/")
 
 
+def test_unrecognised_board_shape_stops_every_write(tmp_path, monkeypatch):
+    # R2a finding 30: rows_of treated any unrecognised dict as an EMPTY
+    # result, so {"error": ...} read as "no open issues, no live runs" and
+    # apply passed its blockers on a misread. An unknown shape must die for
+    # apply, rollback and refresh-carrier, before anything is written.
+    bad_shapes = ({"data": [{"identifier": "MAS-1"}]},   # a page we can't read
+                  {"error": {"message": "internal error"}},
+                  {})                                     # an empty object
+    for bad in bad_shapes:
+        class BadIssues(FakeHttp):
+            def get(self, path):
+                if "/issues?" in path:
+                    return copy.deepcopy(bad)
+                return super().get(path)
+        spec = make_spec(tmp_path)
+        http = BadIssues(old_agent())
+        monkeypatch.setattr(co, "Http", lambda base: http)
+        with pytest.raises(SystemExit):
+            co.cmd_apply(spec)
+        assert http.patches == []  # the agent is untouched
+        assert not os.path.exists(os.path.join(spec["agent_dir"],
+                                               "cutover-preimage.json"))
+
+    class BadLive(FakeHttp):
+        def get(self, path):
+            if "/live-runs" in path:
+                return {"error": {"message": "boom"}}
+            return super().get(path)
+
+    # a live-runs misread stops apply the same way
+    spec = make_spec(tmp_path)
+    http = BadLive(old_agent())
+    monkeypatch.setattr(co, "Http", lambda base: http)
+    with pytest.raises(SystemExit):
+        co.cmd_apply(spec)
+    assert http.patches == []
+
+    # rollback: a saved setup exists, a misread must not hand it back
+    agent_dir = os.path.join(str(tmp_path), "rb-home")
+    os.makedirs(agent_dir)
+    saved = {k: old_agent().get(k) for k in co.PREIMAGE_KEYS}
+    with open(os.path.join(agent_dir, "cutover-preimage.json"), "w") as fh:
+        json.dump(saved, fh)
+    spec = make_spec(tmp_path)
+    spec["agent_dir"] = agent_dir
+    http = BadLive(old_agent())
+    monkeypatch.setattr(co, "Http", lambda base: http)
+    with pytest.raises(SystemExit):
+        co.cmd_rollback(spec)
+    assert http.patches == []
+    assert os.path.exists(os.path.join(agent_dir, "cutover-preimage.json"))
+
+    # refresh-carrier: the agent is already moved; a misread changes nothing
+    spec = make_spec(tmp_path)
+    carrier_path, _ = co.carrier_paths(spec)
+    moved = old_agent()
+    moved["adapterType"] = "process"
+    moved["adapterConfig"] = {"command": "/usr/bin/python3",
+                              "args": ["-I", carrier_path, "carrier.json"]}
+    http = BadLive(moved)
+    monkeypatch.setattr(co, "Http", lambda base: http)
+    with pytest.raises(SystemExit):
+        co.cmd_refresh_carrier(spec)
+    assert http.patches == []
+    assert not os.path.exists(carrier_path)  # not even installed
+
+
 def test_blockers_name_every_unsafe_state(tmp_path):
     spec = make_spec(tmp_path)
     assert co.blockers(spec, old_agent(), [], []) == []

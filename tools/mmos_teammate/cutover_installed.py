@@ -46,10 +46,19 @@ def write_private(path, text):
 def rows_of(payload):
     if isinstance(payload, list):
         return payload
-    for key in ("items", "issues", "rows", "runs"):
-        if isinstance(payload.get(key), list):
-            return payload[key]
-    return []
+    if isinstance(payload, dict):
+        for key in ("items", "issues", "rows", "runs"):
+            if isinstance(payload.get(key), list):
+                return payload[key]
+    # R2a finding 30: an unrecognised shape is NOT an empty result. A dict
+    # with no known list key ({"data": ...}, {"error": ...}, {}) — or a
+    # non-object — is a page this tool cannot read; treating it as "no open
+    # issues, no live runs" lets apply pass its blockers on a misread. Die;
+    # every caller (apply, rollback, refresh-carrier, check) changes
+    # nothing. Shape only: nothing of the payload is printed.
+    die("unrecognised response shape from the board (expected a list or an "
+        f"object with one of items/issues/rows/runs, got "
+        f"{type(payload).__name__})")
 
 
 def blockers(spec, agent, open_issues, live_runs):
