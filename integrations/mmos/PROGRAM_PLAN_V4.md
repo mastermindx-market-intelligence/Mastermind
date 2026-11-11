@@ -745,7 +745,7 @@ teammates. Evidence: `~/.mastermind/mmos_evidence/cq-20261111/unanswered/`.
 from section 19. Still open on the coding job: everything in lane T4c.
 
 
-## 21. Amendment, 2026-11-11 01:45 UTC: the improvement loop has run once
+## 21. Amendment, 2026-11-11 01:30 UTC: the improvement loop has run once
 
 **Lane IMP returned and is merged** (`7781ccc1d`). It read the plan's amendments, the method,
 the findings files and every lane ledger, and produced:
@@ -769,3 +769,51 @@ the findings files and every lane ledger, and produced:
 
 DONE_WHEN 10's third part (backlog, scoreboard, skill updated from real lane findings) is met.
 The loop's next run is due when T8, TSH and T4c have returned.
+
+
+## 22. Amendment, 2026-11-11 01:55 UTC: the model router failed, three lanes died, and one lane is split
+
+**What happened.** The model router (`ai.mastermind.fabric-router`, not this program's to
+change) took a new release at 01:28:49 UTC. Its health check failed, the roll-back was also
+unhealthy, and its watchdog restarted it. Further releases went in at 01:34:48, 01:42:14 and
+01:45:08. All three running lanes (T8, TSH, T4c) ended with "connection refused". Since
+01:45:43 UTC the router answers for `glm-5.3`, `kimi-k3.1-pro` and `deepseek-v4.1-flash`.
+Lanes running through the later reloads survived them; only the first, long failure killed.
+
+**What the failure exposed.** T8 and T4c had hours of work that was not committed, and their
+branches had never been pushed. Nothing was lost only because the checkouts were intact. This
+is the event the pushed-steps rule (section 21) was written for; these lanes were started
+before it. Both resumes were told to commit and push first, and both branches are now on
+origin (`t3/mmos-v4-t8` at `593aeb9d8`, `t3/mmos-v4-t4c` at `f31bf26b6`).
+
+**Resumed in their own threads:** T8 and T4c, same drivers, same checkouts.
+
+**TSH was not resumed. It is split into two lanes.**
+- Its driver was `kimi-k3.1-pro` in one run of 3 hours 47 minutes. That provider allows about
+  24,000 new input tokens a minute, so a thread that long cannot be restarted cold. Its
+  working tree had an installer that did not parse and one broken test. I saved the tree as
+  it was (`daa8f2003` on `t3/mmos-v4-tsh`, labelled work in progress) and cancelled the task.
+- The lane had tied a finished, fast part to an unfinished, slow part. The fast part is the
+  short teammate names and finding a teammate's thread by something that does not change
+  (`859282b2f`, `9b733b1d7`). The slow part is the pinned Node, the packed server build and
+  the health check.
+- **Lane TSHb** (`glm-5.3`, branch `t3/mmos-v4-tshb`) owns the slow part. It rewrites the
+  installer from the last parsing version with the eight findings of the installer review
+  written into its brief. The installer decides which downloaded program gets run, so it is a
+  critical surface and gets an independent review before the real team server is moved.
+- **Lane TSR** (`glm-5.3`, branch `t3/mmos-v4-tsr`) proves the fast part on a team server of
+  its own. The two commits have unit tests and have never run against a server. They will be
+  applied to the real one, where two teammates hold real work, and a teammate must never end
+  up with two primary threads. TSR runs seven steps (create, rename, repeat, lost state, two
+  candidates refused, a message still answered, rename back) and writes the commands for the
+  real server. Then I apply the short names, and Secretary moves as the third teammate.
+  Neither waits for TSHb.
+
+**Rules changed.**
+- A lane driver is `glm-5.3`. `kimi-k3.1-pro` is used for one bounded child at a time, never
+  as the driver of a lane that runs for hours.
+- A child asked to review files gets a commit, and those files stay unchanged until it
+  returns. TSH's review ran while its driver edited the same file and saw three versions.
+  This is now in `LANE_RULES_V4.md`.
+
+**Running now, at the width cap of four:** T8, T4c, TSHb, TSR.
