@@ -26,5 +26,15 @@ Resume never re-sends the original prompt: the continuation turn sends the serve
 - Status stays `cancelled` (not `interrupted`): three upstream delivery tests pin `cancelled`.
 - Hung executor and unbounded finalization retry: upstream design, not changed.
 
+## Operator rule until the follow-up lane lands (ruling 7, 2026-11-11)
+After any restart of the team server, read the task list before re-sending a delegation, and
+use a new client request id. A repeated `delegate_task` with the same client request id after a
+restart starts a second child (row 7, unchanged by this patch).
+
+Panel 2026-11-11 (`~/.mastermind/mmos_evidence/t10-20261111/panel/SCORE.md`): install-ready,
+0 HIGH, 6 MED (E–J), all present before this patch and not worsened by it; 4 LOW (A–D) on the
+patch surface. E–J, A–D and chain-head keying for the duplicate child go to the follow-up lane
+T10f as a separate reviewed change; this install is not held for them.
+
 ## Install / rollback (team server; the install is the principal's)
 Build from a clone at the pin with all four patches applied in order (MANIFEST commands), then swap the team server build under its existing launcher. Rollback: rebuild without `silent_stop_return_0770446.patch` (`git apply -R silent_stop_return_0770446.patch` on the clone) and restart under the same launcher. No schema or state migration; stored data is untouched either way.
