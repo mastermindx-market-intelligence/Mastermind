@@ -30,13 +30,29 @@ instance at `127.0.0.1:3100`.
 ```
 cd integrations/paperclip_plugins/my-module
 node ../build_module.mjs                                   # build (commit dist/)
+tools/mmos_dev/paperclip_dev.sh status                     # may already be up (shared standing instance)
 tools/mmos_dev/paperclip_dev.sh up                         # dev instance on 127.0.0.1:3190
 tools/mmos_dev/paperclip_dev.sh install-module "$(pwd)"    # install, waits for ready
 # edit src, rebuild, then:
 tools/mmos_dev/paperclip_dev.sh reload-module "$(pwd)"     # touch; falls back to reinstall
 tools/mmos_dev/paperclip_dev.sh logs plugin mastermind.core
-tools/mmos_dev/paperclip_dev.sh down
+tools/mmos_dev/paperclip_dev.sh down                      # only if your brief owns this instance
 ```
 
+The dev instance is standing: other lanes may be using port 3190, so check
+`status` before `up` and stop it only when your brief says you own it.
+
+## Two Paperclip facts that bite
+
+- Every write accepted on loopback is recorded with `authorType: "user"` —
+  it looks like the board wrote it. If your module posts comments or notes
+  on issues, start the body with a bracketed prefix (for example
+  `[mastermind-core]`) so machine text can be told apart from a person's
+  words; readers filter on those prefixes.
+- A comment's text is all a reader has: there is no per-comment author
+  distinction beyond that prefix, so never write a person-voiced sentence
+  from code.
+
 Rules and boundaries: `_template/README.md` and
-`tools/mmos_dev/README.md` (next-lane test company/agent).
+`tools/mmos_dev/README.md` (next-lane test company/agent). Safety and git
+rules: `integrations/mmos/LANE_RULES_V4.md`.

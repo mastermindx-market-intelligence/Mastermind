@@ -19,8 +19,26 @@ loopback spellings (`127.1`, `2130706433`, `0x7f000001`) normalize to
 starts in normal mode: https, `0.0.0.0`, `[::1]`, any other host, `file:`,
 userinfo, unparseable. The loaded page gets no native IPC (no capability,
 file or config-inline, carries a `remote` key). Proof:
-`cargo test --manifest-path src-tauri/Cargo.toml shell_mode` — 8 tests, run
-from `app/mastermind_os`.
+`cargo test --manifest-path src-tauri/Cargo.toml shell_mode` — 12 tests at
+the time of writing, run from `app/mastermind_os`.
+
+## The T3 command line picks its own server
+
+The `t3` CLI chooses its server from `T3CODE_HOME` and `T3CODE_PORT`, never
+from any address inside your arguments — a helper pointed at a dev URL has
+minted pairing codes on the Chairman's app (port 3773) this way. Set both to
+the server you mean and confirm it answers before any pairing command. The
+stock `~/.t3/bin/t3` wraps the Chairman's app and prints a warning line in
+front of its JSON when aimed at a newer home, so scripts reading its JSON
+fail — use the named server build's own binary (team server:
+`~/.mastermind/t3-team-server/bin/t3`, `T3CODE_HOME=~/.mastermind/t3-team/home`).
+
+## Pairing
+
+Pair from a 0600 file at launch (`MM_SHELL_URL_FILE`). The one-time token in
+the server's `run/access.txt` stops working about two minutes after the server
+starts — pair with a freshly made code. Never take an accessibility dump or an
+image of the pairing page: the page shows the token (`LANE_RULES_V4.md`).
 
 ## Build the dev bundle
 
@@ -45,7 +63,8 @@ MM_SHELL_URL=http://127.0.0.1:<port> MMOS_DEV_ROOT=$HOME/.mastermind/mmos_dev \
 ```
 
 The dev log (JSONL, structurally redacted) is `$MMOS_DEV_ROOT/app.log`;
-refusals also go to stderr.
+refusals also go to stderr. Read that log, never the T3 server's raw
+`run/server.log` — its startup banner carries credentials (`LANE_RULES_V4.md`).
 
 ## Proof recipe (load only, window-scoped)
 
@@ -54,6 +73,9 @@ refusals also go to stderr.
 2. Launch as above with `MM_SHELL_URL=http://127.0.0.1:<port>`.
 3. Accessibility text: `osascript -e 'tell application "System Events" to tell
    process "mastermind-os" to get entire contents of first window'`.
+   Transient zero-element or no-composer reads happen on a live webview;
+   retry once in the same bounded session before concluding the page is
+   blank, and count a step done only once its evidence file exists.
 4. Window capture: `peekaboo see --app "Mastermind OS Dev" --no-elements --path
    <file>.png` (peekaboo v4; the old `image` command was removed).
 
@@ -65,3 +87,4 @@ refusals also go to stderr.
 - The default Paperclip instance on 127.0.0.1:3100 is read-only (GET only).
 - Captures are scoped to the dev window; never full-screen. Kill the dev app
   and your proof server when done.
+- Full safety and git rules: `integrations/mmos/LANE_RULES_V4.md`.
