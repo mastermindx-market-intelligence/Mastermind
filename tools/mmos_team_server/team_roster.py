@@ -532,6 +532,13 @@ GATE_SOURCE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "teammate_gate.py")
 GATE_INSTALL_NAME = "teammate_gate.py"
 
+# M-R2 (panel 3): the hook interpreter is ONE absolute, validated binary.
+# `/usr/bin/env python3` resolved the interpreter through the hook runtime's
+# PATH, so any python3 earlier on that PATH would run INSTEAD of the gate —
+# different code deciding every tool call, a full fence bypass. The pinned
+# binary is verified at apply time (ensure_gate) and by `status`.
+GATE_INTERPRETER = "/usr/bin/python3"
+
 
 def gate_install_path(spec):
     return os.path.join(os.path.realpath(expand(spec["server"]["root"])),
@@ -552,12 +559,13 @@ def _shell_single_quote(text):
 
 
 def gate_command(spec, mate):
-    # R4 (M2 + N1): /usr/bin/env python3 -I defeats usercustomize/site
-    # hijack of a bare `python3`; -I isolates from PYTHON* env and the
+    # R4 (M2 + N1) + M-R2 (panel 3): the PINNED absolute interpreter — no
+    # PATH lookup, so nothing earlier on the hook runtime's PATH can run
+    # instead of the gate — with -I isolation from PYTHON* env and the
     # user site dir; every non-2 exit of the gate itself (1 on internal
     # error, 126 not executable, 127 missing, timeout kill) becomes a
     # refusal through `|| exit 2` — the hook layer fails CLOSED.
-    return (f"/usr/bin/env python3 -I "
+    return (f"{GATE_INTERPRETER} -I "
             f"{_shell_single_quote(gate_install_path(spec))} --config "
             f"{_shell_single_quote(gate_config_path(spec, mate))} || exit 2")
 
@@ -705,6 +713,13 @@ def ensure_gate(spec):
     if not os.path.isfile(GATE_SOURCE):
         die(f"gate program missing from the installation: {GATE_SOURCE}; "
             "refusing to apply limits whose primary fence cannot exist")
+    # M-R2 (panel 3): never wire a hook whose pinned interpreter cannot
+    # run — the fence would fail closed on EVERY call (or, wired with a
+    # PATH lookup, run whatever python3 comes first)
+    if not (os.path.isfile(GATE_INTERPRETER) and
+            os.access(GATE_INTERPRETER, os.X_OK)):
+        die(f"the pinned hook interpreter {GATE_INTERPRETER} is missing or "
+            "not executable; refusing to wire a hook that cannot run")
     root = os.path.realpath(expand(spec["server"]["root"]))
     staging = os.path.join(root, "run")
     os.makedirs(staging, exist_ok=True)
@@ -1660,9 +1675,10 @@ def _fence_status(spec, mate):
       sha256 and is exactly what tool-limits.json wires as the
       PreToolUse hook (a missing or altered hook lets every call through
       — live-proved fail-open);
-    - the gate's mode is exactly 0555, python3 is on PATH, no settings
-      file that applies to the teammate sets disableAllHooks, and a canary
-      call through the exact wired command exits 2 (repair round 2, R6c).
+    - the gate's mode is exactly 0555, the pinned interpreter exists
+      (M-R2), no settings file that applies to the teammate sets
+      disableAllHooks, and a canary call through the exact wired command
+      exits 2 (repair round 2, R6c).
     """
     problems = []
     limits_path, _ = limits_paths(spec, mate)
@@ -1723,10 +1739,14 @@ def _fence_status(spec, mate):
         if not mode_ok:
             problems.append(f"gate mode is {mode:04o}, expected 0555: "
                             f"{gate_path}")
-    # 2) the hook command's interpreter must exist on PATH
-    python_ok = shutil.which("python3") is not None
+    # 2) the pinned hook interpreter exists and is executable (M-R2, panel
+    #    3: the command no longer resolves python3 through PATH, so the
+    #    exact binary must be present)
+    python_ok = (os.path.isfile(GATE_INTERPRETER) and
+                 os.access(GATE_INTERPRETER, os.X_OK))
     if not python_ok:
-        problems.append("python3 not found on PATH; the gate hook command "
+        problems.append(f"the pinned hook interpreter {GATE_INTERPRETER} is "
+                        "missing or not executable; the gate hook command "
                         "cannot run and every call would fail closed to a "
                         "refusal — fix the launch environment")
     # 3) hooks disabled in any settings file that applies to the teammate:

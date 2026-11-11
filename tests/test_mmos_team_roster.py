@@ -1782,7 +1782,10 @@ class TestRepairRound2:
         spec = load(tmp_path, make_spec(tmp_path))
         mate = spec["teammates"][0]
         command = team_roster.gate_command(spec, mate)
-        assert command.startswith("/usr/bin/env python3 -I ")
+        # M-R2 (panel 3) tightened R4: the interpreter is the pinned
+        # absolute binary, never a PATH lookup
+        assert command.startswith("/usr/bin/python3 -I ")
+        assert "/usr/bin/env" not in command
         assert command.endswith("|| exit 2")
         # both paths quoted: a server root with a space must still parse
         assert f"'{team_roster.gate_install_path(spec)}'" in command
@@ -1873,13 +1876,15 @@ class TestRepairRound2:
         _, gate_ok, problems = team_roster._fence_status(spec, mate)
         assert not gate_ok and any("0555" in p for p in problems), problems
         os.chmod(gate_path, 0o555)
-        # 2) python3 missing for the hook command
-        monkeypatch.setattr(team_roster.shutil, "which",
-                            lambda name: None if name == "python3" else name)
+        # 2) the pinned interpreter missing for the hook command (M-R2
+        #    replaced the PATH lookup with one absolute binary)
+        monkeypatch.setattr(team_roster, "GATE_INTERPRETER",
+                            "/nonexistent/python3")
         _, gate_ok, problems = team_roster._fence_status(spec, mate)
-        assert not gate_ok and any("python3" in p for p in problems)
-        monkeypatch.setattr(team_roster.shutil, "which",
-                            lambda name: name)
+        assert not gate_ok and any("pinned hook interpreter" in p
+                                   for p in problems), problems
+        monkeypatch.setattr(team_roster, "GATE_INTERPRETER",
+                            "/usr/bin/python3")
         # 3) hooks disabled in a settings file that applies to the teammate
         home = team_roster.teammate_home(spec, mate)
         settings = os.path.join(home, "settings.json")
@@ -2002,3 +2007,57 @@ class TestRepairRound3:
         assert len(roots) == len(set(roots)), roots
         assert len([r for r in roots
                     if r.startswith("/System/Volumes/Data")]) == 0, roots
+
+    # ---- M-R2: the hook interpreter is one absolute, validated binary ----
+
+    def test_mr2_gate_command_pins_absolute_interpreter(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        command = team_roster.gate_command(spec, mate)
+        # the exact pinned binary, isolated, fail-closed — no PATH lookup
+        assert command.startswith(team_roster.GATE_INTERPRETER + " -I ")
+        assert command.startswith("/")
+        assert "/usr/bin/env" not in command
+        assert command.endswith("|| exit 2")
+        # the pinned interpreter is a real executable on this machine
+        assert os.path.isfile(team_roster.GATE_INTERPRETER)
+        assert os.access(team_roster.GATE_INTERPRETER, os.X_OK)
+
+    def test_mr2_wired_command_runs_under_the_pinned_interpreter(
+            self, tmp_path):
+        # end to end through sh -c: the command executes and fails closed
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        team_roster.write_file_assets(spec, mate)
+        team_roster.ensure_gate(spec)
+        allowed = json.dumps({
+            "tool_name": "Read",
+            "tool_input": {"file_path": str(
+                team_roster.teammate_home(spec, mate) + "/CLAUDE.md")},
+            "cwd": team_roster.teammate_home(spec, mate)})
+        proc = subprocess.run(team_roster.gate_command(spec, mate),
+                              shell=True, input=allowed,
+                              capture_output=True, text=True, timeout=60)
+        assert proc.returncode == 0, proc.stderr
+
+    def test_mr2_status_flags_missing_pinned_interpreter(
+            self, tmp_path, monkeypatch):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        team_roster.write_file_assets(spec, mate)
+        team_roster.ensure_gate(spec)
+        _, gate_ok, problems = team_roster._fence_status(spec, mate)
+        assert gate_ok and not problems, problems
+        monkeypatch.setattr(team_roster, "GATE_INTERPRETER",
+                            "/nonexistent/python3")
+        _, gate_ok, problems = team_roster._fence_status(spec, mate)
+        assert not gate_ok
+        assert any("pinned hook interpreter" in p for p in problems), problems
+
+    def test_mr2_apply_dies_when_pinned_interpreter_missing(
+            self, tmp_path, monkeypatch):
+        spec = load(tmp_path, make_spec(tmp_path))
+        monkeypatch.setattr(team_roster, "GATE_INTERPRETER",
+                            "/nonexistent/python3")
+        with pytest.raises(SystemExit):
+            team_roster.ensure_gate(spec)
