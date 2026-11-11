@@ -493,7 +493,15 @@ class _CommentsPaperclip:
 
 
 def _agent(body, at):
-    return {"authorType": "agent", "body": body, "createdAt": at}
+    # the ASSIGNEE's own word (_issue_row assigns "ag-1"): the R1 gate binds
+    # the authorizing comment's authorAgentId to the assignee
+    return {"authorType": "agent", "authorAgentId": "ag-1",
+            "body": body, "createdAt": at}
+
+
+def _agent_of(agent_id, body, at):
+    return {"authorType": "agent", "authorAgentId": agent_id,
+            "body": body, "createdAt": at}
 
 
 def _user(body, at):
@@ -1683,6 +1691,86 @@ def test_step5_f5_the_request_gate_refuses_degraded_timestamps(
         # the not-started service socket, i.e. the admission lane itself
         asyncio.run(d.admit(command_b))
     assert d.frozen[command_b].get("admit_requested_at")
+
+
+def test_r1_the_gate_binds_the_requesting_comment_to_the_assignee(
+        scratch, monkeypatch):
+    """T4c repair round 1, R1 (panel HIGH, 2026-11-11): the F10 gate never
+    compared the authorizing comment's ``authorAgentId`` to the issue's
+    assignee — any roster teammate's block-bearing comment authorized a run
+    under the assignee's identity.  The gate now requires the NEWEST agent
+    comment to be the assignee's own word.  When the newest agent comment is
+    another agent's, the NEWEST wins and the gate refuses typed — the newest
+    agent comment is the task's current instruction state (the same law the
+    F10 newest-wins test already asserts for block semantics), so a foreign
+    newer word makes the authorization ambiguous: admitting on an OLDER
+    assignee row would mean silently ignoring a teammate's newer words on
+    the assignee's task, and the gate cannot know whether that word cancels,
+    supersedes or sits beside the request.  Like F5, an authorization gate
+    refuses on ambiguous evidence; the refusal persists nothing, so the
+    assignee's own newer block admits later."""
+    d = _attack_door(scratch, monkeypatch)
+    # a second REAL roster teammate, so the refusals below come from the
+    # author binding, not the ASSIGNEE_NOT_ENROLLED roster check
+    d.config.teammates = list(d.config.teammates) + ["ag-2"]
+    assert "ag-2" in d.config.teammates
+
+    # leg 1 — another roster teammate's block-bearing comment on the
+    # assignee's issue is NOT the assignee's request: refused typed, and
+    # the refusal burned nothing
+    command = d.freeze_issue(_issue_row("iss-r1a"))
+    entry = d.frozen[command]
+    row = dict(_issue_row("iss-r1a"))
+    assert row["assigneeAgentId"] == "ag-1"
+    d.paperclip = _CommentsPaperclip(row, [
+        _user("board note", "2026-11-11T01:00:00Z"),
+        _agent_of("ag-2", BLOCK, "2026-11-11T02:00:00Z")])
+    reply = asyncio.run(d.admit(command))
+    assert reply["ok"] is False
+    assert reply["error"]["code"] == "REQUEST_AUTHOR_NOT_ASSIGNEE"
+    assert "ag-2" in reply["error"]["message"]
+    assert "admit_requested_at" not in entry
+
+    # leg 2 — an agent comment with NO author id is equally foreign (a row
+    # that cannot name its author cannot authorize the assignee's run)
+    d.paperclip = _CommentsPaperclip(row, [
+        {"authorType": "agent", "body": BLOCK,
+         "createdAt": "2026-11-11T02:00:00Z"}])
+    reply = asyncio.run(d.admit(command))
+    assert reply["ok"] is False
+    assert reply["error"]["code"] == "REQUEST_AUTHOR_NOT_ASSIGNEE"
+    assert "admit_requested_at" not in entry
+
+    # leg 3 — the NEWEST agent comment is another agent's while an OLDER
+    # valid one is the assignee's: the newest wins, so the gate refuses —
+    # it must not hunt for an older assignee row it likes better
+    command_b = d.freeze_issue(_issue_row("iss-r1b"))
+    row_b = dict(_issue_row("iss-r1b"))
+    d.paperclip = _CommentsPaperclip(row_b, [
+        _agent_of("ag-1", BLOCK, "2026-11-11T02:00:00Z"),
+        _agent_of("ag-2", "hands off — I am taking this one",
+                  "2026-11-11T03:00:00Z")])
+    reply = asyncio.run(d.admit(command_b))
+    assert reply["ok"] is False
+    assert reply["error"]["code"] == "REQUEST_AUTHOR_NOT_ASSIGNEE"
+    assert "admit_requested_at" not in d.frozen[command_b]
+
+    # leg 4 — the assignee's OWN newest agent comment carries the block:
+    # the gate admits (the failure past the gate is the not-started
+    # service socket, the same shape as the F5 lawful-admit leg).  An
+    # OLDER teammate comment beside it neither revokes nor authorizes.
+    command_c = d.freeze_issue(_issue_row("iss-r1c"))
+    row_c = dict(_issue_row("iss-r1c"))
+    d.paperclip = _CommentsPaperclip(row_c, [
+        _agent_of("ag-2", "old chatter from a teammate",
+                  "2026-11-11T01:00:00Z"),
+        _agent_of("ag-1", BLOCK, "2026-11-11T02:00:00Z")])
+    monkeypatch.setattr(d, "_frame_context", lambda: {
+        "principal": {}, "principal_context": {},
+        "capability_profile_digest": "", "target_digest": ""})
+    with pytest.raises(FileNotFoundError):
+        asyncio.run(d.admit(command_c))
+    assert d.frozen[command_c].get("admit_requested_at")  # lawful admit
 
 
 def test_step6_the_launch_spec_names_the_placement_jobs_own_paths(

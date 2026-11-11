@@ -953,10 +953,12 @@ class CodingJobDoor:
     def _task_request_error(self, command: str, entry: dict):
         """F10 (R4b review): ``None`` when the TASK shows the request —
         the live assignee is an enrolled teammate and its NEWEST agent
-        comment carries the job block for this entry's key (the carrier's
-        own parser discipline: the fenced block as the comment's own last
-        word).  Otherwise a typed ``(code, message)`` refusal; nothing is
-        persisted, so a later lawful admit is not burned."""
+        comment — authored by the assignee itself, ``authorAgentId`` bound
+        to the assignee (T4c repair R1) — carries the job block for this
+        entry's key (the carrier's own parser discipline: the fenced block
+        as the comment's own last word).  Otherwise a typed
+        ``(code, message)`` refusal; nothing is persisted, so a later
+        lawful admit is not burned."""
         issue = entry.get("issue") or {}
         issue_id = issue.get("id")
         if not issue_id:
@@ -998,6 +1000,21 @@ class CodingJobDoor:
         agent_rows = sorted(agent_rows,
                             key=lambda row: str(row["createdAt"]))
         newest = agent_rows[-1]
+        # T4c repair round 1, R1 (panel HIGH, 2026-11-11): the NEWEST agent
+        # comment is the task's current instruction state, and it must be
+        # the ASSIGNEE's own word — a block-bearing comment by any other
+        # agent (another roster teammate included) is not the assignee's
+        # request and must not authorize a run under the assignee's
+        # identity.  The gate never falls back to an OLDER assignee row
+        # when the newest agent word is foreign: that newer word is exactly
+        # the ambiguity an authorization gate refuses on (the F5 law).
+        if str(newest.get("authorAgentId") or "") != assignee:
+            return ("REQUEST_AUTHOR_NOT_ASSIGNEE",
+                    f"the newest agent comment on the task is authored by "
+                    f"{newest.get('authorAgentId') or 'an unnamed agent'}, "
+                    f"not the assignee ({assignee}); only the assignee's "
+                    "own newest agent word can request this run — refusing "
+                    "rather than acting on another agent's word")
         # the carrier's parser (byte-pinned by its own tests): the LAST
         # fenced paperclip-coding-job block, the comment's own last word
         from tools.mmos_teammate.wake_carrier import parse_coding_job_block
