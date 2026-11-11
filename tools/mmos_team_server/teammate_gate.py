@@ -44,36 +44,38 @@ import threading
 import unicodedata
 import urllib.parse
 
-# Mirrors HOME_LOCKED/HOME_CONFIG in team_roster.py plus the backup name a
-# restart honors (probe 5). tests/test_mmos_teammate_gate.py asserts the two
-# constant sets stay in sync.
-PROTECTED_NAMES = frozenset({
-    # team_roster.HOME_LOCKED
-    "tool-limits.json", "CHARTER.md", "carrier.json",
-    "cutover-preimage.json", "cutover-result.json",
-    # team_roster.HOME_CONFIG
+# H-2 (panel 3): ONE canonical list of home-relative names that are Claude
+# configuration, credentials or client state. The gate's write fence
+# (PROTECTED_NAMES below), its read fence (UNREADABLE_NAMES) and
+# team_roster.py's HOME_LOCKED / HOME_CONFIG / HOME_UNREADABLE classes are
+# ALL derived from these sets (the roster imports this module), so the
+# layers cannot drift apart again. Panel 3 H-2: the read fence named 10
+# first components while the write fence classed 29 — .claude/settings.json
+# (the .claude/ subtree is its first component), .mcp.json,
+# keybindings.json, sessions/, the CLAUDE.md backups and friends stayed
+# readable. One class now.
+CLAUDE_CONFIG_NAMES = frozenset({
     "settings.json", "settings.local.json", "managed-settings.json",
     ".claude.json", ".mcp.json", ".credentials.json", "keybindings.json",
     "CLAUDE.local.md", ".claude", "plugins", "skills", "agents", "commands",
     "hooks", "rules", "output-styles", "backups", "sessions", "projects",
     "todos", "shell-snapshots", "statsig", "ide",
-    # restart-honored / belt (probe 5)
-    ".claude.json.backup", "CLAUDE.md.backup",
 })
-
-# One unreadable set (repair round 2, R3 + M5) used by Read, Glob and Grep
-# alike: files in the teammate's OWN home that carry config, credentials or
-# session transcripts. Panel 2 H3: Grep rooted at the home returned the
-# cut-over preimage's content while Read of it refused; M5: .claude.json,
-# .credentials.json, carrier.json and projects/ were fully readable. The
-# families cover every spelling: anything starting with .claude.json (the
-# backups a restart could honor) and settings*.json.
-UNREADABLE_NAMES = frozenset({
-    "cutover-preimage.json", ".credentials.json", ".claude.json",
-    ".claude.json.backup", "carrier.json", "tool-limits.json",
-    "settings.json", "settings.local.json", "managed-settings.json",
-    "projects",
-})
+RESTART_BACKUP_NAMES = frozenset({".claude.json.backup",
+                                  "CLAUDE.md.backup"})
+RUNTIME_PRIVATE_NAMES = frozenset({"cutover-preimage.json",
+                                   "cutover-result.json", "carrier.json",
+                                   "tool-limits.json"})
+# the write fence: nobody may create/replace any of these through tools
+PROTECTED_NAMES = (CLAUDE_CONFIG_NAMES | RESTART_BACKUP_NAMES |
+                   RUNTIME_PRIVATE_NAMES | frozenset({"CHARTER.md"}))
+# One unreadable set (repair round 2 R3/M5, extended by panel 3 H-2) used
+# by Read, Glob and Grep alike: everything above except CHARTER.md, which
+# the teammate reads as its charter. The families in unreadable_name cover
+# every spelling: anything starting with .claude.json (the backups a
+# restart could honor) and settings*.json.
+UNREADABLE_NAMES = (CLAUDE_CONFIG_NAMES | RESTART_BACKUP_NAMES |
+                    RUNTIME_PRIVATE_NAMES)
 
 
 def unreadable_name(name):

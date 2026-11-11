@@ -52,6 +52,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+# The gate module sits beside this file; make it importable however THIS
+# module is loaded (script run, pytest importlib load).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import teammate_gate as _gate  # noqa: E402 (path bootstrap above)
+
 RESERVED_PORTS = (3773, 3774)  # the Chairman's own T3 Code app
 
 SLUG_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -420,21 +425,21 @@ SERVER_PRIVATE = ("run", "home", "config", "bin", "runtime", "claude-home",
 
 # Files in a teammate's own home that are config or credentials, not memory.
 # The teammate may not change them; the preimage it may not even read.
-HOME_LOCKED = ("tool-limits.json", "CHARTER.md", "carrier.json",
-               "cutover-preimage.json", "cutover-result.json",
-               # restart-honored backup config surfaces (panel 2 q2#6): a
-               # restart does not load them today, but they sit in the
-               # home as published config — deny writes at the rule layer
-               # too, not only in the gate
-               ".claude.json.backup", "CLAUDE.md.backup")
-# What a teammate may not even READ in its own home (repair round 2, M5:
-# the set was only the preimage, leaving .credentials.json, .claude.json
-# and the projects/ transcript folder readable to Grep). Keep in sync with
-# UNREADABLE_NAMES in teammate_gate.py — the roster test asserts the sync.
-HOME_UNREADABLE = ("cutover-preimage.json", ".credentials.json",
-                   ".claude.json", ".claude.json.backup", "carrier.json",
-                   "tool-limits.json", "settings.json", "settings.local.json",
-                   "managed-settings.json", "projects")
+#
+# H-2 (panel 3): all three home-name classes below are DERIVED from the
+# gate's one canonical list (teammate_gate.CLAUDE_CONFIG_NAMES and friends)
+# so the write fence and the read fence cannot drift apart again — the
+# panel found the read fence naming 10 first components while this file
+# classed 29 as configuration. The rule layer derives from these tuples;
+# the gate derives from the same sets directly.
+HOME_LOCKED = tuple(sorted(frozenset({"CHARTER.md"}) |
+                           _gate.RUNTIME_PRIVATE_NAMES |
+                           _gate.RESTART_BACKUP_NAMES))
+# What a teammate may not even READ in its own home: the whole Claude
+# configuration class plus this deployment's private runtime files (the
+# .claude/ subtree is covered by its first component; the gate's
+# unreadable_name keeps the .claude.json* / settings*.json families).
+HOME_UNREADABLE = tuple(sorted(_gate.UNREADABLE_NAMES))
 
 # A teammate's home is also its Claude configuration folder. A settings file
 # or an MCP entry there can name a command to run, and a skill, agent, rule
@@ -442,12 +447,7 @@ HOME_UNREADABLE = ("cutover-preimage.json", ".credentials.json",
 # files in its home could give itself a shell (found by the principal with
 # MAS-15: creating a new file in the home is allowed). The runtime writes
 # these itself without the Write tool; the teammate's tools may not.
-HOME_CONFIG = ("settings.json", "settings.local.json", "managed-settings.json",
-               ".claude.json", ".mcp.json", ".credentials.json",
-               "keybindings.json", "CLAUDE.local.md", ".claude", "plugins",
-               "skills", "agents", "commands", "hooks", "rules",
-               "output-styles", "backups", "sessions", "projects", "todos",
-               "shell-snapshots", "statsig", "ide")
+HOME_CONFIG = tuple(sorted(_gate.CLAUDE_CONFIG_NAMES))
 
 # Server-root folders that choose which program the team server runs at its
 # next start (bin/server_runner.sh is what launchd invokes; config names the

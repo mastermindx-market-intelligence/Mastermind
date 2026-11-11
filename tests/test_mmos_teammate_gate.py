@@ -548,3 +548,87 @@ class TestRepairRound2:
             rig.other / "tool-limits.json"), "content": "x"})
         rig.refused("Edit", {"file_path": str(rig.other / "CLAUDE.md"),
                              "old_string": "a", "new_string": "b"})
+
+
+class TestRepairRound3:
+    """Panel 3 repairs (H-2, M-R1); H-1 is decided out of code."""
+
+    # --- H-2: the WHOLE Claude-configuration class is unreadable ---
+
+    def test_h2_claude_config_class_unreadable_for_read(self, rig):
+        # stand-ins only (never real config content)
+        dotclaude = rig.home / ".claude"
+        dotclaude.mkdir()
+        (dotclaude / "settings.json").write_text("STANDIN\n")
+        (dotclaude / ".credentials.json").write_text("STANDIN\n")
+        (rig.home / "sessions").mkdir()
+        (rig.home / "sessions" / "t1.jsonl").write_text("STANDIN\n")
+        for rel in (".claude/settings.json", ".claude/.credentials.json",
+                    ".mcp.json", "keybindings.json", "sessions/t1.jsonl",
+                    "plugins/p.json", "CLAUDE.local.md", "CLAUDE.md.backup",
+                    ".claude.json.backup", "skills/s.md", "hooks/h.json",
+                    "agents/a.md", "commands/c.md", "todos/t.json",
+                    "shell-snapshots/s.txt", "statsig/s.json", "ide/i.json",
+                    "output-styles/o.json", "backups/b.json"):
+            rig.refused("Read", {"file_path": str(rig.home / rel)})
+
+    def test_h2_claude_config_class_search_refused(self, rig):
+        # a search rooted at the .claude subtree or sessions/ is refused
+        rig.refused("Grep", {"pattern": "STANDIN",
+                             "path": str(rig.home / ".claude")})
+        rig.refused("Glob", {"pattern": "*", "path": str(rig.home / "sessions")})
+
+    def test_h2_memory_surfaces_stay_readable(self, rig):
+        rig.allowed("Read", {"file_path": str(rig.home / "CLAUDE.md")})
+        notes = rig.home / "notes"
+        notes.mkdir(exist_ok=True)
+        (notes / "n.md").write_text("note\n")
+        rig.allowed("Read", {"file_path": str(notes / "n.md")})
+        rig.allowed("Grep", {"pattern": "note", "path": str(notes)})
+        # CHARTER.md is write-locked but stays readable (it is the charter)
+        (rig.home / "CHARTER.md").write_text("# charter\n")
+        rig.allowed("Read", {"file_path": str(rig.home / "CHARTER.md")})
+
+    # --- M-R1: config-side paths get the same firmlink canonicalization
+    #     the gate applies to tool paths ---
+
+    def test_mr1_data_spelled_home_still_fences(self, tmp_path, rig):
+        # a config that spells home in the Data-volume form while the tool
+        # calls (and the roots) use the primary spelling must not skip the
+        # unreadable check (panel 3 lead probe "MIXED": settings.json,
+        # cutover-preimage.json and .credentials.json all read ALLOWED)
+        data_home = "/System/Volumes/Data" + str(rig.home)
+        config = dict(rig.config)
+        config["home"] = data_home
+        # read_roots stay in the PRIMARY spelling (the panel's MIXED shape:
+        # root spelled in Data form, roots in /Users form) so the only thing
+        # that can refuse settings.json is the unreadable-name check
+        config["read_roots"] = [str(rig.ws)]
+        config_path = rig.tmpdir() / "gate-config-mixed.json"
+        config_path.write_text(json.dumps(config))
+        # the refusal must be the UNREADABLE-NAME reason (with a Data-spelled
+        # home the current code skips the check entirely and would allow)
+        proc = rig.refused("Read", {"file_path": str(
+            rig.home / "settings.json")}, config=config_path)
+        assert "not readable by the teammate" in proc.stderr, proc.stderr
+        proc = rig.refused("Read", {"file_path": str(
+            rig.home / "cutover-preimage.json")}, config=config_path)
+        assert "not readable by the teammate" in proc.stderr, proc.stderr
+        rig.refused("Read", {"file_path": str(
+            rig.home / ".credentials.json")}, config=config_path)
+        # and the readable memory surface still works under the mixed config
+        # (the home itself is implicitly readable once the spellings match)
+        rig.allowed("Read", {"file_path": str(
+            rig.home / "CLAUDE.md")}, config=config_path)
+
+    def test_mr1_data_spelled_deny_entry_still_denies(self, tmp_path, rig):
+        # deny-list mode (no read roots): the deny entry spelled in Data
+        # form must bind against primary-spelled tool paths — the deny list
+        # is compared after canonicalization
+        config = dict(rig.config)
+        config["read_roots"] = None
+        config["deny_reads"] = ["/System/Volumes/Data" + str(rig.dotssh)]
+        config_path = rig.tmpdir() / "gate-config-deny-mixed.json"
+        config_path.write_text(json.dumps(config))
+        rig.refused("Read", {"file_path": str(
+            rig.dotssh / "id_rsa.stand-in")}, config=config_path)

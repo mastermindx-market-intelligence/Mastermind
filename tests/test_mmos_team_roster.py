@@ -1923,3 +1923,78 @@ class TestRepairRound2:
         gate.loader.exec_module(module)
         assert set(team_roster.HOME_UNREADABLE) <= set(
             module.UNREADABLE_NAMES)
+
+
+class TestRepairRound3:
+    """Panel 3: H-2 (unreadable set from one list), M-R1 (firmlink
+    canonicalization of config paths), M-R2 (pinned interpreter)."""
+
+    @staticmethod
+    def _gate_module():
+        loader = importlib.util.spec_from_file_location(
+            "teammate_gate_r3b", team_roster.GATE_SOURCE)
+        module = importlib.util.module_from_spec(loader)
+        loader.loader.exec_module(module)
+        return module
+
+    # ---- H-2: the unreadable set is DERIVED from the gate's one list ----
+
+    def test_h2_unreadable_set_derived_from_one_list(self):
+        gate = self._gate_module()
+        # the roster does not keep its own copy: both classes come from the
+        # gate's canonical sets, so they cannot drift apart again
+        assert set(team_roster.HOME_UNREADABLE) == set(gate.UNREADABLE_NAMES)
+        assert set(team_roster.HOME_CONFIG) == set(gate.CLAUDE_CONFIG_NAMES)
+        # everything HOME_CONFIG classes as Claude configuration is covered
+        # by the read fence, including the panel's named items
+        assert set(team_roster.HOME_CONFIG) <= set(team_roster.HOME_UNREADABLE)
+        for name in (".claude", ".mcp.json", "keybindings.json", "sessions",
+                     "CLAUDE.md.backup", ".claude.json.backup"):
+            assert name in team_roster.HOME_UNREADABLE, name
+        # the readable memory surfaces are not collateral damage
+        for name in ("CLAUDE.md", "CHARTER.md", "notes"):
+            assert name not in team_roster.HOME_UNREADABLE, name
+
+    def test_h2_rule_layer_denies_the_config_class(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        home = team_roster.teammate_home(spec, mate)
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        for name in (".mcp.json", "keybindings.json", "sessions",
+                     "CLAUDE.md.backup", ".claude"):
+            for tool in ("Read", "Glob", "Grep"):
+                assert f"{tool}(/{home}/{name})" in deny, (tool, name)
+                assert f"{tool}(/{home}/{name}/**)" in deny, (tool, name)
+
+    # ---- M-R1: config paths canonicalized before comparison/dedupe ----
+
+    def test_mr1_gate_config_home_canonical_across_firmlink_spellings(
+            self, tmp_path):
+        # a spec that spells server.root in the Data-volume form must emit
+        # a gate config whose home matches the primary spelling the gate
+        # compares tool paths against (panel 3 MIXED: the unreadable check
+        # was skipped entirely)
+        root = str(tmp_path / "t3-team")
+        data_root = "/System/Volumes/Data" + root
+        spec = load(tmp_path, make_spec(tmp_path, root=data_root))
+        mate = spec["teammates"][0]
+        home = team_roster.teammate_home(spec, mate)
+        assert home.startswith("/System/Volumes/Data")  # the mixed shape
+        cfg = team_roster.gate_config(spec, mate)
+        # canonical: the /System/Volumes/Data prefix is stripped to the
+        # primary spelling so rel_first_component can never miss the home
+        assert not cfg["home"].startswith("/System/Volumes/Data"), cfg["home"]
+        assert cfg["home"].rstrip("/").endswith(
+            os.path.basename(root))  # still the same tree
+
+    def test_mr1_gate_config_dedupe_is_normalization_aware(self, tmp_path):
+        # the same root in both firmlink spellings is ONE entry, not two
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        ws = spec["project"]["workspace_root"]
+        spec["allow_read_roots"] = [ws, "/System/Volumes/Data" + ws]
+        cfg = team_roster.gate_config(spec, mate)
+        roots = cfg["read_roots"]
+        assert len(roots) == len(set(roots)), roots
+        assert len([r for r in roots
+                    if r.startswith("/System/Volumes/Data")]) == 0, roots
