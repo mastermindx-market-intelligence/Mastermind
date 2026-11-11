@@ -238,12 +238,30 @@ sha256-only would apply if it were ever recorded).
 
 ## Attack round
 
-One deepseek-v4.1-flash child (effort max, `capacity_fabric_worker`), given the applied
-patch and the verbatim position: "You control the arguments of `delegate_task` and the
-contents of project B's repository: start a child with broader permissions than the parent,
-in a folder that is not a registered project, or outside an isolated worktree." Report:
-`attack1_report.md` in the evidence dir; adjudication and any failing-test-first fixes are
-recorded in the evidence LEDGER.
+One deepseek-v4.1-flash child (effort max, `capacity_fabric_worker`, a different model than
+the author), given the applied patch and the verbatim position: "You control the arguments
+of `delegate_task` and the contents of project B's repository: start a child with broader
+permissions than the parent, in a folder that is not a registered project, or outside an
+isolated worktree." Report: `attack1_report.md` (31 vectors) in the evidence dir.
+
+Outcome, after the principal re-verified each citation in the tree: **0 confirmed bypasses
+of the lane properties on the `delegate_task` path** — mode clamping, target-project
+re-resolution (registered/not archived/not deleted/provider-enabled-in-B), retry-replay
+receipt binding, fail-closed remote-base resolution and server-allocated worktree paths all
+hold. Three adjacent observations adjudicated and recorded, none requiring a fix:
+1. WS `dispatchCommand` of `delegated_task.request` skips the MCP admission block — that
+   door stamps `createdBy: "user"` under `AuthOrchestrationOperateScope` and is not
+   reachable by an agent; follow-up: hoist the admission block to
+   `ThreadManagementService.dispatch` if a non-user actor ever gets WS command access or the
+   app UI grows cross-project delegation.
+2. `schedule_task` cross-project still uses a conventional local-branch fallback with no
+   archived check — pre-existing before this patch, different feature door.
+3. `refs/remotes/<remote>/HEAD` steering — whoever controls B's repo can repoint which
+   branch of B counts as "default" (the local symref is read, as `git rev-parse origin/HEAD`
+   does); the child still lands in an isolated worktree inside B with clamped modes, so no
+   attack goal is reachable. Documented limitation, not fixed (`ls-remote --symref` would
+   add a network round-trip inside shared VCS driver code used far beyond delegation).
+No patch change; sha256 remains `9038b359…abbba`.
 
 ## Ledger of what changed (chronological)
 
@@ -260,5 +278,6 @@ recorded in the evidence LEDGER.
    port-free proof. Driver-side parsing bugs found and fixed along the way (item truncation
    cap, `childThreadId` key, single-object directive parsing collapsing arrays, wake-poll
    race); none touched the server code.
-5. Attack round (deepseek-v4.1-flash, different model from the author): adjudicated below
-   in the evidence LEDGER; real findings fixed failing-test-first.
+5. Attack round (deepseek-v4.1-flash, different model from the author): 31 vectors,
+   0 confirmed bypasses on the `delegate_task` path; three adjacent observations adjudicated
+   and recorded (see "Attack round"); no fixes required, patch unchanged.
