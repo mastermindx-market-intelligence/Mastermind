@@ -92,6 +92,15 @@ def load_spec(path):
     for key in ("server", "project", "model", "teammates"):
         if key not in spec:
             die(f"spec missing required key '{key}'")
+    if spec.get("assets_dir"):
+        # Proved live 2026-11-11 on the RL dev server: a --settings file
+        # outside the teammate home loads, but its Read/Glob/Grep deny
+        # rules silently do not bind — the teammate reads everything the
+        # spec denies. Evidence: rl-20261111/10-rule-semantics-round2.md.
+        die("spec key 'assets_dir' is refused: limits outside the teammate "
+            "home silently disable Read/Glob/Grep deny rules (live-proved "
+            "2026-11-11); tool-limits.json stays in the home, protected by "
+            "the HOME_LOCKED write denies")
     server, project = spec["server"], spec["project"]
     for key in ("root", "home", "t3_bin", "port"):
         if key not in server:
@@ -364,30 +373,18 @@ HOME_CONFIG = ("settings.json", "settings.local.json", "managed-settings.json",
 SERVER_INFRASTRUCTURE = ("bin", "config", "runtime", "run")
 
 
-def assets_dir_for(spec, mate):
-    """Where this teammate's tool-limits.json and CHARTER.md live.
-
-    Part B Q4: with spec.assets_dir set, those two config files are written
-    outside the teammate home (the home is the Claude configuration folder,
-    and config the runtime re-reads is better absent than denied). Returns
-    None when the key is absent — then both files live in the home, as
-    today. The dir is private to one teammate: <assets_dir>/<slug>.
-    """
-    base = spec.get("assets_dir")
-    if not base:
-        return None
-    return os.path.join(expand(base), mate["slug"])
-
-
 def limits_paths(spec, mate):
-    """(limits_path, charter_path) this teammate's launch args point at."""
+    """(limits_path, charter_path) this teammate's launch args point at.
+
+    Always the teammate home: an assets_dir outside the home was tried and
+    REFUSED live (2026-11-11, RL dev server). A --settings file outside the
+    home loads, but its Read/Glob/Grep deny rules silently do not bind —
+    the teammate then reads everything the spec denies. load_spec refuses
+    the assets_dir key for that reason.
+    """
     home = teammate_home(spec, mate)
-    assets = assets_dir_for(spec, mate)
-    if assets is None:
-        return (os.path.join(home, "tool-limits.json"),
-                os.path.join(home, "CHARTER.md"))
-    return (os.path.join(assets, "tool-limits.json"),
-            os.path.join(assets, "CHARTER.md"))
+    return (os.path.join(home, "tool-limits.json"),
+            os.path.join(home, "CHARTER.md"))
 
 
 def _read_deny(path):
@@ -412,9 +409,6 @@ def deny_read_paths(spec, mate):
     for other in spec["teammates"]:
         if other["slug"] != mate["slug"]:
             paths.append(teammate_home(spec, other))
-            other_assets = assets_dir_for(spec, other)
-            if other_assets is not None:
-                paths.append(other_assets)
     home = teammate_home(spec, mate)
     paths += [os.path.join(home, name) for name in HOME_UNREADABLE]
     paths += [expand(r) for r in spec.get("deny_read_roots", [])]
@@ -458,10 +452,14 @@ def rooted_read_denies(spec, mate, tools=READ_TOOLS):
     silently allowed, and a more-specific allow never beats a deny), so the
     rooting is compiled to deny rules by sibling enumeration: for every
     root chain (/a/b/c), every directory NOT on a chain gets a file and a
-    tree deny, and each chain directory gets a file-form deny only — a tree
-    deny on a chain directory would deny the allowed root inside it, and
-    deny wins. The file form stops a Glob/Grep whose path is the directory
-    itself from enumerating names one level above an allowed root.
+    tree deny. Chain directories get NO deny in any form: a deny rule on a
+    directory matches the directory's whole subtree (live-proved: the
+    refusal text is "File is in a directory that is denied"), so even a
+    file-form deny on a chain directory would deny the allowed root below
+    it — and deny wins. Residual gap: a Glob/Grep whose path is a chain
+    directory runs and enumerates its names, revealing sibling names one
+    level above an allowed root (names only, never content; the siblings
+    themselves stay denied).
     """
     roots = _read_allow_roots(spec, mate)
     chain = set()
@@ -488,8 +486,6 @@ def rooted_read_denies(spec, mate, tools=READ_TOOLS):
     for tool in tools:
         for path in sorted(denied):
             rules += [f"{tool}(/{path})", f"{tool}(/{path}/**)"]
-        for path in sorted(c for c in chain if c != "/" and c not in roots):
-            rules.append(f"{tool}(/{path})")
     return rules
 
 
@@ -617,15 +613,6 @@ def write_file_assets(spec, mate):
     os.makedirs(home, exist_ok=True)
     os.chmod(home, 0o700)
     limits_path, charter_path = limits_paths(spec, mate)
-    if assets_dir_for(spec, mate) is not None:
-        os.makedirs(assets_dir_for(spec, mate), exist_ok=True)
-        os.chmod(assets_dir_for(spec, mate), 0o700)
-        # a leftover in-home copy from before assets_dir was set would be
-        # dead config the home deny rules treat as locked: remove it
-        for stale in ("tool-limits.json", "CHARTER.md"):
-            stale_path = os.path.join(home, stale)
-            if os.path.exists(stale_path):
-                os.unlink(stale_path)
     seed = ("<!-- Long-term memory of {name}. Append durable facts below; "
             "they persist across conversations and server restarts. -->\n"
             "# {name} — memory\n\n").format(name=mate["name"])
@@ -1006,10 +993,12 @@ def write_urls_file(spec, threads):
 
 
 def session_processes(*paths):
-    """Session processes of the teammate identified by ``paths`` (its home
-    plus, when assets_dir is set, the limits/charter paths its launch args
-    carry — with assets_dir those, not the home, appear in the command
-    line; the home is then only an env var).
+    """Session processes of the teammate identified by ``paths`` (its home,
+    its limits/charter paths, and its project workspace root — the spawn
+    argv carries the workspace cwd, while the home is an env var and the
+    launch-arg flags are consumed by the server, so the workspace marker is
+    the one that reliably matches live processes; proved live on the RL dev
+    server, 2026-11-11).
 
     A teammate session is one long-lived process the server starts per
     thread; it reads tool-limits.json and CHARTER.md only when it starts, so
@@ -1059,10 +1048,16 @@ def cmd_apply(spec):
     renames, rename_failures = rename_threads(spec, threads)
     urls_path = write_urls_file(spec, threads)
     log(f"thread URLs written: {urls_path} (0600, no credentials)")
+    workspace = expand(spec["project"]["workspace_root"])
+    workspace_sessions = session_processes(workspace)
     for mate in spec["teammates"]:
         changed = pending[mate["name"]]
         if not changed:
             continue
+        # Precise markers first (home, limits/charter paths); the spawn argv
+        # carries only the workspace cwd (live-proved), so a workspace-only
+        # match cannot be attributed to one teammate — report it as such
+        # instead of claiming no session is running.
         sessions = session_processes(teammate_home(spec, mate),
                                      *limits_paths(spec, mate))
         if sessions:
@@ -1071,6 +1066,12 @@ def cmd_apply(spec):
             log(f"{mate['name']}: new limits ({', '.join(changed)}) are "
                 f"NOT IN FORCE until that teammate's session process "
                 f"restarts; running now: {live}")
+        elif workspace_sessions:
+            log(f"{mate['name']}: new limits ({', '.join(changed)}) are NOT "
+                f"IN FORCE until that teammate's session process restarts; "
+                f"{len(workspace_sessions)} session process(es) are running "
+                f"in the team workspace but cannot be attributed to this "
+                f"teammate by process listing — assume a restart is needed")
         else:
             log(f"{mate['name']}: new limits ({', '.join(changed)}) are "
                 f"NOT IN FORCE until that teammate's session process starts; "

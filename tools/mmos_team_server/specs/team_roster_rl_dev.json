@@ -12,6 +12,15 @@
     "workspace_root": "~/.mastermind/mmos_dev/rl/team-project"
   },
   "model": "glm-5.3",
+  "allow_read_roots": [
+    "~/.mastermind/mmos_dev/rl/team-project",
+    "~/.mastermind/mmos_dev/rl-extra-root"
+  ],
+  "home_write_allow": ["CLAUDE.md", "notes/"],
+  "deny_write_roots": [
+    "/Users/chriswong/.mastermind/t3-team-server",
+    "/Users/chriswong/Library/LaunchAgents"
+  ],
   "teammates": [
     {
       "name": "Prober",

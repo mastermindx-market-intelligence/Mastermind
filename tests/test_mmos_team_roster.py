@@ -351,13 +351,15 @@ class TestToolLimitsNewKeys:
                     continue
                 assert f"{tool}(//{name})" in deny, name
                 assert f"{tool}(//{name}/**)" in deny, name
-        # chain directories are denied in FILE form only (a tree form would
-        # deny the allowed root below them too, and deny wins); their
-        # non-chain children that exist at apply time are denied in both
+        # chain directories get NO deny in any form: a deny on a directory
+        # matches its whole subtree (live-proved: "File is in a directory
+        # that is denied"), so even a file-form deny would deny the allowed
+        # root below it. Their non-chain children that exist at apply time
+        # are denied in both forms.
         chain_parent = os.path.dirname(str(extra_root))
         sibling = str(sibling_dir)
         for tool in ("Read", "Glob", "Grep"):
-            assert f"{tool}(/{chain_parent})" in deny
+            assert f"{tool}(/{chain_parent})" not in deny
             assert f"{tool}(/{chain_parent}/**)" not in deny
             assert f"{tool}(/{sibling})" in deny
             assert f"{tool}(/{sibling}/**)" in deny
@@ -405,46 +407,26 @@ class TestToolLimitsNewKeys:
             assert f"{tool}(/{home}/.mcp.json)" in deny
             assert f"{tool}(/{home}/tool-limits.json)" in deny
 
-    def test_assets_dir_moves_limits_and_charter(self, tmp_path):
-        """Q4: with assets_dir set, tool-limits.json and CHARTER.md are
-        written outside the teammate home, the launch args point there, and
-        other teammates cannot read that directory."""
+    def test_assets_dir_refused(self, tmp_path, capsys):
+        """Q4 verdict, live-proved 2026-11-11: a --settings file outside the
+        teammate home loads, but its Read/Glob/Grep deny rules silently do
+        not bind — the teammate then reads everything the spec denies. The
+        key must be refused loudly, never silently ignored."""
         raw = make_spec(tmp_path)
         raw["assets_dir"] = str(tmp_path / "assets")
-        spec = load(tmp_path, raw)
-        mate, other = spec["teammates"][0], spec["teammates"][1]
-        os.makedirs(team_roster.teammate_home(spec, other))
-        wrote = team_roster.write_file_assets(spec, mate)
-        home = team_roster.teammate_home(spec, mate)
-        assets = os.path.join(team_roster.expand(spec["assets_dir"]),
-                              mate["slug"])
-        assert not os.path.exists(os.path.join(home, "tool-limits.json"))
-        assert not os.path.exists(os.path.join(home, "CHARTER.md"))
-        assert os.path.exists(os.path.join(assets, "tool-limits.json"))
-        assert os.path.exists(os.path.join(assets, "CHARTER.md"))
-        assert os.path.exists(os.path.join(home, "CLAUDE.md"))  # memory stays
-        assert set(wrote) == {"CLAUDE.md", "CHARTER.md", "tool-limits.json"}
-        instance = team_roster.instance_for(spec, mate)
-        args = instance["config"]["launchArgs"]
-        assert f"--settings {os.path.join(assets, 'tool-limits.json')}" in args
-        assert f"--append-system-prompt-file" in args
-        assert os.path.join(assets, "CHARTER.md") in args
-        deny = team_roster.tool_limits(spec, other)["permissions"]["deny"]
-        assert f"Read(/{assets}/**)" in deny
+        with pytest.raises(SystemExit):
+            load(tmp_path, raw)
+        assert "assets_dir" in capsys.readouterr().err
 
-    def test_session_processes_match_assets_paths(self, tmp_path,
-                                                  monkeypatch):
-        """With assets_dir the command line carries the limits/charter
-        paths, not the home (that becomes an env var): process detection
-        must be given those paths or apply under-reports pending restarts."""
-        raw = make_spec(tmp_path)
-        raw["assets_dir"] = str(tmp_path / "assets")
-        spec = load(tmp_path, raw)
+    def test_session_processes_match_any_marker_path(self, tmp_path,
+                                                     monkeypatch):
+        """Process detection takes every identifying path: the spawn argv
+        carries the workspace cwd, while the home is an env var — a single
+        fixed marker under-reports running sessions (live-proved)."""
+        spec = load(tmp_path, make_spec(tmp_path))
         mate = spec["teammates"][0]
-        limits_path, charter_path = team_roster.limits_paths(spec, mate)
-        home = team_roster.teammate_home(spec, mate)
-        line = (f" 4242   Tue Nov 10 19:34:11 2026 t3-claude --settings "
-                f"{limits_path} --append-system-prompt-file {charter_path}")
+        workspace = team_roster.expand(spec["project"]["workspace_root"])
+        line = f" 4242   Tue Nov 10 19:34:11 2026 t3-claude --cwd {workspace}"
 
         class Proc:
             returncode = 0
@@ -453,11 +435,11 @@ class TestToolLimitsNewKeys:
 
         monkeypatch.setattr(team_roster.subprocess, "run",
                             lambda a, **k: Proc())
-        found = team_roster.session_processes(home, limits_path,
-                                              charter_path)
+        found = team_roster.session_processes(workspace)
         assert found == [{"pid": 4242, "started": "Tue Nov 10 19:34:11 2026"}]
-        # home alone no longer matches: apply must pass all three paths
-        assert team_roster.session_processes(home) == []
+        # a path that appears in no command line matches nothing
+        assert team_roster.session_processes(
+            team_roster.teammate_home(spec, mate)) == []
 
 
 class TestAtomicWrites:
@@ -884,6 +866,24 @@ class TestLimitsPendingRestart:
         assert any("4242" in l and "restart" in l for l in a_lines), out
         assert any("[team_roster] B:" in l and "none is running" in l
                    for l in out.splitlines()), out
+
+    def test_workspace_sessions_reported_without_attribution(
+            self, tmp_path, monkeypatch, capsys):
+        """The spawn argv carries only the workspace cwd (live-proved), so a
+        running session may be unattributable: the report must say sessions
+        exist and a restart is needed, never 'none is running'."""
+        def sessions(*paths):
+            if "team-project" in paths[0]:
+                return [{"pid": 99, "started": "Tue Nov 10 19:34:11 2026"}]
+            return []
+
+        self.fake_apply(tmp_path, monkeypatch,
+                        {"A": ["tool-limits.json"]},
+                        sessions_by_home=sessions)
+        out = capsys.readouterr().out
+        assert any("cannot be attributed" in l and "assume a restart" in l
+                   for l in out.splitlines()), out
+        assert "none is running" not in out
 
     def test_no_change_no_pending_line(self, tmp_path, monkeypatch, capsys):
         self.fake_apply(tmp_path, monkeypatch, {})
