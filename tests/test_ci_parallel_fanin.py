@@ -272,6 +272,74 @@ def test_workflow_level_defaults_or_env_injection_is_refused(
         fan.validate_parallel_workflow(baseline.replace(preimage, mutation, 1))
 
 
+_EXIT0_DEFAULTS = (
+    "    defaults:\n      run:\n        shell: \"bash -c 'exit 0' #\"\n")
+
+
+@pytest.mark.parametrize(
+    ("header", "injected", "message"),
+    [
+        # defaults.run.shell on the fan-in gate: its run step names no shell,
+        # so the job default would make it exit 0 without reading any shard.
+        ("  test:\n    name: test\n", _EXIT0_DEFAULTS, "test gate job keys"),
+        ("  test:\n    name: test\n",
+         '    env:\n      CI_PYTEST_SKIP: "1"\n', "test gate job keys"),
+        ("  pytest_shards:\n    name: pytest shard ${{ matrix.index }}\n",
+         _EXIT0_DEFAULTS, "test gate job keys"),
+        ("  pytest_shards:\n    name: pytest shard ${{ matrix.index }}\n",
+         "    services:\n      cache:\n        image: redis\n", "test gate job keys"),
+        # The scope job decides the mode; a job default could force mode=fast.
+        ("  pr_scope:\n    name: PR test scope\n", _EXIT0_DEFAULTS,
+         "PR fast job keys"),
+        ("  pr_scope:\n    name: PR test scope\n",
+         "    container: ubuntu:24.04\n", "PR fast job keys"),
+        ("  pr_fast:\n    name: PR fast checks\n",
+         '    env:\n      npm_config_dry_run: "true"\n', "PR fast job keys"),
+    ],
+)
+def test_job_level_defaults_env_or_runtime_injection_is_refused(
+    header: str, injected: str, message: str
+) -> None:
+    baseline = _WORKFLOW.read_text(encoding="utf-8")
+    assert baseline.count(header) == 1
+    job_line, name_line = header.splitlines(keepends=True)
+    changed = baseline.replace(header, job_line + injected + name_line, 1)
+    with pytest.raises(cip.PolicyError, match=message):
+        fan.validate_parallel_workflow(changed)
+
+
+@pytest.mark.parametrize(
+    ("preimage", "mutation"),
+    [
+        ("name: CI\n", "name: Evil CI\n"),
+        ("  cancel-in-progress: true\n", "  cancel-in-progress: false\n"),
+        ("  group: ci-${{ github.workflow }}-${{ github.ref }}\n",
+         "  group: ci-${{ github.run_id }}\n"),
+    ],
+)
+def test_workflow_name_and_concurrency_are_pinned(
+    preimage: str, mutation: str
+) -> None:
+    baseline = _WORKFLOW.read_text(encoding="utf-8")
+    assert baseline.startswith("name: CI\n")
+    assert baseline.count(preimage) == 1
+    with pytest.raises(cip.PolicyError, match="name and concurrency"):
+        fan.validate_parallel_workflow(baseline.replace(preimage, mutation, 1))
+
+
+def test_yaml_merge_keys_stay_unconstructible() -> None:
+    baseline = _WORKFLOW.read_text(encoding="utf-8")
+    root_permissions = "permissions:\n  contents: read\n"
+    gate_header = "  test:\n    name: test\n"
+    assert baseline.count(root_permissions) == 1
+    assert baseline.count(gate_header) == 1
+    changed = baseline.replace(
+        root_permissions, "permissions: &perm\n  contents: read\n", 1
+    ).replace(gate_header, "  test:\n    <<: *perm\n    name: test\n", 1)
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(changed)
+
+
 def test_all_matrix_shards_exactly_cover_canonical_discovery_once() -> None:
     gate = cip.resolve_gate(_ROOT)
     included = gate["included"]

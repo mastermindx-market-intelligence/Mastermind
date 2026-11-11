@@ -635,6 +635,11 @@ _WorkflowYAMLLoader.yaml_implicit_resolvers = {
 _WorkflowYAMLLoader.add_implicit_resolver(
     "tag:yaml.org,2002:bool", _TRUE_FALSE_BOOL_PATTERN, list("tTfF")
 )
+# YAML merge keys (`<<: *anchor`) must stay unconstructible: replacing the
+# stock map constructor leaves tag:yaml.org,2002:merge without a constructor,
+# so a merge makes the workflow invalid. If this constructor ever flattens
+# merges, an alias could splice keys into a job or the root that the exact
+# key pins in ci_parallel_shard.py would then have to be re-proven against.
 _WorkflowYAMLLoader.add_constructor(
     "tag:yaml.org,2002:map", _reject_duplicate_mapping_keys
 )
