@@ -8,8 +8,10 @@ RECORDS = {
     # 2026-11-09 MMOS composition pin moves: PR #2351 capacity-fabric OS read
     # (commit 3838b8b82) and master #2344 primary/work-entry composition both
     # shifted the same three fixture 503 operands down; the reviewed tokens
-    # and columns are byte-identical at their merged positions (3812/3817/3821).
-    "app/mastermind_os/src-tauri/src/auth.rs": ('612e97c934d4407c3b08bdf3c15bf75e8df5a1507d4161435b862896acff4737', ((3812, 68, 71, 'int', '503'), (3817, 69, 72, 'int', '503'), (3821, 67, 70, 'int', '503'))),
+    # and columns are byte-identical at their merged positions.
+    # 2026-11-10: the T3 attempt-fleet read seam (f6bfac18b) shifted them again
+    # to 3878/3883/3887; tokens and columns unchanged.
+    "app/mastermind_os/src-tauri/src/auth.rs": ('ddb5575969f2a36c7b2fe5d4dc8473c9d8f009732c6f91c2658325565be5fbeb', ((3878, 68, 71, 'int', '503'), (3883, 69, 72, 'int', '503'), (3887, 67, 70, 'int', '503'))),
     "app/mastermind_os/src/fixtures/discovery-correction-owner.json": (
         "363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f",
         ((163, 18, 21, "int", "401"),)),

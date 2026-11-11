@@ -4490,7 +4490,12 @@ def test_r8_watchdog_denies_fail_closed_when_a_step_is_slow(
         if slow_step == "sleep":
             time.sleep(30)
         else:  # a catastrophically backtracking regex: the engine checks signals
-            _r8_re.match(r"(a+)+$", "a" * 64 + "!")
+            # Deliberate ReDoS payload: this pattern exists to prove the armed
+            # watchdog interrupts catastrophic backtracking; it is test source,
+            # never production regex handling. Suppressed per the repo's
+            # qualify_application_owner.py annotation precedent.
+            # codeql[py/redos]
+            _r8_re.match(r"(a+)+$", "a" * 64 + "!")  # lgtm[py/redos]
         raise AssertionError("the watchdog did not interrupt the slow step")
 
     monkeypatch.setattr(guard, "guard_fabric_launch", slow)

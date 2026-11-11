@@ -792,11 +792,10 @@ REVIEWED_FILES['app/mastermind_os/src/resources/capacity-fabric.css'] = {'sha256
 # and line positions; these same three fixture HTTP statuses are not principals.
 # Content-continuation reviewed6eb650a8 preserves the complete enclosing fixture
 # function. Primary/work-entry composition preserves these three complete fixture
-# calls. 2026-11-09 MMOS merge pin move: master #2344 primary/work-entry source
-# and PR #2351 capacity-fabric OS read (commit 3838b8b82) both insert lines above
-# the fixture; the three reviewed 503 operands are byte-identical at their merged
-# positions (3812/3817/3821). Only exact existing tokens qualify.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '612e97c934d4407c3b08bdf3c15bf75e8df5a1507d4161435b862896acff4737', 'sites': ((3812, 68, 71, 'int', '503'), (3817, 69, 72, 'int', '503'), (3821, 67, 70, 'int', '503'))}
+# 2026-11-10 MMOS integration pin move: T3 attempt-fleet read seam (f6bfac18b)
+# inserts lines above the fixture on top of the 2026-11-09 #2344/#2351 moves;
+# the three reviewed 503 operands stay byte-identical at 3878/3883/3887.
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'ddb5575969f2a36c7b2fe5d4dc8473c9d8f009732c6f91c2658325565be5fbeb', 'sites': ((3878, 68, 71, 'int', '503'), (3883, 69, 72, 'int', '503'), (3887, 67, 70, 'int', '503'))}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
@@ -1262,3 +1261,9 @@ REVIEWED_FILES['ops/native_fabric/provider_plans/memory118/native_owner/provider
 # Exact reviewed helper-buffer bounds (512 KiB), no identity/permission grant.
 # Complete source hash plus typed spans; any byte drift restores the guard.
 REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256': '463bca4c06fc8cbb07f2e87fce8efac0a4ff2ca1c47db08e32f3b7f17c1b0058', 'sites': ((385, 66, 69, 'int', '512'), (404, 54, 57, 'int', '512'))}
+
+# Exact reviewed team-group description input bound (600 characters), mirroring
+# the incumbent NewBotPanel.tsx description cap. Not an OS UID/GID or peer
+# identity; the path word "group" alone gives the literal identity context.
+# Complete source hash plus typed span; any byte drift restores the guard.
+REVIEWED_FILES['app/mastermind_os/src/team/NewGroupPanel.tsx'] = {'sha256': 'b84219e674c305e9d57571214e9c970c63508b774573b5d284d0bf8be869459d', 'sites': ((187, 25, 28, 'int', '600'),)}
