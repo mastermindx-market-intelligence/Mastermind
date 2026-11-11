@@ -374,6 +374,39 @@ class TestMF2VerifyNodeHeartbeat:
         assert warm >= 2, f"warm verify noted {warm} time(s) — walk went silent"
 
 
+class TestMF3OneWalkTriples:
+    """Micro-fix round, HIGH-3: the cold verify used to hash the tree (walk
+    1) and then re-walk for the stat triples (walk 2). A file changed in
+    that gap left a cache whose triples blessed the MUTATED file while its
+    digest field still named the pre-change tree — every later boot rode the
+    cache and never re-hashed."""
+
+    def test_mf3_change_in_the_old_gap_cannot_poison_the_cache(self, tmp_path):
+        # The seam mutates right after tree_sha256 returns — exactly where
+        # the old gap between the two walks sat. With one walk the cache can
+        # record only what was actually hashed, so the NEXT boot re-hashes
+        # the mutated tree and refuses instead of riding the race.
+        root, node, _ = packed_runtime(tmp_path)
+        real = node_install.tree_sha256
+        calls = {"n": 0}
+
+        def racing(directory, **kwargs):
+            digest = real(directory, **kwargs)      # the old walk 1
+            calls["n"] += 1
+            if calls["n"] == 1:                     # the change lands in the gap
+                body = bytearray(node.read_bytes())
+                body[0] ^= 0x01
+                node.write_bytes(bytes(body))
+            return digest
+
+        with patch.object(node_install, "tree_sha256", side_effect=racing):
+            node_install.runtime_paths(str(root))   # passes: pre-change digest
+        cache = root / "runtime" / "node-tree-stat-cache.json"
+        assert cache.exists()
+        with pytest.raises(node_install.InstallError, match="Node tree"):
+            node_install.runtime_paths(str(root))   # the next boot re-hashes
+
+
 # --------------------------------------------------------------------------
 # Repair round 3 — C: a slow or empty lsof must never relabel our own
 # listener as "foreign". Unknown is unknown, with one retry.

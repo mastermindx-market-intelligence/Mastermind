@@ -292,7 +292,8 @@ def idempotent_receipt(path, payload):
     private_write(path, payload)
 
 
-def tree_sha256(directory, status_file=None, note_stage=None, note_every=500):
+def tree_sha256(directory, status_file=None, note_stage=None, note_every=500,
+                entries_out=None):
     """Deterministic digest of a published tree, excluding its own receipt
     (which embeds this digest and so cannot cover itself). Schema 2: every
     entry contributes — directories (including empty ones) contribute
@@ -306,7 +307,12 @@ def tree_sha256(directory, status_file=None, note_stage=None, note_every=500):
     Micro-fix HIGH-2: with status_file AND note_stage the walk appends a
     boot.status heartbeat every `note_every` entries — a 199 MB tree hash
     otherwise writes one note and then goes silent long enough for
-    wait_ours's 30 s freshness rule to read a working boot as dead."""
+    wait_ours's 30 s freshness rule to read a working boot as dead.
+
+    Micro-fix HIGH-3: with entries_out the walk ALSO records each entry's
+    stat triple (the _node_tree_entries schema) in the SAME per-entry visit
+    that feeds the digest, so a caller can cache exactly what it hashed —
+    never a stat snapshot of a later, different tree."""
     digest = hashlib.sha256()
     seen = 0
 
@@ -318,18 +324,26 @@ def tree_sha256(directory, status_file=None, note_stage=None, note_every=500):
         if status_file and note_stage and seen % note_every == 0:
             _status_note(status_file, note_stage)
 
+    def remember(relative, kind, extra, info, size):
+        if entries_out is not None:
+            entries_out[relative] = [kind, extra, size, info.st_mtime_ns,
+                                     info.st_ctime_ns]
+
     for current, dirnames, filenames in os.walk(directory):
         dirnames.sort()
         for name in dirnames:
             absolute = os.path.join(current, name)
             relative = os.path.relpath(absolute, directory)
-            if os.path.islink(absolute):
+            info = os.lstat(absolute)
+            if stat.S_ISLNK(info.st_mode):
                 # os.walk does not descend into symlinked directories
                 # (followlinks=False), but they still must contribute.
                 feed(relative, "l", os.readlink(absolute))
+                remember(relative, "l", os.readlink(absolute), info, 0)
             else:
-                info = os.lstat(absolute)
                 feed(relative, "d", oct(stat.S_IMODE(info.st_mode) & 0o7777))
+                remember(relative, "d",
+                         f"{stat.S_IMODE(info.st_mode) & 0o7777:o}", info, 0)
         for name in sorted(filenames):
             absolute = os.path.join(current, name)
             relative = os.path.relpath(absolute, directory)
@@ -338,11 +352,15 @@ def tree_sha256(directory, status_file=None, note_stage=None, note_every=500):
             info = os.lstat(absolute)
             if stat.S_ISLNK(info.st_mode):
                 feed(relative, "l", os.readlink(absolute))
+                remember(relative, "l", os.readlink(absolute), info, 0)
             elif not stat.S_ISREG(info.st_mode):
                 # FIFO, socket, device: refused before any open() can block.
                 raise InstallError(f"non-regular tree entry refused: {relative}")
             else:
                 feed(relative, "f", f"{stat.S_IMODE(info.st_mode) & 0o7777:o}:{info.st_size}")
+                remember(relative, "f",
+                         f"{stat.S_IMODE(info.st_mode) & 0o7777:o}",
+                         info, info.st_size)
                 with open(absolute, "rb") as stream:
                     for block in iter(lambda: stream.read(1024 * 1024), b""):
                         digest.update(block)
@@ -909,15 +927,20 @@ def _verify_node_tree(install_dir, recorded, status_file=None, force_full=False,
             _status_note(status_file, "verify-node")
             return  # every triple matches: the tree is what we digest-recorded
     _status_note(status_file, "verify-node")   # full digest begins (cold)
+    # Micro-fix HIGH-3: ONE walk — the triples are captured in the same
+    # per-entry visit that feeds the digest, so the cache can only bless
+    # what was actually hashed. The old second walk sampled the tree AFTER
+    # the hash; a file changed in that gap left a cache whose triples
+    # blessed the mutated file while the digest field still named the
+    # pre-change tree, and every later boot rode it without re-hashing.
+    fresh = {}
     digest = tree_sha256(install_dir, status_file=status_file,
-                         note_stage="verify-node")
+                         note_stage="verify-node", entries_out=fresh)
     if digest != recorded:
         raise InstallError(
             "pinned Node tree no longer matches its receipt (treeSha256 "
             "mismatch); reinstall the runtime")
-    fresh = {"__treeSha256__": digest}
-    fresh.update(_node_tree_entries(install_dir, status_file=status_file))
-    _save_stat_cache(cache_path, fresh)
+    _save_stat_cache(cache_path, {"__treeSha256__": digest, **fresh})
 
 
 def verify_packed_server(build_dir, force_full=False, status_file=None, root=None):
