@@ -166,6 +166,55 @@ class TestTeammateTitle:
             load(tmp_path, spec)
 
 
+class TestLongTitleRegime:
+    """allow_long_titles: the starting state (long titles on the real server)
+    and the principal's undo must be expressible, as an explicit opt-in."""
+
+    def test_long_role_line_refused_without_flag(self, tmp_path):
+        spec = make_spec(tmp_path)
+        spec["teammates"][0]["role_line"] = "quality & security challenger"
+        with pytest.raises(SystemExit):
+            load(tmp_path, spec)
+
+    def test_flag_false_keeps_single_word_rule(self, tmp_path):
+        spec = make_spec(tmp_path)
+        spec["allow_long_titles"] = False
+        spec["teammates"][0]["role_line"] = "quality & security challenger"
+        with pytest.raises(SystemExit):
+            load(tmp_path, spec)
+
+    def test_long_role_line_allowed_with_flag(self, tmp_path):
+        spec = make_spec(tmp_path)
+        spec["allow_long_titles"] = True
+        for mate, role in zip(spec["teammates"],
+                              ["quality & security challenger",
+                               "product design lead"]):
+            mate["role_line"] = role
+        loaded = load(tmp_path, spec)
+        assert team_roster.teammate_title(loaded["teammates"][0]) == \
+            "A — quality & security challenger"
+        assert team_roster.teammate_title(loaded["teammates"][1]) == \
+            "B — product design lead"
+
+    def test_over_24_title_with_flag_warns_not_dies(self, tmp_path, capsys):
+        spec = make_spec(tmp_path)
+        spec["allow_long_titles"] = True
+        spec["teammates"][0]["role_line"] = "quality & security challenger"
+        loaded = load(tmp_path, spec)  # must not SystemExit
+        assert len(team_roster.teammate_title(loaded["teammates"][0])) > 24
+        assert "sidebar" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("bad", ["quality — challenger", " padded ",
+                                     "", "line one\nline two"])
+    def test_flag_does_not_allow_em_dash_padding_or_newlines(
+            self, tmp_path, bad):
+        spec = make_spec(tmp_path)
+        spec["allow_long_titles"] = True
+        spec["teammates"][0]["role_line"] = bad
+        with pytest.raises(SystemExit):
+            load(tmp_path, spec)
+
+
 class TestListThreads:
     def test_returns_instance_and_pin(self, tmp_path):
         spec = load(tmp_path, make_spec(tmp_path))

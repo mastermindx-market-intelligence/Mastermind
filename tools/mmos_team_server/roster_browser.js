@@ -204,7 +204,9 @@ async function modePin(profileDir, threadUrl, titleContains, outJson, shotPng) {
 
 async function modeRename(profileDir, threadUrl, threadId, currentTitle,
                           newTitle, outJson) {
-  if (newTitle.length > 24) throw new Error("thread title exceeds 24 characters");
+  // Title-length policy (24-char sidebar fit, allow_long_titles opt-in) is
+  // owned by team_roster.py, which knows the spec's regime; this driver only
+  // checks what it needs to target a thread safely.
   if (!threadId) throw new Error("durable thread id is required");
   const context = await launch(profileDir);
   try {

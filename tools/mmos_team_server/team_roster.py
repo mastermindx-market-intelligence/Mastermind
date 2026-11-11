@@ -23,6 +23,13 @@ isolated, already-paired profile; renames are otherwise reported as pending
 and apply exits nonzero without claiming convergence. No credentials or
 pairing URLs are put on a command line.
 
+Spec key ``allow_long_titles: true`` switches to the long-title regime: the
+starting state on the real server (threads titled ``Name — long role``) and
+the principal's undo. Role lines may then be any one line (still no em dash,
+no outer whitespace) and titles may exceed the sidebar's 24-character fit
+with a warning. Default (absent/false) keeps the one-word short-title rule
+and the hard cap. Title-length policy lives here, not in the browser driver.
+
 The server watches settings.json and reloads it live while running
 (apps/server/src/serverSettings.ts:1303-1311, debounced 100ms), so instance
 edits take effect without a restart; apply still works against a stopped
@@ -113,13 +120,28 @@ def load_spec(path):
             die(f"duplicate accent_color {mate['accent_color']!r}")
         if "—" in mate["name"] or mate["name"] != mate["name"].strip():
             die(f"{where}.name must not contain an em dash or outer spaces")
-        if not ROLE_LINE_RE.fullmatch(mate["role_line"]):
+        allow_long = spec.get("allow_long_titles") is True
+        if allow_long:
+            # Long-title regime (the real server's current state, and the
+            # principal's undo): role_line may be any one line, but the title
+            # must stay exactly "Name — role_line" (one em dash, no padding).
+            role = mate["role_line"]
+            if (not role or role != role.strip() or "—" in role
+                    or "\n" in role or "\r" in role):
+                die(f"{where}.role_line must be one non-empty line without an "
+                    f"em dash or outer spaces, got {mate['role_line']!r}")
+        elif not ROLE_LINE_RE.fullmatch(mate["role_line"]):
             die(f"{where}.role_line must be one ASCII word (letters, digits, "
                 f"'_' or '-'), got {mate['role_line']!r}")
         title = teammate_title(mate)
         if len(title) > TITLE_MAX:
-            die(f"{where} title {title!r} is {len(title)} characters; the "
-                f"sidebar fits at most {TITLE_MAX}")
+            if allow_long:
+                log(f"{where}: title {title!r} is {len(title)} characters; "
+                    f"the sidebar fits {TITLE_MAX} and will ellipsize it "
+                    f"(allow_long_titles)")
+            else:
+                die(f"{where} title {title!r} is {len(title)} characters; the "
+                    f"sidebar fits at most {TITLE_MAX}")
         names.add(mate["name"])
         instances.add(mate["instance"])
         slugs.add(mate["slug"])
