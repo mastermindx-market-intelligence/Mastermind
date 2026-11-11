@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {startPrivateGateway, resolvePrivateTunnelConfig} from './private-tunnel-gateway.mjs';
 
-const fixture = new URL('./fixtures/backend.mjs', import.meta.url).pathname;
+const fixture = fileURLToPath(new URL('./fixtures/backend.mjs', import.meta.url));
 
 async function setup(t, options = {}, env = {}) {
   const dir = await mkdtemp(resolve(tmpdir(), 'studio-owner-review-'));
