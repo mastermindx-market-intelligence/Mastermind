@@ -1,0 +1,17 @@
+{
+  "CLAUDE.md.snippet": "f00a60b1617b55be98447080b93717464fd0bf8bd72740eb8a3e7b26f556c2cb",
+  "README.md": "f8d4a41536425d01f7fb8ec85703efedd88639924df0f7f00906f14a420f500c",
+  "SKILL.md": "85174c6961f7d1d0ed60ff28e291f43bbf8a0efef1b3973492d1975b3f609368",
+  "agents/openai.yaml": "946cdca39de0a28b2319cb1c24abca35c2715a526cb611988ee0eea9681023da",
+  "examples/patterns.md": "368ef02b09b15750d9b19757699ad23386d49766118d9b009834c3caa46da795",
+  "manifest.json": "b6727d68b8bcc1025c7283727b2cdd19954f18ba4450c445e06aa2acaeb8f69e",
+  "references/archetypes.md": "92a88439280af6bbce3eb53c4037043aa617d3929511c17ea5978bf4da378c43",
+  "references/components.md": "9d8c7b4f8e0e230084179e0bed3f8597cfff2cbf8e817fe6fd28938639d9dafe",
+  "references/foundations.md": "f7395f91b182d8aec09f7520a02aec6982e573499b69760ddab817cea2910566",
+  "references/paper-sources.md": "c10fad2d0740c2174d97679144da465ccfab5019b82728270d949f1e658b97ef",
+  "references/sources.md": "ae5c45a03b20d5fa40a5ba4e49b374391c0378b872902559ae853fb24736fece",
+  "references/states-accessibility.md": "2ae30b3c85713bd2971c796589b23a0332c6094fb8f58f7b25142a98988908fa",
+  "scripts/validate_bundle.py": "2ed18cec09b1bdbb2b3da6e009a784b63a4182c051815a2d1e5bf89d140c4bf4",
+  "tokens/mastermind.css": "fef8a4eb646a024be1ef2c1439e0470889b24e871c9cdcd35088eeac12ebbdba",
+  "tokens/mastermind.tokens.json": "8aab3e7de3f1adcb74b5320306f333eda9c00bbedf474ccfcb7d6d203a36308c"
+}

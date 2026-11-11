@@ -1,0 +1,647 @@
+{
+  "schema": "paper_design_evidence_v1",
+  "assignment": "D22",
+  "observed_at": "2026-11-08 19:44:06 UTC",
+  "paper_file_id": "01M3NSZGE8JWN2EZCSF0DT05RM",
+  "proposal_page_id": "p-1F-0",
+  "proposal_artboard_id": "261Q-0",
+  "reference_page_id": "p-X-0",
+  "reference_artboard_id": "26NL-0",
+  "status": "BOUNDED_DESIGN_PROPOSAL_NOT_PRODUCT_ACCEPTANCE",
+  "foundation_versions": null,
+  "rig_receipt": null,
+  "product_pr_head": null,
+  "source_revisions": {
+    "terminal": "b38d93c2cc8d05f9f5c29598a3691304330ffee6",
+    "mastermind": "89c83b3a3172054b7dfce7d208d4cf0c209f4672",
+    "macro": "9fe19a5128f431f9962a2866451919b516ea26e3",
+    "governing_procedure": "5c3d3885234358aefb97ecdbc59be0864df14f8b"
+  },
+  "artifacts": [
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d22/personal-before.jpg",
+      "sha": "f602935aa22b92dce4115f7cf4a7a744b4e17b94",
+      "nodeId": "1L71-0",
+      "kind": "native_screenshot",
+      "encoding": "base64",
+      "mimeType": "image/jpeg",
+      "content_length": 217148
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d22/entry.jpg",
+      "sha": "a508f10f852db36ce46c5cd0357979167f252d05",
+      "nodeId": "268B-0",
+      "kind": "native_screenshot",
+      "encoding": "base64",
+      "mimeType": "image/jpeg",
+      "content_length": 129464
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d22/comparison.jpg",
+      "sha": "0bb3819fd9be7a5c7e680bcdd863b1e80a7729ee",
+      "nodeId": "269Y-0",
+      "kind": "native_screenshot",
+      "encoding": "base64",
+      "mimeType": "image/jpeg",
+      "content_length": 200336
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d22/read-states.jpg",
+      "sha": "c201e7871a2f3a1b57971cb11660be09107e0477",
+      "nodeId": "26DF-0",
+      "kind": "native_screenshot",
+      "encoding": "base64",
+      "mimeType": "image/jpeg",
+      "content_length": 156600
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d22/model-states.jpg",
+      "sha": "6aa82f7ad93ea64d36708e9b4cee4513d82353b6",
+      "nodeId": "26FO-0",
+      "kind": "native_screenshot",
+      "encoding": "base64",
+      "mimeType": "image/jpeg",
+      "content_length": 192636
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d22/continuity-states.jpg",
+      "sha": "5e77099adff29ced3d7c955daa659d9d576351b7",
+      "nodeId": "26HI-0",
+      "kind": "native_screenshot",
+      "encoding": "base64",
+      "mimeType": "image/jpeg",
+      "content_length": 152604
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d22/paper-read-states.jpg",
+      "sha": "3000141638c5487c0fe227273ca3e9eb4c6a69ab",
+      "nodeId": "26P0-0",
+      "kind": "native_screenshot",
+      "encoding": "base64",
+      "mimeType": "image/jpeg",
+      "content_length": 180092
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d22/reference.jpg",
+      "sha": "0d4ee8fbe3e8af5e7664cd294a4012785a843446",
+      "nodeId": "26NL-0",
+      "kind": "native_screenshot",
+      "encoding": "base64",
+      "mimeType": "image/jpeg",
+      "content_length": 156868
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d22/portfolio-comparison.native.jsx",
+      "sha": "5708f455b20d2f7b2abbaefc62563bf06f2b6810",
+      "nodeId": "261Q-0",
+      "kind": "native_jsx",
+      "encoding": "utf-8",
+      "content_length": 117891
+    },
+    {
+      "path": "docs/design/evidence/paper_portfolio_20261108/d22/reference.native.jsx",
+      "sha": "4af813b4c4a3397ad1fc276551af74258f24b123",
+      "nodeId": "26NL-0",
+      "kind": "native_jsx",
+      "encoding": "utf-8",
+      "content_length": 5503
+    }
+  ],
+  "native_nodes": [
+    {
+      "role": "New study",
+      "page_id": "p-1F-0",
+      "node_id": "261Q-0",
+      "scope": "258 simple text leaves; 1440 auto height"
+    },
+    {
+      "role": "New builder reference",
+      "page_id": "p-X-0",
+      "node_id": "26NL-0",
+      "scope": "12 text leaves; full source and study pointer"
+    },
+    {
+      "role": "Desktop entry",
+      "page_id": "p-1F-0",
+      "node_id": "268B-0",
+      "scope": "Personal / paper / model chooser"
+    },
+    {
+      "role": "Desktop comparison",
+      "page_id": "p-1F-0",
+      "node_id": "269Y-0",
+      "scope": "Priced personal subtotal / provisional paper value"
+    },
+    {
+      "role": "Failed / empty / unconnected",
+      "page_id": "p-1F-0",
+      "node_id": "26DF-0",
+      "scope": "390 EN dark;390 ZH light;320 EN light"
+    },
+    {
+      "role": "Model availability",
+      "page_id": "p-1F-0",
+      "node_id": "26FO-0",
+      "scope": "Known budget; valid zero; unavailable"
+    },
+    {
+      "role": "Refresh / changed account",
+      "page_id": "p-1F-0",
+      "node_id": "26HI-0",
+      "scope": "768 EN light;390 ZH dark"
+    },
+    {
+      "role": "Managed/shared read limits",
+      "page_id": "p-1F-0",
+      "node_id": "26P0-0",
+      "scope": "Provisional / pending / shared read unbound"
+    },
+    {
+      "role": "Owner build contract",
+      "page_id": "p-1F-0",
+      "node_id": "26J9-0",
+      "scope": "Source identities, effects, comparison and navigation"
+    },
+    {
+      "role": "Source/acceptance note",
+      "page_id": "p-1F-0",
+      "node_id": "26LF-0",
+      "scope": "Exact source pins and remaining consumer evidence"
+    }
+  ],
+  "sources": [
+    {
+      "repository": "Terminal",
+      "path": "terminal/lib/portfolio.ts",
+      "commit": "b38d93c2cc8d05f9f5c29598a3691304330ffee6",
+      "blob_sha": "cc699dc56b92ca162d32875a894609a42648333d"
+    },
+    {
+      "repository": "Terminal",
+      "path": "terminal/app/(shell)/portfolio/page.tsx",
+      "commit": "b38d93c2cc8d05f9f5c29598a3691304330ffee6",
+      "blob_sha": "c3bf1da4622bc9ca57fba0466ffdf50a4edda845"
+    },
+    {
+      "repository": "Terminal",
+      "path": "terminal/components/PortfolioWorkspace.tsx",
+      "commit": "b38d93c2cc8d05f9f5c29598a3691304330ffee6",
+      "blob_sha": "64e0a44aa5711c64402eb51786666fe4966f194f"
+    },
+    {
+      "repository": "Terminal",
+      "path": "terminal/components/mounts/PortfolioViewMount.tsx",
+      "commit": "b38d93c2cc8d05f9f5c29598a3691304330ffee6",
+      "blob_sha": "68c6fe45c430db8717a8991a009b9079f96ae7e7"
+    },
+    {
+      "repository": "Terminal",
+      "path": "terminal/components/PortfolioView.tsx",
+      "commit": "b38d93c2cc8d05f9f5c29598a3691304330ffee6",
+      "blob_sha": "e5f8abbb848dc5a60c2d58f6b8a3c1ffe7b59ef6"
+    },
+    {
+      "repository": "Terminal",
+      "path": "terminal/lib/portfolioMoney.ts",
+      "commit": "b38d93c2cc8d05f9f5c29598a3691304330ffee6",
+      "blob_sha": "81f5e45b4b9755ad16e52ae9517ccda6cb2be2c8"
+    },
+    {
+      "repository": "Mastermind",
+      "path": "app/static/index.html",
+      "commit": "89c83b3a3172054b7dfce7d208d4cf0c209f4672",
+      "blob_sha": "dba545d94300588926a00ea767dcdab600724ef5"
+    },
+    {
+      "repository": "Mastermind",
+      "path": "app/web.py",
+      "commit": "89c83b3a3172054b7dfce7d208d4cf0c209f4672",
+      "blob_sha": "1d61d2f54de9215fe703e539ba5e91a9cead3eb6"
+    },
+    {
+      "repository": "Mastermind",
+      "path": "portfolio/registry.py",
+      "commit": "89c83b3a3172054b7dfce7d208d4cf0c209f4672",
+      "blob_sha": "f5eb632d8f2d8dfcdbe11abb19076f9d746b38fe"
+    },
+    {
+      "repository": "Mastermind",
+      "path": "portfolio/self_directed.py",
+      "commit": "89c83b3a3172054b7dfce7d208d4cf0c209f4672",
+      "blob_sha": "11c46facb5c883d45ce21531665b56a4c5b9da74"
+    },
+    {
+      "repository": "Mastermind",
+      "path": "portfolio/paper_account.py",
+      "commit": "89c83b3a3172054b7dfce7d208d4cf0c209f4672",
+      "blob_sha": "73b18d9c5ecaaeee30492d02af2312db4c57efd0"
+    },
+    {
+      "repository": "Mastermind",
+      "path": "app/decision_availability.py",
+      "commit": "89c83b3a3172054b7dfce7d208d4cf0c209f4672",
+      "blob_sha": "529de3a392cb9f05914caad98184adbdf43805f6"
+    },
+    {
+      "repository": "Mastermind",
+      "path": "portfolio/performance_read.py",
+      "commit": "89c83b3a3172054b7dfce7d208d4cf0c209f4672",
+      "blob_sha": "82a6db2ca1e46829aa71107bb49740dcc0a75a6f"
+    },
+    {
+      "repository": "Mastermind",
+      "path": "portfolio/performance_projection.py",
+      "commit": "89c83b3a3172054b7dfce7d208d4cf0c209f4672",
+      "blob_sha": "371a407867fc25b8a635a31789c72a7d724a5d17"
+    },
+    {
+      "repository": "Mastermind",
+      "path": "app/settlement_price_read.py",
+      "commit": "89c83b3a3172054b7dfce7d208d4cf0c209f4672",
+      "blob_sha": "88cebdb9dc000d50d32f57f029f414876adef4d5"
+    },
+    {
+      "repository": "Mastermind",
+      "path": "app/provider_diagnostic_read.py",
+      "commit": "89c83b3a3172054b7dfce7d208d4cf0c209f4672",
+      "blob_sha": "df619102a779cc110c80919e3f41abcb3be19930"
+    },
+    {
+      "repository": "Macro",
+      "path": "templates/vector.html.j2",
+      "commit": "9fe19a5128f431f9962a2866451919b516ea26e3",
+      "blob_sha": "9123692d3db7af30d7f6db5c70b981ff3eb9f201"
+    },
+    {
+      "repository": "Macro",
+      "path": "templates/crypto.html.j2",
+      "commit": "9fe19a5128f431f9962a2866451919b516ea26e3",
+      "blob_sha": "0c657a1b1d7eaa41faa2edb14ec110878c0601bc"
+    },
+    {
+      "repository": "Macro",
+      "path": "templates/vector_allocation.html.j2",
+      "commit": "9fe19a5128f431f9962a2866451919b516ea26e3",
+      "blob_sha": "130bea8dd5194b1106c8fce621a281fd5e1f6864"
+    }
+  ],
+  "validation": {
+    "pageOrderMatches": true,
+    "originalPageOrderPreserved": true,
+    "newPageImmediatelyAfterPersonal": true,
+    "operations": 42,
+    "allApplied": true,
+    "duplicateOperationIds": 0,
+    "preserved": [
+      {
+        "nodeId": "1L71-0",
+        "preserved": true
+      },
+      {
+        "nodeId": "1LE4-0",
+        "preserved": true
+      },
+      {
+        "nodeId": "1L19-0",
+        "preserved": true
+      },
+      {
+        "nodeId": "216F-0",
+        "preserved": true
+      },
+      {
+        "nodeId": "1Z0H-0",
+        "preserved": true
+      },
+      {
+        "nodeId": "1ZET-0",
+        "preserved": true
+      },
+      {
+        "nodeId": "23MJ-0",
+        "preserved": true
+      }
+    ],
+    "finishedNodes": [
+      "261Q-0",
+      "26NL-0"
+    ]
+  },
+  "layout": [
+    {
+      "nodeId": "261Q-0",
+      "length": 117891,
+      "leaves": 258,
+      "min44": 33,
+      "width390": 8,
+      "width320": 2,
+      "width768": 1
+    },
+    {
+      "nodeId": "26NL-0",
+      "length": 5503,
+      "leaves": 12,
+      "min44": 0,
+      "width390": 0,
+      "width320": 0,
+      "width768": 0
+    }
+  ],
+  "operations": [
+    {
+      "key": "create_page",
+      "id": "paper-portfolio-20261108-d22-create-page-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "duplicate-study",
+      "id": "paper-portfolio-20261108-d22-duplicate-study-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "rename-study",
+      "id": "paper-portfolio-20261108-d22-rename-study-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "study-shell",
+      "id": "paper-portfolio-20261108-d22-study-shell-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "entry-shell",
+      "id": "paper-portfolio-20261108-d22-entry-shell-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "personal-card",
+      "id": "paper-portfolio-20261108-d22-personal-card-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "paper-card",
+      "id": "paper-portfolio-20261108-d22-paper-card-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "model-card",
+      "id": "paper-portfolio-20261108-d22-model-card-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "comparison-shell",
+      "id": "paper-portfolio-20261108-d22-comparison-shell-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "personal-values",
+      "id": "paper-portfolio-20261108-d22-personal-values-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "paper-values",
+      "id": "paper-portfolio-20261108-d22-paper-values-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "eligibility-table",
+      "id": "paper-portfolio-20261108-d22-eligibility-table-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "mobile-read-shell",
+      "id": "paper-portfolio-20261108-d22-mobile-read-shell-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "mobile-paper-read-failed",
+      "id": "paper-portfolio-20261108-d22-mobile-paper-read-failed-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "mobile-personal-empty",
+      "id": "paper-portfolio-20261108-d22-mobile-personal-empty-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "mobile-unbound-paper",
+      "id": "paper-portfolio-20261108-d22-mobile-unbound-paper-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "mobile-model-shell",
+      "id": "paper-portfolio-20261108-d22-mobile-model-shell-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "mobile-model-split-missing",
+      "id": "paper-portfolio-20261108-d22-mobile-model-split-missing-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "mobile-model-valid-zero",
+      "id": "paper-portfolio-20261108-d22-mobile-model-valid-zero-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "mobile-model-unavailable",
+      "id": "paper-portfolio-20261108-d22-mobile-model-unavailable-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "continuity-shell",
+      "id": "paper-portfolio-20261108-d22-continuity-shell-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "tablet-source-refreshed",
+      "id": "paper-portfolio-20261108-d22-tablet-source-refreshed-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "mobile-access-changed",
+      "id": "paper-portfolio-20261108-d22-mobile-access-changed-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "build-contract-shell",
+      "id": "paper-portfolio-20261108-d22-build-contract-shell-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "build-contract-rows-1",
+      "id": "paper-portfolio-20261108-d22-build-contract-rows-1-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "build-contract-rows-2",
+      "id": "paper-portfolio-20261108-d22-build-contract-rows-2-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "source-and-proof-note",
+      "id": "paper-portfolio-20261108-d22-source-and-proof-note-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "review-clarity-fixes",
+      "id": "paper-portfolio-20261108-d22-review-clarity-fixes-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "model-binding-review-note",
+      "id": "paper-portfolio-20261108-d22-model-binding-review-note-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "duplicate-reference-pointer",
+      "id": "paper-portfolio-20261108-d22-duplicate-reference-pointer-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "rename-reference-pointer",
+      "id": "paper-portfolio-20261108-d22-rename-reference-pointer-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "reference-pointer-content",
+      "id": "paper-portfolio-20261108-d22-reference-pointer-content-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "place-study-after-personal",
+      "id": "paper-portfolio-20261108-d22-place-study-after-personal-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "read-projection-copy-fixes",
+      "id": "paper-portfolio-20261108-d22-read-projection-copy-fixes-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "paper-read-owner-contract",
+      "id": "paper-portfolio-20261108-d22-paper-read-owner-contract-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "paper-projection-state-shell",
+      "id": "paper-portfolio-20261108-d22-paper-projection-state-shell-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "mobile-paper-provisional",
+      "id": "paper-portfolio-20261108-d22-mobile-paper-provisional-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "mobile-paper-pending-update",
+      "id": "paper-portfolio-20261108-d22-mobile-paper-pending-update-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "mobile-shared-read-unbound",
+      "id": "paper-portfolio-20261108-d22-mobile-shared-read-unbound-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "place-read-states-before-contract",
+      "id": "paper-portfolio-20261108-d22-place-read-states-before-contract-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "plain-language-final-fixes",
+      "id": "paper-portfolio-20261108-d22-plain-language-final-fixes-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    {
+      "key": "finish-study-and-reference",
+      "id": "paper-portfolio-20261108-d22-finish-study-and-reference-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    }
+  ],
+  "limitations": [
+    "Screenshots and exported JSX are native composition evidence, not browser behavior or accessibility conformance.",
+    "No application endpoints, account actions, model execution, product deployment or trade actions were called.",
+    "Managed comparison can reuse existing decision_availability projection only after consumer/access/effect qualification.",
+    "Shared self_directed has no qualified full passive holdings projection established here.",
+    "Cross-app origin and exact historical model navigation remain unbound.",
+    "Numerical comparison pair remains unqualified."
+  ],
+  "artifact_content_verification": {
+    "method": "independently computed SHA-1 over Git blob header and exact native bytes; compare created blob SHA and canonical directory path SHA",
+    "text_readback": "exact UTF-8 body expected after commit",
+    "binary_body_readback": "UNSUPPORTED_BY_TEXT_ONLY_CONNECTOR",
+    "checks": [
+      {
+        "path": "docs/design/evidence/paper_portfolio_20261108/d22/personal-before.jpg",
+        "decoded_bytes": 162859,
+        "computed_git_blob_sha": "f602935aa22b92dce4115f7cf4a7a744b4e17b94",
+        "recorded_git_blob_sha": "f602935aa22b92dce4115f7cf4a7a744b4e17b94",
+        "match": true
+      },
+      {
+        "path": "docs/design/evidence/paper_portfolio_20261108/d22/entry.jpg",
+        "decoded_bytes": 97096,
+        "computed_git_blob_sha": "a508f10f852db36ce46c5cd0357979167f252d05",
+        "recorded_git_blob_sha": "a508f10f852db36ce46c5cd0357979167f252d05",
+        "match": true
+      },
+      {
+        "path": "docs/design/evidence/paper_portfolio_20261108/d22/comparison.jpg",
+        "decoded_bytes": 150251,
+        "computed_git_blob_sha": "0bb3819fd9be7a5c7e680bcdd863b1e80a7729ee",
+        "recorded_git_blob_sha": "0bb3819fd9be7a5c7e680bcdd863b1e80a7729ee",
+        "match": true
+      },
+      {
+        "path": "docs/design/evidence/paper_portfolio_20261108/d22/read-states.jpg",
+        "decoded_bytes": 117450,
+        "computed_git_blob_sha": "c201e7871a2f3a1b57971cb11660be09107e0477",
+        "recorded_git_blob_sha": "c201e7871a2f3a1b57971cb11660be09107e0477",
+        "match": true
+      },
+      {
+        "path": "docs/design/evidence/paper_portfolio_20261108/d22/model-states.jpg",
+        "decoded_bytes": 144475,
+        "computed_git_blob_sha": "6aa82f7ad93ea64d36708e9b4cee4513d82353b6",
+        "recorded_git_blob_sha": "6aa82f7ad93ea64d36708e9b4cee4513d82353b6",
+        "match": true
+      },
+      {
+        "path": "docs/design/evidence/paper_portfolio_20261108/d22/continuity-states.jpg",
+        "decoded_bytes": 114453,
+        "computed_git_blob_sha": "5e77099adff29ced3d7c955daa659d9d576351b7",
+        "recorded_git_blob_sha": "5e77099adff29ced3d7c955daa659d9d576351b7",
+        "match": true
+      },
+      {
+        "path": "docs/design/evidence/paper_portfolio_20261108/d22/paper-read-states.jpg",
+        "decoded_bytes": 135067,
+        "computed_git_blob_sha": "3000141638c5487c0fe227273ca3e9eb4c6a69ab",
+        "recorded_git_blob_sha": "3000141638c5487c0fe227273ca3e9eb4c6a69ab",
+        "match": true
+      },
+      {
+        "path": "docs/design/evidence/paper_portfolio_20261108/d22/reference.jpg",
+        "decoded_bytes": 117650,
+        "computed_git_blob_sha": "0d4ee8fbe3e8af5e7664cd294a4012785a843446",
+        "recorded_git_blob_sha": "0d4ee8fbe3e8af5e7664cd294a4012785a843446",
+        "match": true
+      },
+      {
+        "path": "docs/design/evidence/paper_portfolio_20261108/d22/portfolio-comparison.native.jsx",
+        "decoded_bytes": 119061,
+        "computed_git_blob_sha": "5708f455b20d2f7b2abbaefc62563bf06f2b6810",
+        "recorded_git_blob_sha": "5708f455b20d2f7b2abbaefc62563bf06f2b6810",
+        "match": true
+      },
+      {
+        "path": "docs/design/evidence/paper_portfolio_20261108/d22/reference.native.jsx",
+        "decoded_bytes": 5510,
+        "computed_git_blob_sha": "4af813b4c4a3397ad1fc276551af74258f24b123",
+        "recorded_git_blob_sha": "4af813b4c4a3397ad1fc276551af74258f24b123",
+        "match": true
+      }
+    ]
+  }
+}

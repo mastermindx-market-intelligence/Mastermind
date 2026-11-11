@@ -170,14 +170,14 @@ def _as_pairs(raw: Any) -> Optional[list[tuple[date, float]]]:
 
 def _to_date(k: Any) -> Optional[date]:
     """Coerce a mapping key / index label to a ``datetime.date``; None if impossible."""
-    if isinstance(k, date):
-        return k
-    # pandas Timestamp / datetime expose .date()
+    # Normalize datetime / pandas Timestamp before the date check: both are date subclasses.
     if hasattr(k, "date") and callable(getattr(k, "date")):
         try:
             return k.date()
         except Exception:  # noqa: BLE001
             return None
+    if isinstance(k, date):
+        return k
     try:
         return date.fromisoformat(str(k)[:10])
     except (ValueError, TypeError):

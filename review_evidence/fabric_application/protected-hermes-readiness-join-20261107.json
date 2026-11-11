@@ -1,0 +1,88 @@
+{
+  "schema": "mastermind.fabric_application.protected_observation_readiness_join.v1",
+  "observed_at": "2026-11-07T17:21:31.723385+00:00",
+  "parents": {
+    "qualified_studio_c4": "70a6516d72d19df77d364bca0c2e8cf43f029843",
+    "protected_master": "528ce4ee2720a47abed002919d7555d7d2f4d76a"
+  },
+  "protected_delta": {
+    "commits": [
+      "28cbe35a87a2575b57d8a2d7a4721dcdf13a5d6a",
+      "528ce4ee2720a47abed002919d7555d7d2f4d76a"
+    ],
+    "paths": 24,
+    "conflicts": 0
+  },
+  "decisions": [
+    "Retain the existing exact Hermes loader fixture and its affirmative zero-skip gate while adding the protected SDK/HTTPX observation dependency contract.",
+    "Preserve the disjoint exact release-identity record union; the actual archive-review/drift case executes in the qualified transport suite.",
+    "Retain the protected readiness ledger and effect-aware API/phase2 truth."
+  ],
+  "authority_check": {
+    "path": "integrations/hermes_runtime/native_session_control.py",
+    "unchanged_units": [
+      "_db",
+      "_session",
+      "_target",
+      "_read_original",
+      "_admission_guard",
+      "_submit",
+      "install_private_control",
+      "NativeSecretaryClient"
+    ],
+    "ast_equal": true,
+    "provider_or_admission_authority_added": false
+  },
+  "qualification": {
+    "hermes": {
+      "returncode": 0,
+      "seconds": 9.55,
+      "selectors": [
+        "integrations/hermes_runtime/tests/test_native_transport_observation.py",
+        "integrations/hermes_runtime/tests/test_native_request_observation.py",
+        "integrations/hermes_runtime/tests/test_native_tool_observation.py",
+        "integrations/hermes_runtime/tests/test_native_session_control.py"
+      ],
+      "interpreter": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/hermes-protected-observation-venv-v10/bin/python",
+      "log": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/hermes-protected-observation-v10.log",
+      "sha256": "48a0f51a5b2c9cea9700fdad8c2b31a801765852b620fe3c631e4494ba4f5c8c",
+      "install_log_sha256": "b6a4aa33d3a860255bf97ca7a38cb0dbb64ea8bbbac49d09486dda3a06fe063e",
+      "cases": {
+        "total": 249,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "failures": []
+    },
+    "readiness": {
+      "returncode": 0,
+      "seconds": 1.514,
+      "uid": 501,
+      "log": "/tmp/mmx-brief-auto-source-20261106-363my5ix/proof/protected-readiness-truth-v10.log",
+      "sha256": "c6ce8518a2cc113cc5560b3731e234ed6d559e746221ae903ce01599dfe7e797",
+      "cases": {
+        "total": 25,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "failures": []
+    },
+    "studio_source_report": "review_evidence/fabric_application/protected-studio-c4-join-20261107.json"
+  },
+  "native_proof_reuse": {
+    "unchanged_from": "bd119dfd25db6e9b5b48ab461407faf29cb0725d",
+    "source_report": "review_evidence/fabric_application/protected-host-portfolio-join-20261107.json",
+    "manifest_107": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+    "new_native_build_claim": false
+  },
+  "production_claims": {
+    "deployed": false,
+    "selected_generation": false,
+    "j_collected": false,
+    "grants_issued": false,
+    "provider_called": false,
+    "accepted": false
+  }
+}

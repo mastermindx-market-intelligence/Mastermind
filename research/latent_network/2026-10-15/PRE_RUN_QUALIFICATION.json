@@ -1,0 +1,15 @@
+{
+  "status": "BEFORE_EMPIRICAL_RESULT",
+  "tests_passed": 13,
+  "protocol_commit": "b9bf9369c",
+  "clarifications": [
+    "Target uses centered midrank 2*((rank-.5)/N-.5), so each full date has mean zero",
+    "Own and other-industry factor-residual5/21/63 sums plus residualvol are added to all baselines before outcomes to isolate network connections from access to the same residual input",
+    "A symmetric correlation score followed by per-row top5 selection need not yield a symmetric adjacency; it is called correlation graph",
+    "No missing selected peer residual is silently replaced by zero: a missing contributing peer invalidates the feature row",
+    "Future labels may omit incomplete industry outcomes; omissions and exact common model panel are recorded",
+    "Statistical associations are not claims of economic supply-chain/ownership edges"
+  ],
+  "parameter_search": false,
+  "source_sha256": "4e8a66449a2cfd5c3cd800540332abf86ee8dd7df8fbcd4c2df731df93574ea2"
+}

@@ -14,15 +14,45 @@ to the autonomous book only.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 import bot  # noqa: F401
 from claude_agent_sdk import tool, create_sdk_mcp_server
 
 from brain import bot_mcp
+from brain import portfolio_intelligence
 
 SERVER_NAME = "desk"
 PORTFOLIO_ID = "autonomous"
+
+# This context is installed by the typed harness, never by model arguments.
+_FABRIC_INVOCATION = ContextVar("autonomous_fabric_invocation", default=None)
+
+
+@contextmanager
+def fabric_invocation(context: dict):
+    from brain import runlog
+    if type(context) is not dict:
+        raise runlog.PortfolioRunError("fabric_tool_context_invalid")
+    context = {**context, "book": runlog.portfolio_book(context.get("book", PORTFOLIO_ID))}
+    token = _FABRIC_INVOCATION.set(context)
+    try:
+        yield
+    finally:
+        _FABRIC_INVOCATION.reset(token)
+
+
+def fabric_context(book: str = PORTFOLIO_ID):
+    """Read the existing trusted invocation; a handler cannot borrow another book."""
+    from brain import runlog
+    book = runlog.portfolio_book(book)
+    context = _FABRIC_INVOCATION.get()
+    if context is not None and context.get("book") != book:
+        raise runlog.PortfolioRunError("fabric_tool_book_conflict")
+    return context
+
 
 # Marker the builder / any streaming layer can scan a tool result for.
 BOOK_MARKER = "__BOOK__"
@@ -65,6 +95,16 @@ def submission_path(portfolio_id: str = PORTFOLIO_ID) -> Path:
 
 def clear_submission(portfolio_id: str = PORTFOLIO_ID) -> None:
     """Remove a stale decision file before a fresh run so a no-op turn can't replay yesterday."""
+    if portfolio_id in ("autonomous", "china", "hk"):
+        from brain import runlog
+        with runlog.portfolio_lock():
+            if runlog.portfolio_pending_locked(portfolio_id) is not None:
+                raise runlog.PortfolioRunError("fabric_submission_owned")
+            try:
+                submission_path(portfolio_id).unlink()
+            except FileNotFoundError:
+                pass
+        return
     try:
         submission_path(portfolio_id).unlink()
     except FileNotFoundError:
@@ -74,6 +114,10 @@ def clear_submission(portfolio_id: str = PORTFOLIO_ID) -> None:
 
 
 def read_submission(portfolio_id: str = PORTFOLIO_ID) -> dict | None:
+    if portfolio_id in ("autonomous", "china", "hk"):
+        from brain import runlog
+        if runlog.portfolio_lookup(book=portfolio_id) is not None:
+            return None  # Selected callers consume their exact correlated receipt.
     p = submission_path(portfolio_id)
     try:
         if p.exists():
@@ -193,10 +237,12 @@ async def get_my_book(args):
                     "cash_rationale", "decision_memo"]})
 async def submit_book(args):
     from brain import decision_submission
+    context = fabric_context(PORTFOLIO_ID)
     try:
         payload, audit = decision_submission.normalize(
             PORTFOLIO_ID, args, stock_only=True, early_exit_hysteresis=True,
-            deterministic_sizing=True)
+            deterministic_sizing=True,
+            **({"decision_asof": context["asof"]} if context is not None else {}))
     except decision_submission.DecisionBoundaryFreeze as exc:
         return bot_mcp._ok(
             f"SUBMISSION REJECTED; prior paper book preserved unchanged. Trusted-boundary reason: {exc}"
@@ -204,7 +250,12 @@ async def submit_book(args):
     cleaned = payload["holdings"]
     gross = float(payload["gross"])
     p = submission_path()
-    decision_submission.write_atomic(p, payload)
+    if context is None:
+        decision_submission.write_atomic(p, payload)
+    else:
+        payload, correlation = context["prepare_submission"](payload, audit)
+        receipt = decision_submission.write_atomic(p, payload, correlation=correlation)
+        context["accept_submission"](receipt)
     cash_pct = max(0.0, 1.0 - gross) * 100
     note = (f"Book submitted: {len(cleaned)} holdings, {gross * 100:.0f}% invested, {cash_pct:.0f}% cash"
             + (" (scaled to remove leverage)" if payload.get("scaled_to_no_leverage") else "")
@@ -232,10 +283,24 @@ async def get_prophet_board(args):
     return bot_mcp._json(portfolio_intelligence.prophet_board(limit=int(args.get("limit") or 24)))
 
 
-@tool("get_sector_rotation", "Current Sector Central leaders, laggards and rotation state in a bounded packet.",
-      {"type": "object", "properties": {"limit": {"type": "integer"}}})
+@tool("get_sector_rotation", "Sector Central context. Default returns legacy leaders; projection=sector_dossiers returns the dated all-eleven dossier with source qualifications and no trade authority; projection=sector_windows returns one explicitly selected sector's exact 5/20/63-session measurements with every other identity kept as status-only.",
+      {"type": "object", "properties": {
+          "limit": {"type": "integer"},
+          "projection": {"type": "string", "enum": ["legacy", "sector_dossiers", "sector_windows"]},
+          "sector": {"type": "string", "enum": list(portfolio_intelligence.PSL_SECTOR_IDS)},
+      }})
 async def get_sector_rotation(args):
-    from brain import portfolio_intelligence
+    projection = args.get("projection")
+    if "projection" in args and projection != "legacy":
+        if "sector" in args:
+            return bot_mcp._json(portfolio_intelligence.sector_rotation(
+                projection=projection, sector=args["sector"]))
+        return bot_mcp._json(portfolio_intelligence.sector_rotation(projection=projection))
+    if "sector" in args:
+        # A sector selector only means something for projection=sector_windows; never fall
+        # back to legacy-ranked values.
+        return bot_mcp._json(portfolio_intelligence.sector_rotation(
+            projection="legacy", sector=args["sector"]))
     return bot_mcp._json(portfolio_intelligence.sector_rotation(limit=int(args.get("limit") or 12)))
 
 
@@ -273,8 +338,11 @@ async def get_neural_web_packet(args):
        "ticker": {"type": "string"}}, "required": ["plane", "reason"]})
 async def request_context_upgrade(args):
     from brain import portfolio_learning
+    context = fabric_context(PORTFOLIO_ID)
     return bot_mcp._json(portfolio_learning.request_context(
-        PORTFOLIO_ID, args.get("plane"), args.get("reason"), args.get("ticker")))
+        PORTFOLIO_ID, args.get("plane"), args.get("reason"), args.get("ticker"),
+        **({"correlation": {"run_id": context["run_id"], "tool_id": context["tool_id"]}}
+           if context is not None else {})))
 
 
 _DESK_TOOLS = [get_my_book, get_market_packet, get_prophet_board, get_sector_rotation,

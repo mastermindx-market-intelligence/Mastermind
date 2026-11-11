@@ -1,0 +1,28 @@
+{
+  "bridge_sha256": "928d00436427d4b5b7cfaf551c4fff8d21c3432c5ac87a9d9b9f1e017b0e4fec",
+  "owner_modules_sha256": {
+    "experiential_pin.py": "8ddb970fa460634a44c4c2db309207be62e07ea02843e4d6776e084e31c5eb06",
+    "experiential_transport.py": "4687529d1f277ecba510c330f69c2b2e4f6ae18a4e8a60167ec019a0dc88b47b"
+  },
+  "patches_sha256": {
+    "fabric_task.py.patch": "0cbb58193fef93b0bcefd46ee7e94ef728f6c337188e66067aaa00a0a3a01e74",
+    "remote_sub.sh.patch": "012987cea38575266ced7cc4747aca55c57e6e539084658df3dc76f3b4da1d7a",
+    "slot.py.patch": "d60b646d82f179de5e9a0399462ea7d0a2bf44353a09c2a5b6a66d1056b69c80",
+    "sub.sh.patch": "b422bd27c7dc5e80da200859bc31e9177d68417f5d76359c61a147eb1cc618cc"
+  },
+  "postimages_sha256": {
+    "fabric_task.py": "1c9ea4e73c0ad3fe7a8c2d166ff8bcedab61640deec090b0eb23f47c9c965aa5",
+    "remote_sub.sh": "539878d9c0e4502ff31a7e667e8ef173768d5b9a48a3af0a90cab9a40d0e1e42",
+    "slot.py": "1d3bdadfa7dcfb3a770bc91f55f2f987016f73e83f60fc5e0c77c43b374ca6d2",
+    "sub.sh": "21c0bab2159f4deb659aa24e7918b94c8c304d0c40a2291f539a1435487adcdb"
+  },
+  "preimages_sha256": {
+    "fabric_task.py": "8bedb6157e6f94c7c3206906964ee713ac39095b9767f1ae6c32edd97082f8b1",
+    "remote_sub.sh": "25037f87fde6659b9e5ffe8e5fded4cac84358568043f21fda3ad1a7d510ade5",
+    "slot.py": "4508794aa613f578dcd69aca7a03ccba4ad8d790698472d2c9000c3c7c9eb6a5",
+    "sub.sh": "3ac95f16be472483fcd7f1957a4c9837174a23fa9b012733e971e38b0026c697"
+  },
+  "profile": "ubuntu0-ubuntu3-20261104-exact-installed-code",
+  "schema": "mastermind.experiential_linux_installed_profile.v1",
+  "status": "source_candidate_not_installed"
+}

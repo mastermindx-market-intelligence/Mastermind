@@ -3,14 +3,14 @@
 Composes, in the load-bearing order below, the exact steps BSC-E1's FROZEN
 SPEC requires for ``submit_ceo_intent``:
 
-1. Validate the caller payload against the EXISTING public five-tool request
-   shape (:func:`integrations.executive_mcp.schemas.validate_tool_arguments`
-   — reused verbatim, never copied).  A caller/model cannot supply ``actor``,
-   ``authority``, raw capabilities, ``branch``, ``worktree``, ``grounding``,
-   ``request_ref``, intent/job/status, provider/account/session, or a socket
-   target: none of those names appear in that schema's
-   ``additionalProperties: false`` object, so they are structurally
-   impossible, not merely refused by a runtime check.
+1. Validate the caller payload through the authenticated-app extension
+   (:func:`integrations.executive_mcp.schemas.validate_app_submit_arguments`).
+   Legacy requests reuse the frozen five-tool law; the app alone may carry
+   an exact requested ``frontier_model_alias``. A caller/model cannot supply
+   ``actor``, ``authority``, raw capabilities, ``branch``, ``worktree``,
+   ``grounding``, ``request_ref``, intent/job/status, provider/account/session,
+   or a socket target: the closed validator rejects those fields before any
+   transport effect.
 2. Derive one stable ``req-*`` outer identity via
    :func:`control_plane.ceo_request.app_request_ref` — depends ONLY on the
    validated ``operation_key`` (the approved logical operation identity),
@@ -137,14 +137,22 @@ class AdmissionRequest:
 
 
 def _validate_five_tool_shape(payload: Any) -> dict[str, Any]:
-    """Step 1 — reuse the EXISTING public ``submit_ceo_intent`` validator.
+    """Validate the authenticated App shape through the canonical request law.
+
+    Legacy profiles reuse the frozen MCP adapter. The explicit native profile
+    is App-only; accepting its shape does not issue an execution capability.
 
     Raises :class:`AdmissionError` (never a bare ``GatewayError``) so this
     module owns one closed vocabulary end to end.
     """
 
     try:
-        return validate_tool_arguments(MODIFYING_TOOL, payload)
+        if isinstance(payload, Mapping) and payload.get("execution_profile") == "native_research_only":
+            return ceo_request.normalize_high_level_request(payload)
+        from integrations.executive_mcp.schemas import validate_app_submit_arguments
+        return validate_app_submit_arguments(payload)
+    except ceo_request.CeoRequestError as exc:
+        raise AdmissionError("invalid_input", exc.message) from exc
     except GatewayError as exc:
         raise AdmissionError("invalid_input", exc.message) from exc
 
@@ -221,6 +229,13 @@ async def compose_admission(request: AdmissionRequest) -> AdmissionOutcome:
     frame = _build_v2_frame(
         request_ref=request_ref, grounding=grounding, semantic_request=semantic_request
     )
+    if semantic_request.get("execution_profile") == "native_research_only":
+        from control_plane.direct_native_execution import SUBMIT_SCHEMA
+        from integrations.mastermind_executive_app.principal_namespace import principal_scope_from_identity
+        frame["schema"] = SUBMIT_SCHEMA
+        frame["principal_scope"] = principal_scope_from_identity(
+            issuer_digest=request.principal.issuer_digest,subject_digest=request.principal.subject_digest,
+            client_ref=request.principal.client_ref,resource=request.principal.resource)
     response = await request.client.send_frame(request.ceo_ingress_socket_path, frame)
     return _classify_send_response(response, request_ref=request_ref)
 

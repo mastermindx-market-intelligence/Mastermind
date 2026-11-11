@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
+
+import pytest
 
 from scripts.executive_os_r1_shadow import run_r1_shadow
 
@@ -9,6 +12,7 @@ def test_r1_shadow_registers_logical_luna_terra_and_completes_four_cases(tmp_pat
     evidence = run_r1_shadow(tmp_path)
 
     assert evidence["schema"] == "mastermind.executive_os_r1_shadow_evidence/v1"
+    assert evidence["routing_policy_version"] == "2026-10-14.attended-qualification"
     assert evidence["acceptance"]["r1_shadow_pass"] is True
     assert {row["worker_id"] for row in evidence["jobs"]} == {
         "fixture-luna-r1",
@@ -49,3 +53,14 @@ def test_r1_shadow_is_byte_deterministic_for_same_fixture_inputs(tmp_path):
     first = run_r1_shadow(tmp_path / "first")
     second = run_r1_shadow(tmp_path / "second")
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+
+
+def test_r1_shadow_refuses_unreviewed_policy_before_runtime(tmp_path, monkeypatch):
+    from scripts import executive_os_r1_shadow as shadow
+
+    monkeypatch.setattr(shadow.ModelRouter, "load", classmethod(
+        lambda cls: SimpleNamespace(policy_version="unreviewed.fixture")))
+    root = tmp_path / "not-created"
+    with pytest.raises(RuntimeError, match="R1 fixture expects routing policy"):
+        run_r1_shadow(root)
+    assert not root.exists()

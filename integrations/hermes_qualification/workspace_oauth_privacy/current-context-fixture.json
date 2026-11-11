@@ -1,0 +1,82 @@
+{
+  "bundle_sha256": "f50165a4b39ede344491e41cdcca94ed3dc501488ddc4d31940bc4f14658a7df",
+  "proof_scope": "Recorded real signed ASGI/current compiler fixture output; inert credentials/PR/source custody seams; no live or installed authority",
+  "publication": {
+    "authority_generation_digest": "0175cec38035ad4d8b90f840bb53952a860af4fa79032661a08d7f4693c083d2",
+    "capability_profile_digest": "1b311cfbfed38d613a243532bb873227b3676ff24ba45c51580d9ce30e970c4e",
+    "context": {
+      "freshness_seconds": 120,
+      "max_context_bytes": 131072,
+      "provider": "agentos",
+      "source_mode": "CANONICAL_PROJECT_DATA"
+    },
+    "mcp": {
+      "client_id": "inert-client",
+      "scope": "mastermind.executive.coo.act mastermind.executive.read",
+      "server": "mastermind_coo",
+      "server_name": "mastermind-executive-coo",
+      "server_version": "1.0.0",
+      "url": "https://mcp.mastermind-x.com/mcp/coo"
+    },
+    "mission_authority_ref": "authority:coo-test",
+    "permission_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "plugin": {
+      "digest": "3333333333333333333333333333333333333333333333333333333333333333",
+      "name": "native_selected_child_plugin",
+      "source": "user"
+    },
+    "principal": {
+      "client_ref": "fe033e5dcefe1711feb37480cc8d1add3b368c2495cf35395133c6137bc903af",
+      "issuer_digest": "6df027eccbbe3554714297dcf3302307b183576b919b69f22a4260f5609b31c3",
+      "policy_id": "current-context-coo",
+      "resource_ref": "https://mcp.mastermind-x.com/mcp",
+      "scopes": [
+        "mastermind.executive.coo.act",
+        "mastermind.executive.read"
+      ],
+      "subject_digest": "0e64397fc300202b67abce21758c856b2c769de4451116c9c0e816a3fe6edb87"
+    },
+    "principal_binding_digest": "ba3e1c55c25b827ff2da25aee2364a17f75b2a5d7acc1d011b3d367dff66d9ec",
+    "schema": "mastermind.hermes_native_executive_consumer/v3",
+    "selected_child": null,
+    "session": {
+      "principal_id": "uid:1001",
+      "request_id": "enroll-1",
+      "role": "mmsecretary"
+    },
+    "tools_schema_digest": "41644c90bbd8b5927c5cc7f97f65fef144ba9f9ca6e0277d702d7a8a26fa0da0",
+    "work_ref": "WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412",
+    "workspace_principal": {
+      "client_ref": "fe033e5dcefe1711feb37480cc8d1add3b368c2495cf35395133c6137bc903af",
+      "issuer_digest": "6df027eccbbe3554714297dcf3302307b183576b919b69f22a4260f5609b31c3",
+      "policy_id": "planning-workspace-read",
+      "resource_ref": "https://mcp.mastermind-x.com/workspace/read",
+      "scopes": [
+        "mastermind.workspace.read"
+      ],
+      "subject_digest": "0e64397fc300202b67abce21758c856b2c769de4451116c9c0e816a3fe6edb87"
+    }
+  },
+  "receiver_mcp": "1.28.1",
+  "schema": "mastermind.hermes_current_context_sdk_fixture.v1",
+  "sdk_result": {
+    "_meta": null,
+    "content": [
+      {
+        "_meta": null,
+        "annotations": null,
+        "text": "{\"schema\":\"mastermind.executive_mcp_result.v1\",\"tool\":\"executive_agentos_current_context\",\"ok\":true,\"server_version\":\"1.0.0\",\"mode\":\"readonly\",\"generated_at\":\"2026-11-07T10:29:59Z\",\"grounding\":{},\"data\":{\"bundle_base64\":\"eyJzY2hlbWEiOiJjb250ZXh0X2J1bmRsZS52MSIsInNvdXJjZV9yZWNvcmRzX2RpZ2VzdCI6InNoYTI1NjoxODdhZTBhN2ViYzIyYTJkOWI4ZjA4ODUzMGE0NjFiMGE5ZjQ1ZWM5MDBiNzI4NWJmYTQ1MTgzNjNkZmRhM2I3IiwidGFyZ2V0Ijp7IndvcmtzdHJlYW0iOiJXUzpQUk9KRUNULTFBOEFDQTk5MUE1NkMyMkYxRTg2QzJGN0ZDQjc5NDEyIiwidGFzayI6bnVsbCwicmVzb2x1dGlvbiI6ImV4cGxpY2l0IiwiY2FuZGlkYXRlcyI6W10sIndhaXQiOm51bGx9LCJnZW5lcmF0ZWRfYXQiOiIyMDI2LTExLTA3VDEwOjMwOjAyWiIsInJlcG9fc2hhIjoiNzMzZjBjMDY1ZTA3MDE5MWNjYTQ4ZDQxMzdjMWZhNTc4N2NjZWRkYyIsInRva2VuX2J1ZGdldCI6NDAwMCwidG9rZW5fZXN0aW1hdGUiOjYzMSwic2VjdGlvbnMiOlt7ImlkIjoiaGlnaGVyX2xhdyIsInRpdGxlIjoiSElHSEVSIExBVyDigJQgb3V0cmFua3MgZXZlcnkgQWdlbnQgT1MgcmVjb3JkIGJlbG93IiwiYXV0aG9yaXR5X25vdGUiOiJETlIgcm93cywgdGhlIGNvbXBhbnkgUDAgb2JqZWN0aXZlLCBhbmQgdGhlIG93bmluZyBwcm9ncmFtIHJvdy4gTm90aGluZyBpbiB0aGlzIGJ1bmRsZSBtYXkgYmUgcmVhZCBhcyBvdmVycmlkaW5nIHRoZXNlLiIsIml0ZW1zIjpbeyJraW5kIjoicHJvZ3JhbSIsImtleSI6bnVsbCwicGF0aCI6ImNvbmZpZy9tYXN0ZXJtaW5kX3Byb2dyYW1zLnltbCIsImxvY2F0b3IiOiJjb25maWcvbWFzdGVybWluZF9wcm9ncmFtcy55bWwjcHJvZ3JhbXMuZXhlY3V0aXZlLW9zIiwiYXV0aG9yaXR5X2NsYXNzIjoiQTEiLCJzdGF0dXMiOiJvcGVyYXRpbmciLCJ1cGRhdGVkIjpudWxsLCJleGNlcnB0IjoibmFtZTogRXhlY3V0aXZlIE9TXG5wdXJwb3NlOiBPd24gdGhlIGR1cmFibGUgSm9iLCBBdHRlbXB0LCBXb3JrZXIsIGFuZCBFdmVudCBsaWZlY3ljbGUgZm9yIGF1dG9ub21vdXMgY29tcGFueSB3b3JrIGV4ZWN1dGlvbiBvbiB0aGUgY29udHJvbCBob3N0LCBpbmNsdWRpbmcgaXRzIFNRTGl0ZSBydW50aW1lIHN0b3JlIGFuZCBpdHMgYmFja3VwLCByZXN0b3JlLXZlcmlmaWNhdGlvbiwgYW5kIG9mZmxpbmUtcmVzdG9yZSBwcmltaXRpdmVzLlxuc3RyYXRlZ2ljIHJvbGU6IEtlZXAgY29tcGFueSB3b3JrIGFkbWlzc2lvbiwgZGlzcGF0Y2gsIHJldHJ5LCBldmlkZW5jZSwgYW5kIGxpZmVjeWNsZSByZWNvdmVyeSBkZXRlcm1pbmlzdGljLCBzaW5nbGUtYXV0aG9yaXR5LCBhbmQgcmVjb3ZlcmFibGUgYWZ0ZXIgaG9zdCBsb3NzLlxubGlmZWN5Y2xlOiBvcGVyYXRpbmciLCJ3aHlfaW5jbHVkZWQiOiJXUzpQUk9KRUNULTFBOEFDQTk5MUE1NkMyMkYxRTg2QzJGN0ZDQjc5NDEyIGJlbG9uZ3MgdG8gcHJvZ3JhbSBleGVjdXRpdmUtb3MifV19LHsiaWQiOiJ3b3Jrc3RyZWFtIiwidGl0bGUiOiJXT1JLU1RSRUFNIFNUQVRFIChhdXRob3JpdGF0aXZlIGZvciBzdGF0ZSwgbm90IGZvciBwZXJtaXNzaW9uKSIsImF1dGhvcml0eV9ub3RlIjoiV2hhdCB0aGUgd29yayBpcyBhbmQgd2hlcmUgaXQgc3RhbmRzLiBBZ2VudCBPUyByZWNvcmRzIHdvcms7IGl0IG5ldmVyIGRlY2lkZXMgd2hldGhlciB3b3JrIG1heSBydW4gKGludmFyaWFudCBJMSkuIiwiaXRlbXMiOlt7ImtpbmQiOiJ3b3Jrc3RyZWFtIiwia2V5IjoiV1M6UFJPSkVDVC0xQThBQ0E5OTFBNTZDMjJGMUU4NkMyRjdGQ0I3OTQxMiIsInBhdGgiOiJhZ2VudG9zL3dvcmtzdHJlYW1zL1dTLVBST0pFQ1QtMUE4QUNBOTkxQTU2QzIyRjFFODZDMkY3RkNCNzk0MTIubWQiLCJsb2NhdG9yIjoiYWdlbnRvcy93b3Jrc3RyZWFtcy9XUy1QUk9KRUNULTFBOEFDQTk5MUE1NkMyMkYxRTg2QzJGN0ZDQjc5NDEyLm1kI2Zyb250bWF0dGVyIiwiYXV0aG9yaXR5X2NsYXNzIjoiQTQiLCJzdGF0dXMiOiJwcm9wb3NlZCIsInVwZGF0ZWQiOiIyMDI2LTExLTA3IiwiZXhjZXJwdCI6Im9iamVjdGl2ZTogUHJlc2VydmUgbGl0ZXJhbCDkuK3mlocgZ29hbCBhbmQgY2xhcmlmeSB0aGUgc2NvcGUuXG5zdGF0dXM6IHByb3Bvc2VkIMK3IGNsYXNzOiByZXNlYXJjaCDCtyBibGFzdF9yYWRpdXM6IHJldmVyc2libGUgwrcgYW1iaWd1aXR5OiBvcGVuXG5vd25lcjogYXN0cmEtbWV0YS1jZW8gwrcgcHJvZ3JhbTogZXhlY3V0aXZlLW9zIMK3IHJlcG9zOiBtYWNybyB8IG1hc3Rlcm1pbmRcbndhdmVzOlxuICBDTEFSSUZZIENsYXJpZnkgZ29hbCBhbmQgcGxhbiBzY29wZSDigJQgdG9kb1xubmV4dF9hY3Rpb246IENsYXJpZnkgc2NvcGUgYmVmb3JlIGV4ZWN1dGlvbiBhZG1pc3Npb24uXG5cbi0tLSByZWNvcmQgYm9keSAoZXhjZXJwdCkgLS0tXG4jIyBXaGF0IHRoaXMgZmlsZSBpc1xuXG5BIERSQUZUX09OTFkgd29ya3N0cmVhbSByZWNvcmQgY29tcGlsZWQgZnJvbSBhbiBhdXRob3JlZCBwcm9qZWN0LXByb3Bvc2FsXG5yZXF1ZXN0LiBDb21waWxhdGlvbiBoYXBwZW5lZCBlbnRpcmVseSBpbiBtZW1vcnk6IG5vIHN0b3JlIHBhdGggd2FzIHJlYWQgb3JcbndyaXR0ZW4sIG5vIEdpdCBvcGVyYXRpb24gcmFuLCBhbmQgbm8gYXV0aG9yaXR5IHdhcyBncmFudGVkIGJ5IHByb2R1Y2luZyB0aGlzXG50ZXh0LiBUaGUgZHJhZnQgcmVhY2hlcyB0aGUgc3RvcmUgb25seSBpZiBhIHNlcGFyYXRlIHB1YmxpY2F0aW9uIHN0ZXAg4oCUIHdoaWNoXG50aGlzIGNvbXBpbGVyIGNhbiBuZWl0aGVyIHBlcmZvcm0gbm9yIHByb3ZlIOKAlCBjYXJyaWVzIGl0IGludG9cbmBhZ2VudG9zL3dvcmtzdHJlYW1zL2AgdW5kZXIgdGhlIGNvbW1pdCB0aGUgcmVxdWVzdCBwaW5uZWQgYXNcbmBleHBlY3RlZF9jb21taXRgLiBUaGF0IGNvbW1pdCB2YWx1ZSBpcyBhbiBvYmxpZ2F0aW9uIHJlY29yZGVkIGZvciB0aGF0IGxhdGVyXG5wdWJsaXNoZXIsIG5vdCBhIGZhY3QgdGhpcyBmaWxlIGFzc2VydHMuXG5cbiMjIFdoYXQgdGhpcyBmaWxlIGRvZXMgbm90IHNheVxuXG5JdCBjYXJyaWVzIG5vIGBjcmVhdGVkYC9gdXBkYXRlZGAgZmllbGQgKHRob3NlIGFyZSBkZXJpdmVkIGZyb20gZ2l0IGhpc3RvcnkgYnlcbnRoZSBzdG9yZSB0b29saW7igKYiLCJ3aHlfaW5jbHVkZWQiOiJ0aGUgY29tcGlsYXRpb24gdGFyZ2V0In1dfSx7ImlkIjoiZGVjaXNpb25zIiwidGl0bGUiOiJERUNJU0lPTlMgKGluc3RpdHV0aW9uYWwgcmVhc29uaW5nIOKAlCBkbyBub3Qgb3ZlcnJpZGUgaGlnaGVyIGxhdykiLCJhdXRob3JpdHlfbm90ZSI6IkN1cnJlbnQgZGVjaXNpb25zIG9ubHkuIFN1cGVyc2VkZWQgcmVjb3JkcyBhcmUgbmFtZWQgdW5kZXIgRVhDTFVERUQgd2l0aCB0aGUga2V5IHRoYXQgcmVwbGFjZWQgdGhlbTsgdGhleSBhcmUgbmV2ZXIgY28tZXF1YWwgaGVyZS4iLCJpdGVtcyI6W119LHsiaWQiOiJkaXNjb3ZlcmllcyIsInRpdGxlIjoiRElTQ09WRVJJRVMgKGV2aWRlbmNlLCBub3QgcG9saWN5KSIsImF1dGhvcml0eV9ub3RlIjoiRnJlc2ggZmluZGluZ3Mgb25seS4gRXhwaXJlZCwgc3VwZXJzZWRlZCwgYW5kIHVuY2l0ZWQtYW5kLXN0YWxlIGRpc2NvdmVyaWVzIGFyZSBleGNsdWRlZCBieSBmaWVsZCwgbm90IGJ5IHJlbGV2YW5jZS4iLCJpdGVtcyI6W119LHsiaWQiOiJoYW5kb2ZmIiwidGl0bGUiOiJMQVRFU1QgSEFORE9GRiAodHJhbnNmZXIgc3RhdGUsIG5vdCBzdHJhdGVneSkiLCJhdXRob3JpdHlfbm90ZSI6IldoZXJlIHRoZSBsYXN0IHNlc3Npb24gc3RvcHBlZC4gT25seSB0aGUgbGF0ZXN0IHN1cnZpdmVzIOKAlCBvbGRlciBoYW5kb2ZmcyBhcmUgZXhjbHVkZWQgcmF0aGVyIHRoYW4gbWVyZ2VkIGludG8gYSBjb21wb3NpdGUgbm9ib2R5IHdyb3RlLiIsIml0ZW1zIjpbXX0seyJpZCI6ImFydGlmYWN0cyIsInRpdGxlIjoiQVJUSUZBQ1RTIChwb2ludGVycyDigJQgcmVhZCB0aGUgcHJpbWFyeSBzb3VyY2UpIiwiYXV0aG9yaXR5X25vdGUiOiJQYXRocyBvbmx5LiBBIHJlY29yZCBwb2ludHMgYXQgcHJvc2U7IGl0IG5ldmVyIGFic29yYnMgaXQuIiwiaXRlbXMiOltdfV0sImV4Y2x1ZGVkIjpbXSwib21pdHRlZF9kdWVfdG9fYnVkZ2V0IjpbXSwiZGVncmFkZWQiOlsiZGF0YS9nb3Zlcm5hbmNlL2FjdGl2ZV9idWlsZHMuanNvbiBhYnNlbnQg4oCUIFBSIHN0YXRlIHVua25vd247IHdhdmUvUFIgYWdyZWVtZW50IHVuY2hlY2tlZCAobm9ybWFsIGluIGEgc3BhcnNlIHdvcmt0cmVlOyB0aGUgbmlnaHRseSB3cml0ZXMgaXQpIl0sIm5vX2Fuc3dlcl9yZWFzb24iOm51bGwsImFjY2VwdGFuY2VfYmFzaXMiOnsic2NoZW1hIjoiYWdlbnRvcy5hY2NlcHRhbmNlX2Jhc2lzLnYxIiwiYXV0aG9yaXRhdGl2ZSI6ZmFsc2UsImJ5X2NvbW1pc3Npb24iOnt9fX0K\",\"bundle_encoding\":\"base64\",\"capability_profile_digest\":\"1b311cfbfed38d613a243532bb873227b3676ff24ba45c51580d9ce30e970c4e\",\"catalogue\":\"coo.agentos_current_context.v1\",\"principal_context\":{\"authority_generation_digest\":\"0175cec38035ad4d8b90f840bb53952a860af4fa79032661a08d7f4693c083d2\",\"mission_authority_ref\":\"authority:coo-test\",\"principal_binding_digest\":\"ba3e1c55c25b827ff2da25aee2364a17f75b2a5d7acc1d011b3d367dff66d9ec\",\"work_ref\":\"WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412\"},\"receipt\":{\"bundle_sha256\":\"f50165a4b39ede344491e41cdcca94ed3dc501488ddc4d31940bc4f14658a7df\",\"compiler_closure_sha256\":\"4e2b8a0406a733d2c4927a072f49cb9f9a84bcd1170ccaa31db91d5b58b992f2\",\"compiler_code_commit\":\"625b410d69e2e5f57b6ae4fc27b26451b71b5e86\",\"compiler_sources\":[{\"bytes\":284428,\"git_blob\":\"2b1032c0bfe9a64b41d9a78ae0eee57fc9a12f85\",\"mode\":\"100644\",\"path\":\"scripts/agentos.py\",\"sha256\":\"acf3d970decb0b0c79b536bcc4e64cca93adace078321156fa72ff29c73f64a3\"},{\"bytes\":26423,\"git_blob\":\"84ff653fe948a138efb1ad0e0e3b7e44c9058e89\",\"mode\":\"100644\",\"path\":\"scripts/agentos_project_plan_contract.py\",\"sha256\":\"fe93bd433963d740dc617a3df91a13baee0b919b0e4cd1ebab158cff929608b6\"}],\"compiler_sources_scope\":\"fixed_macro_entry_and_helper\",\"data_commit\":\"733f0c065e070191cca48d4137c1fa5787cceddc\",\"data_observation\":{\"authority\":\"OBSERVATION_ONLY\",\"canonical_commit_at\":\"2026-11-07T05:30:01-05:00\",\"canonical_data_commit\":\"733f0c065e070191cca48d4137c1fa5787cceddc\",\"canonical_observed_at_ms\":1794047401925,\"code_config_relation\":\"IDENTICAL_READER_CLOSURE\",\"default_ref\":\"main\",\"executable_macro_commit\":\"625b410d69e2e5f57b6ae4fc27b26451b71b5e86\",\"publication_recorded_at_ms\":1794047401000,\"publication_time\":null,\"reader_closure_sha256\":\"e34b64c58074f70ded9eb9892b3e23426a2795b31a34bc9c602a0ab7aa078046\",\"repository\":\"mastermindx-market-intelligence/macro\",\"schema\":\"mastermind.canonical_project_data_observation.v1\",\"source_operation\":{\"event_id\":10,\"principal_scope\":\"2df64c1a4db3068d30d18ded1f6cd9c614ec35e6120bdef9985eb0e9669f63d9\",\"receipt_sha256\":\"8dba8db1bdd233a5cd030d4081f9352c44f0b275598e220056b72f6b9e28be4d\",\"recipe_fingerprint_sha256\":\"b93e957253daa91ee992f2233dfbe5b587cd3252a8e5c650062dcc8d8e1dbe92\",\"recorded_at_ms\":1794047401000,\"request_sha256\":\"5d010eb2c5e26f8da42b1004a2ebfd27bdfa75a41ba98ec5b1ecf3b7185d5337\",\"selection\":{\"action\":\"publish_project_proposal\",\"request_id\":\"mmos-project-create-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"work_ref\":\"WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412\"},\"sources\":[{\"commit\":\"733f0c065e070191cca48d4137c1fa5787cceddc\",\"content_sha256\":\"6819916637116fd5b05d7da7b86b13189de66a22c2b2995f3397b874c0452aae\",\"path\":\"agentos/workstreams/WS-PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412.md\",\"repository\":\"macro\"}]}},\"deadline_semantics\":\"cooperative_result_deadline_v1\",\"degraded_count\":1,\"execution_authority\":false,\"generated_at\":\"2026-11-07T10:30:02Z\",\"import_policy\":\"qualified_runtime_paths_v1\",\"mastermind_source_sha\":\"8a5a75e819b1366126d799cdc5ecb8141b3ca0d3\",\"omitted_count\":0,\"owner\":\"agent_os\",\"repo_sha\":\"733f0c065e070191cca48d4137c1fa5787cceddc\",\"runtime_commitment\":{\"owner\":\"cf2_capacity_runtime\",\"python_binary_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"python_version\":\"3.12.14\",\"pyyaml_record_sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"pyyaml_version\":\"6.0.3\",\"runtime_tree_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"schema\":\"mastermind.agentos_current_context_receipt.v1\",\"source_inventory_files\":4,\"source_inventory_sha256\":\"5c66932e9a999779eb0f2ffdc2df6b0af6fe301bdfc4d42889e27222f2614ee7\",\"source_mode\":\"CANONICAL_PROJECT_DATA\",\"source_observation\":{\"macro_generation\":\"b278c61f3fb30a3ca4301eb3047a340f8002a7eb48cd62a988a1f5afde0f6fb1\",\"mastermind_generation\":\"da6c3e56ac1937eafa215b238c52cf50c8a72eb79d404b3d09e4c9e4a571c728\",\"materialized_generation\":\"1efc60f3818f575caffe13fea8ab110d702e587e6b5ed21eb495c1f7611a3197\"},\"source_script_sha256\":\"acf3d970decb0b0c79b536bcc4e64cca93adace078321156fa72ff29c73f64a3\",\"token_budget\":4000,\"workstream\":\"WS:PROJECT-1A8ACA991A56C22F1E86C2F7FCB79412\"},\"schema\":\"mastermind.coo_agentos_current_context_result.v1\",\"workspace_principal\":{\"client_ref\":\"fe033e5dcefe1711feb37480cc8d1add3b368c2495cf35395133c6137bc903af\",\"issuer_digest\":\"6df027eccbbe3554714297dcf3302307b183576b919b69f22a4260f5609b31c3\",\"policy_id\":\"planning-workspace-read\",\"resource\":\"https://mcp.mastermind-x.com/workspace/read\",\"scopes\":[\"mastermind.workspace.read\"],\"subject_digest\":\"0e64397fc300202b67abce21758c856b2c769de4451116c9c0e816a3fe6edb87\"}},\"degraded\":[],\"bounded\":[],\"error\":null}",
+        "type": "text"
+      }
+    ],
+    "isError": false,
+    "structuredContent": null
+  },
+  "source_sha256": {
+    "common/coo_agentos_context_contract.py": "c906357e106985d4a1b933ae55d9a5187b905e7a0439a30754bbb754f0ea030a",
+    "control_plane/agentos_context_bundle.py": "321f99081aeca385c9e1a6664fe0acc169a3c1ec2a82885a09f722b1186bee39",
+    "integrations/hermes_harness/tests/test_native_current_agentos_context.py": "bc92523debd563a9e5563801bdaa8647f448aff1f289edd270ace486b3446c24",
+    "tests/test_executive_current_agentos_context.py": "f207f8b1aa290f74528579568cf0c4975eb8d73a40fe54f8b5cfe6c25b428ef4",
+    "tests/test_installed_current_agentos_context.py": "70ed59cce6e1c5c94715bba546bb538c549156ac8de2178e79dba6adf9595c85"
+  }
+}

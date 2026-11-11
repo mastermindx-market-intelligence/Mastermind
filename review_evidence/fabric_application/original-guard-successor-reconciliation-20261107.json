@@ -1,0 +1,17 @@
+{
+  "schema": "mastermind.original_guard_successor_reconciliation.v1",
+  "head_before": "fa6c8f2f3c0b67e805e3b92681679fede2bf9e9a",
+  "original_parent": "cd557dc05e26b70f2d8f56ad0da2df76a15d74ca",
+  "incoming_patch_sha256": "e5f984d772bbccaedbb2df39b0789a2da66b20d13adeb64a82b5402f8cb43640",
+  "preserved_current_files": {
+    "ops/native_fabric/quota_continuity/rollout/build_review_stage.py": "3b804a82cce51a1c222dfd0c89154805a5065f48515bb6cf49c209ffda9301c2",
+    "tests/test_fabric_grok47_qwen_release_composition_20261022.py": "b135fc30d0f9ddf3af0af04939dc8a0eaf0d42310f6b3673207ea47749d45508"
+  },
+  "qualification": "210 native guard/stage cases on byte-identical files; current entry eed37568f732d270ec420109601cd166fe23a8c07f714ac4f2a228504d3af320",
+  "decision": [
+    "The original successor independently applied the same returned guard patch to b495. Its source receipt is retained unchanged.",
+    "Preserve the already qualified protected914 four-cohort semantic composition: named forward guard, immutable overlay authentication, regular candidate checks and exact current manifest/collector closure.",
+    "Do not replace the current bcfb107 manifest assertion with incoming historical c7f5 or collapse four accepted cohorts to the older single composed cohort."
+  ],
+  "runtime_changed": false
+}

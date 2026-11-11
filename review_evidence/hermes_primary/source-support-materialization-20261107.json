@@ -1,0 +1,113 @@
+{
+  "schema": "mastermind.hermes_primary_committed_source_materialization.v1",
+  "parent": "d7de48bea3290738fd153fa9569a3be1185af465",
+  "original_application_parent": "552375cd288ebe3c417d10afa17f47114c6319db",
+  "prior_exact_merge": "173b2240dbff53d5af4be3b66176bc68b79db2d3",
+  "native_prior": {
+    "run": 42384660247,
+    "job": 128439397143,
+    "macro": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+    "tests": 21,
+    "seconds": 142.31,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "source_flags_overridden": true,
+    "real_application_handler": true,
+    "real_broker": true,
+    "provider_is_fixture": true,
+    "blocked_external_connections": 0,
+    "provider_sdk_constructions": 0
+  },
+  "proposal_archive_failure": {
+    "job": 128439397143,
+    "returncode": 128,
+    "failed_stage": "git archive before patch application",
+    "underlying_cause": "unproved; stderr was captured but not surfaced",
+    "runner_git": "2.56.0",
+    "selected_paths_verified_in_published_commit": true,
+    "source_patch_applied": false,
+    "proposal_unit_or_native_execution": false,
+    "provider_effect": false
+  },
+  "local_archive_diagnostic": {
+    "git": "2.51.1",
+    "inputs": "synthetic full and sparse partial local repositories",
+    "both_archive_contexts_passed": true,
+    "does_not_reproduce_hosted_failure": true
+  },
+  "source_materialization": {
+    "helper_sha256": "36a99318b4b7049d024ca15b6ec91022c13953568416dc14b234d042e448facb",
+    "method": "ls-tree selected committed entries, batch-check all local blobs, cat-file each verified object",
+    "checks": [
+      "exact pinned commit",
+      "closed selected paths",
+      "regular file modes only",
+      "object ID/type/size before export",
+      "each blob ID and size on export",
+      "exclusive destination files and original executable modes",
+      "no lazy fetching or working-tree substitution",
+      "unchanged contract, exact pre/postimages, complete four-file patch delta, original source readbacks"
+    ],
+    "missing_objects": "refuse explicitly; do not fetch or substitute",
+    "git_failures": "bounded sanitized stderr and return code from the same failed command"
+  },
+  "local_tests": {
+    "tests": 3,
+    "seconds": 0.217,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "cases": [
+      "committed bytes/modes retained despite dirty and untracked worktree data",
+      "committed symlink refuses before any export",
+      "missing local object refuses and remains absent after refusal"
+    ]
+  },
+  "studio_qualified": {
+    "run": 42384660247,
+    "job": 128439396984,
+    "fixture_blob": "41dae1f1e0f29b542137ebf53f01a3e16b7f473d",
+    "baseline": {
+      "tests": 1,
+      "seconds": 2.041
+    },
+    "observed_isolated": {
+      "tests": 1,
+      "seconds": 1.994
+    },
+    "full_discovery": {
+      "tests": 848,
+      "seconds": 172.215,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0
+    },
+    "contexts": {
+      "baseline": 0,
+      "single": 0,
+      "suite": 0
+    },
+    "observer_selfcheck": "Node22.14 all eight export/prototype entries passed",
+    "production_effects": false,
+    "release_acceptance": false
+  },
+  "original552_join": {
+    "original_report_blob": "7cc74a7f49efd29b6eca6e84137140bfba92c681",
+    "workflow_resolution": "Retain the actually qualified d7 immutable-anchor/full-history acquisition; original552 API-blob acquisition is not duplicated. Preserve its other existing workflow inputs.",
+    "all_other_original_members_preserved": true
+  },
+  "macro_current_observation": {
+    "commit": "cc45757612addfdc496acbb3c233376ad4c28c78",
+    "factory_blob": "a8d1b7a8d86946eb9870c56a54e1599eae5fa5c5",
+    "factory_unchanged_from_a577": true,
+    "hermes_source_support_adopted": false
+  },
+  "source_patch_sha256": "9ac521f0ae88a1826295afec5a0c61470935fed07d833de3f9f16edb2d71181d",
+  "source_patch_changed": false,
+  "hosted_proposal_383_plus_21": "pending",
+  "installed_primary": false,
+  "live_acceptance": false,
+  "monetary_acceptance": false,
+  "mission_complete": false
+}

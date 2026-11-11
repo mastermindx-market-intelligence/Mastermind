@@ -101,3 +101,76 @@ def test_archive_argument_owns_record_asof(tmp_path, monkeypatch):
     assert sh.archive("2026-09-17", [{"ticker": "AAPL", "asof": "1999-01-01"}]) == 1
     row = sh.load()[0]
     assert row["asof"] == "2026-09-17"
+
+
+def _exercise(sh, operation):
+    if operation == "load":
+        return sh.load()
+    if operation == "seen":
+        return sh.seen_keys("2026-09-17")
+    return sh.archive("2026-09-17", [{"ticker": "MSFT"}])
+
+
+@pytest.mark.parametrize("operation", ["load", "seen", "archive"])
+@pytest.mark.parametrize("component", ["leaf", "directory"])
+def test_dangling_history_path_remains_unavailable(tmp_path, monkeypatch, operation, component):
+    sh, path = _wire(tmp_path, monkeypatch)
+    missing = tmp_path / "missing-target"
+    link = path if component == "leaf" else tmp_path / "alias"
+    if component == "directory":
+        monkeypatch.setattr(sh, "_PATH", link / "signals.jsonl")
+    link.symlink_to(missing, target_is_directory=component == "directory")
+    original = link.lstat()
+
+    with pytest.raises(OSError):
+        _exercise(sh, operation)
+    assert link.is_symlink()
+    assert link.lstat().st_ino == original.st_ino
+    assert link.readlink() == missing
+    assert not missing.exists()
+
+
+def test_first_use_and_readable_symlink(tmp_path, monkeypatch):
+    sh, _ = _wire(tmp_path, monkeypatch)
+    path = tmp_path / "new" / "history" / "signals.jsonl"
+    monkeypatch.setattr(sh, "_PATH", path)
+    assert sh.load() == []
+    assert sh.seen_keys("2026-09-17") == set()
+    path.parent.mkdir(parents=True)
+    path.touch()
+    assert sh.load() == []
+    assert sh.archive("2026-09-17", [{"ticker": "MSFT"}]) == 1
+    alias = tmp_path / "readable.jsonl"
+    alias.symlink_to(path)
+    monkeypatch.setattr(sh, "_PATH", alias)
+    assert sh.seen_keys("2026-09-17") == {"MSFT"}
+
+
+@pytest.mark.parametrize("operation", ["load", "seen", "archive"])
+@pytest.mark.parametrize("seam", ["read_text", "lstat"])
+@pytest.mark.parametrize("failure", [PermissionError(13, "fixture denied"), OSError(5, "fixture I/O error")])
+def test_history_io_failure_is_never_absence(tmp_path, monkeypatch, operation, seam, failure):
+    sh, path = _wire(tmp_path, monkeypatch)
+    original = b'{"asof":"2026-09-16","ticker":"AAPL"}\n'
+    if seam == "read_text":
+        path.write_bytes(original)
+    real = getattr(Path, seam)
+    calls = []
+
+    def fail_for_history(self, *args, **kwargs):
+        if self == path:
+            calls.append(self)
+            raise failure
+        return real(self, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, seam, fail_for_history)
+        with pytest.raises(OSError) as received:
+            _exercise(sh, operation)
+    assert received.value is failure
+    assert calls == [path]
+    if seam == "read_text":
+        assert path.read_bytes() == original
+    else:
+        assert not path.exists()
+    assert not list(tmp_path.glob(".*.tmp"))

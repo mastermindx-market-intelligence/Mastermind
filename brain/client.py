@@ -3,7 +3,12 @@
 The authoritative VPS uses ``waterfall``: Codex (ChatGPT-managed auth, Sol
 xhigh) first, then Macro Dashboard's shared Claude OAuth pool.  Direct
 ``codex``/``cli`` modes remain available for diagnostics and local use, with
-``api`` as the metered Anthropic Messages API fallback.
+``api`` as the metered Anthropic Messages API fallback, and explicit
+``explabs`` as the Experiential Labs OpenAI-compatible gateway.
+``production_mode`` delegates no-tools completions to Macro's Shared AI
+Provider Control production API modes; it does not reserve Fabric capacity.
+Explicit ``fabric`` uses that owner's shared application binding and the native
+shared inference wrapper. Selection is exclusive, including binding failures.
 
 Every mode is exclusive: a configured shared-waterfall outage never falls through to a
 separate metered credential.  ``call_model()`` returns (text|None, degraded_reason|None) — the same contract as
@@ -28,9 +33,13 @@ TIERS = {
 
 
 def backend() -> str:
-    """Configured LLM backend. Env override > agents.yml > shared waterfall."""
+    """The present application selector is exclusive; absence preserves legacy routing."""
+    if "MM_PROVIDER_APPLICATION_MODE" in os.environ:
+        return "fabric"
     env = os.environ.get("BOT_LLM_BACKEND")
-    if env in ("waterfall", "codex", "cli", "api"):
+    if env is not None:
+        # An explicit unknown/empty backend fails closed in the dispatcher.
+        # Never turn a misspelled new backend into the legacy waterfall.
         return env
     try:
         return cli_bridge._cfg().get("backend", "waterfall")
@@ -40,6 +49,9 @@ def backend() -> str:
 
 
 def api_available() -> bool:
+    if cli_bridge._application_fabric_selected():
+        from brain import fabric_inference
+        return fabric_inference.available()
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return False
     try:
@@ -51,16 +63,52 @@ def api_available() -> bool:
 
 def available() -> bool:
     """Whether the explicitly configured backend can currently reason."""
+    if cli_bridge._application_fabric_selected():
+        from brain import fabric_inference
+        return fabric_inference.available()
     selected = backend()
+    if cli_bridge._application_fabric_selected():
+        from brain import fabric_inference
+        return fabric_inference.available()
     if selected == "waterfall":
-        return cli_bridge.available()
+        available = cli_bridge.available()
+        return _fabric_available_if_selected() and available
     if selected == "codex":
-        return codex_bridge.available()
+        available = codex_bridge.available()
+        return _fabric_available_if_selected() and available
     if selected == "cli":
-        return cli_bridge.available()
+        available = cli_bridge.available()
+        return _fabric_available_if_selected() and available
     if selected == "api":
-        return api_available()
+        available = api_available()
+        return _fabric_available_if_selected() and available
+    if selected == "explabs":
+        from brain import explabs_pool
+        available = explabs_pool.available()
+        return _fabric_available_if_selected() and available
+    if selected == "production_mode":
+        from brain import production_inference
+        return production_inference.available()
+    if selected == "fabric":
+        from brain import fabric_inference
+        return fabric_inference.available()
     return False
+
+
+def _fabric_available_if_selected() -> bool:
+    if not cli_bridge._application_fabric_selected():
+        return True
+    from brain import fabric_inference
+    fabric_inference.available()
+    return False
+
+
+def _fabric_call_if_selected(system, user, *, role, max_tokens, seat, record_book):
+    if not cli_bridge._application_fabric_selected():
+        return None
+    from brain import fabric_inference
+    return fabric_inference.call_model(system, user, role=role, max_tokens=max_tokens,
+                                       seat=seat, record_book=record_book)
 
 
 def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 1500,
@@ -70,7 +118,63 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
     seat / record_book: cost-attribution overrides forwarded to the recorder on either
     backend — seat names the ledger seat (default = role), record_book overrides the
     _ROLE_BOOK default book. Attribution-only; never changes routing or behaviour."""
+    if cli_bridge._application_fabric_selected():
+        from brain import fabric_inference
+        return fabric_inference.call_model(
+            system, user, role=role, max_tokens=max_tokens,
+            seat=seat, record_book=record_book,
+        )
     selected = backend()
+    selected_call = _fabric_call_if_selected(system, user, role=role, max_tokens=max_tokens,
+                                            seat=seat, record_book=record_book)
+    if selected_call is not None:
+        return selected_call
+
+    if selected == "fabric":
+        from brain import fabric_inference
+        return fabric_inference.call_model(
+            system, user, role=role, max_tokens=max_tokens,
+            seat=seat, record_book=record_book,
+        )
+
+    if selected == "explabs":
+        from brain import explabs_client, explabs_pool
+        if not explabs_pool.available():
+            return None, "explabs_unavailable"
+        selected_call = _fabric_call_if_selected(system, user, role=role, max_tokens=max_tokens,
+                                                seat=seat, record_book=record_book)
+        if selected_call is not None:
+            return selected_call
+        try:
+            reply = explabs_pool.complete(system, user, max_tokens=max_tokens)
+            # Account for observed usage even if a served reply contains no text.
+            # Reuse the existing cost ledger; never estimate a gateway charge.
+            try:
+                from brain import cost_guard as _cg
+                from brain.cli_bridge import _ROLE_BOOK
+                _cg.record(
+                    record_book or _ROLE_BOOK.get(str(role).lower(), "flagship"),
+                    reply.cost_usd or 0.0,
+                    seat=seat or role,
+                    model=reply.model,
+                    input_tokens=reply.input_tokens,
+                    output_tokens=reply.output_tokens,
+                    key_id=f"explabs_account_{reply.account_slot}" if reply.account_slot else None,
+                )
+            except Exception:
+                pass
+            if not reply.text:
+                return None, "explabs_empty_reply"
+            return reply.text, None
+        except explabs_client.ExperientialError as exc:
+            return None, str(exc)
+
+    if selected == "production_mode":
+        from brain import production_inference
+        return production_inference.call_model(
+            system, user, role=role, max_tokens=max_tokens,
+            seat=seat, record_book=record_book,
+        )
 
     if selected == "waterfall":
         if not cli_bridge.available():
@@ -92,6 +196,10 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
     if selected == "codex":
         if not codex_bridge.available():
             return None, "codex_unavailable"
+        selected_call = _fabric_call_if_selected(system, user, role=role, max_tokens=max_tokens,
+                                                seat=seat, record_book=record_book)
+        if selected_call is not None:
+            return selected_call
         try:
             r = codex_bridge.reason_sync(
                 user,
@@ -120,6 +228,10 @@ def call_model(system: str, user: str, *, role: str = "pm", max_tokens: int = 15
 
     if selected != "api" or not api_available():
         return None, "no_backend"
+    if cli_bridge._application_fabric_selected():
+        from brain import fabric_inference
+        return fabric_inference.call_model(system, user, role=role, max_tokens=max_tokens,
+                                          seat=seat, record_book=record_book)
     import anthropic
     t = TIERS[role]
     try:

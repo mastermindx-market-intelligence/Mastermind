@@ -1,0 +1,46 @@
+{
+  "at": "2026-11-07T09:14:06.823164+00:00",
+  "baseHead": "77d6eab59feb688e95caf203aa53e592189d1d1f",
+  "qualification": "Presentation-only logout and original-request feedback; original auth/send eligibility/owner semantics retained",
+  "appTestsPassed": 107,
+  "panelTestsPassed": 19,
+  "typecheckExit": 0,
+  "logs": [
+    {
+      "path": "/tmp/hermes-thin-ui-feedback-tests-20261107-pro-06.log",
+      "exit": 1,
+      "qualification": "App107 passed; panel18 passed, one new negative fixture invalid before correction",
+      "sha256": "b0d16e86fd7a37f601d165bfc020bfb0bc0d9a94e659f39e420e267357a023e3"
+    },
+    {
+      "path": "/tmp/hermes-thin-ui-feedback-panel-final-20261107-pro-06.log",
+      "exit": 0,
+      "qualification": "All19 panel tests pass after using a valid live unqualified-scope fixture",
+      "sha256": "f8bc5ebe07e3c0dcc2bbb09e933ea07e186b5a9516b268d01000d023b8218a9b"
+    },
+    {
+      "path": "/tmp/hermes-thin-ui-feedback-types-20261107-pro-06.log",
+      "exit": 0,
+      "qualification": "TypeScript noEmit passes",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "sourceFiles": [
+    {
+      "path": "app/mastermind_os/src/App.tsx",
+      "sha256": "30a25de86fe976378d271cfc4f4d63fdc09b7c442dda8c15a3fa8c945ca2f28e"
+    },
+    {
+      "path": "app/mastermind_os/src/App.test.tsx",
+      "sha256": "06bd45091b9ed8eb17a8274437387331dbd75c26041ba67fca9b2e6c18369194"
+    },
+    {
+      "path": "app/mastermind_os/src/hermes-native/HermesNativePanel.tsx",
+      "sha256": "2dab73b723699b704c6e19d96e96acaafa39c5ee00e6b2ac8297d997ba3e3bd8"
+    },
+    {
+      "path": "app/mastermind_os/src/hermes-native/HermesNativePanel.test.tsx",
+      "sha256": "586ce34d28394add6e058fb7057df6fa8caacdd5dd0d79b6a869ef061b4bcee1"
+    }
+  ]
+}

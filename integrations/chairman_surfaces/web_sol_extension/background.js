@@ -2,6 +2,7 @@
 
 importScripts("instance_config.js");
 importScripts("census_core.js");
+importScripts("browser_control.js");
 
 const PROBE_KIND = "MMX_WEB_SOL_PROBE";
 const REPROBE_KIND = "MMX_WEB_SOL_REPROBE";
@@ -12,8 +13,8 @@ const HELLO_SCHEMA = "mastermind.web_sol_transport_hello.v1";
 const HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1";
 const INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1";
 const TRANSPORT_PROTOCOL_MAJOR = 1;
-const PACKAGE_VERSION = "0.2.0";
-const EXPECTED_CAPABILITY_DIGEST = "89a0dcb05a6c1c31000f841671e6cbf6c29a69dd73ed9726c8b5b99535485e50";
+const PACKAGE_VERSION = "0.3.0";
+const EXPECTED_CAPABILITY_DIGEST = "c3cf6a8186d967b499e74432acc23f10a9a765138fd50e2c8e0cfa54e9a38309";
 const MAX_ACTION_TTL_MS = 60000;
 const ALLOWED_FUTURE_SKEW_MS = 5000;
 const CHATGPT_TAB_PATTERNS = Object.freeze([
@@ -91,6 +92,8 @@ const rawInstanceConfig = globalThis.MMX_WEB_SOL_INSTANCE;
 const INSTANCE_CONFIG = validInstanceConfig(rawInstanceConfig)
   ? Object.freeze({...rawInstanceConfig})
   : null;
+const browserControl = INSTANCE_CONFIG && globalThis.MMXBrowserControl
+  ? globalThis.MMXBrowserControl.createController(chrome, INSTANCE_CONFIG.instanceId, () => transportBootNonce) : null;
 
 function validProbeObservation(observation) {
   if (!exactKeys(observation, OBSERVATION_KEYS) || observation.schema !== PROBE_SCHEMA) return false;
@@ -436,6 +439,11 @@ function validCensusPopup(event, sender) {
 }
 
 async function handleNativeRequest(request, port) {
+  if (browserControl && request && request.schema === globalThis.MMXBrowserControl.REQUEST_SCHEMA) {
+    const result = await browserControl.run(request, transportBootNonce);
+    if (result) port.postMessage(result);
+    return result;
+  }
   if (request && request.schema === CENSUS_REQUEST_SCHEMA) return handleCensusRequest(request, port);
   const typedReentry = validTypedReentryRequest(request);
   if (!typedReentry && !validActionRequest(request)) return;

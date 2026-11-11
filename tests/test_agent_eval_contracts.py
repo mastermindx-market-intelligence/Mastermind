@@ -40,6 +40,47 @@ def test_baseline_scenario_is_shape_valid() -> None:
     assert contracts.validate_scenario_shape(_scenario()) == "SHAPE_VALID"
 
 
+def test_scenario_v2_keeps_equal_content_at_distinct_refs_without_changing_v1():
+    fields = _scenario_fields()
+    pairs = [{"artifact_ref": "git:fixture/sources@" + "c" * 40 + "#" + path,
+              "digest": "sha256:" + "e" * 64} for path in ("one.md", "two.md")]
+    fields["source_policy"]["allowlist_artifacts"] = sorted(
+        fields["source_policy"]["allowlist_artifacts"] + pairs, key=lambda row: row["artifact_ref"])
+    fields["privacy"]["model_visible_artifact_refs"] = sorted(
+        set(fields["privacy"]["model_visible_artifact_refs"]) | {row["artifact_ref"] for row in pairs})
+    with pytest.raises(ContractError) as old:
+        contracts.build_scenario(fields)
+    assert "DUPLICATE_ARTIFACT_DIGEST" in {d.code for d in old.value.defects}
+    current = contracts.build_scenario(fields, schema=contracts.SCENARIO_SCHEMA_V2)
+    assert contracts.validate_document_shape(current) == "SHAPE_VALID"
+    assert all(pair in current["source_policy"]["allowlist_artifacts"] for pair in pairs)
+    assert contracts.build_scenario(_scenario_fields())["schema"] == contracts.SCENARIO_SCHEMA
+    # Unrelated evidence-artifact collections retain their older identity rule.
+    with pytest.raises(ContractError) as unrelated:
+        contracts.v_artifact_list(pairs, "$.evidence.artifacts")
+    assert "DUPLICATE_ARTIFACT_DIGEST" in {d.code for d in unrelated.value.defects}
+
+
+@pytest.mark.parametrize("mutation,code", [
+    ("same-ref", "DUPLICATE_ARTIFACT_REF"), ("reverse", "LIST_NOT_SORTED"),
+    ("digest", "DIGEST_SHAPE"), ("extra", "UNKNOWN_FIELD"),
+])
+def test_ref_unique_source_list_still_closes_shape_and_order(mutation, code):
+    pairs = [{"artifact_ref": "git:fixture/sources@" + "c" * 40 + "#" + path,
+              "digest": "sha256:" + "e" * 64} for path in ("one.md", "two.md")]
+    if mutation == "same-ref":
+        pairs[1]["artifact_ref"] = pairs[0]["artifact_ref"]
+    elif mutation == "reverse":
+        pairs.reverse()
+    elif mutation == "digest":
+        pairs[0]["digest"] = "configured-label"
+    else:
+        pairs[0]["alias_authorized"] = True
+    with pytest.raises(ContractError) as error:
+        contracts.v_source_artifact_list(pairs, "$.observed_sources")
+    assert code in {d.code for d in error.value.defects}
+
+
 def test_two_configurations_share_model_but_differ_in_digest() -> None:
     c1 = build_baseline_configuration()
     c2 = build_alternate_configuration()

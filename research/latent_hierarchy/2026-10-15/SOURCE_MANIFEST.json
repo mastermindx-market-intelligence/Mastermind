@@ -1,0 +1,57 @@
+[
+  {
+    "name": "10_Industry_Portfolios_daily_CSV.zip",
+    "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/10_Industry_Portfolios_daily_CSV.zip",
+    "sha256": "12e33cce09517c9a2bb38cf75d43b5a15e65238848e864145d06d456e170161d",
+    "bytes": 934275,
+    "contents": [
+      "10_Industry_Portfolios_Daily.csv"
+    ],
+    "vintage": "202608 if source header says; verify headers",
+    "private": true
+  },
+  {
+    "name": "49_Industry_Portfolios_daily_CSV.zip",
+    "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/49_Industry_Portfolios_daily_CSV.zip",
+    "sha256": "8f394fe34bea54d41b9aafed410425ee8f8e252ede3c71a7c1cd20bab83040de",
+    "bytes": 4173817,
+    "contents": [
+      "49_Industry_Portfolios_Daily.csv"
+    ],
+    "vintage": "202608 if source header says; verify headers",
+    "private": true
+  },
+  {
+    "name": "F-F_Research_Data_Factors_daily_CSV.zip",
+    "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/F-F_Research_Data_Factors_daily_CSV.zip",
+    "sha256": "2f29e22546069914890a712680a6f81f3680ebc3543b52864484d209ca13a7db",
+    "bytes": 178184,
+    "contents": [
+      "F-F_Research_Data_Factors_daily.csv"
+    ],
+    "vintage": "202608 if source header says; verify headers",
+    "private": true
+  },
+  {
+    "name": "Siccodes10.zip",
+    "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Siccodes10.zip",
+    "sha256": "d7022df07d9e9d1f8ceddf5499cdd6aff9dff28e1b3dedf8b4b6d91ef8780429",
+    "bytes": 1080,
+    "contents": [
+      "Siccodes10.txt"
+    ],
+    "vintage": "202608 if source header says; verify headers",
+    "private": true
+  },
+  {
+    "name": "Siccodes49.zip",
+    "url": "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp/Siccodes49.zip",
+    "sha256": "36761b4009107e11cd15cff0eb75f8837ef49f024524b7378634629bf90905d5",
+    "bytes": 9587,
+    "contents": [
+      "Siccodes49.txt"
+    ],
+    "vintage": "202608 if source header says; verify headers",
+    "private": true
+  }
+]

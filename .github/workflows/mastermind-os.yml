@@ -1,0 +1,188 @@
+name: Mastermind OS
+
+on:
+  pull_request:
+    paths:
+      - app/mastermind_os/**
+      - integrations/worker_browser_runtime/app-control/**
+      - integrations/workbench_browser_mcp/**
+      - integrations/workbench_action_mcp/service.py
+      - control_plane/browser_resource_contract.py
+      - tests/test_os_app_control_profile.py
+      - tests/test_workbench_browser_port.py
+      - .github/workflows/mastermind-os.yml
+      - tests/test_native_macos_ci.py
+  # No merge_group trigger: this workflow is not a required check, so the merge
+  # queue never waits for it, and every built, rebuilt or discarded queue group
+  # would spend runners on it. The path-filtered push run below proves each
+  # landed change instead. Policy: tests/test_ci_merge_group_capacity.py.
+  push:
+    branches: [master]
+    paths:
+      - app/mastermind_os/**
+      - integrations/worker_browser_runtime/app-control/**
+      - integrations/workbench_browser_mcp/**
+      - integrations/workbench_action_mcp/service.py
+      - control_plane/browser_resource_contract.py
+      - tests/test_os_app_control_profile.py
+      - tests/test_workbench_browser_port.py
+      - .github/workflows/mastermind-os.yml
+      - tests/test_native_macos_ci.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mastermind-os-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app/mastermind_os
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.23.3"
+          cache: npm
+          cache-dependency-path: app/mastermind_os/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # The production release archives only app/mastermind_os. Build that exact
+      # source closure, rather than succeeding because checkout-root fixtures
+      # happen to exist on the CI runner. Reuse the current frontend job.
+      - name: Build exact app-only release archive
+        working-directory: .
+        run: |
+          release_root="$(mktemp -d "$RUNNER_TEMP/mmos-release.XXXXXX")"
+          git archive "$GITHUB_SHA" app/mastermind_os | tar -x -C "$release_root"
+          (
+            cd "$release_root/app/mastermind_os"
+            npm ci --ignore-scripts
+            npm run build
+          )
+          test -s "$release_root/app/mastermind_os/dist/index.html"
+          # Use the original release owner's closed profile on the REAL compiled files.
+          # A green checkout build must not mask unpublishable static assets.
+          PYTHONPATH="$GITHUB_WORKSPACE" python3 -c 'from pathlib import Path; import sys; from ops.executive_os.executive_mcp_entry import build_os_asset_manifest; manifest = build_os_asset_manifest(Path(sys.argv[1])); print("OS_RELEASE_ASSET_LAYOUT_OK", len(manifest["files"]))' "$release_root"
+          # Never mingle generated test/checkout assets with the sealed archive output.
+          rm -rf "$GITHUB_WORKSPACE/app/mastermind_os/dist"
+          cp -R "$release_root/app/mastermind_os/dist" "$GITHUB_WORKSPACE/app/mastermind_os/dist"
+      - name: Build isolated browser source fixture
+        run: npx vite build --config vite.browser-proof.config.ts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Qualify app control through an MCP client and rendered App
+        working-directory: .
+        run: |
+          npm ci --prefix integrations/worker_browser_runtime --ignore-scripts --no-audit --no-fund
+          npm ci --prefix integrations/worker_browser_runtime/app-control --ignore-scripts --no-audit --no-fund
+          node --test integrations/worker_browser_runtime/app-control/adapter.test.cjs
+          app_control_chrome="$(command -v google-chrome || command -v chromium || true)"
+          if [ -z "$app_control_chrome" ]; then
+            npm exec --prefix integrations/worker_browser_runtime -- playwright install --with-deps chromium
+            app_control_chrome="$(node -e 'process.stdout.write(require("./integrations/worker_browser_runtime/node_modules/playwright").chromium.executablePath())')"
+          fi
+          export MM_APP_CONTROL_CHROMIUM="$app_control_chrome"
+          MM_APP_CONTROL_PROOF_OUTPUT="$RUNNER_TEMP/mastermind-app-control-proof" node integrations/worker_browser_runtime/app-control/browser-proof.cjs
+          python -m venv "$RUNNER_TEMP/mmos-app-control-python"
+          "$RUNNER_TEMP/mmos-app-control-python/bin/python" -m pip install --disable-pip-version-check -r requirements/executive-mcp-macos-arm64-py312.in 'pytest==9.1.1'
+          "$RUNNER_TEMP/mmos-app-control-python/bin/python" -m pytest --noconftest -o addopts= -q \
+            tests/test_os_app_control_profile.py tests/test_workbench_browser_port.py \
+            --junitxml="$RUNNER_TEMP/mastermind-app-control-proof/workbench-stdio.xml"
+      - name: Record exact compiled source identity
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; const receipt = JSON.stringify({schema: "mastermind.os.compiled_test_receipt.v1", source_revision: process.env.GITHUB_SHA, run_id: process.env.GITHUB_RUN_ID, run_attempt: process.env.GITHUB_RUN_ATTEMPT, live_acceptance: false}) + "\n"; for (const dir of ["dist", "dist-browser-proof"]) fs.writeFileSync(`${dir}/build-receipt.json`, receipt);'
+      - name: Retain app control source proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: mastermind-os-app-control-${{ github.sha }}
+          path: ${{ runner.temp }}/mastermind-app-control-proof
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain compiled web candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: mastermind-os-web-${{ github.sha }}
+          path: app/mastermind_os/dist
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain isolated browser source fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: mastermind-os-browser-proof-${{ github.sha }}
+          path: app/mastermind_os/dist-browser-proof
+          if-no-files-found: error
+          retention-days: 7
+
+  # Compilation and unsigned packageability only; this is not beta acceptance.
+  native-macos:
+    runs-on: macos-15
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: app/mastermind_os
+    env:
+      RUSTUP_TOOLCHAIN: "1.99.0"
+      # The default checkout is this exact integration/push commit, not PR head.
+      MM_SOURCE_REVISION: ${{ github.sha }}
+      MM_BUILD_IDENTITY: ci-native-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.23.3"
+          cache: npm
+          cache-dependency-path: app/mastermind_os/package-lock.json
+      - name: Place build products in runner-owned temporary storage
+        run: echo "CARGO_TARGET_DIR=$RUNNER_TEMP/mastermind-os-target" >> "$GITHUB_ENV"
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - run: npm ci
+      - name: Build packaged native assets
+        run: npm run build -- --mode native
+      - name: Check native Rust targets
+        run: cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml
+      - name: Test native Rust targets
+        run: cargo test --locked --all-targets --manifest-path src-tauri/Cargo.toml
+      # Real macOS compilation of the opt-in source path; no registered client,
+      # Keychain identity or Auth0 tenant is provided to the CI runner.
+      - name: Check opt-in native rotating refresh path
+        run: MM_NATIVE_REFRESH_ENABLED=1 cargo check --locked --all-targets --manifest-path src-tauri/Cargo.toml
+      - name: Test opt-in native rotating refresh path
+        run: MM_NATIVE_REFRESH_ENABLED=1 cargo test --locked --all-targets --manifest-path src-tauri/Cargo.toml
+      # Native persistence rollout 2026-11-09: the packaged unsigned app
+      # compiles the rotating Keychain refresh path in. It stays inert without
+      # a build-time MM_NATIVE_CLIENT_ID; a client-configured install then
+      # requests offline_access and persists renewals without re-login.
+      - name: Construct unsigned macOS app (native rotating refresh path enabled)
+        run: MM_NATIVE_REFRESH_ENABLED=1 ./node_modules/.bin/tauri build --ci --no-sign --bundles app -- --locked
+      # The --no-sign bundle ships an ad-hoc executable signature without a
+      # sealed CodeResources manifest, so `codesign --verify --deep --strict`
+      # fails on it (verified on the M2, 2026-11-09). Seal the exact bundle
+      # ad hoc under the declared bundle identifier and strictly verify before
+      # the artifact can be staged, installed or archived anywhere.
+      - name: Ad-hoc seal the unsigned app and strictly verify
+        run: |
+          bundle="$CARGO_TARGET_DIR/release/bundle/macos/Mastermind OS.app"
+          /usr/bin/codesign --force --deep --sign - --identifier com.mastermind.os "$bundle"
+          /usr/bin/codesign --verify --deep --strict --verbose=2 "$bundle"
+      - name: Verify package and locked inputs
+        run: |
+          bundle="$CARGO_TARGET_DIR/release/bundle/macos/Mastermind OS.app"
+          test -s "$bundle/Contents/Info.plist"
+          test -x "$bundle/Contents/MacOS/mastermind-os"
+          git diff --exit-code -- package-lock.json src-tauri/Cargo.lock
+          {
+            echo "Unsigned native CI package constructed; no release or installation acceptance."
+            echo "Source revision: $MM_SOURCE_REVISION"
+            echo "Build identity: $MM_BUILD_IDENTITY"
+            shasum -a 256 "$bundle/Contents/MacOS/mastermind-os"
+          } >> "$GITHUB_STEP_SUMMARY"

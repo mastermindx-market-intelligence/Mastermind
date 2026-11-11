@@ -1,0 +1,72 @@
+[
+  {
+    "key": "directory",
+    "path": "docs/design/evidence/paper-linked-guides-20261108/directory.jpg",
+    "bytes": 313291,
+    "gitBlobSha": "523049d40ed221daf980793434d17ef4394b7b14",
+    "sha256": "e382d958147bfe4212bc377746d72fc6125e3d5c5423ad8e5a0de3dcf882395c"
+  },
+  {
+    "key": "aerlor-map",
+    "path": "docs/design/evidence/paper-linked-guides-20261108/aerlor-map.jpg",
+    "bytes": 317370,
+    "gitBlobSha": "b55b526fee30df8ebac48a20699ce6eaf184ec52",
+    "sha256": "58fca5dca0410e969b0317c9eb626a46ff676cc59c124b6e79208eeae925843f"
+  },
+  {
+    "key": "aerlor-planner",
+    "path": "docs/design/evidence/paper-linked-guides-20261108/aerlor-planner.jpg",
+    "bytes": 197833,
+    "gitBlobSha": "41b092e73e01bd57bbfb8d7e69e0d1917dd48fa5",
+    "sha256": "cb2bb6457e9220760a5d4012229510137bdb77bdb79c21d1891695d26add4490"
+  },
+  {
+    "key": "os-guide",
+    "path": "docs/design/evidence/paper-linked-guides-20261108/os-guide.jpg",
+    "bytes": 253337,
+    "gitBlobSha": "774a6d2e4721fad2333bcc2f6466262d6230f7e5",
+    "sha256": "8e0cdd9a30d9d51e4898080323b8249d8d0d577a879113a754e8f1dd0ba1999c"
+  },
+  {
+    "key": "breadth",
+    "path": "docs/design/evidence/paper-linked-guides-20261108/breadth.jpg",
+    "bytes": 16177,
+    "gitBlobSha": "1b5b319ae5d6f73ae8e5793905143f0fb75b6ffb",
+    "sha256": "d24de84c77b616d22d3b12a8b129e2cb1e437fb6193918676407b1f3a8481c21"
+  },
+  {
+    "key": "d06-desktop",
+    "path": "docs/design/evidence/paper-linked-guides-20261108/d06-desktop.jpg",
+    "bytes": 85867,
+    "gitBlobSha": "0b3789631afa7c8ec306c059e6129f5bb32894f4",
+    "sha256": "be4adaea02ebad7adb38702b4c7277bc5189a224259781c913fd8beef68d76c9"
+  },
+  {
+    "key": "terminal-build",
+    "path": "docs/design/evidence/paper-linked-guides-20261108/terminal-build.jpg",
+    "bytes": 220589,
+    "gitBlobSha": "6d47e5d220b7ad9b68a0b8ebe946329791818584",
+    "sha256": "fdf0f223c8614c01ba331008663d9b7d7946f43b1bd4617aae82aa864b9b27a2"
+  },
+  {
+    "key": "terminal-recovery",
+    "path": "docs/design/evidence/paper-linked-guides-20261108/terminal-recovery.jpg",
+    "bytes": 85343,
+    "gitBlobSha": "fe582338a48834b408b78298ab76d28e291ceb17",
+    "sha256": "863d9fc9fe6af2f8d41b294346d376df8bf5c553d95e17c4a43ab5df07ad3615"
+  },
+  {
+    "key": "biocatalyst",
+    "path": "docs/design/evidence/paper-linked-guides-20261108/biocatalyst.jpg",
+    "bytes": 35572,
+    "gitBlobSha": "c6f862485ede492cc0c9c5c58674da4960122212",
+    "sha256": "68951b555e248bc8031c350d19b4b49d9f7581c338df6b136493318639a31d1d"
+  },
+  {
+    "key": "options-mobile",
+    "path": "docs/design/evidence/paper-linked-guides-20261108/options-mobile.jpg",
+    "bytes": 55446,
+    "gitBlobSha": "72dd4bb51e2c54b89f95ddc610d2c71a19d462e0",
+    "sha256": "9f1d070b502d13e95cea4cb6101e9805f89b567e51b7dedfde2c0e1082482b4f"
+  }
+]

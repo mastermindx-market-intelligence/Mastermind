@@ -12,6 +12,26 @@ from typing import Any
 COMPANY_WORKSPACE_BINDING_CLASS = "company-workspace-admin-attested"
 PERSONAL_PRO_WORKER_BINDING_CLASS = "personal-pro-dedicated-worker-attested"
 
+# One reviewed recovery preimage. This digest grants neither auth continuity
+# nor a retry; it closes the explicit current-credential qualification route.
+COMPANY_DEVICE_DRIFT_PREDECESSOR_SHA256 = (
+    "654abd66f6baef1b610a6c03fafe85f76fd81ed646266d3ff90db3c6e85e2a7d"
+)
+
+# Separate native incident: controller41117 stopped with exit65 at
+# 2026-10-20T08:04:27.668781Z before reservation or inference. The retained
+# evidence does not establish the writer or continuity of credential contents.
+# These constants close eligibility; they are not approval for a live attempt.
+NATIVE_PROBE_DRIFT_PREDECESSOR_SHA256 = (
+    "2bca56bcf84b1c5332879eaa22f23f521b37cea30c01dfe5936c3923c3f651cf"
+)
+NATIVE_PROBE_DRIFT_EVIDENCE_SHA256 = (
+    "ffa2dec44d1d81569be113ebcd4b199464ba8e50e100b894196c32e82fa50d42"
+)
+# A pre-reservation probe refusal leaves the PASS preimage unchanged. The
+# broker's durable request identity, not the preimage alone, fences that probe.
+NATIVE_PROBE_DRIFT_REQUEST_ID = "mmos-native-probe-drift-2bca-20261022-v1"
+
 EXPECTED_AUTH_MODE = {
     "service-account": "agentIdentity",
     "personal-access-token": "personalAccessToken",
@@ -76,6 +96,10 @@ def evaluate_identity_policy(
 
 __all__ = [
     "COMPANY_PLAN_TYPES",
+    "COMPANY_DEVICE_DRIFT_PREDECESSOR_SHA256",
+    "NATIVE_PROBE_DRIFT_PREDECESSOR_SHA256",
+    "NATIVE_PROBE_DRIFT_EVIDENCE_SHA256",
+    "NATIVE_PROBE_DRIFT_REQUEST_ID",
     "COMPANY_WORKSPACE_BINDING_CLASS",
     "EXPECTED_AUTH_MODE",
     "PERSONAL_PRO_PLAN_TYPES",
