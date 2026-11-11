@@ -607,6 +607,28 @@ def test_b3_false_ongoing_status_active_but_all_waves_done_fails_through_the_che
     assert result.source_refs
 
 
+@pytest.mark.parametrize(
+    ("status", "wave_statuses", "expected"),
+    [
+        ("killed", ("dropped",), "TERMINAL_CANCELLED"),
+        ("killed", ("done", "dropped"), "TERMINAL_CANCELLED"),
+        ("done", ("dropped",), "TERMINAL_CANCELLED"),
+        ("done", ("done", "dropped"), "TERMINAL_SUCCESS"),
+        ("done", ("done",), "TERMINAL_SUCCESS"),
+    ],
+)
+def test_terminal_outcome_preserves_cancellation(status, wave_statuses, expected):
+    def mutate(payload):
+        payload["status"] = status
+        payload["waves"] = [
+            {**wave, "status": wave_statuses[index % len(wave_statuses)]}
+            for index, wave in enumerate(payload["waves"])
+        ]
+
+    model = compile_operation_assurance_model(_edit_target_payload(_facts("corrected"), mutate))
+    assert [outcome.kind for outcome in model.terminal_outcomes] == [expected]
+
+
 def test_b3_status_killed_groups_with_done_terminal_class() -> None:
     def mutate(payload: dict) -> None:
         payload["status"] = "killed"

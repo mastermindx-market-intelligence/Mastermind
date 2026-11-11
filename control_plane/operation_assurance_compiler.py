@@ -597,8 +597,8 @@ def _source_coverage_gap(facts: SourceFacts | None) -> list[dict]:
     """REPAIR R1: a LOAD-BEARING, machine-readable gap whenever any gathered
     family was incompletely read. Before this, the only trace of a collapsed
     read basis was a free-text ``abstraction_contract.notes`` census line that
-    nothing machine-reads, so a report derived from 2 of 546 records was
-    indistinguishable from one derived from all of them.
+    nothing machine-reads, so a partial source family could produce the same
+    coverage claim as a complete one.
     """
     if facts is None:
         return []
@@ -639,8 +639,8 @@ def _build_source_snapshot(relevant_facts: list[SourceFact], facts: SourceFacts 
     ``fact.status``. A record that itself parsed cleanly, but whose family
     was only partially readable, is ``PARTIAL``: the compiled model cannot
     have seen every sibling record that could conflict with, supersede, or
-    contradict this identity. Reporting ``COMPLETE`` there let a real
-    gather of 2/546 readable records publish full-coverage receipts and
+    contradict this identity. Reporting ``COMPLETE`` there let a partial
+    gather publish full-coverage receipts and
     left A1's existing ``INCOMPLETE`` applicability branch
     (``checker.py`` ``_compose_source_applicability``) unreachable.
     """
@@ -731,10 +731,12 @@ def compile_operation_assurance_model(
         gates,
     ) = _compile_waves(waves, seat_token=seat_token, ws_source_ref=ws_source_ref)
 
+    all_dropped = bool(waves) and all(wave["status"] == "dropped" for wave in waves)
+    cancelled = payload.get("status") == "killed" or all_dropped
     terminal_outcomes = [
         {
             "outcome_id": "all_waves_resolved",
-            "kind": "TERMINAL_SUCCESS",
+            "kind": "TERMINAL_CANCELLED" if cancelled else "TERMINAL_SUCCESS",
             "guards": terminal_guard_parts,
             "owned_persistent_obligation_ids": [],
             "owned_persistent_resource_ids": [],
