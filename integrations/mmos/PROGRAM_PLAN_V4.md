@@ -1163,3 +1163,46 @@ I read the score. First result (lane RF): do not install as written; three HIGH 
 of them a defence that read a field the server never sends and passed two attack rounds
 because the tests supplied the field by hand. Rule added to `REVIEW_PANEL.md` practice: a
 defence that reads a server field is tested against a captured real response.
+
+## 29. Amendment, 2026-11-11 12:40 UTC: Chairman rulings on computer use and admin steps; four panel scores
+
+**Chairman rulings, 2026-11-11.**
+- Computer use runs on Peekaboo. Workers drive it; the principal does not. Workers on Terra,
+  Sol and GLM must each be able to drive it, so the first slice (bring a named window to the
+  front, click, paste by chord, click send, look) is proven once per model, DeepSeek Flash
+  included, each as a worker started by T3. The Chairman's own Peekaboo daemons are not
+  stopped or restarted by any lane.
+- Steps that need only the Mac admin password are the principal's to run and no longer wait
+  on the Chairman. The password reaches the principal through the secret prompt as a file and
+  goes to `sudo` on standard input; it is never printed, logged, committed, placed on a
+  command line or handed to a worker. A lane that meets such a step returns
+  `NEEDS PRINCIPAL ADMIN STEP` with the exact command or pane, the check and the undo.
+  Touch ID, passkeys, CAPTCHA and provider sign-ins stay with a person. This covers settings
+  and installs that assigned work on this Mac needs; it does not cover purchases, security
+  changes on outside accounts, turning off System Integrity Protection, or editing the macOS
+  privacy database directly.
+
+**Panel scores and what follows from each.**
+
+| Lane | Score | Decision |
+| --- | --- | --- |
+| TSHc (team server installer) | 23 real; two HIGH: the packed server tree is never checked against its digests, and any answer on the port counts as a healthy server | Repair round 2 running; delta panel; then the real server switch |
+| XPb (cross-project worker) | Four repairs verified; one MED: the raw socket door writes the child's run mode without the parent's cap | Repair round 2 running; small delta check; installed with or after the server switch |
+| RL (teammate limits) | 19 real; six HIGH. The claim "a teammate writes only inside its home" is false as built | Repair round 1 running, with the design change below |
+| RF (ask and return) | Do not install as written (section 28) | Repair round 2 running; second panel |
+
+**Design change for teammate limits.** A list of denied names taken from the disk at install
+time cannot cover a name that does not exist yet, a folder made later, a teammate added later
+or another spelling of the same path. The primary fence becomes a check that runs before every
+file and web tool call: it resolves the real path, allows writes only inside the teammate's
+home (less its own configuration, charter, limits and preimage) and reads only inside the home
+and the named read roots, and refuses everything else, including a tool it does not know.
+Searches are checked on their starting folder; web fetches to this Mac and to private
+addresses are refused. The generated deny rules remain as a second layer. The lane proved in
+its first round that such a check runs inside teammate turns. If it cannot carry one of these
+duties the lane returns early with the evidence.
+
+**Harness answers sent.** Item 6: `mini1` is usable when the call names the host; `ubuntu4`
+and the `m2` MastermindX profile need the extension loaded from the right folder, which the
+computer-use worker does once its first slice passes review. Item 12: one interactive sign-in
+by the Chairman.
