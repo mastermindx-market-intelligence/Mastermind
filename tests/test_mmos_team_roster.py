@@ -251,12 +251,18 @@ class TestToolLimitsNewKeys:
     def today_rules(spec, mate):
         """The default generation, reconstructed from the module's own
         tuples so the absent-key test fails if the output changes in any
-        way."""
-        root = team_roster.expand(spec["server"]["root"])
-        home = team_roster.teammate_home(spec, mate)
-        deny_roots = [team_roster.expand(spec["project"]["workspace_root"])]
-        deny_roots += [os.path.abspath(r)
+        way. The write fence enumeration is delegated to
+        rooted_read_denies (its chain/sibling logic has its own direct
+        tests); this reconstruction pins WHICH roots fence writes and how
+        every other deny is composed."""
+        root = os.path.realpath(team_roster.expand(spec["server"]["root"]))
+        home = os.path.realpath(team_roster.teammate_home(spec, mate))
+        deny_roots = [os.path.realpath(
+            team_roster.expand(spec["project"]["workspace_root"]))]
+        deny_roots += [os.path.realpath(r)
                        for r in spec.get("deny_write_roots", [])]
+        deny_roots += [a for r in deny_roots
+                       for a in team_roster.firmlink_aliases(r)]
         deny = ["Bash", "Agent", "NotebookEdit"]
         for r in deny_roots:
             deny += [f"Write(/{r})", f"Write(/{r}/**)",
@@ -273,8 +279,22 @@ class TestToolLimitsNewKeys:
             infra = os.path.join(root, name)
             for tool in ("Write", "Edit"):
                 deny += [f"{tool}(/{infra})", f"{tool}(/{infra}/**)"]
+        t3_dir = os.path.dirname(os.path.realpath(
+            team_roster.expand(spec["server"]["t3_bin"])))
+        for tool in ("Write", "Edit"):
+            deny += [f"{tool}(/{t3_dir})", f"{tool}(/{t3_dir}/**)"]
         for path in team_roster.deny_read_paths(spec, mate):
             deny += team_roster._read_deny(path)
+        # always-on write fence (attack round): own home only when no
+        # rooted key is set; the read roots join otherwise
+        fence_roots = [home]
+        deny += team_roster.rooted_read_denies(spec, mate, ("Write", "Edit"),
+                                               roots=fence_roots)
+        # same first-occurrence dedupe as tool_limits (components can now
+        # overlap: the explicit t3_bin-dir deny collides with the
+        # enumeration's deny of the same directory as a chain sibling)
+        seen = set()
+        deny = [d for d in deny if not (d in seen or seen.add(d))]
         allow = ["Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite",
                  f"Write(/{home}/**)", f"Edit(/{home}/**)"]
         return {"permissions": {"allow": allow, "deny": deny}}
@@ -309,16 +329,34 @@ class TestToolLimitsNewKeys:
                 assert f"{tool}(/{locked})" in deny, name
                 assert f"{tool}(/{locked}/**)" in deny, name
 
-    def test_absent_keys_give_exactly_today_rules(self, tmp_path):
+    @staticmethod
+    def freeze_listings(monkeypatch):
+        """Snapshot each directory listing once: the equality tests below
+        compare two enumerations of the LIVE filesystem, and /private/tmp
+        (on pytest's tmp_path chain) churns underneath them — a file
+        appearing between the two calls would break equality spuriously."""
+        real = os.listdir
+        cache = {}
+        def frozen(path):
+            key = os.path.realpath(path)
+            if key not in cache:
+                cache[key] = list(real(path))
+            return cache[key]
+        monkeypatch.setattr(team_roster.os, "listdir", frozen)
+
+    def test_absent_keys_give_exactly_today_rules(self, tmp_path,
+                                                  monkeypatch):
+        self.freeze_listings(monkeypatch)
         spec = load(tmp_path, make_spec(tmp_path))
         mate = spec["teammates"][0]
         os.makedirs(team_roster.teammate_home(spec, spec["teammates"][1]))
         assert team_roster.tool_limits(spec, mate)["permissions"] == \
             self.today_rules(spec, mate)["permissions"]
 
-    def test_absent_keys_despite_empty_values(self, tmp_path):
+    def test_absent_keys_despite_empty_values(self, tmp_path, monkeypatch):
         """Empty lists are not the new regime either: only present-and-set
         keys turn the rooted rules on, so [] must equal absent."""
+        self.freeze_listings(monkeypatch)
         raw = make_spec(tmp_path)
         raw["allow_read_roots"] = []
         raw["home_write_allow"] = []
@@ -482,6 +520,8 @@ class TestAtomicWrites:
                             "same_dir": os.path.dirname(
                                 os.path.abspath(src)) ==
                             os.path.dirname(os.path.abspath(target)),
+                            "src_dir": os.path.dirname(
+                                os.path.abspath(src)),
                             "mode": stat.S_IMODE(st.st_mode),
                             "text": fh.read()})
             return real_replace(src, dst)
@@ -515,7 +555,13 @@ class TestAtomicWrites:
         assert wrote == ["CHARTER.md"]
         charter = targets[0]
         assert seen[charter], "CHARTER.md was not written via os.replace"
-        assert seen[charter][0]["same_dir"]
+        # attack round, finding 5: home assets stage under <root>/run
+        # (Write-denied for teammates), never next to the destination
+        # where a temp name matches no deny rule
+        root = os.path.realpath(team_roster.expand(spec["server"]["root"]))
+        staging = os.path.join(root, "run")
+        assert not seen[charter][0]["same_dir"]
+        assert seen[charter][0]["src_dir"] == staging
         assert seen[charter][0]["mode"] == 0o600
         # tool-limits.json was identical, so apply correctly wrote nothing;
         # a first creation (file missing) is atomic too
@@ -1005,3 +1051,196 @@ class TestFileAssets:
         wrote = team_roster.write_file_assets(spec, mate)
         assert "CLAUDE.md" not in wrote
         assert open(memory).read() == remembered
+
+
+class TestAttackRoundFixes:
+    """Fixes from the attack round (deepseek-v4.1-flash, effort max,
+    frozen commit caf98855e; evidence 11-*). Each test names the finding
+    it pins."""
+
+    def _spec_with_layout(self, tmp_path):
+        raw = make_spec(tmp_path)
+        root = raw["server"]["root"]
+        os.makedirs(os.path.join(root, "home", "userdata"), exist_ok=True)
+        open(os.path.join(root, "fabric.env"), "w").write("x")
+        os.makedirs(os.path.join(root, "teammates", "b"), exist_ok=True)
+        open(os.path.join(str(tmp_path), "zshenv"), "w").write("x")
+        return load(tmp_path, raw), raw
+
+    def test_write_fence_covers_server_and_user_surfaces(self, tmp_path):
+        """Findings 1/2/4: with NO rooted keys, the always-on Write/Edit
+        fence denies the server's own home (its settings.json is reloaded
+        live by the running server), fabric.env, other teammates' homes
+        (their limits bind at their next start), and user-home siblings —
+        while the teammate's own home stays writable."""
+        spec, raw = self._spec_with_layout(tmp_path)
+        mate = spec["teammates"][0]
+        root = os.path.realpath(raw["server"]["root"])
+        home = os.path.realpath(team_roster.teammate_home(spec, mate))
+        os.makedirs(home, exist_ok=True)
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        denied_paths = [os.path.join(root, "home"),
+                        os.path.join(root, "fabric.env"),
+                        os.path.join(root, "teammates", "b"),
+                        os.path.join(str(tmp_path), "zshenv")]
+        # a directory deny matches its whole subtree (live-proved D2), so
+        # home/userdata needs no rule of its own — assert the cover exists
+        for path in denied_paths:
+            for tool in ("Write", "Edit"):
+                assert f"{tool}(/{path})" in deny, (tool, path)
+                assert f"{tool}(/{path}/**)" in deny, (tool, path)
+        # the teammate's own home and its chain stay writable
+        assert f"Write(/{home})" not in deny
+        assert f"Write(/{home}/**)" not in deny
+
+    def test_t3_bin_dir_not_writable(self, tmp_path):
+        """Finding 3: the t3 CLI install dir gets an explicit always-on
+        deny even when it sits nowhere near the home chain (apply/status
+        execute the binary with the team home — a replacement is code
+        execution with principal privileges)."""
+        raw = make_spec(tmp_path)
+        raw["server"]["t3_bin"] = str(tmp_path / "tools" / "t3")
+        spec = load(tmp_path, raw)
+        mate = spec["teammates"][0]
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        tools_dir = os.path.realpath(str(tmp_path / "tools"))
+        for tool in ("Write", "Edit"):
+            assert f"{tool}(/{tools_dir})" in deny
+            assert f"{tool}(/{tools_dir}/**)" in deny
+
+    def test_atomic_write_stages_outside_writable_dirs(self, tmp_path,
+                                                       monkeypatch):
+        """Finding 5: a temp staged next to a teammate-writable destination
+        sits at a name no deny rule covers; the staging dir (server run/)
+        must hold it instead."""
+        staging = tmp_path / "run"
+        staging.mkdir()
+        dest_dir = tmp_path / "home"
+        dest_dir.mkdir()
+        seen = {}
+        real_replace = os.replace
+        def replace(src, dst):
+            seen["src"] = src
+            return real_replace(src, dst)
+        monkeypatch.setattr(team_roster.os, "replace", replace)
+        team_roster.atomic_write(str(dest_dir / "f.txt"), "body", 0o600,
+                                 staging_dir=str(staging))
+        assert seen["src"].startswith(str(staging) + os.sep)
+        assert not seen["src"].startswith(str(dest_dir) + os.sep)
+        assert open(dest_dir / "f.txt").read() == "body"
+
+    def test_write_file_assets_stages_in_run(self, tmp_path, monkeypatch):
+        """Finding 5, apply path: write_file_assets passes the server run/
+        dir as staging for every home write."""
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        calls = []
+        real = team_roster.write_if_changed
+        monkeypatch.setattr(
+            team_roster, "write_if_changed",
+            lambda path, text, mode, staging_dir=None:
+                calls.append((path, staging_dir)) or
+                real(path, text, mode, staging_dir=staging_dir))
+        team_roster.write_file_assets(spec, mate)
+        assert calls and all(c[1] for c in calls), calls
+        root = os.path.realpath(team_roster.expand(spec["server"]["root"]))
+        assert all(c[1] == os.path.join(root, "run") for c in calls), calls
+
+    def test_existing_file_read_denies_have_tree_member(self, tmp_path):
+        """Finding 6: _read_deny never relies on an exact-path rule alone
+        — the Write/Edit exact form proved inert live (evidence 10 D3),
+        so no emitter may depend on an exact form binding."""
+        f = tmp_path / "secret.txt"
+        f.write_text("x")
+        assert team_roster._read_deny(str(f)) == \
+            [f"Read(/{f})", f"Read(/{f}/**)"]
+
+    def test_firmlink_alias_read_denies(self, tmp_path):
+        """Finding 7: a /Users deny root also emits its firmlink twin
+        (/System/Volumes/Data/...) — realpath does not canonicalize the
+        firmlink, so both spellings need their own rule."""
+        raw = make_spec(tmp_path)
+        raw["deny_read_roots"] = ["/Users/nightguard/.ssh"]
+        spec = load(tmp_path, raw)
+        mate = spec["teammates"][0]
+        paths = team_roster.deny_read_paths(spec, mate)
+        assert "/Users/nightguard/.ssh" in paths
+        assert "/System/Volumes/Data/Users/nightguard/.ssh" in paths
+
+    def test_write_deny_roots_realpath(self, tmp_path):
+        """Finding 8: a symlinked deny_write_roots spelling compiles to the
+        real path (the matcher resolves links, so a symlink spelling would
+        never match)."""
+        real = tmp_path / "realroot"
+        real.mkdir()
+        link = tmp_path / "linkroot"
+        os.symlink(str(real), str(link))
+        raw = make_spec(tmp_path)
+        raw["deny_write_roots"] = [str(link)]
+        spec = load(tmp_path, raw)
+        mate = spec["teammates"][0]
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        # the real spelling is denied by the deny_write_roots mechanism
+        # itself (the symlink spelling may also appear from the sibling
+        # enumeration — harmless, and it cannot substitute for the real)
+        assert f"Write(/{real})" in deny and f"Write(/{real}/**)" in deny
+
+    def test_sibling_enumeration_fails_closed(self, tmp_path, monkeypatch):
+        """Finding 9: a listdir failure on an EXISTING chain parent dies
+        instead of silently emitting a fence with holes; a parent that
+        does not exist is skipped (fresh installs, foreign paths)."""
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        os.makedirs(team_roster.teammate_home(spec, mate), exist_ok=True)
+        parent = os.path.realpath(
+            os.path.dirname(team_roster.teammate_home(spec, mate)))
+        real_listdir = os.listdir
+        def fake(p):
+            if os.path.realpath(p) == parent:
+                raise PermissionError(13, "simulated denial")
+            return real_listdir(p)
+        monkeypatch.setattr(team_roster.os, "listdir", fake)
+        with pytest.raises(SystemExit):
+            team_roster.rooted_read_denies(spec, mate, ("Write", "Edit"),
+                                           roots=[team_roster.teammate_home(spec, mate)])
+        # nonexistent parent: skipped, no exception
+        rules = team_roster.rooted_read_denies(
+            spec, mate, ("Write", "Edit"), roots=["/no/such/root"])
+        assert isinstance(rules, list)
+
+    def test_home_write_allow_rejects_config_and_traversal(self, tmp_path):
+        """Finding 10: locked/config names, absolute paths, ~ and traversal
+        spellings are refused at spec load — the 'never granted' promise
+        must not depend on an unrelated deny loop still covering it."""
+        for bad in ("settings.json", "tool-limits.json", "/abs/x", "~/x",
+                    "../out", "a/../b", ""):
+            raw = make_spec(tmp_path)
+            raw["home_write_allow"] = [bad]
+            with pytest.raises(SystemExit):
+                load(tmp_path, raw)
+
+    def test_symlinked_asset_refused(self, tmp_path):
+        """Finding 11: write_if_changed refuses a symlinked destination —
+        writing (and chmod) through a planted link sends bytes outside
+        the fence."""
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        home = team_roster.teammate_home(spec, mate)
+        os.makedirs(home, exist_ok=True)
+        victim = tmp_path / "victim.txt"
+        victim.write_text("do not touch\n")
+        os.symlink(str(victim), os.path.join(home, "CHARTER.md"))
+        with pytest.raises(SystemExit):
+            team_roster.write_file_assets(spec, mate)
+        assert victim.read_text() == "do not touch\n"
+
+    def test_server_bin_runtime_unreadable(self, tmp_path):
+        """Finding 12: the server root's bin/ and runtime/ (runner script,
+        pinned server bundle) are read-denied like the other private
+        entries."""
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        root = os.path.realpath(team_roster.expand(spec["server"]["root"]))
+        paths = team_roster.deny_read_paths(spec, mate)
+        for name in ("bin", "runtime"):
+            assert os.path.join(root, name) in paths, name

@@ -101,6 +101,22 @@ def load_spec(path):
             "home silently disable Read/Glob/Grep deny rules (live-proved "
             "2026-11-11); tool-limits.json stays in the home, protected by "
             "the HOME_LOCKED write denies")
+    for name in spec.get("home_write_allow") or []:
+        # attack round, finding 10: a locked/config name here would emit an
+        # allow for it (only the unconditional deny loop keeps it bound
+        # today — do not rely on that coincidence), and an absolute or
+        # traversal name joins into an allow string outside the home
+        if name in HOME_CONFIG or name in HOME_LOCKED:
+            die(f"home_write_allow entry {name!r} is a config or locked "
+                "name and can never be granted")
+        if not isinstance(name, str):
+            die(f"home_write_allow entry {name!r} must be a string")
+        base = name[:-1] if name.endswith("/") else name
+        if (not base or name.startswith("/")
+                or name.startswith("~") or base != os.path.normpath(base)
+                or ".." in base.split(os.sep)):
+            die(f"home_write_allow entry {name!r} must be a relative "
+                "home-directory name like 'CLAUDE.md' or 'notes/'")
     server, project = spec["server"], spec["project"]
     for key in ("root", "home", "t3_bin", "port"):
         if key not in server:
@@ -288,19 +304,27 @@ def teammate_home(spec, mate):
                         mate["slug"])
 
 
-def atomic_write(path, text, mode):
+def atomic_write(path, text, mode, staging_dir=None):
     """Replace ``path`` with ``text`` atomically (review R2a, finding 11).
 
     The running server watches settings.json and reloads it about 100 ms
     after a change, and a teammate process reads tool-limits.json and
     CHARTER.md when it starts; a truncate-then-write in place can be read
-    half-written. The replacement is a same-directory temporary (so
-    os.replace never crosses a filesystem), created 0600 and fsynced before
-    it is moved into place. A failure leaves the destination untouched and
-    removes the temporary.
+    half-written. The replacement is a temporary created 0600 and fsynced
+    before it is moved into place. A failure leaves the destination
+    untouched and removes the temporary.
+
+    ``staging_dir``: stage the temporary here instead of next to the
+    destination (attack round, finding 5). Next to the destination the
+    temp's name matches no deny rule, so a teammate whose Write tool can
+    touch the destination directory could poll for the temp name and
+    overwrite it between os.open and os.replace, publishing its own bytes
+    as the file. Staging under ``<server root>/run`` (Write-denied for
+    every teammate) closes the race; os.replace across directories on the
+    same volume is still atomic.
     """
     path = os.path.abspath(path)
-    directory = os.path.dirname(path)
+    directory = staging_dir if staging_dir else os.path.dirname(path)
     tmp = os.path.join(directory, f".{os.path.basename(path)}.tmp."
                        f"{os.getpid()}")
     fd = None
@@ -330,20 +354,27 @@ def atomic_write(path, text, mode):
         raise
 
 
-def write_if_changed(path, text, mode):
+def write_if_changed(path, text, mode, staging_dir=None):
+    if os.path.islink(path):
+        die(f"refusing to write through symlink {path} — a planted link "
+            "would send the bytes (and the chmod) outside the fence")
     changed = True
     if os.path.exists(path) and open(path).read() == text:
         changed = False
     else:
-        atomic_write(path, text, mode)
-    os.chmod(path, mode)
+        atomic_write(path, text, mode, staging_dir=staging_dir)
+    if not os.path.islink(path):
+        os.chmod(path, mode)
     return changed
 
 
 # Entries of the server root a teammate never needs to read. `run` holds the
 # pairing file, the server log and the paired browser profile; `home` is the
-# T3 server's own state (sessions, secrets, settings).
-SERVER_PRIVATE = ("run", "home", "config", "claude-home", "fabric.env")
+# T3 server's own state (sessions, secrets, settings); `bin` and `runtime`
+# are the runner script and the pinned server bundle (attack round,
+# finding 12).
+SERVER_PRIVATE = ("run", "home", "config", "bin", "runtime", "claude-home",
+                  "fabric.env")
 
 # Files in a teammate's own home that are config or credentials, not memory.
 # The teammate may not change them; the preimage it may not even read.
@@ -388,12 +419,25 @@ def limits_paths(spec, mate):
 
 
 def _read_deny(path):
-    """Deny rules for one path: a directory denies its whole tree."""
-    if os.path.isdir(path):
-        return [f"Read(/{path}/**)"]
-    if os.path.exists(path):
-        return [f"Read(/{path})"]
+    """Deny rules for one path: always the file+tree pair. A directory deny
+    matches its whole subtree; an exact-path rule alone is not trusted to
+    bind (the Write/Edit exact form proved inert live — evidence 10 D3 —
+    so no emitter relies on an exact form alone for any tool)."""
     return [f"Read(/{path})", f"Read(/{path}/**)"]
+
+
+def firmlink_aliases(path):
+    """macOS firmlink spelling variants of a /Users path (attack round,
+    finding 7). /Users is a firmlink onto the data volume, so
+    /System/Volumes/Data/Users/<user>/... names the SAME file while
+    matching no /Users-prefixed deny string — and os.path.realpath does
+    not canonicalize it (checked live 2026-11-11: realpath keeps the
+    Data spelling). The sibling enumeration denies /System itself, which
+    covers Data spellings of enumerated paths; these twins cover
+    spec-named roots that live under /Users."""
+    if path == "/Users" or path.startswith("/Users/"):
+        return ["/System/Volumes/Data" + path]
+    return []
 
 
 def deny_read_paths(spec, mate):
@@ -404,14 +448,15 @@ def deny_read_paths(spec, mate):
     read a file and quote it back, and the carrier posts its reply. Deny
     rules win over the plain `Read` allow.
     """
-    root = expand(spec["server"]["root"])
+    root = os.path.realpath(expand(spec["server"]["root"]))
     paths = [os.path.join(root, name) for name in SERVER_PRIVATE]
     for other in spec["teammates"]:
         if other["slug"] != mate["slug"]:
-            paths.append(teammate_home(spec, other))
+            paths.append(os.path.realpath(teammate_home(spec, other)))
     home = teammate_home(spec, mate)
     paths += [os.path.join(home, name) for name in HOME_UNREADABLE]
-    paths += [expand(r) for r in spec.get("deny_read_roots", [])]
+    paths += [os.path.realpath(expand(r))
+              for r in spec.get("deny_read_roots", [])]
     if spec.get("deny_read_root_siblings"):
         parent = os.path.dirname(root)
         if os.path.isdir(parent):
@@ -420,9 +465,10 @@ def deny_read_paths(spec, mate):
                     paths.append(os.path.join(parent, name))
     seen, out = set(), []
     for path in paths:
-        if path not in seen:
-            seen.add(path)
-            out.append(path)
+        for candidate in [path] + firmlink_aliases(path):
+            if candidate not in seen:
+                seen.add(candidate)
+                out.append(candidate)
     return out
 
 
@@ -443,7 +489,7 @@ def _read_allow_roots(spec, mate):
     return out
 
 
-def rooted_read_denies(spec, mate, tools=READ_TOOLS):
+def rooted_read_denies(spec, mate, tools=READ_TOOLS, roots=None):
     """Deny rules that make reads (and, with Write/Edit passed as tools,
     writes) allowed ONLY under the rooted roots (Part B Q2/Q3).
 
@@ -456,12 +502,23 @@ def rooted_read_denies(spec, mate, tools=READ_TOOLS):
     directory matches the directory's whole subtree (live-proved: the
     refusal text is "File is in a directory that is denied"), so even a
     file-form deny on a chain directory would deny the allowed root below
-    it — and deny wins. Residual gap: a Glob/Grep whose path is a chain
-    directory runs and enumerates its names, revealing sibling names one
-    level above an allowed root (names only, never content; the siblings
-    themselves stay denied).
+    it — and deny wins. Residual gaps, stated in RL_TEAMMATE_LIMITS.md:
+    a Glob/Grep whose path is a chain directory runs and enumerates its
+    names (names only, never content), and the enumeration is a snapshot —
+    directories created after apply get no deny until the next apply.
+
+    ``roots`` overrides the allowed roots (absolute real paths); the
+    Write/Edit fence calls it with just the teammate's own home.
+
+    Enumeration fails CLOSED for a parent that exists but cannot be
+    listed (attack round, finding 9): a silently skipped level would emit
+    a fence with holes in exactly the place something went wrong. A
+    parent that does not exist (fresh install, or a path that is not on
+    this machine, e.g. /Users in CI) has nothing to enumerate and is
+    skipped.
     """
-    roots = _read_allow_roots(spec, mate)
+    if roots is None:
+        roots = _read_allow_roots(spec, mate)
     chain = set()
     for root in roots:
         node = root
@@ -476,7 +533,10 @@ def rooted_read_denies(spec, mate, tools=READ_TOOLS):
         parent = os.path.dirname(node)
         try:
             names = os.listdir(parent)
-        except OSError:
+        except OSError as exc:
+            if os.path.exists(parent):
+                die(f"cannot enumerate {parent} for the limits fence "
+                    f"({exc}); refusing to emit a fence with holes")
             names = []
         for name in names:
             sib = os.path.join(parent, name)
@@ -537,9 +597,13 @@ def rooted_home_write_rules(spec, mate):
 
 
 def tool_limits(spec, mate):
-    home = teammate_home(spec, mate)
-    deny_roots = [expand(spec["project"]["workspace_root"])]
-    deny_roots += [os.path.abspath(r) for r in spec.get("deny_write_roots", [])]
+    home = os.path.realpath(teammate_home(spec, mate))
+    deny_roots = [os.path.realpath(expand(spec["project"]["workspace_root"]))]
+    deny_roots += [os.path.realpath(r) for r in spec.get("deny_write_roots", [])]
+    # symlink spellings must not dodge a deny: the matcher resolves links,
+    # so every deny string is built from the real path (attack round,
+    # finding 8); /Users paths also get their firmlink twin (finding 7)
+    deny_roots += [a for r in deny_roots for a in firmlink_aliases(r)]
     deny = ["Bash", "Agent", "NotebookEdit"]
     for root in deny_roots:
         # root itself too: if the folder does not exist (yet), a Write could
@@ -559,19 +623,40 @@ def tool_limits(spec, mate):
         config = os.path.join(home, name)
         for tool in ("Write", "Edit"):
             deny += [f"{tool}(/{config})", f"{tool}(/{config}/**)"]
-    root = expand(spec["server"]["root"])
+    root = os.path.realpath(expand(spec["server"]["root"]))
     for name in SERVER_INFRASTRUCTURE:
         infra = os.path.join(root, name)
         for tool in ("Write", "Edit"):
             deny += [f"{tool}(/{infra})", f"{tool}(/{infra}/**)"]
+    # the t3 CLI install dir (attack round, finding 3): apply/status
+    # themselves execute <t3_bin> with the team home, so a replaced
+    # binary is code execution with principal privileges — and the dir
+    # need not sit anywhere near the home chain, so it gets its own
+    # always-on deny instead of relying on the sibling enumeration
+    t3_dir = os.path.dirname(os.path.realpath(expand(spec["server"]["t3_bin"])))
+    for tool in ("Write", "Edit"):
+        deny += [f"{tool}(/{t3_dir})", f"{tool}(/{t3_dir}/**)"]
     for path in deny_read_paths(spec, mate):
         deny += _read_deny(path)
     read_rooted = bool(spec.get("allow_read_roots"))
     write_named = bool(spec.get("home_write_allow"))
     if read_rooted:
         deny += rooted_read_denies(spec, mate, READ_TOOLS)
-    if write_named:
-        deny += rooted_read_denies(spec, mate, ("Write", "Edit"))
+    # ALWAYS-ON write fence (attack round, findings 1-4): a teammate
+    # writes nothing outside its own home — not the server's own home
+    # (its settings.json is reloaded live by the running server; whoever
+    # edits it rewrites launchArgs and can drop --settings), not
+    # fabric.env, not another teammate's home (their limits/charter would
+    # bind at their next start), not the t3_bin install dir (the next
+    # apply executes it), and none of the user's own config surfaces
+    # (~/.zshenv, ~/.ssh, ~/Library/LaunchAgents, ~/.claude, ...). All of
+    # those are non-chain siblings of the teammate home, so one
+    # Write/Edit sibling enumeration covers them; with the rooted keys on,
+    # the fence widens to the read roots (previous behavior).
+    write_fence_roots = (_read_allow_roots(spec, mate)
+                         if (read_rooted or write_named) else [home])
+    deny += rooted_read_denies(spec, mate, ("Write", "Edit"),
+                               roots=write_fence_roots)
     allow = [
         "Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite",
         f"Write(/{home}/**)", f"Edit(/{home}/**)",
@@ -596,6 +681,10 @@ def tool_limits(spec, mate):
             "nor deny is silently allowed, so every restriction here is a "
             "deny. Limits bind at session-process start, not on file "
             "change (apply reports limitsPendingRestart).")
+    note += (" Writes are fenced to the teammate home in every spec "
+             "(Write/Edit sibling enumeration); directories created after "
+             "this apply get no deny until the next apply — re-apply "
+             "after changing the team layout.")
     if read_rooted or write_named:
         note += (" allow_read_roots/home_write_allow compiled to deny "
                  "rules by sibling enumeration (rooted_read_denies).")
@@ -610,13 +699,22 @@ def write_file_assets(spec, mate):
 
     CLAUDE.md is the teammate's live long-term memory: created only when
     missing, never rewritten by apply (a rewrite would erase remembered
-    facts). CHARTER.md and tool-limits.json are config and follow the spec;
-    with spec.assets_dir set they live outside the home (Q4) in a
-    0700 dir of their own.
+    facts). CHARTER.md and tool-limits.json are config and follow the spec,
+    always inside the home (an outside assets_dir is refused — see
+    limits_paths).
+
+    The atomic-write temporaries are staged under <server root>/run
+    (attack round, finding 5): a temp staged next to the destination sits
+    at a name no deny rule covers, where a teammate's Write tool could
+    poll for it and poison the file between write and rename. run/ is
+    Write-denied for every teammate.
     """
     home = teammate_home(spec, mate)
     os.makedirs(home, exist_ok=True)
     os.chmod(home, 0o700)
+    staging = os.path.join(os.path.realpath(expand(spec["server"]["root"])),
+                           "run")
+    os.makedirs(staging, exist_ok=True)
     limits_path, charter_path = limits_paths(spec, mate)
     seed = ("<!-- Long-term memory of {name}. Append durable facts below; "
             "they persist across conversations and server restarts. -->\n"
@@ -624,13 +722,14 @@ def write_file_assets(spec, mate):
     wrote = []
     memory = os.path.join(home, "CLAUDE.md")
     if not os.path.exists(memory):
-        write_if_changed(memory, seed, 0o600)
+        write_if_changed(memory, seed, 0o600, staging_dir=staging)
         wrote.append("CLAUDE.md")
-    if write_if_changed(charter_path, mate["charter"], 0o600):
+    if write_if_changed(charter_path, mate["charter"], 0o600,
+                        staging_dir=staging):
         wrote.append("CHARTER.md")
     if write_if_changed(limits_path,
                         json.dumps(tool_limits(spec, mate), indent=2) + "\n",
-                        0o600):
+                        0o600, staging_dir=staging):
         wrote.append("tool-limits.json")
     return wrote
 
