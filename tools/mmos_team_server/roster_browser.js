@@ -202,6 +202,14 @@ async function modePin(profileDir, threadUrl, titleContains, outJson, shotPng) {
   console.log("PIN_DONE");
 }
 
+// Escape a value for a double-quoted CSS attribute selector in Node (where
+// the browser's CSS.escape global does not exist — calling it here threw
+// "CSS is not defined" on every rename). Only backslash and the quote
+// character need escaping inside a quoted attribute value.
+function attrValue(s) {
+  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
 async function modeRename(profileDir, threadUrl, threadId, currentTitle,
                           newTitle, outJson) {
   // Title-length policy (24-char sidebar fit, allow_long_titles opt-in) is
@@ -213,10 +221,11 @@ async function modeRename(profileDir, threadUrl, threadId, currentTitle,
     const page = context.pages()[0] || (await context.newPage());
     await openThread(page, threadUrl);
     // The visible row may start with the pinned separator, so select the row
-    // that contains the exact current title. Confirm its durable identity
-    // against the persisted environmentId:threadId row key, never by title.
-    const target = page.locator(`[data-sidebar-row="${CSS.escape(
-      `${new URL(threadUrl).pathname.split("/").filter(Boolean)[0]}:${threadId}`)}"]`);
+    // by its durable identity against the persisted environmentId:threadId
+    // row key, never by title.
+    const rowKey = `${new URL(threadUrl).pathname.split("/").filter(Boolean)[0]}:${threadId}`;
+    const selector = `[data-sidebar-row="${attrValue(rowKey)}"]`;
+    const target = page.locator(selector);
     await target.waitFor({ state: "visible", timeout: 20000 });
     if (await target.count() !== 1)
       throw new Error(`expected exactly one durable row for ${threadId}`);
@@ -233,12 +242,12 @@ async function modeRename(profileDir, threadUrl, threadId, currentTitle,
     await input.press("Enter");
     await input.waitFor({ state: "hidden", timeout: 15000 });
     await page.waitForFunction(
-      ({ key, title }) => {
-        const row = document.querySelector(`[data-sidebar-row="${CSS.escape(key)}"]`);
+      ({ sel, title }) => {
+        const row = document.querySelector(sel);
         return row && [...row.querySelectorAll("span, div")]
           .some((n) => n.children.length === 0 && n.textContent.trim() === title);
       },
-      { key: await target.getAttribute("data-sidebar-row"), title: newTitle },
+      { sel: selector, title: newTitle },
       { timeout: 20000 },
     );
     await page.waitForTimeout(1500);
