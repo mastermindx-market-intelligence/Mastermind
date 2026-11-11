@@ -614,11 +614,13 @@ until the dev server answers. Test: `test_config_requires_the_dev_server_pin`.
    nothing without a `coding_job_door` entry in a teammate's config (read at
    `handle_coding_job` and `coding_job_help`). No real teammate gets that entry before the
    bundle review.
-3. One CRITICAL bundle review stays at the release tail, read-only, by a model that wrote none
-   of it. Scope: the engine reattach (`executive_runtime.py`, `executive_supervisor.py`,
-   `t3_native_composition.py`), `paperclip_result_delivery.py`, the door, the socket door for
-   local admission, the shell-URL loader, the cut-over tool, the carrier, and T8's pairing
-   path.
+3. The CRITICAL review is split in two, so the part T4c waits on does not wait for the other
+   lanes. Part one (lane R4b, started 00:35 UTC, read-only, Opus, which wrote none of it):
+   the engine reattach (`executive_runtime.py`, `executive_supervisor.py`,
+   `t3_native_composition.py`), `paperclip_result_delivery.py`, the door and the carrier's
+   coding-job block. Part two, at the release tail once T8, TSH and CQ are in: the socket door
+   for local admission, the shell-URL loader, the cut-over tool, the rest of the carrier and
+   T8's pairing path.
 4. New lane T4c, after that review: the coding job on the installed app. It owes the real
    door composition with a reconcile cadence (attack finding F8, reported and not fixed), a
    Paperclip writer credential for the return transport, and its own local Executive store.
