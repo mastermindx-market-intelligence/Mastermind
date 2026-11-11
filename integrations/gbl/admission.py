@@ -23,8 +23,10 @@ from common.gbl_contract import (
     ALLOWLIST_ROW_KEYS,
     ASK_KINDS,
     MAX_ASKS_PER_HOUR_PER_PRINCIPAL,
+    GBLContractError,
     admit_ask_rate,
     check_thread_allowlist,
+    validate_principal_label,
 )
 
 _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -56,6 +58,15 @@ class PrincipalAdmission:
             raise ValueError("subject_digest must be a sha256 hex digest")
         if not isinstance(self.principal, str) or not self.principal:
             raise ValueError("admission requires a bridge principal label")
+        # Repair (panel A LOW): the label is interpolated unquoted into the
+        # quoted-data wrapper header, so its charset is the contract's —
+        # refused here, where every other row invariant is refused.
+        try:
+            validate_principal_label(self.principal)
+        except GBLContractError:
+            raise ValueError(
+                "admission principal label failed the contract charset "
+                "(control characters and newlines are not labels)") from None
         for name, value in (("targets", self.targets), ("kinds", self.kinds)):
             if not isinstance(value, frozenset) or not value:
                 raise ValueError(f"admission {name} must be a non-empty frozenset")

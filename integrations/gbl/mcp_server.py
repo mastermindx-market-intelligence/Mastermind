@@ -34,6 +34,7 @@ import asyncio
 import dataclasses
 import hashlib
 import json
+import re
 import socket as socket_module
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -51,6 +52,7 @@ from starlette.types import Receive, Scope, Send
 
 from common.company_consultation_host_contract import HostFrameError
 from common.gbl_contract import (
+    ANSWER_ARGUMENT_KEYS,
     ASK_BODY_MAX_CHARS,
     BODY_MAX_CHARS,
     GBLContractError,
@@ -153,12 +155,16 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         description=(
             "Post the bot's answer to one ask addressed to this principal. "
             "Idempotent by (ask_id, idempotency_key); a replay of the same "
-            "key with new text is a CONFLICT."
+            "key with new answer text is a CONFLICT."
         ),
+        # H1: ONE shared schema — the public argument set is the contract's
+        # ANSWER_ARGUMENT_KEYS minus the authenticated principal, and the
+        # dispatch sends exactly the bridge's op arguments ("answer", never
+        # a private "text" spelling).
         input_schema=_object(
-            {"ask_id": _ASK_ID, "text": _string(max_length=MAX_ANSWER_CHARS),
+            {"ask_id": _ASK_ID, "answer": _string(max_length=MAX_ANSWER_CHARS),
              "idempotency_key": _ASK_KEY},
-            ("ask_id", "text", "idempotency_key")),
+            tuple(sorted(ANSWER_ARGUMENT_KEYS - {"principal"}))),
         read_only=False,
     ),
     ToolSpec(
@@ -217,6 +223,16 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
 TOOL_NAMES = frozenset(spec.name for spec in TOOL_SPECS)
 TOOL_ARGUMENT_KEYS = {spec.name: frozenset(spec.input_schema["required"])
                       for spec in TOOL_SPECS}
+# The advertised maxLength/pattern of every argument, ENFORCED at the edge
+# before any bridge or carrier call (repair LOW): what the census promises
+# is what the door checks.
+TOOL_ARGUMENT_RULES: dict[str, dict[str, tuple[int | None, str | None]]] = {
+    spec.name: {
+        key: (prop.get("maxLength"), prop.get("pattern"))
+        for key, prop in spec.input_schema["properties"].items()
+    }
+    for spec in TOOL_SPECS
+}
 
 
 def tool_schema_snapshot() -> list[dict[str, Any]]:
@@ -240,7 +256,9 @@ def tool_schema_digest() -> str:
 
 # Deliberately literal: any reviewed schema/description/annotation change
 # must update this value explicitly and is therefore visible in review.
-TOOL_SCHEMA_DIGEST = "b9e66d2e79804cdac5b165f6be1caa9342b7ed0938a1f792fc7baafb802d1092"
+# Repair H1 re-pin: team.answer's public argument is now "answer" (the
+# shared contract schema), advertised caps enforced at the edge.
+TOOL_SCHEMA_DIGEST = "d29615d2bfff3f12676b144340bdf38269cfae8e4334ed636aff04b5d9c30c4e"
 
 
 def build_tool_models() -> list[mcp_types.Tool]:
@@ -418,9 +436,16 @@ def create_gbl_mcp_app(
         if set(arguments) != set(expected):
             raise GblEdgeError("INVALID_ARGUMENTS",
                                "exact census arguments required")
+        rules = TOOL_ARGUMENT_RULES[name]
         for key, value in arguments.items():
             if not isinstance(value, str) or not value:
                 raise GblEdgeError("INVALID_ARGUMENTS", f"{key} must be text")
+            maximum, pattern = rules.get(key, (None, None))
+            if maximum is not None and len(value) > maximum:
+                raise GblEdgeError("INVALID_ARGUMENTS",
+                                   f"{key} exceeds {maximum} characters")
+            if pattern is not None and re.match(pattern, value) is None:
+                raise GblEdgeError("INVALID_ARGUMENTS", f"{key} is malformed")
         return dict(arguments)
 
     async def _dispatch(name: object, arguments: object
@@ -460,11 +485,17 @@ def create_gbl_mcp_app(
                     bridge_client.call, "question",
                     {"principal": row.principal, "ask_id": args["ask_id"]})
             elif name == "team.answer":
+                # The shared schema: exactly ANSWER_ARGUMENT_KEYS, the
+                # principal supplied by the authenticated scope.
+                arguments = {"principal": row.principal,
+                             "ask_id": args["ask_id"],
+                             "answer": args["answer"],
+                             "idempotency_key": args["idempotency_key"]}
+                if set(arguments) != ANSWER_ARGUMENT_KEYS:
+                    return _error_result("INVALID_ARGUMENTS",
+                                         "answer schema drift")
                 result = await asyncio.to_thread(
-                    bridge_client.call, "answer",
-                    {"principal": row.principal, "ask_id": args["ask_id"],
-                     "text": args["text"],
-                     "idempotency_key": args["idempotency_key"]})
+                    bridge_client.call, "answer", arguments)
             elif name == "team.result":
                 result = await asyncio.to_thread(
                     bridge_client.call, "result",

@@ -25,8 +25,10 @@ stock CLI the same way an operator would.
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
+import threading
 from dataclasses import dataclass
 
 from common.gbl_contract import (
@@ -37,7 +39,8 @@ from common.gbl_contract import (
     wrap_message_body,          # imported for the wrapper law AND identity
 )
 
-SCAN_MESSAGE_DEPTH = 60               # T2: scan window for marker read-back
+SCAN_MESSAGE_DEPTH = 60               # T2: first scan window for read-back
+SCAN_MAX_PAGES = 20                   # window doubling cap (repair MED)
 SCAN_TIMEOUT_SECONDS = 120
 SEND_TIMEOUT_SECONDS = 900            # --wait: bounded, never forever
 
@@ -103,13 +106,26 @@ class MessageSender:
     One ``send`` = scan for the marker, then (only if absent) exactly one
     ``t3 thread send``.  A lost send answer is reconciled by re-scanning for
     the marker — never by a second send.
+
+    Repair round: the marker counts as landed only when a parsed message's
+    FIRST line is the marker (never a substring anywhere in the blob); the
+    scan pages the window until a short page covers the whole thread (cap
+    ``scan_max_pages``, then a typed ``SCAN_WINDOW_EXCEEDED`` with nothing
+    sent); and same-(environment, thread) sends serialize on a lock, so two
+    concurrent same-key calls cannot both pass the scan-then-send gap.
     """
 
     def __init__(self, *, runner=None, allowlist=DEFAULT_ALLOWLIST,
-                 environments=DEFAULT_ENVIRONMENTS):
+                 environments=DEFAULT_ENVIRONMENTS,
+                 scan_max_pages: int = SCAN_MAX_PAGES):
         self._runner = runner if runner is not None else SubprocessRunner()
         self._allowlist = tuple(allowlist)
         self._environments = tuple(environments)
+        if type(scan_max_pages) is not int or scan_max_pages < 1:
+            raise ValueError("scan_max_pages must be a positive integer")
+        self._scan_max_pages = scan_max_pages
+        self._locks: dict[tuple[str, str], threading.Lock] = {}
+        self._locks_guard = threading.Lock()
 
     # ── gates ────────────────────────────────────────────────────────────────
 
@@ -136,24 +152,92 @@ class MessageSender:
 
     # ── carrier ──────────────────────────────────────────────────────────────
 
-    def _scan(self, *, thread_ref: str, row: EnvironmentRow) -> str:
-        result = self._runner.run(
-            ["t3", "thread", "show", thread_ref, "--json", "--messages",
-             str(SCAN_MESSAGE_DEPTH)],
-            stdin="", env={"T3CODE_HOME": row.t3code_home})
+    def _scan(self, *, thread_ref: str, row: EnvironmentRow,
+              depth: int) -> str:
+        try:
+            result = self._runner.run(
+                ["t3", "thread", "show", thread_ref, "--json", "--messages",
+                 str(depth)],
+                stdin="", env={"T3CODE_HOME": row.t3code_home})
+        except (TimeoutError, OSError) as err:
+            raise GblMessageError("SCAN_FAILED",
+                                  f"{type(err).__name__} reading thread") from None
         if result.exit_code != 0:
             raise GblMessageError("SCAN_FAILED",
                                   f"exit {result.exit_code} reading thread")
         return result.stdout or ""
 
-    def _marker_landed(self, scan_stdout: str, marker: str) -> bool:
-        return marker in scan_stdout
+    @staticmethod
+    def _parse_messages(scan_stdout: str) -> list[str]:
+        """The scan output is JSON: either ``{"messages": [...]}`` or a bare
+        list.  Anything else — non-JSON, a foreign envelope shape, a
+        non-list messages field, a non-dict row, a non-string text — is a
+        typed SCAN_FAILED: an unreadable thread may never read as 'the
+        marker is absent' (that is how a duplicate send happens)."""
+        try:
+            payload = json.loads(scan_stdout)
+        except (ValueError, TypeError):
+            raise GblMessageError("SCAN_FAILED", "scan output is not JSON") from None
+        rows = payload.get("messages") if isinstance(payload, dict) else payload
+        if not isinstance(rows, list):
+            raise GblMessageError("SCAN_FAILED",
+                                  "scan output has no messages list")
+        texts: list[str] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                raise GblMessageError("SCAN_FAILED", "non-object message row")
+            text = row.get("text", "")
+            if not isinstance(text, str):
+                raise GblMessageError("SCAN_FAILED", "non-string message text")
+            texts.append(text)
+        return texts
+
+    @classmethod
+    def _marker_landed(cls, scan_stdout: str, marker: str) -> bool:
+        """M5: the marker counts as landed only when a message's FIRST line
+        is exactly the marker — a quoted marker, a marker buried mid-text or
+        a marker inside JSON noise is data, never proof of delivery."""
+        for text in cls._parse_messages(scan_stdout):
+            first_line = text.splitlines()[0] if text.splitlines() else ""
+            if first_line == marker:
+                return True
+        return False
+
+    def _scan_for_marker(self, *, thread_ref: str, row: EnvironmentRow,
+                         marker: str) -> bool:
+        """Paged marker read-back: the window doubles each page until a
+        short page proves the whole thread was in view.  At the page cap
+        the scan is typed ``SCAN_WINDOW_EXCEEDED`` and NOTHING is sent —
+        silence about the thread's tail is never permission to send."""
+        depth = SCAN_MESSAGE_DEPTH
+        for _ in range(self._scan_max_pages):
+            stdout = self._scan(thread_ref=thread_ref, row=row, depth=depth)
+            texts = self._parse_messages(stdout)
+            for text in texts:
+                first_line = text.splitlines()[0] if text.splitlines() else ""
+                if first_line == marker:
+                    return True
+            if len(texts) < depth:
+                return False               # short page: whole thread in view
+            depth *= 2
+        raise GblMessageError(
+            "SCAN_WINDOW_EXCEEDED",
+            f"no short page within {self._scan_max_pages} scan pages")
 
     def _send_command(self, *, thread_ref: str, row: EnvironmentRow,
                       stdin_text: str) -> CommandResult:
         return self._runner.run(
             ["t3", "thread", "send", thread_ref, "-", "--wait", "--json"],
             stdin=stdin_text, env={"T3CODE_HOME": row.t3code_home})
+
+    def _lock_for(self, environment_id: str, thread_ref: str) -> threading.Lock:
+        key = (environment_id, thread_ref)
+        with self._locks_guard:
+            lock = self._locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                self._locks[key] = lock
+            return lock
 
     # ── the one effect ───────────────────────────────────────────────────────
 
@@ -166,9 +250,17 @@ class MessageSender:
         message_id = envelope["message_id"]
         marker = message_marker(message_id)
         row = self._admit(environment_id=environment_id, thread_ref=thread_ref)
+        # One logical effect per (environment, thread): the scan-then-send
+        # gap is inside the lock, so a concurrent same-key delivery waits,
+        # re-scans, and finds this send's marker instead of sending twice.
+        with self._lock_for(environment_id, thread_ref):
+            return self._deliver(marker=marker, message_id=message_id,
+                                 principal=principal, thread_ref=thread_ref,
+                                 row=row, body=body)
 
-        if self._marker_landed(self._scan(thread_ref=thread_ref, row=row),
-                               marker):
+    def _deliver(self, *, marker: str, message_id: str, principal: str,
+                 thread_ref: str, row: EnvironmentRow, body: str) -> dict:
+        if self._scan_for_marker(thread_ref=thread_ref, row=row, marker=marker):
             return {"status": "ALREADY_SENT", "message_id": message_id,
                     "marker": marker}
 
@@ -181,8 +273,9 @@ class MessageSender:
             # read-back.  Never a second send.  A failed re-scan cannot
             # prove absence either — that stays EFFECT_UNKNOWN.
             try:
-                rescan = self._scan(thread_ref=thread_ref, row=row)
-            except GblMessageError:
+                rescan = self._scan(thread_ref=thread_ref, row=row,
+                                    depth=SCAN_MESSAGE_DEPTH)
+            except (GblMessageError, TimeoutError, OSError):
                 raise GblMessageError(
                     "EFFECT_UNKNOWN",
                     "send outcome unknown and read-back unavailable") from None
@@ -208,6 +301,7 @@ __all__ = [
     "EnvironmentRow",
     "GblMessageError",
     "MessageSender",
+    "SCAN_MAX_PAGES",
     "SCAN_MESSAGE_DEPTH",
     "SubprocessRunner",
     "message_marker",

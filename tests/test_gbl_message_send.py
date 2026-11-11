@@ -53,7 +53,7 @@ class FakeRunner:
             raise self.raise_on[index]
         if self.responses:
             return self.responses.pop(0)
-        return CommandResult(stdout="{}")
+        return CommandResult(stdout='{"messages": []}')
 
 
 def sender(runner, *, allowlist=DEFAULT_ALLOWLIST,
@@ -165,7 +165,8 @@ class TestOneSend:
         first = transport.send(**send_kwargs())
         marker = message_marker(first["message_id"])
         # The thread now contains the marker (the scan reads it back).
-        runner.responses.append(CommandResult(stdout=f'{{"text": "{marker}"}}'))
+        runner.responses.append(CommandResult(stdout=thread_stdout(
+            [f"{marker}\n> delivered words"])))
         second = transport.send(**send_kwargs())          # redelivery: same key+content
         assert second["status"] == "ALREADY_SENT"
         assert second["message_id"] == first["message_id"]
@@ -180,8 +181,8 @@ class TestOneSend:
         # scan 1: no marker; the send times out after its effect; the
         # re-scan sees the marker the send left behind.
         runner.responses = [
-            CommandResult(stdout="{}"),
-            CommandResult(stdout=f'{{"text": "{marker}"}}'),
+            CommandResult(stdout='{"messages": []}'),
+            CommandResult(stdout=thread_stdout([f"{marker}\n> delivered words"])),
         ]
         runner.raise_on = {1: TimeoutError("send timed out after effect")}
         result = transport.send(**send_kwargs())
@@ -192,8 +193,8 @@ class TestOneSend:
     def test_crash_without_marker_is_typed_effect_unknown(self):
         runner = FakeRunner()
         transport = configured_sender(runner, allowlist=listed_allowlist())
-        runner.responses = [CommandResult(stdout="{}"),
-                            CommandResult(stdout="{}")]
+        runner.responses = [CommandResult(stdout='{"messages": []}'),
+                            CommandResult(stdout='{"messages": []}')]
         runner.raise_on = {1: TimeoutError("send timed out, nothing landed")}
         with pytest.raises(GblMessageError) as err:
             transport.send(**send_kwargs())
@@ -203,7 +204,7 @@ class TestOneSend:
 
     def test_send_failure_is_typed(self):
         runner = FakeRunner()
-        runner.responses.append(CommandResult(stdout="{}"))
+        runner.responses.append(CommandResult(stdout='{"messages": []}'))
         runner.responses.append(CommandResult(exit_code=1, stdout="err"))
         with pytest.raises(GblMessageError) as err:
             configured_sender(runner, allowlist=listed_allowlist()).send(**send_kwargs())
@@ -211,7 +212,7 @@ class TestOneSend:
 
     def test_needs_human_is_typed(self):
         runner = FakeRunner()
-        runner.responses.append(CommandResult(stdout="{}"))
+        runner.responses.append(CommandResult(stdout='{"messages": []}'))
         runner.responses.append(CommandResult(exit_code=2, stdout="blocked"))
         with pytest.raises(GblMessageError) as err:
             configured_sender(runner, allowlist=listed_allowlist()).send(**send_kwargs())
@@ -397,7 +398,7 @@ class TestConcurrentSend:
                         PRINCIPAL, ENV_ID, THREAD_REF, KEY, BODY))
                     return CommandResult(stdout=thread_stdout(
                         [f"{marker}\n> delivered words"]))
-                return CommandResult(stdout="{}")
+                return CommandResult(stdout='{"messages": []}')
 
         runner = GatedRunner()
         transport = configured_sender(runner, allowlist=listed_allowlist())
@@ -422,8 +423,8 @@ class TestRescueTyping:
     def test_rescan_timeout_is_typed_effect_unknown(self):
         runner = FakeRunner()
         transport = configured_sender(runner, allowlist=listed_allowlist())
-        runner.responses = [CommandResult(stdout="{}"),
-                            CommandResult(stdout="{}")]
+        runner.responses = [CommandResult(stdout='{"messages": []}'),
+                            CommandResult(stdout='{"messages": []}')]
         runner.raise_on = {1: TimeoutError("send timed out")}
         runner.raise_on[2] = TimeoutError("rescan timed out too")
         with pytest.raises(GblMessageError) as err:

@@ -26,6 +26,7 @@ from common.company_consultation_host_contract import HostFrameError
 from common.gbl_contract import (
     ANSWER_UNCONSUMED,
     ASK_BODY_MAX_CHARS,
+    BODY_MAX_CHARS,
     ASK_CHAIN,
     ASK_ID_RE,
     ASK_KINDS,
@@ -234,14 +235,15 @@ class TestBudgetMaxima:
         assert MAX_RENUDGES_PER_ASK == 3
         assert ROUTINES_PER_ACCOUNT == 1
         assert ASK_BODY_MAX_CHARS == 16384
-        assert MAX_ANSWER_CHARS == 16384
+        # Repair M1: the answer cap IS the TeamLink body law — one cap.
+        assert MAX_ANSWER_CHARS == BODY_MAX_CHARS == 4096
         assert MAX_FRAME_BYTES == 32768
         assert BUDGET_MAXIMA == {
             "max_asks_per_hour_per_principal": 20,
             "max_renudges_per_ask": 3,
             "routines_per_account": 1,
             "max_question_chars": 16384,
-            "max_answer_chars": 16384,
+            "max_answer_chars": 4096,
             "max_frame_bytes": 32768,
         }
 

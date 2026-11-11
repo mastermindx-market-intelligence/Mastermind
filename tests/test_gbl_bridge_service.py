@@ -41,7 +41,11 @@ T0 = datetime(2026, 11, 11, 12, 0, 0, tzinfo=timezone.utc)
 
 
 class FakeStore:
-    """The GblAskStore interface GBL-4 implements over Paperclip."""
+    """The GblAskStore interface GBL-4 implements over Paperclip.
+
+    Repair-round contract: create_ask is create-if-absent (None when
+    created, the existing record when present); every append stamps a
+    per-record strictly-increasing ``seq`` and ``trusted: True``."""
 
     def __init__(self, clock=None):
         self.asks: dict[str, dict] = {}
@@ -52,12 +56,16 @@ class FakeStore:
 
     def create_ask(self, ask):
         self.create_calls += 1
+        existing = self.asks.get(ask["ask_id"])
+        if existing is not None:
+            return copy.deepcopy(existing)      # present: never a second record
         if self.timeout_mode == "landed":
             self._store(ask)
             raise GblCreateEffectUnknown("create response timed out")
         if self.timeout_mode == "absent":
             raise GblCreateEffectUnknown("create request timed out")
         self._store(ask)
+        return None
 
     def _store(self, ask):
         if ask["ask_id"] not in self.asks:
@@ -70,8 +78,17 @@ class FakeStore:
 
     def append_ask_event(self, ask_id, event):
         record = self.asks[ask_id]
-        if event not in record["events"]:
-            record["events"].append(dict(event))
+        stamped = {**event, "trusted": True}
+        stamped["seq"] = ((record["events"][-1].get("seq", -1) + 1)
+                          if record["events"] else 0)
+        if not any(self._same_event(stamped, existing)
+                   for existing in record["events"]):
+            record["events"].append(stamped)
+
+    @staticmethod
+    def _same_event(new, existing):
+        return all(existing.get(key) == value
+                   for key, value in new.items() if key != "seq")
 
     def count_asks(self, principal, since_iso):
         return sum(1 for p, at in self.created if p == principal and at >= since_iso)
@@ -612,11 +629,11 @@ class TestRepairAnswerWrite:
                         "idempotency_key": "gb-ans-partial",
                         "text": "The stranded fixture answer."}
         store.asks[ASK_ID]["events"].append(answer_event)   # no state event
+        assert core.ask_status(principal=PRINCIPAL,
+                               ask_id=ASK_ID)["status"] == "ANSWER_UNCONSUMED"
         result = core.fetch_result(principal=PRINCIPAL, ask_id=ASK_ID)
         assert result["status"] == "ANSWER_UNCONSUMED"
         assert result["answer"] == "The stranded fixture answer."
-        assert core.ask_status(principal=PRINCIPAL,
-                               ask_id=ASK_ID)["status"] == "ANSWER_UNCONSUMED"
         retry = core.post_answer(principal=PRINCIPAL, ask_id=ASK_ID,
                                  answer="The stranded fixture answer.",
                                  idempotency_key="gb-ans-partial")
@@ -674,14 +691,19 @@ class TestRepairServeLoop:
 
     def test_unencodable_reply_is_typed_and_keeps_serving(self, tmp_path):
         class SurrogateCore:
+            def __init__(self):
+                self.calls = 0
             def ask_status(self, **_):
-                return {"status": "FIXTURE", "poison": "\ud800"}
+                self.calls += 1
+                if self.calls == 1:
+                    return {"status": "FIXTURE", "poison": "\ud800"}
+                return {"status": "FIXTURE"}
         server = _server(tmp_path, SurrogateCore(), (os.getuid(),))
         try:
             response = _exchange(server, REQUEST)
             assert response["ok"] is False
             assert response["error"]["code"] == "REPLY_FRAME_REFUSED"
-            self._alive(server)
+            self._alive(server)                # the loop still serves
         finally:
             server.close()
 
@@ -701,14 +723,19 @@ class TestRepairServeLoop:
 
     def test_oversized_reply_is_typed_and_keeps_serving(self, tmp_path):
         class HugeCore:
+            def __init__(self):
+                self.calls = 0
             def ask_status(self, **_):
-                return {"status": "FIXTURE", "blob": "y" * 40000}
+                self.calls += 1
+                if self.calls == 1:
+                    return {"status": "FIXTURE", "blob": "y" * 40000}
+                return {"status": "FIXTURE"}
         server = _server(tmp_path, HugeCore(), (os.getuid(),))
         try:
             response = _exchange(server, REQUEST)
             assert response["ok"] is False
             assert response["error"]["code"] == "REPLY_FRAME_REFUSED"
-            self._alive(server)
+            self._alive(server)                # the loop still serves
         finally:
             server.close()
 

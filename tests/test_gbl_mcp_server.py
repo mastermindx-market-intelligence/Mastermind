@@ -44,8 +44,10 @@ from integrations.gbl.message_send import (
 )
 from integrations.gbl.mcp_server import (
     RESULT_SCHEMA,
+    TOOL_ARGUMENT_KEYS,
     TOOL_NAMES,
     TOOL_SCHEMA_DIGEST,
+    TOOL_SPECS,
     BridgeClient,
     create_gbl_mcp_app,
     tool_schema_digest,
@@ -142,7 +144,7 @@ class FakeRunner:
         self.calls.append({"argv": list(argv), "stdin": stdin, "env": dict(env)})
         if self.responses:
             return self.responses.pop(0)
-        return CommandResult(stdout="{}", exit_code=0)
+        return CommandResult(stdout='{"messages": []}', exit_code=0)
 
 
 def _policy_document() -> dict:
@@ -545,8 +547,11 @@ class TestTeamMessage(unittest.IsolatedAsyncioTestCase):
         assert first["result"]["status"] == "SENT"
         # The thread now contains the marker; the redelivery scan sees it.
         marker_line = harness.runner.calls[1]["stdin"].splitlines()[0]
+        import json as _json
         harness.runner.responses.append(
-            CommandResult(stdout=f'{{"text": "{marker_line}"}}', exit_code=0))
+            CommandResult(stdout=_json.dumps(
+                {"messages": [{"id": "m0", "text": marker_line}]}),
+                exit_code=0))
         second = tool_payload(await harness.call("team.message", arguments,
                                                  token=token))
         assert second["result"]["status"] == "ALREADY_SENT"
