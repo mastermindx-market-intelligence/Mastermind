@@ -47,7 +47,7 @@ function fixture() {
   const state = {boot:BOOT, effects:[], permissions:new Set(["tabs","scripting","debugger"]),
     sites:new Set(["https://allowed.test/*"]), document:"document-one", session:SESSION, snapshot:null,
     snapshotCount:0, messageHook:null, permissionHook:null, focusFailure:null, detachFailure:false,
-    injectFailure:null, filesFailure:null, worldMissing:false,
+    injectFailure:null, filesFailure:null, worldMissing:false, dispatchFailureOn:null, dispatchFailureText:null,
     history:{currentIndex:1,entries:[{id:10,url:"https://denied.test/"},{id:11,url:"https://allowed.test/page"}]}};
   const f = {state};
   const worldDispatch = pageWorldDispatch(f);
@@ -67,6 +67,13 @@ function fixture() {
       }
       assert.equal(options.world,"ISOLATED");assert.equal(typeof options.func,"function");
       if(state.injectFailure) throw new Error(state.injectFailure);
+      // executeScript can reject AFTER the func already ran in the page (tab
+      // closed, frame removed or navigated by the very click it performed):
+      // when the dispatched message's action matches dispatchFailureOn, run the
+      // dispatch, then lose the reply. The pre-dispatch validate still succeeds.
+      if(state.dispatchFailureOn && options.args[0] && options.args[0].action === state.dispatchFailureOn) {
+        try {options.func(...options.args);} finally {throw new Error(state.dispatchFailureText || "frame removed while injecting");}
+      }
       // Real Chrome runs the controller's func wrapper inside the page world;
       // model that here by installing the fake page object on globalThis.
       globalThis.__MMX_BROWSER_PAGE_V1__ = {dispatch: worldDispatch};
@@ -238,6 +245,35 @@ function fixture() {
       assert.ok(Object.keys(record).every(k=>["at","action","code","detail"].includes(k)));
       assert.ok(String(record.detail||"").length<=180);
     }
+  }
+  // A dispatch that ran in the page but whose reply was lost is UNCERTAIN for a
+  // mutation (the click may have landed: never invite a repeat) and safely
+  // NOT_APPLIED for a read. The pre-dispatch validate succeeds in both cases.
+  {
+    const f=fixture();await f.snapshot();
+    f.state.dispatchFailureOn="click";
+    const result=await f.run(request("click"));
+    assert.equal(result.status,"ACTION_EFFECT_UNKNOWN");
+    assert.equal(result.effect,"EFFECT_UNKNOWN");
+    assert.ok(String(result.data.detail).includes("frame removed"),"detail keeps native text");
+    assert.deepEqual(f.state.effects,[["click"]],"the page world did run the click");
+    const status=await f.run(request("status"));
+    assert.equal(status.data.recent_errors[status.data.recent_errors.length-1].code,"ACTION_EFFECT_UNKNOWN");
+  }
+  {
+    const f=fixture();f.state.dispatchFailureOn="snapshot";
+    const result=await f.snapshot();
+    assert.equal(result.status,"PAGE_INJECT_FAILED");
+    assert.equal(result.effect,"NOT_APPLIED");
+  }
+  // The pre-dispatch failures stay NOT_APPLIED (nothing was sent).
+  {
+    const f=fixture();await f.snapshot();
+    f.state.injectFailure="Extension process crashed while injecting";
+    const result=await f.run(request("click"));
+    assert.equal(result.status,"PAGE_INJECT_FAILED");
+    assert.equal(result.effect,"NOT_APPLIED");
+    assert.deepEqual(f.state.effects,[],"nothing dispatched");
   }
   // diagnostics is callable without any prior snapshot and survives a dead page world.
   {

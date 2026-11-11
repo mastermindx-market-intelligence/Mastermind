@@ -138,6 +138,13 @@
         return out && out[0] ? out[0].result : null;
       };
       let value = null;
+      // Once call() is entered for a mutating action, a rejection can no longer
+      // prove the effect did not happen: executeScript may reject after the
+      // func already ran (tab closed, frame removed or navigated by the very
+      // click it performed). Only failures proven to precede dispatch are
+      // knownNotApplied; the rest surface as ACTION_EFFECT_UNKNOWN.
+      const read = /^(snapshot|validate|validate_focus|consume|diagnostics)$/.test(action);
+      let sent = false;
       try {
         // Reads re-inject the page world; a mutation without a live world
         // entry (for example after a transport reconnect cleared it) must
@@ -145,6 +152,7 @@
         if (action === "snapshot" || action === "diagnostics") await pageWorld(tab);
         else if (!documents.has(tab.id)) throw new Error("STALE_SNAPSHOT");
         await tabFor(r); current(r); if (beforeSend) beforeSend();
+        sent = true;
         value = await call();
         if (PAGE_READ_RETRY.has(action) && (!value || value.code === "PAGE_WORLD_UNAVAILABLE")) {
           await pageWorld(tab); await tabFor(r); current(r); value = await call();
@@ -156,7 +164,7 @@
         if (/^(TAB_LIMIT|DOCUMENT_ID_UNAVAILABLE|STALE_SNAPSHOT|REQUEST_EXPIRED|CONNECTION_CHANGED|TARGET_[A-Z_]+|SITE_PERMISSION_REQUIRED|CDP_[A-Z_]+)$/.test(text)) throw error;
         const wrapped = new Error(/Cannot access contents|cannot be scripted|Missing host permission|permission to access the respective host/i.test(text)
           ? "SITE_PERMISSION_REQUIRED" : "PAGE_INJECT_FAILED");
-        wrapped.knownNotApplied = true;
+        wrapped.knownNotApplied = !(sent && !read);
         wrapped.detail = boundedDetail(`inject ${(error && error.name) || "Error"}: ${text}` +
           ` tab=${String(tab.url || "").slice(0,48)} doc=${documents.get(tab.id) || "-"}`);
         throw wrapped;
