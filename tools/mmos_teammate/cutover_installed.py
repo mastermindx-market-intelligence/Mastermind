@@ -282,14 +282,25 @@ def cmd_rollback(spec):
         die(f"no saved setup at {preimage}")
     with open(preimage) as fh:
         saved = json.load(fh)
-    if live_for(http, spec):
-        die("a run is live for this agent; wait for it to end")
+    # R2a finding 10: the SAME blockers as apply. Rolling back while an open
+    # issue is assigned — a turn waiting on a question, an ask child — hands
+    # that work to the old runtime; live runs are covered here too.
+    agent, open_issues, live = read_state(http, spec)
+    found = blockers(spec, agent, open_issues, live)
+    if found:
+        die("not rolling back: " + "; ".join(found))
+    # R2a finding 10: restore the run command, never the whole metadata
+    # object — binding changes written after the move (a rotate's revision
+    # bump, another subsystem's key) would be lost. Only the teammate key
+    # this move added is removed; the rest of the CURRENT metadata stands.
+    merged = dict(agent.get("metadata") or {})
+    merged.pop("teammate", None)
     http.patch(f"/api/agents/{spec['agent_id']}", {
         "adapterType": saved["adapterType"],
         "replaceAdapterConfig": True,
         "adapterConfig": saved["adapterConfig"] or {},
         "runtimeConfig": saved["runtimeConfig"] or {},
-        "metadata": saved["metadata"],
+        "metadata": merged,
     })
     after = http.get(f"/api/agents/{spec['agent_id']}")
     got, want = after.get("adapterConfig") or {}, saved["adapterConfig"] or {}

@@ -304,10 +304,43 @@ def test_rollback_restores_the_saved_setup(wired, tmp_path):
     before = old_agent()
     co.cmd_apply(spec)
     assert co.cmd_rollback(spec) == 0
-    for key in co.PREIMAGE_KEYS:
+    # the run command comes back whole; metadata is NOT restored as an
+    # object (R2a finding 10) — only the teammate key the move added is
+    # removed, and the move wrote nothing else, so it ends empty
+    for key in ("adapterType", "adapterConfig", "runtimeConfig"):
         assert http.agent[key] == before[key]
+    assert http.agent["metadata"] == {}
     assert not (tmp_path / "home" / "cutover-preimage.json").exists()
     assert [p for p in os.listdir(tmp_path / "home") if ".restored-" in p]
+
+
+def test_rollback_refuses_open_work_and_removes_only_the_teammate_key(
+        wired, tmp_path):
+    # R2a finding 10: rollback refuses on the same blockers as apply — an
+    # open issue (a turn waiting on a question or an ask child) must not be
+    # handed to the old runtime. And it never restores the whole metadata
+    # object: only the teammate binding key the move added is removed;
+    # metadata written after the move (a rotate's bump, another subsystem's
+    # key) stands.
+    spec, http = wired
+    co.cmd_apply(spec)  # a completed move: preimage saved, agent on carrier
+    patches_after_move = len(http.patches)
+
+    # open work assigned to the agent: rollback must refuse
+    http.issues.append({"identifier": "MAS-7", "status": "in_progress"})
+    with pytest.raises(SystemExit):
+        co.cmd_rollback(spec)
+    assert len(http.patches) == patches_after_move  # nothing changed
+    assert http.agent["adapterType"] == "process"
+    http.issues.clear()
+
+    # later metadata survives; only the teammate key goes
+    http.agent["metadata"] = {"other": {"keep": True},
+                              "teammate": {"t3": dict(spec["binding"],
+                                                      bindingRevision=4)}}
+    assert co.cmd_rollback(spec) == 0
+    assert http.agent["adapterType"] == "hermes_local"  # run command restored
+    assert http.agent["metadata"] == {"other": {"keep": True}}
 
 
 def test_rollback_waits_for_a_live_run(wired):
