@@ -487,8 +487,12 @@ def test_short_pro_receipt_does_not_promote_an_ordinary_worker_route(
     task_kind: str,
 ) -> None:
     receipt = _pro_receipt(expected_duration_minutes=11)
+    # Same repair as the sibling mechanical-work test above: load before the
+    # assertion so an unrelated configuration error cannot surface as a
+    # regex-mismatch failure of this routing refusal.
+    router = ModelRouter.load()
     with pytest.raises(RoutingPolicyError, match="PRO_MODE_REFUSED"):
-        ModelRouter.load().route(
+        router.route(
             WorkRequest(task_kind),
             chat_reasoning_mode=ChatReasoningMode.PRO_MODE_EXCEPTION,
             pro_mode_receipt=receipt,
