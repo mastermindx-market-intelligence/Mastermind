@@ -1742,6 +1742,116 @@ def test_coding_job_admission_comment_carries_the_lane_prefix(monkeypatch):
     assert wc.is_machine_comment(replay) is True
 
 
+JOB_REPLY = ("The build needs the runner.\n\n"
+             "```paperclip-coding-job\n"
+             "key: coding-job-1\n"
+             "```\n")
+
+
+class RecordingDoor:
+    """A door stub that records every admit and answers from a script."""
+
+    admits = []
+    answers = []
+
+    def __init__(self, socket_path, timeout=60.0):
+        pass
+
+    def _request(self, method, path, body=None):
+        type(self).admits.append(body)
+        return type(self).answers.pop(0)
+
+
+def test_a_transient_coding_job_is_retried_on_a_later_wake(monkeypatch):
+    # WAIT and DOOR_UNREACHABLE outcomes were terminal in effect: the note
+    # said "retried on the next wake" but no path ever looked at them again
+    # — the delivered issue is in_review (never in the inbox) and its
+    # comment wake exited at "nothing to do". A transient note now carries
+    # a retry line, and a later wake on the issue re-issues the admit (the
+    # door is idempotent by command).
+    class OkDoor(RecordingDoor):
+        answers = [(200, {"result": {"state": "ADMITTED",
+                                     "job_id": "job-42"}})]
+
+    command = wc.coding_job_command("is-1", "coding-job-1")
+    issue = {"identifier": "MMO-1", "status": "in_review",
+             "title": "Summarize file X",
+             "description": "Write a three-line summary."}
+    pc = FakePaperclip(issues={"is-1": dict(issue)})
+    pc.comment_rows["is-1"] = [board.served_comment(
+        f"[t2-carrier] coding job blocked — WAIT (queue full)\n\n"
+        "The Executive ready queue has no capacity for this task's coding "
+        "job right now.\n\n"
+        "coding-job-retry: coding-job-1")]
+    t3 = FakeT3()
+    monkeypatch.setattr(wc, "DoorClient", OkDoor)
+    os.environ["PAPERCLIP_AGENT_ID"] = "ag-1"
+    os.environ["PAPERCLIP_ISSUE_ID"] = "is-1"
+    try:
+        assert wc.run_carrier(pc, lambda tid: t3,
+                              {"coding_job_door": "/x/sock"}) == 0
+    finally:
+        os.environ.pop("PAPERCLIP_ISSUE_ID", None)
+    assert OkDoor.admits and OkDoor.admits[0]["command"] == command
+    notes = [c[2] for c in pc.calls if c[0] == "comment"]
+    assert any("ADMITTED" in n and "job-42" in n for n in notes)
+
+
+def test_a_quoted_marker_in_a_person_comment_does_not_suppress_the_admit(
+        monkeypatch):
+    # The dedupe matched the marker text in ANY comment, so a person or
+    # teammate quoting the carrier's terminal note suppressed a real admit:
+    # the job never runs and nothing on the issue says so. Only the
+    # carrier's own notes carry the marker's authority.
+    class OkDoor(RecordingDoor):
+        answers = [(200, {"result": {"state": "ADMITTED",
+                                     "job_id": "job-7"}})]
+
+    command = wc.coding_job_command("is-1", "coding-job-1")
+    pc = FakePaperclip(issues=one_issue())
+    pc.comment_rows["is-1"] = [board.served_comment(
+        f"for the record, the carrier wrote "
+        f"coding-job-command: {command} yesterday", author_type="user")]
+    t3 = FakeT3(replies=[JOB_REPLY])
+    monkeypatch.setattr(wc, "DoorClient", OkDoor)
+    assert run(pc, t3, {"coding_job_door": "/x/sock"}) == 0
+    assert OkDoor.admits and OkDoor.admits[0]["command"] == command
+    assert any("ADMITTED" in c[2] for c in pc.calls if c[0] == "comment")
+
+
+def test_an_unreadable_door_answer_stays_retryable(monkeypatch):
+    # A malformed door response (no status line, unparseable body) carried
+    # the terminal marker — yet the admit may have executed. The note made
+    # the job unretryable forever while saying it had been "requested". An
+    # unreadable answer is transient: no marker, a retry line, and the next
+    # wake asks again.
+    class GarbageDoor(RecordingDoor):
+        answers = [(0, {})]
+
+    class OkDoor(RecordingDoor):
+        answers = [(200, {"result": {"state": "ADMITTED",
+                                     "job_id": "job-9"}})]
+
+    pc = FakePaperclip(issues=one_issue())
+    t3 = FakeT3(replies=[JOB_REPLY])
+    monkeypatch.setattr(wc, "DoorClient", GarbageDoor)
+    assert run(pc, t3, {"coding_job_door": "/x/sock"}) == 0
+    note = [c[2] for c in pc.calls if c[0] == "comment"][-1]
+    assert "coding-job-command:" not in note    # not terminal
+    assert "coding-job-retry: coding-job-1" in note
+    # a later wake on the in_review issue, door healthy: the admit runs
+    monkeypatch.setattr(wc, "DoorClient", OkDoor)
+    os.environ["PAPERCLIP_ISSUE_ID"] = "is-1"
+    try:
+        assert wc.run_carrier(pc, lambda tid: t3,
+                              {"coding_job_door": "/x/sock"}) == 0
+    finally:
+        os.environ.pop("PAPERCLIP_ISSUE_ID", None)
+    assert OkDoor.admits and OkDoor.admits[0]["command"] == \
+        wc.coding_job_command("is-1", "coding-job-1")
+    assert any("job-9" in c[2] for c in pc.calls if c[0] == "comment")
+
+
 def test_board_notes_keep_order_and_cap():
     pc = FakePaperclip(issues=feedback_issue())
     pc.comment_rows["is-1"] = [

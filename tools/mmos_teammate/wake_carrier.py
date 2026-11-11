@@ -163,6 +163,19 @@ class DoorClient:
             return status, {}
 
 
+def _coding_job_transient_note(pc, issue, key, headline, detail):
+    """A TRANSIENT coding-job outcome (WAIT, unreachable or unreadable
+    door). No marker — the admit is not confirmed — but a retry line naming
+    the key, so a later wake on this issue re-issues it (the door is
+    idempotent by command)."""
+    pc.add_comment(issue["id"], (
+        f"[t2-carrier] coding job blocked — {headline}\n\n"
+        f"{detail} The task's governed coding job could not be confirmed "
+        "and will be retried when this issue is next worked (a board reply "
+        f"or a resume wakes it).\n\n"
+        f"coding-job-retry: {key}"))
+
+
 def handle_coding_job(pc, issue, reply, block, opts):
     """The third block: this task needs code, so ONE governed coding job.
 
@@ -172,10 +185,10 @@ def handle_coding_job(pc, issue, reply, block, opts):
     admission/replay comment (the job id is the identity the result will
     carry home), or ONE blocker comment with the exact reason (WAIT detail,
     refusal code, unreachable door). Terminal outcomes carry the idempotency
-    marker; TRANSIENT ones (WAIT, unreachable door) deliberately do not, so
-    a later wake retries the one call — the door itself is idempotent by
-    command. Never raises — a blocked job must not fail the delivered
-    answer."""
+    marker; TRANSIENT ones (WAIT, unreachable or unreadable door) carry a
+    retry line instead, and a later wake on the issue re-issues the call —
+    the door itself is idempotent by command. Never raises — a blocked job
+    must not fail the delivered answer."""
     socket_path = (opts.get("coding_job_door") or "").strip()
     if not socket_path:
         log("coding-job block present but no coding_job_door in config; "
@@ -189,7 +202,12 @@ def handle_coding_job(pc, issue, reply, block, opts):
         rows = []
     if isinstance(rows, dict):
         rows = rows.get("comments") or rows.get("rows") or []
-    if any(marker in (row.get("body") or "") for row in rows):
+    # Only the carrier's OWN notes carry the marker's authority: a person or
+    # teammate quoting a terminal note's marker text must not suppress a
+    # real admit (the job would never run and nothing would say so).
+    machine_bodies = [(row.get("body") or "") for row in rows
+                      if is_machine_comment((row.get("body") or ""))]
+    if any(marker in body for body in machine_bodies):
         log(f"coding job for {issue.get('identifier')} already surfaced "
             f"({block['key']}); no second call")
         return
@@ -199,14 +217,10 @@ def handle_coding_job(pc, issue, reply, block, opts):
             "POST", "/paperclip/coding-job/admit", {"command": command})
     except OSError as exc:
         # F4 (attack review): DOOR_UNREACHABLE is TRANSIENT — the door may
-        # just be restarting.  The comment deliberately carries NO marker so
-        # the next wake retries the one admit call (the door is idempotent
-        # by command).
-        pc.add_comment(issue["id"], (
-            f"[t2-carrier] coding job blocked — DOOR_UNREACHABLE\n\n"
-            f"The Executive door socket is not answering ({exc}); the task's "
-            f"governed coding job could not be requested and will be "
-            f"retried on the next wake."))
+        # just be restarting.
+        _coding_job_transient_note(
+            pc, issue, block["key"], "DOOR_UNREACHABLE",
+            f"The Executive door socket is not answering ({exc});")
         log(f"coding-job door unreachable for {issue.get('identifier')}")
         return
     result = body.get("result") if isinstance(body, dict) else None
@@ -223,23 +237,75 @@ def handle_coding_job(pc, issue, reply, block, opts):
         log(f"coding job for {issue.get('identifier')} {state} as {job_id}")
         return
     if status == 200 and state == "WAIT":
-        # F4: WAIT is TRANSIENT capacity — no marker, so the next wake
-        # retries when the queue drains; only terminal outcomes suppress.
+        # F4: WAIT is TRANSIENT capacity; only terminal outcomes suppress.
         reason = (result or {}).get("wait_reason") or "queue full"
         detail = (result or {}).get("wait_detail") or {}
-        pc.add_comment(issue["id"], (
-            f"[t2-carrier] coding job blocked — WAIT ({reason})\n\n"
-            f"The Executive ready queue has no capacity for this task's "
-            f"coding job right now{': ' + json.dumps(detail) if detail else ''}"
-            f"; it will be retried on the next wake."))
+        _coding_job_transient_note(
+            pc, issue, block["key"], f"WAIT ({reason})",
+            "The Executive ready queue has no capacity for this task's "
+            f"coding job right now{': ' + json.dumps(detail) if detail else ''};")
         log(f"coding job for {issue.get('identifier')} WAIT: {reason}")
         return
     error = (body.get("error") or {}) if isinstance(body, dict) else {}
+    if not status or (status == 200 and state is None and not error):
+        # No HTTP status line, or a 200 whose body carries neither a
+        # readable result nor an error object: the admit may have executed,
+        # but this run cannot confirm it. A terminal marker would be a lie;
+        # retry is safe (the door is idempotent by command). A 200 WITH an
+        # error object is a readable engine refusal — terminal below.
+        _coding_job_transient_note(
+            pc, issue, block["key"],
+            "UNREADABLE_ANSWER" if status else "DOOR_MALFORMED",
+            "The Executive door answered, but the answer could not be read;")
+        log(f"coding job for {issue.get('identifier')} unreadable door "
+            f"answer (status {status or 'none'})")
+        return
     code = error.get("code") or f"HTTP_{status or 'EMPTY'}"
     message = error.get("message") or "the Executive refused the coding job"
     pc.add_comment(issue["id"], (
         f"[t2-carrier] coding job blocked — {code}\n\n{message}\n\n{marker}"))
     log(f"coding job for {issue.get('identifier')} refused: {code}")
+
+
+def retry_transient_coding_jobs(pc, issue, opts, skip=None):
+    """Re-issue the coding-job admits whose last outcome was TRANSIENT.
+
+    A WAIT, unreachable or unreadable door left a `coding-job-retry: <key>`
+    line in a carrier note instead of a marker. The wake that touches this
+    issue again — the board's comment or rejection wake (the in_review
+    path), a resume, or a later delivery run — asks once more per key: the
+    door is idempotent by command, and a terminal marker in a carrier note
+    still suppresses. Only carrier notes are read, so quoting the line can
+    neither force nor suppress a retry. `skip` names the key THIS run's
+    handle_coding_job just surfaced (a fresh transient outcome does not
+    re-admit within the same wake — the door just told us why)."""
+    if not (opts.get("coding_job_door") or "").strip():
+        return
+    try:
+        rows = pc.comments(issue["id"])
+    except CarrierError:
+        rows = []
+    if isinstance(rows, dict):
+        rows = rows.get("comments") or rows.get("rows") or []
+    machine_bodies = [(row.get("body") or "") for row in rows
+                      if is_machine_comment((row.get("body") or ""))]
+    keys = []
+    for body in machine_bodies:
+        for line in body.splitlines():
+            line = line.strip()
+            if line.startswith("coding-job-retry: "):
+                key = line[len("coding-job-retry: "):].strip()
+                if key and key not in keys:
+                    keys.append(key)
+    for key in keys:
+        if key == skip:
+            continue
+        marker = f"coding-job-command: {coding_job_command(issue['id'], key)}"
+        if any(marker in body for body in machine_bodies):
+            continue  # a terminal outcome for this key already surfaced
+        log(f"retrying transient coding job {key} for "
+            f"{issue.get('identifier')}")
+        handle_coding_job(pc, issue, "", {"key": key}, opts)
 
 
 def parse_ask_block(reply):
@@ -1895,6 +1961,9 @@ def handle_feedback(pc, t3, issue, opts):
     if feedback is None:
         log(f"in_review issue {issue.get('identifier')} is bound to this run "
             "but has no board feedback; nothing to do")
+        # This wake is the one a TRANSIENT coding-job outcome (WAIT,
+        # unreachable/unreadable door) was waiting for: re-issue it.
+        retry_transient_coding_jobs(pc, issue, opts)
         return 0
     reason, comment = feedback
     content = (issue.get("title") or "") + "\n" + (issue.get("description") or "")
@@ -1953,6 +2022,8 @@ def handle_feedback(pc, t3, issue, opts):
     # asked child — re-entering review would strand the asker above it.
     deliver(pc, issue, reply, rev_op,
             ask_child=asked_child_of(pc, issue) is not None)
+    # this wake touched the issue: a transient coding job retries now
+    retry_transient_coding_jobs(pc, issue, opts)
     return 0
 
 
@@ -2259,6 +2330,12 @@ def _run_carrier_locked(pc, t3_factory, opts, me, binding, thread_id):
         job = None if ask_parent else parse_coding_job_block(reply)
         if job:
             handle_coding_job(pc, issue, reply, job, opts)
+        # a reply with several job blocks across turns, or a transient
+        # outcome from an earlier run: this wake re-issues those keys too
+        # (the key surfaced THIS run is skipped — a fresh transient outcome
+        # does not re-admit within the same wake)
+        retry_transient_coding_jobs(
+            pc, issue, opts, skip=job["key"] if job else None)
         return 0
     except NeedsHuman:
         try:
