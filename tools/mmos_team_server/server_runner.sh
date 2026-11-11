@@ -33,8 +33,28 @@ elif [ -n "${TEAM_SERVER_LOG_CAP:-}" ]; then
   CAP="$TEAM_SERVER_LOG_CAP"
 fi
 
-mkdir -p "$RUN_DIR" "$SCRATCH" 2>/dev/null || true
+mkdir -p "$RUN_DIR" "$SCRATCH" 2>/dev/null
+# F28: the old `|| true` tolerated a failed mkdir and let the inline python
+# die with a FileNotFoundError traceback into the log on every
+# ThrottleInterval. One line, operator-readable, correct exit.
+[ -d "$RUN_DIR" ] || { echo "server_runner: cannot create $RUN_DIR (root read-only or full?)" >&2; exit 73; }
+[ -d "$SCRATCH" ] || { echo "server_runner: cannot create $SCRATCH (root read-only or full?)" >&2; exit 73; }
 [ -f "$ENV_FILE" ] || { echo "server_runner: missing $ENV_FILE (seed the root first)" >&2; exit 78; }
+
+# Item 13: the interpreter for the runtime resolver is the absolute path
+# `install` recorded and validated (config/python3-path) — never a PATH
+# search, never the script's own `#!/usr/bin/env python3` line, which under
+# launchd resolved against whatever PATH launchd happened to pass (F13).
+PY3_CONF="$ROOT/config/python3-path"
+PY3=""
+if [ -s "$PY3_CONF" ]; then PY3=$(head -1 "$PY3_CONF" 2>/dev/null); fi
+case "$PY3" in
+  /*) [ -f "$PY3" ] && [ -x "$PY3" ] || PY3="" ;;
+  *) PY3="" ;;
+esac
+[ -n "$PY3" ] || { echo "server_runner: no recorded python3 interpreter (config/python3-path missing or invalid); re-run team_server.sh install" >&2; exit 78; }
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 # Bound the log before the server can add more (crash-loop disk-fill guard).
 if [ -f "$LOG_FILE" ] && [ "$(stat -f%z "$LOG_FILE" 2>/dev/null || echo 0)" -gt "$CAP" ]; then
@@ -46,12 +66,9 @@ chmod 600 "$LOG_FILE" 2>/dev/null || true
 # overrides this path explicitly; absent that marker the old stock CLI remains.
 NODE_BIN=""
 if [ -s "$ROOT/config/server-runtime.json" ] && [ -s "$ROOT/config/node-runtime.json" ]; then
-  NODE_BIN="$($ROOT/bin/node_install.py resolve --root "$ROOT" --command node)" || {
+  NODE_BIN="$("$PY3" -I "$ROOT/bin/node_install.py" resolve --root "$ROOT" --command node)" || {
     echo "server_runner: incomplete pinned Node runtime" >&2; exit 69; }
 fi
-
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-PYTHON3=$(command -v python3 || echo /usr/bin/python3)
 # Read the server binary setting only after the pinned-runtime validation.
 # There is deliberately NO default binary: absent an explicit config/server-bin
 # (legacy rollback) or a complete packed runtime, guessing one would exec an
@@ -59,9 +76,9 @@ PYTHON3=$(command -v python3 || echo /usr/bin/python3)
 # Chairman's ~/.t3 (attack finding 12). Fail loudly instead.
 SERVER_BIN=""
 if [ -s "$BIN_CONF" ]; then
-  SERVER_BIN=$(cat "$BIN_CONF")
+  SERVER_BIN=$(head -1 "$BIN_CONF" 2>/dev/null)
 elif [ -s "$ROOT/config/server-runtime.json" ] && [ -s "$ROOT/config/node-runtime.json" ]; then
-  SERVER_BIN="$($ROOT/bin/node_install.py resolve --root "$ROOT" --command serve)" || {
+  SERVER_BIN="$("$PY3" -I "$ROOT/bin/node_install.py" resolve --root "$ROOT" --command serve)" || {
     echo "server_runner: packed runtime incomplete (resolve failed)" >&2; exit 69; }
 else
   echo "server_runner: no server binary configured ($BIN_CONF missing and no packed runtime); refusing to guess a default" >&2
@@ -72,7 +89,7 @@ fi
 # flock survives execve (fd is made inheritable), so the lock is held for the
 # whole server lifetime; launchd retries every ThrottleInterval while held out.
 export NODE_BIN
-exec "$PYTHON3" - "$ROOT" "$SERVER_BIN" "$ENV_FILE" "$LOG_FILE" <<'PY'
+exec "$PY3" -I - "$ROOT" "$SERVER_BIN" "$ENV_FILE" "$LOG_FILE" <<'PY'
 import fcntl, os, sys
 
 root, server_bin, env_file, log_file = sys.argv[1:5]
@@ -103,6 +120,12 @@ try:
     port = open(port_file).read().strip()
 except OSError:
     print("server_runner: REFUSED missing port file %s (install first)" % port_file, flush=True)
+    sys.exit(78)
+# F21: a canonical decimal port only — an empty or leading-zero port file
+# must refuse here, not ride into T3CODE_PORT.
+if not (port.isdecimal() and not port.startswith("0")
+        and 1024 <= int(port) <= 65535):
+    print("server_runner: REFUSED non-canonical port %r in %s (re-run install)" % (port, port_file), flush=True)
     sys.exit(78)
 
 env["T3CODE_HOME"] = os.path.join(root, "home")

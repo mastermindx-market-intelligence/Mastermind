@@ -7,7 +7,7 @@
 #   team_server.sh install  --root DIR --port N --label ID [--server-bin PATH]
 #                           [--replace]
 #   team_server.sh doctor --root DIR --label ID
-#   team_server.sh start|stop|status|uninstall  --root DIR --label ID
+#   team_server.sh start|stop|status|capture|uninstall  --root DIR --label ID
 #   team_server.sh selftest
 #
 # Reuses the guard logic of tools/mmos_dev/t3_dev.sh (sourced as a library via
@@ -31,6 +31,21 @@ die() { echo "team_server: $1" >&2; exit 1; }
 REPO_DIR=$(cd "$(dirname "$0")/../.." && pwd -P)
 T3_DEV="$REPO_DIR/tools/mmos_dev/t3_dev.sh"
 [ -f "$T3_DEV" ] || die "cannot find $T3_DEV"
+# Item 13 / F27: the interpreter that guards every check is chosen by
+# explicit absolute path BEFORE the library is sourced — never through the
+# caller's PATH (whoever controls PATH would pick the program that validates
+# the runtime). Set it for the library's port_busy too.
+PYTHON3_BIN="${PYTHON3_BIN:-}"
+if [ -z "$PYTHON3_BIN" ]; then
+  if [ -x /opt/homebrew/bin/python3.12 ]; then PYTHON3_BIN=/opt/homebrew/bin/python3.12
+  elif [ -x /usr/bin/python3 ]; then PYTHON3_BIN=/usr/bin/python3
+  fi
+fi
+case "$PYTHON3_BIN" in
+  /*) [ -f "$PYTHON3_BIN" ] && [ -x "$PYTHON3_BIN" ] \
+    || die "python3 interpreter missing or not executable: ${PYTHON3_BIN:-none found} (set PYTHON3_BIN to an absolute python3)" ;;
+  *) die "PYTHON3_BIN must be an absolute path, got: $PYTHON3_BIN" ;;
+esac
 T3_DEV_LIB_ONLY=1
 # shellcheck disable=SC1090
 . "$T3_DEV"
@@ -39,18 +54,17 @@ T3_DEV_LIB_ONLY=0
 # tool's refusals are attributed correctly (attack finding 14).
 die() { echo "team_server: $1" >&2; exit 1; }
 # t3_dev.sh guards reused below: realpath_of, check_home_safe (HOME_DIR),
-# port_forbidden, port_busy. Its own DEV_ROOT/HOME_DIR are re-pointed per call.
-
-REAL_T3_RESOLVED=""  # set below, after resolve_path exists
+# port_forbidden, port_busy, canonical_port. Its own DEV_ROOT/HOME_DIR are
+# re-pointed per call.
 
 # Resolve a possibly-nonexistent path fully (symlinks resolved on the existing
 # prefix, like os.path.realpath strict=False). Unlike realpath_of, this works
 # for paths that do not exist yet (fresh roots, a HOME without ~/.t3).
-PYTHON3_BIN=$(command -v python3 2>/dev/null || echo /usr/bin/python3)
 resolve_path() {
   "$PYTHON3_BIN" -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"
 }
 REAL_T3_RESOLVED=$(resolve_path "$HOME/.t3")
+[ -n "$REAL_T3_RESOLVED" ] || die "cannot resolve $HOME/.t3 (realpath of HOME failed)"
 
 # Refuse a root that is, contains, or resolves (incl. symlinks) into ~/.t3,
 # BEFORE any directory is created. Returns 1 (does not die: callers run this
@@ -96,9 +110,13 @@ cmd_selftest() {
   fail=0
   port_forbidden 3773 && echo "guard 3773 forbidden: ok" || { echo "guard 3773 forbidden: FAIL"; fail=1; }
   port_forbidden 3774 && echo "guard 3774 forbidden: ok" || { echo "guard 3774 forbidden: FAIL"; fail=1; }
-  port_forbidden 3805 || echo "guard 3805 allowed: ok" || { echo "guard 3805 allowed: FAIL"; fail=1; }
+  # F9: the old `port_forbidden 3805 || echo ok || { FAIL }` could never
+  # fail — the middle echo always succeeded, so a broken guard passed
+  # selftest. Each allowed/refused guard is now an if-test of the guard
+  # itself. Same for label_valid.
+  if port_forbidden 3805; then echo "guard 3805 allowed: FAIL"; fail=1; else echo "guard 3805 allowed: ok"; fi
   label_valid com.mastermind.t3-team && echo "label valid form: ok" || { echo "label valid form: FAIL"; fail=1; }
-  label_valid "bad label;rm" || echo "label invalid refused: ok" || { echo "label invalid refused: FAIL"; fail=1; }
+  if label_valid "bad label;rm"; then echo "label invalid refused: FAIL"; fail=1; else echo "label invalid refused: ok"; fi
   ( root_is_safe "$HOME/.t3" ) >/dev/null 2>&1 && { echo "guard root=~/.t3 refuse: FAIL"; fail=1; } \
     || echo "guard root=~/.t3 refuse: ok"
   ( root_is_safe "$HOME/.t3/team" ) >/dev/null 2>&1 && { echo "guard root inside ~/.t3 refuse: FAIL"; fail=1; } \
@@ -128,7 +146,11 @@ require_root_label() {
 wait_http() {
   _port="$1"; _want="${2:-60}"; _i=0
   while [ "$_i" -lt "$_want" ]; do
-    _code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$_port/" 2>/dev/null || echo 000)
+    # F20: on a connection failure curl prints 000 AND exits non-zero, so
+    # `|| echo 000` produced "000000". Capture, then default only an empty
+    # result.
+    _code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$_port/" 2>/dev/null) || _code=""
+    [ -n "$_code" ] || _code=000
     [ "$_code" = "200" ] && return 0
     _i=$((_i + 1)); sleep 1
   done
@@ -152,6 +174,10 @@ banner_filter() {
 # job): then the live token is the last complete banner in the whole log.
 # The existing access.txt is replaced only when a banner was actually found,
 # so a failed capture can never truncate the live credential away.
+# F11/F29: capture returns 0 on success and 1 when no complete banner was
+# found — the caller decides what that means (a server that is up must not
+# be reported as a failed install step). The mv is checked and a directory
+# in place of the credential file is refused, not silently swallowed.
 capture_access() {
   _log="$ROOT/run/server.log"; _acc="$ROOT/run/access.txt"; _tmp="$_acc.new"
   _off=$(stat -f%z "$_log" 2>/dev/null || echo 0)
@@ -166,18 +192,34 @@ capture_access() {
     # nothing new was appended while waiting: the server was already up and
     # its live token is the last complete banner in the whole log.
     banner_filter < "$_log" > "$_tmp" 2>/dev/null || true
-    grep -q '^Pairing URL:' "$_tmp" 2>/dev/null \
-      || { rm -f "$_tmp"; die "no complete pairing banner found in $_log"; }
+    grep -q '^Pairing URL:' "$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 1; }
   fi
   # umask 077 made the temp 0600; a chmod failure here is a live credential
   # sitting world-readable — fatal, never swallowed (attack finding 9).
   chmod 600 "$_tmp" 2>/dev/null || { rm -f "$_tmp"; die "cannot secure $_acc"; }
-  mv "$_tmp" "$_acc"
+  [ -d "$_acc" ] && { rm -f "$_tmp"; die "$_acc exists as a directory; move it away"; }
+  mv "$_tmp" "$_acc" 2>/dev/null || { rm -f "$_tmp"; die "cannot install $_acc"; }
+  return 0
+}
+
+# F17: small config files (run/port, config/server-bin) are written to a
+# temp and renamed into place, so a kill mid-write can never leave a partial
+# value for the runner to exec with.
+atomic_write() {
+  _f="$1"; _c="$2"; _t="$_f.new"
+  [ -d "$_f" ] && die "$_f exists as a directory; move it away"
+  rm -f "$_t" || die "cannot clear stale temp: $_t"
+  printf '%s\n' "$_c" > "$_t" || { rm -f "$_t"; die "cannot write $_f"; }
+  mv "$_t" "$_f" || { rm -f "$_t"; die "cannot install $_f"; }
 }
 
 cmd_install() {
   [ -n "$PORT" ] || die "missing --port"
-  case "$PORT" in ''|*[!0-9]*) die "port must be an integer" ;; esac
+  # F10: canonical decimal only. A leading zero ("03773") passed the old
+  # integer check while curl/nc/Node all stripped it — installing straight
+  # onto a live T3 server's port.
+  canonical_port "$PORT" \
+    || die "port must be a canonical decimal integer 1024..65535 without leading zero, got: $PORT"
   require_root_label
   label_valid "$LABEL" || die "invalid label: $LABEL"
   port_forbidden "$PORT" && die "port $PORT is reserved for the live T3 servers"
@@ -277,14 +319,21 @@ PYLOCK
       chmod 700 "$ROOT/$_d" || die "cannot tighten $ROOT/$_d to 0700"
     fi
   done
-  mkdir -p "$ROOT/home/userdata" "$ROOT/run" "$ROOT/bin" "$ROOT/config" "$ROOT/scratch-project" "$ROOT/claude-home"
-  cp "$REPO_DIR/tools/mmos_team_server/server_runner.sh" "$ROOT/bin/server_runner.sh"
-  cp "$REPO_DIR/tools/mmos_team_server/node_install.py" "$ROOT/bin/node_install.py"
-  chmod 700 "$ROOT/bin/node_install.py"
-  chmod 700 "$ROOT/bin/server_runner.sh"
-  printf '%s\n' "$PORT" > "$ROOT/run/port"
-  printf '%s\n' "$SERVER_BIN" > "$ROOT/config/server-bin"
-  : > "$ROOT/run/server.log"; chmod 600 "$ROOT/run/server.log"
+  mkdir -p "$ROOT/home/userdata" "$ROOT/run" "$ROOT/bin" "$ROOT/config" "$ROOT/scratch-project" "$ROOT/claude-home" \
+    || die "cannot create root subdirectories under $ROOT"
+  # F18: an unchecked cp left the plist pointing at a missing runner and
+  # surfaced 90 s later as "server did not answer". Every copy is checked.
+  cp "$REPO_DIR/tools/mmos_team_server/server_runner.sh" "$ROOT/bin/server_runner.sh" \
+    || die "cannot copy server_runner.sh into $ROOT/bin"
+  cp "$REPO_DIR/tools/mmos_team_server/node_install.py" "$ROOT/bin/node_install.py" \
+    || die "cannot copy node_install.py into $ROOT/bin"
+  chmod 700 "$ROOT/bin/node_install.py" || die "cannot chmod $ROOT/bin/node_install.py"
+  chmod 700 "$ROOT/bin/server_runner.sh" || die "cannot chmod $ROOT/bin/server_runner.sh"
+  # F17: temp+rename so a kill cannot leave a partial port or server-bin.
+  atomic_write "$ROOT/run/port" "$PORT"
+  atomic_write "$ROOT/config/server-bin" "$SERVER_BIN"
+  : > "$ROOT/run/server.log" || die "cannot truncate $ROOT/run/server.log"
+  chmod 600 "$ROOT/run/server.log" || die "cannot chmod $ROOT/run/server.log"
   mkdir -p "$(plist_dir)"
   cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -314,10 +363,35 @@ EOF
   env -i /bin/launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null \
     || launchctl load -w "$PLIST" 2>/dev/null \
     || die "launchctl bootstrap failed for $LABEL"
-  wait_http "$PORT" 90 || { launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null; die "server did not answer on 127.0.0.1:$PORT; see $ROOT/run/server.log"; }
-  capture_access
-  echo "INSTALLED label=$LABEL root=$ROOT port=$PORT server_bin=$SERVER_BIN"
-  echo "pairing access saved to $ROOT/run/access.txt (mode 0600; not printed)"
+  # F15/F29: separate the two failure kinds. A server that answered is never
+  # a failed install step (banner capture may legitimately miss); a server
+  # that never answered gets a cleanup whose OWN result is checked and
+  # reported truthfully.
+  if ! wait_http "$PORT" 90; then
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
+    sleep 1
+    if label_loaded "$LABEL"; then
+      die "server did not answer on 127.0.0.1:$PORT and cleanup FAILED: label $LABEL is STILL LOADED (KeepAlive will crash-loop it) — run: launchctl bootout gui/$(id -u)/$LABEL — then see $ROOT/run/server.log"
+    fi
+    die "server did not answer on 127.0.0.1:$PORT; the label was unloaded; see $ROOT/run/server.log"
+  fi
+  if capture_access; then
+    echo "INSTALLED label=$LABEL root=$ROOT port=$PORT server_bin=$SERVER_BIN"
+    echo "pairing access saved to $ROOT/run/access.txt (mode 0600; not printed)"
+  else
+    # F29: the server is up and answering; a missing banner is not a failed
+    # install. Say it plainly and name the recovery command.
+    echo "INSTALLED label=$LABEL root=$ROOT port=$PORT server_bin=$SERVER_BIN"
+    echo "pairing access was NOT captured (no complete banner in $ROOT/run/server.log); to retry: $0 capture --root $ROOT --label $LABEL"
+  fi
+}
+
+cmd_capture() {
+  require_root_label
+  [ -f "$ROOT/run/server.log" ] || die "no $ROOT/run/server.log; run install first"
+  capture_access \
+    && echo "pairing access saved to $ROOT/run/access.txt (mode 0600; not printed)" \
+    || die "no complete pairing banner found in $ROOT/run/server.log"
 }
 
 cmd_start() {
@@ -325,25 +399,50 @@ cmd_start() {
   PLIST="$(plist_dir)/$LABEL.plist"
   [ -f "$PLIST" ] || die "no plist for $LABEL at $PLIST; run install"
   PORT=$(cat "$ROOT/run/port" 2>/dev/null) || die "no port file; run install"
+  # F21: an empty or non-canonical port file must refuse now, not spin for
+  # 90 s inside wait_http (the old `[ -z ... ] || die` never fired on "").
+  canonical_port "$PORT" || die "port file holds a non-canonical port: '$PORT'; re-run install"
   if label_loaded "$LABEL"; then
     launchctl kickstart "gui/$(id -u)/$LABEL" || die "kickstart failed"
   else
     env -i /bin/launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || launchctl load -w "$PLIST" 2>/dev/null || die "bootstrap failed"
   fi
   wait_http "$PORT" 90 || die "server did not answer on 127.0.0.1:$PORT"
-  capture_access
-  echo "STARTED label=$LABEL port=$PORT"
+  if capture_access; then
+    echo "STARTED label=$LABEL port=$PORT"
+  else
+    echo "STARTED label=$LABEL port=$PORT"
+    echo "pairing access was NOT captured (no complete banner in $ROOT/run/server.log); to retry: $0 capture --root $ROOT --label $LABEL"
+  fi
 }
 
 cmd_stop() {
   require_root_label
+  PLIST="$(plist_dir)/$LABEL.plist"
   if label_loaded "$LABEL"; then
-    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || launchctl unload -w "$(plist_dir)/$LABEL.plist" 2>/dev/null
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null \
+      || launchctl unload -w "$PLIST" 2>/dev/null
+  fi
+  # F14: report one of exactly three truthful states. The old code ignored
+  # bootout's own failure, sampled the port once, and printed
+  # "STOPPED ... free" while KeepAlive was restarting the server.
+  _i=0
+  while label_loaded "$LABEL" && [ "$_i" -lt 10 ]; do _i=$((_i + 1)); sleep 1; done
+  if label_loaded "$LABEL"; then
+    die "STOP_FAILED label=$LABEL is still loaded; run by hand: launchctl bootout gui/$(id -u)/$LABEL"
   fi
   PORT=$(cat "$ROOT/run/port" 2>/dev/null || echo "")
-  [ -n "$PORT" ] && ! port_busy "$PORT" && echo "STOPPED label=$LABEL port=$PORT free" && return 0
-  [ -z "$PORT" ] && echo "STOPPED label=$LABEL" && return 0
-  die "label booted out but port $PORT still busy (unknown owner)"
+  if [ -z "$PORT" ]; then
+    echo "STOPPED label=$LABEL (no port file)"
+    return 0
+  fi
+  _j=0
+  while port_busy "$PORT" && [ "$_j" -lt 10 ]; do _j=$((_j + 1)); sleep 1; done
+  if port_busy "$PORT"; then
+    die "STOPPED label=$LABEL (unloaded) but port $PORT is still held by another process (unknown owner); find it: lsof -nP -iTCP:$PORT -sTCP:LISTEN"
+  fi
+  echo "STOPPED label=$LABEL port=$PORT free"
+  return 0
 }
 
 cmd_status() {
@@ -358,7 +457,9 @@ cmd_status() {
   fi
   echo "pid=${_pid:-none}"
   if [ "$PORT" != "?" ]; then
-    _code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" 2>/dev/null || echo 000)
+    # F20: same 000000 fix as wait_http.
+    _code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/" 2>/dev/null) || _code=""
+    [ -n "$_code" ] || _code=000
     echo "port=$PORT http_root=$_code"
     echo "listeners:"
     lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | tail -n +2 || true
@@ -382,7 +483,12 @@ cmd_uninstall() {
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || launchctl unload -w "$(plist_dir)/$LABEL.plist" 2>/dev/null
   fi
   PLIST="$(plist_dir)/$LABEL.plist"
-  rm -f "$PLIST"
+  # F19: the old unchecked `rm -f` printed UNINSTALLED even with the plist
+  # still on disk, so the next install died on "plist already exists".
+  rm -f "$PLIST" 2>/dev/null
+  if [ -e "$PLIST" ] || [ -L "$PLIST" ]; then
+    die "could not remove $PLIST; remove it by hand before re-installing"
+  fi
   echo "UNINSTALLED label=$LABEL (plist removed; root $ROOT left in place)"
 }
 
@@ -397,6 +503,7 @@ case "$COMMAND" in
   stop) cmd_stop ;;
   status) cmd_status ;;
   doctor) cmd_doctor ;;
+  capture) cmd_capture ;;
   uninstall) cmd_uninstall ;;
   selftest) cmd_selftest ;;
   *) usage ;;

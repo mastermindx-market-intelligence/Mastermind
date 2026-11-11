@@ -288,6 +288,24 @@ class TestAttackRoundFixes:
         # default must be gone from the script text.
         root = tmp_path / "root"
         run = root / "run"
+        cfg = root / "config"
+        run.mkdir(parents=True)
+        cfg.mkdir(parents=True)
+        (root / "fabric.env").write_text("DUMMY=1\n")
+        (root / "fabric.env").chmod(0o600)
+        (cfg / "python3-path").write_text("/opt/homebrew/bin/python3.12\n")
+        (run / "port").write_text(str(free_port()))
+        r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
+                           capture_output=True, text=True, timeout=30)
+        assert r.returncode == 78
+        assert "refusing to guess" in (r.stdout + r.stderr)
+        assert ".t3/bin/t3" not in RUNNER.read_text()
+
+    def test_runner_refuses_without_recorded_interpreter(self, tmp_path):
+        # Item 13: no recorded interpreter means a one-line refusal — never a
+        # PATH search for python3.
+        root = tmp_path / "root"
+        run = root / "run"
         run.mkdir(parents=True)
         (root / "fabric.env").write_text("DUMMY=1\n")
         (root / "fabric.env").chmod(0o600)
@@ -295,8 +313,51 @@ class TestAttackRoundFixes:
         r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
                            capture_output=True, text=True, timeout=30)
         assert r.returncode == 78
-        assert "refusing to guess" in (r.stdout + r.stderr)
-        assert ".t3/bin/t3" not in RUNNER.read_text()
+        assert "python3-path" in (r.stdout + r.stderr)
+        # and a relative or non-executable recording is refused just the same
+        for bad in ("usr/bin/python3", "/nonexistent/python3"):
+            (root / "config").mkdir(exist_ok=True)
+            (root / "config" / "python3-path").write_text(bad + "\n")
+            r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
+                               capture_output=True, text=True, timeout=30)
+            assert r.returncode == 78, bad
+            assert "python3-path" in (r.stdout + r.stderr)
+
+    def test_runner_refuses_non_canonical_port_file(self, tmp_path):
+        # F21: an empty or leading-zero port file must refuse at the runner,
+        # not pass through to T3CODE_PORT.
+        root = tmp_path / "root"
+        run = root / "run"
+        cfg = root / "config"
+        run.mkdir(parents=True)
+        cfg.mkdir(parents=True)
+        (root / "fabric.env").write_text("DUMMY=1\n")
+        (root / "fabric.env").chmod(0o600)
+        (cfg / "python3-path").write_text("/opt/homebrew/bin/python3.12\n")
+        (cfg / "server-bin").write_text("/usr/bin/false\n")
+        for bad in ("", "03773", "65536", "37x3"):
+            (run / "port").write_text(bad + "\n")
+            r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
+                               capture_output=True, text=True, timeout=30)
+            assert r.returncode == 78, repr(bad)
+            assert "non-canonical port" in (r.stdout + r.stderr), repr(bad)
+
+    def test_runner_fails_closed_when_run_dir_cannot_exist(self, tmp_path):
+        # F28: a read-only root must produce one operator-readable line, not a
+        # python traceback every ThrottleInterval.
+        root = tmp_path / "root"
+        root.mkdir()
+        (root / "fabric.env").write_text("DUMMY=1\n")
+        (root / "fabric.env").chmod(0o600)
+        root.chmod(0o500)  # read+execute only: run/ cannot be created
+        try:
+            r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
+                               capture_output=True, text=True, timeout=30)
+            assert r.returncode == 73
+            assert "cannot create" in (r.stdout + r.stderr)
+            assert "Traceback" not in (r.stdout + r.stderr)
+        finally:
+            root.chmod(0o700)
 
 
 class TestRunnerHygiene:
@@ -328,6 +389,7 @@ class TestRunnerHygiene:
         cfg.mkdir(parents=True)
         (root / "fabric.env").write_text("DUMMY=1\n")
         (root / "fabric.env").chmod(0o600)
+        (cfg / "python3-path").write_text("/opt/homebrew/bin/python3.12\n")
         (cfg / "server-bin").write_text("/usr/bin/false\n")
         (cfg / "log-cap").write_text("1024\n")
         (run / "port").write_text(str(free_port()))
