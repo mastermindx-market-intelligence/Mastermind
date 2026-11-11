@@ -102,3 +102,13 @@ def test_missing_files_and_unavailable_port_are_uncertain_not_success():
     assert "UPSTREAM_COO_AUTH_CHALLENGE_UNPROVEN" in output["problems"]
     assert "LOCAL_OAUTH_DISCOVERY_UNAVAILABLE" in output["problems"]
     assert output["status"] == "BLOCKED"
+
+
+def test_untrusted_scope_values_do_not_crash_or_claim_readiness():
+    args = list(good())
+    args[0]["coo"]["policy"]["required_scopes"] = [{"unexpected": "object"}, READ_SCOPE]
+    args[4]["json"]["scopes_supported"] = [{"unexpected": "object"}]
+    output = result(args)
+    assert output["status"] == "BLOCKED"
+    assert "COO_SCOPE_CONTRACT_INVALID" in output["problems"]
+    assert "LOCAL_MCP_ROLE_SCOPES_INVALID" in output["problems"]
