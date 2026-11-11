@@ -1118,9 +1118,23 @@ def _wrapper_shaped(word: str) -> bool:
     ``/`` and every launch shape admits any path prefix. Glued fragments
     (``system(poo*``, ``--flag=po*``) are tested too: inside a program
     string or attached flag value the CHILD shell re-expands them
-    (REVIEW_2329 r5 B-1c)."""
-    candidates = [word] + [
-        fragment for fragment in re.split(r"[()\[\]\"',=]", word) if fragment
+    (REVIEW_2329 r5 B-1c). The closing backtick of a command substitution
+    is a fragment boundary as well (r10, REVIEW_2329 r8 B-R8-1): a
+    whole-command substitution glues its CLOSER to the last word of its
+    text (`` `echo poo*` `` → the word `` poo*` ``), and that output
+    re-parses as the command line, so the glued fragment `` poo* `` is
+    judged exactly like the `` poo*) `` sibling the ``)`` boundary already
+    covered. The strip candidate keeps the CLOSER pure glue: a word whose
+    only wrapper evidence hides behind a brace group is dismembered by the
+    ``,`` boundary (a ``po{o,}l`` word glued to its closer fragments to
+    ``po{o``/``}l``, neither wrapper-shaped), so the closer-stripped whole
+    word is tested too and the brace pattern translation judges it intact
+    (``po{o,}l`` → ``pool``/``pol``; the ``po{l,}l`` spelling can only
+    produce ``poll``/``pol``, never a wrapper basename)."""
+    candidates = [word, word.rstrip("`")] + [
+        fragment
+        for fragment in re.split(r"[()\[\]\"',=`]", word)
+        if fragment
     ]
     for candidate in candidates:
         if not _expansion_dependent(candidate):
@@ -1383,6 +1397,16 @@ def _deny_computed_launch(canon: str, raw: str | None = None) -> None:
       (a substituted ``git describe --dirty``) still reduce and stay
       allowed: the refusal is the payload's own
       wrapper-shaped/expansion-dependent launch, never the backtick.
+    * r10 (REVIEW_2329 r8 B-R8-1): the CLOSING backtick glued to a
+      wrapper-shaped word is a fragment boundary too — a whole-command
+      substitution's output re-parses as the command line
+      (`` `echo poo*` `` → ``pool`` executed), and without the closer in
+      :func:`_wrapper_shaped`'s split class the glued word `` poo*` `` was
+      never judged wrapper-shaped while the token-free leg admitted before
+      the `` `echo `` head word could be judged. The closer-stripped whole
+      word is tested as well: the ``,`` fragment boundary dismembers brace
+      words, so `` `echo po{o,}l` `` (→ ``pool``, live-truthed) is judged
+      through the intact pattern translation.
     * r8 (REVIEW_2329 r6 B-R6-2/M-R6-1): a shell keyword/prefix head
       (if/while/until/elif/!/time/…) does not occupy its segment's command
       slot — the word the shell EXECUTES after it (the loop/conditional's

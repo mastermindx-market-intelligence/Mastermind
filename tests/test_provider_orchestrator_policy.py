@@ -3821,3 +3821,122 @@ def test_r9_unarmed_sessions_keep_the_backtick_shapes_allowed(
     ):
         guard.guard_bash(_payload(cwd, command), {"command": command})
         assert capsys.readouterr().out == "", command
+
+
+# --- rework r10: round-8 posture review blocker (B-R8-1) ------------------------
+#
+# REVIEW_2329 r8 measured the CLOSING backtick of a whole-command
+# substitution ADMITTED token-free while it glued the substitution's last
+# word to a wrapper-shaped glob: `` `echo poo*` `` was ALLOW armed and
+# live-executed (the substitution's OUTPUT re-parses as the command line,
+# word-splits and glob-expands, and ``pool`` becomes the COMMAND). The
+# `_wrapper_shaped` fragment split carried the ``(``/``)`` glue boundaries
+# but not the backtick closer, so `` poo*` `` was never judged by its
+# `` poo* `` fragment — and the token-free leg returned ADMIT before
+# `_computed_command_word` could judge the `` `echo `` head word. The r10
+# fix adds the closer to the split class AND tests the closer-stripped
+# whole word, because the ``,`` boundary dismembers brace words
+# (``po{o,}l\``` → ``po{o``/``}l``): the brace spelling that reaches the
+# wrapper (`` `echo po{o,}l` `` → ``pool pol``, live-truthed) is judged
+# intact through the pattern translation. The r8 prose specimen
+# `` `echo po{l,}l` `` expands to ``poll``/``pol`` — live-truthed it
+# executes ``poll``, never a wrapper basename — so it stays ALLOW under
+# the wrapper-evidence doctrine (no wrapper name reachable), the same
+# class as `` `git describe --dirty` ``.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # The two r8-measured shapes plus the corrected brace spelling:
+        # every substitution whose OUTPUT re-parses into a wrapper name.
+        "`echo poo*`",
+        "`echo su?.sh`",
+        "`echo po{o,}l`",
+    ],
+    ids=["glob-closer", "qmark-closer", "brace-closer"],
+)
+def test_r10_br81_glued_backtick_closer_output_reparse_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+def test_r10_backtick_head_word_judgment_fires(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # The head-word judgment now fires: the refusal names the GLUED word
+    # (`` poo*` ``) behind the `` `echo `` head — the shape the r8 trace
+    # showed unreachable because the token-free leg admitted first.
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, "`echo poo*`")
+    output = _emitted(capsys)
+    assert "poo*`" in output["permissionDecisionReason"]
+    assert "`echo" in output["permissionDecisionReason"]
+
+
+def test_r10_whole_command_substitution_pure_data_stays_allowed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Controls: a whole-command substitution whose output feeds nothing
+    # wrapper-shaped stays allowed. `` `echo po{l,}l` `` is pinned here on
+    # live-truth evidence: brace expansion produces ``poll``/``pol``, and
+    # ``poll`` is not a wrapper basename (REVIEW_2329 r8 named this shape
+    # "→ pool"; the expansion never yields ``pool`` — see the r10 block
+    # comment above). The r9-era pure-data substitutions re-prove the
+    # closer did not disturb them.
+    _install(monkeypatch, tmp_path, _binding())
+    for command in (
+        "`git describe --dirty`",
+        "`echo po{l,}l`",
+        "echo `date`",
+        "cat `pwd`",
+        "echo `echo hi`",
+        "cat `git describe --dirty`",
+    ):
+        _guard_launch(shared_placement, command)
+        assert capsys.readouterr().out == "", command
+
+
+def test_r10_unarmed_sessions_keep_the_glued_closer_shapes_allowed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Scoped arming (the r7/r9 unarmed pattern): the r10 closer rule lives
+    # only inside the armed `_deny_computed_launch`.
+    home = tmp_path / "home"
+    cwd = home / "lanes" / "work"
+    cwd.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("MASTERMIND_CI_POLL_STATE_DIR", str(tmp_path / "poll-state"))
+    for name in (
+        "MASTERMIND_SHARED_PLACEMENT",
+        "POOL_EXECUTION_BINDING",
+        "MASTERMIND_PLACEMENT_RECEIPT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    for command in (
+        "`echo poo*`",
+        "`echo su?.sh`",
+        "`echo po{o,}l`",
+        "`echo po{l,}l`",
+    ):
+        guard.guard_bash(_payload(cwd, command), {"command": command})
+        assert capsys.readouterr().out == "", command
