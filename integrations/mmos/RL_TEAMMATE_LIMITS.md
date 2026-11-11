@@ -103,10 +103,15 @@ generates byte-identical permissions to today's (regression test
   (top-level names only).
 - **Web tools** remain unrestricted for all teammates (Q5, evidence 07);
   a domain allowlist is not enforceable under bypass (allow rules inert).
-- **The 203-deny real file grows to roughly 400-600 rules** under the
-  rooted keys (enumeration of `/`, the user folder, and the chain). Rule
-  matching is per-tool-call string work; no size problem is expected, but
-  the reviewer should sanity-check a generated file.
+- **Deny beats allow at any specificity** (evidence 09b): a more-specific
+  allow inside a tree deny does NOT unlock the subtree. There is no
+  gitignore-style cascade, so a compact deny/allow cascade is impossible
+  and the enumeration must be precise.
+- **The 203-deny real file grows to ~5,000 deny rules** under the rooted
+  keys (measured on this Mac: 838 non-chain sibling paths across the
+  chain levels — 710 of them in the user home alone — times 6 rules each,
+  ~300 KB). The round-2 dev proof validates that the CLI loads and
+  enforces a generated file of that shape.
 
 ## 5. Safe session restart (for installing new limits)
 
