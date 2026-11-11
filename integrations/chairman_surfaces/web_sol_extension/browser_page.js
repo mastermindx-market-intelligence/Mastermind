@@ -272,24 +272,31 @@
             // their model (they re-normalize plain \n to spaces). Insert
             // through the editor's own pipeline instead: select everything,
             // then insertText per line with insertParagraph between lines, so
-            // paragraphs become the block structure the editor expects.
+            // paragraphs become the block structure the editor expects. The
+            // insertion feed normalizes CRLF to LF first — execCommand renders
+            // a CR as a paragraph break of its own, which would double every
+            // CRLF into a blank line.
+            const feed = params.text.replace(/\r\n?/g, "\n");
             const insertViaEditor = () => {
               const selection = win.getSelection();
               if (!selection || typeof doc.execCommand !== "function") return false;
               selection.selectAllChildren(node);
-              const lines = params.text.split("\n");
+              const lines = feed.split("\n");
               for (let i = 0; i < lines.length; i++) {
                 if (lines[i] && !doc.execCommand("insertText", false, lines[i])) return false;
                 if (i < lines.length - 1 && !doc.execCommand("insertParagraph")) return false;
               }
               return true;
             };
-            const target = params.text.length - (params.text.match(/\n/g) || []).length;
             let inserted = false;
             try { inserted = insertViaEditor(); } catch (_) { inserted = false; }
-            // Whole-text fallback: identical to the previous behavior, still a
-            // complete replacement (never partial), but without paragraphs.
-            if (!inserted || node.innerText.replace(/\n/g, "").length < target) {node.textContent = params.text; insertionPath = "fallback";}
+            // Whole-text fallback ONLY when the editor pipeline genuinely
+            // refused (execCommand returned false or threw). Never as a
+            // length-heuristic second guess: innerText collapses runs of
+            // spaces in the render, so a length check mis-judges correct
+            // insertions and destroys their paragraph structure. The honest
+            // verdict on what the box holds is the receipt comparison.
+            if (!inserted) {node.textContent = params.text; insertionPath = "fallback";}
           } else {
             const proto = node.tagName === "INPUT" ? win.HTMLInputElement.prototype : win.HTMLTextAreaElement.prototype;
             const setter = Object.getOwnPropertyDescriptor(proto, "value").set;

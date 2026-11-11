@@ -115,17 +115,16 @@ const fixture = `<!doctype html><html><head><title>Fill receipt fixture</title><
       assert.equal((r.data.normalizations||[]).includes("blank-line-render"),false,
         "a real dropped line must not hide behind the render artifact normalization");
     }
-    // CRLF: the editor pipeline breaks on it (execCommand treats CR as a
-    // paragraph), so this fill runs the byte-exact whole-text fallback and
-    // the receipt verifies it through textContent — the actual carrier — not
-    // through innerText, which only renders the break as a space.
+    // CRLF: since the repair-4 insertion-feed normalization (item B1) each
+    // CRLF becomes exactly one real paragraph on the editor pipeline, and the
+    // receipt names crlf-to-lf. (The byte-exact textContent fallback for a
+    // genuinely failing pipeline is proven in browser_fill_structure_playwright.cjs.)
     {
       const r=await fill("plain editable","a\r\nb");
-      assert.equal(r.effect,"APPLIED","byte-exact fallback holds the CRLF");
-      assert.equal(r.data.insertion_path,"fallback");
-      assert.equal(r.data.read_back,"textContent");
-      assert.deepEqual(r.data.normalizations,[]);
-      assert.equal(await page.evaluate(()=>document.getElementById("plain").textContent),"a\r\nb");
+      assert.equal(r.effect,"APPLIED","CRLF becomes one paragraph break");
+      assert.equal(r.data.insertion_path,"editor");
+      assert.deepEqual((r.data.normalizations||[]).slice().sort(),["crlf-to-lf"]);
+      assert.equal(await box("plain"),"a\nb");
     }
     // Tab: the editor pipeline inserts it literally — the DOM text holds the
     // real tab — and innerText renders the tab as a space, so the receipt
@@ -189,7 +188,7 @@ const fixture = `<!doctype html><html><head><title>Fill receipt fixture</title><
     console.log(JSON.stringify({state:"PASS",proof:"isolated Chromium DOM fixture",
       cases:["stale empty fill","append-not-replace","editor rewrote (grew)","editor truncated",
              "editor reverted","blank-line dropped is a mismatch",
-             "CRLF/tab byte-exact fallback verified through textContent",
+             "CRLF one-paragraph-per-line + tab rendered collapsed, both named",
              "blank-line render + trailing-break drift named as normalizations",
              "faithful apply carries receipt fields (nbsp render named)",
              "textarea CRLF normalized + tab/trailing-space preserved",
