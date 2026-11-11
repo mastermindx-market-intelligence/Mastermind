@@ -724,9 +724,15 @@ class CodingJobDoor:
                 continue
             try:
                 # Mint/verify the door's worker token file (never printed).
+                # Finding 8 (R4b review): the target is REQUIRED and pinned —
+                # the mint is refused unless the pinned home's own runtime
+                # state names the pinned dev port, so the pairing CLI can
+                # never fall back to the live app (3773).
                 proof.obtain_mcp_access_token(
                     str(self.config.t3_token_path),
-                    self.config.t3_token_label)
+                    self.config.t3_token_label,
+                    base_url=self.config.t3_proof_base,
+                    home_dir=self.config.t3_home_dir)
                 break
             except Exception as exc:  # noqa: BLE001 - dev server may be down
                 _log(f"worker token unavailable (dev T3 server down?): "

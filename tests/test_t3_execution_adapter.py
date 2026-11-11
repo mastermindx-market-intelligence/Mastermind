@@ -1810,7 +1810,8 @@ class T3LiveProofHarnessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             Path(harness.REPO).resolve(), Path(__file__).resolve().parent.parent
         )
-        mcp = harness.McpHttp("unused-token")
+        mcp = harness.McpHttp(
+            "unused-token", "http://127.0.0.1:3799/mcp")  # explicit target (finding 8)
         port = harness.LiveT3McpPort(mcp, _session_token())
         self.assertEqual(port.authenticated_namespace(), f"client:{_SID}")
         cases = [
@@ -1870,7 +1871,8 @@ class A4HarnessTests(unittest.IsolatedAsyncioTestCase):
         from unittest import mock
 
         harness = _import_live_proof_harness("t3_live_proof")
-        mcp = harness.McpHttp("unused-token")
+        mcp = harness.McpHttp(
+            "unused-token", "http://127.0.0.1:3799/mcp")  # explicit target (finding 8)
         declared = {"jsonrpc": "2.0", "id": 1, "result": {"isError": True, "content": [
             {"type": "text", "text": _json.dumps({"_tag": "OrchestratorMcpFailure",
                                                  "code": "orchestration_error",
