@@ -318,6 +318,120 @@ BANNED = ("token", "secret", "password", "bearer", "authorization",
           "credential", "api_key", "api-key")
 
 
+# ── Repair 1: the wait survives transient bridge hiccups; honest exits ──────
+
+
+class ScriptedBridge:
+    """A BridgeSocketClient stand-in with a canned request script, for the
+    wait-loop resilience tests (panel B N1/N3/L10/L11)."""
+
+    def __init__(self, socket_path,
+                 timeout=gbl_ask.REQUEST_TIMEOUT_SECONDS, script=()):
+        self.script: list[tuple] = list(script)
+        self.calls: list[tuple[str, dict]] = []
+
+    def request(self, op: str, arguments: dict) -> dict:
+        self.calls.append((op, dict(arguments)))
+        if not self.script:
+            raise gbl_ask.AskCliError("BRIDGE_UNREACHABLE", "scripted")
+        step = self.script.pop(0)
+        if step[0] == "raise":
+            raise gbl_ask.AskCliError(step[1], "scripted")
+        return dict(step[1])
+
+
+def run_scripted(capsys, monkeypatch, script, *args) -> tuple[int, str]:
+    import functools
+    monkeypatch.setattr(gbl_ask, "BridgeSocketClient",
+                        functools.partial(ScriptedBridge, script=script))
+    command, *rest = args
+    rc = gbl_ask.main([command, "--socket", "/tmp/gbl-fixture.sock",
+                       "--bot", BOT, *rest])
+    captured = capsys.readouterr()
+    return rc, captured.out + captured.err
+
+
+NOT_YET = {"status": "NOT_YET", "ask_id": "gb-" + "1" * 32}
+ANSWERED = {"status": "ANSWER_UNCONSUMED", "ask_id": "gb-" + "1" * 32,
+            "answer_id": "gbm-" + "2" * 32, "answer": ANSWER}
+
+
+class TestWaitResilience:
+    def test_wait_retries_past_a_transient_unreachable(self, capsys,
+                                                       monkeypatch):
+        rc, out = run_scripted(
+            capsys, monkeypatch,
+            [("result", NOT_YET), ("raise", "BRIDGE_UNREACHABLE"),
+             ("result", ANSWERED)],
+            "fetch", "--id", "gb-" + "1" * 32, "--wait",
+            "--poll-seconds", "0.05", "--deadline-seconds", "10")
+        assert rc == 0                        # not 5: a hiccup is not a verdict
+        assert ANSWER in out
+
+    def test_wait_unreachable_at_the_deadline_exits_2(self, capsys,
+                                                      monkeypatch):
+        rc, out = run_scripted(
+            capsys, monkeypatch, [("raise", "BRIDGE_UNREACHABLE")],
+            "fetch", "--id", "gb-" + "1" * 32, "--wait",
+            "--poll-seconds", "0.05", "--deadline-seconds", "0.3")
+        assert rc == 2                        # unreachable, not a typed ask error
+        assert "BRIDGE_UNREACHABLE" in out
+
+    def test_wait_invalid_response_is_transient_then_retried(self, capsys,
+                                                             monkeypatch):
+        rc, out = run_scripted(
+            capsys, monkeypatch,
+            [("raise", "BRIDGE_RESPONSE_INVALID"), ("result", ANSWERED)],
+            "fetch", "--id", "gb-" + "1" * 32, "--wait",
+            "--poll-seconds", "0.05", "--deadline-seconds", "10")
+        assert rc == 0
+
+    def test_wait_still_exits_5_on_a_typed_ask_error(self, capsys,
+                                                     monkeypatch):
+        rc, out = run_scripted(
+            capsys, monkeypatch, [("raise", "ASK_NOT_FOUND")],
+            "fetch", "--id", "gb-" + "1" * 32, "--wait",
+            "--poll-seconds", "0.05", "--deadline-seconds", "10")
+        assert rc == 5
+
+    def test_ask_reply_without_a_usable_ask_id_is_refused(self, capsys,
+                                                          monkeypatch):
+        rc, out = run_scripted(
+            capsys, monkeypatch, [("ask", {"status": "CREATED"})],
+            "ask", "--question", QUESTION)
+        assert rc == 5
+        assert "BRIDGE_RESPONSE_INVALID" in out
+        assert "ask_id=None" not in out
+
+    def test_ask_wait_never_silently_skips_on_a_bad_reply(self, capsys,
+                                                          monkeypatch):
+        rc, out = run_scripted(
+            capsys, monkeypatch, [("ask", {"status": "CREATED"})],
+            "ask", "--question", QUESTION, "--wait",
+            "--poll-seconds", "0.05", "--deadline-seconds", "1")
+        assert rc == 5
+        assert "BRIDGE_RESPONSE_INVALID" in out
+
+    @pytest.mark.parametrize("bad", ["nan", "-inf", "inf", "-1", "-0.5"])
+    def test_nonfinite_or_negative_deadline_is_a_usage_error(self, capsys,
+                                                             monkeypatch,
+                                                             bad):
+        rc, _ = run_scripted(
+            capsys, monkeypatch, [("result", NOT_YET)],
+            "fetch", "--id", "gb-" + "1" * 32, "--wait",
+            "--poll-seconds", "0.05", "--deadline-seconds", bad)
+        assert rc == 2
+
+    @pytest.mark.parametrize("bad", ["nan", "0", "-0.5", "inf"])
+    def test_nonpositive_poll_interval_is_a_usage_error(self, capsys,
+                                                        monkeypatch, bad):
+        rc, _ = run_scripted(
+            capsys, monkeypatch, [("result", NOT_YET)],
+            "fetch", "--id", "gb-" + "1" * 32, "--wait",
+            "--poll-seconds", bad, "--deadline-seconds", "1")
+        assert rc == 2
+
+
 class TestTokenHygiene:
     def test_help_offers_no_credential_option(self):
         help_text = gbl_ask.build_parser().format_help().lower()
