@@ -1,5 +1,6 @@
 mod auth;
 mod dev_log;
+mod shell_menu;
 mod shell_mode;
 mod shell_pairing;
 mod native_session_send;
@@ -185,8 +186,10 @@ fn main() {
     let app = tauri::Builder::default()
         .manage(auth::NativeAuth::new().expect("native transport configuration"))
         .manage(terminal_session::TerminalSession::new().expect("Terminal transport configuration"))
+        .manage(shell_menu::ZoomState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
+        .on_menu_event(|app, event| shell_menu::handle_event(app, event.id().as_ref()))
         .setup(move |app| {
             let handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
@@ -197,6 +200,7 @@ fn main() {
                 }
             });
             auth::start_restore(app.handle().clone());
+            shell_menu::install(app.handle())?;
             if let Some(urls) = app.deep_link().get_current()? {
                 for url in urls {
                     dispatch_auth_callback(app.handle().clone(), url);

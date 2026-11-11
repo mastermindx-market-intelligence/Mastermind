@@ -159,7 +159,6 @@ pub fn helper_is_trusted(path: &Path) -> bool {
 
     let mut prefix = PathBuf::new();
     for component in path.components() {
-        use std::path::Component;
         prefix.push(component);
         let Ok(meta) = std::fs::symlink_metadata(&prefix) else {
             return false;
