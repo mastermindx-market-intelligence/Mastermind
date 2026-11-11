@@ -184,18 +184,63 @@ test("F12: a conflicting config receipt refuses before anything is published", (
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
-test("F12: a tree published without its receipt names the hand-recovery mv", () => {
+test("FU10: an interrupted publish is healed automatically, then still refuses", () => {
+  // P23 remainder: a crash between the publish rename and the config-receipt
+  // install used to strand the root until a human ran the mv the refusal
+  // printed. The receipt now lives inside the published release; the next
+  // pack heals the config receipt itself and THEN refuses (the release IS
+  // published; a repack of the same ID is still not allowed).
+  const { tmp, home, source, root } = fixture();
+  try {
+    makeRuntime(root);
+    fs.mkdirSync(path.join(root, "runtime", ID, "dist"), { recursive: true });
+    fs.writeFileSync(path.join(root, "runtime", ID, "dist", "bin.mjs"), "x\n");
+    fs.writeFileSync(path.join(root, "runtime", ID, "PUBLISH_RECEIPT.json"),
+      JSON.stringify({ schemaVersion: 2, kind: "t3-packed-server-runtime",
+        buildDir: path.join(root, "runtime", ID, "dist"),
+        serverBin: path.join(root, "runtime", ID, "dist", "bin.mjs") }) + "\n");
+    fs.mkdirSync(path.join(root, "config"), { mode: 0o700 });
+    const run = pack(source, root, home);
+    assert.notEqual(run.status, 0);
+    assert.match(run.stderr, /already exists/);
+    assert.match(run.stdout, /PACKFinishedInterruptedPublish=/);
+    // the receipt was installed from the release, no human mv involved
+    const healed = JSON.parse(
+      fs.readFileSync(path.join(root, "config", "server-runtime.json"), "utf8"));
+    assert.equal(healed.buildDir, path.join(root, "runtime", ID, "dist"));
+    assert.ok(!fs.existsSync(path.join(root, "config", "server-runtime.json.new")));
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test("FU10: a legacy interruption (staged config tmp, no embedded receipt) heals too", () => {
   const { tmp, home, source, root } = fixture();
   try {
     makeRuntime(root);
     fs.mkdirSync(path.join(root, "runtime", ID, "dist"), { recursive: true });
     fs.mkdirSync(path.join(root, "config"), { mode: 0o700 });
-    fs.writeFileSync(path.join(root, "config", "server-runtime.json.new"), "{}\n");
+    fs.writeFileSync(path.join(root, "config", "server-runtime.json.new"),
+      JSON.stringify({ schemaVersion: 2, kind: "t3-packed-server-runtime",
+        buildDir: path.join(root, "runtime", ID, "dist"),
+        serverBin: path.join(root, "runtime", ID, "dist", "bin.mjs") }) + "\n");
     const run = pack(source, root, home);
     assert.notEqual(run.status, 0);
     assert.match(run.stderr, /already exists/);
-    assert.match(run.stderr, new RegExp(
-      `finish by hand: mv .*server-runtime\\.json\\.new .*server-runtime\\.json`));
+    assert.match(run.stdout, /PACKFinishedInterruptedPublish=/);
+    assert.ok(fs.existsSync(path.join(root, "config", "server-runtime.json")));
+    assert.ok(!fs.existsSync(path.join(root, "config", "server-runtime.json.new")));
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test("FU10: a healthy pack embeds the publish receipt in the release", () => {
+  const { tmp, home, source, root } = fixture();
+  try {
+    const run = pack(source, root, home);
+    assert.equal(run.status, 0, `pack failed:\n${run.stderr}`);
+    const rel = path.join(root, "runtime", ID);
+    assert.ok(fs.statSync(path.join(rel, "PUBLISH_RECEIPT.json")).isFile());
+    // no staged config tmp left anywhere
+    assert.ok(!fs.existsSync(path.join(root, "config", "server-runtime.json.new")));
+    assert.deepEqual(runtimeEntries(root), [ID]);
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 

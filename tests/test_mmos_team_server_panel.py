@@ -271,3 +271,182 @@ class TestR3BuildDirConstraint:
         (root / "config" / "server-runtime.json").write_text(json.dumps(receipt))
         with pytest.raises(node_install.InstallError, match="runtime"):
             node_install.runtime_paths(str(root))
+
+
+# --------------------------------------------------------------------------
+# Repair round 3 — A: the pinned Node tree is re-hashed on EVERY resolve
+# (twice per boot, ~199 MB each); that, not the (cached) server tree, is
+# what kept a launchd start in state U for minutes at load 25-107.
+# --------------------------------------------------------------------------
+
+class TestA1NodeTreeStatCache:
+    def test_a1_node_tree_stat_cache_written_and_tripwired(self, tmp_path):
+        # After one verified digest the node tree's (mode,size,mtime_ns,
+        # ctime_ns) triples are cached beside runtime/ and later verifies
+        # skip re-hashing; any change falls back to a full digest. Same
+        # tripwire semantics as the server-tree cache, proved the same way:
+        # a same-size in-place edit with mtime restored still refuses.
+        root, node, _ = packed_runtime(tmp_path)
+        node_install.runtime_paths(str(root))          # full pass, writes cache
+        cache = root / "runtime" / "node-tree-stat-cache.json"
+        assert cache.exists()
+        node_install.runtime_paths(str(root))          # cached pass, still verifies
+        before = os.stat(node)
+        body = bytearray(node.read_bytes())
+        body[0] ^= 0x01
+        node.write_bytes(bytes(body))
+        os.utime(node, ns=(before.st_atime_ns, before.st_mtime_ns))
+        with pytest.raises(node_install.InstallError, match="Node tree"):
+            node_install.runtime_paths(str(root))
+        cache.unlink()                                  # a deleted cache = slow, not wrong
+        with pytest.raises(node_install.InstallError, match="Node tree"):
+            node_install.runtime_paths(str(root))
+
+
+# --------------------------------------------------------------------------
+# Repair round 3 — C: a slow or empty lsof must never relabel our own
+# listener as "foreign". Unknown is unknown, with one retry.
+# --------------------------------------------------------------------------
+
+class TestC1AttributionUnknown:
+    def test_c1_empty_lsof_is_unknown_with_retry_not_foreign(self):
+        # First lookup returns nothing (lsof slow/failed under load), the
+        # retry finds the job's own pid: ours.
+        calls = {"n": 0}
+
+        def flaky(_port):
+            calls["n"] += 1
+            return [] if calls["n"] == 1 else [os.getpid()]
+
+        with patch.object(node_install, "_listener_pids", side_effect=flaky):
+            assert node_install.answering_process(50817, os.getpid()) == "ours"
+        assert calls["n"] == 2
+
+    def test_c1_persistent_empty_lsof_reports_unknown_not_foreign(self):
+        # Nothing identifiable at all: the verdict must say unknown (with the
+        # probe named), never claim an impostor was found.
+        with patch.object(node_install, "_listener_pids", return_value=[]):
+            verdict = node_install.answering_process(50817, os.getpid())
+        assert verdict.startswith("unknown"), verdict
+        assert "foreign" not in verdict
+
+    def test_c1_a_real_foreign_listener_is_still_foreign(self):
+        # The impostor finding survives: listener pids exist, none is ours.
+        with patch.object(node_install, "_listener_pids", return_value=[999999]):
+            verdict = node_install.answering_process(50817, os.getpid())
+        assert verdict.startswith("foreign"), verdict
+
+
+# --------------------------------------------------------------------------
+# Repair round 3 — follow-up 3: doctor --full forces a re-hash past the
+# stat caches; follow-up 7: doctor --port and a named recovery when
+# config/server-bin is unreadable.
+# --------------------------------------------------------------------------
+
+class TestFUDoctorFullAndPort:
+    def test_fu3_doctor_full_rehashes_past_a_poisoned_stat_cache(self, tmp_path, capsys):
+        # The cache is a performance artifact a same-user writer can forge
+        # (recorded in the limits). doctor --full ignores it and re-hashes:
+        # a tampered file whose stat triple was forged into the cache is
+        # still refused.
+        root, _, build = packed_runtime(tmp_path, tamper=("bin.mjs", b"// tampered\n"))
+        cache_path = build.parent / "verify-stat-cache.json"
+        digest_path = build.parent / "file-digests.json"
+        recorded = {e["path"]: e for e in json.loads(digest_path.read_text())}
+        forged = {}
+        for rel, entry in recorded.items():
+            target = build / rel
+            st = os.stat(target)
+            forged[rel] = [st.st_size, st.st_mtime_ns, st.st_ctime_ns]
+        # fix the forged entry for the tampered file (recorded bytes, real stat)
+        cache_path.write_text(json.dumps(forged))
+        with patch.object(node_install.subprocess, "run",
+                          return_value=Mock(returncode=1, stdout="")):
+            code = node_install.doctor(str(root), LABEL, verify_tree="full")
+        out = capsys.readouterr().out
+        assert code == 1
+        errors = [line for line in out.splitlines() if line.startswith("doctor_error=")]
+        assert errors and ("digest" in errors[0] or "server tree" in errors[0]), out
+
+    def test_fu7_doctor_port_flag_reaches_the_recovery_line(self, tmp_path, capsys):
+        # run/port unreadable: doctor --port N probes N and prints a
+        # runnable recovery carrying --port N; without the flag the error
+        # names the flag instead of inventing a port.
+        root, _, _ = packed_runtime(tmp_path)
+        (root / "run").mkdir(exist_ok=True)
+        (root / "run" / "port").unlink(missing_ok=True)
+        with patch.object(node_install.subprocess, "run",
+                          return_value=Mock(returncode=1, stdout="")):
+            code = node_install.doctor(str(root), LABEL, port="50899")
+        out = capsys.readouterr().out
+        assert code == 1
+        assert "port=50899" in out
+        line = next(l for l in out.splitlines()
+                    if l.startswith("doctor_error=label not loaded"))
+        assert "--port 50899" in line
+        with patch.object(node_install.subprocess, "run",
+                          return_value=Mock(returncode=1, stdout="")):
+            node_install.doctor(str(root), LABEL)
+        out2 = capsys.readouterr().out
+        line2 = next(l for l in out2.splitlines()
+                     if l.startswith("doctor_error=label not loaded"))
+        assert "--port" in line2 and "pass --port" in line2
+
+    def test_fu7_unreadable_server_bin_names_its_recovery(self, tmp_path, capsys):
+        # Rollback mode whose config/server-bin cannot be read: the error
+        # names the recovery (Going back / step 3), not a bare exception.
+        root, _, _ = packed_runtime(tmp_path)
+        (root / "config" / "server-runtime.json").unlink()   # force rollback mode
+        legacy = tmp_path / "legacy-server"
+        legacy.write_text("#!/bin/sh\n")
+        (root / "config" / "server-bin").write_text(str(legacy) + "\n")
+        os.chmod(root / "config" / "server-bin", 0o000)
+        with patch.object(node_install.subprocess, "run",
+                          return_value=Mock(returncode=1, stdout="")):
+            code = node_install.doctor(str(root), LABEL)
+        out = capsys.readouterr().out
+        assert code == 1
+        errors = [line for line in out.splitlines() if line.startswith("doctor_error=")]
+        assert errors and "server-bin" in errors[0] and "recovery" in errors[0], out
+
+    def test_fu2_doctor_launchagents_dir_seam_is_gated(self, tmp_path, capsys,
+                                                       monkeypatch):
+        # FU2: doctor hardcoded ~/Library/LaunchAgents for the expected plist;
+        # it now honors TEAM_SERVER_LAUNCHAGENTS_DIR — but only as a gated
+        # test seam. Set without MMOS_TEST_SEAMS=1 it refuses instead of
+        # quietly judging another directory "the" plist location.
+        root, _, _ = packed_runtime(tmp_path)
+        monkeypatch.setenv("TEAM_SERVER_LAUNCHAGENTS_DIR", "/tmp/t6-elsewhere")
+        monkeypatch.delenv("MMOS_TEST_SEAMS", raising=False)
+        with patch.object(node_install.subprocess, "run",
+                          return_value=Mock(returncode=1, stdout="")):
+            code = node_install.doctor(str(root), LABEL)
+        out = capsys.readouterr().out
+        assert code == 1
+        errors = [l for l in out.splitlines() if l.startswith("doctor_error=")]
+        assert errors and "TEAM_SERVER_LAUNCHAGENTS_DIR" in errors[0], out
+        # gated open: the seam is honored and doctor proceeds normally
+        monkeypatch.setenv("MMOS_TEST_SEAMS", "1")
+        with patch.object(node_install.subprocess, "run",
+                          return_value=Mock(returncode=1, stdout="")):
+            node_install.doctor(str(root), LABEL)
+        out2 = capsys.readouterr().out
+        assert "doctor_error=label not loaded" in out2, out2
+
+    def test_fu5_runner_exit78_names_runbook_step_3(self, tmp_path):
+        # FU5: the exit-78 recovery said "re-run team_server.sh install",
+        # which never writes config/python3-path — runbook step 3
+        # (node_install.py install) does. The message must name step 3.
+        root, _, _ = packed_runtime(tmp_path)
+        (root / "run").mkdir()
+        (root / "run" / "port").write_text("50899\n")
+        (root / "fabric.env").write_text("X=1\n")
+        os.chmod(root / "fabric.env", 0o600)
+        (root / "config" / "python3-path").write_text("/nonexistent/python3\n")
+        shutil_copy_runner(root)
+        proc = subprocess.run(["/bin/sh", str(root / "bin" / "server_runner.sh"),
+                               str(root)], capture_output=True, text=True,
+                              timeout=30)
+        assert proc.returncode == 78
+        assert "step 3" in proc.stderr, proc.stderr
+        assert "team_server.sh install" not in proc.stderr

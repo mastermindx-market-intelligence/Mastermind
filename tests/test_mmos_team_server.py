@@ -36,6 +36,9 @@ def free_port():
 def run_tool(*args, env_extra=None, input=None):
     env = dict(os.environ)
     env.pop("MMOS_T3_DEV_ROOT", None)
+    # Round 3 (FU4): the MMOS_*/TEAM_SERVER_* seams are test-only and gated
+    # behind MMOS_TEST_SEAMS=1; this suite runs entirely under that flag.
+    env["MMOS_TEST_SEAMS"] = "1"
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
@@ -451,3 +454,42 @@ class TestPlistShape:
         assert data["ProgramArguments"][0] == "/bin/sh"
         assert "EnvironmentVariables" not in data  # no env (thus no keys) in plist
         assert data["StandardOutPath"] == "/tmp/root/run/server.log"
+
+
+class TestRound3Plist:
+    def test_a2_plist_declares_process_type_interactive(self):
+        # Repair round 3 A2: a launchd agent with no ProcessType key runs in
+        # the background I/O band — under load the runner's tree verifies were
+        # starved for minutes (the 22-minute switch). Interactive is the
+        # declared scheduling class for a foreground service we wait on.
+        text = TOOL.read_text()
+        m = re.search(r"cat > \"\$PLIST_TMP\" <<EOF\n(.*?)\nEOF", text, re.S)
+        assert m, "plist heredoc not found"
+        body = (m.group(1)
+                .replace("$LABEL", "com.example.shape")
+                .replace("$ROOT", "/tmp/root"))
+        data = plistlib.loads(body.encode())
+        assert data.get("ProcessType") == "Interactive"
+
+    def test_fu8_plist_heredoc_failure_dies(self, dev_root, launchagents_dir):
+        # FU8: the plist heredoc itself was unchecked — a LaunchAgents dir we
+        # cannot write left a silent failure (or worse, a half-written temp
+        # renamed into place by a later run). A failed heredoc must die there,
+        # naming the plist path.
+        os.chmod(dev_root, 0o700)
+        ro = Path(launchagents_dir) / "ro"
+        ro.mkdir()
+        os.chmod(ro, 0o500)
+        server = tmp_bin = dev_root.parent / "true-server"
+        server.write_text("#!/bin/sh\nexec /bin/sleep 30\n")
+        os.chmod(server, 0o755)
+        try:
+            r = install(dev_root, free_port(), "com.example.t6-fu8",
+                        "--server-bin", str(server),
+                        env_extra={"TEAM_SERVER_LAUNCHAGENTS_DIR": str(ro)})
+            assert r.returncode != 0
+            out = r.stdout + r.stderr
+            assert "plist" in out.lower(), out
+            assert "cannot write" in out or "heredoc" in out.lower(), out
+        finally:
+            os.chmod(ro, 0o700)

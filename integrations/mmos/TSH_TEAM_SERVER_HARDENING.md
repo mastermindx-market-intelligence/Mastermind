@@ -105,12 +105,22 @@ merged. Prerequisites on this Mac (all already present):
 `~/.mastermind/mmos_dev/tsh/downloads/` (verified Node tarball + SHASUMS256),
 `~/.mastermind/mmos_dev/tsh/source/t3-pin0770446/` (pinned T3 source with
 `node_modules` installed), and `curl` on PATH (`install`/`start` refuse in
-one line without it rather than timing out). Do the migration when the
-machine is not under heavy load: step 6's first boot runs the state-DB
-migrations inside a 180 s window, and a machine at load >100 (measured
-during this lane's own proof) can stretch a healthy first boot past it — the
-install then reports the failure truthfully and cleans up, and a re-run
-completes quickly because the migrations already finished.
+one line without it rather than timing out).
+
+Load guidance (round 3, measured): the first switch attempt ran during
+ambient load 25–107 and took 22 minutes of downtime instead of 1–3. Cause,
+found and fixed on this lane's dev instance: the plist declared no
+`ProcessType`, so launchd ran the job in its background I/O band, and the
+runner's two per-boot tree verifies (199 MB of pinned Node re-hashed from
+scratch every time) starved at 2–4 % CPU for minutes. The plist now declares
+`ProcessType=Interactive` and both trees verify through stat-tripwire caches
+(one full digest on first sight, triples thereafter). Post-fix the same
+sequence is minutes of work even at load ≈ 50, and install's wait no longer
+gives up on a live boot: while `run/boot.status` shows a fresh pre-exec
+stage, install keeps waiting (60 s extensions, 900 s cap) and prints
+`still starting (verifying: …)`. Prefer a quiet machine anyway — step 3's
+extraction and step 5's pack are plain disk work — but load is no longer a
+correctness risk for step 6.
 
 Every numbered step below states: what worked prints, what the server state
 is when the step fails, and the exact recovery command. "Nothing is published
@@ -130,9 +140,11 @@ test -x ~/.mastermind/t3-team-server/bin/t3 && echo rollback-binary-ok
 test -f ~/.mastermind/t3-team/config/python3-path && echo interpreter-ok
 ```
 
-`uptime`: the lane measured machine load >100 stretching a healthy first boot
-past the 180 s install window (the failure is truthful and a re-run completes
-fast, but avoid it: migrate below load 50). `rollback-binary-ok`: the
+`uptime`: record the load — the runbook's downtime statements assume it
+(see the load guidance above; a loaded machine is no longer a correctness
+risk for step 6, but the first boot after THIS paragraph's fix still pays
+one full digest per tree on first sight, so expect the upper end of the
+range when loaded). `rollback-binary-ok`: the
 documented rollback boots that exact binary — no step touches it, but if it
 is missing there is no going back. `interpreter-ok`: **if you abort between
 step 1 and step 3's completion, re-run step 3 before rolling back** — the
@@ -159,8 +171,14 @@ history. Recovery: none needed; this step observes only.
 
 ### Part (a) — move to the pinned Node and the packed build
 
-Downtime for the whole part: about one to three minutes (stop → install →
-pack → reinstall → server answers). Threads and history are preserved; the
+Downtime for the whole part: **about one minute of actual stop-to-answer
+when steps 3–5 are done first** — step 3 (node install, ~4½ min measured)
+and step 5 (pack, ~2½ min measured) do not need the server down and can be
+run BEFORE step 1; the stop→reinstall→answer span itself measured 22 s from
+a cold page cache at load ≈ 50 (282 s before the round-3 fixes at load ≈ 30;
+see `~/.mastermind/mmos_evidence/tshc-20261111/probe-round3/`). If you run
+the steps strictly in order instead, add the step-3/5 durations to the
+downtime. Threads and history are preserved; the
 pairing cookie in a paired browser keeps working (proven in T6: no re-pair
 after restart).
 
@@ -300,10 +318,11 @@ Failure states (server still down; every pack refusal prints exactly ONE
 stderr line, `pack_server: <reason>` — never a Node stack trace):
 - `packed runtime or its receipt already exists; …` — one line. If a previous
   pack published the tree but crashed before its config receipt landed, the
-  same message names the exact `mv` that finishes the job; otherwise inspect
-  before retrying (both tools refuse to overwrite — by design). Nothing new
-  is published on the refusal: the receipt is staged at
-  `config/server-runtime.json.new` before the publishing rename.
+  NEXT pack finishes that publish automatically first (`PACKFinishedInterruptedPublish=…`
+  on stdout, validated against the release it names) and then still refuses
+  the re-pack; there is no manual `mv` any more. The receipt travels inside
+  the release (`PUBLISH_RECEIPT.json`), so the publishing rename publishes
+  tree and receipt together; the config copy after it is idempotent.
 - **Killed mid-pack**: `.packing-*` staging from a dead run is cleaned
   automatically under the packing lock. Recovery: re-run this exact command
   with the same `--release-ID`.
@@ -367,6 +386,28 @@ re-run). A failed `team_server.sh start` does the same (panel R7): the label
 is booted out and verified — `START_FAILED … (label unloaded, cleanup
 verified)` — instead of being left crash-looping every 10 s.
 
+**What a slow first boot looks like now (round 3 B).** The runner announces
+every boot stage as it happens — on screen via install's wait and in
+`<root>/run/boot.status` as `stage=<name> <epoch>` lines
+(`pre-flight`, `resolve-node`, `verify-node`, `resolve-server`,
+`verify-server`, `lock-port`, `exec-server`; the verify stages heartbeat
+every 500 files while hashing). While the wait window runs you see a line
+every ~15 s: `waiting for first answer on 127.0.0.1:3780 — Ns elapsed, boot
+stage: verify-node`. If the base 180 s window expires while the LAST stage
+is still pre-exec, fresh (<30 s since its last heartbeat) and the job pid is
+alive, install does NOT boot the job out — it prints `still starting
+(verifying: <stage>; Ns since its last progress, job pid P alive) —
+extending the wait 60s` and keeps waiting (extensions capped at 900 s
+total). This is what the real switch needed and did not have: both failed
+installs killed a job that was still hashing its trees. A boot that reached
+`exec-server` and still does not answer gets NO extension — the server
+itself owns the answer past that line, and the R7 cleanup fires exactly as
+before, with the failure now naming the last stage and its age: `server did
+not answer on 127.0.0.1:3780 (last stage: exec-server, Ns ago; see
+~/.mastermind/t3-team/run/boot.status)`. An empty `server.log` therefore
+never again reads as "working": the stage lines land in it (via stderr) and
+in boot.status from the first second.
+
 ### Step 7 — doctor
 
 ```
@@ -390,14 +431,24 @@ under inspection): the version line is receipt-attested, and the receipt's
 install time — and still binds it now, re-checked. `answeringProcess=ours`
 means the HTTP 200 came from this job's own pid or its direct child; a
 foreign responder, or a job loaded from a foreign plist (a /tmp squat,
-panel atk-7), prints its own `doctor_error=` naming it and exits 1. Failure
+panel atk-7), prints its own `doctor_error=` naming it and exits 1. Round 3
+C: an lsof that returns NOTHING (a loaded machine can be that slow) is
+reported as what it is — attribution UNKNOWN, never "foreign":
+`answeringProcess=unknown(no listener identified by lsof; job pid N — retry
+doctor, or probe: lsof -a -p N -tP -iTCP:3780 -sTCP:LISTEN -n)` with exit 1
+and `health is unverified until attribution says ours`. During the real
+switch the first doctor call wrongly said foreign for exactly this reason;
+the re-run a minute later said ours. Failure
 prints the metadata block and then one line `doctor_error=<reason>` (exit 1)
 — including the two down states `doctor_error=label not loaded` and
 `doctor_error=port N not answering`, each naming runbook step 6 as the
 recovery — and on a rollback root that recovery line names the rollback
 binary with the full argument set (`install --replace --root … --label …
 --port … --server-bin …`), so it is runnable exactly as printed (panel
-LOW 13). For one live check after
+LOW 13). Two flags round out the tool (round 3): `doctor --full` re-hashes
+both trees in full, past the stat caches, when a cached verdict is not
+enough; `doctor --port N` checks a named port when `run/port` is unreadable.
+For one live check after
 migrating:
 
 ```
@@ -523,3 +574,35 @@ pid by design (fd 3, inheritable so it survives execve) and at idle the
 server has no children inheriting it — a surviving inheritor would be caught
 fail-closed by stop/install's lock re-check. Evidence:
 `~/.mastermind/mmos_evidence/tshc-20261111/probe-round2/`.
+
+Repair round 3 (the real switch on `3f79ffc40` was switch-ready but took 22
+minutes of downtime instead of 1–3; cause found on this lane's dev instance
+before any fix): A the plist now declares `ProcessType=Interactive` (launchd
+had put the job in its background I/O band, where the runner's two per-boot
+tree verifies starved) and the pinned Node tree verifies through a
+`runtime/node-tree-stat-cache.json` tripwire exactly like the server tree's,
+so a healthy warm boot hashes nothing (the receipt stays the anchor: any
+mismatch falls back to the full digest and refuses on difference); B the
+runner records every boot stage to stderr AND `run/boot.status`
+(`stage=<name> <epoch>`, verify heartbeats every 500 files) and install's
+wait extends past the base window while the last stage is pre-exec, fresh
+and alive — printing `still starting (verifying: …)` — instead of booting a
+working job out (a post-`exec-server` silence still gets the R7 cleanup,
+now naming the last stage and its age); C attribution treats an empty lsof
+as UNKNOWN with a retry hint, never "foreign" (doctor exits 1 on unknown:
+health unverified); D this runbook's downtime and load statements above now
+match the post-fix measurements. Follow-ups from the round-2 panel's tail:
+FU1 the `load -w`/`unload` fallbacks run `env -i` too; FU2/FU4 every
+`MMOS_*`/`TEAM_SERVER_LAUNCHAGENTS_DIR` test seam is refused unless
+`MMOS_TEST_SEAMS=1` (PYTHON3_BIN stays an operator knob; the one seam the
+RUNNER honors — the slow-verify valve used to test install's wait — travels
+as `<root>/config/verify-delay`, because launchd starts the runner with no
+environment at all); FU3 `doctor
+--full`; FU5 the runner's exit-78 recovery names runbook step 3; FU6 a
+failed `kickstart` dies truthfully naming the untouched running job; FU7
+`doctor --port N`; FU8 a failed plist heredoc dies at once (temp+rename
+kept); FU9 uninstall verifies the root is actually down before printing
+UNINSTALLED; FU10 pack embeds `PUBLISH_RECEIPT.json` in the release so the
+publishing rename carries tree and receipt together, and the next pack
+auto-finishes an interrupted publish (no manual `mv`).
+Evidence: `~/.mastermind/mmos_evidence/tshc-20261111/probe-round3/`.

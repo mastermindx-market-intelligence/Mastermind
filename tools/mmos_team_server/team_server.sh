@@ -60,6 +60,32 @@ for _tool in LAUNCHCTL CURL LSOF STAT PS_BIN; do
   eval "_val=\$$_tool"
   case "$_val" in /*) ;; *) die "$_tool must be an absolute path, got: $_val" ;; esac
 done
+# Round 3 / FU4: the MMOS_*/TEAM_SERVER_* environment seams are TEST-ONLY,
+# gated behind MMOS_TEST_SEAMS=1. Outside the harness a set seam is a hijack
+# attempt — a hostile shell steering launchctl/curl/lsof, the LaunchAgents
+# location, the wait window or the verify valve — and is refused by name.
+# PYTHON3_BIN is deliberately NOT gated: an operator knob, validated above
+# to an absolute executable path.
+if [ "${MMOS_TEST_SEAMS:-}" != "1" ]; then
+  for _seam in MMOS_LAUNCHCTL_BIN MMOS_CURL_BIN MMOS_LSOF_BIN MMOS_STAT_BIN \
+               MMOS_PS_BIN MMOS_INSTALL_WAIT MMOS_VERIFY_DELAY_SECONDS \
+               TEAM_SERVER_LAUNCHAGENTS_DIR; do
+    _sv=$(eval "printf '%s' \"\${$_seam:-}\"")
+    [ -z "$_sv" ] || die "$_seam is set but MMOS_TEST_SEAMS is not 1; test-only env seams are refused outside the test harness"
+  done
+fi
+# Round 3 B: install/start wait windows. 180 s (install) / 90 s (start): the
+# first boot after moving receipts runs state-DB migrations; the wait itself
+# now distinguishes a slow-but-live boot from a dead one (see wait_ours), so
+# the window is the BASE, not the verdict. MMOS_INSTALL_WAIT shortens both
+# for tests (gated above).
+INSTALL_WAIT=180
+START_WAIT=90
+if [ "${MMOS_TEST_SEAMS:-}" = "1" ] && [ -n "${MMOS_INSTALL_WAIT:-}" ]; then
+  case "$MMOS_INSTALL_WAIT" in ''|*[!0-9]*) die "MMOS_INSTALL_WAIT must be an integer" ;; esac
+  INSTALL_WAIT=$MMOS_INSTALL_WAIT
+  START_WAIT=$MMOS_INSTALL_WAIT
+fi
 T3_DEV_LIB_ONLY=1
 # shellcheck disable=SC1090
 . "$T3_DEV"
@@ -250,14 +276,86 @@ answer_ours() {
   return 1
 }
 
+# Round 3 B: the runner's last recorded boot stage and its age in seconds
+# ("none 9999" when there is no status file or the line is malformed).
+boot_stage_age() {
+  _bs="$ROOT/run/boot.status"
+  _line=$(tail -1 "$_bs" 2>/dev/null) || _line=""
+  case "$_line" in
+    stage=\ *|stage=) echo "none 9999"; return 0 ;;
+    stage=*) ;;
+    *) echo "none 9999"; return 0 ;;
+  esac
+  _name=${_line#stage=}; _name=${_name%% *}
+  _epoch=${_line##* }
+  case "$_epoch" in ''|*[!0-9]*) echo "none 9999"; return 0 ;; esac
+  echo "$_name $(( $(date +%s) - _epoch ))"
+}
+
+# The epoch of the CURRENT boot (line 1 of boot.status — the runner truncates
+# the file at pre-flight). A changed value between two wait_ours extensions
+# means the boot RESTARTED (crash-loop under KeepAlive): the previous boot
+# failed, and restart churn must never look like verify progress. 0 = absent.
+boot_first_epoch() {
+  _line=$(sed -n '1p' "$ROOT/run/boot.status" 2>/dev/null) || _line=""
+  case "$_line" in
+    stage=pre-flight\ *) echo "${_line##* }" ;;
+    *) echo 0 ;;
+  esac
+}
+
 # wait_http, but the 200 must come from THIS label's job (panel R4).
+# Round 3 B: an expired window no longer condemns a boot whose LAST stage is
+# pre-exec, fresh (<30 s since its last progress), still owned by a live job
+# pid AND still the SAME boot — under launchd's background I/O band the two
+# 199 MB tree verifies per boot can outlast the base window, and R7's bootout
+# then killed a working job twice on the real switch. Two clocks: the BASE
+# window counts 1 s iterations (round-2 semantics), while every extension is
+# a REAL 60 s grant on the wall clock, capped at 900 s total — so an
+# extension always buys a full minute of loaded-machine time regardless of
+# how the base window was shortened. The extension NEVER applies past
+# exec-server or across a boot restart: a server that has exec'd but is not
+# answering is dead or hung, exactly what R7 exists for, and a restarted
+# boot is a crash-loop, not progress. Progress prints every ~15 s.
 wait_ours() {
-  _p="$1"; _l="$2"; _i=0; _w="$3"
-  while [ "$_i" -lt "$_w" ]; do
+  _p="$1"; _l="$2"; _w="$3"
+  _i=0
+  _start=$(date +%s)
+  _next_note=$(( _start + 15 ))
+  _pf_prev=""
+  _ext_deadline=0
+  while :; do
     answer_ours "$_p" "$_l" && return 0
-    _i=$((_i + 1)); sleep 1
+    _i=$((_i + 1))
+    _now=$(date +%s)
+    if [ "$_i" -lt "$_w" ] || [ "$_now" -lt "$_ext_deadline" ]; then
+      if [ "$_now" -ge "$_next_note" ]; then
+        _sa=$(boot_stage_age); _stage=${_sa%% *}
+        echo "waiting for first answer on 127.0.0.1:$_p — $(( _now - _start ))s elapsed, boot stage: ${_stage}" >&2
+        _next_note=$(( _now + 15 ))
+      fi
+      sleep 1
+      continue
+    fi
+    # base window and any extension both exhausted: extend once more through
+    # a live, same-boot, pre-exec verify — or let the failure path speak.
+    _sa=$(boot_stage_age); _stage=${_sa%% *}; _age=${_sa##* }
+    _jp=$(job_pid "$_l")
+    _pf=$(boot_first_epoch)
+    if [ -z "$_pf_prev" ]; then _pf_prev="$_pf"; fi
+    case "$_stage" in
+      pre-flight|verify-node|verify-server|resolve-node|resolve-server|lock-port)
+        if [ "$_age" -lt 30 ] && [ -n "$_jp" ] && [ "$_pf" = "$_pf_prev" ] \
+           && [ $(( _now - _start )) -lt 900 ]; then
+          echo "still starting (verifying: $_stage; ${_age}s since its last progress, job pid $_jp alive) — extending the wait 60s" >&2
+          _pf_prev="$_pf"
+          _ext_deadline=$(( _now + 60 ))
+          sleep 1
+          continue
+        fi ;;
+    esac
+    return 1
   done
-  return 1
 }
 
 # Emit the last complete pairing banner from stdin (never print it elsewhere).
@@ -524,35 +622,46 @@ cmd_install() {
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
+  <key>ProcessType</key><string>Interactive</string>
   <key>WorkingDirectory</key><string>$ROOT/scratch-project</string>
   <key>StandardOutPath</key><string>$ROOT/run/server.log</string>
   <key>StandardErrorPath</key><string>$ROOT/run/server.log</string>
 </dict>
 </plist>
 EOF
+  # FU8: the heredoc itself is checked — an unwritable LaunchAgents dir used
+  # to surface much later (or as a half-written temp). Fail here, naming it.
+  [ -s "$PLIST_TMP" ] || { rm -f "$PLIST_TMP" 2>/dev/null; die "cannot write plist template (heredoc produced nothing): $PLIST_TMP — is $(plist_dir) writable?"; }
   chmod 644 "$PLIST_TMP"
   mv -f "$PLIST_TMP" "$PLIST" || { rm -f "$PLIST_TMP"; die "cannot publish plist $PLIST"; }
   # Bootstrap from an empty environment: launchd snapshots the caller's env
   # into the job ("inherited environment"); env -i keeps provider keys from
-  # riding into `launchctl print` and the server process.
+  # riding into `launchctl print` and the server process. FU1: the load -w
+  # FALLBACK is env -i'd too — it was the one path a hostile environment
+  # could still ride into launchd through.
   env -i "$LAUNCHCTL" bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null \
-    || "$LAUNCHCTL" load -w "$PLIST" 2>/dev/null \
+    || env -i "$LAUNCHCTL" load -w "$PLIST" 2>/dev/null \
     || die "launchctl bootstrap failed for $LABEL"
   # F15/F29: separate the two failure kinds. A server that answered is never
   # a failed install step (banner capture may legitimately miss); a server
   # that never answered gets a cleanup whose OWN result is checked and
   # reported truthfully.
-  # 180 s, not 90: the first boot after moving receipts runs the state-DB
-  # migrations (the real root carries a large existing DB); measured first
-  # boots on a busy machine exceed 90 s while remaining perfectly healthy.
   # Panel R4: the 200 must come from THIS label's job (listener pid = job pid
   # or a descendant), not from any process that grabbed the port.
-  if ! wait_ours "$PORT" "$LABEL" 180; then
-    _why="server did not answer on 127.0.0.1:$PORT"
+  # Round 3 B: the base window is a floor, not a verdict — wait_ours extends
+  # through a live, still-verifying boot (see its comment).
+  if ! wait_ours "$PORT" "$LABEL" "$INSTALL_WAIT"; then
+    _sa=$(boot_stage_age); _lstage=${_sa%% *}; _lage=${_sa##* }
+    _why="server did not answer on 127.0.0.1:$PORT (last stage: ${_lstage}, ${_lage}s ago; see $ROOT/run/boot.status)"
     if port_answered "$PORT"; then
       _jp=$(job_pid "$LABEL")
       _lp=$("$LSOF" -tP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1)
-      _why="port $PORT answered HTTP 200 from pid ${_lp:-not identified}, which is NOT label $LABEL's job (job pid ${_jp:-none}) — another process is serving this port"
+      if [ -n "$_lp" ]; then
+        _why="port $PORT answered HTTP 200 from pid $_lp, which is NOT label $LABEL's job (job pid ${_jp:-none}) — another process is serving this port"
+      else
+        # Round 3 C: an empty lsof is UNKNOWN, never proof of an impostor.
+        _why="port $PORT answered HTTP 200 but the listener pid could not be identified (lsof returned nothing — load can delay it); job pid ${_jp:-none}; re-check: lsof -a -p ${_jp:-<job-pid>} -tP -iTCP:$PORT -sTCP:LISTEN -n"
+      fi
     fi
     "$LAUNCHCTL" bootout "gui/$(id -u)/$LABEL" 2>/dev/null
     sleep 1
@@ -590,19 +699,32 @@ cmd_start() {
   canonical_port "$PORT" || die "port file holds a non-canonical port: '$PORT'; re-run install"
   require_curl
   if label_loaded "$LABEL"; then
-    "$LAUNCHCTL" kickstart "gui/$(id -u)/$LABEL" || die "kickstart failed"
+    # FU6: a failed kickstart is not a dead server — the previously-loaded
+    # job keeps running untouched. Name its state and the hand recovery
+    # instead of dying bare (and never boot the healthy job out on its way
+    # to that failure).
+    if ! "$LAUNCHCTL" kickstart "gui/$(id -u)/$LABEL"; then
+      _jp=$(job_pid "$LABEL")
+      die "kickstart failed for $LABEL (launchctl error); the loaded job is untouched and still running (pid ${_jp:-none}) — if it answers its recorded port nothing needs doing; by hand: launchctl kickstart -k gui/$(id -u)/$LABEL"
+    fi
   else
-    env -i "$LAUNCHCTL" bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || "$LAUNCHCTL" load -w "$PLIST" 2>/dev/null || die "bootstrap failed"
+    env -i "$LAUNCHCTL" bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || env -i "$LAUNCHCTL" load -w "$PLIST" 2>/dev/null || die "bootstrap failed"
   fi
   # Panel R4: the 200 must come from THIS label's job, not any listener.
   # Panel R7: a failed start must not leave the label loaded and KeepAlive
   # crash-looping it every 10 s — boot it out, VERIFY, and name the recovery.
-  if ! wait_ours "$PORT" "$LABEL" 90; then
-    _why="START_FAILED — server did not answer on 127.0.0.1:$PORT"
+  # Round 3 B: wait_ours extends through a live still-verifying boot.
+  if ! wait_ours "$PORT" "$LABEL" "$START_WAIT"; then
+    _sa=$(boot_stage_age); _lstage=${_sa%% *}; _lage=${_sa##* }
+    _why="START_FAILED — server did not answer on 127.0.0.1:$PORT (last stage: ${_lstage}, ${_lage}s ago; see $ROOT/run/boot.status)"
     if port_answered "$PORT"; then
       _jp=$(job_pid "$LABEL")
       _lp=$("$LSOF" -tP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | head -1)
-      _why="START_FAILED — port $PORT answered HTTP 200 from pid ${_lp:-not identified}, which is NOT label $LABEL's job (job pid ${_jp:-none}) — another process is serving this port"
+      if [ -n "$_lp" ]; then
+        _why="START_FAILED — port $PORT answered HTTP 200 from pid $_lp, which is NOT label $LABEL's job (job pid ${_jp:-none}) — another process is serving this port"
+      else
+        _why="START_FAILED — port $PORT answered HTTP 200 but the listener pid could not be identified (lsof returned nothing — load can delay it); job pid ${_jp:-none}; re-check: lsof -a -p ${_jp:-<job-pid>} -tP -iTCP:$PORT -sTCP:LISTEN -n"
+      fi
     fi
     "$LAUNCHCTL" bootout "gui/$(id -u)/$LABEL" 2>/dev/null
     sleep 1
@@ -716,9 +838,10 @@ cmd_uninstall() {
   PLIST="$(plist_dir)/$LABEL.plist"
   # Panel R6: uninstall gets stop's truthful three-state treatment — a
   # bootout that fails must not be silenced into UNINSTALLED while the job
-  # still serves and its plist is deleted.
+  # still serves and its plist is deleted. FU1: the unload fallback is
+  # env -i'd like every other launchd mutation.
   if label_loaded "$LABEL"; then
-    "$LAUNCHCTL" bootout "gui/$(id -u)/$LABEL" 2>/dev/null || "$LAUNCHCTL" unload -w "$PLIST" 2>/dev/null
+    "$LAUNCHCTL" bootout "gui/$(id -u)/$LABEL" 2>/dev/null || env -i "$LAUNCHCTL" unload -w "$PLIST" 2>/dev/null
   fi
   _i=0
   while label_loaded "$LABEL" && [ "$_i" -lt 10 ]; do _i=$((_i + 1)); sleep 1; done
@@ -731,7 +854,17 @@ cmd_uninstall() {
   if [ -e "$PLIST" ] || [ -L "$PLIST" ]; then
     die "could not remove $PLIST; remove it by hand before re-installing"
   fi
-  echo "UNINSTALLED label=$LABEL (plist removed; root $ROOT left in place)"
+  # FU9: UNINSTALLED is now backed by a root-down check — a server that
+  # outlived the bootout (a runner whose lock an inherited process still
+  # holds) is NAMED in a warning instead of silently serving a root whose
+  # plist is gone.
+  if ! root_lock_free "$ROOT"; then
+    _holder=$("$LSOF" -t "$ROOT/run/home.lock" 2>/dev/null | head -1)
+    echo "UNINSTALLED label=$LABEL (plist removed; root $ROOT left in place)"
+    echo "WARNING: $ROOT/run/home.lock is still held (surviving process${_holder:+ pid $_holder}) — a server may still be serving this root outside launchd; find it: ps ax -o pid,args= | grep -F '$ROOT/bin/server_runner.sh', then kill it" >&2
+    return 0
+  fi
+  echo "UNINSTALLED label=$LABEL (plist removed; root $ROOT left in place, verified down)"
 }
 
 usage() {
