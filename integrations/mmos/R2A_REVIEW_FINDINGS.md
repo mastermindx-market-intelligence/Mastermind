@@ -106,3 +106,43 @@ is wrong. Lane RL adds a report line to `apply` and the safe restart procedure.
 Lane RL (GLM 5.3, started 02:50 UTC) builds the stronger design: reads allowed only from named
 roots, writes only to the memory file and one notes folder, proven on its own dev server; plus
 the roster side of findings 11, 12 and 14.
+
+## Findings 16 to 32, from the calibration reviewers (principal, 2026-11-11)
+
+The same commit was then read by four open-model reviewers to decide who reviews from now on
+(plan section 26; scoring in `~/.mastermind/mmos_evidence/r2cal-20261111/SCORE.md`). They
+found these defects that the review above did not. The principal checked each against the
+code before sending it to a lane. The same hold applies: no more agents move onto the carrier
+until lane RF's and lane RL's repairs have had a panel review and are installed.
+
+| # | Sev | Where | What goes wrong | Lane |
+| --- | --- | --- | --- | --- |
+| 16 | MEDIUM | `wake_carrier.py` `scan_marker` | Only the last 60 thread messages are read. On the live Assurance thread that is 19 turns. A task whose turn waits on a person while other tasks run scrolls out of the window and is sent again. | RF |
+| 17 | MEDIUM | `last_result_comment` | It returns the last comment that is not machine text, whoever wrote it, so a person's remark on a finished child is handed to the asker as "their answer". | RF |
+| 18 | LOW | `parse_ask_block` | No last-word guard: an ask block the teammate quoted, followed by its own prose, is acted on. | RF |
+| 19 | MEDIUM | `handle_return` | With two ask children, only the first is returned; the second teammate's answer is never read. | RF: return the child whose answer has not been delivered. |
+| 20 | MEDIUM | comment read before delivery | A failed read of the comments is taken as "no comment yet", so the answer is posted twice. | RF |
+| 21 | MEDIUM | `deliver`, release | A person's `done` or `cancelled` is overwritten by a later delivery or release. | RF: never move an issue out of `done` or `cancelled`. |
+| 22 | MEDIUM | error path after delivery | A failure after the answer is posted moves a delivered issue back to `todo`. | RF |
+| 23 | HIGH | HTTP client | Redirects are followed and the run token is carried to the new address. | RF: refuse every redirect. Credentials surface. |
+| 24 | LOW | `sent_here` | Set before the send, so a failed send is recorded as sent. | RF |
+| 25 | LOW | checkout | A lost answer to the checkout call (409 on retry) is treated as held by someone else. | RF |
+| 26 | MEDIUM | `is_machine_comment` | A teammate's answer that begins with `[t2-carrier]` or `[coding-job]` is taken for machine text and skipped by every reader; an older comment is used instead. | RF: such an answer is posted under a fixed first line. |
+| 27 | LOW | `parse_output_block` | No last-word guard: a quoted output block writes a document. | RF |
+| 28 | LOW | `parse_ask_block` | The `description:` label stays at the start of the asked teammate's brief. | RF |
+| 29 | HIGH | `setup_teammate.py` `Http.__init__` | The loopback check reads userinfo as the host: `http://127.0.0.1:3100@evil.example` passes and requests carrying the board header go to the other host. Needs a wrong value in a spec file. | RF: parse with `urlsplit`; no userinfo, loopback host, port present. Credentials surface. |
+| 30 | MEDIUM | `cutover_installed.py` `rows_of` | An unrecognised or error answer becomes an empty list, read as "no open work, no live run", and `apply` goes ahead. | RF: stop on an unrecognised answer. Admission surface. |
+| 31 | LOW | `cutover_installed.py` `apply` | The preimage is written before the second check. If that check stops the move, every later `apply` refuses until a person removes the file. | RF: reuse the file when its saved values equal the agent's current ones, compared in memory. |
+| 32 | MEDIUM | `team_roster.py` spec loading | `slug` is not validated and reaches `launchArgs` and a path: a space adds a command-line flag, `..` leaves the server root. Needs a wrong value in a spec file. | RL |
+
+Added to finding 8: the subprocess limit is passed with no retry at all, so RF gives every
+call a share of the remaining run budget.
+
+Recorded, not assigned: a thread record without run fields is read as a finished reply (the
+live server always sets them); a person's comment that begins with a machine prefix is ignored
+(by design); `refresh-carrier` drops `coding_job_door` and a coding job is not requested again
+after a door failure (both for lane T4d).
+
+Checked and false: the doubled slash in the permission rules (raised twice; MAS-14, 15 and 17
+show the rules binding), and the teammate's own answer being recorded as a person's words (the
+installed Paperclip records `authorType: agent`).
