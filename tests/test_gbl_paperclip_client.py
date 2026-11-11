@@ -97,7 +97,7 @@ class FakePaperclipState:
         self.headers_log.append((method, clean, dict(headers)))
 
     def stamp(self) -> str:
-        base = datetime(2026, 11, 11, 12, 0, 0, tzinfo=timezone.utc)
+        base = datetime.now(timezone.utc)
         return (base + timedelta(microseconds=next(self._clock))
                 ).isoformat()
 
@@ -368,8 +368,9 @@ class TestBaseUrlLaw:
                                         headers={"x-custom": "v"})
         ask_client.create_ask(envelope())
         method, path, headers = fake.state.headers_log[-1]
-        assert headers.get("x-instance-role") == "local_trusted"
-        assert headers.get("x-custom") == "v"
+        sent = {key.lower(): value for key, value in headers.items()}
+        assert sent.get("x-instance-role") == "local_trusted"
+        assert sent.get("x-custom") == "v"
 
 
 # ── create / read / append / count over the fake server ─────────────────────
@@ -606,10 +607,11 @@ class TestExactResolution:
         decoy = fake.state.add_issue(
             f"GBL [{row['ask_id']}] embedded in a decoy title",
             "human words about {json} shapes")
-        record = client(fake).read_ask(row["ask_id"])   # decoy sorts first
+        record_finder = client(fake)
+        record = record_finder.read_ask(row["ask_id"])  # decoy sorts first
         assert record is not None
         assert record["ask_id"] == row["ask_id"]
-        assert client(fake)._issue_ids[row["ask_id"]] == real_issue
+        assert record_finder._issue_ids[row["ask_id"]] == real_issue
         # and a write goes to the real issue, never the decoy
         ask_client.append_ask_event(row["ask_id"],
                                     {"type": "state", "state": "ANSWERED"})
@@ -786,9 +788,12 @@ class TestIdLaw:
 
     def test_legitimate_request_paths_are_unchanged(self, fake):
         ask_client = client(fake)
-        ask_client.create_ask(envelope())
+        row = envelope()
+        ask_client.create_ask(row)
         assert count(fake, "POST", ISSUES_PATH) == 1
-        assert count(fake, "GET", ISSUES_PATH) >= 1
+        assert client(fake).read_ask(row["ask_id"]) is not None  # a scan
+        assert count(fake, "GET", ISSUES_PATH) >= 1              # same route
+        assert count(fake, "POST", ISSUES_PATH) == 1             # no rewrite
 
 
 # ── M4: comments envelope fails closed; M1/M2: provenance exposed ───────────

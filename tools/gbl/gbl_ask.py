@@ -38,6 +38,7 @@ or the bytes on the wire.
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import re
 import socket
@@ -82,6 +83,19 @@ DEFAULT_POLL_SECONDS = 5.0
 DEFAULT_DEADLINE_SECONDS = 900.0
 MAX_DEADLINE_SECONDS = 86400.0
 REQUEST_TIMEOUT_SECONDS = 30.0
+
+# Bridge/socket conditions that are transient by nature: during ``--wait``
+# they are retried until the deadline (panel B N1) and keep the exit code
+# they have outside the wait (unreachable is 2, not 5 — panel B N3).
+TRANSIENT_WAIT_CODES = ("BRIDGE_UNREACHABLE", "BRIDGE_RESPONSE_INVALID")
+
+# Codes that mean "your call or the door is wrong", not "the ask failed":
+# they exit 2; every other typed error exits 5.
+USAGE_EXIT_CODES = frozenset({
+    "SOCKET_REQUIRED", "SOCKET_PATH_NOT_ABSOLUTE", "BRIDGE_UNREACHABLE",
+    "ASKER_IDENTITY_INCOMPLETE", "INVALID_QUESTION",
+    "INVALID_IDEMPOTENCY_KEY", "INVALID_ASK_ID",
+})
 
 
 class AskCliError(Exception):
@@ -146,6 +160,30 @@ class BridgeSocketClient:
 # ── Argument parsing (no credential-shaped option exists) ───────────────────
 
 
+def _finite_float(value: str, *, lowest: float, exclusive: bool = False
+                  ) -> float:
+    """An argparse ``type`` body for finite bounded floats (panel B L11):
+    nan, inf and out-of-range values are usage errors, never silent zeros."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(f"not a number: {value!r}") from None
+    ok = number > lowest if exclusive else number >= lowest
+    if not math.isfinite(number) or not ok:
+        sign = ">" if exclusive else ">="
+        raise argparse.ArgumentTypeError(
+            f"must be a finite number {sign} {lowest}: {value!r}")
+    return number
+
+
+def _poll_seconds(value: str) -> float:
+    return _finite_float(value, lowest=0.0, exclusive=True)
+
+
+def _deadline_seconds(value: str) -> float:
+    return _finite_float(value, lowest=0.0)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="gbl_ask",
@@ -175,8 +213,9 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--asker-session-label", metavar="LABEL")
     ask.add_argument("--wait", action="store_true",
                      help="poll for the answer; the exit is the wake")
-    ask.add_argument("--poll-seconds", type=float, default=DEFAULT_POLL_SECONDS)
-    ask.add_argument("--deadline-seconds", type=float,
+    ask.add_argument("--poll-seconds", type=_poll_seconds,
+                     default=DEFAULT_POLL_SECONDS)
+    ask.add_argument("--deadline-seconds", type=_deadline_seconds,
                      default=DEFAULT_DEADLINE_SECONDS)
 
     status = commands.add_parser("status", parents=[common],
@@ -188,8 +227,9 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--id", required=True, help="the ask id (gb-…)")
     fetch.add_argument("--wait", action="store_true",
                        help="poll until the answer or the deadline")
-    fetch.add_argument("--poll-seconds", type=float, default=DEFAULT_POLL_SECONDS)
-    fetch.add_argument("--deadline-seconds", type=float,
+    fetch.add_argument("--poll-seconds", type=_poll_seconds,
+                       default=DEFAULT_POLL_SECONDS)
+    fetch.add_argument("--deadline-seconds", type=_deadline_seconds,
                        default=DEFAULT_DEADLINE_SECONDS)
     return parser
 
@@ -236,9 +276,14 @@ def cmd_ask(client: BridgeSocketClient, args: argparse.Namespace) -> int:
         "correlation": {}, "asker": asker,
     })
     ask_id = result.get("ask", {}).get("ask_id") or result.get("ask_id")
+    if not isinstance(ask_id, str) or not ASK_ID_RE.fullmatch(ask_id):
+        # Panel B L10: a reply without a usable ask id is never printed as
+        # ``ask_id=None`` and never silently skips the wait.
+        raise AskCliError("BRIDGE_RESPONSE_INVALID",
+                          "ask reply carried no usable ask_id")
     status = result.get("status") or "CREATED"
     print(f"status={status} ask_id={ask_id}")
-    if args.wait and ask_id:
+    if args.wait:
         return _wait_for_answer(client, args.bot, ask_id, args)
     return EXIT_OK
 
@@ -284,32 +329,48 @@ def _fetch_once(client: BridgeSocketClient, principal: str,
     return EXIT_OK
 
 
+def _exit_for_code(code: str) -> int:
+    return EXIT_USAGE if code in USAGE_EXIT_CODES else EXIT_BRIDGE_ERROR
+
+
 def _wait_for_answer(client: BridgeSocketClient, principal: str,
                      ask_id: str, args: argparse.Namespace) -> int:
-    """Poll until the answer, the deadline (NOT_YET), or a typed error.
+    """Poll until the answer, the deadline (NOT_YET), or a typed verdict.
+    A transient bridge/socket condition (unreachable, invalid response) is
+    retried until the deadline (panel B N1) — the ask is still pending, and
+    the wake must not discard it — and at the deadline it keeps the exit
+    code it has outside the wait (unreachable is 2, not 5 — panel B N3).
     Every exit is the asker session's wake; none carries a secret."""
     poll = max(0.05, float(args.poll_seconds))
-    deadline = min(MAX_DEADLINE_SECONDS, max(0.0, float(args.deadline_seconds)))
+    deadline = min(MAX_DEADLINE_SECONDS, float(args.deadline_seconds))
     started = time.monotonic()
+    transient: AskCliError | None = None
     while True:
         try:
             result = client.request("result", {"principal": principal,
                                                "ask_id": ask_id})
+            transient = None
         except AskCliError as exc:
             if exc.code == "EXPIRED":
                 print(f"status=EXPIRED ask_id={ask_id}")
                 return EXIT_EXPIRED
-            print(f"status={exc.code} ask_id={ask_id}")
-            return EXIT_BRIDGE_ERROR
-        status = str(result.get("status") or "")
-        if status in ("ANSWER_UNCONSUMED", "CONSUMED"):
-            print(f"status={status} ask_id={ask_id} "
-                  f"answer_id={result.get('answer_id') or ''}")
-            text = result.get("answer")
-            if text is not None:
-                print(str(text)[:MAX_ANSWER_CHARS])
-            return EXIT_OK
+            if exc.code not in TRANSIENT_WAIT_CODES:
+                print(f"status={exc.code} ask_id={ask_id}")
+                return EXIT_BRIDGE_ERROR
+            transient = exc          # a hiccup, not a verdict: keep polling
+        else:
+            status = str(result.get("status") or "")
+            if status in ("ANSWER_UNCONSUMED", "CONSUMED"):
+                print(f"status={status} ask_id={ask_id} "
+                      f"answer_id={result.get('answer_id') or ''}")
+                text = result.get("answer")
+                if text is not None:
+                    print(str(text)[:MAX_ANSWER_CHARS])
+                return EXIT_OK
         if time.monotonic() - started + poll > deadline:
+            if transient is not None:
+                print(f"status={transient.code} ask_id={ask_id}")
+                return _exit_for_code(transient.code)
             print(f"status=NOT_YET ask_id={ask_id}")
             return EXIT_NOT_YET
         time.sleep(poll)
@@ -339,13 +400,7 @@ def main(argv: list[str] | None = None) -> int:
         return handler(client, args)
     except AskCliError as exc:
         print(f"error={exc.code} {exc.detail}".rstrip(), file=sys.stderr)
-        return EXIT_USAGE if exc.code in ("SOCKET_REQUIRED",
-                                          "SOCKET_PATH_NOT_ABSOLUTE",
-                                          "BRIDGE_UNREACHABLE",
-                                          "ASKER_IDENTITY_INCOMPLETE",
-                                          "INVALID_QUESTION",
-                                          "INVALID_IDEMPOTENCY_KEY",
-                                          "INVALID_ASK_ID") else EXIT_BRIDGE_ERROR
+        return _exit_for_code(exc.code)
     except GBLContractError as exc:
         print(f"error={exc.code} {exc.detail}".rstrip(), file=sys.stderr)
         return EXIT_BRIDGE_ERROR
