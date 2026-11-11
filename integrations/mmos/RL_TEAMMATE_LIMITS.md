@@ -318,11 +318,19 @@ principal's named list plus two round-2 discoveries:
    `mcp_tool_use` — no PreToolUse hook fires for it (contrast:
    `request_secret`'s call was hook-refused live), and no permissions
    deny binds MCP tools (N4). Only its server-side "Network error"
-   behavior currently limits it. **Recommendation to the server lane:
-   remove/disable the web_reader tool in team-server builds, or
-   egress-block it.** The gate fences the name whenever a hook does
-   fire and R6b bare-denies the exact name; neither reaches a
-   server-side execution path.
+   behavior currently limits it. **Post-panel W-task pinned the source
+   (evidence 14): the tool is attached API-side by the upstream behind
+   the fabric router** — the teammate env's
+   `ANTHROPIC_BASE_URL=http://127.0.0.1:8313` routes to the unified
+   router, and that route's glm-5.3 upstream offers `web_reader`
+   server-side; no MCP registration exists anywhere in the teammate
+   home, spec, generated settings, workspace, managed config or CLI
+   argv (`claude mcp list` shows none), and the T3 server itself
+   injects only `t3-code`. So no team_roster change can un-offer it;
+   the close is a router-route change — escalation steps, census and
+   rollbacks in `14-webreader-close.md`. The gate fences the name
+   whenever a hook does fire and R6b bare-denies the exact name;
+   neither reaches a server-side execution path.
 6. **New MCP tools need exact-name census updates** (consequence of
    N4): a newly offered MCP tool carries no wildcard protection in the
    rule layer until its exact name joins `TOOL_DENY_CENSUS`; the
@@ -370,6 +378,7 @@ and resumes the same thread with full history (transcript-based resume,
 | repair round 1: the hook gate live from a real seat (12/12 probes refused, hook-text refusals for search/web), hook freshness in a running session, restart semantics, `.claude.json` corruption blocks start (backup not honored), volume + latency, status verification | `12-gate-hook-live-proof.md` |
 | panel 2 blind score of `7e9a29aa4` (3 HIGH, 6 MED, two live-proof items, "install: ready after listed repairs") | `panel2/SCORE.md` + reviewer files beside it |
 | repair round 2: the 7 live probes (url-field, octal/backslash-`@`, home Grep with hints, `@` write + what the client does with an `@` import, hook env `HOME`/`CLAUDE_CONFIG_DIR`, gate mode 0644/0000 + `status` exit 1, brace-verbatim + 20-call timing), N4 MCP-wildcard non-binding, the webReader server-side finding, the BCU M14 answer, red logs + suite logs | `13-repair2-live-probes.md` + `probe2/` |
+| W-task: webReader source pinned to the router's upstream (full offer census, 96 tools, webReader present, all other MCP = t3-code hook-visible and gate-refused live; restore byte-identical; escalated close steps with checks/rollbacks; the two one-liners) | `14-webreader-close.md` + `probe2/w-census-reply.json` |
 | Q1 source citations and reconciliation (incl. two child claims refuted by live proof) | `08-q1-child-answers.md`, `08-q1-reconciliation.md` |
 | web-tool facts for the three real charters | `07-q5-web-facts.md` |
 | Part A atomic writes / Paperclip binding / pairing URL | ledger lines 1-5 in `LEDGER.md` |
