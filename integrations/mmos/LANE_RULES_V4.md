@@ -89,7 +89,8 @@ directory your brief names, each on a port you pick and state in your return.
 - An attack round is evidence about the defects it found, not about the ones it missed. A
   diff on a critical surface (admission, credentials, exactly-once, source authority) is
   accepted by the principal only after an independent review, so say in your return when your
-  diff touches one.
+  diff touches one. The review is a panel of narrow questions; `REVIEW_PANEL.md` says how to
+  run one.
 - A child that reviews files gets a commit to read. Commit first, give it the commit id, and
   do not change those files until it has returned.
 - A child that fails once on a gateway error is restarted in the same thread. A child that
