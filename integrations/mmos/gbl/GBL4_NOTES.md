@@ -15,7 +15,7 @@ sole writer:
   bridge service agent in the isolated dev instance (no existing roster or
   spec was edited).
 - `tests/test_gbl_ask_cli.py` (44 after round 2),
-  `tests/test_gbl_paperclip_client.py` (119 after round 2).
+  `tests/test_gbl_paperclip_client.py` (121 after round 2).
 - this note.
 
 `common/gbl_contract.py` and the GBL-1/GBL-2 modules were imported and NOT
@@ -216,15 +216,17 @@ Test evidence for this round (same command, one file at a time):
 
 ## Round 2 (GBL contract adaptation, 2026-11-11)
 
-Merged the GBL lane's `t3/mmos-v4-gbl` at `a20872981` (clean merge,
-non-force; NO GBL-owned file — `bridge_service.py`, `gbl_contract.py`,
-`nudge.py`, `message_send.py`, `mcp_server.py`, `admission.py`, their
-tests — was edited here). The contract note
-(`integrations/mmos/gbl/GBL_REPAIR1_NOTES.md` §1–§3) needed no change;
-everything it requires was implementable on the current Paperclip
-surface. Tests first (`de402e7e2`, 88 failing assertions), fixes in the
-same files I own (`integrations/gbl/paperclip_client.py`,
-`tools/gbl/gbl_ask.py`, the two test files, this note, the dev spec):
+Merged the GBL lane's `t3/mmos-v4-gbl` at `e5a69f9ff` (superseding the
+round's first merge of `a20872981`; both clean, non-force; NO GBL-owned
+file — `bridge_service.py`, `gbl_contract.py`, `nudge.py`,
+`message_send.py`, `mcp_server.py`, `admission.py`, their tests — was
+edited here). The contract note
+(`integrations/mmos/gbl/GBL_REPAIR1_NOTES.md` §1–§3 at `e5a69f9ff`)
+needed no change; everything it requires was implementable on the
+current Paperclip surface. Tests first (`de402e7e2`, 88 failing
+assertions), fixes in the same files I own
+(`integrations/gbl/paperclip_client.py`, `tools/gbl/gbl_ask.py`, the
+two test files, this note, the dev spec):
 
 - **§1.1 create-if-absent** — `create_ask` first resolves the
   deterministic ask id through the exact-key path (`read_ask`), returns
@@ -237,18 +239,23 @@ same files I own (`integrations/gbl/paperclip_client.py`,
   truncated reply, 408/409/425/429/499, unusable reply id), and the
   bridge's read-back reconcile path is unchanged. Replay through the
   merged bridge: two submits, exactly one issue, `IDEMPOTENT`.
-- **§1.2 seq + trusted** — every append is stamped BY THE STORE with
-  `seq = max(seq of verified events) + 1` (per record, starting at 1) and
-  surfaced `trusted: True` only when the §2 tag verifies. Incoming
+- **§1.2 seq + trusted (trusted-only derivation, exact bool)** — every
+  append is stamped BY THE STORE with
+  `seq = max(seq over events with trusted === true) + 1` (per record,
+  starting at 1) and surfaced `trusted` as an EXACT bool. Incoming
   `seq`/`tag`/`trusted` keys on an append are never written through.
-  **Deputy steer (round 2), implemented as ruled:** seq derives ONLY
-  from tag-verified (trusted) events, so a foreign or untrusted comment
-  — including one carrying a huge forged `seq` or a claimed
-  `"trusted": true` — can never move or block the sequence, and trust is
+  **Implemented per GBL_REPAIR1_NOTES §1.2 at `e5a69f9ff` (first ruled
+  by the deputy's round-2 steer):** seq derives ONLY from tag-verified
+  (trusted) events, so a foreign or untrusted comment — including one
+  carrying a huge forged `seq` or a claimed `"trusted": true` — can
+  never move or block the sequence (the reference FakeStore's
+  last-event derivation was deliberately NOT copied), and trust is
   gated on `trusted is True` EXACTLY (the flag is computed from HMAC
-  verification, never read from the comment JSON). A fresh client
-  instance continues the record's sequence: derivation is from the
-  stored record, not instance state.
+  verification, never read from the comment JSON; every surfaced
+  `trusted` is a real bool). A fresh client instance continues the
+  record's sequence: derivation is from the stored record, not
+  instance state. `EVENT_TRUST_INVALID` stays the bridge's own check on
+  non-bool stored rows; this store never writes one.
 - **§2 HMAC v1 tag** — the adapter holds ONE host-local key: 32 random
   bytes, generated on first use (lazy), stored mode 0600 inside the
   EXISTING bridge state dir (a missing dir is the typed
@@ -274,16 +281,22 @@ same files I own (`integrations/gbl/paperclip_client.py`,
   agent-attributed rows). The KEY never crosses the wire, never enters
   Paperclip, never appears in an error — asserted over every recorded
   request body/path/header and every stored comment in the suite.
-- **§3 expires_at + reconcile** — `status` prints `expires_at` whenever
-  the bridge carries it and exits 4 on a status of `EXPIRED`. New
-  `reconcile --id <gb-…>` subcommand: wire op `reconcile` with
-  arguments EXACTLY `{ask_id}` (its parser deliberately has NO `--bot`;
-  the door's `_OP_ARGUMENTS` pins the key set). Rationale for the CLI
-  owning this surface: the MCP edge is a static five-tool census
+- **§3 expires_at + reconcile + nudge_settled** — `status` prints
+  `expires_at` whenever the bridge carries it and exits 4 on a status
+  of `EXPIRED`. New `reconcile --bot <label> --id <gb-…>` subcommand:
+  wire op `reconcile` with arguments EXACTLY `{principal, ask_id}` (the
+  round-2 law at `e5a69f9ff`; it shares the common `--socket/--bot`
+  shape because the op now carries the same creator-or-addressee party
+  check as every other mutating op — the door's `_OP_ARGUMENTS` pins
+  the key set). Rationale for the CLI owning this surface: the MCP edge
+  is a static five-tool census
   (`team.delegate/result/question/answer/message`) with no reconcile
   tool, so the local AF_UNIX door is the op's one lawful caller — an
   operator settling a `NUDGE_EFFECT_UNKNOWN` by observation, which
-  never sends.
+  never sends. The new `nudge_settled` event kind is persisted and
+  signed like any other event (stamped seq, v1 tag, surfaced with
+  computed `trusted`) — tested explicitly; the
+  `NUDGE_ATTEMPT_UNSETTLED` re-arm block is bridge law over the store.
 - **§5 nudge write-law mitigation, already in place** —
   `append_ask_event` is idempotent by CORE content (a trusted match
   suppresses the duplicate POST), so a nudge-event append whose reply
@@ -329,20 +342,27 @@ create the file — or pre-create it:
 
 ## Test-run evidence (one file at a time)
 
-`TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q
--p no:cacheprovider <file>`:
+`TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest
+-p no:cacheprovider <file>` — at the round-2 head (merge of
+`e5a69f9ff`), all eight GBL files one at a time:
 
-- `tests/test_gbl_ask_cli.py` — 20/20 (real GBL-2 `GblBridge`+
-  `BridgeServer` on a temp socket, `allowed_peer_uids=(uid,)`, in-memory
-  store)
-- `tests/test_gbl_paperclip_client.py` — 33/33 (fake HTTP server bound to
-  127.0.0.1 on an EPHEMERAL port; the real GblBridge is driven over the
-  client for the EFFECT_UNKNOWN tests)
+- `tests/test_gbl_paperclip_client.py` — 121/121 (also run 3× back-to-back
+  after fixing a latent coin-flip tie in one provenance test; the fake
+  HTTP server binds 127.0.0.1 on an EPHEMERAL port, and the real
+  GblBridge is driven over the client for the EFFECT_UNKNOWN tests)
+- `tests/test_gbl_ask_cli.py` — 44/44 (real GBL-2 `GblBridge`+
+  `BridgeServer` on a temp socket, `allowed_peer_uids=(uid,)`, a real
+  `PaperclipAskClient` behind it for the door tests)
+- `tests/common/gbl_contract_test.py` — 79/79
+- `tests/test_gbl_bridge_service.py` — 64/64
+- `tests/test_gbl_nudge.py` — 12/12
+- `tests/test_gbl_message_send.py` — 27/27
+- `tests/test_gbl_mcp_server.py` — 28/28
+- `tests/test_gbl_admission.py` — 23/23
 
-Regressions of imported modules: `tests/common/gbl_contract_test.py`
-72/72, `tests/test_gbl_bridge_service.py` 35/35, `tests/test_gbl_nudge.py`
-10/10, `tests/test_gbl_message_send.py` 19/19. No real Paperclip instance
-is contacted by any test.
+No real Paperclip instance is contacted by any test. (Round 1 for the
+record: CLI 20/20, client 33/33, contract 72/72, bridge 35/35, nudge
+10/10, message_send 19/19.)
 
 ## Dev proof (2026-11-11, one stack at a time, all stopped)
 

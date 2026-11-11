@@ -971,9 +971,11 @@ class TestCommentProvenance:
         ask_client.create_ask(row)
         issue_id = fake.state.order[0]
         same = fake.state.now_iso()
-        for state in ("ANSWERED", "CONSUMED"):
+        # Deterministic ids: the total order is (createdAt, id), so a random
+        # uuid pair would make the expected order a coin flip.
+        for index, state in enumerate(("ANSWERED", "CONSUMED"), start=1):
             fake.state.comments[issue_id].append({
-                "id": str(uuid.uuid4()), "authorAgentId": AGENT_ID,
+                "id": f"c-{index}", "authorAgentId": AGENT_ID,
                 "createdAt": same,
                 "body": pc.EVENT_MARKER + " " +
                         json.dumps({"type": "state", "state": state},
@@ -1053,6 +1055,40 @@ class TestEventSeqAndTrust:
         assert events[0]["trusted"] is True
         assert events[0]["seq"] == 1
         assert "tag" not in events[0]              # storage metadata only
+
+    def test_nudge_settled_is_persisted_and_signed_like_any_event(self, fake):
+        # GBL_REPAIR1_NOTES §3 at e5a69f9ff: `nudge_settled` is a first-class
+        # event kind — the store stamps, signs and surfaces it generically,
+        # exactly like a state or answer event.
+        ask_client, row = self.seed_ask(fake)
+        settled = {"type": "nudge_settled", "outcome": "NOT_DELIVERED",
+                   "state": "ANSWERED", "at": "2026-11-11T22:33:00Z"}
+        ask_client.append_ask_event(row["ask_id"], dict(settled))
+        issue_id = fake.state.order[0]
+        stored = stored_comment(fake, issue_id)
+        assert stored["seq"] == 1
+        assert stored["tag"] == expect_tag(
+            KEY_BYTES, row["ask_id"], 1, {**settled, "seq": 1})
+        events = ask_client.read_ask(row["ask_id"])["events"]
+        assert [e["type"] for e in events] == ["nudge_settled"]
+        assert events[0]["outcome"] == "NOT_DELIVERED"
+        assert events[0]["trusted"] is True
+
+    def test_trusted_is_exactly_a_bool(self, fake):
+        # GBL_REPAIR1_NOTES §1.2 at e5a69f9ff: `trusted` must be exactly a
+        # JSON bool on every surfaced event — trusted and untrusted alike.
+        ask_client, row = self.seed_ask(fake)
+        ask_client.append_ask_event(row["ask_id"],
+                                    {"type": "state", "state": "ANSWERED"})
+        issue_id = fake.state.order[0]
+        fake.state.comments[issue_id].append({
+            "id": str(uuid.uuid4()), "createdAt": fake.state.now_iso(),
+            "body": pc.EVENT_MARKER + ' {"type":"state","state":"FORGED",'
+                                      '"seq":9,"tag":"v1:' + "0" * 64 + '"}'})
+        events = ask_client.read_ask(row["ask_id"])["events"]
+        assert len(events) == 2
+        assert all(type(e["trusted"]) is bool for e in events)
+        assert [e["trusted"] for e in events] == [True, False]
 
     def test_bridge_replays_the_full_chain_over_the_store(self, fake):
         # The merged bridge validates seq monotonicity across trusted events

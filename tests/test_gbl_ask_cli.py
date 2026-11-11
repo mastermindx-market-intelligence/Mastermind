@@ -436,8 +436,8 @@ class TestWaitResilience:
 
 
 def run_raw(capsys, *args) -> tuple[int, str]:
-    """Drive the CLI verbatim (no injected --socket/--bot): reconcile takes
-    ONLY --id on the wire (merge §3: its argument set is exactly {ask_id})."""
+    """Drive the CLI verbatim (no injected --socket/--bot), for the cases
+    whose flag surface differs from the common shape."""
     rc = gbl_ask.main(list(args))
     captured = capsys.readouterr()
     return rc, captured.out + captured.err
@@ -483,7 +483,8 @@ RECONCILED = {"status": "RECONCILED_DELIVERED", "ask_id": "gb-" + "1" * 32,
 
 
 class TestReconcile:
-    def test_reconcile_sends_exactly_ask_id(self, capsys, monkeypatch):
+    def test_reconcile_sends_exactly_principal_and_ask_id(self, capsys,
+                                                          monkeypatch):
         made: list[ScriptedBridge] = []
 
         def factory(socket_path, timeout=gbl_ask.REQUEST_TIMEOUT_SECONDS):
@@ -494,12 +495,16 @@ class TestReconcile:
 
         monkeypatch.setattr(gbl_ask, "BridgeSocketClient", factory)
         rc, out = run_raw(capsys, "reconcile", "--socket",
-                          "/tmp/gbl-fixture.sock", "--id", "gb-" + "1" * 32)
+                          "/tmp/gbl-fixture.sock", "--bot", BOT,
+                          "--id", "gb-" + "1" * 32)
         assert rc == 0
         assert "status=RECONCILED_DELIVERED" in out
-        assert made[0].calls == [("reconcile", {"ask_id": "gb-" + "1" * 32})]
+        # round-2 wire law: reconcile is exactly {principal, ask_id}
+        assert made[0].calls == [("reconcile",
+                                  {"principal": BOT,
+                                   "ask_id": "gb-" + "1" * 32})]
 
-    def test_reconcile_takes_no_bot_flag(self, capsys, monkeypatch):
+    def test_reconcile_requires_the_bot_flag(self, capsys, monkeypatch):
         made: list[ScriptedBridge] = []
 
         def factory(socket_path, timeout=gbl_ask.REQUEST_TIMEOUT_SECONDS):
@@ -509,10 +514,10 @@ class TestReconcile:
             return bridge
 
         monkeypatch.setattr(gbl_ask, "BridgeSocketClient", factory)
-        # --bot is not a reconcile option: the wire law is {ask_id} only.
+        # --bot is required: the op carries the party check like every
+        # other mutating op.
         rc, out = run_raw(capsys, "reconcile", "--socket",
-                          "/tmp/gbl-fixture.sock", "--id", "gb-" + "1" * 32,
-                          "--bot", BOT)
+                          "/tmp/gbl-fixture.sock", "--id", "gb-" + "1" * 32)
         assert rc == 2                          # argparse usage refusal
         assert made == []                       # nothing was sent
 
@@ -520,23 +525,24 @@ class TestReconcile:
         rc, out = run_cli(capsys, service, "ask", "--question", QUESTION)
         ask_id = ask_id_from(out)
         rc, out = run_raw(capsys, "reconcile", "--socket", service.socket,
-                          "--id", ask_id)
+                          "--bot", BOT, "--id", ask_id)
         assert rc == 5          # typed: no nudge attempt exists to settle
         assert "NUDGE_ATTEMPT_NOT_FOUND" in out
 
     def test_reconcile_unknown_ask_is_typed(self, service, capsys):
         rc, out = run_raw(capsys, "reconcile", "--socket", service.socket,
-                          "--id", "gb-" + "0" * 32)
+                          "--bot", BOT, "--id", "gb-" + "0" * 32)
         assert rc == 5
         assert "ASK_NOT_FOUND" in out
 
     def test_reconcile_refuses_a_malformed_ask_id(self, capsys, monkeypatch):
         rc, out = run_raw(capsys, "reconcile", "--socket",
-                          "/tmp/gbl-fixture.sock", "--id", "not-an-ask-id")
+                          "/tmp/gbl-fixture.sock", "--bot", BOT,
+                          "--id", "not-an-ask-id")
         assert rc == 2
         assert "INVALID_ASK_ID" in out
 
-    def test_help_lists_reconcile_without_a_bot_option(self):
+    def test_help_lists_reconcile(self):
         help_text = gbl_ask.build_parser().format_help().lower()
         assert "reconcile" in help_text
 

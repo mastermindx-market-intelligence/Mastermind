@@ -18,11 +18,12 @@ Commands:
   GBL repair-1 §3).
 * ``fetch --id <gb-…>`` — fetch the answer once it exists (the first
   successful fetch consumes it).
-* ``reconcile --id <gb-…>`` — the operator's settle path for an
-  effect-unknown nudge: it OBSERVES the last attempt by ask id and never
-  sends.  The wire op takes exactly ``{ask_id}`` (no ``--bot``); the MCP
-  edge's static five-tool census has no reconcile surface, so this local
-  door is the one caller.
+* ``reconcile --bot <account-label> --id <gb-…>`` — the operator's settle
+  path for an effect-unknown nudge: it OBSERVES the last attempt by ask id
+  and never sends.  The wire op takes exactly ``{principal, ask_id}``
+  (round 2 of the contract: it carries the same creator-or-addressee party
+  check as every other mutating op); the MCP edge's static five-tool census
+  has no reconcile surface, so this local door is the one caller.
 
 ``--wait`` polls ``fetch`` for up to the deadline, then exits: the EXIT is
 the asker session's wake when the command runs as a background task
@@ -229,16 +230,13 @@ def build_parser() -> argparse.ArgumentParser:
                                  help="show an ask's state")
     status.add_argument("--id", required=True, help="the ask id (gb-…)")
 
-    # reconcile is the ONE command without --bot: the wire law pins its
-    # argument set to exactly {ask_id} (bridge _OP_ARGUMENTS), and it names
-    # no principal — the ask record itself is the whole address.
+    # reconcile shares the common shape: the round-2 wire law pins its
+    # argument set to exactly {principal, ask_id} (the door's
+    # _OP_ARGUMENTS), with the same creator-or-addressee party check as
+    # every other mutating op.
     reconcile = commands.add_parser(
-        "reconcile", help="settle the last nudge attempt by observation "
-                          "(never sends)")
-    reconcile.add_argument("--socket", metavar="PATH",
-                           default=os.environ.get(SOCKET_ENV),
-                           help="bridge service socket path "
-                                f"(default: ${SOCKET_ENV})")
+        "reconcile", parents=[common],
+        help="settle the last nudge attempt by observation (never sends)")
     reconcile.add_argument("--id", required=True, help="the ask id (gb-…)")
 
     fetch = commands.add_parser("fetch", parents=[common],
@@ -327,15 +325,17 @@ def cmd_status(client: BridgeSocketClient, args: argparse.Namespace) -> int:
 def cmd_reconcile(client: BridgeSocketClient,
                   args: argparse.Namespace) -> int:
     """Observe-and-settle for the last nudge attempt (wire op
-    ``reconcile``, arguments exactly ``{ask_id}``): after a
+    ``reconcile``, arguments exactly ``{principal, ask_id}`` — round 2:
+    the same party check as every other mutating op): after a
     ``NUDGE_EFFECT_UNKNOWN`` this is the lawful next step — it never
     sends, so it is always safe to run.  A settled observation prints its
     status (RECONCILED_DELIVERED / RECONCILED_NOT_DELIVERED /
     NUDGE_EFFECT_UNKNOWN when the transport still cannot prove the
     outcome) and exits 0; a typed bridge refusal (no attempt to settle,
-    unknown ask, no sender) exits 5."""
+    unknown ask, wrong party, no sender) exits 5."""
     _require_ask_id(args.id)
-    result = client.request("reconcile", {"ask_id": args.id})
+    result = client.request("reconcile", {"principal": args.bot,
+                                          "ask_id": args.id})
     line = f"status={result.get('status')} ask_id={args.id}"
     if result.get("reason_code"):
         line += f" reason_code={result['reason_code']}"
