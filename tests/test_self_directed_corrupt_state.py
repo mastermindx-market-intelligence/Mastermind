@@ -193,6 +193,7 @@ def test_nonfinite_sizing_cannot_create_unreadable_pending_order(sandbox, field)
     assert not SD._PENDING_PATH.exists()
 
 
+@pytest.mark.strict_book_dirs
 @pytest.mark.parametrize("dangling_link", [False, True], ids=["missing", "dangling"])
 def test_unavailable_book_directory_cannot_report_a_cancel_miss(sandbox, dangling_link):
     SD._DATA.rmdir()
