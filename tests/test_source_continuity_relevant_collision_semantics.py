@@ -77,6 +77,7 @@ class CollisionChurnHTTP:
         self.direct_details = direct_details or {}
         self._source_continuity_conditional = conditional
         self.roster_reads = 0
+        self.last_roster: list[dict[str, object]] = []
         self.foreign_file_reads: dict[int, int] = {}
         self.foreign_detail_reads: dict[int, int] = {}
         self.plain_calls: list[str] = []
@@ -90,14 +91,25 @@ class CollisionChurnHTTP:
     def _open_roster_url(self) -> str:
         return (
             f"{fx.API_ROOT}/repos/{fx.REPOSITORY}/pulls"
-            "?state=open&per_page=100&page=1"
+            "?state=open&sort=created&direction=asc&per_page=100&page=1"
         )
+
+    @property
+    def _tail_url(self) -> str:
+        return self._open_roster_url.replace("direction=asc", "direction=desc")
+
+    def _tail(self) -> list[dict[str, object]]:
+        # Newest first, from whichever roster the observation just paged.
+        return sorted(self.last_roster, key=lambda row: row["number"], reverse=True)
 
     def _plain(self, url: str, *, token: str, timeout: float) -> object:
         self.plain_calls.append(url)
         if url == self._open_roster_url:
             self.roster_reads += 1
-            return self.first_roster if self.roster_reads == 1 else self.second_roster
+            self.last_roster = self.first_roster if self.roster_reads == 1 else self.second_roster
+            return self.last_roster
+        if url == self._tail_url:
+            return self._tail()
 
         prefix = f"{fx.API_ROOT}/repos/{fx.REPOSITORY}/pulls/"
         if url.startswith(prefix):
@@ -156,7 +168,9 @@ class CollisionChurnHTTP:
             )
 
         self.conditional_calls.append(url)
+        assert url != self._tail_url
         if url == self._open_roster_url:
+            self.last_roster = self.second_roster
             return self.module._HTTPRepresentation(
                 payload=self.second_roster,
                 etag='"' + "e" * 64 + '"',
@@ -251,7 +265,39 @@ def test_missing_disjoint_pr_may_drop_only_when_direct_detail_proves_closed(
     )
 
 
-def test_missing_disjoint_pr_that_direct_detail_still_reports_open_refuses(
+@pytest.mark.parametrize(
+    ("path", "collision_state"),
+    [("docs/a.md", "DISJOINT"), ("scripts/source_continuity.py", "OVERLAP")],
+)
+def test_missing_pr_that_direct_detail_still_reports_open_is_reproved(
+    path: str,
+    collision_state: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Offset paging skips a row when an earlier row closes mid-read, so absence
+    # from the second roster is not closure.
+    module = sat._module()
+    http = CollisionChurnHTTP(
+        module,
+        first_roster=[_target_row(), _foreign_row(FOREIGN_A, head_sha=A_HEAD)],
+        second_roster=[_target_row()],
+        foreign_files={FOREIGN_A: (path,)},
+        direct_details={
+            FOREIGN_A: _foreign_row(FOREIGN_A, head_sha=A_HEAD, state="open"),
+        },
+    )
+
+    result = _run(module, http, capsys)
+
+    _assert_receipt(result)
+    assert result[1]["collision_state"] == collision_state
+    assert (
+        f"{fx.API_ROOT}/repos/{fx.REPOSITORY}/pulls/{FOREIGN_A}"
+        in http.plain_calls
+    )
+
+
+def test_missing_colliding_pr_that_moved_refuses(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     module = sat._module()
@@ -259,9 +305,9 @@ def test_missing_disjoint_pr_that_direct_detail_still_reports_open_refuses(
         module,
         first_roster=[_target_row(), _foreign_row(FOREIGN_A, head_sha=A_HEAD)],
         second_roster=[_target_row()],
-        foreign_files={FOREIGN_A: ("docs/a.md",)},
+        foreign_files={FOREIGN_A: ("scripts/source_continuity.py",)},
         direct_details={
-            FOREIGN_A: _foreign_row(FOREIGN_A, head_sha=A_HEAD, state="open"),
+            FOREIGN_A: _foreign_row(FOREIGN_A, head_sha=A_HEAD_MOVED, state="open"),
         },
     )
 
@@ -574,12 +620,18 @@ def test_colliding_pr_closure_refuses(
         first_roster=[_target_row(), _foreign_row(FOREIGN_A, head_sha=A_HEAD)],
         second_roster=[_target_row()],
         foreign_files={FOREIGN_A: ("scripts/source_continuity.py",)},
+        direct_details={
+            FOREIGN_A: [
+                _foreign_row(FOREIGN_A, head_sha=A_HEAD),
+                _foreign_row(FOREIGN_A, head_sha=A_HEAD, state="closed"),
+            ],
+        },
     )
 
     _assert_changed(_run(module, http, capsys))
     assert http.roster_reads == 2
     assert http.foreign_file_reads == {FOREIGN_A: 1}
-    assert http.foreign_detail_reads == {FOREIGN_A: 1}
+    assert http.foreign_detail_reads == {FOREIGN_A: 2}
 
 
 @pytest.mark.parametrize(

@@ -20,11 +20,13 @@ class EstateHTTP(fx._ProbeHTTP):
         file_counts=None,
         change=None,
         overlap=False,
+        opened_between=0,
         identity_complete=False,
         move_overlap=False,
     ):
         super().__init__()
         self.count = count
+        self.opened_between = opened_between
         self.files_per_pr = files_per_pr
         self.file_counts = {} if file_counts is None else dict(file_counts)
         self.change = change
@@ -58,9 +60,10 @@ class EstateHTTP(fx._ProbeHTTP):
     def __call__(self, url, *, token, timeout):
         parsed = urlparse(url)
         page = int(parse_qs(parsed.query).get("page", ["1"])[0])
+        tail = parse_qs(parsed.query).get("direction") == ["desc"]
         if parsed.path.endswith("/pulls"):
             self.calls.append((url, token, timeout))
-            if page == 1:
+            if page == 1 and not tail:
                 self.passes += 1
             foreign_rows = []
             for i in range(self.count - 1):
@@ -72,9 +75,14 @@ class EstateHTTP(fx._ProbeHTTP):
             rows = [{"number": fx.PR_NUMBER}] + foreign_rows
             if self.change == "membership" and self.passes > 1:
                 rows[-1] = {"number": 9000}
-            if self.change == "duplicate" and page == 2:
-                rows[100] = rows[99]
-            result = rows[(page - 1) * 100:page * 100]
+            if self.passes > 1:
+                rows += [{"number": 9000 + i} for i in range(self.opened_between)]
+            if self.change == "duplicate" and page == 1:
+                rows[1] = rows[0]
+            if tail:
+                result = rows[::-1][:100]
+            else:
+                result = rows[(page - 1) * 100:page * 100]
         elif parsed.path.endswith("/files") and (
                 f"/pulls/{fx.PR_NUMBER}/" not in parsed.path):
             self.calls.append((url, token, timeout))
@@ -121,13 +129,19 @@ def run_cli(module, capsys, http, *, kind="checkpoint", runner=None, read_failur
     return exit_code, json.loads(captured.out)
 
 
-@pytest.mark.parametrize("count", [1, 100, 143, 200, 256, 409, 419, 450, 451, 457, 458, 465, 470, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 903, 907, 999, 1000, 1001, 1499, 1500])
+@pytest.mark.parametrize("count", [1, 2, 99, 100, 143, 200, 256, 409, 419, 450, 451, 457, 458, 465, 470, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 903, 907, 999, 1000, 1001, 1499, 1500])
 @pytest.mark.parametrize("kind", ["checkpoint", "remote-complete"])
-def test_real_main_completes_bounded_estate(count, kind, capsys, monkeypatch):
+def test_real_main_reports_the_qualified_coverage_boundary(count, kind, capsys, monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
     http = EstateHTTP(count)
     rc, payload = run_cli(module, capsys, http, kind=kind)
+    if count >= 100:
+        assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
+        assert http.passes == 1
+        assert not any("/files?" in url and f"/pulls/{fx.PR_NUMBER}/" not in url
+                       for url, _, _ in http.calls)
+        return
     assert rc == 0, payload
     assert payload["authority_effect"] == "NONE"
     assert payload["merge_authorized"] is False
@@ -147,7 +161,8 @@ def test_over_ceiling_refuses_before_foreign_files(count, capsys, monkeypatch):
                    for url, _, _ in http.calls)
     roster_pages = [int(parse_qs(urlparse(url).query)["page"][0])
                     for url, _, _ in http.calls if urlparse(url).path.endswith("/pulls")]
-    assert max(roster_pages) == module._MAX_ROSTER_PAGES == 16
+    assert roster_pages == [1]
+    assert module._MAX_ROSTER_PAGES == 16
 
 
 @pytest.mark.parametrize("change,code", [
@@ -155,11 +170,11 @@ def test_over_ceiling_refuses_before_foreign_files(count, capsys, monkeypatch):
     ("paths", "REMOTE_PROOF_CHANGED"),
     ("duplicate", "REMOTE_PROBE_FAILED"),
 ])
-def test_large_estate_still_requires_stable_complete_observations(
+def test_single_page_estate_still_requires_stable_complete_observations(
         change, code, capsys, monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
-    rc, payload = run_cli(module, capsys, EstateHTTP(143, change=change))
+    rc, payload = run_cli(module, capsys, EstateHTTP(99, change=change))
     assert rc != 0 and payload["code"] == code
 
 
@@ -181,10 +196,10 @@ def _foreign_detail_call_count(http: EstateHTTP) -> int:
     )
 
 
-def test_490_selective_revalidation_reuses_stable_foreign_evidence(monkeypatch):
+def test_single_page_selective_revalidation_reuses_stable_foreign_evidence(monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
-    estate_size = 490
+    estate_size = 99
     http = EstateHTTP(
         estate_size,
         overlap=True,
@@ -216,10 +231,10 @@ def test_490_selective_revalidation_reuses_stable_foreign_evidence(monkeypatch):
     assert http.passes == 2
 
 
-def test_490_selective_revalidation_reproves_only_moved_foreign_identity(monkeypatch):
+def test_single_page_selective_revalidation_reproves_only_moved_foreign_identity(monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
-    estate_size = 490
+    estate_size = 99
     http = EstateHTTP(
         estate_size,
         overlap=True,
@@ -249,11 +264,11 @@ def test_490_selective_revalidation_reproves_only_moved_foreign_identity(monkeyp
     assert http.passes == 2
 
 
-def test_490_estate_moved_collider_same_projection_stays_within_closed_budget(
+def test_single_page_estate_moved_collider_same_projection_stays_within_closed_budget(
         capsys, monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
-    estate_size = 490
+    estate_size = 99
     http = EstateHTTP(
         estate_size,
         overlap=True,
@@ -271,13 +286,26 @@ def test_490_estate_moved_collider_same_projection_stays_within_closed_budget(
     assert http.passes == 2
 
 
+def test_490_estate_refuses_before_selective_revalidation(capsys, monkeypatch):
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
+    http = EstateHTTP(490, overlap=True, identity_complete=True, move_overlap=True)
+
+    rc, payload = run_cli(module, capsys, http)
+
+    assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
+    assert _foreign_file_call_count(http) == 0
+    assert _foreign_detail_call_count(http) == 0
+    assert http.passes == 1
+
+
 def test_last_foreign_pr_overlap_is_preserved(capsys, monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
-    rc, payload = run_cli(module, capsys, EstateHTTP(256, overlap=True))
+    rc, payload = run_cli(module, capsys, EstateHTTP(99, overlap=True))
     assert rc == 0
     assert payload["collision_state"] == "OVERLAP"
-    assert payload["colliding_pr_numbers"] == [1254]
+    assert payload["colliding_pr_numbers"] == [1097]
     assert payload["merge_authorized"] is False
 
 
@@ -345,11 +373,11 @@ def test_auth_failure_is_not_relabeled_budget_or_retried(capsys, monkeypatch):
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("files", [950, 1000])
+@pytest.mark.parametrize("files", [2000, 2100])
 def test_large_foreign_file_fanout_remains_bounded(files, capsys, monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
-    http = EstateHTTP(200, files_per_pr=files)
+    http = EstateHTTP(99, files_per_pr=files)
     rc, payload = run_cli(module, capsys, http)
     assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
     # The call budget binds: admission refuses the 4,097th read before transport.
@@ -383,8 +411,8 @@ def test_deadline_is_rechecked_after_json_accounting(capsys, monkeypatch):
     assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
 
 
-@pytest.mark.parametrize("count", [143, 200, 256])
-def test_complete_cli_uses_real_git_with_large_synthetic_estate(
+@pytest.mark.parametrize("count", [2, 50, 99])
+def test_complete_cli_uses_real_git_with_single_response_estate(
         count, tmp_path, capsys, monkeypatch):
     import subprocess
     import test_source_continuity_r3_hardening as r3
@@ -496,9 +524,11 @@ def test_current_macro_estate_payload_fits_successor_byte_budget(monkeypatch):
     bounded.check()
 
 
-def test_measured_macro_census_scales_to_ceiling_inside_every_budget():
-    """The 903-PR measurement overran the old profile; linear growth to the new
-    PR ceiling keeps at least 1.6x headroom on calls, bytes and time."""
+def test_retained_resource_projection_fits_without_proving_coverage():
+    """Retain the historical capacity estimate, not an enumeration certificate.
+
+    Resource headroom cannot qualify the now-refused multi-page coverage.
+    """
     module = fx._cli_module()
     assert MEASURED_CALLS > 1152
     assert MEASURED_NORMALIZED_BYTES > 128 * 1024 * 1024

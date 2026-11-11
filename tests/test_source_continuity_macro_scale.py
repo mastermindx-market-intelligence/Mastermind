@@ -1,4 +1,4 @@
-"""Macro-1500 Source Continuity profile regressions; no real HTTP or token."""
+"""Retained Macro resource profile and truthful coverage limits; no real HTTP."""
 from __future__ import annotations
 
 import hashlib
@@ -140,18 +140,16 @@ def test_macro_1500_profile_is_exact() -> None:
 
 
 @pytest.mark.parametrize("count", [274, 299, 300, 350, 384, 400, 409, 410, 419, 425, 450, 451, 457, 458, 465, 470, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 600, 903, 907, 999, 1000, 1001, 1200, 1499, 1500])
-def test_macro_scale_estate_completes(count, capsys, monkeypatch) -> None:
+def test_macro_scale_estate_refuses_unqualified_coverage(count, capsys, monkeypatch) -> None:
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", budget.Clock(), raising=False)
     http = budget.EstateHTTP(count)
     rc, payload = budget.run_cli(module, capsys, http)
-    assert rc == 0, payload
-    assert payload["authority_effect"] == "NONE"
-    assert payload["merge_authorized"] is False
-    assert payload["writer_release_authorized"] is False
-    assert payload["collision_state"] == "DISJOINT"
-    assert http.passes == 2
-    assert len(http.calls) <= 4096
+    assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
+    assert http.passes == 1
+    assert _foreign_file_calls(http) == []
+    assert len(_roster_calls(http)) == 1
+    assert len(http.calls) < 4096
 
 
 def test_macro_1501_refuses_before_foreign_file_enumeration(
@@ -165,13 +163,13 @@ def test_macro_1501_refuses_before_foreign_file_enumeration(
     assert _foreign_file_calls(http) == []
 
 
-def test_macro_1500_call_budget_exact_and_one_under(
+def test_single_response_call_budget_exact_and_one_under(
     capsys, monkeypatch
 ) -> None:
     control_module = fx._cli_module()
     _apply_frozen_profile(control_module)
     monkeypatch.setattr(control_module, "monotonic", budget.Clock())
-    control = budget.EstateHTTP(1500)
+    control = budget.EstateHTTP(99)
     assert budget.run_cli(control_module, capsys, control)[0] == 0
     required_calls = len(control.calls)
     assert required_calls < 4096
@@ -180,24 +178,24 @@ def test_macro_1500_call_budget_exact_and_one_under(
     _apply_frozen_profile(exact_module)
     exact_module._MAX_HTTP_CALLS = required_calls
     monkeypatch.setattr(exact_module, "monotonic", budget.Clock())
-    assert budget.run_cli(exact_module, capsys, budget.EstateHTTP(1500))[0] == 0
+    assert budget.run_cli(exact_module, capsys, budget.EstateHTTP(99))[0] == 0
 
     under_module = fx._cli_module()
     _apply_frozen_profile(under_module)
     under_module._MAX_HTTP_CALLS = required_calls - 1
     monkeypatch.setattr(under_module, "monotonic", budget.Clock())
-    rc, payload = budget.run_cli(under_module, capsys, budget.EstateHTTP(1500))
+    rc, payload = budget.run_cli(under_module, capsys, budget.EstateHTTP(99))
     assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
 
 
-def test_macro_1500_byte_budget_exact_and_one_under(
+def test_single_response_byte_budget_exact_and_one_under(
     capsys, monkeypatch
 ) -> None:
     control_module = fx._cli_module()
     _apply_frozen_profile(control_module)
     monkeypatch.setattr(control_module, "monotonic", budget.Clock())
     sizes: list[int] = []
-    control = budget.EstateHTTP(1500)
+    control = budget.EstateHTTP(99)
     control.after_read = lambda _url, result: sizes.append(
         len(control_module.canonical_json(result).encode("utf-8", "backslashreplace"))
     )
@@ -209,65 +207,48 @@ def test_macro_1500_byte_budget_exact_and_one_under(
     _apply_frozen_profile(exact_module)
     exact_module._MAX_HTTP_NORMALIZED_BYTES = required_bytes
     monkeypatch.setattr(exact_module, "monotonic", budget.Clock())
-    assert budget.run_cli(exact_module, capsys, budget.EstateHTTP(1500))[0] == 0
+    assert budget.run_cli(exact_module, capsys, budget.EstateHTTP(99))[0] == 0
 
     under_module = fx._cli_module()
     _apply_frozen_profile(under_module)
     under_module._MAX_HTTP_NORMALIZED_BYTES = required_bytes - 1
     monkeypatch.setattr(under_module, "monotonic", budget.Clock())
-    rc, payload = budget.run_cli(under_module, capsys, budget.EstateHTTP(1500))
+    rc, payload = budget.run_cli(under_module, capsys, budget.EstateHTTP(99))
     assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
 
 
-def test_macro_1000_open_pr_estate_with_live_fanout_completes(
+def test_macro_1000_with_live_fanout_refuses_before_foreign_reads(
     capsys, monkeypatch
 ) -> None:
-    """About 1000 open PRs carrying the live multi-page file fanout of Macro."""
+    """Historical file fanout cannot qualify an incomplete PR roster."""
     assert len(LIVE_903_EXTRA_FILE_CALLS) == 41
     assert sum(LIVE_903_EXTRA_FILE_CALLS) == 170
-
-    baseline_module = fx._cli_module()
-    monkeypatch.setattr(baseline_module, "monotonic", budget.Clock())
-    baseline = budget.EstateHTTP(1000)
-    assert budget.run_cli(baseline_module, capsys, baseline)[0] == 0
-
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", budget.Clock())
     http = budget.EstateHTTP(1000, file_counts=_live_fanout_file_counts(1))
+
     rc, payload = budget.run_cli(module, capsys, http)
 
-    assert rc == 0, payload
-    assert payload["collision_state"] == "DISJOINT"
-    assert payload["authority_effect"] == "NONE"
-    assert http.passes == 2
-    roster_pages = [url for url, _, _ in http.calls if "/pulls?" in url]
-    assert sum("page=11" in url for url in roster_pages) == 2
-    assert len(http.calls) == len(baseline.calls) + 2 * 170 == 2370
+    assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
+    assert http.passes == 1
+    assert len(_roster_calls(http)) == 1
+    assert _foreign_file_calls(http) == []
 
 
-def test_macro_1500_doubled_live_fanout_preserves_call_headroom(
+def test_macro_1500_doubled_fanout_does_not_claim_coverage_or_headroom(
     capsys, monkeypatch
 ) -> None:
-    """Twice the live fanout at the PR ceiling, observed in full on both passes.
-
-    This is the full-re-census shape (identity-less rows or a non-conditional
-    transport). It omits the saturated compare/commit/tree reads, about 434 per
-    pass live, so it is not a headroom claim for that path in production: with
-    those reads the full re-census exhausts 4,096 calls near 1,210 open PRs.
-    """
-    baseline_module = fx._cli_module()
-    monkeypatch.setattr(baseline_module, "monotonic", budget.Clock())
-    baseline = budget.EstateHTTP(1500)
-    assert budget.run_cli(baseline_module, capsys, baseline)[0] == 0
-
+    """The large estate is unqualified before its expensive file fanout."""
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", budget.Clock())
     http = budget.EstateHTTP(1500, file_counts=_live_fanout_file_counts(2))
+
     rc, payload = budget.run_cli(module, capsys, http)
 
-    assert rc == 0, payload
-    assert len(http.calls) == len(baseline.calls) + 2 * 340 == 3720
-    assert module._MAX_HTTP_CALLS - len(http.calls) == 376
+    assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
+    assert http.passes == 1
+    assert len(_roster_calls(http)) == 1
+    assert _foreign_file_calls(http) == []
 
 
 def _census_threads(http) -> set[str]:
@@ -284,7 +265,7 @@ def _roster_calls(http) -> list[str]:
     return [url for url, _, _ in http.calls if "/pulls?" in url]
 
 
-@pytest.mark.parametrize("count", [1000, 1500])
+@pytest.mark.parametrize("count", [50, 99])
 def test_conditional_reuse_path_reads_each_foreign_pr_once(
     count, capsys, monkeypatch
 ) -> None:
@@ -301,7 +282,8 @@ def test_conditional_reuse_path_reads_each_foreign_pr_once(
     assert payload["collision_state"] == "DISJOINT"
     assert payload["authority_effect"] == "NONE"
     assert http.passes == 2
-    assert len(_roster_calls(http)) == 2 * (count // 100 + 1)
+    # Each observation uses exactly one complete short response.
+    assert len(_roster_calls(http)) == 2
     foreign_files = _foreign_file_calls(http)
     assert len(foreign_files) == len(set(foreign_files)) == count - 1 + 170
     strict = [
@@ -312,7 +294,7 @@ def test_conditional_reuse_path_reads_each_foreign_pr_once(
     assert sorted(http.conditional_calls) == sorted(strict)
     assert any(name.startswith("source-continuity-read") for name in threads)
     total = len(http.calls) + len(http.conditional_calls)
-    assert total == 2 * (count // 100 + 1) + count - 1 + 170 + 2 * len(strict)
+    assert total == 2 + count - 1 + 170 + 2 * len(strict)
     assert total < module._MAX_HTTP_CALLS // 2
 
 
@@ -320,7 +302,7 @@ def test_census_worker_count_is_the_shared_constant(capsys, monkeypatch) -> None
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", budget.Clock())
     monkeypatch.setattr(module, "_FOREIGN_PR_WORKERS", 1)
-    http = ConditionalEstateHTTP(module, 200)
+    http = ConditionalEstateHTTP(module, 50)
     threads = _census_threads(http)
     rc, payload = budget.run_cli(module, capsys, http)
     assert rc == 0, payload
@@ -334,14 +316,38 @@ def test_identityless_foreign_row_forces_full_second_census(
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", budget.Clock())
     http = ConditionalEstateHTTP(
-        module, 1000, identityless={1000}, file_counts=_live_fanout_file_counts(1)
+        module, 99, identityless={1000}, file_counts=_live_fanout_file_counts(1)
     )
     rc, payload = budget.run_cli(module, capsys, http)
 
     assert rc == 0, payload
     assert payload["collision_state"] == "DISJOINT"
     assert http.passes == 2
-    assert len(_foreign_file_calls(http)) == 2 * (999 + 170)
+    assert len(_foreign_file_calls(http)) == 2 * (98 + 170)
+
+
+@pytest.mark.parametrize(("opened", "rc", "code"), [
+    (98, 2, "REMOTE_CENSUS_INCOMPLETE"),
+    (99, 2, "REMOTE_CENSUS_INCOMPLETE"),
+])
+@pytest.mark.parametrize("conditional", [True, False], ids=["identityless", "legacy"])
+def test_full_second_response_leaves_revalidation_incomplete(
+    conditional, opened, rc, code, capsys, monkeypatch
+) -> None:
+    """Neither re-census fallback may promote a full second page to success."""
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", budget.Clock())
+    if conditional:
+        http = ConditionalEstateHTTP(
+            module, 2, identityless={1000}, opened_between=opened
+        )
+    else:
+        http = budget.EstateHTTP(2, opened_between=opened)
+    rc_result, payload = budget.run_cli(module, capsys, http)
+
+    assert rc_result == rc, payload
+    assert payload["code"] == code
+    assert http.passes == 2
 
 
 def test_time_budget_accepts_last_finite_instant_and_refuses_deadline(

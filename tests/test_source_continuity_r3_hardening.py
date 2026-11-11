@@ -96,8 +96,10 @@ class CollisionHTTP:
 
     def __call__(self, url: str, *, token: str, timeout: float) -> object:
         assert token == TOKEN and timeout > 0
-        if url.endswith("/pulls?state=open&per_page=100&page=1"):
+        if url.endswith("/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"):
             return [{"number": 448}, {"number": 999}]
+        if url.endswith("/pulls?state=open&sort=created&direction=desc&per_page=100&page=1"):
+            return [{"number": 448}, {"number": 999}][::-1]
         if url.endswith("/pulls/999/files?per_page=100&page=1"):
             return [self.row]
         raise AssertionError(url)
@@ -125,8 +127,10 @@ class CollisionRowsHTTP:
 
     def __call__(self, url: str, *, token: str, timeout: float) -> object:
         assert token == TOKEN and timeout > 0
-        if url.endswith("/pulls?state=open&per_page=100&page=1"):
+        if url.endswith("/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"):
             return [{"number": 448}, *({"number": number} for number in self.rows)]
+        if url.endswith("/pulls?state=open&sort=created&direction=desc&per_page=100&page=1"):
+            return [{"number": 448}, *({"number": number} for number in self.rows)][::-1]
         for number, rows in self.rows.items():
             if url.endswith(f"/pulls/{number}/files?per_page=100&page=1"):
                 return rows
@@ -197,8 +201,10 @@ class PrefixHTTP:
             return {"merge_base_commit": {"sha": MERGE_BASE}}
         if url.endswith("/pulls/448/files?per_page=100&page=1"):
             return self.files
-        if url.endswith("/pulls?state=open&per_page=100&page=1"):
+        if url.endswith("/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"):
             return [{"number": 448}]
+        if url.endswith("/pulls?state=open&sort=created&direction=desc&per_page=100&page=1"):
+            return [{"number": 448}][::-1]
         raise AssertionError(url)
 
 
@@ -265,8 +271,10 @@ class FenceHTTP:
             return {"commit": {"sha": HEAD}}
         if url.endswith("/branches/master"):
             return {"commit": {"sha": BASE}}
-        if url.endswith("/pulls?state=open&per_page=100&page=1"):
+        if url.endswith("/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"):
             return [{"number": 448}]
+        if url.endswith("/pulls?state=open&sort=created&direction=desc&per_page=100&page=1"):
+            return [{"number": 448}][::-1]
         raise AssertionError(url)
 
 
@@ -307,8 +315,10 @@ class CollisionDriftFenceHTTP(FenceHTTP):
         assert token == TOKEN and timeout > 0
         if url.endswith("/pulls/448/files?per_page=100&page=1"):
             return [{"filename": path, "status": "modified"} for path in OWNED]
-        if url.endswith("/pulls?state=open&per_page=100&page=1"):
+        if url.endswith("/pulls?state=open&sort=created&direction=asc&per_page=100&page=1"):
             return [{"number": 448}, *({"number": number} for number in self.rows)]
+        if url.endswith("/pulls?state=open&sort=created&direction=desc&per_page=100&page=1"):
+            return [{"number": 448}, *({"number": number} for number in self.rows)][::-1]
         for number, path in self.rows.items():
             if url.endswith(f"/pulls/{number}/files?per_page=100&page=1"):
                 return [{"filename": path, "status": "modified"}]

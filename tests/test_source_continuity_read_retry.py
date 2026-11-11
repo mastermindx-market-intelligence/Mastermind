@@ -395,9 +395,9 @@ def _foreign_files(number):
 def test_parallel_census_read_recovers(capsys, monkeypatch):
     module = fx._cli_module()
     _, sleeper = _patch_time(module, monkeypatch)
-    url = f"{fx.API_ROOT}/{_foreign_files(1100)}"
+    url = f"{fx.API_ROOT}/{_foreign_files(1020)}"
     http = Flaky(
-        scale.ConditionalEstateHTTP(module, 200),
+        scale.ConditionalEstateHTTP(module, 50),
         url,
         [_error(module, "timeout", transient=True)],
     )
@@ -410,9 +410,9 @@ def test_parallel_census_read_recovers(capsys, monkeypatch):
 def test_parallel_census_read_exhaustion_names_the_foreign_read(capsys, monkeypatch):
     module = fx._cli_module()
     _patch_time(module, monkeypatch)
-    url = f"{fx.API_ROOT}/{_foreign_files(1100)}"
+    url = f"{fx.API_ROOT}/{_foreign_files(1020)}"
     http = Flaky(
-        scale.ConditionalEstateHTTP(module, 200),
+        scale.ConditionalEstateHTTP(module, 50),
         url,
         [_error(module, "http_502", transient=True) for _ in range(3)],
     )
@@ -420,7 +420,7 @@ def test_parallel_census_read_exhaustion_names_the_foreign_read(capsys, monkeypa
         module,
         capsys,
         http,
-        read_failure=_diagnostic("http_502", 3, True, endpoint=_foreign_files(1100)),
+        read_failure=_diagnostic("http_502", 3, True, endpoint=_foreign_files(1020)),
     )
     assert rc == 2 and payload["code"] == "REMOTE_PROBE_FAILED"
     assert http.target_reads == 3
@@ -525,7 +525,7 @@ def test_diagnostic_endpoint_refuses_unrecognized_urls(url):
 
 def test_diagnostic_endpoint_keeps_a_github_api_path_and_query():
     module = fx._cli_module()
-    endpoint = f"repos/{fx.REPOSITORY}/pulls?state=open&per_page=100&page=16"
+    endpoint = f"repos/{fx.REPOSITORY}/pulls?state=open&sort=created&direction=asc&per_page=100&page=16"
     assert module._diagnostic_endpoint(f"{fx.API_ROOT}/{endpoint}") == endpoint
 
 
