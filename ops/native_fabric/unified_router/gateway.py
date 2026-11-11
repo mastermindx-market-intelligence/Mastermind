@@ -424,6 +424,33 @@ def _sanitize_messages(payload: dict) -> None:
                      index, ",".join(sorted(extra)), payload.get("model"))
 
 
+_ALLOWED_TOP_LEVEL = frozenset({
+    "model", "messages", "system", "max_tokens", "stop_sequences", "stream",
+    "temperature", "top_k", "top_p", "metadata", "tools", "tool_choice",
+    "thinking", "service_tier", "container", "mcp_servers", "betas",
+})
+
+
+def _sanitize_payload(payload: dict) -> None:
+    """Drop keys this Messages API does not accept, then fix message objects.
+
+    Newer clients (T3's claudeAgent driver) send forward-looking fields that the
+    pinned ``anthropic-version`` rejects outright -- one stray key fails the
+    whole request with a hard 400 the router can only pass through. Observed
+    live in sequence: ``messages.N.output_config``, then top-level
+    ``context_management``. Stripping is strictly better than a 400 because the
+    upstream would refuse the field anyway; every drop is logged so the drifting
+    client stays visible.
+    """
+    extra = [key for key in payload if key not in _ALLOWED_TOP_LEVEL]
+    for key in extra:
+        del payload[key]
+    if extra:
+        _log.warning("fabric sanitized payload dropped=%s model=%s",
+                     ",".join(sorted(extra)), payload.get("model"))
+    _sanitize_messages(payload)
+
+
 def _affinity(payload: dict) -> str | None:
     metadata = payload.get("metadata")
     if isinstance(metadata, dict) and isinstance(metadata.get("user_id"), str):
@@ -1124,7 +1151,7 @@ def create_app(cfg: Settings | None = None, *,
                     payload = json.loads(bytes(body))
                     if not isinstance(payload, dict):
                         raise ValueError()
-                    _sanitize_messages(payload)
+                    _sanitize_payload(payload)
                     candidates = _model_candidates(payload, cfg.aliases)
                 except (ValueError, RecursionError, WireTranslationError) as exc:
                     state.refused += 1
