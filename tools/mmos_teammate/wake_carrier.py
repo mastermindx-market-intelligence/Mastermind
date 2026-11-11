@@ -1212,10 +1212,18 @@ def base_pin_error(cfg, env):
 
 
 def release_issue(pc, issue_id, note):
-    """On failure leave the issue visible for a person, never silently held."""
+    """On failure leave the issue visible for a person, never silently held.
+    R2a finding 21: the status write reads the status first — only
+    in_progress moves to todo; a done or cancelled issue keeps its status
+    (the note is still posted)."""
     try:
         pc.add_comment(issue_id, f"[t2-carrier] did not complete this run: {note}")
-        pc.set_status(issue_id, "todo")
+        fresh = pc.issue(issue_id)
+        if fresh.get("status") == "in_progress":
+            pc.set_status(issue_id, "todo")
+        else:
+            log(f"release of {issue_id}: status is {fresh.get('status')!r}; "
+                "left as it is")
     except CarrierError as exc:
         log(f"release of issue {issue_id} also failed: {exc}")
 
@@ -1270,7 +1278,15 @@ def deliver(pc, issue, reply, op, crash_after=None, ask_child=False):
                                   doc["title"], doc["body"])
             log(f"output document {doc['key']} written on "
                 f"{issue.get('identifier')}")
-    pc.set_status(issue["id"], final)
+    # R2a finding 21: every status write reads the status first. The board
+    # may already have closed the issue (a replay wake, an accepted answer);
+    # done and cancelled are never left by a delivery.
+    fresh = pc.issue(issue["id"])
+    if fresh.get("status") in ("done", "cancelled"):
+        log(f"{issue.get('identifier')} is already {fresh.get('status')}; "
+            f"the status write to {final} is skipped")
+    else:
+        pc.set_status(issue["id"], final)
     log(f"posted reply as comment on {issue.get('identifier')}; "
         f"status -> {final}")
 

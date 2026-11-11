@@ -809,7 +809,10 @@ def test_blocked_task_with_slow_marker_waits_then_releases():
     assert t3.sends == []
     assert any("did not complete" in (c[2] if c[0] == "comment" else "")
                for c in pc.calls)
-    assert pc.issues["is-1"]["status"] == "todo"
+    # R2a finding 21 changed this end: release moves only in_progress ->
+    # todo. A blocked issue keeps its block (its ask children are real
+    # blockers); the release note is what makes it visible to a person.
+    assert pc.issues["is-1"]["status"] == "blocked"
 
 
 def test_blocked_issue_with_board_feedback_and_marker_revises():
@@ -2460,3 +2463,51 @@ def test_output_doc_key_is_ascii_identifier_only():
     assert wc.parse_output_block(
         "```paperclip-output\nkey: good-key_2\ntitle: T\nx\n```"
     )["key"] == "good-key_2"
+
+
+def test_deliver_never_moves_a_done_or_cancelled_issue():
+    # R2a finding 21: every status write reads the status first. A replay
+    # wake on an issue the board already closed (done here, cancelled in the
+    # second half) must not reopen it: the comment and the confirmation are
+    # already there (dedupe), and the status write is skipped.
+    op = "pc-is-1-done1"
+    pc = FakePaperclip(issues={
+        "is-1": {"identifier": "MMO-1", "status": "done",
+                 "title": "Summarize file X",
+                 "description": "Write a three-line summary."}})
+    pc.comment_rows["is-1"] = [{"body": "the answer"}]
+    pc.interaction_rows = [{"id": "ix-1", "kind": "request_confirmation",
+                            "status": "pending",
+                            "idempotencyKey": f"{op}-confirm"}]
+    wc.deliver(pc, pc.issue("is-1"), "the answer", op)
+    assert pc.issues["is-1"]["status"] == "done"
+    assert [c for c in pc.calls if c[0] == "status"] == []
+
+    pc2 = FakePaperclip(issues={
+        "is-1": {"identifier": "MMO-1", "status": "cancelled",
+                 "title": "Summarize file X",
+                 "description": "Write a three-line summary."}})
+    pc2.comment_rows["is-1"] = [{"body": "the answer"}]
+    pc2.interaction_rows = [{"id": "ix-1", "kind": "request_confirmation",
+                             "status": "pending",
+                             "idempotencyKey": f"{op}-confirm"}]
+    wc.deliver(pc2, pc2.issue("is-1"), "the answer", op)
+    assert pc2.issues["is-1"]["status"] == "cancelled"
+    assert [c for c in pc2.calls if c[0] == "status"] == []
+
+
+def test_release_moves_only_in_progress_to_todo():
+    # R2a finding 21: release_issue moves only in_progress -> todo. A done
+    # or cancelled issue keeps its status; the note is still posted.
+    pc = FakePaperclip(issues={
+        "is-1": {"identifier": "MMO-1", "status": "done",
+                 "title": "T", "description": "D"}})
+    wc.release_issue(pc, "is-1", "CarrierError: x")
+    assert pc.issues["is-1"]["status"] == "done"
+    assert any(c[0] == "comment" for c in pc.calls)
+
+    pc2 = FakePaperclip(issues={
+        "is-1": {"identifier": "MMO-1", "status": "in_progress",
+                 "title": "T", "description": "D"}})
+    wc.release_issue(pc2, "is-1", "CarrierError: x")
+    assert pc2.issues["is-1"]["status"] == "todo"
