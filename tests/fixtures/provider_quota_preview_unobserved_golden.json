@@ -9,32 +9,24 @@
     "opened_mode": "ro",
     "path": "/Users/chriswong/.hermes/profiles/engineering/mmos/wt-lane-fabric-quota/tests/fixtures/_golden_inputs/leases.sqlite",
     "sha256": "9f9db6a1f6fb0bb9d9f1fb4e4501cea1fc48b2133ce8df2521b3e1a4afa57626",
+    "sha256_basis": "main_database_file_bytes_excludes_uncheckpointed_wal",
+    "snapshot_basis": "single_read_only_sqlite_transaction",
+    "snapshot_sha256": "3374729447d6bf89403b1d1f6e5e10d18bd11e303de9e2500fea375f74ed39f9",
     "waiters_total": 0
   },
   "claim_time_revalidation_required": true,
   "expires_at": "2026-09-16T05:40:00Z",
   "knowledge_summary": {
-    "admission_eligible": 2,
+    "admission_eligible": 1,
     "observed_vs_unknown": "3 observed / 1 unknown",
     "quota_observed": 3,
     "quota_unknown": 1,
     "resources_total": 4
   },
   "live_admission": false,
-  "observation_digest": "faf9ffd260f86f6f0c78e1560b71e344d39d40dfd9b4b0aa8d053dc2c98d1b89",
-  "options": [
-    {
-      "eligible_in_preview": true,
-      "estimate_basis": "configured_concurrency_minus_broker_active_reserved",
-      "estimated_startable_jobs": 7,
-      "expiry_pressure_jobs_per_hour": null,
-      "model_alias": "qwen3.8-flash",
-      "option_id": "bailian:Chris",
-      "provider": "bailian",
-      "suggested_parallelism": 7
-    }
-  ],
-  "preview_id": "a632c0a3f60d8235fee2fb3887d66c44",
+  "observation_digest": "282f4f158adf07e94f60de694792d8f7c259efebc4f85b97ad6a32fbd54f76a4",
+  "options": [],
+  "preview_id": "45824482759227cef643bdc0901a75ac",
   "producer": {
     "source_config": {
       "broker_generation": 0,
@@ -61,8 +53,9 @@
   "resources": [
     {
       "active_slots": 0,
-      "admission_eligibility": true,
+      "admission_eligibility": false,
       "auth_route_ref": "codex exec via ext/qwen_exec.sh",
+      "broker_limited_concurrency_cap": 7,
       "configured_cap_basis": "accounts_yaml_per_account_cap",
       "configured_concurrency_cap": 7,
       "cooldown_source": null,
@@ -77,7 +70,7 @@
       "quota_source": "bailian_inline_7d_local_reconstruction",
       "readiness_state": "ready",
       "reason_codes": [
-        "eligible_in_preview",
+        "quota_observation_in_future",
         "quota_source_local_reconstruction"
       ],
       "registry_revision": "14259ca4-test-revision",
@@ -92,6 +85,7 @@
       "active_slots": 0,
       "admission_eligibility": false,
       "auth_route_ref": "codex exec via ext/qwen_exec.sh",
+      "broker_limited_concurrency_cap": 7,
       "configured_cap_basis": "accounts_yaml_per_account_cap",
       "configured_concurrency_cap": 7,
       "cooldown_source": "registry_parked_until",
@@ -107,6 +101,7 @@
       "readiness_state": "parked",
       "reason_codes": [
         "owner_parked_verdict",
+        "quota_observation_in_future",
         "quota_source_local_reconstruction"
       ],
       "registry_revision": "14259ca4-test-revision",
@@ -121,6 +116,7 @@
       "active_slots": 0,
       "admission_eligibility": true,
       "auth_route_ref": "grok -p",
+      "broker_limited_concurrency_cap": 17,
       "configured_cap_basis": "pools_yaml_concurrent",
       "configured_concurrency_cap": 17,
       "cooldown_source": null,
@@ -149,6 +145,7 @@
       "active_slots": 0,
       "admission_eligibility": false,
       "auth_route_ref": "claude -p with MiniMax base URL via ext/sub.sh",
+      "broker_limited_concurrency_cap": 7,
       "configured_cap_basis": "accounts_yaml_per_account_cap",
       "configured_concurrency_cap": 7,
       "cooldown_source": null,
@@ -182,6 +179,6 @@
     }
   },
   "source_owner_ref": "owner_ext",
-  "status": "PREVIEW_READY",
-  "suggested_option": "bailian:Chris"
+  "status": "PREVIEW_NO_ELIGIBLE_OPTION",
+  "suggested_option": null
 }
