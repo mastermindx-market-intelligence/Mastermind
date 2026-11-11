@@ -206,8 +206,13 @@ def validate_request(value):
     elif action in {"open", "navigate"}:
         _require(set(params) == {"url"} and valid_url(params["url"]))
     elif action == "fill":
+        # The editor pipeline issues one execCommand pair per line, so a fill
+        # is line-bounded as well as length-bounded (a 30,000-newline fill
+        # would otherwise freeze the tab). CR and CRLF both count: the
+        # insertion feed normalizes them to line breaks.
         _require(set(params) == {"text"} and type(params["text"]) is str
-                 and len(params["text"]) <= 30000 and "\x00" not in params["text"])
+                 and len(params["text"]) <= 30000 and "\x00" not in params["text"]
+                 and len(re.sub(r"\r\n?", "\n", params["text"]).split("\n")) - 1 <= 2000)
     elif action == "select":
         _require(set(params) == {"value"} and _text(params["value"], 0, 512))
     elif action == "press":

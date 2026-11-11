@@ -84,6 +84,23 @@ def test_navigation_has_no_privileged_or_credential_urls(url):
     with pytest.raises(legacy.WebSolProtocolError):protocol.validate_request(request("navigate",params={"url":url}))
 
 
+def test_fill_refuses_line_counts_that_freeze_the_editor_pipeline():
+    # The editor pipeline issues one execCommand pair per line; a 30,000-newline
+    # fill used to reach the page and freeze the tab (SCORE e2#2). The protocol
+    # refuses normalized line counts above the cap before any dispatch; the cap
+    # boundary itself still validates.
+    with pytest.raises(legacy.WebSolProtocolError):
+        protocol.validate_window(request("fill", params={"text": "a\n" * 15000}))
+    with pytest.raises(legacy.WebSolProtocolError):
+        protocol.validate_window(request("fill", params={"text": "\n" * 2001}))
+    accepted = protocol.validate_window(request("fill", params={"text": "\n" * 2000}))
+    assert accepted["params"]["text"] == "\n" * 2000
+    # Lone CR normalizes to a line break on the insertion feed, so it counts
+    # toward the cap rather than sneaking lines past it.
+    with pytest.raises(legacy.WebSolProtocolError):
+        protocol.validate_window(request("fill", params={"text": "\r" * 2001}))
+
+
 def test_bounded_receipts_reject_nonfinite_mutable_and_wrong_effect_values():
     good=protocol.receipt(request(),status="OK")
     for changes in ({"effect":{}},{"data":{"x":float("nan")}}, {"data":{"secret":"x"*70000}}):

@@ -7,6 +7,12 @@
   const MAX_ELEMENTS = 120;
   const MAX_NODES = 2000;
   const MAX_TEXT = 10000;
+  // A fill is bounded work: the editor pipeline issues one execCommand pair
+  // per line, so both a line cap (refused before anything is written) and an
+  // insertion time bound (checked inside the loop) keep a fill from freezing
+  // the tab on hostile or pathological input.
+  const MAX_FILL_LINES = 2000;
+  const FILL_TIME_BOUND_MS = 1500;
   const ACTIONS = new Set(["snapshot", "validate", "consume", "validate_focus", "focus_ref", "click", "fill",
     "select", "scroll", "diagnostics"]);
   const MUTATIONS = new Set(["focus_ref", "click", "fill", "select", "scroll"]);
@@ -165,7 +171,7 @@
     // payload: either the applied receipt with the fired normalizations, or a
     // FILL_MISMATCH (never APPLIED) with both lengths and the first differing
     // offset of the normalized comparison.
-    function fillReceipt(node, asked, path, preFill) {
+    function fillReceipt(node, asked, path, preFill, stopped) {
       const channel = channelFor(node, path);
       const raw = channel.read(node);
       const fired = new Set();
@@ -175,8 +181,19 @@
       const common = {asked_characters: asked.length, box_characters: raw.length,
         normalizations, insertion_path: path,
         read_back: !node.isContentEditable ? "value" : path === "fallback" ? "textContent" : "innerText"};
-      if (firstDiff(askedNormalized, boxNormalized) !== -1) {
-        const offset = firstDiff(askedNormalized, boxNormalized);
+      const offset = firstDiff(askedNormalized, boxNormalized);
+      // A time-bound stop reports how far the insertion got and the honest
+      // partial state of the box under its own typed code.
+      if (stopped) {
+        const excerpt = raw.slice(0, 40);
+        return result(false, "FILL_TIME_BOUND", {...common,
+          first_diff_offset: offset === -1 ? null : offset,
+          mismatch_kind: raw === preFill ? "box-unchanged" : "content-differs",
+          prefill_characters: preFill.length,
+          lines_inserted: stopped.linesInserted, time_bound_ms: stopped.timeBoundMs,
+          box_excerpt: excerpt, box_excerpt_is_untrusted: true}, "NOT_APPLIED");
+      }
+      if (offset !== -1) {
         const excerpt = raw.slice(Math.max(0, offset - 16), Math.max(0, offset - 16) + 40);
         // mismatch_kind names what the mismatch is: box-unchanged means the
         // box still holds exactly what it held before the fill — the write
@@ -244,6 +261,7 @@
         if (node.disabled || node.getAttribute("aria-disabled") === "true") return result(false, "TARGET_DISABLED");
         const fields = Object.keys(params).sort().join(",");
         if (action === "fill" && (fields !== "text" || typeof params.text !== "string" || params.text.length > 30000 || params.text.includes("\u0000") ||
+            (params.text.replace(/\r\n?/g, "\n").match(/\n/g) || []).length > MAX_FILL_LINES ||
             (!/^(INPUT|TEXTAREA)$/.test(node.tagName) && !node.isContentEditable) || node.readOnly ||
             (node.tagName === "INPUT" && !/^(text|search|email|url|tel|number)$/i.test(node.type)))) return result(false, "INPUT_REFUSED");
         if (action === "select" && (fields !== "value" || typeof params.value !== "string" || params.value.length > 512 || node.tagName !== "SELECT" ||
@@ -291,26 +309,40 @@
             // a CR as a paragraph break of its own, which would double every
             // CRLF into a blank line.
             const feed = params.text.replace(/\r\n?/g, "\n");
+            // Returns {inserted, timeBound, linesInserted}: timeBound means the
+            // loop stopped itself at the deadline — the box holds a partial
+            // insertion, reported as FILL_TIME_BOUND, never left mid-loop to
+            // freeze the tab on a slow or hostile editor.
             const insertViaEditor = () => {
               const selection = win.getSelection();
-              if (!selection || typeof doc.execCommand !== "function") return false;
+              if (!selection || typeof doc.execCommand !== "function") return {inserted: false, linesInserted: 0};
               selection.selectAllChildren(node);
               const lines = feed.split("\n");
+              const deadline = Date.now() + FILL_TIME_BOUND_MS;
               for (let i = 0; i < lines.length; i++) {
-                if (lines[i] && !doc.execCommand("insertText", false, lines[i])) return false;
-                if (i < lines.length - 1 && !doc.execCommand("insertParagraph")) return false;
+                if (lines[i] && !doc.execCommand("insertText", false, lines[i]))
+                  return {inserted: false, linesInserted: i};
+                if (i < lines.length - 1 && !doc.execCommand("insertParagraph"))
+                  return {inserted: false, linesInserted: i + 1};
+                if ((i & 63) === 63 && Date.now() > deadline)
+                  return {inserted: false, timeBound: true, linesInserted: i + 1};
               }
-              return true;
+              return {inserted: true, linesInserted: lines.length};
             };
-            let inserted = false;
-            try { inserted = insertViaEditor(); } catch (_) { inserted = false; }
+            let outcome = {inserted: false, linesInserted: 0};
+            try { outcome = insertViaEditor(); } catch (_) { outcome = {inserted: false, linesInserted: 0}; }
+            if (outcome.timeBound) {
+              return fillReceipt(node, params.text, insertionPath,
+                preEditable ? preEditable.innerText : preValue,
+                {linesInserted: outcome.linesInserted, timeBoundMs: FILL_TIME_BOUND_MS});
+            }
             // Whole-text fallback ONLY when the editor pipeline genuinely
             // refused (execCommand returned false or threw). Never as a
             // length-heuristic second guess: innerText collapses runs of
             // spaces in the render, so a length check mis-judges correct
             // insertions and destroys their paragraph structure. The honest
             // verdict on what the box holds is the receipt comparison.
-            if (!inserted) {node.textContent = params.text; insertionPath = "fallback";}
+            if (!outcome.inserted) {node.textContent = params.text; insertionPath = "fallback";}
           } else {
             const proto = node.tagName === "INPUT" ? win.HTMLInputElement.prototype : win.HTMLTextAreaElement.prototype;
             const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
