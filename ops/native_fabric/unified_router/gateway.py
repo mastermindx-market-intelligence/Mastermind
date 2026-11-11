@@ -445,7 +445,11 @@ def _sanitize_messages(payload: dict) -> None:
             system = [{"type": "text", "text": system}] if system else []
         if not isinstance(system, list):
             system = []
-        payload["system"] = directives + system
+        # APPEND, never prepend: the prompt cache is prefix-exact, so putting the
+        # folded directives in front of the system block changes the very first
+        # token of every turn and cold-prefills the whole context. Appending keeps
+        # the existing prefix intact, so only the new tail is uncached.
+        payload["system"] = system + directives
     if len(kept) != len(messages):
         payload["messages"] = kept
 
