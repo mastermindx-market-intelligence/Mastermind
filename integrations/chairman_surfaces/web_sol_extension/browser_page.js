@@ -121,6 +121,68 @@
         viewport: {width: win.innerWidth, height: win.innerHeight},
         ready_state: doc.readyState, scope: "top_frame", content_is_untrusted: true});
     }
+    // What one comparison channel provably does to text. Each step is applied
+    // to BOTH sides of the comparison and named in the receipt when it
+    // actually fired; nothing else is normalized — a dropped or added line
+    // break is a real mismatch.
+    // - value API: normalizes CRLF (and lone CR) to LF; tabs and spaces exact.
+    // - innerText of the editor channel: rendered text — a typed space at a
+    //   line edge or inside a run renders as U+00A0, runs of spaces and tabs
+    //   collapse, spaces at line edges are invisible, an empty block renders
+    //   as a doubled break, and trailing breaks drift.
+    // - textContent of the whole-text fallback: the byte-exact carrier this
+    //   code just wrote; it normalizes nothing, so nothing is normalized.
+    const CRLF_TO_LF = ["crlf-to-lf", t => t.replace(/\r\n?/g, "\n")];
+    const CHANNELS = {
+      value: {read: node => String(node.value || ""), steps: [CRLF_TO_LF]},
+      innerText: {read: node => String(typeof node.innerText === "string" ? node.innerText : node.textContent || ""),
+        steps: [CRLF_TO_LF, ["nbsp-render", t => t.replace(/ /g, " ")],
+          ["whitespace-run-collapse", t => t.replace(/[ \t]+/g, " ")],
+          ["line-edge-spaces", t => t.replace(/ *\n */g, "\n")],
+          ["blank-line-render", t => t.replace(/\n{3,}/g, "\n\n")],
+          ["trailing-newline-drift", t => t.replace(/\n+$/, "")]]},
+      textContent: {read: node => String(node.textContent || ""), steps: []}
+    };
+    function channelFor(node, path) {
+      if (!node.isContentEditable) return CHANNELS.value;
+      return path === "fallback" ? CHANNELS.textContent : CHANNELS.innerText;
+    }
+    function normalize(steps, value, fired) {
+      for (const [name, step] of steps) {
+        const next = step(value);
+        if (next !== value) fired.add(name);
+        value = next;
+      }
+      return value;
+    }
+    function firstDiff(a, b) {
+      const length = Math.min(a.length, b.length);
+      for (let i = 0; i < length; i++) if (a[i] !== b[i]) return i;
+      return a.length === b.length ? -1 : length;
+    }
+    // Compare what the box holds with what was asked, reading the box back
+    // through the channel the insertion actually used. Returns the receipt
+    // payload: either the applied receipt with the fired normalizations, or a
+    // FILL_MISMATCH (never APPLIED) with both lengths and the first differing
+    // offset of the normalized comparison.
+    function fillReceipt(node, asked, path) {
+      const channel = channelFor(node, path);
+      const raw = channel.read(node);
+      const fired = new Set();
+      const askedNormalized = normalize(channel.steps, asked, fired);
+      const boxNormalized = normalize(channel.steps, raw, fired);
+      const normalizations = [...fired];
+      const common = {asked_characters: asked.length, box_characters: raw.length,
+        normalizations, insertion_path: path,
+        read_back: !node.isContentEditable ? "value" : path === "fallback" ? "textContent" : "innerText"};
+      if (firstDiff(askedNormalized, boxNormalized) !== -1) {
+        const offset = firstDiff(askedNormalized, boxNormalized);
+        const excerpt = raw.slice(Math.max(0, offset - 16), Math.max(0, offset - 16) + 40);
+        return result(false, "FILL_MISMATCH", {...common, first_diff_offset: offset,
+          box_excerpt: excerpt, box_excerpt_is_untrusted: true}, "NOT_APPLIED");
+      }
+      return result(true, "OK", {...common, snapshot_consumed: true, refresh_required: true}, "APPLIED");
+    }
     function diagnostics() {
       const entries = win.performance && typeof win.performance.getEntriesByType === "function"
         ? win.performance.getEntriesByType("resource").slice(-60) : [];
@@ -204,6 +266,7 @@
         }
         if (action === "fill") {
           node.focus();
+          let insertionPath = "editor";
           if (node.isContentEditable) {
             // A raw textContent write loses line breaks in editors that own
             // their model (they re-normalize plain \n to spaces). Insert
@@ -226,7 +289,7 @@
             try { inserted = insertViaEditor(); } catch (_) { inserted = false; }
             // Whole-text fallback: identical to the previous behavior, still a
             // complete replacement (never partial), but without paragraphs.
-            if (!inserted || node.innerText.replace(/\n/g, "").length < target) node.textContent = params.text;
+            if (!inserted || node.innerText.replace(/\n/g, "").length < target) {node.textContent = params.text; insertionPath = "fallback";}
           } else {
             const proto = node.tagName === "INPUT" ? win.HTMLInputElement.prototype : win.HTMLTextAreaElement.prototype;
             const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
@@ -234,6 +297,12 @@
           }
           node.dispatchEvent(new win.Event("input", {bubbles: true}));
           node.dispatchEvent(new win.Event("change", {bubbles: true}));
+          // The receipt is honest about what the box now holds: compare the
+          // read-back with what was asked, normalizing only what this channel
+          // provably normalizes (listed in the receipt). A mismatch is a typed
+          // FILL_MISMATCH with both lengths and the first differing offset —
+          // never APPLIED.
+          return fillReceipt(node, params.text, insertionPath);
         }
         if (action === "select") {
           node.value = params.value;
