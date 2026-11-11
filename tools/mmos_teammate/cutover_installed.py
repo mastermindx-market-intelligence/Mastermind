@@ -272,7 +272,7 @@ def cmd_refresh_carrier(spec):
     started by one version and finished by another."""
     http = Http(spec["paperclip_base"])
     agent, _, live = read_state(http, spec)
-    carrier_path, _ = carrier_paths(spec)
+    carrier_path, config_path = carrier_paths(spec)
     if not is_ours(agent, carrier_path):
         die(f"{agent.get('name')} does not run the carrier at {carrier_path}; "
             "use `apply` to move it")
@@ -286,9 +286,28 @@ def cmd_refresh_carrier(spec):
         staged = f"{carrier_path}.new-{os.getpid()}"
         shutil.copyfile(source, staged)
         os.replace(staged, carrier_path)
+    # This teammate's own settings file follows its spec too: a carrier fix
+    # that adds a setting is otherwise installed without it (seen 2026-11-11:
+    # the new carrier ran on defaults and without its conversation link).
+    # Same one-rename swap. Key names only are printed.
+    want = carrier_config(spec)
+    try:
+        with open(config_path) as fh:
+            have = json.load(fh)
+    except (OSError, ValueError):
+        have = None
+    config_keys = sorted(k for k in set(want) | set(have or {})
+                         if (have or {}).get(k) != want.get(k))
+    if have != want:
+        staged = f"{config_path}.new-{os.getpid()}"
+        with open(staged, "w") as fh:
+            json.dump(want, fh, indent=2)
+        os.replace(staged, config_path)
     print(json.dumps({
         "carrierPath": carrier_path, "sha256Before": before,
         "sha256After": sha256_file(carrier_path), "changed": before != after,
+        "configPath": config_path, "configChanged": have != want,
+        "configKeysChanged": config_keys,
         "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, indent=2))
     return 0
 

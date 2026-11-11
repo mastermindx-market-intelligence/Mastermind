@@ -263,8 +263,32 @@ def test_refresh_carrier_swaps_the_file_for_a_moved_agent(wired, tmp_path, capsy
     source = os.path.join(os.path.dirname(co.__file__), "wake_carrier.py")
     assert carrier.read_bytes() == open(source, "rb").read()
     assert os.listdir(tmp_path / "carrier") == ["wake_carrier.py"]  # no leftovers
+    assert out["configChanged"] is False         # apply wrote this spec's file
     assert co.cmd_refresh_carrier(spec) == 0     # a second run changes nothing
     assert json.loads(capsys.readouterr().out)["changed"] is False
+
+
+def test_refresh_carrier_brings_the_settings_file_up_to_its_spec(
+        wired, tmp_path, capsys):
+    # A carrier fix that adds a setting must not be installed without it.
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    config = tmp_path / "home" / "carrier.json"
+    old = json.loads(config.read_text())
+    old.pop("question_wait_sec")
+    config.write_text(json.dumps(old))
+    spec = dict(spec, thread_url_template="http://127.0.0.1:3780/env/{thread}")
+    capsys.readouterr()
+    assert co.cmd_refresh_carrier(spec) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["configChanged"] is True
+    assert out["configKeysChanged"] == ["question_wait_sec",
+                                        "thread_url_template"]
+    assert json.loads(config.read_text()) == co.carrier_config(spec)
+    assert sorted(os.listdir(tmp_path / "home")) == sorted(
+        n for n in os.listdir(tmp_path / "home") if ".new-" not in n)
+    assert co.cmd_refresh_carrier(spec) == 0
+    assert json.loads(capsys.readouterr().out)["configChanged"] is False
 
 
 def test_refresh_carrier_refuses_a_live_run_or_an_unmoved_agent(wired, tmp_path):
