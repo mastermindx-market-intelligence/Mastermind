@@ -154,6 +154,18 @@ fn create_main_window(
                 }
             }
         });
+        // The generation this build will register: `create_main_window` is
+        // the only build path and it runs on the event loop, so the bump
+        // after a successful build returns exactly this value. When this
+        // webview finishes its first load the gate opens — only then may
+        // the watchdog poll the webview URL (wry 0.55.1 unwraps a nil URL
+        // before any commit and would take the app down).
+        let committed_generation = shell_pairing::window_generation() + 1;
+        builder = builder.on_page_load(move |_, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                shell_pairing::mark_window_committed(committed_generation);
+            }
+        });
         builder = builder.initialization_script(shell_mode::SHELL_PAGE_BOOTSTRAP);
     }
     let window = builder

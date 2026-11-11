@@ -226,6 +226,85 @@ only; `usage()` prints only the help text. §3 verifies with
 Test: `test_usage_prints_only_the_help_text` (source-level guard); the
 rest is documentation verified by reading against the scripts.
 
+## Live-proof round 1 — the app could not start (fixed)
+
+The first live-proof child could not prove any pairing behaviour: the app
+**crashed at every launch** (4/4, ~3–4 s in, zero `PAIRING.*` records —
+`01-dead-helper/launch3-backtrace.log`). wry 0.55.1's url getter unwraps
+`WKWebView.URL`, which is nil until the webview's first load commits — and
+the window's initial `tauri://` frontend load is refused by the navigation
+allowlist, so nothing commits until the configured address does. The
+watchdog's first `WebviewWindow::url()` poll (750 ms in) therefore hit the
+unwrap and the panic landed on the event loop, taking the app down.
+
+Fix: the watchdog polls the URL only behind `url_poll_is_safe(generation)`
+— a gate that opens when the window's `on_page_load` callback reports
+`PageLoadEvent::Finished` for the generation captured at build time. A
+stale commit from a closed window cannot open the gate for its successor,
+and before the first commit the watchdog simply waits (the window has
+nothing to observe yet). Tests:
+`url_polling_waits_for_the_window_generation_to_commit_a_load` (rust;
+fail-first evidence is the crash itself plus
+`failfirst2-python-urlgate.txt`),
+`test_watchdog_never_polls_the_url_before_a_committed_load` (python,
+source-level, failed on the pre-fix commit export).
+
+## Attack round (two effort-max children on the part-1 export)
+
+Two children worked the exported part-1 commit (`/tmp/t8b-atk/src`): one
+mapped reachable states, one attacked the config and helper surface. Eight
+findings came back; seven were fixed, one was judged not a defect in this
+app's threat model.
+
+1. **Dot-segment disguises reach the loader** (`/a/../pair`, `%2e`
+   spellings, `//pair`, `/PAIR`): the shell writers refused them, but the
+   app's url parser normalizes dot segments, so a hand-edited config could
+   smuggle the pairing flow in as the "thread" address. Fixed: the loader
+   (`parse_shell_url`) now applies the writers' exact rule — no query, no
+   fragment, path neither the server root nor `/pair` nor under it, after
+   normalization. Tests: `config_lines_follow_the_writers_exact_rule`,
+   `url_file_follows_the_writers_exact_rule`,
+   `test_write_refuses_dot_segment_disguised_pair_paths`.
+2. **`window_config.sh` port arithmetic overflow**: a 19-digit port made
+   shell arithmetic error out with an unnamed refusal. Fixed: length
+   bounded before any numeric test (`test_write_refuses_oversized_ports_with_a_named_reason`).
+3. **`show` missed single-digit ports** (`http://127.0.0.1:1/...` printed
+   "unrecognized"). Fixed: port pattern `[0-9]*`
+   (`test_show_prints_single_digit_ports`).
+4. **Symlinked config directory**: `write` created/chmodded through a
+   planted symlink before refusing (target touched); `show`/`clear`
+   followed it. Fixed: all three refuse a symlinked `$DIR` first — `write`
+   before mkdir/chmod (`test_write_never_touches_a_symlinked_config_directory`,
+   `test_show_and_clear_refuse_a_symlinked_config_directory`).
+5. **`open_team_window.sh` roster validation gaps**: control characters
+   (stripped silently by `urlsplit`), uppercase scheme, raw `#`/`?`, `//`,
+   dot segments and `%2e` spellings passed the old prefix rule. Fixed: the
+   raw string is checked for control characters and exact `http://` prefix
+   before parsing, then urlsplit with the same exact rule as
+   `window_config.sh`, path compared lowercased
+   (`test_roster_refuses_dot_segments_control_chars_and_uppercase`).
+6. **The blanking gate accepted any `about:` URL** — `about:error` would
+   have passed as the blank page. Fixed: exact `BLANK_PAGE` constant match
+   (assert added to the `decide()` test).
+7. **The helper-output parser enforced config-line rules on the minted
+   address** whose shape is `/pair#token=` *by design* — split into
+   `parse_loopback_http` (structure) vs `parse_shell_url` (config-line
+   rule), so the two contracts can no longer collide (repair D intact).
+8. **Minted-address shape vs config rules** (states child): the empty
+   `token=` fragment passes the shape check but the exchange then records
+   `no_session` — no trust is granted and nothing is written. Documented,
+   not changed.
+
+**Documented boundaries (not defects, recorded so they are choices):**
+the write-side helper checks (regular file, no group/other write on
+helper or parent) are weaker than the runtime trust walk — the runbook's
+answer is `window_config.sh check`, which runs the app's own judge, after
+any write; macOS ACLs are invisible to mode bits and outside what either
+side checks; `check --bundle` trusts the caller to pass the matching app
+binary (it runs what it is given); and the helper runs before any
+origin check — the origin check happens at mint time on the helper's
+output, as the panel accepted ("By design" below).
+
 ## Panel "By design" items, now written down
 
 Accepted risk: whatever actually listens on the configured port receives

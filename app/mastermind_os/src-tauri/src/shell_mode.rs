@@ -6,8 +6,9 @@
 //! then treated exactly like unset, so a bad environment never blocks launch.
 //!
 //! Safety notes:
-//! - Only `http://127.0.0.1` and `http://localhost` are accepted, so the window can
-//!   never be steered at a remote origin by the environment variable at startup.
+//! - Only `http://127.0.0.1` is accepted, and the line carries no query, no
+//!   fragment and no pairing-flow path, so the window can never be steered at
+//!   a remote origin — or at the pairing flow — by its address at startup.
 //!   Navigation after load is observed by the dev bundle's event log (item 3); it is
 //!   not re-gated here, and remote origins keep no IPC either way.
 //! - Refusals never carry the raw input: a URL can embed credentials in its
@@ -34,8 +35,15 @@ pub enum ShellUrlRefusal {
     MissingHost,
     /// The URL carries userinfo (`user:pass@`), which can hold a secret.
     UserInfo,
-    /// Host was not exactly `127.0.0.1` or `localhost`.
+    /// Host was not exactly `127.0.0.1`.
     HostNotLoopback,
+    /// The URL carries a query, which never belongs in a saved config line.
+    Query,
+    /// The URL carries a fragment (pairing tokens travel in one).
+    Fragment,
+    /// The path is the server root or the pairing flow (`/pair` or under
+    /// it, after the url parser's dot-segment normalization).
+    ReservedPath,
 }
 
 impl ShellUrlRefusal {
@@ -47,6 +55,9 @@ impl ShellUrlRefusal {
             ShellUrlRefusal::MissingHost => "missing_host",
             ShellUrlRefusal::UserInfo => "userinfo",
             ShellUrlRefusal::HostNotLoopback => "host_not_loopback",
+            ShellUrlRefusal::Query => "query",
+            ShellUrlRefusal::Fragment => "fragment",
+            ShellUrlRefusal::ReservedPath => "reserved_path",
         }
     }
 
@@ -57,7 +68,12 @@ impl ShellUrlRefusal {
             ShellUrlRefusal::WrongScheme => "scheme must be http",
             ShellUrlRefusal::MissingHost => "URL has no host",
             ShellUrlRefusal::UserInfo => "URL must not carry userinfo",
-            ShellUrlRefusal::HostNotLoopback => "host must be exactly 127.0.0.1 or localhost",
+            ShellUrlRefusal::HostNotLoopback => "host must be exactly 127.0.0.1",
+            ShellUrlRefusal::Query => "a query never belongs in the config",
+            ShellUrlRefusal::Fragment => "a fragment never belongs in the config",
+            ShellUrlRefusal::ReservedPath => {
+                "the server root and /pair belong to the pairing flow, never to the config"
+            }
         }
     }
 
@@ -73,11 +89,12 @@ impl ShellUrlRefusal {
     }
 }
 
-/// Parse and validate a `MM_SHELL_URL` value. No network access, ever.
-///
-/// Accepted: scheme exactly `http` (ASCII case-insensitive, normalised by `url`),
-/// host exactly `127.0.0.1` or `localhost` (ASCII case-insensitive), any port.
-pub fn parse_shell_url(input: &str) -> Result<Url, ShellUrlRefusal> {
+/// The loopback-http structure shared by every address the app accepts:
+/// scheme exactly `http`, no userinfo, host exactly `127.0.0.1`. The config
+/// line adds its own shape rules on top ([`parse_shell_url`]; attack round,
+/// finding 3); a minted pairing address is checked separately because its
+/// shape is `/pair#token=...` by design (panel repair D).
+pub fn parse_loopback_http(input: &str) -> Result<Url, ShellUrlRefusal> {
     let parsed = Url::parse(input).map_err(|_| ShellUrlRefusal::Unparseable)?;
     // Userinfo is checked before anything else so credential-bearing inputs are
     // refused without further inspection.
@@ -88,11 +105,33 @@ pub fn parse_shell_url(input: &str) -> Result<Url, ShellUrlRefusal> {
         return Err(ShellUrlRefusal::WrongScheme);
     }
     let host = parsed.host_str().ok_or(ShellUrlRefusal::MissingHost)?;
-    if host.eq_ignore_ascii_case("127.0.0.1") || host.eq_ignore_ascii_case("localhost") {
-        Ok(parsed)
-    } else {
-        Err(ShellUrlRefusal::HostNotLoopback)
+    if !host.eq_ignore_ascii_case("127.0.0.1") {
+        return Err(ShellUrlRefusal::HostNotLoopback);
     }
+    Ok(parsed)
+}
+
+/// Parse and validate a `MM_SHELL_URL` value. No network access, ever.
+///
+/// Accepted: the [`parse_loopback_http`] structure plus the writers' exact
+/// rule (attack round, finding 3): no query, no fragment, and a path that —
+/// after the url parser's dot-segment normalization — is neither the server
+/// root nor `/pair` nor under it. The `--check-window-config` judge and the
+/// real launch must not accept an address `window_config.sh` refuses to
+/// write.
+pub fn parse_shell_url(input: &str) -> Result<Url, ShellUrlRefusal> {
+    let parsed = parse_loopback_http(input)?;
+    if parsed.query().is_some() {
+        return Err(ShellUrlRefusal::Query);
+    }
+    if parsed.fragment().is_some() {
+        return Err(ShellUrlRefusal::Fragment);
+    }
+    let path = parsed.path();
+    if path == "/" || path == "/pair" || path.starts_with("/pair/") {
+        return Err(ShellUrlRefusal::ReservedPath);
+    }
+    Ok(parsed)
 }
 
 /// Read the one-time shell URL from a user-private file (the T3 pairing-file path).
@@ -578,14 +617,57 @@ mod tests {
     #[test]
     fn accepts_loopback_http_urls() {
         for value in [
-            "http://127.0.0.1:3100/",
-            "http://localhost:5173/path?x=1",
-            "http://localhost/",
-            "HTTP://LOCALHOST:8080",
+            "http://127.0.0.1:3100/env-1/thread-1",
+            "HTTP://127.0.0.1:8080/env-1/thread-1",
         ] {
             let parsed = parse_shell_url(value)
                 .unwrap_or_else(|refusal| panic!("case refused as {}", refusal.subcode()));
             assert_eq!(parsed.scheme(), "http");
+        }
+    }
+
+    /// Attack round (finding 3): the config line follows the writers' exact
+    /// rule, so the `--check-window-config` judge cannot certify an address
+    /// `window_config.sh` refuses to write — and a hand-edited config cannot
+    /// smuggle one past the loader.
+    #[test]
+    fn config_lines_follow_the_writers_exact_rule() {
+        for (value, expected) in [
+            ("http://127.0.0.1:3780/env-1/thread-1", None),
+            ("http://127.0.0.1:3780/env-1/../env-2/thread-1", None),
+            ("http://localhost:3780/env-1/t", Some(ShellUrlRefusal::HostNotLoopback)),
+            ("http://LOCALHOST:3780/env-1/t", Some(ShellUrlRefusal::HostNotLoopback)),
+            (
+                "http://127.0.0.1:3780/env-1/t?x=1",
+                Some(ShellUrlRefusal::Query),
+            ),
+            (
+                "http://127.0.0.1:3780/env-1/t#f",
+                Some(ShellUrlRefusal::Fragment),
+            ),
+            ("http://127.0.0.1:3780/", Some(ShellUrlRefusal::ReservedPath)),
+            ("http://127.0.0.1:3780/pair", Some(ShellUrlRefusal::ReservedPath)),
+            (
+                "http://127.0.0.1:3780/pair/x",
+                Some(ShellUrlRefusal::ReservedPath),
+            ),
+            // Dot segments are normalized before the path rule, so the
+            // disguise the shell tools must refuse literally is refused
+            // here after normalization.
+            (
+                "http://127.0.0.1:3780/a/../pair",
+                Some(ShellUrlRefusal::ReservedPath),
+            ),
+            // `/pair/../env-1/t` normalizes to `/env-1/t` before the rule,
+            // so the loader accepts what it lands on; the shell writers
+            // refuse any `..` outright, so this spelling cannot be written.
+            ("http://127.0.0.1:3780/pair/../env-1/t", None),
+        ] {
+            assert_eq!(
+                parse_shell_url(value).map(|_| ()).err(),
+                expected,
+                "{value}"
+            );
         }
     }
 
@@ -806,14 +888,16 @@ mod tests {
     /// S1 attack finding 2 fix: exotic loopback spellings and lookalikes.
     /// url-2.5.8 normalizes IPv4 shorthands to exactly 127.0.0.1 (still loopback,
     /// so accepted); lookalike domains, userinfo tricks and IPv6 forms are refused.
+    /// Since the attack round the accepted spellings carry a real thread path —
+    /// the server root itself belongs to the pairing flow, never to the config.
     #[test]
     fn gate_handles_exotic_loopback_spellings() {
         for accepted in [
-            "http://127.1",
-            "http://127.0.0.1.",
-            "http://2130706433",
-            "http://0x7f000001",
-            "http://127.000.000.001",
+            "http://127.1/env-1/t",
+            "http://127.0.0.1./env-1/t",
+            "http://2130706433/env-1/t",
+            "http://0x7f000001/env-1/t",
+            "http://127.000.000.001/env-1/t",
         ] {
             let parsed = parse_shell_url(accepted)
                 .unwrap_or_else(|r| panic!("{accepted} refused as {}", r.subcode()));
@@ -872,20 +956,41 @@ mod tests {
             unsafe { libc::getuid() }
         }
 
+        /// A config file never carries a minted pairing address (attack
+        /// round: the loader follows the writers' exact rule now) — the
+        /// fragment, query and pairing-path shapes each carry their code,
+        /// and a clean thread address is accepted with its shape intact.
         #[test]
-        fn accepts_a_private_loopback_url_file_and_keeps_path_query_fragment() {
+        fn url_file_follows_the_writers_exact_rule() {
             let dir = unique_temp_dir();
-            let path = write_file(
-                &dir,
-                "url.txt",
-                "http://127.0.0.1:3796/pair#token=synthetic0123456789\n",
-                0o600,
-            );
-            let url = read_shell_url_file(&path).expect("accepted");
+            for (contents, expected) in [
+                (
+                    "http://127.0.0.1:3796/pair#token=synthetic0123456789\n",
+                    Some(ShellUrlRefusal::Fragment),
+                ),
+                (
+                    "http://127.0.0.1:3796/env-1/t?x=1\n",
+                    Some(ShellUrlRefusal::Query),
+                ),
+                (
+                    "http://127.0.0.1:3796/pair\n",
+                    Some(ShellUrlRefusal::ReservedPath),
+                ),
+                ("http://localhost:3796/env-1/t\n", Some(ShellUrlRefusal::HostNotLoopback)),
+            ] {
+                let path = write_file(&dir, "url.txt", contents, 0o600);
+                assert_eq!(
+                    read_shell_url_file(&path).map(|_| ()).err(),
+                    expected.map(ShellUrlFileRefusal::Url),
+                    "{contents}"
+                );
+            }
+            let path = write_file(&dir, "url.txt", "http://127.0.0.1:3796/env-1/t\n", 0o600);
+            let url = read_shell_url_file(&path).expect("clean thread address accepted");
             assert_eq!(url.host_str(), Some("127.0.0.1"));
             assert_eq!(url.port(), Some(3796));
-            assert_eq!(url.path(), "/pair");
-            assert_eq!(url.fragment(), Some("token=synthetic0123456789"));
+            assert_eq!(url.path(), "/env-1/t");
+            assert!(url.query().is_none() && url.fragment().is_none());
             fs::remove_dir_all(&dir).ok();
         }
 
@@ -1105,12 +1210,12 @@ mod tests {
             std::env::remove_var("MM_SHELL_URL");
 
             // MM_SHELL_URL_FILE wins over everything.
-            let env_file = write_file(&dir, "env-url.txt", "http://localhost:5000/", 0o600);
+            let env_file = write_file(&dir, "env-url.txt", "http://127.0.0.1:5000/env-1/t", 0o600);
             std::env::set_var("MM_SHELL_URL_FILE", &env_file);
             let (url, _) = resolve_shell_settings(identifier);
             assert_eq!(
                 url.as_ref().map(|u| u.to_string()),
-                Some("http://localhost:5000/".to_string())
+                Some("http://127.0.0.1:5000/env-1/t".to_string())
             );
             std::env::remove_var("MM_SHELL_URL_FILE");
 

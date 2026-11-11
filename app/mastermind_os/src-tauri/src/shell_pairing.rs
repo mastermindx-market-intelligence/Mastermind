@@ -139,6 +139,32 @@ pub fn window_generation() -> u64 {
     WINDOW_GENERATION.load(Ordering::SeqCst)
 }
 
+/// The window generation whose webview has committed at least one page
+/// load.
+///
+/// wry 0.55.1 unwraps `WKWebView.URL` in its url getter, and that property
+/// is nil until the webview's first load commits — the window's initial
+/// `tauri://` load is refused by the navigation allowlist, so nothing
+/// commits until the configured address does. Asking `WebviewWindow::url()`
+/// in that window panics on the event loop and takes the whole app down
+/// with it (it crashed every launch of the first live-proof round). The
+/// watchdog therefore polls the URL only when this matches the current
+/// generation. It is written by the page-load callback with the generation
+/// captured at build time, so a late callback from a closed window cannot
+/// open the gate for its successor.
+static COMMITTED_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Record that the window built in `generation` finished loading a page.
+pub fn mark_window_committed(generation: u64) {
+    COMMITTED_GENERATION.store(generation, Ordering::SeqCst);
+}
+
+/// Whether polling the webview URL for `generation` is safe: only once
+/// that same window generation has committed a load.
+pub fn url_poll_is_safe(generation: u64) -> bool {
+    COMMITTED_GENERATION.load(Ordering::SeqCst) == generation
+}
+
 /// Two URLs are on the same origin (scheme, host, port).
 pub fn same_origin(a: &Url, b: &Url) -> bool {
     a.scheme() == b.scheme()
@@ -403,7 +429,10 @@ pub fn run_pair_helper(helper: &Path, origin: &Url) -> Result<Url, PairingFailur
     if line.is_empty() || line.contains('\n') || line.len() > 4096 {
         return Err(PairingFailure::HelperOutput);
     }
-    let url = parse_shell_url(line).map_err(|_| PairingFailure::HelperOutput)?;
+    // The structural parse only: a minted address is `/pair#token=...` by
+    // design (panel repair D), so the config line's no-query/no-fragment/
+    // no-pair-path rules must not apply to it — the shape rules below do.
+    let url = shell_mode::parse_loopback_http(line).map_err(|_| PairingFailure::HelperOutput)?;
     if !same_origin(&url, origin) {
         return Err(PairingFailure::OriginMismatch);
     }
@@ -608,7 +637,10 @@ fn decide(phase: &Phase, current: Option<&Url>, original: &Url) -> Decision {
             if since.elapsed() > EXCHANGE_TIMEOUT {
                 return Decision::TimedOut;
             }
-            if current.is_some_and(|url| url.scheme() == "about") {
+            // Only the exact blank page the watchdog itself issued counts
+            // (attack-round hardening): no other `about:` URL is reachable
+            // through the allowlist, and the gate should not be broader.
+            if current.is_some_and(|url| url.as_str() == BLANK_PAGE) {
                 Decision::LoadMinted(pairing_url.clone())
             } else {
                 Decision::Wait
@@ -801,7 +833,14 @@ pub fn spawn_watchdog(app: tauri::AppHandle, window_label: &str, original: Url, 
             std::thread::sleep(POLL_INTERVAL);
             let generation = window_generation();
             let window = app.get_webview_window(&window_label);
-            let current = window.as_ref().and_then(|window| window.url().ok());
+            // Poll the webview URL only once this window generation has
+            // committed a load: wry 0.55.1 unwraps a nil WKWebView URL on
+            // the event loop, and before the first commit the URL is nil
+            // (the initial `tauri://` load is refused by the allowlist).
+            let current = window
+                .as_ref()
+                .filter(|_| url_poll_is_safe(generation))
+                .and_then(|window| window.url().ok());
             let action = core.observe(generation, current.as_ref(), &original, Instant::now());
             let Some(window) = window else {
                 continue;
@@ -1375,6 +1414,39 @@ mod tests {
         assert_eq!(window_generation(), second);
     }
 
+    /// wry 0.55.1 unwraps a nil WKWebView URL in its url getter and panics
+    /// on the event loop, which killed the app at every launch of the first
+    /// live-proof round: the initial `tauri://` load is refused by the
+    /// allowlist, so until the configured address commits, the URL is nil.
+    /// The watchdog may poll `url()` only for a window generation that has
+    /// committed a load — never before, and never on a stale commit left by
+    /// a closed predecessor.
+    #[test]
+    fn url_polling_waits_for_the_window_generation_to_commit_a_load() {
+        let generation = bump_window_generation();
+        assert!(
+            !url_poll_is_safe(generation),
+            "no load has committed for this window yet"
+        );
+        mark_window_committed(generation);
+        assert!(url_poll_is_safe(generation));
+
+        // A rebuild bumps the generation; the old commit must not open the
+        // gate for the new window.
+        let rebuilt = bump_window_generation();
+        assert_ne!(rebuilt, generation);
+        assert!(
+            !url_poll_is_safe(rebuilt),
+            "a stale commit must not open the poll for a new window"
+        );
+
+        // A late page-load callback from the closed window marks only its
+        // own generation.
+        mark_window_committed(generation);
+        assert!(!url_poll_is_safe(rebuilt));
+        assert!(url_poll_is_safe(generation));
+    }
+
     /// The helper executable earns the config's trust only through a path
     /// nobody else can rewrite (attack finding: the 0600 config file's checks
     /// said nothing about the executable it named).
@@ -1541,6 +1613,12 @@ mod tests {
             Decision::LoadMinted(loaded) => assert_eq!(loaded, minted),
             other => panic!("blank page must trigger loading the minted address, got {other:?}"),
         }
+        // Only the exact blank page counts (attack-round hardening): any
+        // other `about:` URL still waits.
+        assert!(matches!(
+            decide(&blanking, Some(&url("about:error")), &original),
+            Decision::Wait
+        ));
         assert!(matches!(
             decide(
                 &Phase::Blanking { pairing_url: minted.clone(), since: stale },

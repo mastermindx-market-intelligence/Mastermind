@@ -122,11 +122,21 @@ case "$CMD" in
     addr_path=${rest#* }
     port_num=$(printf '%s\n' "$port" | sed 's/^0*//')
     [ -n "$port_num" ] || port_num=0
-    if [ "$port_num" -lt 1 ] || [ "$port_num" -gt 65535 ]; then
+    # Attack round: bound the length before any numeric test so an oversized
+    # port gets the named refusal instead of a shell arithmetic error.
+    if [ "${#port_num}" -gt 5 ] || [ "$port_num" -lt 1 ] || [ "$port_num" -gt 65535 ]; then
       refuse "the port must be between 1 and 65535"
     fi
-    case "$addr_path" in
-      /|/pair|/pair/*)
+    # Attack round: compare a lowercased copy so `/PAIR` disguises fail, and
+    # refuse dot segments (raw or percent-encoded, either case) outright —
+    # the app's url parser normalizes them, so `/a/../pair` would otherwise
+    # open the pairing page as the configured "thread". A leading empty
+    # segment (`//pair`) is refused for the same reason.
+    low_path=$(printf '%s\n' "$addr_path" | tr 'A-Z' 'a-z')
+    case "$low_path" in
+      *..*|*%2e*)
+        refuse "dot segments never belong in the config path" ;;
+      //*|/|/pair|/pair/*)
         refuse "the server root and /pair belong to the pairing flow, never to the config" ;;
     esac
     if [ -n "$HELPER" ]; then
@@ -153,9 +163,12 @@ case "$CMD" in
         *[2367]*) echo "window_config: refusing a pair helper in a group- or other-writable directory (mode $parent_mode)" >&2; exit 1 ;;
       esac
     fi
+    # Panel repair N: never write into a symlinked folder. The refusal runs
+    # before mkdir/chmod so a planted symlink never has its target touched
+    # (attack-round ordering fix); the post-chmod check stays for the race.
+    [ ! -L "$DIR" ] || { echo "window_config: refusing to write into a symlinked config directory" >&2; exit 1; }
     mkdir -p "$DIR"
     chmod 700 "$DIR"
-    # Panel repair N: never write into a symlinked folder.
     [ ! -L "$DIR" ] || { echo "window_config: refusing to write into a symlinked config directory" >&2; exit 1; }
     # Panel repair F: stage both files first (umask 077, trap removes the
     # temporaries on any exit), then commit. A write without --pair-helper
@@ -199,17 +212,21 @@ case "$CMD" in
     ;;
   show)
     if [ ! -d "$DIR" ]; then echo "no config directory: $DIR"; exit 1; fi
+    # Attack round: a symlinked config directory is never followed, not even
+    # to display.
+    if [ -L "$DIR" ]; then echo "window_config: refusing to show a symlinked config directory" >&2; exit 1; fi
     for name in shell-url pair-helper; do
       f="$DIR/$name"
       if [ -f "$f" ]; then
         printf '%s mode=%s owner=%s' "$f" "$(stat -f '%Lp' "$f")" "$(stat -f '%u' "$f")"
         line=$(cat "$f")
         # Panel repair L: print scheme, host, port and path only; anything
-        # carrying userinfo, a query or a fragment is never echoed.
+        # carrying userinfo, a query or a fragment is never echoed. One
+        # port digit is as valid as five (attack-round fix).
         case "$line" in
           *@*|*\?*|*\#*)
             printf ' -> (not shown: carries a query, fragment or userinfo)\n' ;;
-          http://127.0.0.1:[0-9][0-9]*/*)
+          http://127.0.0.1:[0-9]*/*)
             printf ' -> %s\n' "$line" ;;
           /*)
             printf ' -> %s\n' "$line" ;;
@@ -223,6 +240,8 @@ case "$CMD" in
     ;;
   clear)
     [ -d "$DIR" ] || { echo "no config directory: $DIR"; exit 0; }
+    # Attack round: never delete through a symlinked config directory.
+    if [ -L "$DIR" ]; then echo "window_config: refusing to clear a symlinked config directory" >&2; exit 1; fi
     rm -f "$DIR/shell-url" "$DIR/pair-helper"
     echo "cleared $DIR"
     ;;

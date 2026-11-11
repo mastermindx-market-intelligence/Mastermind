@@ -403,6 +403,94 @@ class TestWriteShowClear:
                 assert result.returncode != 0, bad
             assert not (Path(tmp) / ".mastermind/mmos_dev/window-dev/pair-helper").exists()
 
+    def test_write_refuses_dot_segment_disguised_pair_paths(self):
+        # Attack round: `/a/../pair` and its percent-encoded spellings pass a
+        # literal `/pair` case pattern, but the app's url parser normalizes
+        # dot segments, so the window would open on the pairing page. The
+        # writer must refuse the disguise, not the literal spelling only.
+        with tempfile.TemporaryDirectory() as tmp:
+            for bad in [
+                "http://127.0.0.1:3780/a/../pair",
+                "http://127.0.0.1:3780/%2e%2e/pair",
+                "http://127.0.0.1:3780/%2E%2E/pair",
+                "http://127.0.0.1:3780/.%2e/pair",
+                "http://127.0.0.1:3780/%2e./pair",
+                "http://127.0.0.1:3780//pair",
+                "http://127.0.0.1:3780/PAIR",
+                "http://127.0.0.1:3780/Pair/x",
+            ]:
+                result = run_tool(
+                    "write", "--bundle", "t8", "--url", bad,
+                    env_extra={"HOME": tmp}, check=False,
+                )
+                assert result.returncode != 0, bad
+                assert "refusing the address" in result.stderr, bad
+            config_dir = Path(tmp) / ".mastermind/mmos_dev/window-dev-t8"
+            assert not (config_dir / "shell-url").exists()
+
+    def test_write_refuses_oversized_ports_with_a_named_reason(self):
+        # Attack round: a 19-digit port overflows the shell numeric test and
+        # exits with an arithmetic error instead of the named refusal. The
+        # refusal must be named for every bad port.
+        with tempfile.TemporaryDirectory() as tmp:
+            result = run_tool(
+                "write", "--bundle", "t8",
+                "--url", "http://127.0.0.1:9999999999999999999/env-1/t",
+                env_extra={"HOME": tmp}, check=False,
+            )
+            assert result.returncode != 0
+            assert "port must be between 1 and 65535" in result.stderr
+
+    def test_write_never_touches_a_symlinked_config_directory(self):
+        # Attack round: `chmod 700` ran before the symlink refusal, so a
+        # planted symlink had its target directory's mode rewritten before
+        # the write was refused. The refusal must come first and touch
+        # nothing.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            victim = home / "victim"
+            victim.mkdir()
+            victim.chmod(0o755)
+            (home / ".mastermind/mmos_dev").mkdir(parents=True)
+            (home / ".mastermind/mmos_dev/window-dev-t8").symlink_to(victim)
+            result = run_tool(
+                "write", "--bundle", "t8",
+                "--url", "http://127.0.0.1:3780/env-1/t",
+                env_extra={"HOME": tmp}, check=False,
+            )
+            assert result.returncode != 0
+            assert "symlink" in result.stderr
+            assert stat.S_IMODE(victim.stat().st_mode) == 0o755
+            assert not (victim / "shell-url").exists()
+
+    def test_show_and_clear_refuse_a_symlinked_config_directory(self):
+        # Same rule for the readers: a symlinked config directory is never
+        # followed, not for display and not for deletion.
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            victim = home / "victim"
+            victim.mkdir()
+            (victim / "shell-url").write_text("http://127.0.0.1:3780/env-1/t\n")
+            (home / ".mastermind/mmos_dev").mkdir(parents=True)
+            (home / ".mastermind/mmos_dev/window-dev-t8").symlink_to(victim)
+            for args in (["show"], ["clear"]):
+                result = run_tool(
+                    *args, "--bundle", "t8", env_extra={"HOME": tmp}, check=False
+                )
+                assert result.returncode != 0, args
+                assert "symlink" in result.stderr, args
+            assert (victim / "shell-url").exists()
+
+    def test_show_prints_single_digit_ports(self):
+        # Attack round: the show filter required two port digits, so a
+        # legitimately written `:1` address printed as unrecognized.
+        with tempfile.TemporaryDirectory() as tmp:
+            url = "http://127.0.0.1:1/env-1/thread-9"
+            run_tool("write", "--bundle", "t8", "--url", url, env_extra={"HOME": tmp})
+            shown = run_tool("show", "--bundle", "t8", env_extra={"HOME": tmp})
+            assert url in shown.stdout
+            assert "unrecognized" not in shown.stdout
+
     def test_check_command_runs_the_app_judge_and_propagates_it(self):
         # Panel repair M: `check --bundle <b> --app <path>` execs the app
         # binary in --check-window-config mode, passing its lines and exit
@@ -697,6 +785,34 @@ class TestOpenTeamWindow:
                 assert result.returncode != 0, bad
                 assert "refusing a roster address" in result.stderr, bad
 
+    def test_roster_refuses_dot_segments_control_chars_and_uppercase(self):
+        # Attack round: the roster writer must not validate one string and
+        # write another. Dot segments (raw or percent-encoded, either case)
+        # smuggle the path past the /pair rule because urlsplit does not
+        # normalize; ASCII control characters are stripped by urlsplit before
+        # parsing, so a tab-carrying URL would validate and the raw string be
+        # written; an uppercase scheme survives urlsplit's lowercasing. All
+        # three are refused on the raw string.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            self.make_app(tmp_path)
+            for bad in [
+                "http://127.0.0.1:3780/a/../pair",
+                "http://127.0.0.1:3780/%2e%2e/pair",
+                "http://127.0.0.1:3780/%2E%2E/pair",
+                "http://127.0.0.1:3780/.%2e/pair",
+                "http://127.0.0.1:3780/%2e./pair",
+                "http://127.0.0.1:3780//pair",
+                "http://127.0.0.1:3780/env-1/t\t",
+                "HTTP://127.0.0.1:3780/env-1/t",
+            ]:
+                self.roster(tmp_path, [{"instanceId": "bad-1", "name": "Bad", "url": bad}])
+                result = self.run_open(tmp_path, "bad-1")
+                assert result.returncode != 0, bad
+                assert not (
+                    tmp_path / "work" / "thread-bad-1.txt"
+                ).exists(), bad
+
 
 class TestSingleInstanceRegistration:
     def test_single_instance_plugin_is_a_dependency_and_registered_first(self):
@@ -721,3 +837,44 @@ class TestSingleInstanceRegistration:
         # a second watchdog, auth restore or pairing start.
         callback = main_rs[single:opener]
         assert "reopen_main_window" in callback or "set_focus" in callback
+
+class TestUrlPollGate:
+    def test_watchdog_never_polls_the_url_before_a_committed_load(self):
+        # Live-proof round 1 crashed at every launch (launch3-backtrace.log:
+        # wry 0.55.1 unwraps a nil WKWebView URL in its url getter and the
+        # panic lands on the event loop, taking the app down). Until the
+        # window's first load commits the URL is nil — the initial
+        # tauri:// load is refused by the allowlist — so the watchdog may
+        # call url() only behind a gate keyed to the window generation that
+        # finished a load, and a stale commit from a closed window must not
+        # open it for its successor.
+        pairing = (
+            REPO / "app" / "mastermind_os" / "src-tauri" / "src" / "shell_pairing.rs"
+        ).read_text()
+        polls = [
+            line
+            for line in pairing.splitlines()
+            if "window.url()" in line
+        ]
+        assert polls, "the watchdog's url() poll is gone; re-check the gate"
+        gated = re.findall(
+            r"filter\(\|_\| url_poll_is_safe\([^)]*\)\)\s*"
+            r"\.and_then\(\|window\| window\.url\(\)",
+            pairing,
+        )
+        assert len(polls) == len(gated), (
+            "every window.url() call must sit behind the url_poll_is_safe gate"
+        )
+        main_rs = (
+            REPO / "app" / "mastermind_os" / "src-tauri" / "src" / "main.rs"
+        ).read_text()
+        assert "on_page_load" in main_rs, (
+            "the window must record its first committed load"
+        )
+        assert "PageLoadEvent::Finished" in main_rs, (
+            "only a finished load proves the webview URL is non-nil"
+        )
+        assert "mark_window_committed" in main_rs
+        assert "window_generation() + 1" in main_rs, (
+            "the callback must carry the generation captured at build time, not the current one"
+        )

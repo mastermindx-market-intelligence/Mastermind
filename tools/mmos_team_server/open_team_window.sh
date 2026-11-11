@@ -48,19 +48,29 @@ entry_id = m[0]["instanceId"]
 if not re.fullmatch(r"[A-Za-z0-9._-]+", entry_id) or ".." in entry_id:
     sys.exit("roster entry id is not a safe file name; refusing")
 url = m[0]["url"]
+# Attack round: the raw string is what gets written, so the raw string is
+# what gets validated — urlsplit silently strips ASCII control characters
+# and lowercases the scheme, and it does not normalize dot segments.
+if re.search(r"[\x00-\x1f\x7f]", url) or not url.startswith("http://"):
+    sys.exit("refusing a roster address that is not exactly http://127.0.0.1:<port>/<thread-path>")
 # Panel repair O: the roster address is parsed, not prefix-matched — the
 # same exact rule window_config.sh applies (panel repair M): scheme http,
 # host exactly 127.0.0.1, a real port, no userinfo, no query, no fragment,
-# and a path that is neither the root nor /pair nor under it.
+# and a path that is neither the root nor /pair nor under it. Dot segments
+# (raw or percent-encoded, either case) and a leading empty segment are
+# refused outright; the path compares lowercased so `/PAIR` fails too.
 p = urlsplit(url)
+low = p.path.lower()
 safe = (
     p.scheme == "http"
     and p.hostname == "127.0.0.1"
     and p.port is not None and 1 <= p.port <= 65535
     and p.username is None and p.password is None
     and not p.query and not p.fragment
-    and p.path.startswith("/") and p.path not in ("/", "/pair")
-    and not p.path.startswith("/pair/")
+    and p.path.startswith("/") and low not in ("/", "/pair")
+    and not low.startswith("/pair/")
+    and not low.startswith("//")
+    and ".." not in low and "%2e" not in low
 )
 if not safe: sys.exit("refusing a roster address that is not exactly http://127.0.0.1:<port>/<thread-path>")
 if os.path.lexists(out): os.remove(out)
