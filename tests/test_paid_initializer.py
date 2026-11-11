@@ -27,6 +27,25 @@ def commitment():
 def selectors():return dict(host_ref='ubuntu2',transport_alias='ubuntu2',python_path='/usr/bin/python3',capture_root='/home/worker/lanes/ext/lanes')
 
 
+def _fixture_bootstrap(executable):
+    # Canonicalize runner-owned ancestors, retaining the real python3 selector.
+    return Path(executable).parent.resolve(strict=True)/'python3'
+
+
+def test_fixture_bootstrap_parent_alias_keeps_real_getpath(tmp_path):
+    executable=Path(sys.executable)
+    alias=tmp_path/'interpreter-parent'
+    alias.symlink_to(executable.parent,target_is_directory=True)
+    direct=_fixture_bootstrap(executable)
+    selected=_fixture_bootstrap(alias/executable.name)
+    assert selected==direct
+    assert selected.name=='python3'
+    assert selected.resolve(strict=True)==direct.resolve(strict=True)
+    code='import json,sys;print(json.dumps({k:getattr(sys,k) for k in ("executable","prefix","exec_prefix","base_prefix","base_exec_prefix")}))'
+    def observe(path):
+        return json.loads(subprocess.check_output([str(path),'-I','-S','-B','-c',code],timeout=10))
+    assert observe(selected)==observe(direct)
+
 
 def _preserving_stat_view(info,*,uid=None,mode=None):
     values=list(info)
@@ -429,8 +448,9 @@ def test_actual_pinned_image_exec_matches_normal_isolated_venv_startup(tmp_path,
 
 
 @pytest.mark.skipif(sys.platform!='linux' or sys.version_info[:2]!=(3,12),reason='requires actual Linux CPython3.12 initializer/getpath')
+@pytest.mark.parametrize('bootstrap_parent_alias',[False,True])
 @pytest.mark.parametrize('fixture_umask',[0o002,0o022])
-def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,monkeypatch,request,fixture_umask):
+def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,monkeypatch,request,bootstrap_parent_alias,fixture_umask):
     """Real FD/snapshot/Bash/getpath; trusted-platform metadata is simulated.
 
     No remote/system mutation, credential read or provider is used. This does
@@ -446,9 +466,12 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     for key in tuple(os.environ):
         if key.startswith(('LD_','BASH_FUNC_')) or key in ('BASH_ENV','ENV','PYTHONHOME','PYTHONEXECUTABLE','__PYVENV_LAUNCHER__'):
             monkeypatch.delenv(key)
-    # Canonicalize only the fixture directory. Keep python3's final selector
-    # symlink so the real owner still checks its image and alias identity.
-    bootstrap=Path(sys.executable).parent.resolve(strict=True)/'python3'
+    executable=Path(sys.executable)
+    if bootstrap_parent_alias:
+        alias=tmp_path/'bootstrap-parent'
+        alias.symlink_to(executable.parent,target_is_directory=True)
+        executable=alias/executable.name
+    bootstrap=_fixture_bootstrap(executable)
     assert bootstrap.resolve(strict=True)==Path(sys.executable).resolve(strict=True)
     system_launch=_system_fixture_launch()
     logical=system_launch or bootstrap
@@ -739,9 +762,7 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
     try:
         (lane/'ext/lanes').mkdir(parents=True,mode=0o700)
         (lane/'venv/bin').mkdir(parents=True,mode=0o700)
-        # Canonicalize only this inert fixture's existing interpreter parent;
-        # retain the python3 leaf alias and all production custody/drift checks.
-        bootstrap=Path(sys.executable).parent.resolve(strict=True)/'python3'
+        bootstrap=_fixture_bootstrap(sys.executable)
         assert bootstrap.resolve(strict=True)==Path(sys.executable).resolve(strict=True)
         system_launch=_system_fixture_launch();real=(system_launch or bootstrap).resolve()
         monkeypatch.setenv('PATH','/usr/bin:/bin')
