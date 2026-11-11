@@ -109,6 +109,7 @@ definitively did not take effect (clean refusal).
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import dataclasses
 import hashlib
@@ -1953,11 +1954,16 @@ class T3ExecutionAdapter:
         *,
         clock: Callable[[], datetime] | None = None,
         state_store: T3AdapterStateStore | None = None,
+        collect_poll_seconds: float = 1.0,
     ) -> None:
         self._port = port
         self._binding_source = binding_source
         self.inspector = inspector
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        # L8b: how long collect_result waits between live-status polls while
+        # the run is still executing (the supervisor's wait loop is the
+        # collect call itself — see collect_result's docstring).
+        self._collect_poll_seconds = float(collect_poll_seconds)
         # Durable adapter state per run.  Every mutation writes through the
         # store SYNCHRONOUSLY at its ordering point (intent claimed BEFORE
         # the native call; receipt + original ref BEFORE the ACK; cursor
@@ -2520,17 +2526,36 @@ class T3ExecutionAdapter:
         the bare thread id — is refused.  The canonical reference is stored
         in the WRITE-ONCE result ledger BEFORE the CollectionReceipt is
         constructed or returned.  Reading T3 is NOT company acceptance.
+
+        L8b (lease-expiry journey round 6, 2026-11-11): the supervisor's
+        collection contract is "completes at terminal" — process adapters
+        await process exit inside collect_result, and
+        ``_collect_with_heartbeats`` relies on exactly that as its wait
+        loop.  This adapter refused a still-LIVE run outright, so the
+        service's recovered-run finisher died on its first poll and
+        QUARANTINED the whole Executive service at startup (the recovery
+        door then died at register-worker).  collect_result now polls the
+        honest live status until the run is terminal and only then performs
+        the ONE terminal read — the result still never comes from the
+        status cursor, and the wait is a plain sleep so the engine loop can
+        cancel it on ownership loss with no partial state (the ledger is
+        untouched until the terminal read).
         """
         run = self._require_run_state(ref)
         original = run.original_ref
         assert original is not None
         thread_id, native_run_id = self._native_coordinates(run)
+        while True:
+            live = await self.status(ref)
+            if live in _TERMINAL_STATES:
+                break
+            await asyncio.sleep(self._collect_poll_seconds)
         read = await self._read_terminal(thread_id, native_run_id)
         state = _map_t3_status(read.native_status)
         if state not in _TERMINAL_STATES:
             raise T3ExecutionAdapterError(
-                f"run {original.run_id!r} is not terminal; no final result to "
-                "collect"
+                f"terminal read for run {original.run_id!r} observed "
+                f"non-terminal state {state.name!r}; refusing to collect"
             )
         result_ref = str(read.result_ref or "")
         if not result_ref or result_ref in {thread_id, native_run_id}:

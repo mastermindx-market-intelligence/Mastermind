@@ -32,7 +32,7 @@ attack finding F8 from `T4B_ATTACK_FINDINGS.md`. Base commit `676786c71`
 | L5 (live, crash journey round 4) | the engine adopts the recovered attempt with a FRESH short lease, then the door honestly WAITS for the native run to finish — a wait longer than the lease made `complete_attempt` refuse (`StateConflict: attempt … lease has expired`) with the result in hand; the entry froze execute-failed | CLOSED (a live owner extends its lease while its execution runs: the door heartbeats through the terminal wait — before each poll and once more before the seal — through the runtime's typed `heartbeat_attempt` seam; a refusal propagates, the door no longer holds the attempt and must not seal it) | `…door_t4c.py::test_step5_a_wait_longer_than_the_lease_still_seals` | this step |
 | L6 (live, lease-expiry journey round 4) | the ADOPTED attempt's bound-path recovery check compares `spec.workspace_path` with the placement Job's OWN worktree and `spec.result_schema_path` with the engine's canonical `worker-result.schema.json`; the door's spec named an attempt-scoped `{run_id}-ws` workspace and a bare `schema.json`, so the reconcile AFTER the successful adoption refused (`LIVE_QUARANTINED`, "worker recovery launch contract differs from durable Job") → whole-service quarantine → the recovery door died at `register-worker` | CLOSED (the spec names the placement Job's paths at BOTH launch sites: the first claim passes the workspace it just created and recorded on the Job; the F1 relaunch reads the attempt's job worktree from the durable Job) | `…door_t4c.py::test_step6_the_launch_spec_names_the_placement_jobs_own_paths` | this step |
 | L7 (live, wait-frees journey round 4) | the census file is per-SCRATCH but `job_state` answered a command's "native launches" with the whole-file count: two tasks that each launched exactly once both reported 2, so the journey's per-task exactly-once proof could not pass (the door itself was correct — the census showed one launch per task) | CLOSED (the per-job launch port tags its census rows with the attempt it was composed for; a command's state counts only ITS attempt's tagged launches — untagged service-side rows never count, an attemptless entry answers 0) | `…door_t4c.py::test_step7_job_state_counts_native_launches_per_attempt` | this step |
-| L8 (live, lease-expiry journey round 5) | with L6 fixed, the recovery door's startup reconcile ADOPTED at once (events 8–12: PROCESS_RECORDED → RECEIPT_ADOPTED → ADOPTED → RUNNING → CHECKPOINTED) — and the service's own recovered-run FINISHER then raised inside `finish_job`, so `_finish_dispatched` quarantined the whole service (`executive_service.py:10100`, the reason retained only in memory) and the door died at `register-worker`.  Root cause (reproduced verbatim on copied stores): the t3 adapter's `CollectionReceipt` hardcoded `exit_code=None` (a provider-managed run has no OS process), while `_terminalize` demands a truthful exit code — `SupervisorError: recovered local worker has no truthful durable OS exit code`.  Only the lease-expiry shape reaches this path: default/crash seal door-side, and in crash the service never adopts (it defers to the live lease) | CLOSED (the t3 adapter maps its durable provider verdict to the engine-uniform exit code exactly as the paid wire's reviewed law does — SUCCEEDED → 0, every failure verdict nonzero; the richer truth stays in `result.status`.  Probe on copied stores: reconcile → TERMINAL_RECOVERED → `finish_job` completes, no quarantine) | `tests/test_t3_execution_adapter.py::T3CollectTests::test_collect_maps_the_provider_verdict_to_the_engine_uniform_exit_code` | this step |
+| L8 (live, lease-expiry journey rounds 5–6; two parts) | with L6 fixed, the recovery door's startup reconcile ADOPTED at once (events 8–12: PROCESS_RECORDED → RECEIPT_ADOPTED → ADOPTED → RUNNING → CHECKPOINTED) — and the service's own recovered-run FINISHER then raised inside `finish_job`, so `_finish_dispatched` quarantined the whole service (`executive_service.py:10100`, the reason retained only in memory) and the door died at `register-worker`.  **Part a (round 5):** the t3 adapter's `CollectionReceipt` hardcoded `exit_code=None` (a provider-managed run has no OS process), while `_terminalize` demands a truthful exit code — `SupervisorError: recovered local worker has no truthful durable OS exit code`.  **Part b (round 6, L8b):** after part a, the finisher still died on its FIRST poll because `collect_result` refused a still-LIVE run (`run ... is not terminal; no final result to collect`) — but the supervisor's collection contract is "completes at terminal": process adapters await process exit inside collect_result, and `_collect_with_heartbeats` uses the collect call itself as its ONLY wait loop (verified `claude_worker.py:2107-2130` awaits a shared collection task).  The t3 read-adapter was the outlier; the whole service quarantined on the first poll.  Only the lease-expiry shape reaches this path: default/crash seal door-side, and in crash the service never adopts (it defers to the live lease) | CLOSED (a: the t3 adapter maps its durable provider verdict to the engine-uniform exit code exactly as the paid wire's reviewed law does — SUCCEEDED → 0, every failure verdict nonzero; the richer truth stays in `result.status`.  b: `collect_result` now polls the honest live `status` until the run is terminal and only then performs the ONE terminal read — audit #13 unchanged, the result never comes from the status cursor; the wait is a plain sleep so the engine loop can cancel it on ownership loss, and the ledger is untouched until the terminal read.  Probe on copied stores after both parts: reconcile → TERMINAL_RECOVERED → `finish_job` completes, no quarantine) | part a: `tests/test_t3_execution_adapter.py::T3CollectTests::test_collect_maps_the_provider_verdict_to_the_engine_uniform_exit_code`; part b: `tests/test_t3_execution_adapter.py::T3CollectTests::test_collect_waits_for_the_terminal_state_before_the_terminal_read` | this step |
 
 ## Step-4 proof (dev instances)
 
@@ -49,7 +49,7 @@ task shows.
 | `default` | one task → one job → sealed → result comment on the same task | PASS (1 launch); PASS again on `5b3efef6f` (round 3) |
 | `crash` | exit 90 at the receipt; fresh door recovers the SAME attempt through the engine's defer-then-adopt cadence | engine lane PASS live (defer → `RECEIPT_RECOVERED` → same run under fence 2, ONE native launch); seal refused by L4, then the seal's commit refused by L5 — re-running on the L4+L5 fixes |
 | `crash-seal` | exit 91 after the seal commit; fresh door finishes the job, result comment EXACTLY once | PASS on `d222e9d80`; PASS on `5b3efef6f` (round 3) |
-| `lease-expiry` | door down longer than its 20s lease; first reconcile adopts at once, no deferral round | FAILED on `deb89b5cd` — live defect L1; FAILED on `8da58b12d` (round 4) — live defect L6; FAILED on `8653bdcd2` (round 5b) — live defect L8; re-running on the fixed tree |
+| `lease-expiry` | door down longer than its 20s lease; first reconcile adopts at once, no deferral round | FAILED on `deb89b5cd` — live defect L1; FAILED on `8da58b12d` (round 4) — live defect L6; FAILED on `8653bdcd2` (round 5b) — live defect L8 part a; FAILED on `f8ffd1117` (round 6) — live defect L8 part b (the finisher's collect refused a still-live run); re-running on the fixed tree |
 | `wait` | fleet full: second task WAITs with the precise blocker | PASS |
 | `wait-frees` | WAIT then live capacity: the door re-admits by itself | FAILED on `deb89b5cd` — live defect L2; L2 fix proven live (admission retired → task two admitted + launched) on `deb89b5cd`; round 4 FAILed only on L7's whole-file launch count (door correct); **PASS on `8653bdcd2` (round 5b): two tasks, ONE launch each, task two admitted by the door itself after the admission slot freed, both delivered** |
 | `undeliverable` | refused receipt surfaced with its code | see below |
@@ -175,14 +175,31 @@ live in the T4c evidence ledger's `step4-journeys/` folder.)
   receipt maps the verdict to the engine-uniform exit code exactly as
   the paid wire's reviewed law does (`paid_fabric_wire.py:328`,
   SUCCEEDED → 0), keeping the richer truth in `result.status`.  Probe
-  after the fix: `FINISH OK` end to end, no quarantine.  Only the
-  lease-expiry shape reaches this path — default/crash seal door-side,
-  and in crash the service never adopts (it defers to the live lease
-  while the door lane owns) — which is why every earlier journey passed
-  around it.  Two observability notes recorded here: the finisher's
-  quarantine reason is in-memory only, and the census showed exactly one
-  service-side read before the failure (the raise was local, not a
-  transport fault).
+  after the fix: `FINISH OK` end to end, no quarantine.  **Part b
+  (round 6, L8b):** the journey STILL failed with the identical
+  quarantine signature on the part-a tree, because the probe-5 copy had
+  gone terminal by the time it finished — a now-terminal run was never
+  the failing moment.  Probe 6 on a FRESH lease-expiry scratch isolated
+  it: `finish_job` raised at the still-LIVE moment with
+  `T3ExecutionAdapterError: run ... is not terminal; no final result to
+  collect`.  The supervisor's collection contract is "completes at
+  terminal" — process adapters block until exit inside collect_result
+  (`claude_worker.py:2107-2130` awaits a shared collection task), and
+  `_collect_with_heartbeats` (`executive_supervisor.py:3397`) uses
+  `adapter.collect_result` as its ONLY wait mechanism; the t3
+  read-adapter refused the live run and the finisher died on its first
+  poll.  Fixed at the adapter: `collect_result` polls the honest live
+  `status` until `_TERMINAL_STATES` (interval `collect_poll_seconds`,
+  default 1.0s) and only then performs the ONE terminal read; the
+  result never comes from the status cursor, the wait is a plain sleep
+  (cancellable on ownership loss), and no ledger write happens until
+  the terminal read.  Only the lease-expiry shape reaches this path —
+  default/crash seal door-side, and in crash the service never adopts
+  (it defers to the live lease while the door lane owns) — which is why
+  every earlier journey passed around it.  Two observability notes
+  recorded here: the finisher's quarantine reason is in-memory only,
+  and the census showed exactly one service-side read before the
+  failure (the raise was local, not a transport fault).
 
 ## Attack round (Step 5)
 

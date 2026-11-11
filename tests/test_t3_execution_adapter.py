@@ -11,6 +11,7 @@ reporting, and replay-only reattach under the SAME key + namespace.
 """
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import hashlib
 import os
@@ -632,10 +633,11 @@ class T3CollectTests(unittest.IsolatedAsyncioTestCase):
 
         adapter._build_collection_receipt = spy_build
         receipt = await adapter.collect_result(ref)
-        # Ordering: port read -> ledger store -> receipt construction.
+        # Ordering: live status poll (L8b wait, already terminal here) ->
+        # the ONE terminal read -> ledger store -> receipt construction.
         self.assertEqual(
             [entry[0] for entry in trace],
-            ["read", "ledger-store", "build-receipt"],
+            ["read", "read", "ledger-store", "build-receipt"],
         )
         # Reading T3 is NOT company acceptance: the ledger holds the
         # canonical reference as evidence, separately from the neutral floor.
@@ -649,13 +651,38 @@ class T3CollectTests(unittest.IsolatedAsyncioTestCase):
             hashlib.sha256(entry.result_ref.encode("utf-8")).hexdigest(),
         )
 
-    async def test_collect_refuses_non_terminal_run(self) -> None:
+    async def test_collect_waits_for_the_terminal_state_before_the_terminal_read(
+        self,
+    ) -> None:
+        """L8b (lease-expiry journey round 6, 2026-11-11): the supervisor's
+        collection contract is "completes at terminal" — process adapters
+        await process exit inside collect_result, and
+        ``_collect_with_heartbeats`` relies on exactly that as its wait
+        loop.  This adapter refused a still-LIVE run outright, so the
+        service's recovered-run finisher died on its first poll and
+        quarantined the whole Executive service at startup (the recovery
+        door then died at register-worker).  collect now polls the honest
+        live status until the run is terminal and only then performs the
+        ONE terminal read (audit #13 unchanged: the result never comes
+        from the status cursor)."""
         adapter, port, _ = _t3_adapter(binding=_binding())
         ref = await adapter.start(_launch_spec())
         port.status_by_thread[ref.provider_session_id] = "running"
-        with self.assertRaises(T3ExecutionAdapterError):
-            await adapter.collect_result(ref)
+        task = asyncio.ensure_future(adapter.collect_result(ref))
+        await asyncio.sleep(0.1)
+        # a live run is WAITED ON, never refused — and nothing is ledgered
+        self.assertFalse(task.done())
         self.assertIsNone(adapter.result_ledger_entry(ref.run_id))
+        port.status_by_thread[ref.provider_session_id] = "succeeded"
+        receipt = await asyncio.wait_for(task, timeout=10.0)
+        self.assertEqual(receipt.result.status, WorkerRunStatus.SUCCEEDED)
+        self.assertEqual(receipt.result.exit_code, 0)
+        entry = adapter.result_ledger_entry(ref.run_id)
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            entry.result_ref,
+            f"t3://thread/{ref.provider_session_id}/result",
+        )
 
     async def test_collect_refuses_a_different_run_result(self) -> None:
         adapter, port, _ = _t3_adapter(binding=_binding())
