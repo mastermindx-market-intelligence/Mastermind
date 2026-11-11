@@ -227,3 +227,34 @@ def test_rollback_notices_a_restore_that_did_not_take(tmp_path, monkeypatch):
     with pytest.raises(SystemExit):
         co.cmd_rollback(spec)
     assert (tmp_path / "home" / "cutover-preimage.json").exists()
+
+
+def test_refresh_carrier_swaps_the_file_for_a_moved_agent(wired, tmp_path, capsys):
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    carrier = tmp_path / "carrier" / "wake_carrier.py"
+    carrier.write_text("# an older carrier\n")
+    # open work blocks a move, and must not block a carrier fix
+    http.issues.append({"identifier": "MAS-9", "status": "in_review"})
+    capsys.readouterr()
+    assert co.cmd_refresh_carrier(spec) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["changed"] and out["sha256Before"] != out["sha256After"]
+    source = os.path.join(os.path.dirname(co.__file__), "wake_carrier.py")
+    assert carrier.read_bytes() == open(source, "rb").read()
+    assert os.listdir(tmp_path / "carrier") == ["wake_carrier.py"]  # no leftovers
+    assert co.cmd_refresh_carrier(spec) == 0     # a second run changes nothing
+    assert json.loads(capsys.readouterr().out)["changed"] is False
+
+
+def test_refresh_carrier_refuses_a_live_run_or_an_unmoved_agent(wired, tmp_path):
+    spec, http = wired
+    with pytest.raises(SystemExit):              # not moved yet
+        co.cmd_refresh_carrier(spec)
+    assert co.cmd_apply(spec) == 0
+    carrier = tmp_path / "carrier" / "wake_carrier.py"
+    carrier.write_text("# an older carrier\n")
+    http.live.append({"agentId": "another-agent"})   # the file is shared
+    with pytest.raises(SystemExit):
+        co.cmd_refresh_carrier(spec)
+    assert carrier.read_text() == "# an older carrier\n"

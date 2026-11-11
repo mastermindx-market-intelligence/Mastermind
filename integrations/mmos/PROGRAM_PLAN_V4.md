@@ -510,3 +510,59 @@ Evidence: `~/.mastermind/mmos_evidence/cutover-assurance-20261110/` (LEDGER.md) 
 3. Team server hardening: its own Node, a packed build, a restart-after-reboot check.
 4. Check 9: an existing Hermes conversation still works.
 
+
+## 16. Amendment, 2026-11-10 22:25 UTC: check 9 answered, a real task exposed two carrier faults
+
+**Lanes.** H9 (read-only diagnosis of Hermes health and the attention list) is accepted:
+`H9_HERMES_AND_ATTENTION_DIAGNOSIS.md`. T8 (the window people open), T4b (the governed coding
+job) and TSH (team server hardening and short names) are still running.
+
+**Check 9, the result.** MAS-9 gave Secretary, still on Hermes, a one-comment task with every
+fact in the task text. Paperclip woke it, the gateway took the message and the model answered
+111 times. Secretary ran for 30 minutes, used tools 53 times, tried twice to patch its own
+config (refused), opened a browser, and was stopped by the 30-minute limit with nothing posted.
+So: the Hermes transport works; the Hermes agent did not do the task. Evidence:
+`~/.mastermind/mmos_evidence/h9-check9-20261110/LEDGER.md`.
+
+The same task, unchanged, was then given to Assurance on the carrier. It ended done with one
+record comment, but only after two faults of ours were found and fixed on the way:
+
+| Fault | Effect on MAS-9 | Fix (trunk) |
+| --- | --- | --- |
+| A board note on a task with no answer yet was read as "the board declined your answer", and the task text was left out | Assurance got a revision with no task. It refused to guess, which was right | `8b532902c`: only a declined confirmation counts as feedback; board notes travel with the task; a revision carries the task when the thread never had it |
+| A turn that waits for a person holds the thread. Each retry queued the same message again and added the same "waiting" line | Three copies queued, three identical lines, then Paperclip set the issue blocked | `b752daa02`: nothing is sent while a question waits; the line is said once |
+
+Two tools came out of it. `cutover_installed.py refresh-carrier <spec>` installs a carrier fix
+while teammates have open work (plain `apply` refuses then); it still refuses during a live
+run. `roster_browser.js answer` answers a teammate's waiting question through the paired
+headless tab, because the T3 command line has no way to do it.
+
+**Attention list.** MAS-1 (stale onboarding task whose assignee was terminated) is cancelled;
+that removed three rows. Four are left: the MAS-7 confirmation kept for the Chairman, two
+blocker rows on MAS-4 and one agent error alert. The last three belong to the Astra session's
+work and are not touched.
+
+**Decisions**
+
+1. DONE_WHEN 9 is closed as checked, with the result above. This program does not repair
+   Hermes agents. The answer to a Hermes agent that cannot do its work is to move it.
+2. Secretary is the third teammate to move, after TSH lands, so it arrives on the hardened
+   server. The two-teammate limit is lifted to three for this; no mass move.
+3. New gap, queued behind T4b because it touches the same file: when a person answers a
+   teammate's question in its conversation, nothing wakes the task. Today someone must also
+   comment on the issue or move it back to todo. The fix is for the carrier run to stay with
+   the question for a bounded time and finish in the same run.
+4. The waiting-question half of DONE_WHEN 2 now has a real case: the question showed in the
+   thread as a card with options and an answer box, and the row showed "Input". T8 still owes
+   the same from the window people open.
+
+**DONE_WHEN, honestly**
+
+| # | State |
+| --- | --- |
+| 1, 2 | As in section 15; lane T8 |
+| 3 | Not done; the Chairman's switch |
+| 4 | Rotation on real teammates still owed |
+| 5, 6, 7, 8 | Done on the installed app (MAS-5 to MAS-9) |
+| 9 | Checked: transport works, the agent failed the task |
+| 10 | Lane T4b |
