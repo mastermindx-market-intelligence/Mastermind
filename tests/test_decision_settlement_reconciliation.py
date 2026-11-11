@@ -939,7 +939,7 @@ def test_receipt_retry_uses_captured_prices_and_original_settlement_date(
     monkeypatch.setattr(
         settle,
         "_republish",
-        lambda pid, asof, submission=None, settlement_prices=None: (
+        lambda pid, asof, submission=None, settlement_prices=None, settlement_receipt_id=None: (
             republish_calls.append(
                 (pid, asof, submission, dict(settlement_prices or {}))
             ),
@@ -1177,7 +1177,7 @@ def test_direct_zero_fill_receipt_projects_every_durable_surface_before_ack(
     monkeypatch.setattr(
         settle,
         "_republish",
-        lambda pid, asof, submission=None, settlement_prices=None: (
+        lambda pid, asof, submission=None, settlement_prices=None, settlement_receipt_id=None: (
             events.append("publish_and_learning"),
             {"ok": True},
         )[1],
@@ -1682,7 +1682,7 @@ def test_legacy_receipt_without_hash_bound_submission_publishes_receipt_only_tru
     monkeypatch.setattr(
         settle,
         "_republish",
-        lambda pid, asof, submission=None, settlement_prices=None: (
+        lambda pid, asof, submission=None, settlement_prices=None, settlement_receipt_id=None: (
             publications.append(copy.deepcopy(submission)),
             {"ok": True},
         )[1],
@@ -1724,3 +1724,45 @@ def test_zero_fill_receipt_without_exact_settlement_date_is_retained(
     assert out["ok"] is False
     assert out["finalization_errors"] == ["receipt_invalid_settlement_date_evidence"]
     assert path.exists()
+
+
+def test_finalizer_threads_exact_receipt_id_into_republish(tmp_path, monkeypatch):
+    """Learning durability must be proven against the exact retained settlement receipt."""
+    from bot import decision_rows, settle
+    from portfolio import autonomous_migration, paper_account, position_log, registry
+
+    monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    receipt = _receipt_for({
+        "holdings": [{"ticker": "AAPL", "weight": 0.20}],
+        "summary": "receipt-bound learning finalization",
+    })
+    _persist_receipt(paper_account, receipt)
+
+    monkeypatch.setattr(position_log, "update", lambda *a, **k: None)
+    monkeypatch.setattr(paper_account, "mark", lambda *a, **k: None)
+    monkeypatch.setattr(
+        autonomous_migration,
+        "persist_settlement_link",
+        lambda *a, **k: {"ok": True, "applicable": False},
+    )
+    monkeypatch.setattr(
+        decision_rows,
+        "reconcile_settlement",
+        lambda *a, **k: {"ok": True, "reconciled": True},
+    )
+    observed = []
+
+    def republish(pid, asof, *, submission=None, settlement_prices=None,
+                  settlement_receipt_id=None):
+        observed.append(settlement_receipt_id)
+        return {"ok": True}
+
+    monkeypatch.setattr(settle, "_republish", republish)
+
+    out = settle.finalize_direct_settlement_receipt(
+        "autonomous", receipt["transaction_id"]
+    )
+
+    assert out["ok"] is True
+    assert out["receipt_acknowledged"] is True
+    assert observed == [receipt["transaction_id"]]

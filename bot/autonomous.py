@@ -926,6 +926,7 @@ def republish(
     *,
     submission: dict | None = None,
     settlement_prices: dict[str, float] | None = None,
+    settlement_receipt_id: str | None = None,
 ) -> dict:
     """Re-emit the autonomous book's published contract from an accepted submission + current marks —
     no Brain call. Used by the open settle (bot/settle.py) so the dashboard reflects freshly-filled
@@ -969,7 +970,7 @@ def republish(
             }
         try:
             lesson_finalization = portfolio_learning.application_finalization_status(
-                PORTFOLIO_ID, submission
+                PORTFOLIO_ID, submission, settlement_receipt_id=settlement_receipt_id
             )
         except Exception as exc:  # noqa: BLE001 - finalizer must retain the receipt
             lesson_finalization = {

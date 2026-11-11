@@ -809,6 +809,7 @@ def _finalize_settlement_receipt(
         settlement_asof,
         submission=publication_submission,
         settlement_prices=prices,
+        settlement_receipt_id=transaction_id,
     )
     # A hash-bound Brain receipt is not publish-complete merely because the helper returned
     # without raising.  ``republish`` also owns the durable learning transition; only its explicit
@@ -1122,6 +1123,7 @@ def _republish(
     *,
     submission: dict | None = None,
     settlement_prices: dict[str, float] | None = None,
+    settlement_receipt_id: str | None = None,
 ) -> dict | None:
     """Re-emit the book's published contract after a settle (so the dashboard reflects the fills),
     via the book module's republish(). Best-effort; never raises."""
@@ -1133,6 +1135,7 @@ def _republish(
                 asof,
                 submission=submission,
                 settlement_prices=settlement_prices,
+                settlement_receipt_id=settlement_receipt_id,
             )
     except Exception as exc:  # noqa: BLE001 - settlement is committed; surface publish failure
         return {"ok": False, "error": repr(exc)[:200]}

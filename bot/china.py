@@ -835,6 +835,7 @@ def republish(
     *,
     submission: dict | None = None,
     settlement_prices: dict[str, float] | None = None,
+    settlement_receipt_id: str | None = None,
 ) -> dict:
     """Re-emit the CURRENT book's published contract (with display names) + re-warm the zh cache
     from the LAST submission and today's CNY marks — WITHOUT a new Brain call. Use to refresh the
@@ -877,7 +878,7 @@ def republish(
         }
     try:
         out["lesson_finalization"] = portfolio_learning.application_finalization_status(
-            PORTFOLIO_ID, submission
+            PORTFOLIO_ID, submission, settlement_receipt_id=settlement_receipt_id
         )
     except Exception as exc:  # noqa: BLE001 - finalizer must retain the receipt
         out["lesson_finalization"] = {
