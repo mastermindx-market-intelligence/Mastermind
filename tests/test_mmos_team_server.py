@@ -55,12 +55,17 @@ def launchagents_dir():
 
 @pytest.fixture()
 def dev_root(tmp_path):
-    """A plausible root outside ~/.t3 with a 0600 fabric.env, as seed leaves it."""
+    """A plausible root outside ~/.t3 with a 0600 fabric.env, as seed leaves
+    it. Panel R5: --server-bin roots must carry runbook step 3's interpreter
+    record, exactly as a real root does after step 3."""
     root = tmp_path / "t3-team"
     root.mkdir()
     envf = root / "fabric.env"
     envf.write_text("ANTHROPIC_BASE_URL=https://example.internal/api\n")
     envf.chmod(0o600)
+    (root / "config").mkdir()
+    (root / "config" / "python3-path").write_text(
+        "/opt/homebrew/bin/python3.12\n")
     return root
 
 
@@ -260,6 +265,10 @@ class TestAttackRoundFixes:
         root.mkdir(mode=0o700)
         (root / "fabric.env").write_text("ANTHROPIC_BASE_URL=https://x\n")
         (root / "fabric.env").chmod(0o600)
+        (root / "config").mkdir()
+        # Panel R5: a rollback root carries step 3's interpreter record.
+        (root / "config" / "python3-path").write_text(
+            "/opt/homebrew/bin/python3.12\n")
         victim = tmp_path / "victim"
         victim.mkdir()
         os.symlink(victim, root / "home")
@@ -279,6 +288,11 @@ class TestAttackRoundFixes:
         root.chmod(0o755)
         (root / "fabric.env").write_text("ANTHROPIC_BASE_URL=https://x\n")
         (root / "fabric.env").chmod(0o600)
+        (root / "config").mkdir()
+        # Panel R5: interpreter record present, so the test reaches the root-
+        # mode refusal it exists to check.
+        (root / "config" / "python3-path").write_text(
+            "/opt/homebrew/bin/python3.12\n")
         r = install(root, free_port(), "com.example.a5-loose",
                     "--server-bin", "/usr/bin/true",
                     env_extra={"TEAM_SERVER_LAUNCHAGENTS_DIR": launchagents_dir})
@@ -422,8 +436,10 @@ class TestLibraryReuse:
 class TestPlistShape:
     def test_plist_wellformed_and_minimal(self, dev_root, launchagents_dir):
         # Extract the heredoc plist from the script and validate its shape.
+        # LOW4: the heredoc targets the temp file ($PLIST_TMP) that is renamed
+        # into place, not $PLIST directly.
         text = TOOL.read_text()
-        m = re.search(r"cat > \"\$PLIST\" <<EOF\n(.*?)\nEOF", text, re.S)
+        m = re.search(r"cat > \"\$PLIST_TMP\" <<EOF\n(.*?)\nEOF", text, re.S)
         assert m, "plist heredoc not found"
         body = m.group(1)
         body = body.replace("$LABEL", "com.example.shape").replace("$ROOT", "/tmp/root")

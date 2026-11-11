@@ -10,6 +10,7 @@ the installed runner (so the fake server really binds 127.0.0.1, really answers
 Never touches the real ~/Library/LaunchAgents, the real label
 com.mastermind.t3-team, port 3780, or ~/.t3.
 """
+import hashlib
 import json
 import os
 import shutil
@@ -48,6 +49,14 @@ def connect_ok(port, timeout=0.2):
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=timeout):
             return True
+    except OSError:
+        return False
+
+
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
     except OSError:
         return False
 
@@ -118,6 +127,9 @@ class Harness:
             "TMPDIR": os.environ.get("TMPDIR", "/tmp"),
             "FAKE_LAUNCHCTL_STATE": str(self.state),
             "LANG": "en_US.UTF-8",
+            # Panel R8: the tools call launchctl by absolute path now; the
+            # fake launchd rides the explicit MMOS_*_BIN seam.
+            "MMOS_LAUNCHCTL_BIN": str(self.bindir / "launchctl"),
         }
         env.update(extra)
         return env
@@ -145,10 +157,11 @@ class Harness:
         return target
 
     # -- running the tool -------------------------------------------------
-    def run(self, *args, timeout=120):
+    def run(self, *args, timeout=120, env=None):
         return subprocess.run(
             ["/bin/sh", str(TOOL), *map(str, args)],
-            capture_output=True, text=True, env=self.env(), timeout=timeout)
+            capture_output=True, text=True, env=env or self.env(),
+            timeout=timeout)
 
     def run_install(self, *extra, timeout=180):
         return self.run("install", "--root", self.root, "--port", self.port,
@@ -164,6 +177,54 @@ class Harness:
     def log(self):
         path = self.root / "run" / "server.log"
         return path.read_text(errors="replace") if path.exists() else ""
+
+    def hold_port_http(self, port, delay=0.0, after_file=None):
+        """A foreign HTTP listener: answers 200 on the port, prints no banner.
+
+        Panel R4: a same-user process that grabs the port and answers 200
+        must never stand in for this root's server. Unlike hold_port this one
+        really speaks HTTP, so curl sees a live "200" that is not ours.
+        after_file reproduces the panel's exact race deterministically: the
+        listener binds only after that file appears (the fake launchd's
+        .loaded marker, written strictly AFTER install's port_busy pre-check
+        has passed), so the pre-check sees a free port every time.
+        """
+        script = (
+            "import os,sys,time\n"
+            "gate=sys.argv[2]\n"
+            "if gate != '-':\n"
+            "    while not os.path.exists(gate):\n"
+            "        time.sleep(0.02)\n"
+            f"time.sleep({delay})\n"
+            "from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\n"
+            "class H(BaseHTTPRequestHandler):\n"
+            "    def do_GET(self):\n"
+            "        body=b'ok'; self.send_response(200); "
+            "self.send_header('Content-Length', str(len(body))); "
+            "        self.end_headers(); self.wfile.write(body)\n"
+            "    def log_message(self,*a): pass\n"
+            "ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()\n")
+        proc = subprocess.Popen(
+            [PY, "-c", script, str(port), str(after_file or "-")],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self._children.append(proc)
+        if after_file is None:
+            assert wait_for(lambda: http_code(port) == "200", 25 + delay), \
+                "foreign HTTP listener never bound"
+        # With a gate file the caller runs the tool next; the listener binds
+        # on its own once the gate appears. Do not block here.
+        return proc
+
+    def kill_job_server(self):
+        """Kill the fake launchd job's process but keep its loaded marker:
+        the crash-loop window (launchd still 'has' the job, nothing serves)."""
+        pidfile = self.state / f"{LABEL}.pid"
+        pid = int(pidfile.read_text().strip())
+        try:
+            os.kill(pid, 9)
+        except OSError:
+            pass
+        assert wait_for(lambda: not _pid_alive(pid), 10), "job server never died"
 
     # -- cleanup ----------------------------------------------------------
     def hold_port(self, port):
@@ -331,10 +392,19 @@ def _plant_packed_runtime(harness):
     (install_dir / "lib" / "stamp").write_text("fake pinned tree\n")
 
     build = root / "runtime" / "packed" / "dist"
+    recorded = []
     for name in node_install.REQUIRED_DIST_FILES:
         target = build / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("x")
+        body = b"x"
+        recorded.append({"path": name, "bytes": len(body),
+                         "sha256": hashlib.sha256(body).hexdigest()})
+    # Panel R1: the packed tree carries its digest list beside dist/ and the
+    # post-hash BUILD_RECEIPT inside it, exactly as pack_server.mjs leaves it.
+    (build / "BUILD_RECEIPT.json").write_text("{}\n")
+    (root / "runtime" / "packed" / "file-digests.json").write_text(
+        json.dumps(recorded, indent=2) + "\n")
 
     tree = node_install.tree_sha256(install_dir)
     receipt = {
@@ -588,12 +658,268 @@ def test_install_dies_early_without_curl(h, tmp_path):
             os.symlink(src, stubs / name)
     env = h.env()
     env["PATH"] = f"{h.bindir}:{stubs}:/bin"
+    # Panel R8: curl is invoked by absolute path now (PATH injection alone
+    # can no longer steer or break the probe) — a broken install exercises
+    # the refusal through the same MMOS_*_BIN seam the harness uses for
+    # launchctl: point it at a path that does not exist.
+    env["MMOS_CURL_BIN"] = str(stubs / "curl")
     proc = subprocess.run(
         ["/bin/sh", str(TOOL), "install", "--root", str(h.root),
          "--port", str(h.port), "--label", LABEL, "--replace",
          "--server-bin", str(server)],
         capture_output=True, text=True, env=env, timeout=60)
     assert proc.returncode != 0, proc.stdout + proc.stderr
-    assert "curl not found" in proc.stderr
+    assert "curl missing or not executable" in proc.stderr
     # the refusal fired before launchd: nothing was started
     assert not h.loaded()
+
+
+# ==========================================================================
+# Panel round 2 (repair round on c89427598) — R4: bind the HTTP-200 answer
+# to the launchd job's pid at install, doctor and capture.
+# ==========================================================================
+
+def test_r4_install_refuses_foreign_listener_on_recorded_port(h):
+    # Panel R4 (HIGH): install's success test was "some process answered 200
+    # on the port". In the panel's race a same-user listener binds the port
+    # AFTER the port_busy pre-check while our job crash-loops on EADDRINUSE —
+    # and got INSTALLED printed over it. The listener's pid must be this
+    # label's job pid (or a descendant) for INSTALLED to print.
+    h.hold_port_http(h.port, after_file=h.state / f"{LABEL}.loaded")  # binds after port_busy
+    slow = h.fake_server(FIX / "fake_t3_slowbind.py")  # loses the race, dies
+    proc = h.run_install("--server-bin", slow, timeout=180)
+    assert proc.returncode != 0, proc.stdout + proc.stderr
+    assert "INSTALLED" not in proc.stdout
+    # the refusal names the impostor and the job it does not belong to
+    assert f"NOT label {LABEL}" in proc.stderr
+    assert "another process" in proc.stderr
+    # the crash-looping job was booted out, not left in launchd
+    assert not h.loaded()
+
+
+def test_r4_doctor_refuses_foreign_listener(h):
+    # Panel R4 (HIGH): doctor's verdict was "label loaded + HTTP 200" with
+    # nothing attributing the responder to this root's job. With our server
+    # dead and a foreign 200 listener on the port, doctor must not exit 0.
+    server = h.fake_server()
+    assert h.run_install("--server-bin", server).returncode == 0
+    _plant_packed_runtime(h)
+    assert wait_for(lambda: http_code(h.port) == "200", 15)
+    h.kill_job_server()
+    holder = h.hold_port_http(h.port)
+    try:
+        proc = h.run("doctor", "--root", h.root, "--label", LABEL, timeout=120)
+        assert proc.returncode != 0, proc.stdout + proc.stderr
+        assert "answeringProcess=foreign" in proc.stdout
+        assert "doctor_error=" in proc.stdout
+        assert "Traceback" not in proc.stdout + proc.stderr
+    finally:
+        holder.terminate()
+
+
+def test_r4_capture_refuses_foreign_listener_dead_banner(h):
+    # Panel R4 (capture aspect): capture's whole-log fallback trusted
+    # "label loaded + port answered". With our server dead and a foreign
+    # listener answering, the last logged banner is a DEAD one-time token and
+    # must not be installed as the credential.
+    server = h.fake_server()
+    assert h.run_install("--server-bin", server).returncode == 0
+    access = h.root / "run" / "access.txt"
+    assert access.is_file()
+    before = access.read_text()
+    h.kill_job_server()
+    holder = h.hold_port_http(h.port)
+    try:
+        proc = h.run("capture", "--root", h.root, "--label", LABEL, timeout=120)
+        assert proc.returncode != 0, proc.stdout + proc.stderr
+        assert access.read_text() == before
+    finally:
+        holder.terminate()
+
+
+# ==========================================================================
+# Panel repair round 2 (SCORE.md): R5-R8, LOWs 3/4/10/13, atk-7 (fake level)
+# ==========================================================================
+
+def test_r5_install_server_bin_refuses_without_python3_path(h):
+    # Panel R5: `install --server-bin` on a root whose config/python3-path is
+    # missing must refuse EARLY, naming runbook step 3 — not install a job
+    # that crash-loops at runner exit 78 with an unreachable recovery.
+    (h.root / "config" / "python3-path").unlink()
+    server = h.fake_server()
+    proc = h.run_install("--server-bin", server)
+    assert proc.returncode != 0
+    assert "INSTALLED" not in proc.stdout
+    assert "step 3" in proc.stderr
+    assert "python3-path" in proc.stderr
+    assert not h.loaded()  # refused before anything was started
+
+
+def test_r6_uninstall_truthful_when_bootout_fails(h):
+    # Panel R6: uninstall must give bootout failures the same three-state
+    # treatment as stop — never print UNINSTALLED over a still-loaded job.
+    server = h.fake_server()
+    assert h.run_install("--server-bin", server).returncode == 0
+    assert h.loaded()
+    proc = h.run("uninstall", "--root", h.root, "--label", LABEL,
+                 env=h.env(FAKE_LAUNCHCTL_BOTOUT_FAIL="1"))
+    assert proc.returncode != 0
+    assert "UNINSTALLED" not in proc.stdout
+    assert h.loaded()  # the job is still there and the tool said so
+    assert "still loaded" in proc.stderr or "STILL LOADED" in proc.stderr
+
+
+def test_r7_start_failure_boots_the_label_out(h):
+    # Panel R7: a failed `start` must not leave the label crash-looping under
+    # KeepAlive — boot it out and verify, or name the loop and its recovery.
+    server = h.fake_server()
+    assert h.run_install("--server-bin", server).returncode == 0
+    assert h.run("stop", "--root", h.root, "--label", LABEL).returncode == 0
+    holder = h.hold_port_http(h.port)  # the server can never bind
+    try:
+        proc = h.run("start", "--root", h.root, "--label", LABEL, timeout=120)
+        assert proc.returncode != 0
+        assert "INSTALLED" not in proc.stdout
+        # The exact repair: the label is not left loaded/crash-looping.
+        assert not h.loaded(), proc.stdout + proc.stderr
+    finally:
+        holder.terminate()
+
+
+def test_r8_install_ignores_a_path_injected_fake_curl(h):
+    # Panel R8: curl/launchctl/lsof/stat must be absolute so a PATH-injected
+    # fake `curl` printing 200 cannot manufacture INSTALLED. The fake curl
+    # writes a marker when invoked; it must never run.
+    marker = h.base / "fake-curl-invoked"
+    (h.bindir / "curl").write_text(
+        "#!/bin/sh\n"
+        f"echo x >> {marker}\n"
+        "echo 200\n")
+    os.chmod(h.bindir / "curl", 0o755)
+    silent = h.fake_server(FIX / "fake_t3_silent.py")
+    proc = h.run_install("--server-bin", silent, timeout=120)
+    assert proc.returncode != 0
+    assert "INSTALLED" not in proc.stdout
+    assert f"server did not answer on 127.0.0.1:{h.port}" in proc.stderr
+    assert not marker.exists()  # the fake was never invoked
+    assert not h.loaded()
+
+
+def test_low3_static_refusals_come_before_the_bootout(h):
+    # Panel LOW 3: --replace booted the live label out BEFORE several
+    # refusals — a refusal then took a previously healthy server down.
+    # Static refusals (here: a foreign-held requested port) must fire first.
+    server = h.fake_server()
+    assert h.run_install("--server-bin", server).returncode == 0
+    assert h.loaded()
+    assert wait_for(lambda: http_code(h.port) == "200", 15)
+    other = free_port()
+    holder = h.hold_port_http(other)
+    try:
+        proc = h.run("install", "--replace", "--root", h.root, "--port", other,
+                     "--label", LABEL)
+        assert proc.returncode != 0
+        assert "INSTALLED" not in proc.stdout
+        # The live label was untouched by the refusal.
+        assert h.loaded(), proc.stdout + proc.stderr
+        assert http_code(h.port) == "200"
+    finally:
+        holder.terminate()
+
+
+def test_low4_plist_written_atomically_no_debris(h):
+    # Panel LOW 4: the plist is written to a temp file and renamed into
+    # place; success leaves no temp debris and a complete plist.
+    server = h.fake_server()
+    assert h.run_install("--server-bin", server).returncode == 0
+    agents = h.home / "Library" / "LaunchAgents"
+    names = sorted(p.name for p in agents.iterdir())
+    assert names == [f"{LABEL}.plist"], names
+    body = h.plist().read_text()
+    for needle in (f"<string>{LABEL}</string>",
+                   f"<string>{h.root}/bin/server_runner.sh</string>",
+                   f"<string>{h.root}</string>"):
+        assert needle in body
+
+
+def test_low10_symlink_at_run_files_refused(h):
+    # Panel LOW 10: a symlink planted at run/server.log (or run/port) was
+    # followed by install's truncate/chmod. Install must refuse naming the
+    # symlink and leave the victim file untouched.
+    victim = h.root / "victim.log"
+    victim.write_text("PRECIOUS\n")
+    (h.root / "run" / "server.log").symlink_to(victim)
+    server = h.fake_server()
+    proc = h.run_install("--server-bin", server)
+    assert proc.returncode != 0
+    assert "INSTALLED" not in proc.stdout
+    assert "symlink" in proc.stderr
+    assert victim.read_text() == "PRECIOUS\n"  # not truncated through
+
+
+def test_low13_doctor_recovery_command_is_runnable(h):
+    # Panel LOW 13: post-rollback, doctor's printed recovery must be
+    # executable as written — step 6 without --server-bin refuses because
+    # the receipts doctor itself demanded are gone. The printed command must
+    # name the rollback binary, and running it must work.
+    server = h.fake_server()
+    assert h.run_install("--server-bin", server).returncode == 0
+    assert h.run("stop", "--root", h.root, "--label", LABEL).returncode == 0
+    # Rollback root: no server receipt, config/server-bin present.
+    assert not (h.root / "config" / "server-runtime.json").exists()
+
+    proc = h.run("doctor", "--root", h.root, "--label", LABEL, timeout=120)
+    assert proc.returncode == 1
+    assert "treeVerified=none(rollback)" in proc.stdout
+    line = next(l for l in proc.stdout.splitlines()
+                if l.startswith("doctor_error=label not loaded"))
+    # Extract the command between the parentheses and RUN it verbatim.
+    cmd = line.split("(", 1)[1].rsplit(")", 1)[0]
+    assert f"--server-bin {server}" in cmd, line
+    words = cmd.split()
+    assert words[0] == "team_server.sh"
+    assert words[1] == "install"
+    assert f"--root {h.root}" in cmd and f"--label {LABEL}" in cmd
+    assert f"--port {h.port}" in cmd
+    assert h.run(*words[1:], timeout=120).returncode == 0, line
+    assert h.loaded()
+    assert h.run("doctor", "--root", h.root, "--label", LABEL,
+                 timeout=120).returncode == 0
+
+
+def test_atk7_doctor_names_a_foreign_plist(h):
+    # Panel atk-7 (fake-launchd level): the loaded job's plist is not this
+    # root's plist — a squat from /tmp. doctor must say which plist the job
+    # runs from and refuse to call it healthy.
+    server = h.fake_server()
+    assert h.run_install("--server-bin", server).returncode == 0
+    # Swap the running job for one loaded from a foreign plist.
+    subprocess.run([str(h.bindir / "launchctl"), "bootout", f"gui/59999/{LABEL}"],
+                   capture_output=True, env=h.env(), timeout=30)
+    squat_dir = h.base / "squat"
+    squat_dir.mkdir()
+    squat = squat_dir / f"{LABEL}.plist"
+    squat.write_text(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+        "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+        "<plist version=\"1.0\"><dict>\n"
+        f"<key>Label</key><string>{LABEL}</string>\n"
+        "<key>ProgramArguments</key><array>\n"
+        "<string>/bin/sleep</string><string>300</string>\n"
+        "</array>\n"
+        "<key>StandardOutPath</key>\n"
+        f"<string>{squat_dir / 'squat.log'}</string>\n"
+        "</dict></plist>\n")
+    loaded = subprocess.run(
+        [str(h.bindir / "launchctl"), "load", str(squat)],
+        capture_output=True, env=h.env(), timeout=30)
+    assert loaded.returncode == 0, loaded.stderr
+    assert h.loaded()
+
+    proc = h.run("doctor", "--root", h.root, "--label", LABEL, timeout=120)
+    assert proc.returncode == 1
+    assert f"jobPlist={squat}" in proc.stdout
+    errors = [l for l in proc.stdout.splitlines()
+              if l.startswith("doctor_error=")]
+    assert errors and str(squat) in errors[0], proc.stdout

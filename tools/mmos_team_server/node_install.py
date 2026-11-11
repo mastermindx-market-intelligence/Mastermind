@@ -57,6 +57,13 @@ REQUIRED_DIST_FILES = (
     "node_modules/node-pty/package.json",
 )
 INSTALL_DIR_NAME = f"node-v{VERSION}-darwin-arm64"
+# Panel R3: the server release folder is a single safe-named component under
+# <root>/runtime/ (pack_server.mjs enforces the same shape on --release-ID).
+RELEASE_ID_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,60}")
+DIGESTS_NAME = "file-digests.json"
+# Written into dist AFTER hashing (pack_server.mjs:265), so it is the one file
+# the digest list deliberately does not record.
+PACK_EXCLUDED = {"BUILD_RECEIPT.json"}
 # Measured 2026-11-11 on this M2 Studio over the real 199 MB / ~4.7k-entry
 # pinned Node tree: full schema-2 digest 1.22 s cold, 0.33-0.38 s warm. That
 # is fast enough to recompute at EVERY server start, so resolve (the runner's
@@ -607,6 +614,137 @@ def load_receipt(path):
     return receipt
 
 
+def _load_stat_cache(path):
+    """Best-effort load of the (size, mtime_ns, ctime_ns) skip-cache."""
+    try:
+        with open(path, encoding="utf-8") as stream:
+            data = json.load(stream)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    clean = {}
+    for rel, triple in data.items():
+        if (isinstance(rel, str) and isinstance(triple, list) and len(triple) == 3
+                and all(isinstance(v, int) and not isinstance(v, bool)
+                        for v in triple)):
+            clean[rel] = triple
+    return clean
+
+
+def _save_stat_cache(path, fresh):
+    """Best-effort persist; a read-only release dir only costs re-hashing."""
+    if not fresh:
+        return
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as stream:
+            json.dump(fresh, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def verify_packed_server(build_dir):
+    """Panel R1: verify the packed server tree against its recorded digests.
+
+    file-digests.json (written by pack_server.mjs beside dist/) is the
+    authority: every recorded file must exist as a regular non-link file with
+    the recorded size and sha256, and every file in the tree except
+    BUILD_RECEIPT.json (written after hashing) must be recorded — verifying
+    only the recorded set would bless a planted payload. Returns the number
+    of verified files. Raises InstallError naming the server tree and the
+    offending file, so the refusal is operator-readable wherever it surfaces
+    (resolve, doctor, or the runner's boot gate).
+
+    Boot-time cost: a real packed tree is ~4500 files / 344 MB and a full
+    re-hash measures ~15 s per pass (the runner resolves twice per boot, and
+    resolve ran again at install and doctor), so every boot paying three
+    full digests was both slow and the reason a first install could outrun
+    its own wait window. After a file's content digest matches the record
+    once, its (size, mtime_ns, ctime_ns) triple is remembered beside the
+    record in verify-stat-cache.json; a later verify that sees the identical
+    triple skips re-hashing that file. Any rewrite, truncate, chmod or
+    replace changes at least one of mtime_ns/ctime_ns — ctime is set by the
+    kernel and cannot be restored without root — so a changed file falls
+    back to a full digest and fails. The record, not the cache, stays the
+    anchor: cache entries exist only for paths the record names, and the
+    record's own tamper model (same-user writer of the root) is unchanged.
+    """
+    release_dir = os.path.dirname(build_dir)
+    digests_path = os.path.join(release_dir, DIGESTS_NAME)
+    try:
+        with open(regular_file(digests_path), encoding="utf-8") as stream:
+            recorded = json.load(stream)
+    except InstallError:
+        raise
+    except FileNotFoundError as exc:
+        raise InstallError(
+            f"server tree cannot be verified: {DIGESTS_NAME} is missing next "
+            f"to {build_dir}; repack, or roll back per the runbook") from exc
+    except (OSError, ValueError) as exc:
+        raise InstallError(f"cannot read {digests_path}: {exc}") from exc
+    if not isinstance(recorded, list) or not recorded:
+        raise InstallError(f"{digests_path} is not a non-empty digest list")
+
+    def refuse(detail):
+        raise InstallError(
+            f"server tree no longer matches {DIGESTS_NAME} ({detail}); repack, "
+            f"or roll back per the runbook")
+
+    cache = _load_stat_cache(os.path.join(release_dir, "verify-stat-cache.json"))
+    verified = {}
+    for entry in recorded:
+        if not isinstance(entry, dict):
+            refuse(f"{digests_path} has a malformed entry")
+        rel, size, sha = entry.get("path"), entry.get("bytes"), entry.get("sha256")
+        if (not isinstance(rel, str) or not rel or rel.startswith("/") or
+                rel == "." or "\\" in rel or
+                any(part in ("", ".", "..") for part in rel.split("/")) or
+                not isinstance(size, int) or isinstance(size, bool) or size < 0 or
+                not isinstance(sha, str) or not HEX64.fullmatch(sha)):
+            refuse(f"{digests_path} has a malformed entry: {entry!r}")
+        if rel in verified or rel in PACK_EXCLUDED:
+            refuse(f"{digests_path} records {rel} twice or records an excluded file")
+        target = os.path.join(build_dir, *rel.split("/"))
+        if os.path.islink(target) or not os.path.isfile(target):
+            refuse(f"{rel} is missing (or not a regular file)")
+        info = os.stat(target)
+        triple = [info.st_size, info.st_mtime_ns, info.st_ctime_ns]
+        if cache.get(rel) == triple:
+            verified[rel] = triple
+            continue
+        if info.st_size != size:
+            refuse(f"{rel} is {info.st_size} bytes, recorded {size}")
+        with open(target, "rb") as stream:
+            if hashlib.sha256(stream.read()).hexdigest() != sha:
+                refuse(f"{rel} content digest mismatch")
+        verified[rel] = triple
+    # Everything on disk must be recorded: an unlisted file is a plant.
+    for current, dirnames, filenames in os.walk(build_dir):
+        dirnames.sort()
+        for name in dirnames:
+            if os.path.islink(os.path.join(current, name)):
+                refuse(f"{os.path.relpath(os.path.join(current, name), build_dir)} "
+                       f"is a symlink")
+        for name in sorted(filenames):
+            absolute = os.path.join(current, name)
+            rel = os.path.relpath(absolute, build_dir)
+            if os.path.islink(absolute):
+                refuse(f"{rel} is a symlink")
+            if rel not in verified and rel not in PACK_EXCLUDED:
+                refuse(f"unrecorded file in the server tree: {rel}")
+    if verified != cache:
+        _save_stat_cache(os.path.join(release_dir, "verify-stat-cache.json"),
+                         verified)
+    return len(verified)
+
+
 def runtime_paths(root, verify_tree=True):
     """Resolve the pinned node and packed server entrypoint.
 
@@ -655,6 +793,19 @@ def runtime_paths(root, verify_tree=True):
         raise InstallError("nodePath does not resolve to installDir/bin/node")
     if os.path.basename(os.path.normpath(build_dir)) != "dist":
         raise InstallError("server runtime receipt does not name a dist directory")
+    # Panel R3: Item 12's guarantee held for Node only — buildDir was
+    # free-form, so a writer of config/server-runtime.json alone pointed
+    # serverBin at any in-root */dist. The release folder must be exactly
+    # <root>/runtime/<safe-release-ID> (computed on realpath, so a symlinked
+    # path inside the root cannot launder an outsider either).
+    real_build = os.path.realpath(build_dir)
+    release_dir = os.path.dirname(real_build)
+    runtime_dir = os.path.realpath(os.path.join(root, "runtime"))
+    if (os.path.dirname(release_dir) != runtime_dir or
+            not RELEASE_ID_RE.fullmatch(os.path.basename(release_dir))):
+        raise InstallError(
+            f"buildDir must be <root>/runtime/<release-ID>/dist "
+            f"(pack_server.mjs layout), not: {build_dir}")
     if os.path.realpath(server_bin) != os.path.realpath(
             os.path.join(build_dir, "bin.mjs")):
         raise InstallError("serverBin does not resolve to buildDir/bin.mjs")
@@ -682,6 +833,10 @@ def runtime_paths(root, verify_tree=True):
             raise InstallError(
                 "pinned Node tree no longer matches its receipt (treeSha256 "
                 "mismatch); reinstall the runtime")
+        # Panel R1: the packed SERVER tree — the code that actually executes
+        # on every boot — is verified against file-digests.json too, not just
+        # the Node tree that launches it.
+        verify_packed_server(build_dir)
     return node_path, server_bin
 
 
@@ -701,19 +856,87 @@ def http_status(port):
         return "unanswered"
 
 
+# Panel R8: absolute paths for the system tools attribution relies on — a
+# PATH-injected fake lsof/ps/launchctl must not be able to fake "ours" or
+# "loaded". The MMOS_*_BIN seams exist for the test harness's fake launchd.
+LSOF_BIN = os.environ.get("MMOS_LSOF_BIN", "/usr/sbin/lsof")
+PS_BIN = os.environ.get("MMOS_PS_BIN", "/bin/ps")
+LAUNCHCTL_BIN = os.environ.get("MMOS_LAUNCHCTL_BIN", "/bin/launchctl")
+
+
+def _listener_pids(port):
+    """Pids with a LISTEN socket on port (panel R4)."""
+    try:
+        probe = subprocess.run([LSOF_BIN, "-tP", f"-iTCP:{port}", "-sTCP:LISTEN"],
+                               capture_output=True, text=True, timeout=10)
+    except subprocess.SubprocessError:
+        return []
+    return [int(p) for p in (probe.stdout or "").split() if p.isdigit()]
+
+
+def _parent_of(pid):
+    try:
+        probe = subprocess.run([PS_BIN, "-o", "ppid=", "-p", str(pid)],
+                               capture_output=True, text=True, timeout=10)
+    except subprocess.SubprocessError:
+        return None
+    parent = (probe.stdout or "").strip()
+    return int(parent) if parent.isdigit() else None
+
+
+def _pid_descendant_of(child, ancestor, hops=20):
+    """True when child's parent chain (bounded) includes ancestor."""
+    current, seen = child, 0
+    while current and current > 1 and seen < hops:
+        if current == ancestor:
+            return True
+        current = _parent_of(current)
+        seen += 1
+    return False
+
+
+def answering_process(port, job_pid):
+    """Panel R4: attribute an answering port to this label's job.
+
+    'ours' only when some listener pid is the job pid or one of its
+    descendants; otherwise the foreign listener is named. Never 'ours' when
+    the job has no running pid (a crash-looping job beside a foreign
+    listener)."""
+    try:
+        job_pid = int(job_pid)
+    except (TypeError, ValueError):
+        job_pid = None
+    listeners = _listener_pids(port)
+    if job_pid and any(p == job_pid or _pid_descendant_of(p, job_pid)
+                       for p in listeners):
+        return "ours"
+    named = f"pid {listeners[0]}" if listeners else "no listener identified"
+    return f"foreign({named}, job pid {job_pid or 'none'})"
+
+
 def doctor(root, label, verify_tree=True):
     """Only metadata: no access token, environment, cookies or log contents.
-    F23: the pinned-Node tree digest is recomputed against the receipt
-    (measured ~0.3-1.2 s on the real tree); --no-verify-tree skips it."""
+    F23/panel R1: both trees are recomputed against their receipts — the
+    pinned Node tree (treeSha256, ~0.3-1.2 s measured) and the packed server
+    tree (file-digests.json); treeVerified names which. --no-verify-tree
+    skips both. A rollback root (no server receipt) is reported as such, not
+    refused."""
     root = validated_root(root)
     try:
         try:
-            probe = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{label}"],
+            probe = subprocess.run([LAUNCHCTL_BIN, "print", f"gui/{os.getuid()}/{label}"],
                                    capture_output=True, text=True, timeout=10)
             loaded = probe.returncode == 0
         except subprocess.TimeoutExpired:
             raise InstallError(f"launchctl print timed out for label {label}")
         match = re.search(r"^\s*pid = ([0-9]+)", probe.stdout, re.MULTILINE) if loaded else None
+        # Panel atk-7: which plist is the job actually loaded from? A squatted
+        # /tmp plist under the same label serves instead of this root's job.
+        plist_match = re.search(r"^\s*path = (\S+)", probe.stdout or "",
+                                re.MULTILINE) if loaded else None
+        job_plist = plist_match.group(1) if plist_match else "unknown"
+        expected_plist = os.path.join(
+            os.path.expanduser("~/Library/LaunchAgents"), f"{label}.plist")
         port = "unknown"
         try:
             with open(os.path.join(root, "run", "port"), encoding="ascii") as stream:
@@ -723,16 +946,60 @@ def doctor(root, label, verify_tree=True):
         except OSError:
             pass
         answering = port if port != "unknown" and http_status(port) == "200" else "unanswered"
-        node, server = runtime_paths(root, verify_tree=verify_tree)
+        # Panel R4: loaded + HTTP-200 is not health. Attribute the responder:
+        # 'ours' only when the listener pid is the job's pid or a descendant.
+        if answering != "unanswered":
+            attributed = answering_process(port, match.group(1) if match else None)
+        else:
+            attributed = "none"
+        # LOW-13: a printed recovery must be runnable as written, so it
+        # carries the root/label/port doctor was invoked against (port only
+        # when run/port still records one), not just the subcommand.
+        port_arg = f" --port {port}" if port != "unknown" else ""
+        base_install = (f"team_server.sh install --replace --root {root}"
+                        f" --label {label}{port_arg}")
+        server_receipt = os.path.join(root, "config", "server-runtime.json")
+        if os.path.isfile(server_receipt):
+            # Panel R1/LOW-13: packed mode verifies BOTH trees and says
+            # exactly what was verified; rollback mode (receipts moved aside
+            # per the runbook's 'Going back') reports the operator-named
+            # binary instead of dying on the missing receipt — and its
+            # recovery line names the command that works on such a root.
+            node, server = runtime_paths(root, verify_tree=verify_tree)
+            node_row, node_version = node, "v" + VERSION
+            build_row = server
+            if verify_tree:
+                server_files = verify_packed_server(os.path.dirname(server))
+                tree_row = "node+server"
+                node_exec_check = "skipped-receipt-attested"
+            else:
+                server_files, tree_row = "not-checked", "not-checked"
+                node_exec_check = "not-checked"
+            recovery_install = base_install
+        else:
+            legacy_conf = os.path.join(root, "config", "server-bin")
+            try:
+                with open(regular_file(legacy_conf), encoding="utf-8") as stream:
+                    legacy_bin = stream.read().strip().splitlines()[0]
+            except (OSError, ValueError, IndexError) as exc:
+                raise InstallError(
+                    f"no packed server receipt and no readable {legacy_conf} "
+                    f"— doctor cannot say what boots: {exc}") from exc
+            if (not legacy_bin or not legacy_bin.startswith("/") or
+                    os.path.islink(legacy_bin) or not os.path.isfile(legacy_bin)):
+                raise InstallError(
+                    f"rollback {legacy_conf} does not name an absolute regular "
+                    f"file: {legacy_bin!r}")
+            node_row = node_version = node_exec_check = "none(rollback)"
+            build_row = legacy_bin
+            tree_row, server_files = "none(rollback)", 0
+            recovery_install = f"{base_install} --server-bin {legacy_bin}"
         # Never execute the installed binary: attesting provenance is doctor's
         # job, and running the bytes under inspection would let a tampered tree
         # execute attacker code (attack finding 6). The version below is
         # receipt-attested (and the receipt's tree was digest-verified at
         # install); the runbook has the operator run `<node> --version` once
         # by hand when they want a live check.
-        node_version = "v" + VERSION
-        node_exec_check = "skipped-receipt-attested"
-        tree_line = "treeVerified=" + ("yes" if verify_tree else "not-checked")
         migration = "not initialized"
         db = os.path.join(root, "home", "userdata", "statev2.sqlite")
         if os.path.isfile(db):
@@ -757,9 +1024,12 @@ def doctor(root, label, verify_tree=True):
             age = max(0, int(time.time() - info.st_mtime))
         rows = [("label", label), ("loaded", "yes" if loaded else "no"),
                 ("pid", match.group(1) if match else "none"), ("port", port),
-                ("answeringPort", answering), ("nodePath", node),
+                ("answeringPort", answering), ("answeringProcess", attributed),
+                ("jobPlist", job_plist),
+                ("nodePath", node_row),
                 ("nodeVersion", node_version), ("nodeExecCheck", node_exec_check),
-                ("buildPath", server), ("treeVerified", tree_line.split("=")[1]),
+                ("buildPath", build_row), ("treeVerified", tree_row),
+                ("serverTreeFiles", server_files),
                 ("migrationHead", migration), ("serverLogBytes", size),
                 ("serverLogCapBytes", cap), ("pairingFileAgeSeconds", age)]
         for key, value in rows:
@@ -769,12 +1039,30 @@ def doctor(root, label, verify_tree=True):
         # the commonest failure (server down). The two down states name
         # themselves and their recovery.
         if not loaded:
-            print("doctor_error=label not loaded — recovery: runbook step 6 "
-                  "(team_server.sh install --replace), then re-run doctor")
+            # LOW-13: the printed recovery must be runnable as written — on a
+            # rollback root that means naming config/server-bin's binary.
+            print(f"doctor_error=label not loaded — recovery: runbook step 6 "
+                  f"({recovery_install}), then re-run doctor")
+            return 1
+        # Panel atk-7: a job loaded from a foreign plist is a squatted label —
+        # even a healthy-looking pid is not this root's server.
+        if job_plist != "unknown" and os.path.realpath(job_plist) != os.path.realpath(
+                expected_plist):
+            print(f"doctor_error=job runs from a foreign plist: {job_plist} "
+                  f"(expected {expected_plist}) — a squatted label; recovery: "
+                  f"launchctl bootout gui/{os.getuid()}/{label}, remove the "
+                  f"foreign plist, re-run runbook step 6")
+            return 1
+        # Panel R4: an answered port served by a foreign process is not
+        # health — the job is crash-looping (or dead) beside an impostor.
+        if attributed.startswith("foreign"):
+            print(f"doctor_error=port {port} answered by a foreign process "
+                  f"({attributed}) — this label's job is not serving; find it: "
+                  f"lsof -nP -iTCP:{port} -sTCP:LISTEN")
             return 1
         if answering != port:
             print(f"doctor_error=port {port} not answering — recovery: runbook "
-                  f"step 6 (team_server.sh install --replace), then re-run doctor")
+                  f"step 6 ({recovery_install}), then re-run doctor")
             return 1
         return 0
     except (InstallError, OSError, ValueError, EOFError, tarfile.TarError,

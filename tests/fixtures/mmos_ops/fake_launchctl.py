@@ -60,7 +60,7 @@ def stop_pid(pid):
 
 def clear(label):
     stop_pid(pid_of(label))
-    for suffix in (".pid", ".loaded"):
+    for suffix in (".pid", ".loaded", ".plist"):
         try:
             os.unlink(marker(label, suffix))
         except OSError:
@@ -88,6 +88,8 @@ def start_from_plist(plist_path):
         fh.write(str(proc.pid))
     with open(marker(label, ".loaded"), "w") as fh:
         fh.write(label)
+    with open(marker(label, ".plist"), "w") as fh:
+        fh.write(plist_path)
     return 0
 
 
@@ -111,8 +113,17 @@ def main(argv):
             print(f"Could not find service {label}", file=sys.stderr)
             return 113
         pid = pid_of(label)
+        # Real `launchctl print` names the plist the job was loaded from
+        # (panel atk-7: a squatted /tmp plist under the same label).
+        try:
+            with open(marker(label, ".plist")) as fh:
+                plist = fh.read().strip()
+        except OSError:
+            plist = os.path.join(
+                os.path.expanduser("~/Library/LaunchAgents"), label + ".plist")
         print(f"{rest[-1]} = {{")
         print(f"\tpid = {pid if pid else 0}")
+        print(f"\tpath = {plist}")
         print("\tstate = running")
         print("}")
         return 0
@@ -121,6 +132,11 @@ def main(argv):
         label = label_from_target(rest[-1])
         if not is_loaded(label):
             return 113
+        if os.environ.get("FAKE_LAUNCHCTL_BOTOUT_FAIL"):
+            # Panel R6: launchd refuses to boot the job out — the tool must
+            # not report the label gone.
+            print(f"Bootout failed: {label}", file=sys.stderr)
+            return 5
         clear(label)
         return 0
     if verb == "kickstart":

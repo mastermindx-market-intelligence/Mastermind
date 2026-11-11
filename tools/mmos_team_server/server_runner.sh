@@ -65,7 +65,9 @@ chmod 600 "$LOG_FILE" 2>/dev/null || true
 # NODE_BIN is selected atomically with the packed server. Legacy --server-bin
 # overrides this path explicitly; absent that marker the old stock CLI remains.
 NODE_BIN=""
-if [ -s "$ROOT/config/server-runtime.json" ] && [ -s "$ROOT/config/node-runtime.json" ]; then
+PACKED=0
+[ -s "$ROOT/config/server-runtime.json" ] && [ -s "$ROOT/config/node-runtime.json" ] && PACKED=1
+if [ "$PACKED" -eq 1 ]; then
   NODE_BIN="$("$PY3" -I "$ROOT/bin/node_install.py" resolve --root "$ROOT" --command node)" || {
     echo "server_runner: incomplete pinned Node runtime" >&2; exit 69; }
 fi
@@ -74,12 +76,27 @@ fi
 # (legacy rollback) or a complete packed runtime, guessing one would exec an
 # unvalidated binary outside this root — the pre-lane default reached into the
 # Chairman's ~/.t3 (attack finding 12). Fail loudly instead.
+#
+# Panel R2: config/server-bin boots ONLY in rollback mode (receipts absent).
+# With the packed receipts installed it is not an override — a writer of that
+# one file would otherwise redirect every KeepAlive boot to any in-root file.
+# It must name exactly the receipt-resolved entrypoint; a contradiction
+# refuses here, at boot, naming both paths (resolve itself now also
+# digest-verifies the packed server tree, panel R1).
 SERVER_BIN=""
-if [ -s "$BIN_CONF" ]; then
-  SERVER_BIN=$(head -1 "$BIN_CONF" 2>/dev/null)
-elif [ -s "$ROOT/config/server-runtime.json" ] && [ -s "$ROOT/config/node-runtime.json" ]; then
-  SERVER_BIN="$("$PY3" -I "$ROOT/bin/node_install.py" resolve --root "$ROOT" --command serve)" || {
+if [ "$PACKED" -eq 1 ]; then
+  RESOLVED="$("$PY3" -I "$ROOT/bin/node_install.py" resolve --root "$ROOT" --command serve)" || {
     echo "server_runner: packed runtime incomplete (resolve failed)" >&2; exit 69; }
+  if [ -s "$BIN_CONF" ]; then
+    NAMED=$(head -1 "$BIN_CONF" 2>/dev/null)
+    if [ "$NAMED" != "$RESOLVED" ]; then
+      echo "server_runner: REFUSED config/server-bin names '$NAMED' but the packed receipts resolve to '$RESOLVED' — remove config/server-bin, or follow the runbook's 'Going back' to run another binary" >&2
+      exit 69
+    fi
+  fi
+  SERVER_BIN="$RESOLVED"
+elif [ -s "$BIN_CONF" ]; then
+  SERVER_BIN=$(head -1 "$BIN_CONF" 2>/dev/null)
 else
   echo "server_runner: no server binary configured ($BIN_CONF missing and no packed runtime); refusing to guess a default" >&2
   exit 78

@@ -464,10 +464,19 @@ def fake_runtime(tmp_path):
     node.write_text("#!/bin/sh\n")
     node.chmod(0o700)
     build = root / "runtime" / "packed" / "dist"
+    recorded = []
     for name in node_install.REQUIRED_DIST_FILES:
         target = build / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("x")
+        body = b"x"
+        recorded.append({"path": name, "bytes": len(body),
+                         "sha256": hashlib.sha256(body).hexdigest()})
+    # Panel R1: the packed tree carries file-digests.json beside dist/ and the
+    # post-hash BUILD_RECEIPT inside it, as pack_server.mjs leaves them.
+    (build / "BUILD_RECEIPT.json").write_text("{}\n")
+    (root / "runtime" / "packed" / "file-digests.json").write_text(
+        json.dumps(recorded))
     tree_digest = node_install.tree_sha256(install_dir)
     node_receipt = {
         "schemaVersion": node_install.SCHEMA_VERSION,
@@ -659,7 +668,7 @@ class TestDoctor:
         out = capsys.readouterr().out
         assert "nodeExecCheck=skipped-receipt-attested" in out
         assert f"nodeVersion=v{node_install.VERSION}" in out
-        assert "treeVerified=yes" in out  # F23: doctor rechecks the tree digest
+        assert "treeVerified=node+server" in out  # F23+R1: both trees re-digested
 
     def test_doctor_success_path_returns_zero(self, tmp_path, capsys):
         # The reviewer found doctor's success path untested: loaded + answering
@@ -689,12 +698,12 @@ class TestDoctor:
         try:
             (root / "run" / "port").write_text(f"{port}\n")
             with patch.object(node_install.subprocess, "run",
-                              return_value=Mock(returncode=0, stdout="pid = 4242\n")):
+                              return_value=Mock(returncode=0, stdout=f"pid = {os.getpid()}\n")):
                 assert node_install.doctor(str(root), "com.mastermind.t3-team-dev-tsh") == 0
             out = capsys.readouterr().out
-            assert "loaded=yes" in out and "pid=4242" in out
+            assert "loaded=yes" in out and f"pid={os.getpid()}" in out
             assert f"answeringPort={port}" in out
-            assert "treeVerified=yes" in out
+            assert "treeVerified=node+server" in out
         finally:
             server.shutdown()
             server.server_close()

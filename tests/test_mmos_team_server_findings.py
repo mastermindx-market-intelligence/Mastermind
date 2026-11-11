@@ -80,10 +80,18 @@ SCHEMA = getattr(node_install, "SCHEMA_VERSION", 1)
 def add_server_receipt(root):
     """A complete fake packed dist plus config/server-runtime.json."""
     build = root / "runtime" / "packed" / "dist"
+    recorded = []
     for name in node_install.REQUIRED_DIST_FILES:
         target = build / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("x")
+        body = b"x"
+        recorded.append({"path": name, "bytes": len(body),
+                         "sha256": hashlib.sha256(body).hexdigest()})
+    # Panel R1: digests beside dist/ + post-hash BUILD_RECEIPT inside it.
+    (build / "BUILD_RECEIPT.json").write_text("{}\n")
+    (root / "runtime" / "packed" / "file-digests.json").write_text(
+        json.dumps(recorded))
     (root / "config").mkdir(exist_ok=True)
     (root / "config" / "server-runtime.json").write_text(json.dumps({
         "schemaVersion": SCHEMA,
