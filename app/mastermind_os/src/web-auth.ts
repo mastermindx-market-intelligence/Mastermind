@@ -1464,6 +1464,8 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     },
     readModelConfiguration: ({ signal }) => read("acquisition", `${ORIGIN}/workspace/resources/models/current`,
       signal, { cap: 278_528, typedUnavailableSchema: "mastermind.workspace_model_configuration.v1" }),
+    readCapacityFabric: ({ signal }) => read("acquisition", `${ORIGIN}/workspace/resources/fabric/current`,
+      signal, { cap: 262_144, typedUnavailableSchema: "mastermind.workspace_capacity_fabric.v1" }),
     readResourceCapacity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
       const selected = { work_ref, root_job_id, job_id, attempt_id };
       if (!validResourceCapacitySelection(selected))

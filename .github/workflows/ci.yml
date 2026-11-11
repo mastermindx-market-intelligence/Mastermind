@@ -605,7 +605,7 @@ jobs:
             tests/integration/test_fabric_regional_portfolio_composition.py \
             tests/integration/test_fabric_chat_browser.py \
             ops/native_fabric/quota_continuity \
-            ops/native_fabric/experiential_proxy/gateway.py |
+            ops/native_fabric/experiential_proxy/gateway.py ops/native_fabric/experiential_proxy/anthropic_policy.py |
             tar -x -C "$brain_composition_root"
           mkdir -p "$brain_composition_root/vendor/macro"
           # Isolate synthetic owner configuration in a copy of the exact source.
