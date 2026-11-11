@@ -1,0 +1,298 @@
+{
+  "cards": [
+    {
+      "card_hash": "a69c2c4bf53e3856ad39574f3859fe6f6691f327fd6e2e811ab21ccaa2aa914e",
+      "fx_fixing_policy": "known_at_only",
+      "fx_rights_status": "not_applicable: local unit is USD",
+      "fx_translation_series": null,
+      "hierarchy_members": [
+        "spy",
+        "qqq",
+        "smh",
+        "igv",
+        "iwm",
+        "tlt",
+        "hyg",
+        "lqd"
+      ],
+      "holdout_plan": {
+        "eval_horizon_bdays": 20,
+        "leave_country_out": [
+          "spy",
+          "qqq",
+          "smh",
+          "igv",
+          "iwm",
+          "tlt",
+          "hyg",
+          "lqd"
+        ],
+        "leave_era_out": [
+          {
+            "end": "2013-12-31",
+            "era_id": "e1_2008_2013",
+            "start": "2008-01-04"
+          },
+          {
+            "end": "2019-12-31",
+            "era_id": "e2_2014_2019",
+            "start": "2014-01-02"
+          },
+          {
+            "end": "2021-12-31",
+            "era_id": "e3_2020_2021",
+            "start": "2020-01-02"
+          }
+        ],
+        "local_floor_effective_n": 10,
+        "margin": 0.98
+      },
+      "listing_calendar_ref": "us_equity_sessions",
+      "local_calendar_ref": "portfolio.market_calendar.is_trading_day (us_equity_sessions)",
+      "local_currency": "USD",
+      "local_return_series": "registry targets on the broad target card's total_return basis, quoted in USD",
+      "measurement_status": "measured",
+      "missing_owners": [],
+      "policy_reaction_owner": "Federal Reserve (FOMC)",
+      "region_id": "us",
+      "registry_region": "us",
+      "t10_row": "| us | measured | Fed total assets, WALCL, USD millions (unit_multiplier 1e6) | weekly as of Wednesday, observation_date, release lag 1 bday, release_lag_aligned_non_revised | none (local unit is USD) | reserve identity R = A \u2212 N; funding identity; T08 conditional accounting |"
+    },
+    {
+      "card_hash": "8c2b7b4288b77489911312659545efbdbe04be38ed991e0ae14bf13c7a590c04",
+      "fx_fixing_policy": "known_at_only",
+      "fx_rights_status": "BLANK_RIGHTS: preregistration card blocked_questions name the EURUSD=X FX leg",
+      "fx_translation_series": "EURUSD=X close (USD per EUR), translation only",
+      "hierarchy_members": [],
+      "holdout_plan": {
+        "eval_horizon_bdays": 20,
+        "leave_country_out": [],
+        "leave_era_out": [
+          {
+            "end": "2013-12-31",
+            "era_id": "e1_2008_2013",
+            "start": "2008-01-04"
+          },
+          {
+            "end": "2019-12-31",
+            "era_id": "e2_2014_2019",
+            "start": "2014-01-02"
+          },
+          {
+            "end": "2021-12-31",
+            "era_id": "e3_2020_2021",
+            "start": "2020-01-02"
+          }
+        ],
+        "local_floor_effective_n": 10,
+        "margin": 0.98
+      },
+      "listing_calendar_ref": null,
+      "local_calendar_ref": null,
+      "local_currency": "EUR",
+      "local_return_series": null,
+      "measurement_status": "measured",
+      "missing_owners": [
+        "local-currency return series: no euro-area local target is registered in glt_broad_target_card.v1",
+        "local calendar owner: no euro-area session calendar owner is registered",
+        "FX fixing rights: EURUSD=X rights are blank"
+      ],
+      "policy_reaction_owner": "European Central Bank (Governing Council)",
+      "region_id": "euro_area",
+      "registry_region": null,
+      "t10_row": "| euro_area | measured | ECB total assets, ECBASSETSW, EUR millions (1e6) | weekly, observation_date, lag 2 bdays, release_lag_aligned_revision_unknown | EURUSD=X close, translation only, never fresh money | local-unit stock; FX translation not fresh money |"
+    },
+    {
+      "card_hash": "a65ffad1d184b002fe4fef13665902e0cbf7d9fc6a92af116ea5ff801a396147",
+      "fx_fixing_policy": "known_at_only",
+      "fx_rights_status": "BLANK_RIGHTS: preregistration card blocked_questions name the USDJPY=X FX leg",
+      "fx_translation_series": "USDJPY=X close inverted (USD per JPY), translation only",
+      "hierarchy_members": [],
+      "holdout_plan": {
+        "eval_horizon_bdays": 20,
+        "leave_country_out": [],
+        "leave_era_out": [
+          {
+            "end": "2013-12-31",
+            "era_id": "e1_2008_2013",
+            "start": "2008-01-04"
+          },
+          {
+            "end": "2019-12-31",
+            "era_id": "e2_2014_2019",
+            "start": "2014-01-02"
+          },
+          {
+            "end": "2021-12-31",
+            "era_id": "e3_2020_2021",
+            "start": "2020-01-02"
+          }
+        ],
+        "local_floor_effective_n": 10,
+        "margin": 0.98
+      },
+      "listing_calendar_ref": null,
+      "local_calendar_ref": null,
+      "local_currency": "JPY",
+      "local_return_series": null,
+      "measurement_status": "measured",
+      "missing_owners": [
+        "local-currency return series: no Japan local target is registered in glt_broad_target_card.v1",
+        "local calendar owner: no Japan session calendar owner is registered",
+        "FX fixing rights: USDJPY=X rights are blank"
+      ],
+      "policy_reaction_owner": "Bank of Japan (Policy Board)",
+      "region_id": "japan",
+      "registry_region": null,
+      "t10_row": "| japan | measured | BoJ total assets, JPNASSETS, JPY 100 millions (1e8) | monthly end of period, month-end anchor (DSC:BOJ-ASSETS-REQUIRE-MONTH-END-ANCHOR), lag 2 bdays, release_lag_aligned_revision_unknown | USDJPY=X close inverted, translation only | local-unit stock; FX translation not fresh money; month-end anchor |"
+    },
+    {
+      "card_hash": "1bfd920d6dfc0c8bc00b648a72acf3fc430f6ffc04a683baeaa39175da2f9d30",
+      "fx_fixing_policy": "known_at_only",
+      "fx_rights_status": "not_registered: no CNY fixing series is registered",
+      "fx_translation_series": null,
+      "hierarchy_members": [
+        "fxi",
+        "mchi",
+        "kweb"
+      ],
+      "holdout_plan": {
+        "eval_horizon_bdays": 20,
+        "leave_country_out": [
+          "fxi",
+          "mchi",
+          "kweb"
+        ],
+        "leave_era_out": [
+          {
+            "end": "2013-12-31",
+            "era_id": "e1_2008_2013",
+            "start": "2008-01-04"
+          },
+          {
+            "end": "2019-12-31",
+            "era_id": "e2_2014_2019",
+            "start": "2014-01-02"
+          },
+          {
+            "end": "2021-12-31",
+            "era_id": "e3_2020_2021",
+            "start": "2020-01-02"
+          }
+        ],
+        "local_floor_effective_n": 10,
+        "margin": 0.98
+      },
+      "listing_calendar_ref": "us_equity_sessions",
+      "local_calendar_ref": null,
+      "local_currency": "CNY",
+      "local_return_series": null,
+      "measurement_status": "assumption_only_context",
+      "missing_owners": [
+        "measured liquidity input: T10 status is assumption_only_context",
+        "local-currency return series: fxi/mchi/kweb are US-listed USD-quoted proxies, not CNY local series",
+        "local calendar owner: no mainland session calendar owner is registered"
+      ],
+      "policy_reaction_owner": "People's Bank of China (context only: engine/china_pboc_stance.py stance label)",
+      "region_id": "china",
+      "registry_region": "china_hk",
+      "t10_row": "| china | assumption_only_context | none: PBoC stance label (engine/china_pboc_stance.py) and TSF direction (data/china_credit/tsf.parquet, CNY 100 millions, monthly increment, a flow) | stance as of its own date; TSF first known on day 16 of the following month | none | FX reserves are not a balance sheet; TSF not comparable to US credit |"
+    },
+    {
+      "card_hash": "4ee64a9c01b861d957f23db73639ca2563e10cc9a6319de5c8d4a2d288f2347e",
+      "fx_fixing_policy": "known_at_only",
+      "fx_rights_status": "not_registered: no HKD fixing series is registered",
+      "fx_translation_series": null,
+      "hierarchy_members": [
+        "fxi",
+        "mchi",
+        "kweb"
+      ],
+      "holdout_plan": {
+        "eval_horizon_bdays": 20,
+        "leave_country_out": [
+          "fxi",
+          "mchi",
+          "kweb"
+        ],
+        "leave_era_out": [
+          {
+            "end": "2013-12-31",
+            "era_id": "e1_2008_2013",
+            "start": "2008-01-04"
+          },
+          {
+            "end": "2019-12-31",
+            "era_id": "e2_2014_2019",
+            "start": "2014-01-02"
+          },
+          {
+            "end": "2021-12-31",
+            "era_id": "e3_2020_2021",
+            "start": "2020-01-02"
+          }
+        ],
+        "local_floor_effective_n": 10,
+        "margin": 0.98
+      },
+      "listing_calendar_ref": "us_equity_sessions",
+      "local_calendar_ref": null,
+      "local_currency": "HKD",
+      "local_return_series": null,
+      "measurement_status": "missing_input",
+      "missing_owners": [
+        "measured liquidity input: T10 status is missing_input (currency-board aggregate balance)",
+        "local-currency return series: fxi/mchi/kweb are US-listed USD-quoted proxies, not HKD local series",
+        "local calendar owner: no Hong Kong session calendar owner is registered"
+      ],
+      "policy_reaction_owner": "Hong Kong Monetary Authority (currency board; context only)",
+      "region_id": "hong_kong",
+      "registry_region": "china_hk",
+      "t10_row": "| hong_kong | missing_input | none | none | none | currency-board aggregate balance |"
+    }
+  ],
+  "definition_hash": "032b8bbd21e7361e8ddb2d0ddfc811fd714f803fc1d12cb7e45068fa84fe465a",
+  "evidence_tier": "research",
+  "frozen_at": "2026-10-19",
+  "holdout_rules": {
+    "decision": "supported_local ONLY when local MSE <= margin * pooled MSE on BOTH the leave-country-out and the leave-era-out paired populations with at least local_floor_effective_n paired keys each; a missing holdout or a plan hash that differs from the card's -> abstain; otherwise pooled_only_borrowed when a pooled cell exists for the region's members",
+    "leave_country_out": "every hierarchy member of the region is held out of the pooled fit; the pooled (without-region) and local predictions are scored on the held-out members' paired keys",
+    "leave_era_out": "each era is held out of both fits in turn and rows anchored in the held-out era are scored; every era ends before the preregistration reserved_start 2022-01-03 and every row still passes WindowGuard.admit(fold='dev')",
+    "local_effective_n": "the largest effective_n among the region's local cells at eval_horizon_bdays; never summed across targets; borrowed_prior_effective_n is reported separately",
+    "no_post_hoc_exception": "an unfavourable local outcome is never relabelled an exception; the plan is frozen here",
+    "uncertainty_kind": "pointwise"
+  },
+  "out_of_card_registry_regions": {
+    "dm_ex_us": [
+      "efa"
+    ],
+    "em": [
+      "eem"
+    ],
+    "global": [
+      "gld",
+      "slv",
+      "dbc",
+      "uso",
+      "cper"
+    ],
+    "note": "registry regions with no T10 row carry no transfer card in v1 (GAP for T20/T24)"
+  },
+  "preregistration_card_hash": "da060bf47e8eafc7e94d0cadbb4135c9207a069aad9eef3539ea9d62911d6aee",
+  "schema": "glt_transfer_cards.v1",
+  "status": "frozen_ex_ante_before_any_fit",
+  "t10_source": {
+    "commit": "3ae40fd3d9c36bce0eb818bed95f43ac643c4096",
+    "engine": "engine/global_liquidity_regional_scenarios.py qualify_region / RegionEntry",
+    "note": "T10 measurement_status qualifies the region's central-bank balance-sheet input; it does not register a local-currency return series. T19 requires both.",
+    "path": "research/GLT_T10_REGIONAL_SCENARIO_MAP_2026-10-13.md",
+    "repository": "macro",
+    "section": "2. Per-region status"
+  },
+  "target_card": {
+    "card_version": "glt_broad_target_card.v1",
+    "sha256": "f53d9296ae1556544a0d55d1a3d742bbc169138c0ae04b5a458ceb6eaf3c5537"
+  },
+  "task": "T19",
+  "validated": false
+}

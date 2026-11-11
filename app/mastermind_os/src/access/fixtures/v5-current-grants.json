@@ -1,0 +1,91 @@
+{
+  "availability": "AVAILABLE",
+  "declaration": "SUPPLIED",
+  "grant_schema": "mastermind.workspace_acquisition_bindings.v5",
+  "grants": [
+    {
+      "action": "publish_project_proposal",
+      "instruction_ref": null,
+      "scope": "WORKSPACE",
+      "supply": "SUPPLIED",
+      "work_ref": null
+    },
+    {
+      "action": "pause_workstream_admission",
+      "instruction_ref": null,
+      "scope": "PROJECT",
+      "supply": "SUPPLIED",
+      "work_ref": "WS:ONE"
+    },
+    {
+      "action": "resume_workstream_admission",
+      "instruction_ref": null,
+      "scope": "PROJECT",
+      "supply": "NOT_SUPPLIED",
+      "work_ref": "WS:ONE"
+    },
+    {
+      "action": "ADOPT_PLAN",
+      "instruction_ref": null,
+      "scope": "PROJECT",
+      "supply": "NOT_SUPPLIED",
+      "work_ref": "WS:ONE"
+    },
+    {
+      "action": "ACCEPT_DIRECTION",
+      "instruction_ref": null,
+      "scope": "PROJECT",
+      "supply": "NOT_SUPPLIED",
+      "work_ref": "WS:ONE"
+    },
+    {
+      "action": "add_project_file",
+      "instruction_ref": null,
+      "scope": "PROJECT",
+      "supply": "NOT_SUPPLIED",
+      "work_ref": "WS:ONE"
+    },
+    {
+      "action": "set_project_communication_preference",
+      "instruction_ref": null,
+      "scope": "PROJECT",
+      "supply": "NOT_SUPPLIED",
+      "work_ref": "WS:ONE"
+    },
+    {
+      "action": "pause_instruction_admission",
+      "instruction_ref": "INS:DAILY-ONE",
+      "scope": "INSTRUCTION",
+      "supply": "SUPPLIED",
+      "work_ref": "WS:ONE"
+    },
+    {
+      "action": "publish_project_plan_proposal",
+      "instruction_ref": null,
+      "scope": "PROJECT",
+      "supply": "SUPPLIED",
+      "work_ref": "WS:ONE"
+    },
+    {
+      "action": "read_latest_project_data",
+      "instruction_ref": null,
+      "scope": "WORKSPACE",
+      "supply": "SUPPLIED",
+      "work_ref": null
+    }
+  ],
+  "membership": {
+    "workspace_read": "QUALIFIED"
+  },
+  "reason_codes": [],
+  "schema": "mastermind.workspace_project_access.v2",
+  "selection": {
+    "work_ref": "WS:ONE"
+  },
+  "source": {
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "path": "agentos/workstreams/WS-ONE.md",
+    "repository": "mastermindx-market-intelligence/macro"
+  }
+}

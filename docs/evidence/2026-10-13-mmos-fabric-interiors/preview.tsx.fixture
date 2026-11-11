@@ -1,0 +1,16 @@
+import "./styles.css";
+import { createRoot } from "react-dom/client";
+import { MetaCeoOffice } from "./meta-ceo/MetaCeoOffice";
+import { projectOffice } from "./meta-ceo/projection";
+import { bindMissionHost } from "./host";
+import fixture from "./fixtures/mission-v3-owner-current-operator-harness.json";
+import retained from "./fabric-proof-status.local.json";
+const d:any = structuredClone(fixture);
+d.program.title="Subagent visibility · browser qualification";
+d.children.items = [9102,9103,9104].map((n,i)=>({job_id:`JOB-${n}`,parent_job_id:i===1?"JOB-9102":d.mission.root_job_id,status:i===2?"FAILED":i===1?"COMPLETED":"RUNNING",depth:i===1?2:1,orchestration_role:i===2?"review":"work",plan_step_id:["implementation","browser-proof","review"][i],worker_id:["worker-ui","worker-browser","worker-review"][i],attempt_count:i+1,attempt_limit:3,current_attempt_id:"ATT-"+String(i+1).repeat(32),latest_attempt:{attempt_id:"ATT-"+String(i+1).repeat(32),attempt_number:i+1,status:i===2?"FAILED":i===1?"COMPLETED":"RUNNING",started_at:"2026-10-13T11:00:00Z",finished_at:i?"2026-10-13T11:05:00Z":null,exit_code:i===2?1:i===1?0:null,has_result:i===1,error_present:i===2,error_class:i===2?"WITHHELD":null}}));
+d.children.total_count=3;d.children.overflow_count=0;d.children.unjoined_job_count=0;d.children.coverage="COMPLETE";d.children.state="AVAILABLE";d.read_state.state="CURRENT";
+const context:any={authGeneration:1,selection:{workRef:d.program.work_ref,rootJobId:d.mission.root_job_id},sessionRef:null,bindingGeneration:null,revisions:{mission:"fixture-proof",programs:null,result:null,conversation:null}};
+const projection=projectOffice({mission:{context,source:{owner:"EXECUTIVE_OS",ref:"fixture-proof",revision:"fixture-proof",observed_at:"2026-10-13T11:06:00Z",state:"CURRENT",coverage:"COMPLETE"},value:d},programs:null,result:null,conversation:null},context);
+const raw:any={invalidationGeneration:()=>0,getState:()=>({status:"signed_in",acquisition:true,content:false,reason:null}),subscribe:()=>()=>{},signIn:async()=>{},signOut:async()=>{},readPrograms:async()=>null,readWork:async()=>null,readMission:async()=>null,readCurrentWindow:async()=>null,readAttendedFabric:async()=>retained};
+window.MastermindMissionHost=bindMissionHost(raw);
+createRoot(document.getElementById("root")!).render(<MetaCeoOffice projection={projection} draft={{text:"",context}} onDraftChange={()=>{}}/>);

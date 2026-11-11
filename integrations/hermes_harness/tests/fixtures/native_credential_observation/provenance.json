@@ -1,0 +1,34 @@
+{
+  "files": {
+    "agent/agent_runtime_helpers.py": {
+      "bytes": 207836,
+      "fixture": "agent__agent_runtime_helpers.py.source",
+      "git_blob": "1d8e485170d5da132a6a8ab3017cade1e2dc09a9",
+      "sha256": "7725dfa3b5c12e2ec289e86a2f83eb99dc75052687aa9cb4d2e71bc3f770b5d4"
+    },
+    "agent/client_lifecycle.py": {
+      "bytes": 60491,
+      "fixture": "agent__client_lifecycle.py.source",
+      "git_blob": "879ca87398225a7db38990ce6ad9053daef2eb40",
+      "sha256": "4e8a80556184c415256934c50e6191b840910867fe68d36efc263440ea7b7dd2"
+    },
+    "agent/secret_scope.py": {
+      "bytes": 22466,
+      "fixture": "agent__secret_scope.py.source",
+      "git_blob": "f3b32131934bf5dcf9be65b63d47559305dd9b14",
+      "sha256": "dce64ce99a6966836108e202e1db41c4be97bd3dad41a79e357f39b8d7e90dec"
+    },
+    "gateway/session_worker_construct.py": {
+      "bytes": 13365,
+      "fixture": "gateway__session_worker_construct.py.source",
+      "git_blob": "efff49a7d7a5292a856e5a1a134bdc74c13b9ae0",
+      "sha256": "360680d541fb91b91d2f16d021f8ac6e2082f1751921bacf63371e0bb8db040d"
+    }
+  },
+  "license": "MIT",
+  "license_file": "../../../../hermes_qualification/native_eval_inputs/UPSTREAM_LICENSE",
+  "repository": "https://github.com/NousResearch/hermes-agent",
+  "schema": "mastermind.native_credential_observation_fixture_provenance/v1",
+  "scope": "Pinned original resolution, request client and cache bodies; synthetic service edges and credentials only; no installed/runtime claim",
+  "source_commit": "1c0cd667746d3395fe9e1b6c74f8f85952486f18"
+}

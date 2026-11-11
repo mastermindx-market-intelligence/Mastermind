@@ -1,0 +1,1010 @@
+--- a/agent/agent_init.py
++++ b/agent/agent_init.py
+@@ -730,13 +730,11 @@
+ 
+ 
+ def _print_key_banner(key, label: str, warn_missing: bool = False) -> None:
+-    """Masked credential line. A callable ``key`` (Entra ID, Vertex OAuth, key_cmd, ...) is labelled
+-    by its tagged source and never invoked. Keys ≤ 12 chars (incl. "dummy-key") are not shown."""
++    """Report credential presence without printing credentials or caller labels.
++    Tagged sources are never invoked. Keys ≤ 12 chars retain the existing warning behavior."""
+     from agent.credential_source import credential_label
+-    if source_label := credential_label(key):
+-        print(f"🔑 Using credentials: {source_label}")
+-    elif isinstance(key, str) and len(key) > 12:
+-        print(f"🔑 Using {label}: {key[:8]}...{key[-4:]}")
++    if credential_label(key) or (isinstance(key, str) and len(key) > 12):
++        print("🔑 Using credentials")
+     elif warn_missing:
+         print("⚠️  Warning: API key appears invalid or missing")
+ 
+--- a/agent/memory_caller_scope.py
++++ b/agent/memory_caller_scope.py
+@@ -11,8 +11,8 @@
+ - one provider instance serves one profile: a plugin that hands several agents the same instance is
+   refused for every profile after the first, instead of being rebound to it.
+ 
+-Refusals log the check's code and both homes (errors.log on every host, gateway.log on a gateway); the
+-model/chat only ever sees a generic refusal.
++Refusals log the check's code and reason without profile-home values (errors.log on every host,
++gateway.log on a gateway); the model/chat only ever sees a generic refusal.
+ """
+ 
+ from __future__ import annotations
+@@ -58,8 +58,8 @@
+ 
+ 
+ def _refuse(label: str, reason: str, caller_home: Any, bound_home: Any, multiplexed: bool) -> None:
+-    logger.warning("Memory %s refused (%s): %s; caller profile home %r, provider bound to %r, multiplexed=%s",
+-                   label, CALLER_PROFILE_REFUSAL, reason, caller_home, bound_home, multiplexed)
++    logger.warning("Memory %s refused (%s): %s; multiplexed=%s",
++                   label, CALLER_PROFILE_REFUSAL, reason, multiplexed)
+ 
+ 
+ def bound_scope(hermes_home: Any, agent_identity: Any = None) -> dict[str, Any]:
+@@ -120,17 +120,17 @@
+         entry = _claims.get(pid)
+         owner = entry[1] if entry is not None and entry[0]() is provider else None
+         if owner is not None and owner != key and multiplexed:
+-            logger.warning("Memory provider '%s' refused for profile home %r (%s): this same provider instance "
+-                           "is already bound to %r; a provider must give every agent its own instance",
+-                           getattr(provider, "name", "?"), str(home), SHARED_INSTANCE_REFUSAL, owner)
++            logger.warning("Memory provider '%s' refused (%s): this same provider instance "
++                           "is already bound to another profile; a provider must give every agent its own instance",
++                           getattr(provider, "name", "?"), SHARED_INSTANCE_REFUSAL)
+             return False
+         try:
+             ref = weakref.ref(provider, lambda dead, pid=pid: _forget(pid, dead))
+         except TypeError:
+             if multiplexed:
+-                logger.warning("Memory provider '%s' refused for profile home %r (%s): the instance can't be "
++                logger.warning("Memory provider '%s' refused (%s): the instance can't be "
+                                "tracked (no weak reference support), so sharing it can't be ruled out",
+-                               getattr(provider, "name", "?"), str(home), SHARED_INSTANCE_REFUSAL)
++                               getattr(provider, "name", "?"), SHARED_INSTANCE_REFUSAL)
+                 return False
+             return True
+         _claims[pid] = (ref, key)
+--- a/agent/redact.py
++++ b/agent/redact.py
+@@ -507,7 +507,7 @@
+ 
+ # API-key style headers (single opaque value, no scheme word): non-vendor-prefix
+ # values would otherwise leak when a curl command is echoed into tool output.
+-SECRET_HEADER_NAME_LIST = ("x-api-key", "x-goog-api-key", "api-key", "apikey", "x-api-token", "x-auth-token", "x-access-token")
++SECRET_HEADER_NAME_LIST = ("x-api-key", "x-goog-api-key", "api-key", "apikey", "x-api-token", "x-auth-token", "x-access-token", "x-mastermind-workspace-authorization")
+ _SECRET_HEADER_NAMES = rf"(?:{'|'.join(SECRET_HEADER_NAME_LIST)})"
+ _SECRET_HEADER_RE = re.compile(rf"({_SECRET_HEADER_NAMES}\s*:\s*)(\S+)", re.IGNORECASE)
+ 
+--- a/hermes_cli/mcp_config.py
++++ b/hermes_cli/mcp_config.py
+@@ -474,6 +474,8 @@
+                     desc = desc[:77] + "..."
+                 tools_found.append((t.name, desc))
+             if details is not None:
++                companion = getattr(server, "_workspace_oauth", None)
++                details["workspace_oauth_verified"] = companion is not None and companion.verified() is True
+                 # Per-tool registry-schema sizes (the SAME converted schema the agent registers) so
+                 # the desktop can estimate per-call token cost. Best-effort, absent on failure.
+                 try:
+@@ -896,7 +898,16 @@
+         return False
+ 
+     oauth_cfg = server_config.get("oauth") or {}
++    try:
++        from tools.mcp_oauth_manager import workspace_oauth_descriptor, WORKSPACE_SERVER
++        workspace = workspace_oauth_descriptor(name, url, oauth_cfg)
++    except Exception:
++        _error("WORKSPACE_OAUTH_UNAVAILABLE")
++        return False
+     selected_flow = flow or oauth_cfg.get("flow", "browser")
++    if workspace is not None and selected_flow != "browser":
++        _error("WORKSPACE_OAUTH_UNAVAILABLE")
++        return False
+     if selected_flow not in {"browser", "device"}:
+         _error("oauth.flow must be browser or device")
+         return False
+@@ -908,9 +919,13 @@
+             # cannot be re-fetched (WAF-fronted split-host servers) it is the only thing that keeps
+             # the announced authorize URL off the SDK's `{mcp-origin}/authorize` guess (#115329).
+             from tools.mcp_oauth import HermesTokenStorage
+-            get_manager().evict(name)
+-            HermesTokenStorage(name).remove(keep_metadata=True)
++            for slot in ((name, WORKSPACE_SERVER) if workspace is not None else (name,)):
++                get_manager().evict(slot)
++                HermesTokenStorage(slot, hermes_home=get_hermes_home()).remove(keep_metadata=True)
+     except Exception as exc:
++        if workspace is not None:
++            _error("WORKSPACE_OAUTH_UNAVAILABLE")
++            return False
+         _warning(f"Could not clear existing OAuth state: {exc}")
+ 
+     print()
+@@ -929,10 +944,16 @@
+             from tools.mcp_oauth_device import login_device
+             asyncio.run(login_device(name, url, oauth_cfg))
+         probe_config = {**server_config, "oauth": {**oauth_cfg, "flow": selected_flow}}
++        details = {} if workspace is not None else None
+         with force_interactive_oauth():
+             tools = _probe_single_server(
+-                name, probe_config, connect_timeout=login_connect_timeout(probe_config)
++                name, probe_config, connect_timeout=login_connect_timeout(probe_config) * (2 if workspace is not None else 1),
++                **({"details": details} if details is not None else {})
+             )
++        if workspace is not None and (details.get("workspace_oauth_verified") is not True
++                or not _oauth_tokens_present(name) or not _oauth_tokens_present(WORKSPACE_SERVER)):
++            _error("WORKSPACE_OAUTH_UNAVAILABLE")
++            return False
+         # A clean probe is NOT proof of authentication: some servers (e.g. Google Drive) serve
+         # initialize + tools/list without auth, so the flow may have failed (e.g. DCR 400 for
+         # providers without RFC 7591) while the probe still lists tools. Verify a token landed.
+@@ -960,6 +981,9 @@
+             _success("Authenticated (server reported no tools)")
+         return True
+     except Exception as exc:
++        if workspace is not None:
++            _error("WORKSPACE_OAUTH_UNAVAILABLE")
++            return False
+         try:
+             from tools.mcp_oauth import humanize_oauth_registration_error
+             humanized = humanize_oauth_registration_error(name, exc, server_url=url)
+--- a/tools/mcp_oauth_manager.py
++++ b/tools/mcp_oauth_manager.py
+@@ -8,6 +8,9 @@
+ from __future__ import annotations
+ 
+ import asyncio
++from copy import deepcopy
++import json
++import math
+ import logging
+ import re
+ import threading
+@@ -22,9 +25,281 @@
+ 
+ try:
+     from mcp.client.auth.oauth2 import OAuthClientProvider as _SDKOAuthClientProvider
++    from mcp.client.auth.oauth2 import OAuthFlowError as _OAuthFlowError
++    from mcp.client.auth import oauth2 as _sdk_oauth
+     _SDK_BASES: tuple = (_SDKOAuthClientProvider,)
++    _sdk_httpx = getattr(_sdk_oauth, "httpx2", getattr(_sdk_oauth, "httpx", None))
++    _AUTH_BASES: tuple = (_sdk_httpx.Auth,)
+ except ImportError:  # pragma: no cover — SDK required in CI; module must still import
+     _SDK_BASES = ()
++    _AUTH_BASES = ()
++    _OAuthFlowError = RuntimeError
++
++
++# One opt-in resource pair. These are connection metadata, never credentials.
++WORKSPACE_OAUTH_SCHEMA = "mastermind.hermes_workspace_oauth.v1"
++WORKSPACE_PRIMARY_SERVER = "mastermind_coo"
++WORKSPACE_PRIMARY_URL = "https://mcp.mastermind-x.com/mcp/coo"
++WORKSPACE_PRIMARY_RESOURCE = "https://mcp.mastermind-x.com/mcp"
++WORKSPACE_PRIMARY_SCOPE = "mastermind.executive.coo.act mastermind.executive.read"
++WORKSPACE_SERVER = "mastermind_coo_workspace"
++WORKSPACE_RESOURCE = "https://mcp.mastermind-x.com/workspace/read"
++WORKSPACE_IDENTITY_URL = "https://mcp.mastermind-x.com/workspace/native-draft-identity/current"
++WORKSPACE_SCOPE = "mastermind.workspace.read"
++WORKSPACE_HEADER = "x-mastermind-workspace-authorization"
++
++
++class WorkspaceOAuthError(_OAuthFlowError):
++    """Closed failure classified by the incumbent OAuth park owner."""
++
++    def __init__(self):
++        super().__init__("WORKSPACE_OAUTH_UNAVAILABLE")
++
++
++def workspace_oauth_descriptor(name: str, url: str, oauth: Any) -> dict | None:
++    """Validate the one fixed, nonsecret companion selection; legacy stays absent."""
++    if not isinstance(oauth, dict) or "workspace" not in oauth:
++        return None
++    value = oauth["workspace"]
++    fixed = {"schema": WORKSPACE_OAUTH_SCHEMA, "resource": WORKSPACE_RESOURCE,
++             "identity_url": WORKSPACE_IDENTITY_URL, "scope": WORKSPACE_SCOPE}
++    if (name != WORKSPACE_PRIMARY_SERVER or url != WORKSPACE_PRIMARY_URL
++            or set(oauth) - {"client_id", "scope", "flow", "workspace"}
++            or type(oauth.get("client_id")) is not str
++            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{1,255}", oauth["client_id"]) is None
++            or oauth.get("scope") != WORKSPACE_PRIMARY_SCOPE
++            or oauth.get("flow", "browser") != "browser"
++            or type(value) is not dict or set(value) != set(fixed) | {"principal_scope"}
++            or any(value[k] != v for k, v in fixed.items())
++            or type(value["principal_scope"]) is not str
++            or re.fullmatch(r"[0-9a-f]{64}", value["principal_scope"]) is None):
++        raise WorkspaceOAuthError()
++    return deepcopy(value)
++
++
++class WorkspaceCredentialStamps:
++    """Read both original stores through the existing park/stamp interface."""
++
++    def __init__(self, hermes_home):
++        from tools.mcp_oauth import HermesTokenStorage
++        self._stores = tuple(HermesTokenStorage(name, hermes_home=hermes_home)
++                             for name in (WORKSPACE_PRIMARY_SERVER, WORKSPACE_SERVER))
++
++    def credential_stamp(self):
++        return tuple(storage.credential_stamp() for storage in self._stores)
++
++
++class HermesWorkspaceOAuth(*_AUTH_BASES):
++    """Drive two original providers on the original HTTP client's auth driver.
++
++    This object holds no token store, refresh algorithm, client, task or retry.
++    A Workspace bearer is borrowed only from the successful protected GET and
++    removed from the primary request before its response returns to the SDK.
++    """
++
++    def __init__(self, manager, descriptor, primary, workspace, home):
++        self._manager, self._descriptor = manager, deepcopy(descriptor)
++        self._home = home
++        self._primary, self._workspace = primary, workspace
++        self._entries = tuple(manager._entries[(home, name)]
++                              for name in (WORKSPACE_PRIMARY_SERVER, WORKSPACE_SERVER))
++        self._configs = tuple(deepcopy(entry.oauth_config) for entry in self._entries)
++        self._revisions = tuple(entry.revision for entry in self._entries)
++        self._contexts = tuple(provider.context for provider in (primary, workspace))
++        self._storages = tuple(context.storage for context in self._contexts)
++        self._verified_until_ms = 0
++
++    def _require_current(self):
++        if get_manager() is not self._manager or self._manager._key(WORKSPACE_PRIMARY_SERVER)[0] != self._home:
++            raise WorkspaceOAuthError()
++        for name, resource, provider, entry, cfg, revision, context, storage in zip(
++                (WORKSPACE_PRIMARY_SERVER, WORKSPACE_SERVER),
++                (WORKSPACE_PRIMARY_RESOURCE, WORKSPACE_RESOURCE),
++                (self._primary, self._workspace), self._entries, self._configs, self._revisions,
++                self._contexts, self._storages):
++            if (self._manager._entries.get((self._home, name)) is not entry
++                    or entry.provider is not provider or entry.revision != revision or entry.server_url != resource
++                    or entry.oauth_config != cfg or provider.context.server_url != resource
++                    or provider.context is not context or context.storage is not storage
++                    or (context.client_info is not None and context.client_info.client_id != cfg["client_id"])
++                    or provider._hermes_home != self._home
++                    or provider.context.storage._hermes_home != Path(self._home)
++                    or provider._hermes_workspace_single_client is not True):
++                raise WorkspaceOAuthError()
++
++    def verified(self) -> bool:
++        try:
++            self._require_current()
++            return time.time() * 1000 < self._verified_until_ms
++        except Exception:
++            return False
++
++    @staticmethod
++    async def _close(flow):
++        import anyio
++        if flow is not None:
++            with anyio.CancelScope(shield=True):
++                await flow.aclose()
++
++    def _check_outgoing(self, outgoing, resource_request, resource):
++        self._require_current()
++        if WORKSPACE_HEADER in outgoing.headers:
++            raise WorkspaceOAuthError()
++        if outgoing is resource_request:
++            expected = WORKSPACE_IDENTITY_URL if resource == WORKSPACE_RESOURCE else WORKSPACE_PRIMARY_URL
++            if str(outgoing.url) != expected or (resource == WORKSPACE_RESOURCE and outgoing.method != "GET"):
++                raise WorkspaceOAuthError()
++        if outgoing is not resource_request:
++            # The SDK constructs grant requests. Check its actual encoded
++            # resource/client operands before any token endpoint I/O.
++            from urllib.parse import parse_qs, urlsplit
++            endpoint = urlsplit(str(outgoing.url))
++            if (endpoint.scheme != "https" or endpoint.username is not None
++                    or endpoint.password is not None or endpoint.fragment
++                    or (outgoing.method == "POST" and endpoint.query)):
++                raise WorkspaceOAuthError()
++            if outgoing.method == "POST":
++                try:
++                    fields = parse_qs(outgoing.content.decode("ascii"), strict_parsing=True)
++                except Exception:
++                    raise WorkspaceOAuthError() from None
++                if (fields.get("grant_type") not in (["authorization_code"], ["refresh_token"])
++                        or fields.get("resource") != [resource]
++                        or fields.get("client_id") != [self._configs[0]["client_id"]]):
++                    raise WorkspaceOAuthError()
++
++    @staticmethod
++    def _check_response(response, outgoing, resource_request):
++        if response is None or response.request is not outgoing:
++            raise WorkspaceOAuthError()
++        # Both the SDK and HTTP client have redirect machinery. Refuse before
++        # either can turn a protected request into a different resource path.
++        if (300 <= response.status_code < 400
++                or (outgoing is not resource_request and response.status_code >= 400)):
++            raise WorkspaceOAuthError()
++
++    async def async_auth_flow(self, request):
++        self._verified_until_ms = 0
++        workspace_flow = primary_flow = identity = identity_response = None
++        workspace_bearer = None
++        expiry = 0
++        workspace_stamp = None
++        try:
++            self._require_current()
++            if (str(request.url) != WORKSPACE_PRIMARY_URL or request.method not in {"GET", "POST", "DELETE"}
++                    or WORKSPACE_HEADER in request.headers):
++                raise WorkspaceOAuthError()
++            protocol = request.headers.get("mcp-protocol-version", "")
++            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", protocol) is None or protocol < "2025-06-18":
++                raise WorkspaceOAuthError()
++            timeout = request.extensions.get("timeout")
++            if (type(timeout) is not dict or set(timeout) != {"connect", "read", "write", "pool"}
++                    or any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in timeout.values())):
++                raise WorkspaceOAuthError()
++            identity = _sdk_httpx.Request("GET", WORKSPACE_IDENTITY_URL,
++                headers={"Accept": "application/json", "MCP-Protocol-Version": protocol},
++                extensions={"timeout": deepcopy(timeout)})
++            workspace_flow = self._workspace.async_auth_flow(identity)
++            try:
++                outgoing = await workspace_flow.__anext__()
++                while True:
++                    self._check_outgoing(outgoing, identity, WORKSPACE_RESOURCE)
++                    outgoing.extensions["timeout"] = deepcopy(timeout)
++                    sent_bearer = outgoing.headers.get("authorization") if outgoing is identity else None
++                    sent_stamp = self._storages[1].credential_stamp() if outgoing is identity else None
++                    incoming = yield outgoing
++                    self._require_current()
++                    self._check_response(incoming, outgoing, identity)
++                    if outgoing is identity:
++                        if incoming.status_code == 200 and self._storages[1].credential_stamp() != sent_stamp:
++                            raise WorkspaceOAuthError()
++                        identity_response = incoming
++                        workspace_bearer = sent_bearer
++                        workspace_stamp = sent_stamp
++                    outgoing = await workspace_flow.asend(incoming)
++            except StopAsyncIteration:
++                pass
++            finally:
++                await self._close(workspace_flow)
++                workspace_flow = None
++            self._require_current()
++            if (identity_response is None or identity_response.status_code != 200
++                    or identity_response.headers.get("content-type", "").split(";", 1)[0].strip() != "application/json"
++                    or not isinstance(workspace_bearer, str)
++                    or re.fullmatch(r"Bearer [A-Za-z0-9._~+/-]+=*", workspace_bearer) is None):
++                raise WorkspaceOAuthError()
++            def require_workspace_credential():
++                self._require_current()
++                tokens = self._workspace.context.current_tokens
++                self._workspace._require_fixed_tokens(tokens)
++                if (tokens is None or "Bearer " + tokens.access_token != workspace_bearer
++                        or self._storages[1].credential_stamp() != workspace_stamp):
++                    raise WorkspaceOAuthError()
++            require_workspace_credential()
++            raw = await identity_response.aread()
++            if len(raw) > 1024:
++                raise WorkspaceOAuthError()
++            def unique(pairs):
++                result = {}
++                for key, value in pairs:
++                    if key in result:
++                        raise WorkspaceOAuthError()
++                    result[key] = value
++                return result
++            value = json.loads(raw, object_pairs_hook=unique)
++            if (type(value) is not dict or set(value) != {"schema", "principal_scope", "expires_at_ms"}
++                    or value["schema"] != "mastermind.native_draft_identity.v1"
++                    or value["principal_scope"] != self._descriptor["principal_scope"]
++                    or type(value["expires_at_ms"]) is not int):
++                raise WorkspaceOAuthError()
++            expiry = value["expires_at_ms"]
++            await identity_response.aclose()
++            identity.headers.pop("authorization", None)
++            primary_flow = self._primary.async_auth_flow(request)
++            authenticated_primary = False
++            try:
++                outgoing = await primary_flow.__anext__()
++                while True:
++                    self._check_outgoing(outgoing, request, WORKSPACE_PRIMARY_RESOURCE)
++                    require_workspace_credential()
++                    outgoing.extensions["timeout"] = deepcopy(timeout)
++                    if time.time() * 1000 >= expiry:
++                        raise WorkspaceOAuthError()
++                    if outgoing is request:
++                        outgoing.headers[WORKSPACE_HEADER] = workspace_bearer
++                        authenticated_primary = bool(re.fullmatch(
++                            r"Bearer [A-Za-z0-9._~+/-]+=*", outgoing.headers.get("authorization", "")))
++                    incoming = yield outgoing
++                    request.headers.pop(WORKSPACE_HEADER, None)
++                    require_workspace_credential()
++                    self._check_response(incoming, outgoing, request)
++                    if outgoing is request and incoming.status_code in (401, 403):
++                        authenticated_primary = False
++                    outgoing = await primary_flow.asend(incoming)
++            except StopAsyncIteration:
++                pass
++            require_workspace_credential()
++            if not authenticated_primary or time.time() * 1000 >= expiry:
++                raise WorkspaceOAuthError()
++            self._verified_until_ms = expiry
++        except Exception:
++            self._verified_until_ms = 0
++            raise WorkspaceOAuthError() from None
++        finally:
++            request.headers.pop(WORKSPACE_HEADER, None)
++            if identity is not None:
++                identity.headers.pop("authorization", None)
++            workspace_bearer = None
++            try:
++                await self._close(primary_flow)
++            finally:
++                try:
++                    await self._close(workspace_flow)
++                finally:
++                    if identity_response is not None:
++                        import anyio
++                        with anyio.CancelScope(shield=True):
++                            await identity_response.aclose()
+ 
+ 
+ @dataclass
+@@ -35,6 +310,7 @@
+ 
+     server_url: str
+     oauth_config: Optional[dict]
++    revision: int = 0
+     provider: Optional[Any] = None
+     last_mtime_ns: int = 0
+     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+@@ -70,7 +346,68 @@
+         return self.context.storage if isinstance(self.context.storage, HermesTokenStorage) else None
+ 
+     def _log_nonfatal(self, what: str, exc: BaseException) -> None:
++        if getattr(self, "_hermes_workspace_single_client", False):
++            logger.debug("MCP OAuth fixed resource: non-fatal operation unavailable")
++            return
+         logger.debug("MCP OAuth '%s': %s failed (non-fatal): %s", self._hermes_server_name, what, exc)
++
++    async def _validate_resource_match(self, prm):
++        if (getattr(self, "_hermes_workspace_single_client", False)
++                and str(prm.resource) != self.context.server_url):
++            raise WorkspaceOAuthError()
++        await super()._validate_resource_match(prm)
++
++    def _require_fixed_scope(self):
++        if not getattr(self, "_hermes_workspace_single_client", False):
++            return
++        expected = {WORKSPACE_PRIMARY_RESOURCE: WORKSPACE_PRIMARY_SCOPE,
++                    WORKSPACE_RESOURCE: WORKSPACE_SCOPE}.get(self.context.server_url)
++        scope = self.context.client_metadata.scope
++        if expected is None or type(scope) is not str or sorted(scope.split()) != expected.split():
++            raise WorkspaceOAuthError()
++
++    def _require_fixed_tokens(self, tokens):
++        if not getattr(self, "_hermes_workspace_single_client", False) or tokens is None:
++            return
++        expected = {WORKSPACE_PRIMARY_RESOURCE: WORKSPACE_PRIMARY_SCOPE,
++                    WORKSPACE_RESOURCE: WORKSPACE_SCOPE}.get(self.context.server_url)
++        scope = tokens.scope
++        # This opt-in fixed deployment requires an explicit grant scope. An
++        # unknown cached scope cannot become evidence by copying current config.
++        # The incumbent refresh path preserves an omitted, unchanged scope.
++        if expected is None or type(scope) is not str or sorted(scope.split()) != expected.split():
++            raise WorkspaceOAuthError()
++
++    async def _perform_authorization(self):
++        self._require_fixed_scope()
++        if getattr(self, "_hermes_workspace_single_client", False):
++            from urllib.parse import urlsplit
++            metadata = self.context.oauth_metadata
++            endpoint = urlsplit(str(metadata.authorization_endpoint)) if metadata is not None else None
++            # The SDK appends its own query. Existing operands or a fragment
++            # would make the real consent URL ambiguous despite a narrow scope.
++            if (endpoint is None or endpoint.scheme != "https" or not endpoint.hostname
++                    or endpoint.query or endpoint.fragment or endpoint.username is not None
++                    or endpoint.password is not None):
++                raise WorkspaceOAuthError()
++        return await super()._perform_authorization()
++
++    async def _refresh_token(self):
++        self._require_fixed_scope()
++        self._require_fixed_tokens(self.context.current_tokens)
++        return await super()._refresh_token()
++
++    async def _store_tokens(self, token_response):
++        self._require_fixed_tokens(token_response)
++        await super()._store_tokens(token_response)
++
++    def _hermes_install_disk_pair(self, tokens):
++        self._require_fixed_tokens(tokens)
++        return super()._hermes_install_disk_pair(tokens)
++
++    def _add_auth_header(self, request):
++        self._require_fixed_tokens(self.context.current_tokens)
++        return super()._add_auth_header(request)
+ 
+     async def _initialize(self) -> None:
+         """Load stored state, seed ``token_expiry_time``, restore/prefetch metadata. The SDK's
+@@ -81,6 +418,7 @@
+         ``{server_url}/token`` (wrong for split-origin providers), 404s, and we fall to browser reauth."""
+         await super()._initialize()  # HermesProviderMixin: restores metadata from disk, enforces issuer binding
+         tokens = self.context.current_tokens
++        self._require_fixed_tokens(tokens)
+         if tokens is not None and tokens.expires_in is not None:
+             # The SDK maps a zero TTL to ``time.time()`` and accepts equality
+             # in ``is_token_valid()``.  On a cold load that same-tick boundary
+@@ -90,6 +428,10 @@
+             else:
+                 self.context.update_token_expiry(tokens)
+         if tokens is not None and self.context.oauth_metadata is None:
++            if getattr(self, "_hermes_workspace_single_client", False):
++                # Reauthorization clears tokens and discovers metadata through
++                # the original generator/client. Never open a second client.
++                raise WorkspaceOAuthError()
+             try:
+                 await self._prefetch_oauth_metadata()
+             except Exception as exc:  # pragma: no cover — the SDK's 401-branch discovery runs next request
+@@ -292,12 +634,14 @@
+         except StopAsyncIteration:
+             self._persist_oauth_metadata_if_changed()  # metadata discovered lazily in the 401 branch
+         finally:
+-            if resource_lock_released:
+-                # Balance the SDK's surrounding ``async with`` even when HTTPX cancels/closes the
+-                # flow mid-request; shield only this local bookkeeping.
+-                import anyio
+-                with anyio.CancelScope(shield=True):
++            # Close the entire SDK/mixin chain now, including its refresh
++            # fence; async-generator GC is not a transport cleanup owner.
++            import anyio
++            with anyio.CancelScope(shield=True):
++                if resource_lock_released:
+                     await self.context.lock.acquire()
++                    resource_lock_released = False
++                await inner.aclose()
+         if retry_after_concurrent_auth:
+             yield request
+             self._persist_oauth_metadata_if_changed()
+@@ -314,6 +658,7 @@
+     def __init__(self) -> None:
+         self._entries: dict[tuple[str, str], _ProviderEntry] = {}
+         self._entries_lock = threading.Lock()
++        self._entry_revision = 0
+         # Strong refs to in-flight 401 tasks so the loop's weak bookkeeping cannot GC them mid-run.
+         self._inflight_tasks: set[asyncio.Task] = set()
+ 
+@@ -323,16 +668,31 @@
+         key = self._key(server_name)
+         with self._entries_lock:
+             entry = self._entries.get(key)
+-            if entry is not None and entry.server_url != server_url:
++            if entry is not None and (entry.server_url != server_url or entry.oauth_config != oauth_config):
+                 logger.info("MCP OAuth '%s': URL changed from %s to %s, discarding cache", server_name, entry.server_url, server_url)
+                 entry = None
+             if entry is None:
+-                entry = self._entries[key] = _ProviderEntry(server_url=server_url, oauth_config=oauth_config)
++                self._entry_revision += 1
++                entry = self._entries[key] = _ProviderEntry(server_url=server_url,
++                    oauth_config=deepcopy(oauth_config), revision=self._entry_revision)
+             if entry.provider is None:
+-                entry.provider = self._build_provider(server_name, entry)
++                entry.provider = self._build_provider(server_name, entry, hermes_home=key[0])
+                 if entry.provider is not None:
+                     entry.provider._hermes_home = key[0]
+             return entry.provider
++
++    def get_workspace_provider(self, server_name: str, server_url: str, oauth_config: dict):
++        descriptor = workspace_oauth_descriptor(server_name, server_url, oauth_config)
++        if descriptor is None or not _SDK_BASES:
++            raise WorkspaceOAuthError()
++        home = self._key(server_name)[0]
++        primary = self.get_or_build_provider(server_name, WORKSPACE_PRIMARY_RESOURCE, oauth_config)
++        companion_cfg = {**deepcopy(oauth_config), "scope": WORKSPACE_SCOPE}
++        workspace = self.get_or_build_provider(WORKSPACE_SERVER, WORKSPACE_RESOURCE, companion_cfg)
++        if primary is None or workspace is None:
++            raise WorkspaceOAuthError()
++        primary._hermes_workspace_single_client = workspace._hermes_workspace_single_client = True
++        return HermesWorkspaceOAuth(self, descriptor, primary, workspace, home)
+ 
+     @staticmethod
+     def _key(server_name: str, hermes_home: str | Path | None = None) -> tuple[str, str]:
+@@ -340,7 +700,7 @@
+         home = Path(hermes_home) if hermes_home is not None else get_hermes_home()
+         return (str(home.expanduser().resolve(strict=False)), server_name)
+ 
+-    def _build_provider(self, server_name: str, entry: _ProviderEntry) -> Optional[Any]:
++    def _build_provider(self, server_name: str, entry: _ProviderEntry, *, hermes_home=None) -> Optional[Any]:
+         """Build a ``HermesMCPOAuthProvider``; None if the SDK's OAuth support is unavailable."""
+         if _HERMES_PROVIDER_CLS is None:
+             logger.warning("MCP OAuth '%s': SDK auth module unavailable", server_name)
+@@ -351,6 +711,9 @@
+         if not _OAUTH_AVAILABLE:
+             return None
+         cfg, storage = prepare_oauth_config(server_name, entry.server_url, entry.oauth_config)
++        # Pin the existing store before any cached-state read or preregistration
++        # write, rather than merely pinning the provider's later disk watcher.
++        storage._hermes_home = Path(hermes_home) if hermes_home is not None else Path(self._key(server_name)[0])
+         if get_dashboard_oauth_flow() is None and not _is_interactive() and not storage.has_cached_tokens():
+             raise OAuthNonInteractiveError(
+                 f"MCP OAuth for '{server_name}': non-interactive environment and no cached tokens found. "
+@@ -372,12 +735,20 @@
+         if entry is None:
+             return
+         with self._entries_lock:
+-            self._entries.setdefault(self._key(server_name, hermes_home), entry)
++            key = self._key(server_name, hermes_home)
++            if key not in self._entries:
++                self._entry_revision += 1
++                entry.revision = self._entry_revision
++                self._entries[key] = entry
+ 
+     def evict(self, server_name: str, *, hermes_home: str | Path | None = None) -> _ProviderEntry | None:
+         """Drop only the in-process provider, preserving persisted OAuth state."""
+         with self._entries_lock:
+-            return self._entries.pop(self._key(server_name, hermes_home), None)
++            entry = self._entries.pop(self._key(server_name, hermes_home), None)
++            if entry is not None:
++                self._entry_revision += 1
++                entry.revision = self._entry_revision
++            return entry
+ 
+     async def invalidate_if_disk_changed(self, server_name: str, *, hermes_home: str | Path | None = None) -> bool:
+         """Force the SDK provider to reload when the tokens file mtime changed (e.g. a cron refresh); True if so."""
+--- a/tools/mcp_oauth_provider.py
++++ b/tools/mcp_oauth_provider.py
+@@ -9,6 +9,7 @@
+ from __future__ import annotations
+ 
+ import logging
++from contextvars import ContextVar
+ import re
+ from typing import TYPE_CHECKING, Any
+ from urllib.parse import urlsplit
+@@ -16,6 +17,8 @@
+ if TYPE_CHECKING:
+     from tools.mcp_oauth import HermesTokenStorage
+ logger = logging.getLogger(__name__)
++_REFRESH_FLOW_LEASE = ContextVar("hermes_oauth_refresh_flow_lease", default=None)
++_CURRENT_REFRESH_LEASE = object()
+ 
+ # Authorization servers that advertise ``authorization_response_iss_parameter_supported`` and then
+ # omit ``iss`` from the redirect (#111135). Exact issuer match, nothing else is relaxed.
+@@ -221,6 +224,21 @@
+     # Locked descriptor while this provider owns the refresh fence; cleared by
+     # _hermes_release_refresh_fence. Never shared across instances.
+     _hermes_fence: int | None = None
++    _hermes_fence_lease = None
++
++    @staticmethod
++    async def _hermes_advance_flow(inner, lease, *, sent=None, thrown=None, close=False):
++        # The ContextVar belongs only to this advancement, never an outward
++        # yield. HTTPX may close a generator in a different task/context.
++        token = _REFRESH_FLOW_LEASE.set(lease)
++        try:
++            if close:
++                return await inner.aclose()
++            if thrown is not None:
++                return await inner.athrow(thrown)
++            return await inner.asend(sent)
++        finally:
++            _REFRESH_FLOW_LEASE.reset(token)
+ 
+     async def async_auth_flow(self, request):
+         """Guarantee fence release even if the auth generator is abandoned.
+@@ -239,6 +257,7 @@
+         the original request with the winner's access token, never POSTing
+         the burned refresh token.
+         """
++        lease = object()
+         while True:
+             inner = super().async_auth_flow(request)
+             discovery_failures: list[str] = []
+@@ -248,9 +267,9 @@
+                     try:
+                         if thrown is not None:
+                             exc, thrown = thrown, None
+-                            out = await inner.athrow(exc)
++                            out = await self._hermes_advance_flow(inner, lease, thrown=exc)
+                         else:
+-                            out = await inner.asend(sent)
++                            out = await self._hermes_advance_flow(inner, lease, sent=sent)
+                     except StopAsyncIteration:
+                         return
+                     except _RefreshCompletedByPeer:
+@@ -270,7 +289,7 @@
+                     try:
+                         sent = yield out
+                     except GeneratorExit:
+-                        await inner.aclose()
++                        await self._hermes_advance_flow(inner, lease, close=True)
+                         raise
+                     except BaseException as exc:
+                         sent, thrown = None, exc
+@@ -281,7 +300,12 @@
+                         elif getattr(sent, "status_code", None) == 200:
+                             sent = await self._hermes_accept_origin_issued_metadata(sent)
+             finally:
+-                await self._hermes_release_refresh_fence()
++                import anyio
++                with anyio.CancelScope(shield=True):
++                    try:
++                        await self._hermes_advance_flow(inner, lease, close=True)
++                    finally:
++                        await self._hermes_release_refresh_fence(lease=lease)
+ 
+     async def _refresh_token(self):
+         """Take the refresh fence, then build the request from the token we own.
+@@ -349,18 +373,28 @@
+         """
+         from tools.mcp_oauth import acquire_refresh_fence
+ 
+-        await self._hermes_release_refresh_fence()
++        lease = _REFRESH_FLOW_LEASE.get()
++        await self._hermes_release_refresh_fence(lease=lease)
++        if self._hermes_fence is not None:
++            from mcp.client.auth.oauth2 import OAuthFlowError
++            raise OAuthFlowError("OAuth refresh fence belongs to another flow")
+         storage = self.context.storage
+         tokens_path = getattr(storage, "_tokens_path", None)
+         if tokens_path is None:  # pragma: no cover - non-Hermes storage
+             return
+         self._hermes_fence = await acquire_refresh_fence(tokens_path())
+-
+-    async def _hermes_release_refresh_fence(self) -> None:
++        self._hermes_fence_lease = lease
++
++    async def _hermes_release_refresh_fence(self, *, lease=_CURRENT_REFRESH_LEASE) -> None:
+         """Release the fence if held. Idempotent and never raises."""
+         from tools.mcp_oauth import release_refresh_fence
+ 
++        if lease is _CURRENT_REFRESH_LEASE:
++            lease = _REFRESH_FLOW_LEASE.get()
++        if self._hermes_fence_lease is not lease:
++            return
+         fd, self._hermes_fence = self._hermes_fence, None
++        self._hermes_fence_lease = None
+         if fd is not None:
+             release_refresh_fence(fd)
+ 
+--- a/tools/mcp_tool_errors.py
++++ b/tools/mcp_tool_errors.py
+@@ -93,7 +93,7 @@
+ _HTTP_REJECTION_BODY_CHARS = 300
+ 
+ 
+-def _make_http_rejection_recorder(sink: dict):
++def _make_http_rejection_recorder(sink: dict, *, fixed_workspace_oauth: bool = False):
+     """httpx response hook for the owned Streamable HTTP client: remembers the last 4xx/5xx the server
+     sent (status, method, URL, head of the body). mcp >= 2.0 folds a non-2xx whose body it cannot
+     parse as a JSON-RPC error into the opaque ``-32603 Server returned an error response`` — the
+@@ -103,6 +103,12 @@
+ 
+     async def _record(response):
+         if response.status_code < 400:
++            return
++        if fixed_workspace_oauth:
++            from tools.mcp_oauth_manager import WORKSPACE_PRIMARY_URL
++            if str(response.request.url) == WORKSPACE_PRIMARY_URL:
++                sink.update(status=response.status_code, method=response.request.method,
++                            url=WORKSPACE_PRIMARY_URL, body="")
+             return
+         body = ""
+         if response.headers.get("content-type", "").split(";")[0].strip().lower() != "text/event-stream":
+@@ -284,7 +290,8 @@
+ 
+ 
+ def _make_redirect_header_stripper(httpx_mod, original_url, *, strict: bool = False,
+-                                   configured_header_names: set[str] | frozenset[str] = frozenset()):
++                                   configured_header_names: set[str] | frozenset[str] = frozenset(),
++                                   fixed_workspace_oauth: bool = False):
+     """Client factory enforcing the redirect credential boundary: on a cross-origin redirect
+     follow-up it strips ``Authorization``; with *strict* (Agent Plugins v1 ``strict_redirect_headers``)
+     every configured header (lowercase names in *configured_header_names*) is stripped too — v1 forbids
+@@ -305,6 +312,12 @@
+         base_build = getattr(type(client), "_build_redirect_request", None)
+ 
+         def _build_redirect_request(request, response):
++            if fixed_workspace_oauth:
++                # This one client carries two fixed resources plus their real
++                # OAuth exchanges. Refuse every redirect before any follow-up
++                # is built, including SDK-managed same-origin path changes.
++                from tools.mcp_oauth_manager import WorkspaceOAuthError
++                raise WorkspaceOAuthError()
+             next_request = base_build(client, request, response)
+             target = next_request.url
+             if (target.scheme, target.host, target.port) != origin:
+--- a/tools/mcp_tool_server_run.py
++++ b/tools/mcp_tool_server_run.py
+@@ -534,6 +534,9 @@
+             from hermes_constants import get_hermes_home
+             from tools.mcp_oauth import HermesTokenStorage
+             storage = HermesTokenStorage(self.name, hermes_home=get_hermes_home())
++            from tools.mcp_oauth_manager import workspace_oauth_descriptor, WorkspaceCredentialStamps
++            if workspace_oauth_descriptor(self.name, self._config.get("url"), self._config.get("oauth")) is not None:
++                storage = WorkspaceCredentialStamps(get_hermes_home())
+             self._auth_park = (storage, storage.credential_stamp())
+ 
+     async def start(self, config: dict):
+--- a/tools/mcp_tool_transport.py
++++ b/tools/mcp_tool_transport.py
+@@ -523,9 +523,15 @@
+         if self._auth_type != "oauth":
+             return None
+         try:
+-            from tools.mcp_oauth_manager import get_manager
++            from tools.mcp_oauth_manager import get_manager, workspace_oauth_descriptor
++            if workspace_oauth_descriptor(self.name, url, config.get("oauth")) is not None:
++                self._workspace_oauth = get_manager().get_workspace_provider(self.name, url, config["oauth"])
++                return self._workspace_oauth
+             return get_manager().get_or_build_provider(self.name, url, config.get("oauth"))
+         except Exception as exc:
++            if isinstance(config.get("oauth"), dict) and "workspace" in config["oauth"]:
++                from tools.mcp_oauth_manager import WorkspaceOAuthError
++                raise WorkspaceOAuthError() from None
+             logger.warning("MCP OAuth setup failed for '%s': %s", self.name, exc)
+             raise
+ 
+@@ -574,14 +580,18 @@
+         # Explicit AsyncClient matching the SDK's create_mcp_http_client defaults; MUST come from the
+         # SDK's httpx (httpx2 on mcp >= 2.0) since the SDK sends its own Requests through it.
+         httpx = _core.sdk_httpx()
++        from tools.mcp_oauth_manager import HermesWorkspaceOAuth
++        fixed_workspace_oauth = type(oauth_auth) is HermesWorkspaceOAuth
+         _build_client = _make_redirect_header_stripper(
+-            httpx, httpx.URL(url), strict=strict_cfg_headers, configured_header_names=configured_header_names)
++            httpx, httpx.URL(url), strict=strict_cfg_headers, configured_header_names=configured_header_names,
++            fixed_workspace_oauth=fixed_workspace_oauth)
+         # verify/cert live on the inner transport: a custom transport= makes client-level TLS kwargs
+         # inert — and suppresses httpx's own proxy auto-detection, hence the explicit mounts=.
+         inner_transport = httpx.AsyncHTTPTransport(verify=ssl_verify, **_present(cert=client_cert))
+         client_kwargs: dict = {"follow_redirects": True, "timeout": httpx.Timeout(float(connect_timeout), read=300.0),
+                                **({"headers": headers} if headers else {}),
+-                               "event_hooks": {"response": [_make_http_rejection_recorder(self._http_rejection)]},
++                               "event_hooks": {"response": [_make_http_rejection_recorder(
++                                   self._http_rejection, fixed_workspace_oauth=fixed_workspace_oauth)]},
+                                "transport": _make_mcp_body_cap_transport(httpx, inner_transport),
+                                **_present(mounts=_mcp_proxy_mounts(httpx, url, ssl_verify, client_cert, self.name),
+                                           auth=oauth_auth)}
+@@ -611,6 +621,21 @@
+         # publish another endpoint's identity alongside this session.
+         self._resolved_identity = _registration._identity_digest(inputs)
+         url, headers = inputs
++        from tools.mcp_oauth_manager import workspace_oauth_descriptor, WorkspaceOAuthError, WORKSPACE_HEADER
++        fixed_workspace_oauth = workspace_oauth_descriptor(self.name, url, config.get("oauth")) is not None
++        if fixed_workspace_oauth:
++            # Own exactly the reviewed modern client. Static credentials,
++            # endpoint indirection and SSE cannot override this resource pair.
++            if (self._auth_type != "oauth" or config.get("auth") != "oauth"
++                    or not _core._MCP_NEW_HTTP or getattr(_core.sdk_httpx(), "__name__", None) != "httpx2"
++                    or config.get("transport") != "streamable-http"
++                    or config.get("strict_redirect_headers") is not True
++                    or config.get("ssl_verify", True) is not True
++                    or self._sse_fallback or config.get("headers")
++                    or any(config.get(key) is not None for key in ("server_json", "identity_header", "client_cert", "client_key"))
++                    or any(key.lower() in {"authorization", WORKSPACE_HEADER} for key in headers)):
++                raise WorkspaceOAuthError()
++            configured_header_names.add(WORKSPACE_HEADER)
+         logger.debug("MCP server '%s': connecting to %s", self.name, url)
+         self._http_rejection = {}  # last 4xx/5xx the owned client saw this attempt (recorder hook)
+         # Seed MCP-Protocol-Version (user override wins) from the HANDSHAKE version, not the latest: a
+@@ -632,6 +657,8 @@
+         try:
+             return await self._serve_transport(transport, label, float(connect_timeout))
+         except Exception as exc:
++            if fixed_workspace_oauth:
++                raise WorkspaceOAuthError() from None
+             # The SDK folds a non-2xx it cannot parse into ``-32603 Server returned an error response``;
+             # the recorder hook kept the status/URL/body the server actually sent (#114350, #113359).
+             http_detail = _describe_http_failure(exc, self._http_rejection)
+--- a/gateway/session_authority.py
++++ b/gateway/session_authority.py
+@@ -634,7 +634,7 @@
+         return results
+ 
+     async def submit(self, actor: Principal, request: Submission, *, _authorize_write=None, queue_while_restarting=False,
+-                     _replay_guard=None, _kanban_card=None):
++                     _replay_guard=None, _kanban_card=None, _mmx_eval=None):
+         """``queue_while_restarting``: the caller is an interactive client attached to a restart's
+         after-turn wait, which commits the input queued for the next owner. Machine callers (a2a,
+         kanban, hosted rooms) keep the plain ``runtime_draining`` refusal and retry against the next
+@@ -644,6 +644,12 @@
+         only): committed as ``kanban_card_v1``, it lets a card attempt lost across an owner restart
+         settle interrupted (#134889 KB-8). Never a payload field: a client cannot supply it."""
+         self.authorize(actor, request.ref, 'session:submit')
++        if _mmx_eval is not None:
++            if _kanban_card is not None or queue_while_restarting is not False:
++                raise RuntimeStoreError('invalid_params')
++            from integrations.hermes_runtime.native_eval_inputs import private_inputs_payload
++            # The private producer holds immutable bytes before the first await.
++            private_inputs_payload(self, actor, request, _mmx_eval)
+         async with self.sessions[request.ref.session_id].mutation_lock:
+             # Deletion can retire this session while the caller waits on its writer.
+             self.authorize(actor, request.ref, 'session:submit')
+@@ -651,10 +657,10 @@
+             with capture_lease():  # captured bytes are held from capture until commit or refusal
+                 return await self._submit(actor, request, _authorize_write=_authorize_write,
+                                           queue_only=queue_while_restarting is True, _replay_guard=_replay_guard,
+-                                          _kanban_card=_kanban_card)
++                                          _kanban_card=_kanban_card, _mmx_eval=_mmx_eval)
+ 
+     async def _submit(self, actor, request, *, _authorize_write=None, queue_only=False, _replay_guard=None,
+-                      _kanban_card=None):
++                      _kanban_card=None, _mmx_eval=None):
+         self._require_admission_open(queue_only=queue_only)
+         if (request.intent != 'queue' or not {'text'} <= set(request.payload) <= {
+                 'text', 'attachments', 'finite', 'unattended', 'surface', 'voice_context', 'interrupted',
+@@ -667,6 +673,15 @@
+         from gateway.session_display import admit_display
+         from gateway.session_cli_turn import admit_cli_turn
+         finite = admit_finite(request.payload)
++        evaluation = None
++        if _mmx_eval is not None:
++            if _kanban_card is not None or queue_only is not False:
++                raise RuntimeStoreError('invalid_params')
++            from integrations.hermes_runtime.native_eval_inputs import (
++                MARKER_KEY, private_inputs_payload, private_inputs_admission_guard)
++            evaluation = private_inputs_payload(self, actor, request, _mmx_eval)
++            _authorize_write = private_inputs_admission_guard(
++                self, actor, request, _mmx_eval, _authorize_write)
+         def admitted():
+             # The exact durable identity (authenticated principal + target + request id); the
+             # attachment fields it yields still pass the full payload-digest comparison below.
+@@ -678,6 +693,8 @@
+                    **admit_attachments(request.payload.get('attachments'), admitted=admitted)}
+         if _kanban_card is not None:
+             payload['kanban_card_v1'] = _kanban_card
++        if evaluation is not None:
++            payload[MARKER_KEY] = evaluation
+         source = self.sessions[request.ref.session_id].source
+         if source is not None and source.user_id != actor.subject:
+             # Durable server authorization, not a client payload field. The original
+@@ -689,6 +706,8 @@
+                 'principal_id': actor.subject}
+         def admit():
+             try:
++                if evaluation is not None and private_inputs_payload(self, actor, request, _mmx_eval) != evaluation:
++                    raise RuntimeStoreError('invalid_params')
+                 return admit_session_input(self.db, epoch=self.epoch, principal_id=actor.subject,
+                                            session_id=request.ref.session_id, request_id=request.request_id,
+                                            payload=payload, intent=request.intent, _replay_guard=_replay_guard,
+--- a/hermes_state_mutation_retirement.py
++++ b/hermes_state_mutation_retirement.py
+@@ -109,8 +109,10 @@
+             row = dict(raw)
+             from hermes_state_media import retire_media
+             retire_media(conn, json.loads(row['payload_json']), row['request_id'])
+-            # Keep the digest for exact retries, not another copy of user input/history.
+-            row['payload_json'] = '{}'
++            # Ordinary input/history expires unchanged. Selected PUBLIC_SAFE EVAL
++            # input retains its original binding; malformed markers keep only a fence.
++            from integrations.hermes_runtime.native_eval_inputs import retained_admission_payload
++            row['payload_json'] = _json(retained_admission_payload(json.loads(row['payload_json'])))
+             row['lineage_json'] = '[]'
+             row['retired_at'] = time.time()
+             _compact_result(conn, row['admission_id'])
+@@ -426,6 +428,12 @@
+     for key, raw in conn.execute(f'SELECT key,value FROM state_meta WHERE key GLOB ? AND {_EXPIRED}',
+                                  (ADMISSION_PREFIX + '*', cutoff)).fetchall():
+         row = json.loads(raw)
++        payload = json.loads(row['payload_json'])
++        if isinstance(payload, dict) and 'mastermind_eval_inputs_v1' in payload:
++            # Selected PUBLIC_SAFE EVAL input keeps its original admission identity.
++            # Output privacy is separate: preserve the normal result expiry.
++            conn.execute('DELETE FROM state_meta WHERE key=?', (RESULT_PREFIX + row['admission_id'],))
++            continue
+         conn.execute('DELETE FROM state_meta WHERE key IN (?,?,?)', (key, RESULT_PREFIX + row['admission_id'],
+                      identity_key(row['principal_id'], row['target_session_id'], row['request_id'])))
+     conn.execute(f'DELETE FROM state_meta WHERE key GLOB ? AND {_EXPIRED}', (WORKER_PREFIX + '*', cutoff))
+--- a/hermes_state_common.py
++++ b/hermes_state_common.py
+@@ -602,6 +602,7 @@
+     outcome TEXT,
+     owner_epoch INTEGER,
+     generation INTEGER,
++    eval_publication_json TEXT,
+     UNIQUE (principal_id, target_session_id, request_id),
+     CHECK (status != 'started' OR (owner_epoch IS NOT NULL AND generation IS NOT NULL))
+ );
+--- a/hermes_state_runtime.py
++++ b/hermes_state_runtime.py
+@@ -104,6 +104,7 @@
+     result.pop('payload_digest')
+     result.pop('lineage_json')
+     result.pop('retired_at', None)  # tombstone retention stamp, not admission state
++    result.pop('eval_publication_json', None)  # private immutable publication, never public admission state
+     return result
+ 
+ 

@@ -1,0 +1,126 @@
+{
+  "changed_paths": [
+    "brain/bot_mcp.py",
+    "common/session_bridge_private_contract.py",
+    "docs/hermes/CHATGPT_SESSION_OBSERVATION_INSTALL.md",
+    "docs/superpowers/plans/2026-11-06-chatgpt-web-observation-owner-wiring.md",
+    "integrations/session_bridge/installed.py",
+    "integrations/session_bridge/installed_web_observation.py",
+    "ops/executive_os/executive_mcp_entry.py",
+    "scripts/executive_os_phase1c.py",
+    "tests/executive_fabric_release_identity_review.py",
+    "tests/test_briefing_hub_evidence_truth.py",
+    "tests/test_ceo_submit_armed_composition.py",
+    "tests/test_intelligence_feed_evidence_truth.py",
+    "tests/test_lenses.py",
+    "tests/test_portfolio_mcp_evidence_truth.py",
+    "tests/test_session_web_observation_installed.py",
+    "tests/test_session_web_observation_installed_asgi.py",
+    "tests/test_single_name_research_evidence_truth.py"
+  ],
+  "default_native_closure_unchanged": {
+    "candidate/original_delivery_collector.py": "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d",
+    "rollout/native-manifest.json": "59728db1593596234ce9c2349da06e155d940c3a9220ecd2b8846ff157ad5a3a",
+    "rollout/native-source-inventory.json": "d6590d214f0a2a0e6e4885f4da9ed1c05811bdc1c1cc4c2c258220d8de43ec47"
+  },
+  "governing_paths_changed": [],
+  "inherited_whitespace_paths": [],
+  "original_head": "7e61fb8c8e8e43d08e2272e502b3f8e4386ee95f",
+  "original_source_evidence": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/2175#issuecomment-6712099275",
+  "protected_composition": [
+    {
+      "kind": "exact_clean_three_way_composition",
+      "path": "brain/bot_mcp.py",
+      "sha256": "85c43308cf1e9283fa4ef4798002affba662d947af8597f6544755794236e15e"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "common/session_bridge_private_contract.py",
+      "sha256": "fe8fd38486b6da4bd87c9c466262db5e98f582b9918dc9c608004ec8c7d9967c"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "docs/hermes/CHATGPT_SESSION_OBSERVATION_INSTALL.md",
+      "sha256": "57a2deb7d0acb5b083836991c1f74928dbbf2ba36e7a1bd29f10fbea781b87bf"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "docs/superpowers/plans/2026-11-06-chatgpt-web-observation-owner-wiring.md",
+      "sha256": "d2261319b4d859443eeb8f0b1cae26a1ec596849e780aa559201afe98943b39f"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "integrations/session_bridge/installed.py",
+      "sha256": "29a40386e0a32a9fd9104b7a2d6d076674457bad8242a475e11d8ede7bf1ab73"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "integrations/session_bridge/installed_web_observation.py",
+      "sha256": "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "ops/executive_os/executive_mcp_entry.py",
+      "sha256": "64ebe16c1a7e2b40f54601b40e29db8dd787d35ffb6adcb82d87887a138ce905"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "scripts/executive_os_phase1c.py",
+      "sha256": "54dcc405c66afbbf5ca980f64dead4c0d6709ff1920bd02d1a27e9a3db38e5b6"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "tests/test_briefing_hub_evidence_truth.py",
+      "sha256": "53ea01e24ca7cf4a8ac34ab493c7f403bb3467bfbcd134bf0dcc919f6229334c"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "tests/test_ceo_submit_armed_composition.py",
+      "sha256": "b33c8fed8eba1a202cdd466e1087783c9f6586b0fc22f5e80e6a6c44eeffdbfa"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "tests/test_intelligence_feed_evidence_truth.py",
+      "sha256": "d752d2a4d188c2f4556d29ad0165ed4322ca77fea6e8e8757eaee2b7e7f30ee0"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "tests/test_lenses.py",
+      "sha256": "fb6371cbe6bbe90778822e627a499f24d947fbca53bd58fdf688dbe4de90992b"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "tests/test_portfolio_mcp_evidence_truth.py",
+      "sha256": "637ca15e8a4662006c55dbd015d027ddf0416c4c810c19ae75c4ca23d5f6dfa6"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "tests/test_session_web_observation_installed.py",
+      "sha256": "4ed9eb1a6018ef9b1472614a13d28c512ca41726c4051cb1b9318f111eb5a91b"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "tests/test_session_web_observation_installed_asgi.py",
+      "sha256": "17d04f446f9e2189e41e3ced87b9744a520cd472edbd858dc0f5ada9f782596a"
+    },
+    {
+      "kind": "exact_protected",
+      "path": "tests/test_single_name_research_evidence_truth.py",
+      "sha256": "eb48f9d0ccdd17367f1199b7bc4861809f66d289478e7dc3ff21a6ed5084ed57"
+    }
+  ],
+  "protected_head": "5abd2017f4ae4a69dddce4ff4f0aa4cb5246a402",
+  "registry_composition": {
+    "all_other_registry_ast_units_unchanged": true,
+    "base": "3f79e30ae184dc991102f6044f7c74f677a86040",
+    "governing_paths_changed": [],
+    "original": "7e61fb8c8e8e43d08e2272e502b3f8e4386ee95f",
+    "protected": "5abd2017f4ae4a69dddce4ff4f0aa4cb5246a402",
+    "protected_record_path": "integrations/session_bridge/installed_web_observation.py",
+    "protected_record_sha256": "36a0d5527662fb01e29ea873688367c312750e2436602475496901d151131399",
+    "protected_source_sha256": "e7b3c60725b1be5574d39525aefc076aab2c06a8a3fa0fb7b78ecbb905579a22",
+    "registry_sha256": "082255e339c249c22b3be166a3b18d7fb8fb9d7042ae955ee793afc4e44326dd"
+  },
+  "runtime_or_protected_acceptance": false,
+  "schema": "mastermind.fabric_application.protected_source_composition.v1"
+}

@@ -1,0 +1,1346 @@
+#!/usr/bin/env python3
+"""Bailian Token-Plan key picker (library + CLI).
+
+Reads names and values from ~/.bailian/config.json (mode 600).
+Key values stay inside this helper and the selected Codex child's environment.
+The former `env <name>` stdout interface is retired in this native generation;
+it fails without reading a credential. Account-name/status output is unchanged.
+
+Usage:
+  bailian_keys.py pick
+  bailian_keys.py check-key <name>
+  bailian_keys.py exec-codex <name> -- <codex exec arguments...>
+  bailian_keys.py release <name> <pid>
+  bailian_keys.py cooldown <name> <seconds> <reason>
+  bailian_keys.py cooldown-receipt <name> <seconds> <reason> <receipt-path> [classification-source]
+  bailian_keys.py status
+  bailian_keys.py preflight-slots
+  bailian_keys.py total_cap
+  bailian_keys.py next_usable_in
+  bailian_keys.py model <requested>
+  bailian_keys.py seconds_until_offpeak
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import math
+import os
+import re
+import stat
+import sys
+import time
+from datetime import datetime
+from typing import Any, Dict, IO, List, Optional, Tuple
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+POLICY_PATH = os.path.join(HERE, "bailian_policy.json")
+CONFIG_PATH = os.path.expanduser("~/.bailian/config.json")
+SLOTS_ROOT = os.path.join(HERE, "slots", "bailian")
+LOCK_PATH = os.path.join(SLOTS_ROOT, ".lock")
+
+
+def _die(msg: str, rc: int = 2) -> None:
+    print(msg, file=sys.stderr)
+    raise SystemExit(rc)
+
+
+def load_policy() -> Dict[str, Any]:
+    with open(POLICY_PATH, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+# The policy's `offpeak_window` object is the single source of truth for the
+# discounted window. A legacy `offpeak` / `_legacy_*` block is consulted only when
+# `offpeak_window` is absent, so replaced fields can never silently move the cap
+# or the model swap.
+DEFAULT_OFFPEAK_START = "22:00"
+DEFAULT_OFFPEAK_END = "08:00"
+DEFAULT_OFFPEAK_TZ = "Asia/Shanghai"
+# Model selection is independent of the discount/capacity window.
+MINUTES_PER_DAY = 24 * 60
+
+
+def _parse_hhmm(s: Any, fallback: str) -> int:
+    """'HH:MM'[:SS] as minutes since midnight; bad input falls back to `fallback`."""
+    try:
+        h_raw, _, m_raw = str(s).strip().partition(":")
+        hour, minute = int(h_raw), int(m_raw or 0)
+    except (TypeError, ValueError):
+        hour = minute = -1
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        h_raw, _, m_raw = fallback.strip().partition(":")
+        hour, minute = int(h_raw), int(m_raw or 0)
+    return hour * 60 + minute
+
+
+def _now_in_tz(tz_name: str) -> datetime:
+    if ZoneInfo is None:
+        return datetime.now()
+    return datetime.now(ZoneInfo(tz_name))
+
+
+def _as_tz(dt: datetime, tz_name: str) -> datetime:
+    """Move a clock reading into the window's tz (naive input is assumed local)."""
+    if ZoneInfo is None:
+        return dt
+    tz = ZoneInfo(tz_name)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=tz)
+    return dt.astimezone(tz)
+
+
+def _minutes_of_day(dt: datetime) -> int:
+    return dt.hour * 60 + dt.minute
+
+
+def offpeak_window(policy: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Resolved off-peak window: display HH:MM strings, tz, and minute offsets."""
+    pol = load_policy() if policy is None else policy
+    win = pol.get("offpeak_window")
+    if not isinstance(win, dict):
+        win = pol.get("_legacy_offpeak_window")
+    if not isinstance(win, dict):
+        win = pol.get("offpeak")
+    if not isinstance(win, dict):
+        win = {}
+    start = str(win.get("start") or DEFAULT_OFFPEAK_START)
+    end = str(win.get("end") or DEFAULT_OFFPEAK_END)
+    tz_name = str(win.get("tz") or win.get("timezone") or DEFAULT_OFFPEAK_TZ)
+    return {
+        "start": start[:5],
+        "end": end[:5],
+        "tz": tz_name,
+        "start_min": _parse_hhmm(start, DEFAULT_OFFPEAK_START),
+        "end_min": _parse_hhmm(end, DEFAULT_OFFPEAK_END),
+    }
+
+
+def discounted_models(policy: Optional[Dict[str, Any]] = None) -> List[str]:
+    pol = load_policy() if policy is None else policy
+    models = pol.get("discounted_models")
+    if not isinstance(models, list):
+        return []
+    return [str(m).strip() for m in models if str(m).strip()]
+
+
+def offpeak_default_model(policy: Optional[Dict[str, Any]] = None) -> str:
+    pol = load_policy() if policy is None else policy
+    return str(pol.get("offpeak_default_model") or "").strip()
+
+
+def is_offpeak(now: Optional[datetime] = None) -> bool:
+    """True inside `offpeak_window`, which may cross midnight (22:00 -> 08:00).
+
+    Half-open [start, end) at minute precision: 22:00 is in, 08:00 is out.
+    VERIFY the window against Alibaba's published schedule.
+    """
+    win = offpeak_window()
+    minute = _minutes_of_day(_as_tz(now or _now_in_tz(win["tz"]), win["tz"]))
+    start, end = win["start_min"], win["end_min"]
+    if start == end:
+        return False  # degenerate window: assume no discount, stay on the tight cap
+    if start < end:
+        return start <= minute < end
+    return minute >= start or minute < end  # window crosses midnight
+
+
+def current_per_key_cap(now: Optional[datetime] = None) -> int:
+    """`per_key_cap` inside the off-peak window, `onpeak_per_key_cap` outside."""
+    pol = load_policy()
+    if is_offpeak(now):
+        return int(pol.get("per_key_cap") or 7)
+    return int(pol.get("onpeak_per_key_cap") or 3)
+
+
+def seconds_until_next_offpeak(now: Optional[datetime] = None) -> int:
+    """Seconds until the next window start (e.g. the next 22:00 Asia/Shanghai)."""
+    win = offpeak_window()
+    now = _as_tz(now or _now_in_tz(win["tz"]), win["tz"])
+    delta_min = (win["start_min"] - _minutes_of_day(now)) % MINUTES_PER_DAY
+    if delta_min == 0:
+        delta_min = MINUTES_PER_DAY
+    return max(1, delta_min * 60 - now.second)
+
+
+def effective_model(requested: str = "", now: Optional[datetime] = None) -> str:
+    """Preserve an explicit model; ordinary unspecified work defaults to Flash.
+
+    ``now`` remains a compatibility argument. Discounts change price/capacity,
+    never the caller's selected model or authority to escalate it.
+    """
+    return (requested or "").strip() or "qwen3.8-flash"
+
+
+def _load_config() -> Dict[str, Any]:
+    with open(CONFIG_PATH, encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def list_keys() -> List[Dict[str, str]]:
+    """Return [{name, api_key}] without printing. Prefer token-plan.api_keys."""
+    cfg = _load_config()
+    tp = cfg.get("token-plan") or {}
+    out: List[Dict[str, str]] = []
+    seen = set()
+    for entry in tp.get("api_keys") or []:
+        name = (entry.get("name") or "").strip()
+        val = (entry.get("api_key") or "").strip()
+        if not name or not val or name in seen:
+            continue
+        seen.add(name)
+        out.append({"name": name, "api_key": val})
+    if not out:
+        legacy = tp.get("api_key") or ""
+        if legacy:
+            out.append({"name": "legacy", "api_key": legacy})
+    return out
+
+
+def key_names() -> List[str]:
+    return [k["name"] for k in list_keys()]
+
+
+def _key_value(name: str) -> str:
+    for k in list_keys():
+        if k["name"] == name:
+            return k["api_key"]
+    _die(f"unknown key name {name!r}", 2)
+    return ""
+
+
+def _ensure_slots() -> None:
+    """Original-owner write preflight; never invoked by read-only admission.
+
+    Legacy installations created this directory under the caller's umask.
+    Safely tighten only an owned, stable physical final directory; changing
+    existing cooldown file bytes or clearing a provider restriction is forbidden.
+    """
+    try:
+        os.makedirs(SLOTS_ROOT, mode=0o700, exist_ok=True)
+    except OSError:
+        # Bounded diagnosis without disclosing physical owner path.
+        # No credentials or providers read; admission remains fail-closed.
+        raise RuntimeError("BAILIAN_SLOTS_ROOT_CREATE_REFUSED") from None
+    required = ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
+    if not all(hasattr(os, flag) for flag in required):
+        raise RuntimeError("BAILIAN_SLOTS_ROOT_CUSTODY_UNAVAILABLE")
+    try:
+        fd = os.open(
+            SLOTS_ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        )
+    except OSError as exc:
+        raise RuntimeError("BAILIAN_SLOTS_ROOT_UNSAFE_OR_UNREADABLE") from exc
+    try:
+        def qualified_current():
+            opened = os.fstat(fd)
+            try:
+                current = os.stat(SLOTS_ROOT, follow_symlinks=False)
+            except OSError as exc:
+                raise RuntimeError("BAILIAN_SLOTS_ROOT_CHANGED_DURING_PREFLIGHT") from exc
+            if (not stat.S_ISDIR(opened.st_mode)
+                    or not stat.S_ISDIR(current.st_mode)
+                    or opened.st_uid != os.geteuid()
+                    or (opened.st_dev, opened.st_ino, opened.st_uid, opened.st_mode)
+                       != (current.st_dev, current.st_ino, current.st_uid, current.st_mode)):
+                raise RuntimeError("BAILIAN_SLOTS_ROOT_OWNERSHIP_OR_IDENTITY_REFUSED")
+            return opened
+
+        original = qualified_current()
+        if original.st_mode & 0o022:
+            # This is an explicit write-path migration, never a broker read.
+            # Preserve existing world/group read or traverse bits while
+            # removing only the unsafe group/world WRITE bits.
+            requested = stat.S_IMODE(original.st_mode) & ~0o022
+            try:
+                os.fchmod(fd, requested)
+            except OSError as exc:
+                raise RuntimeError("BAILIAN_SLOTS_ROOT_MODE_REPAIR_REFUSED") from exc
+            final = qualified_current()
+            if final.st_mode & 0o022:
+                raise RuntimeError("BAILIAN_SLOTS_ROOT_MODE_REPAIR_UNVERIFIED")
+            print("BAILIAN_SLOTS_ROOT_LEGACY_MODE_TIGHTENED", file=sys.stderr)
+    finally:
+        os.close(fd)
+
+
+def _with_lock() -> IO[str]:
+    _ensure_slots()
+    fh = open(LOCK_PATH, "a+")
+    fcntl.flock(fh, fcntl.LOCK_EX)
+    return fh
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _name_dir(name: str) -> str:
+    return os.path.join(SLOTS_ROOT, name)
+
+
+def _cooldown_path(name: str) -> str:
+    return os.path.join(SLOTS_ROOT, f"{name}.cooldown")
+
+
+def _count_path(name: str) -> str:
+    return os.path.join(SLOTS_ROOT, f"{name}.429count")
+
+
+def prune_stale(name: str) -> int:
+    """Remove slot files whose pid is gone OR whose mtime is older than 6 h.
+    Returns remaining active count."""
+    d = _name_dir(name)
+    if not os.path.isdir(d):
+        return 0
+    now = int(time.time())
+    stale_mtime = now - 6 * 3600
+    alive = 0
+    for fn in os.listdir(d):
+        path = os.path.join(d, fn)
+        if not os.path.isfile(path):
+            continue
+        # PID-based check
+        try:
+            pid = int(fn)
+        except ValueError:
+            # Non-numeric filename: not a PID marker, leave it alone.
+            # (Only PID markers are written by pick/release.)
+            continue
+        if _pid_alive(pid):
+            alive += 1
+            continue
+        # Dead PID — remove.
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        continue
+    # Second pass: remove markers whose mtime is stale even if PID is alive
+    # (e.g. pid-reuse edge case where a new process got the same PID).
+    for fn in os.listdir(d):
+        path = os.path.join(d, fn)
+        if not os.path.isfile(path):
+            continue
+        try:
+            pid = int(fn)
+        except ValueError:
+            continue
+        try:
+            mtime = int(os.path.getmtime(path))
+        except OSError:
+            continue
+        if mtime < stale_mtime:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+    return alive
+
+
+def cooldown_rank_readonly(name: str) -> int:
+    """Read-only, directory-bound local cooldown classification.
+
+    0 verified absent/expired; 1 unknown; 2 live 429 soft throttle;
+    3 live non-429 hard denial. Never delete, write or pick a key.
+    """
+    if (not isinstance(name, str) or not name or len(name) > 128
+            or "/" in name or "\x00" in name or name in (".", "..")):
+        return 1
+    # A directory fd binds file reads to the original owned slots directory;
+    # O_NOFOLLOW rejects a symlinked *final* directory component. Installed
+    # generation ext/slots may itself be a trusted intermediate state link.
+    if not all(hasattr(os, x) for x in ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")):
+        return 1
+    try:
+        root_fd = os.open(
+            SLOTS_ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        )
+    except OSError:
+        return 1
+    try:
+        directory = os.fstat(root_fd)
+        if (not stat.S_ISDIR(directory.st_mode)
+                or directory.st_uid != os.geteuid()
+                or directory.st_mode & 0o022):
+            return 1
+
+        def bound_directory() -> bool:
+            try:
+                current = os.stat(SLOTS_ROOT, follow_symlinks=False)
+            except OSError:
+                return False
+            return (
+                stat.S_ISDIR(current.st_mode)
+                and (directory.st_dev, directory.st_ino, directory.st_uid,
+                     directory.st_mode) ==
+                    (current.st_dev, current.st_ino, current.st_uid,
+                     current.st_mode)
+            )
+
+        entry = name + ".cooldown"
+        flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK | os.O_NOFOLLOW
+        try:
+            fd = os.open(entry, flags, dir_fd=root_fd)
+        except FileNotFoundError:
+            return 0 if bound_directory() else 1
+        except OSError:
+            return 1
+        try:
+            before = os.fstat(fd)
+            if (not stat.S_ISREG(before.st_mode)
+                    or before.st_uid != os.geteuid()
+                    or before.st_mode & 0o022
+                    or before.st_size < 1 or before.st_size > 256):
+                return 1
+            data = os.read(fd, 257)
+            after = os.fstat(fd)
+            observed = os.stat(entry, dir_fd=root_fd, follow_symlinks=False)
+            identity = lambda st: (
+                st.st_dev, st.st_ino, st.st_size, st.st_mode, st.st_uid,
+                st.st_mtime_ns, st.st_ctime_ns,
+            )
+            if (len(data) != before.st_size or identity(before) != identity(after)
+                    or identity(before) != identity(observed)
+                    or not bound_directory()):
+                return 1
+            parts = data.decode("utf-8").strip().split(None, 1)
+            if len(parts) != 2 or not parts[1].strip():
+                return 1
+            value = float(parts[0])
+            if not math.isfinite(value):
+                return 1
+            expiry = int(value)
+            if expiry <= int(time.time()):
+                return 0
+            return 2 if parts[1] == "http_429" else 3
+        except (OSError, ValueError, UnicodeError, OverflowError, IndexError):
+            return 1
+        finally:
+            os.close(fd)
+    finally:
+        os.close(root_fd)
+
+
+def cooldown_info(name: str) -> Optional[Tuple[int, str]]:
+    """Return (expiry_epoch, reason) if an unexpired cooldown exists."""
+    path = _cooldown_path(name)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            line = fh.readline().strip()
+    except OSError:
+        return None
+    if not line:
+        return None
+    parts = line.split(None, 1)
+    try:
+        expiry = int(float(parts[0]))
+    except (ValueError, IndexError):
+        return None
+    reason = parts[1] if len(parts) > 1 else ""
+    now = int(time.time())
+    if expiry <= now:
+        # Observing expired evidence is not authority to unlink it.
+        # Explicit original-owner writer paths retain cleanup custody.
+        return None
+    return expiry, reason
+
+
+def _read_429count(name: str) -> List[int]:
+    """Return sorted list of epoch timestamps of recent 429s on this key."""
+    path = _count_path(name)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            content = fh.read().strip()
+    except OSError:
+        return []
+    if not content:
+        return []
+    try:
+        epochs = [int(float(x)) for x in content.split()]
+    except ValueError:
+        return []
+    return sorted(epochs)
+
+
+def _write_429count(name: str, epochs: List[int]) -> None:
+    """Persist the sorted epoch list for 429 timestamps."""
+    path = _count_path(name)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(str(int(e)) for e in sorted(epochs)) + "\n")
+    os.replace(tmp, path)
+
+
+def _adaptive_429_seconds(name: str) -> int:
+    """Compute adaptive 429 cooldown in seconds for this key.
+    First 429 → 120 s; each further one within 60 min doubles (240, 480, 960);
+    cap 1800 s. Counter resets when 60 min pass with no 429.
+    """
+    now = int(time.time())
+    cutoff = now - 3600
+    epochs = [e for e in _read_429count(name) if e > cutoff]
+    count = len(epochs) + 1  # +1 for the one being recorded now
+    if count == 1:
+        base = 120
+    else:
+        base = 120 * (2 ** (count - 1))
+    return min(base, 1800)
+
+
+def active_count(name: str) -> int:
+    return prune_stale(name)
+
+
+# --- per-account usage eligibility (source job qwen-eligibility-source-01a15e3f-v1) ---
+
+_BAILIAN_USAGE_FILE = "bailian_usage.json"
+
+
+def _usage_unknown() -> dict:
+    """Explicit UNKNOWN closed DATA: no fabricated usage, no fabricated exhaustion."""
+    return {"state": "UNKNOWN", "parked": None, "observed_at": None, "reset_at": None}
+
+
+def _usage_row_for(name, usage):
+    """Select the applicable row for one account name from a usage payload.
+
+    Accepts either the existing document ({"keys": {name: row, ...}}) or the
+    account row itself; anything else maps to no applicable row.
+    """
+    if not isinstance(usage, dict):
+        return None
+    keys_map = usage.get("keys")
+    if isinstance(keys_map, dict):
+        row = keys_map.get(name)
+        return row if isinstance(row, dict) else None
+    return usage
+
+
+def _usage_parse_ts(value):
+    """Timezone-aware ISO-8601 string -> epoch seconds; naive/malformed -> None."""
+    import datetime as _dt
+
+    if not isinstance(value, str) or not value:
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        ts = _dt.datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if ts.tzinfo is None or ts.tzinfo.utcoffset(ts) is None:
+        return None
+    try:
+        return ts.timestamp()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def usage_eligibility(name, usage, now=None) -> dict:
+    """Pure per-account usage eligibility for one Bailian account.
+
+    Returns closed DATA with exactly the keys {"state", "parked", "observed_at",
+    "reset_at"}: state is "CURRENT" or "UNKNOWN", parked is a bool or None, and
+    observed_at/reset_at are epoch seconds or None. Only a fresh, applicable row
+    (literal parked bool, finite pct_7d in 0..100, timezone-aware observed_at and
+    resets_at with 0 <= now - observed_at <= 86400 and 0 < resets_at - now <= 8
+    days) yields CURRENT. Missing, malformed, stale, future or expired facts stay
+    explicit UNKNOWN. Never raises; unknown usage never fabricates exhaustion and
+    never parks an unrelated account.
+    """
+    import math as _math
+
+    if now is None:
+        import time as _time
+
+        now = _time.time()
+    if isinstance(now, bool):
+        return _usage_unknown()
+    try:
+        now = float(now)
+    except Exception:
+        return _usage_unknown()
+    if not _math.isfinite(now):
+        return _usage_unknown()
+    row = _usage_row_for(name, usage)
+    if row is None:
+        return _usage_unknown()
+    parked = row.get("parked")
+    if not isinstance(parked, bool):
+        return _usage_unknown()
+    pct = row.get("pct_7d")
+    if isinstance(pct, bool) or not isinstance(pct, (int, float)):
+        return _usage_unknown()
+    try:
+        pct = float(pct)
+    except (OverflowError, ValueError):
+        return _usage_unknown()
+    if not _math.isfinite(pct) or pct < 0.0 or pct > 100.0:
+        return _usage_unknown()
+    observed = _usage_parse_ts(row.get("observed_at"))
+    reset = _usage_parse_ts(row.get("resets_at"))
+    if observed is None or reset is None:
+        return _usage_unknown()
+    age = now - observed
+    if age < 0.0 or age > 86400.0:
+        return _usage_unknown()
+    remaining = reset - now
+    if remaining <= 0.0 or remaining > 8.0 * 86400.0:
+        return _usage_unknown()
+    return {
+        "state": "CURRENT",
+        "parked": parked,
+        "observed_at": observed,
+        "reset_at": reset,
+    }
+
+
+def read_usage_eligibility(name, *, now=None, path=None) -> dict:
+    """Read one account's usage eligibility from the existing plain usage JSON.
+
+    Defaults to the existing HERE/bailian_usage.json document (same store the
+    pool already reads; no new store, credentials never input). The document is
+    bounded plain nonsecret JSON keyed by account name. Any read or parse
+    failure yields explicit UNKNOWN; this function never raises.
+    """
+    if path is None:
+        import os as _os
+
+        path = _os.path.join(HERE, _BAILIAN_USAGE_FILE)
+    try:
+        if now is None:
+            import time as _time
+
+            now = _time.time()
+        import json as _json
+
+        with open(path, "rb") as fh:
+            raw = fh.read(1048577)
+        if len(raw) > 1048576:
+            return _usage_unknown()
+        doc = _json.loads(raw)
+        # File-backed eligibility must bind the selected account in the
+        # existing document. A bare row is only pure validation DATA.
+        if not isinstance(doc, dict) or not isinstance(doc.get("keys"), dict):
+            return _usage_unknown()
+    except Exception:
+        return _usage_unknown()
+    return usage_eligibility(name, doc, now)
+# --- end per-account usage eligibility ---
+
+
+def usable_names() -> List[str]:
+    """Read-only eligible names, preserving current usage parking.
+
+    Unknown/unsafe and hard-denial cooldowns fail closed. Verified soft 429
+    remains eligible with its reduced cap. Only CURRENT parked=True usage
+    removes another otherwise eligible account; missing/stale data never
+    overrides the stricter local cooldown result.
+    """
+    now = time.time()
+    names = []
+    for name in key_names():
+        if cooldown_rank_readonly(name) not in (0, 2):
+            continue
+        try:
+            info = read_usage_eligibility(name, now=now)
+        except Exception:
+            info = _usage_unknown()
+        if info.get("state") == "CURRENT" and info.get("parked") is True:
+            continue
+        names.append(name)
+    return names
+
+def _effective_cap_for_key(name: str) -> int:
+    """Effective per-key cap: 0 for non-429 cooldown; soft cap for 429 cooldown."""
+    rank = cooldown_rank_readonly(name)
+    cap = current_per_key_cap()
+    if rank in (1, 3):
+        # Unsafe/unreadable evidence is NOT permission to re-admit a possibly
+        # 401/403/402-denied credential. Keep provider access fail-closed.
+        return 0
+    if rank == 0:
+        # Proven absent or expired: ordinary policy cap.
+        return cap
+    # A verified live 429 retains the existing reduced soft-cap policy.
+    pol = load_policy()
+    if not pol.get("soft_cap_on_429", False):
+        return cap
+    soft = _read_soft_cap(name)
+    if soft is None:
+        return cap
+    return max(3, min(cap, soft - 1))
+
+
+def total_cap() -> int:
+    """Sum of effective per-key caps across all keys.
+
+    Keys in 429-cooldown contribute their soft cap (never less than 3).
+    Every usable key contributes at least 3 even during cooldown.
+    """
+    cap = 0
+    for name in key_names():
+        cap += _effective_cap_for_key(name)
+    return cap
+
+
+def _active_count_readonly(name: str) -> int:
+    """Advisory PID-marker count without pruning original-owner state."""
+    directory = _name_dir(name)
+    if not os.path.isdir(directory):
+        return 0
+    cutoff = int(time.time()) - 6 * 3600
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return sys.maxsize
+    count = 0
+    for item in names:
+        try:
+            pid = int(item)
+        except ValueError:
+            continue
+        path = os.path.join(directory, item)
+        try:
+            if (pid > 0 and os.path.isfile(path)
+                    and os.path.getmtime(path) >= cutoff and _pid_alive(pid)):
+                count += 1
+        except OSError:
+            return sys.maxsize
+    return count
+
+
+def next_usable_in() -> int:
+    """Read-only wait hint; never grants, removes cooldowns or prunes PID state.
+
+    Hard-denial wait time is advisory and is read only after strict rank 3.
+    Unknown/unsafe evidence offers no justified restart time.
+    """
+    names = key_names()
+    if not names:
+        return -1
+    now = int(time.time())
+    soonest: Optional[int] = None
+    for name in names:
+        rank = cooldown_rank_readonly(name)
+        if rank == 1:
+            continue
+        if rank == 3:
+            cd = cooldown_info(name)
+            if cd is not None and cd[1] != "http_429":
+                remain = max(1, cd[0] - now)
+                soonest = remain if soonest is None else min(soonest, remain)
+            continue
+        cap = _effective_cap_for_key(name)
+        if cap > 0 and _active_count_readonly(name) < cap:
+            return 0
+    return soonest if soonest is not None else -1
+
+def pick(
+    pid: Optional[int] = None,
+    skip: Optional[List[str]] = None,
+    prefer: Optional[str] = None,
+    require: Optional[str] = None,
+) -> str:
+    """Least-loaded key under its effective per-key cap. Records <pid>.
+
+    `prefer` is a soft preference for unleased callers. `require` restricts
+    selection to the exact outer-lease account; an unavailable account fails
+    before any other account slot is touched. Never prints a key value.
+    """
+    pid = int(pid if pid is not None else os.getppid())
+    if require is not None and not re.fullmatch(r"[A-Za-z0-9._-]+", require):
+        _die("required Bailian account is invalid", 2)
+    skip_set = set(skip or [])
+    extra = os.environ.get("BAILIAN_PICK_SKIP") or ""
+    if extra.strip():
+        skip_set.update(x.strip() for x in extra.split(",") if x.strip())
+    prefer = (prefer or os.environ.get("BAILIAN_PREFER") or os.environ.get("POOL_ACCOUNT") or "").strip()
+    if prefer in skip_set:
+        prefer = ""
+    lock = _with_lock()
+    try:
+        candidates: List[Tuple[int, str]] = []
+        names = key_names()
+        if require is not None:
+            if require not in names:
+                _die(f"REQUIRED_ACCOUNT_UNAVAILABLE account={require} reason=not_configured", 3)
+            if require in skip_set:
+                _die(f"REQUIRED_ACCOUNT_UNAVAILABLE account={require} reason=excluded", 3)
+            names = [require]
+        unavailable_reason = "at_capacity"
+        for name in names:
+            if name in skip_set:
+                continue
+            rank = cooldown_rank_readonly(name)
+            if rank in (1, 3):
+                # Unleased CLI accounts need the same refusal as the broker.
+                # Malformed/unreadable/unsafe evidence is NOT healthy state.
+                unavailable_reason = "cooldown_unverified" if rank == 1 else "cooldown"
+                continue
+            # Recheck strict rank under the incumbent writer lock.
+            eff_cap = _effective_cap_for_key(name)
+            if eff_cap <= 0:
+                unavailable_reason = "cooldown_unverified"
+                continue
+            n = prune_stale(name)
+            if n >= eff_cap:
+                continue
+            candidates.append((n, name))
+        if not candidates:
+            if require is not None:
+                _die(f"REQUIRED_ACCOUNT_UNAVAILABLE account={require} reason={unavailable_reason}", 3)
+            _die("no usable Bailian key (all cooling or at cap)", 3)
+        preferred = [c for c in candidates if prefer and c[1] == prefer]
+        if preferred:
+            name = preferred[0][1]
+        else:
+            candidates.sort(key=lambda t: (t[0], t[1]))
+            name = candidates[0][1]
+        d = _name_dir(name)
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, str(pid))
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(f"{pid} {int(time.time())}\n")
+        return name
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
+
+def release(name: str, pid: int) -> None:
+    path = os.path.join(_name_dir(name), str(int(pid)))
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+_QWEN_FEEDBACK_SCHEMA = "mastermind.qwen_adaptive429_feedback.v1"
+_QWEN_FEEDBACK_POLICY_SOURCE = "bailian_keys.adaptive_http_429"
+_QWEN_FEEDBACK_SOURCES = ("qwen_wrapper_inference", "codex_error_enum")
+
+
+def _write_private_json(path: str, value: Dict[str, Any]) -> bool:
+    """Atomically create one bounded private receipt file; never overwrite."""
+    tmp = path + ".tmp"
+    try:
+        if not os.path.isabs(path) or os.path.lexists(path):
+            return False
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(value, fh, sort_keys=True)
+                fh.write("\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            # link is atomic and refuses an incumbent destination; replace
+            # would overwrite one created after the initial existence check.
+            os.link(tmp, path, follow_symlinks=False)
+            os.unlink(tmp)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def cooldown(name: str, seconds: int, reason: str) -> int:
+    """Write ext/slots/bailian/<name>.cooldown. Returns expiry epoch.
+
+    For reason='http_429', uses adaptive cooldown and records the 429 event.
+    """
+    expiry, _receipt = cooldown_feedback(name, seconds, reason)
+    return expiry
+
+
+def cooldown_feedback(
+    name: str,
+    seconds: int,
+    reason: str,
+    classification_source: str = "qwen_wrapper_inference",
+    receipt_path: Optional[str] = None,
+) -> Tuple[int, Optional[Dict[str, Any]]]:
+    """Record one cooldown and, for reason='http_429', its actual policy receipt.
+
+    The receipt is captured under the SAME lock and from the SAME adaptive 429
+    computation that persists the cooldown file: the observation epoch, the
+    actual adaptive duration, the expiry, the effective soft cap the pool will
+    then see, and the policy flag. No guessed expiry is recomputed and no other
+    event's after-lock result is read. The destination stays a private caller
+    file; a failed write only skips that file, never the protective cooldown,
+    and the returned receipt describes this event whether or not a destination
+    was supplied. `classification_source` is supplied by the caller and states
+    truthfully who classified the 429; this helper never upgrades a wrapper
+    inference into typed or HTTP evidence.
+    """
+    if name not in key_names():
+        _die(f"unknown key name {name!r}", 2)
+    if classification_source not in _QWEN_FEEDBACK_SOURCES:
+        raise ValueError("classification_source_unqualified")
+    reason = " ".join(str(reason).split()) or "unspecified"
+    lock = _with_lock()
+    try:
+        now_epoch = int(time.time())
+        if reason == "http_429":
+            # Compute adaptive duration BEFORE writing the new epoch so the count
+            # reflects only prior events (not this one yet).
+            # Prune old entries first so they don't inflate the count.
+            cutoff = now_epoch - 3600
+            epochs = [e for e in _read_429count(name) if e > cutoff]
+            count = len(epochs) + 1   # +1 for the event being recorded now
+            if count == 1:
+                seconds = 120
+            else:
+                seconds = min(120 * (2 ** (count - 1)), 1800)
+            # Record active count at moment of 429 for soft-cap calculation.
+            active = active_count(name)
+            # Now persist the new epoch to the count file.
+            epochs.append(now_epoch)
+            _write_429count(name, epochs)
+            _write_soft_cap(name, active)
+        else:
+            # Non-429 cooldown: clear any recorded 429 history.
+            _write_429count(name, [])
+            _clear_soft_cap(name)
+
+        seconds = max(1, int(seconds))
+        expiry = now_epoch + seconds
+        path = _cooldown_path(name)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(f"{expiry} {reason}\n")
+        os.replace(tmp, path)
+        receipt = None
+        if reason == "http_429":
+            # Same event, same lock: the effective cap is read from the exact
+            # state this call just persisted, with the pool's own helper.
+            receipt = {
+                "schema": _QWEN_FEEDBACK_SCHEMA,
+                "account": name,
+                "classification_source": classification_source,
+                "classification": "429",
+                "policy_source": _QWEN_FEEDBACK_POLICY_SOURCE,
+                "observed_at": now_epoch,
+                "until_ts": expiry,
+                "duration_seconds": seconds,
+                "soft_cap": _effective_cap_for_key(name),
+                "soft_cap_enabled": bool(load_policy().get("soft_cap_on_429", False)),
+            }
+            if receipt_path is not None:
+                _write_private_json(receipt_path, receipt)
+        return expiry, receipt
+    finally:
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
+
+
+def _soft_cap_path(name: str) -> str:
+    return os.path.join(SLOTS_ROOT, f"{name}.softcap")
+
+
+def _read_soft_cap(name: str) -> Optional[int]:
+    """Active count at time of 429, used to compute soft cap."""
+    path = _soft_cap_path(name)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return int(fh.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _write_soft_cap(name: str, active: int) -> None:
+    path = _soft_cap_path(name)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(f"{active}\n")
+    os.replace(tmp, path)
+
+
+def _clear_soft_cap(name: str) -> None:
+    path = _soft_cap_path(name)
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def _codex_key_value(name: str) -> str:
+    """Load one exact account privately; neither selection nor a new lease.
+
+    The wrapper owns the key slot and broker lease. Recheck the bound account
+    before both preflight and exec so a missing/replaced config cannot start a
+    task with an inherited or empty credential. Never format a config/exec
+    exception: malformed private input must not reach stderr through its repr.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        _die("BAILIAN_CODEX_ACCOUNT_INVALID", 78)
+    if os.environ.get("LANE_LEASED") == "1" and name != os.environ.get("POOL_ACCOUNT"):
+        _die("BAILIAN_CODEX_OUTER_ACCOUNT_MISMATCH", 78)
+    try:
+        value = _key_value(name)
+    except (OSError, ValueError, TypeError, AttributeError, KeyError, SystemExit):
+        _die("BAILIAN_CODEX_KEY_UNAVAILABLE", 75)
+    if not isinstance(value, str) or not value or "\x00" in value:
+        _die("BAILIAN_CODEX_KEY_UNAVAILABLE", 75)
+    return value
+
+
+def status_lines() -> List[str]:
+    pol = load_policy()
+    cap = current_per_key_cap()
+    off = is_offpeak()
+    win = offpeak_window(pol)
+    models = discounted_models(pol)
+    default_model = effective_model()
+    soft_on = pol.get("soft_cap_on_429", False)
+    lines = [
+        f"offpeak={'yes' if off else 'no'} window={win['start']}-{win['end']} {win['tz']} "
+        f"discounted={','.join(models) if models else 'none'} "
+        f"default_model={default_model or 'none'}",
+        f"cap_per_key={cap} per_key_cap={int(pol.get('per_key_cap') or 7)} "
+        f"onpeak_per_key_cap={int(pol.get('onpeak_per_key_cap') or 3)} "
+        f"soft_cap_on_429={'yes' if soft_on else 'no'} "
+        "verify=alibaba_published_schedule",
+    ]
+    usable = 0
+    for name in key_names():
+        active = active_count(name)
+        eff_cap = _effective_cap_for_key(name)
+        cd = cooldown_info(name)
+        epochs = _read_429count(name)
+        now = int(time.time())
+        recent = [e for e in epochs if e > now - 3600]
+        cnt429 = len(recent)
+        if cd is None:
+            cd_s = "cooldown=no"
+            usable += 1
+        else:
+            expiry, reason = cd
+            remain = max(0, expiry - now)
+            cd_s = f"cooldown=yes remain={remain}s expiry={expiry} reason={reason}"
+        lines.append(
+            f"name={name} active={active} cap={cap} eff_cap={eff_cap} "
+            f"cnt429_60min={cnt429} {cd_s}"
+        )
+    lines.append(f"usable={usable} total_cap={total_cap()}")
+    return lines
+
+
+def _item_text(item: Dict[str, Any]) -> str:
+    if not isinstance(item, dict):
+        return ""
+    kind = item.get("type") or ""
+    if kind == "agent_message":
+        return (item.get("text") or "").rstrip() + ("\n" if item.get("text") else "")
+    if kind == "error":
+        msg = item.get("message") or item.get("text") or ""
+        return f"[error] {msg}\n" if msg else ""
+    if kind == "command_execution":
+        cmd = item.get("command") or ""
+        out = item.get("aggregated_output") or ""
+        rc = item.get("exit_code")
+        bits = [f"$ {cmd}".rstrip()]
+        if out:
+            bits.append(out.rstrip())
+        if rc is not None:
+            bits.append(f"(exit {rc})")
+        return "\n".join(bits) + "\n"
+    if kind == "reasoning":
+        return ""
+    text = item.get("text") or item.get("message") or ""
+    return (text.rstrip() + "\n") if text else ""
+
+
+def stream_jsonl(in_f: IO[str], out_f: IO[str], thread_path: str, raw_path: Optional[str] = None) -> Optional[str]:
+    """Filter Codex --json JSONL to plain text. Persist thread/session id."""
+    thread_id = None
+    raw_fh = open(raw_path, "w", encoding="utf-8") if raw_path else None
+    try:
+        for line in in_f:
+            if raw_fh is not None:
+                raw_fh.write(line)
+                raw_fh.flush()
+            s = line.strip()
+            if not s:
+                continue
+            try:
+                ev = json.loads(s)
+            except json.JSONDecodeError:
+                out_f.write(line)
+                out_f.flush()
+                continue
+            if not isinstance(ev, dict):
+                continue
+            et = ev.get("type") or ""
+            tid = ev.get("thread_id") or ev.get("session_id")
+            if isinstance(tid, str) and tid:
+                thread_id = tid
+                if thread_path:
+                    tmp = thread_path + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as tf:
+                        tf.write(tid + "\n")
+                    os.replace(tmp, thread_path)
+            if et == "thread.started":
+                continue
+            if et in ("error", "turn.failed"):
+                err = ev.get("error") if isinstance(ev.get("error"), dict) else {}
+                msg = ev.get("message") or (err or {}).get("message") or ev.get("error") or ""
+                if isinstance(msg, dict):
+                    msg = msg.get("message") or json.dumps(msg)
+                if msg:
+                    out_f.write(str(msg).rstrip() + "\n")
+                    out_f.flush()
+                continue
+            if et == "item.completed":
+                text = _item_text(ev.get("item") or {})
+                if text:
+                    out_f.write(text)
+                    if not text.endswith("\n"):
+                        out_f.write("\n")
+                    out_f.flush()
+                continue
+            payload = ev.get("payload")
+            if isinstance(payload, dict):
+                sid = payload.get("session_id") or payload.get("id")
+                if isinstance(sid, str) and sid and et == "session_meta":
+                    thread_id = sid
+                    if thread_path:
+                        tmp = thread_path + ".tmp"
+                        with open(tmp, "w", encoding="utf-8") as tf:
+                            tf.write(sid + "\n")
+                        os.replace(tmp, thread_path)
+                ptype = payload.get("type")
+                if ptype == "agent_message":
+                    msg = payload.get("message") or payload.get("text") or ""
+                    if msg:
+                        out_f.write(str(msg).rstrip() + "\n")
+                        out_f.flush()
+    finally:
+        if raw_fh is not None:
+            raw_fh.close()
+    return thread_id
+
+
+def cmd_pick(argv: List[str]) -> int:
+    prefer = None
+    require = None
+    rest: List[str] = []
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--require":
+            if i + 1 >= len(argv) or require is not None:
+                _die("usage: pick [--prefer NAME | --require NAME]", 2)
+            require = argv[i + 1]
+            i += 2
+            continue
+        if argv[i] == "--prefer" and i + 1 < len(argv):
+            prefer = argv[i + 1]
+            i += 2
+            continue
+        rest.append(argv[i])
+        i += 1
+    if rest and prefer is None:
+        prefer = rest[0]
+    if require is not None and (prefer is not None or rest):
+        _die("usage: pick [--prefer NAME | --require NAME]", 2)
+    name = pick(prefer=prefer, require=require)
+    print(name)
+    return 0
+
+
+def cmd_env(argv: List[str]) -> int:
+    # Keep an explicit fail-closed response for a mismatched old wrapper. This
+    # command must never read private config or reconstruct the old export.
+    _die("BAILIAN_ENV_EXPORT_RETIRED: use exec-codex", 78)
+    return 78
+
+
+def cmd_check_key(argv: List[str]) -> int:
+    """Private readiness check for the wrapper's existing key-wait loop."""
+    if len(argv) != 1:
+        _die("usage: check-key <name>", 2)
+    _codex_key_value(argv[0])
+    return 0
+
+
+def cmd_exec_codex(argv: List[str]) -> int:
+    """Replace this process with Codex exec; no key in shell/argv/output.
+
+    Only the fixed `codex exec` entry point is supported. PATH, all caller exec
+    arguments, inherited I/O, process identity and the eventual Codex status
+    retain the incumbent wrapper contract. This helper never forks/retries a
+    worker or acquires/releases the wrapper's slots and leases.
+    """
+    if len(argv) < 2 or argv[1] != "--":
+        _die("usage: exec-codex <name> -- <codex exec arguments...>", 2)
+    value = _codex_key_value(argv[0])
+    child_env = os.environ.copy()
+    child_env["BAILIAN_API_KEY"] = value
+    try:
+        os.execvpe("codex", ["codex", "exec", *argv[2:]], child_env)
+    except FileNotFoundError:
+        _die("BAILIAN_CODEX_EXEC_UNAVAILABLE", 127)
+    except OSError:
+        _die("BAILIAN_CODEX_EXEC_REFUSED", 126)
+    except (ValueError, TypeError):
+        _die("BAILIAN_CODEX_EXEC_ENV_INVALID", 78)
+    _die("BAILIAN_CODEX_EXEC_NOT_REPLACED", 126)
+    return 126
+
+
+def cmd_release(argv: List[str]) -> int:
+    if len(argv) < 2:
+        _die("usage: release <name> <pid>", 2)
+    release(argv[0], int(argv[1]))
+    return 0
+
+
+def cmd_cooldown(argv: List[str]) -> int:
+    if len(argv) < 3:
+        _die("usage: cooldown <name> <seconds> <reason>", 2)
+    name, seconds, reason = argv[0], argv[1], " ".join(argv[2:])
+    expiry = cooldown(name, int(seconds), reason)
+    print(f"cooldown name={name} seconds={int(seconds)} expiry={expiry} reason={reason}")
+    return 0
+
+
+def cmd_preflight_slots(argv: List[str]) -> int:
+    """Explicit original-owner release preflight; no provider or key access."""
+    if argv:
+        _die("usage: preflight-slots", 2)
+    try:
+        _ensure_slots()
+    except RuntimeError as exc:
+        # Explicit operator preflight has a bounded diagnostic, not a
+        # full absolute-path-bearing Python traceback.
+        _die(str(exc), 78)
+    print("BAILIAN_SLOTS_ROOT_VERIFIED")
+def cmd_cooldown_receipt(argv: List[str]) -> int:
+    """Cooldown the account AND have THIS helper write its actual adaptive-429
+    policy receipt into a private caller file, under the helper's own lock."""
+    if len(argv) not in (4, 5):
+        _die("usage: cooldown-receipt <name> <seconds> <reason> <receipt-path> [classification-source]", 2)
+    name, seconds, reason, receipt_path = argv[0], argv[1], argv[2], argv[3]
+    classification_source = argv[4] if len(argv) == 5 else "qwen_wrapper_inference"
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        _die("BAILIAN_RECEIPT_ACCOUNT_INVALID", 2)
+    if not os.path.isabs(receipt_path) or os.path.lexists(receipt_path):
+        _die("BAILIAN_RECEIPT_DESTINATION_UNQUALIFIED", 2)
+    # The receipt binds the exact outer lease. Without the original binding
+    # there is no outcome: refuse before any state change, diagnostic only.
+    if os.environ.get("LANE_LEASED") == "1":
+        pool = os.environ.get("POOL_ACCOUNT") or ""
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", pool) or pool != name:
+            _die("BAILIAN_RECEIPT_OUTER_ACCOUNT_MISMATCH", 78)
+    try:
+        seconds_i = int(seconds)
+    except ValueError:
+        _die("BAILIAN_RECEIPT_SECONDS_INVALID", 2)
+    reason = " ".join(reason.split()) or "unspecified"
+    try:
+        expiry, receipt = cooldown_feedback(
+            name, seconds_i, reason, classification_source, receipt_path)
+    except ValueError:
+        _die("BAILIAN_RECEIPT_SOURCE_UNQUALIFIED", 2)
+    print(f"cooldown name={name} seconds={seconds_i} expiry={expiry} reason={reason}")
+    if receipt is not None and os.path.lexists(receipt_path):
+        print("qwen_429_receipt written", file=sys.stderr)
+    else:
+        print("qwen_429_receipt withheld", file=sys.stderr)
+    return 0
+
+
+def cmd_status(argv: List[str]) -> int:
+    for line in status_lines():
+        print(line)
+    return 0
+
+
+def cmd_total_cap(argv: List[str]) -> int:
+    print(total_cap())
+    return 0
+
+
+def cmd_next_usable_in(argv: List[str]) -> int:
+    print(next_usable_in())
+    return 0
+
+
+def cmd_model(argv: List[str]) -> int:
+    print(effective_model(argv[0] if argv else ""))
+    return 0
+
+
+def cmd_stream(argv: List[str]) -> int:
+    """Internal: filter Codex JSONL on stdin. argv: <thread-file> [raw-file]."""
+    if not argv:
+        _die("usage: stream <thread-file> [raw-file]", 2)
+    thread_path = argv[0]
+    raw_path = argv[1] if len(argv) > 1 else None
+    stream_jsonl(sys.stdin, sys.stdout, thread_path, raw_path)
+    return 0
+
+
+def cmd_seconds_until_offpeak(argv: List[str]) -> int:
+    print(seconds_until_next_offpeak())
+    return 0
+
+
+COMMANDS = {
+    "pick": cmd_pick,
+    "env": cmd_env,
+    "check-key": cmd_check_key,
+    "exec-codex": cmd_exec_codex,
+    "release": cmd_release,
+    "cooldown": cmd_cooldown,
+    "cooldown-receipt": cmd_cooldown_receipt,
+    "status": cmd_status,
+    "preflight-slots": cmd_preflight_slots,
+    "total_cap": cmd_total_cap,
+    "next_usable_in": cmd_next_usable_in,
+    "model": cmd_model,
+    "stream": cmd_stream,
+    "seconds_until_offpeak": cmd_seconds_until_offpeak,
+}
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0 if argv else 2
+    cmd = argv[0]
+    if cmd not in COMMANDS:
+        _die(f"unknown command {cmd!r}\n" + (__doc__ or ""), 2)
+    try:
+        return COMMANDS[cmd](argv[1:])
+    except BrokenPipeError:
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import copy
 import json
+import re
 from pathlib import Path
 import sys
 
@@ -19,8 +20,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bridge import execute, Refusal, READ_TOOLS, EDIT_TOOLS, validate_execution_binding
 
 
-def build_server(allow_write=False, allow_prepare=False, *, execution_binding=None):
+def _transport_diagnostic(value):
+    """Validate host-owned informational metadata, not caller authority."""
+    if value is None:
+        return None
+    expected = {"schema", "seat_id", "source_revision", "bridge_sha256"}
+    if type(value) is not dict or set(value) != expected:
+        raise ValueError("TRANSPORT_DIAGNOSTIC_INVALID")
+    if value["schema"] != "mastermind.paper_transport_diagnostic.v1":
+        raise ValueError("TRANSPORT_DIAGNOSTIC_INVALID")
+    for key, pattern in (
+        ("seat_id", r"[a-z0-9][a-z0-9-]{0,47}"),
+        ("source_revision", r"[0-9a-f]{40}"),
+        ("bridge_sha256", r"[0-9a-f]{64}"),
+    ):
+        if type(value[key]) is not str or not re.fullmatch(pattern, value[key]):
+            raise ValueError("TRANSPORT_DIAGNOSTIC_INVALID")
+    return dict(value)
+
+
+def build_server(allow_write=False, allow_prepare=False, *,
+                 execution_binding=None, transport_diagnostic=None):
     execution_binding = validate_execution_binding(execution_binding)
+    transport_diagnostic = _transport_diagnostic(transport_diagnostic)
     from mcp.server.fastmcp import FastMCP
     from mcp.types import ToolAnnotations, CallToolResult, TextContent, ImageContent
 
@@ -29,6 +51,9 @@ def build_server(allow_write=False, allow_prepare=False, *, execution_binding=No
         "A snapshot is a drift guard, not permission, a document revision, or a collaboration lock. "
         "Multiple admitted designers may modify the same file/page across hosts; coordinate by "
         "board/artboard/node target and re-read/re-plan known overlap. "
+        "Default active-file context and exact-file serviceability are separate facts. If paper_inspect "
+        "returns DOCUMENT_UNAVAILABLE but an exact fileId is known, do not declare Paper blocked: call "
+        "paper_read(get_basic_info, {fileId}) once to bootstrap that target snapshot. "
         "Each logical mutation remains on one carrier until reconciled. Never retry EFFECT_UNKNOWN; "
         "reconcile the original operation with the same carrier."
     ))
@@ -50,9 +75,25 @@ def build_server(allow_write=False, allow_prepare=False, *, execution_binding=No
                              coordination_scope="BOARD_ARTBOARD_NODE")
         except Refusal as exc:
             value = {"state": exc.code, "detail": exc.detail, "retry_allowed": False}
+            if action == "status" and exc.code == "DOCUMENT_UNAVAILABLE":
+                # Default active-file lookup failure is narrower than exact-file
+                # serviceability. Keep the refusal typed/error-visible while
+                # making the lawful one-shot bootstrap machine-readable even
+                # when a ChatGPT app is still using an older frozen tool description.
+                value.update({
+                    "context_scope": "DEFAULT_ACTIVE_FILE",
+                    "whole_paper_outage_proven": False,
+                    "exact_target_status": "UNKNOWN",
+                    "next_action_if_file_id_known": "paper_read:get_basic_info(fileId)",
+                    "retry_paper_inspect": False,
+                })
         if execution_binding is not None:
             value = dict(value, execution_binding=dict(execution_binding))
-        bad = value.get("state") not in {None, "CONNECTED", "OBSERVED", "APPLIED_RESPONSE_OBSERVED", "PAPER_READY", "PAPER_READY_READ_ONLY"}
+        if transport_diagnostic is not None:
+            # Append after the guarded bridge has produced its effect receipt.
+            # This never enters snapshot, permission, custody or retry decisions.
+            value = dict(value, transport_diagnostic=dict(transport_diagnostic))
+        bad = value.get("state") not in {None, "CONNECTED", "OBSERVED", "APPLIED_RESPONSE_OBSERVED", "RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION", "PAPER_READY", "PAPER_READY_READ_ONLY"}
         # Formatting is downstream of effect observation. A missing reply or
         # malformed image must not erase the operation's canonical receipt.
         value = copy.deepcopy(value)
@@ -91,7 +132,7 @@ def build_server(allow_write=False, allow_prepare=False, *, execution_binding=No
 
     @server.tool(annotations=read_annotations)
     async def paper_inspect() -> CallToolResult:
-        """Inspect Paper availability and the active file; obtain a fresh snapshot guard."""
+        """Inspect Paper availability and default active-file context.\n\n        DOCUMENT_UNAVAILABLE means the default active context could not be resolved; it does\n        not prove Paper or an exact target file is unavailable. If the intended fileId is\n        already known, call paper_read with tool="get_basic_info" and that fileId once. A\n        successful explicit read returns the target guard needed for prepare/edit.\n        """
         return await asyncio.to_thread(run, "status")
 
     @server.tool(annotations=read_annotations)
@@ -143,11 +184,12 @@ def build_server(allow_write=False, allow_prepare=False, *, execution_binding=No
             Other admitted sessions may modify disjoint targets in the same Paper file or page.
             Known same-board overlap should use disjoint node targets plus fresh re-read/re-plan;
             this operation/carrier fence is not a file-wide or page-wide lease.
-            File creation/open transitions, native exports, node deletion and token deletion are intentionally not permitted.
+            Use this existing paper_edit action for guarded file management too: create_file accepts a known cloneFileId or sourceFileId plus name; rename_resource accepts a known exact file resourceId plus name. All require the source-file snapshot and operation ID. A new-file reply requires destination readback. Raw open transitions, native exports, node deletion and token deletion remain blocked.
             """
             return await asyncio.to_thread(run, "edit", tool=tool, arguments=arguments,
                                            expected_snapshot=expected_snapshot,
                                            operation_id=operation_id, allow_write=True)
+
     return server
 
 

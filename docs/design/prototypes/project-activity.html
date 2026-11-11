@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Mastermind — Project activity design reference</title>
+  <style>
+    :root { --canvas:#080808; --panel:#121212; --raised:#191919; --line:#292929; --text:#f3f3f3; --secondary:#b8b8b8; --muted:#949494; --champagne:#c9b99b; --sage:#a8c2ad; --rose:#dea4a5; --steel:#a7b4c2; --ui:Inter,ui-sans-serif,system-ui,sans-serif; --display:Manrope,var(--ui); }
+    * { box-sizing:border-box; }
+    [hidden] { display:none !important; }
+    body { margin:0; background:var(--canvas); color:var(--text); font:16px/1.5 var(--ui); }
+    button,input,select,textarea { font:inherit; color:inherit; }
+    button,a,input,select,textarea { -webkit-tap-highlight-color:transparent; }
+    button,select { cursor:pointer; }
+    button,a { touch-action:manipulation; }
+    button:disabled { cursor:default; opacity:.48; }
+    a { color:var(--champagne); text-underline-offset:4px; }
+    button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible { outline:2px solid var(--champagne); outline-offset:4px; }
+    h1,h2,h3,p { margin:0; }
+    h1,h2,h3 { font-family:var(--display); font-weight:500; letter-spacing:-.025em; }
+    button { border:0; background:none; padding:0; }
+    .reference { max-width:1248px; padding:40px 32px 56px; margin:auto; }
+    .reference-head { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; padding-bottom:28px; }
+    .eyebrow { color:var(--champagne); font-size:12px; letter-spacing:.1em; text-transform:uppercase; }
+    h1 { font-size:32px; line-height:1.2; margin-top:8px; }
+    .reference-note { color:var(--muted); font-size:14px; max-width:390px; }
+    .controls { display:flex; gap:16px; align-items:end; flex-wrap:wrap; border:1px solid var(--line); border-radius:14px; padding:20px; margin-bottom:28px; }
+    .control { display:flex; flex-direction:column; gap:8px; min-width:200px; flex:1; }
+    label,.control-label { color:var(--secondary); font-size:13px; }
+    select { min-height:44px; padding:0 36px 0 12px; background:var(--panel); border:1px solid var(--line); border-radius:8px; width:100%; }
+    .toggle { display:flex; align-items:center; gap:10px; min-height:44px; white-space:nowrap; }
+    input[type=checkbox] { width:18px; height:18px; accent-color:var(--champagne); }
+    .button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; border:1px solid var(--line); border-radius:10px; padding:10px 16px; text-decoration:none; font-size:14px; font-weight:500; }
+    .button:hover { background:var(--raised); }
+    .button.primary { color:#15130f; background:var(--champagne); border-color:var(--champagne); }
+    .button.primary:hover { background:#d7c9b0; }
+    .text-button { color:var(--secondary); min-height:44px; padding:8px; font-size:14px; }
+    .text-button:hover { color:var(--text); }
+    .app { border:1px solid var(--line); border-radius:18px; overflow:hidden; }
+    .app-bar { display:flex; justify-content:space-between; gap:16px; align-items:center; min-height:64px; padding:12px 28px; border-bottom:1px solid var(--line); font-size:14px; color:var(--secondary); }
+    .preview-tag { font-size:12px; color:var(--muted); white-space:nowrap; }
+    .workspace { max-width:936px; padding:40px 28px 28px; margin:auto; }
+    .project-head { display:flex; justify-content:space-between; gap:20px; align-items:center; padding-bottom:28px; }
+    .project-head h2 { font-size:34px; line-height:1.2; }
+    .project-head p { color:var(--secondary); margin-top:10px; }
+    .project-actions { display:flex; gap:10px; flex-shrink:0; }
+    .status-strip { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 0 24px; }
+    .status { display:flex; align-items:center; gap:8px; color:var(--sage); font-size:14px; }
+    .status-dot { width:7px; height:7px; flex-shrink:0; border-radius:50%; background:currentColor; }
+    .status.still { color:var(--secondary); }
+    .status.partial { color:var(--champagne); }
+    .user-message { margin-left:auto; width:fit-content; max-width:76%; padding:16px 20px; border-radius:18px 18px 6px 18px; background:var(--raised); }
+    .response { padding:24px 0; }
+    .author { font-size:14px; color:var(--champagne); margin-bottom:12px; }
+    .response h3 { font-size:28px; line-height:1.3; }
+    .response > p { color:var(--secondary); margin-top:12px; }
+    .work-card { border:1px solid var(--line); border-radius:16px; background:var(--panel); padding:24px; }
+    .card-head { display:flex; gap:16px; justify-content:space-between; align-items:center; }
+    .card-title { font-size:18px; font-weight:500; }
+    .support { color:var(--secondary); font-size:14px; margin-top:4px; }
+    .team-map { display:flex; align-items:center; gap:20px; padding:24px 0; min-height:174px; }
+    .coordinator { display:flex; align-items:center; gap:12px; width:170px; flex-shrink:0; }
+    .avatar { width:40px; height:40px; border:1px solid #464138; border-radius:12px; display:flex; align-items:center; justify-content:center; color:var(--champagne); background:#1d1b17; font-size:16px; flex-shrink:0; }
+    .person-name { font-size:15px; font-weight:500; }
+    .person-state { color:var(--secondary); font-size:13px; }
+    .connections { width:56px; height:112px; flex-shrink:0; color:#454545; overflow:visible; }
+    .task-stack { display:flex; flex-direction:column; gap:18px; min-width:0; flex:1; }
+    .task { display:flex; align-items:center; gap:12px; min-height:44px; }
+    .task-dot { width:8px; height:8px; border:1px solid var(--secondary); border-radius:50%; flex-shrink:0; }
+    .task-dot.active { background:var(--sage); border-color:var(--sage); }
+    .coverage { color:var(--secondary); font-size:14px; padding-bottom:20px; }
+    .card-footer { display:flex; justify-content:space-between; align-items:center; gap:12px; padding-top:8px; border-top:1px solid var(--line); }
+    .mode { color:var(--secondary); font-size:13px; }
+    .card-footer .text-button { color:var(--champagne); white-space:nowrap; }
+    .result-head { display:flex; gap:16px; align-items:center; }
+    .artifact-icon { width:56px; height:56px; border:1px solid var(--line); border-radius:12px; display:flex; align-items:center; justify-content:center; color:var(--champagne); flex-shrink:0; }
+    .result-summary { margin-top:20px; font-size:16px; }
+    .result-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding-top:20px; }
+    .result-actions .text-button { margin-left:auto; }
+    .state-card { min-height:216px; display:flex; flex-direction:column; justify-content:center; gap:12px; }
+    .state-card .button { width:fit-content; margin-top:8px; }
+    .state-card p { color:var(--secondary); max-width:540px; }
+    .state-symbol { color:var(--champagne); width:28px; height:28px; }
+    .composer { margin-top:40px; background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:18px; }
+    .composer label { display:block; margin-bottom:8px; }
+    textarea { width:100%; min-height:72px; resize:vertical; background:transparent; border:0; color:var(--text); padding:2px 0; line-height:1.5; }
+    textarea::placeholder { color:var(--muted); }
+    .composer-foot { display:flex; justify-content:space-between; align-items:center; gap:16px; padding-top:8px; }
+    .draft-basis { color:var(--champagne); font-size:13px; max-width:65%; }
+    .composer-message { color:var(--secondary); font-size:14px; padding-top:12px; }
+    .disclosure { border-top:1px solid var(--line); margin-top:32px; padding-top:24px; }
+    .disclosure:focus { outline:none; }
+    .disclosure-head { display:flex; align-items:center; gap:16px; justify-content:space-between; margin-bottom:20px; }
+    .disclosure h3 { font-size:24px; }
+    .detail-context { color:var(--secondary); margin:8px 0 20px; }
+    .detail-goal { padding:20px; background:var(--panel); border:1px solid var(--line); border-radius:14px; margin-bottom:24px; }
+    .detail-goal small { display:block; color:var(--muted); margin-bottom:6px; }
+    .detail-list { border-top:1px solid var(--line); }
+    .detail-list button { width:100%; min-height:72px; display:flex; gap:16px; align-items:center; justify-content:space-between; text-align:left; border-bottom:1px solid var(--line); padding:12px 0; }
+    .detail-list strong { display:block; font-weight:500; }
+    .detail-list small { display:block; color:var(--secondary); font-size:14px; margin-top:2px; }
+    .detail-list .chevron { color:var(--muted); font-size:24px; }
+    .detail-content { padding:0 0 16px; }
+    .detail-content > .text-button { padding-left:0; margin-bottom:16px; }
+    .detail-content h4 { font-size:18px; font-weight:500; margin:0 0 12px; }
+    .detail-content p { color:var(--secondary); max-width:640px; }
+    dl { display:flex; flex-direction:column; gap:0; margin:0; }
+    dl > div { display:flex; gap:24px; padding:14px 0; border-bottom:1px solid var(--line); }
+    dt { width:150px; color:var(--muted); flex-shrink:0; font-size:14px; }
+    dd { margin:0; overflow-wrap:anywhere; font-size:14px; }
+    .history-row { display:flex; justify-content:space-between; gap:24px; padding:16px 0; border-bottom:1px solid var(--line); }
+    .history-row span { color:var(--secondary); font-size:14px; }
+    #preview-copy { white-space:pre-wrap; overflow-wrap:anywhere; }
+    .build-notes { margin-top:24px; color:var(--secondary); font-size:14px; }
+    .build-notes summary { cursor:pointer; min-height:44px; display:flex; align-items:center; color:var(--champagne); }
+    .build-notes p { max-width:800px; margin-top:10px; }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+    @media(max-width:700px) {
+      .reference { padding:24px 16px 40px; }
+      .reference-head { align-items:flex-start; flex-direction:column; gap:14px; }
+      h1 { font-size:28px; }
+      .controls { padding:16px; gap:12px; }
+      .control { min-width:100%; }
+      .controls > .button { flex:1; }
+      .app-bar { padding:12px 20px; }
+      .app-bar .preview-tag { display:none; }
+      .workspace { padding:24px 20px 20px; }
+      .project-head { flex-direction:column; align-items:flex-start; gap:20px; padding-bottom:20px; }
+      .project-head h2 { font-size:28px; }
+      .project-actions { width:100%; }
+      .project-actions .button { flex:1; }
+      .status-strip { padding-bottom:20px; }
+      .user-message { max-width:92%; padding:14px 16px; }
+      .response h3 { font-size:24px; }
+      .work-card { padding:16px; }
+      .card-head { align-items:flex-start; gap:8px; }
+      .card-head .text-button { font-size:0; width:44px; flex-shrink:0; }
+      .card-head .text-button::after { content:'↗'; font-size:20px; }
+      .team-map { gap:10px; min-height:180px; }
+      .coordinator { flex-direction:column; align-items:flex-start; gap:8px; width:78px; }
+      .connections { width:24px; }
+      .task { gap:8px; }
+      .person-name { font-size:14px; }
+      .person-state { font-size:12px; }
+      .card-footer { gap:8px; align-items:flex-start; padding-top:12px; }
+      .mode { padding-top:10px; font-size:12px; }
+      .card-footer .text-button { font-size:12px; padding:8px 0; }
+      .result-actions { flex-direction:column; align-items:stretch; }
+      .result-actions .text-button { margin-left:0; }
+      .composer { margin-top:28px; padding:16px; }
+      .composer-foot { align-items:flex-end; }
+      .draft-basis { max-width:48%; font-size:12px; }
+      .detail-list small { font-size:13px; }
+      dl > div { flex-direction:column; gap:4px; }
+      .history-row { flex-direction:column; gap:6px; }
+    }
+    @media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto !important; animation:none !important; transition:none !important; } }
+  </style>
+</head>
+<body>
+  <main class="reference">
+    <header class="reference-head">
+      <div><p class="eyebrow">Mastermind · Design reference</p><h1>Work you can follow.</h1></div>
+      <p class="reference-note">Choose an independent example scenario. Inspect the interaction; no runtime is connected.</p>
+    </header>
+    <section class="controls" aria-label="Design reference controls">
+      <div class="control"><label for="scenario">Scenario</label><select id="scenario">
+        <option value="active">Working · qualified task facts</option>
+        <option value="result">Result returned · ready to inspect</option>
+        <option value="stale">Stale observation</option>
+        <option value="disconnected">Read disconnected</option>
+        <option value="partial">Partial task coverage</option>
+        <option value="unreadable">Returned result cannot be read</option>
+        <option value="unknown">Original effect unknown</option>
+        <option value="loading">Reading activity</option>
+        <option value="empty">No runs returned by this reader</option>
+      </select></div>
+      <div class="control"><label for="execution-mode">Qualified execution mode</label><select id="execution-mode">
+        <option value="attended">Attended session</option>
+        <option value="durable">Durable service</option>
+        <option value="unavailable">Mode unavailable</option>
+      </select></div>
+      <label class="toggle"><input type="checkbox" id="reduce-motion">Reduce motion</label>
+      <button type="button" class="button primary" id="apply-observation">Load scenario</button>
+    </section>
+
+    <section class="app" aria-label="Project workspace design">
+      <div class="app-bar"><span>Projects / Mastermind OS</span><span class="preview-tag">Design preview</span></div>
+      <div class="workspace">
+        <header class="project-head">
+          <div><h2 id="project-title" tabindex="-1">Mastermind OS</h2><p>One clear daily workflow.</p></div>
+          <div class="project-actions">
+            <button type="button" class="button" id="files-button" data-open="files" aria-controls="files-panel" aria-expanded="false">Files</button>
+            <button type="button" class="button" id="details-button" data-open="details" aria-controls="details-panel" aria-expanded="false">Project details</button>
+          </div>
+        </header>
+        <div class="status-strip">
+          <div class="status" id="status"><span class="status-dot" aria-hidden="true"></span><span id="status-label">Working</span></div>
+          <button type="button" class="text-button" data-open="history" aria-controls="history-panel" aria-expanded="false">Recent runs</button>
+        </div>
+        <div class="user-message">Make this simpler to use. Keep the main journeys clear.</div>
+        <div class="response">
+          <div class="author">Mastermind</div>
+          <h3 id="response-title">The team is checking the layouts.</h3>
+          <p id="response-description">Desktop and mobile, with one shared design.</p>
+        </div>
+
+        <section class="work-card" id="activity-card" aria-label="Observed team activity">
+          <header class="card-head">
+            <div><div class="card-title" id="activity-title">Checking the layouts</div><p class="support" id="activity-subtitle">Sol coordinates the team.</p></div>
+            <button type="button" class="text-button" data-open="activity" aria-label="View activity for this run" aria-controls="activity-panel" aria-expanded="false">View activity ↗</button>
+          </header>
+          <div class="team-map">
+            <div class="coordinator"><div class="avatar" aria-hidden="true">S</div><div><div class="person-name">Sol</div><div class="person-state" id="coordinator-state">Coordinating</div></div></div>
+            <svg class="connections" viewBox="0 0 56 112" preserveAspectRatio="none" aria-hidden="true"><path d="M0 56 H24 V24 H56" fill="none" stroke="currentColor" stroke-width="1.3"/><path id="review-edge" d="M24 56 V88 H56" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+            <div class="task-stack">
+              <div class="task"><span class="task-dot active" id="design-dot" aria-hidden="true"></span><div><div class="person-name">Design</div><div class="person-state" id="design-state">Checking screens</div></div></div>
+              <div class="task" id="review-task"><span class="task-dot" aria-hidden="true"></span><div><div class="person-name">Review</div><div class="person-state" id="review-state">Waiting for designs</div></div></div>
+            </div>
+          </div>
+          <p class="coverage" id="coverage" hidden>Some task details are unavailable.</p>
+          <footer class="card-footer"><span class="mode" id="mode-consequence">Keep this session open</span><button type="button" class="text-button" data-open="history" aria-controls="history-panel" aria-expanded="false">Recent runs →</button></footer>
+        </section>
+
+        <section class="work-card" id="result-card" aria-label="Returned result" hidden>
+          <div class="result-head">
+            <div class="artifact-icon"><svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true"><rect x="3.5" y="5.5" width="23" height="19" rx="2" stroke="currentColor"/><path d="M4 10h22M8 14h13M8 18h8M12 25v4m-5 0h15" stroke="currentColor"/><rect x="24" y="15" width="9" height="16" rx="2" fill="var(--panel)" stroke="currentColor"/><path d="M26 18h5m-4 10h3" stroke="currentColor"/></svg></div>
+            <div><div class="card-title">Project workspace</div><p class="support">Desktop + mobile designs</p></div>
+          </div>
+          <p class="result-summary">See who is working and what comes next.</p>
+          <p class="support">Team activity, a clearer result path, and the conversation in one place.</p>
+          <div class="result-actions">
+            <a class="button primary" href="https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-H-0" target="_blank" rel="noopener noreferrer" id="open-designs">Open designs ↗</a>
+            <button type="button" class="button" id="continue-result">Continue from result</button>
+            <button type="button" class="text-button" data-open="activity" aria-controls="activity-panel" aria-expanded="false">Run details</button>
+          </div>
+        </section>
+
+        <section class="work-card state-card" id="state-card" aria-label="Activity state" hidden>
+          <svg class="state-symbol" viewBox="0 0 28 28" fill="none" aria-hidden="true"><rect x="4" y="4" width="20" height="20" rx="6" stroke="currentColor"/><path d="M14 8v7m0 4v1" stroke="currentColor" stroke-linecap="round"/></svg>
+          <div class="card-title" id="state-title"></div><p id="state-description"></p>
+          <button type="button" class="button" id="state-action"></button><p class="support" id="state-feedback" hidden></p>
+        </section>
+
+        <form class="composer" id="composer">
+          <label for="draft">Your message</label>
+          <textarea id="draft" placeholder="Ask a question or describe the next step…" aria-describedby="draft-basis"></textarea>
+          <div class="composer-foot"><span class="draft-basis" id="draft-basis">Unsent draft</span><button type="submit" class="button" id="preview-draft" disabled>Preview draft</button></div>
+          <p class="composer-message" id="composer-message" hidden></p>
+        </form>
+
+        <section class="disclosure" id="details-panel" tabindex="-1" aria-labelledby="details-heading" hidden>
+          <header class="disclosure-head"><h3 id="details-heading">Project details</h3><button type="button" class="text-button" data-close>Back to conversation</button></header>
+          <div id="details-overview">
+            <p class="detail-context">Mastermind OS</p><div class="detail-goal"><small>Goal</small>Make the daily experience simpler.</div>
+            <div class="detail-list">
+              <button type="button" data-section="direction"><span><strong>Direction</strong><small>Accepted direction and earlier revisions</small></span><span class="chevron" aria-hidden="true">›</span></button>
+              <button type="button" data-section="plan"><span><strong>Plan</strong><small>Objective and delivery plan</small></span><span class="chevron" aria-hidden="true">›</span></button>
+              <button type="button" data-section="work"><span><strong>Work controls</strong><small>Pause and inspect project work</small></span><span class="chevron" aria-hidden="true">›</span></button>
+              <button type="button" data-section="instructions"><span><strong>Standing instructions</strong><small>Instructions supplied for this project</small></span><span class="chevron" aria-hidden="true">›</span></button>
+              <button type="button" data-section="permissions"><span><strong>Project permissions</strong><small>Existing permission records</small></span><span class="chevron" aria-hidden="true">›</span></button>
+              <button type="button" data-section="history"><span><strong>History and sources</strong><small>Conversations, journal and evidence</small></span><span class="chevron" aria-hidden="true">›</span></button>
+            </div>
+          </div>
+          <section class="detail-content" id="owner-direction" tabindex="-1" aria-label="Inspect Direction" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Direction</h4><p>Make everyday work easier. Keep the key journeys clear.</p></section>
+          <section class="detail-content" id="owner-plan" tabindex="-1" aria-label="Inspect Plan" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Plan</h4><p>Review the layouts. Refine the interactions. Inspect the returned work.</p></section>
+          <section class="detail-content" id="owner-work" tabindex="-1" aria-label="Inspect Work controls" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Work controls</h4><p>This reference has no connected project controls.</p></section>
+          <section class="detail-content" id="owner-instructions" tabindex="-1" aria-label="Inspect Standing instructions" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Standing instructions</h4><p>Keep the conversation primary. Preserve drafts and useful evidence.</p></section>
+          <section class="detail-content" id="owner-permissions" tabindex="-1" aria-label="Inspect Project permissions" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>Project permissions</h4><p>No permission records are supplied in this example.</p></section>
+          <section class="detail-content" id="owner-history" tabindex="-1" aria-label="Inspect History and sources" hidden><button type="button" class="text-button" data-section-back>← Back to project details</button><h4>History and sources</h4><p><span id="owner-history-summary">Two recent example runs are available. Earlier history may exist.</span> <a href="https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-E-0" target="_blank" rel="noopener noreferrer">Open the design contract ↗</a></p></section>
+        </section>
+        <section class="disclosure" id="files-panel" tabindex="-1" aria-labelledby="files-heading" hidden><header class="disclosure-head"><h3 id="files-heading">Files</h3><button type="button" class="text-button" data-close>Back to conversation</button></header><a class="button" href="https://app.paper.design/file/01M3NRCX55B452A12819WNE1RH/p-H-0" target="_blank" rel="noopener noreferrer">Project workspace · Paper ↗</a></section>
+        <section class="disclosure" id="activity-panel" tabindex="-1" aria-labelledby="activity-heading" hidden><header class="disclosure-head"><h3 id="activity-heading">Run details</h3><button type="button" class="text-button" data-close>Back to conversation</button></header><dl><div><dt>Project</dt><dd>Mastermind OS · example-project</dd></div><div id="inspector-operation-row"><dt>Original request</dt><dd>example-operation-17</dd></div><div id="inspector-run-row"><dt>Run</dt><dd>example-run-17</dd></div><div><dt>Observation</dt><dd id="inspector-state">Working · 14:32 UTC</dd></div><div id="inspector-mode-row"><dt>Execution mode</dt><dd id="inspector-mode">Attended session</dd></div><div><dt>Coverage</dt><dd id="inspector-coverage">Coordinator and two tasks supplied by this example observation</dd></div></dl></section>
+        <section class="disclosure" id="history-panel" tabindex="-1" aria-labelledby="history-heading" hidden><header class="disclosure-head"><h3 id="history-heading">Recent runs</h3><button type="button" class="text-button" data-close>Back to conversation</button></header><p class="support" id="history-read-status">Two example records shown. Earlier history may exist.</p><div class="history-row" id="history-current-row"><div>Daily workflow review<p class="support">example-run-17</p></div><span id="history-current-state">Working</span></div><div class="history-row" id="history-previous-row"><div>Navigation review<p class="support">example-run-12</p></div><span>Result returned · 7 Nov</span></div></section>
+        <section class="disclosure" id="preview-panel" tabindex="-1" aria-labelledby="preview-heading" hidden><header class="disclosure-head"><h3 id="preview-heading">Draft preview</h3><button type="button" class="text-button" data-close>Back to your draft</button></header><p id="preview-copy"></p><p class="support" id="preview-context"></p><p class="support">This reference stops at preview. It does not submit work.</p></section>
+      </div>
+    </section>
+    <details class="build-notes"><summary>Interaction and build contract ↓</summary><p>Each scenario is an independent fixture, not the next event in a run. Production must keep read quality separate from the retained run/result payload. A failed refresh after a returned result retains that result; it does not revert to working. The unknown-request fixture has no current run identity, but a real uncertain effect must retain any identity already established.</p><p>A changed working/result scenario demonstrates one 180 ms reveal. Production animates only an observed material change. Settled, stale, disconnected and unknown states rest. Reloading an unchanged scenario has no animation or announcement. Reduced motion preserves every fact.</p><p>Team identities and task states are fixtures here. Production must use existing qualified owner data, with a root-only fallback when task facts are absent. Recent runs uses the existing reader, capped at eight original-principal project runs; it is not complete history.</p><p>Continue from result opens an unsent draft. An existing draft is never overwritten. The production preview/submission owner must supply and revalidate the complete parent witness; one new self-root follows the verified result. Unknown original effects use the original reconciliation path, with no resend.</p><p>Files and Details remain after the mounted composer. Their owner sections remain mounted while navigating. Back/Escape returns to the exact available opener. Refresh preserves focus while its target remains available; a disappearing or disabled target returns focus to the project heading. <a href="https://github.com/mastermindx-market-intelligence/Mastermind/blob/design/paper-workflow-audit-20261108-44569e75/docs/design/PAPER_WORKFLOW_AUDIT_2026_11_08.md" target="_blank" rel="noopener noreferrer">Read the implementation and proof matrix ↗</a></p></details>
+    <div class="sr-only" id="announcement" role="status" aria-live="polite" aria-atomic="true"></div>
+  </main>
+  <script>
+    'use strict';
+    const $ = id => document.getElementById(id);
+    // BEGIN PRESENTATION MODEL — no DOM, transport or authority decisions.
+    const states = {
+      active:{label:'Working', title:'The team is checking the layouts.', description:'Desktop and mobile, with one shared design.', kind:'activity', quality:'current'},
+      result:{label:'Result returned', title:'The layouts are ready to review.', description:'Open the screens, then choose what comes next.', kind:'result', quality:'current'},
+      stale:{label:'Stale observation', title:'Activity needs a refresh.', description:'Last observed working at 14:32 UTC.', kind:'activity', quality:'stale'},
+      disconnected:{label:'Read disconnected', title:'Activity could not be refreshed.', description:'The last observation is kept. The worker’s current state is unknown.', kind:'activity', quality:'disconnected'},
+      partial:{label:'Partial activity', title:'Some activity is unavailable.', description:'The known task is shown; other task details are missing.', kind:'activity', quality:'partial'},
+      unreadable:{label:'Result returned', title:'The result cannot be opened.', description:'The run returned a result, but its content is unavailable.', kind:'state', quality:'unavailable', cardTitle:'Result unavailable', cardDescription:'Try reading the existing result again. The completed run stays unchanged.', action:'Try reading result'},
+      unknown:{label:'Original effect unknown', title:'Checking the original request.', description:'Inspect the original request before deciding what happens next.', kind:'state', quality:'unknown', cardTitle:'Original request retained', cardDescription:'The original operation is the reference for reconciliation.', action:'Inspect original request'},
+      loading:{label:'Reading activity', title:'Reading this project’s activity.', description:'Waiting for an observation from the existing reader.', kind:'state', quality:'loading', cardTitle:'No current observation yet', cardDescription:'Work status will appear when the read returns.', action:''},
+      empty:{label:'No runs returned', title:'No recent runs were returned.', description:'This reader has no runs to show for this project.', kind:'state', quality:'empty', cardTitle:'Recent runs is empty', cardDescription:'This result does not describe activity outside the reader’s coverage.', action:'Inspect reader coverage'}
+    };
+    const modes = {attended:'Keep this session open', durable:'Continues after you close the app', unavailable:'Execution mode unavailable'};
+    const modeLabels = {attended:'Attended session',durable:'Durable service',unavailable:'Mode unavailable'};
+    function describeObservation(state, mode) {
+      if (!states[state] || !modes[mode]) throw new Error('Unknown example observation');
+      const data = states[state];
+      const retained = state === 'stale' || state === 'disconnected';
+      const completed = state === 'result' || state === 'unreadable';
+      const hasRun = !['loading','empty','unknown'].includes(state);
+      const currentConsequence = state === 'active' || state === 'partial';
+      const consequence = currentConsequence ? modes[mode] : retained ? 'Last observed: ' + modes[mode] : '';
+      const historyCurrent = hasRun;
+      const historyPrevious = !['loading','empty'].includes(state);
+      const historyCount = Number(historyCurrent) + Number(historyPrevious);
+      const historyRunState = completed ? 'Result returned' : retained ? 'Last observed working' : 'Working';
+      const historyNote = state === 'empty' ? 'No runs returned by this reader. Earlier history may exist.'
+        : state === 'loading' ? 'Reading recent runs. No current records yet.'
+        : state === 'unknown' ? 'One earlier example run retained. The current request effect is unknown.'
+        : retained ? 'Two retained observations. Current execution states are not confirmed.'
+        : 'Two example records shown. Earlier history may exist.';
+      const inspectorTitle = state === 'unknown' ? 'Original request' : hasRun ? 'Run details' : 'Reader coverage';
+      const inspectorMode = hasRun ? (retained ? 'Last observed: ' : completed ? 'Recorded for completed run: ' : '') + modeLabels[mode] : '';
+      const inspectorObservation = state === 'unknown' ? 'Effect not established'
+        : state === 'empty' || state === 'loading' ? data.label
+        : (retained ? 'Last observed working' : completed ? 'Result returned' : 'Working') + (completed ? ' · 14:36 UTC' : ' · 14:32 UTC');
+      const coverage = state === 'partial' ? 'Coordinator and one task available; other task details missing'
+        : state === 'unknown' ? 'Original operation retained; no run identity is asserted'
+        : !hasRun ? historyNote : retained ? 'Retained source observation; current execution is not established'
+        : 'Qualified example observation; earlier project history may exist';
+      return {
+        data, consequence, hasRun, showOperation:hasRun || state === 'unknown',
+        historyCurrent, historyPrevious, historyCount, historyRunState, historyNote,
+        inspectorTitle, inspectorMode, inspectorObservation, coverage,
+        canContinue:state === 'result', canAnimate:state === 'active' || state === 'result',
+        announcement:data.label + '.' + (consequence ? ' ' + consequence + '.' : '')
+      };
+    }
+    // END PRESENTATION MODEL
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let current = {state:'active',mode:'attended'};
+    let disclosure = null, disclosureOpener = null, selectedSection = null, sectionOpener = null;
+    let draftParent = null;
+    const reduced = () => media.matches || $('reduce-motion').checked;
+    const announce = text => { if ($('announcement').textContent !== text) $('announcement').textContent = text; };
+    const stopMotion = () => document.getAnimations().forEach(animation => animation.cancel());
+    function setMotionPreference() {
+      document.documentElement.dataset.reducedMotion = String(reduced());
+      if (reduced()) stopMotion();
+    }
+    media.addEventListener('change', setMotionPreference);
+    $('reduce-motion').addEventListener('change', setMotionPreference);
+    function resetDetails(focusReturn) {
+      document.querySelectorAll('.detail-content').forEach(panel => panel.hidden = true);
+      $('details-overview').hidden = false;
+      selectedSection = null;
+      if (focusReturn && sectionOpener) sectionOpener.focus();
+    }
+    function openPanel(name, opener) {
+      document.querySelectorAll('.disclosure').forEach(panel => panel.hidden = true);
+      document.querySelectorAll('[data-open]').forEach(button => button.setAttribute('aria-expanded', String(button.dataset.open === name)));
+      disclosure = name; disclosureOpener = opener;
+      const panel = $(name + '-panel'); panel.hidden = false; panel.focus();
+    }
+    function closePanel() {
+      if (!disclosure) return;
+      $(disclosure + '-panel').hidden = true;
+      if (disclosure === 'details') resetDetails(false);
+      document.querySelectorAll('[data-open]').forEach(button => button.setAttribute('aria-expanded','false'));
+      disclosure = null;
+      if (disclosureOpener && disclosureOpener.isConnected && !disclosureOpener.closest('[hidden]')) disclosureOpener.focus();
+      else $('project-title').focus();
+    }
+    document.querySelectorAll('[data-open]').forEach(button => button.addEventListener('click', () => {
+      if (disclosure === button.dataset.open) closePanel();
+      else openPanel(button.dataset.open, button);
+    }));
+    document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', closePanel));
+    document.querySelectorAll('[data-section]').forEach(button => button.addEventListener('click', () => {
+      selectedSection = button.dataset.section; sectionOpener = button;
+      $('details-overview').hidden = true;
+      document.querySelectorAll('.detail-content').forEach(panel => panel.hidden = panel.id !== 'owner-' + selectedSection);
+      $('owner-' + selectedSection).focus();
+    }));
+    document.querySelectorAll('[data-section-back]').forEach(button => button.addEventListener('click', () => resetDetails(true)));
+    document.querySelectorAll('.disclosure').forEach(panel => panel.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.target.closest('input,textarea,[contenteditable=true]')) return;
+      event.preventDefault(); event.stopPropagation();
+      if (disclosure === 'details' && selectedSection) resetDetails(true); else closePanel();
+    }));
+    function render(animate) {
+      const previouslyFocused = document.activeElement;
+      const view = describeObservation(current.state,current.mode);
+      const data = view.data;
+      stopMotion();
+      $('status-label').textContent = data.label;
+      $('status').className = 'status' + (data.quality === 'current' ? '' : data.quality === 'partial' ? ' partial' : ' still');
+      $('response-title').textContent = data.title; $('response-description').textContent = data.description;
+      $('activity-card').hidden = data.kind !== 'activity';
+      $('result-card').hidden = data.kind !== 'result';
+      $('state-card').hidden = data.kind !== 'state';
+      $('state-card').setAttribute('aria-busy',String(current.state === 'loading'));
+      $('activity-title').textContent = data.quality === 'current' ? 'Checking the layouts' : data.quality === 'partial' ? 'Known activity' : 'Last observed activity';
+      $('activity-subtitle').textContent = data.quality === 'current' ? 'Sol coordinates the team.' : 'Observation recorded at 14:32 UTC.';
+      $('coordinator-state').textContent = ['stale','disconnected'].includes(current.state) ? 'Last observed' : 'Coordinating';
+      $('design-state').textContent = ['stale','disconnected'].includes(current.state) ? 'Last observed working' : 'Checking screens';
+      $('design-dot').className = 'task-dot' + (data.quality === 'current' ? ' active' : '');
+      $('review-task').hidden = current.state === 'partial';
+      $('review-edge').setAttribute('visibility',current.state === 'partial' ? 'hidden' : 'visible');
+      $('review-state').textContent = ['stale','disconnected'].includes(current.state) ? 'Last observed waiting' : 'Waiting for designs';
+      $('coverage').hidden = !['partial','stale','disconnected'].includes(current.state);
+      $('coverage').textContent = current.state === 'partial' ? 'Some task details are unavailable.' : current.state === 'stale' ? 'This observation is no longer current.' : 'A failed read does not mean the worker stopped.';
+      $('mode-consequence').textContent = view.consequence;
+      $('state-title').textContent = data.cardTitle || ''; $('state-description').textContent = data.cardDescription || '';
+      $('state-action').textContent = data.action || ''; $('state-action').hidden = !data.action;
+      $('state-feedback').hidden = true;
+      $('activity-heading').textContent = view.inspectorTitle;
+      $('inspector-operation-row').hidden = !view.showOperation;
+      $('inspector-run-row').hidden = !view.hasRun;
+      $('inspector-mode-row').hidden = !view.inspectorMode;
+      $('inspector-state').textContent = view.inspectorObservation;
+      $('inspector-mode').textContent = view.inspectorMode;
+      $('inspector-coverage').textContent = view.coverage;
+      $('history-current-row').hidden = !view.historyCurrent;
+      $('history-previous-row').hidden = !view.historyPrevious;
+      $('history-current-state').textContent = view.historyRunState;
+      $('history-read-status').textContent = view.historyNote;
+      $('owner-history-summary').textContent = view.historyNote;
+      if (draftParent && !view.canContinue) {
+        $('draft-basis').textContent = 'Prior result needs verification';
+        if (disclosure === 'preview') {
+          $('preview-panel').dataset.qualified = 'false';
+          $('preview-heading').textContent = 'Preview needs verification';
+          $('preview-context').textContent = 'The prior result no longer qualifies. Your draft is kept.';
+        }
+      }
+      document.documentElement.dataset.observation = current.state;
+      if (previouslyFocused && previouslyFocused !== document.body &&
+          (!previouslyFocused.isConnected || previouslyFocused.closest('[hidden]') || previouslyFocused.matches(':disabled'))) {
+        $('project-title').focus({preventScroll:true});
+      }
+      if (animate && !reduced() && view.canAnimate) {
+        const card = data.kind === 'result' ? $('result-card') : $('activity-card');
+        card.animate([{opacity:.65,transform:'translateY(4px)'},{opacity:1,transform:'translateY(0)'}],{duration:180,easing:'cubic-bezier(.2,.8,.2,1)',iterations:1});
+      }
+    }
+    $('apply-observation').addEventListener('click', () => {
+      const next = {state:$('scenario').value,mode:$('execution-mode').value};
+      if (next.state === current.state && next.mode === current.mode) return;
+      current = next; render(true);
+      announce(describeObservation(current.state,current.mode).announcement);
+    });
+    $('state-action').addEventListener('click', () => {
+      if (current.state === 'unknown' || current.state === 'empty') openPanel('activity',$('state-action'));
+      else { $('state-feedback').hidden = false; $('state-feedback').textContent = 'The result is still unavailable. The original run is retained.'; announce($('state-feedback').textContent); }
+    });
+    $('draft').addEventListener('input', () => {
+      $('preview-draft').disabled = !$('draft').value.trim();
+      $('composer-message').hidden = true;
+      if (!$('draft').value.trim()) { draftParent = null; $('draft-basis').textContent = 'Unsent draft'; }
+    });
+    $('continue-result').addEventListener('click', () => {
+      if (!describeObservation(current.state,current.mode).canContinue) return;
+      if ($('draft').value.trim()) {
+        $('composer-message').hidden = false;
+        $('composer-message').textContent = 'Your draft is kept. Finish or clear it before continuing from this result.';
+        announce($('composer-message').textContent); $('draft').focus(); return;
+      }
+      draftParent = 'example-run-17 / example-result-17';
+      $('draft').value = 'Refine the project workspace designs.';
+      $('draft-basis').textContent = 'Continuing from Daily workflow review';
+      $('preview-draft').disabled = false; $('composer-message').hidden = true; $('draft').focus();
+      announce('Follow-up draft opened. Nothing has been submitted.');
+    });
+    $('composer').addEventListener('submit', event => {
+      event.preventDefault(); if (!$('draft').value.trim()) return;
+      if (draftParent && !describeObservation(current.state,current.mode).canContinue) {
+        $('composer-message').hidden = false; $('composer-message').textContent = 'This result must be verified again before a follow-up preview. Your draft is kept.';
+        announce($('composer-message').textContent); return;
+      }
+      $('preview-panel').dataset.qualified = 'true';
+      $('preview-heading').textContent = 'Draft preview';
+      $('preview-copy').textContent = $('draft').value;
+      if (draftParent) $('draft-basis').textContent = 'Continuing from Daily workflow review';
+      $('preview-context').textContent = draftParent ? 'New follow-up · Based on Daily workflow review' : 'Unsent draft · no prior result attached.';
+      openPanel('preview',$('preview-draft'));
+    });
+    setMotionPreference(); render(false);
+  </script>
+</body>
+</html>

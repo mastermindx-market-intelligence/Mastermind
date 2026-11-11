@@ -1,0 +1,26 @@
+{
+  "base_commit": "b278155a9974e75fa60363589ca142a1a305ab75",
+  "scope": "Two-file historical validator compatibility, no collector effects",
+  "files": {
+    "proposal-green.log": "2f5f234f2d71cb9c3f3685995c479e3b79521b9ada1300fcca74b0e39c4dbd56",
+    "root-acceptance.json": "3ea2544291330b1c52052828adc0be0791c9391f6f7c8b05b20ba70a0ffe96c0",
+    "test_collector_validator_compat.py": "c8ad65366baab24a160918856629d1e86eb6ac06d5a50fd6f5e670b449a78762",
+    "review-receipt.json": "a803e9c308624ef7e217a193de95e5017a9af9683526c7d7b3492ba2b72bdfd2",
+    "COLLECTOR_VALIDATOR_COMPAT.patch": "5ab29de43f84bcd9ed68d2d3ee8552c2212c1e9af5d89f8d0665071b39467345",
+    "artifact_delivery.py.base": "7c86494e58707d7d8f5f9d72e11e2eb84055caad6a14727ada27a6b0d5e1a1a6",
+    "original_delivery_collector.py": "0781977b0f5f6b7c493211e4a2f7e03d6938fb2ac53c65788f5afc5937dca3a7",
+    "artifact_reader.py": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469",
+    "artifact_delivery.py": "2e0a03387f78bf98dba5c1fe42b7ee2ee99d99888624eea79c7f0f889683c3a6",
+    "original_delivery_collector.py.base": "a866741df19d6fad5a4bf4dbdfcf8bdeb67e158723dee37c23bc6390cbd78f95",
+    "causal-binding-red.log": "6f9709b47ac2fde2606d9fd2e7c3dc67debffacc064eac95415d4491005476e0",
+    "artifact_production.py": "e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf",
+    "artifact_production.c0f17c3e.before.py": "c0f17c3e489c83bdb369d6c1ea9adc2757f4732f515cbc76e230fe154a61f67e"
+  },
+  "reviews": [
+    "original RV parent independent review a803e9c3",
+    "original RV root review",
+    "Fabric Integration /root/retained_recovery_coordination full diff review"
+  ],
+  "accepted_evidence": "16 inert tests retained; installed fresh-load qualification next",
+  "refusals_preserved": true
+}

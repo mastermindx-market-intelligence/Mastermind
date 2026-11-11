@@ -268,6 +268,24 @@ async def test_effectful_broker_operations_become_effect_unknown_after_write(
     assert calls == 1
 
 
+async def test_generation_identity_can_be_bound_once_after_runtime_allocation(paths: _Paths) -> None:
+    client = RemoteWorkerBrokerClient(
+        _binding(paths),
+        IDENTITY,
+        allowed_operations={"ohf-reconcile"},
+    )
+    client.bind_payload_identity(**_BOUND_PAYLOAD_IDENTITY)
+    assert client.bound_payload_identity == _BOUND_PAYLOAD_IDENTITY
+    # Re-observing the exact same Runtime identity is idempotent; a different
+    # generation is a retarget and must refuse before any network request.
+    client.bind_payload_identity(**_BOUND_PAYLOAD_IDENTITY)
+    with pytest.raises(TransportValidationError, match="already bound"):
+        client.bind_payload_identity(
+            session_epoch_id="EPOCH-OTHER",
+            process_generation_id="GEN-OTHER",
+        )
+
+
 async def test_generation_identity_requires_explicit_binding(paths: _Paths) -> None:
     client = RemoteWorkerBrokerClient(
         _binding(paths),

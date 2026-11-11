@@ -1,0 +1,50 @@
+{
+  "schema": "mastermind.network_budget_prospective_patch.v1",
+  "base": "fbce94601823718a22466a99aeea692679266a16",
+  "policy_source": {
+    "repository": "mastermindx-market-intelligence/macro",
+    "pull_request": 10483,
+    "comment_id": 6579445312
+  },
+  "root": "01a12a2a-d7e1-77b1-9262-ab593179dd13",
+  "status": "PROSPECTIVE_SOURCE_ONLY_NOT_ACTIVE_PACKAGING_OR_INSTALLATION",
+  "files": {
+    "ops/native_fabric/quota_continuity/candidate/fabric_operator_owner.py": {
+      "base_source": "ops/native_fabric/quota_continuity/source/fabric_operator_owner.py",
+      "preimage_sha256": "a9d5adfa90d081b460a6ad751a705add7ca0387e66266d9cea37eb99c8c09d04",
+      "postimage_sha256": "3e51ede6903c8405f8020d7059a1ad11ef42c6c93a8366d1bc256fdf42c856f2",
+      "patch": "fabric_operator_owner.py.patch",
+      "patch_sha256": "c52746fbf3292338b21044a8e5f5945ccb82de6401fcb4955652769cdb3166f9",
+      "bytes": 24815
+    },
+    "ops/native_fabric/quota_continuity/candidate/fabric_task.py": {
+      "base_source": "ops/native_fabric/quota_continuity/candidate/fabric_task.py",
+      "preimage_sha256": "48699864fdc9e96d12f51ff22fef74bd438a2fcd500f25c836e6fab2dea728d7",
+      "postimage_sha256": "2749b4f1a8cefe438253700d3235d657c62218b1a502845345281ba448685c15",
+      "patch": "fabric_task.py.patch",
+      "patch_sha256": "37de09c0e2d48587f4c64fce6a20f30076c2f837eeafdb7a3724d6fcac42af85",
+      "bytes": 86028
+    }
+  },
+  "prospective_identity_review": {
+    "path": "ops/native_fabric/quota_continuity/candidate/fabric_operator_owner.py",
+    "sha256": "3e51ede6903c8405f8020d7059a1ad11ef42c6c93a8366d1bc256fdf42c856f2",
+    "sites": [
+      [
+        242,
+        81,
+        84,
+        "int",
+        "660"
+      ],
+      [
+        397,
+        85,
+        88,
+        "int",
+        "660"
+      ]
+    ]
+  },
+  "scope": "Nested authenticated grant denial plus honestly named manual negative-only containment; no affirmative token cap/accounting and no omitted/foreign-root attribution."
+}

@@ -1,0 +1,286 @@
+{
+  "schema": "soxx.walk_forward_economic_cycle_failure.v22",
+  "spec_sha256": "fbbc3443976dbe4e8307cc1f03e0a3a8bb3bee54f686a1a76b40a59efe74fd84",
+  "cohort": [
+    {
+      "symbol": "SOXX",
+      "episodes": 11,
+      "source5_sha256": "96c230426f6be2900011d861d4596b3b5857045f8a3f4aa7b3d2342db9a4a7f6",
+      "missing_source5": 0
+    },
+    {
+      "symbol": "SMH",
+      "episodes": 8,
+      "source5_sha256": "225312fa6480c79436eaa30d5407831237b9b466eb2c093b42f601559ac4b363",
+      "missing_source5": 0
+    },
+    {
+      "symbol": "QQQ",
+      "episodes": 7,
+      "source5_sha256": "55a2d5cecd115aee6bad691bfa07c46531c55a7e6f73144da508c51f9920d8e2",
+      "missing_source5": 0
+    },
+    {
+      "symbol": "AMD",
+      "episodes": 8,
+      "source5_sha256": "f84884c3ccb1439519dfb2f4669696316bfa4f21b0ddfa3d38d4a76911d95f28",
+      "missing_source5": 0
+    },
+    {
+      "symbol": "NVDA",
+      "episodes": 6,
+      "source5_sha256": "cabcb9cf15469c1dfcc89ba1a867dd065369300a3aff1be03ef568dc5c5a0c73",
+      "missing_source5": 0
+    },
+    {
+      "symbol": "MU",
+      "episodes": 8,
+      "source5_sha256": "1ff0903520dbad6c92c1dfd01f7000a31e19d8515445810d647407c3ed49b51f",
+      "missing_source5": 0
+    },
+    {
+      "symbol": "INTC",
+      "episodes": 8,
+      "source5_sha256": "c1e2fdc528f0ab84a88c04eaa92f423a8f4f48fb0c9e8e5d7abf11588db3eb4c",
+      "missing_source5": 0
+    },
+    {
+      "symbol": "AMAT",
+      "episodes": 9,
+      "source5_sha256": "1bf4dc87dd4b717b4880eca3d4abab21966441ffcd986db1a8769ca583678657",
+      "missing_source5": 0
+    },
+    {
+      "symbol": "LRCX",
+      "episodes": 6,
+      "source5_sha256": "8cecf61b86124e8373be3594044210025ba401e157b0a1a0c6fec977b9c87b79",
+      "missing_source5": 0
+    },
+    {
+      "symbol": "KLAC",
+      "episodes": 10,
+      "source5_sha256": "fa7cda5fc3210243399b11e197e0a8955492fc265f505d8f7e55b807cc6ba8fd",
+      "missing_source5": 7
+    },
+    {
+      "symbol": "XLV",
+      "episodes": 4,
+      "source5_sha256": "4c60db2a668fa0d77fce3b117edc9f2cd524e5137b658e76ae4906e2c99e7195",
+      "missing_source5": 0
+    },
+    {
+      "symbol": "XLE",
+      "episodes": 6,
+      "source5_sha256": "34799b1948dc40ae185c138ef37486f7f802f011f1e11b1aa091e8eb3d1e30c9",
+      "missing_source5": 0
+    }
+  ],
+  "results": [
+    {
+      "group": "all",
+      "checkpoint_h": 0.5,
+      "all_original_episodes": 91,
+      "forecastable_eligible": 56,
+      "calendar_weeks_with_forecasts": 17,
+      "trades_exited_by_model": 17,
+      "helped_original_losers": 12,
+      "harmed_original_winners": 5,
+      "model_economic_lift_on_test_episodes_pp": -0.151245,
+      "naive_close_below_entry_same_episodes_pp": 0.056796,
+      "baseline_always_hold_same_episodes_pp": 0.0,
+      "hindsight_oracle_upper_bound_same_episodes_pp": 0.939221,
+      "model_economic_lift_per_all_original_opportunities_pp": -0.093074,
+      "model_leave_biggest_benefit_out_mean": -0.20564,
+      "no_forecast_original_opportunities": 35,
+      "model_week_block95": [
+        -1.010339,
+        0.457752
+      ],
+      "naive_week_block95": [
+        -0.609502,
+        0.563143
+      ]
+    },
+    {
+      "group": "new_semis",
+      "checkpoint_h": 0.5,
+      "all_original_episodes": 47,
+      "forecastable_eligible": 27,
+      "calendar_weeks_with_forecasts": 13,
+      "trades_exited_by_model": 9,
+      "helped_original_losers": 7,
+      "harmed_original_winners": 2,
+      "model_economic_lift_on_test_episodes_pp": -0.160181,
+      "naive_close_below_entry_same_episodes_pp": 0.207145,
+      "baseline_always_hold_same_episodes_pp": 0.0,
+      "hindsight_oracle_upper_bound_same_episodes_pp": 1.280562,
+      "model_economic_lift_per_all_original_opportunities_pp": -0.092019,
+      "model_leave_biggest_benefit_out_mean": -0.275591,
+      "no_forecast_original_opportunities": 20,
+      "model_week_block95": [
+        -1.300129,
+        0.785178
+      ],
+      "naive_week_block95": [
+        -0.48348,
+        0.817719
+      ]
+    },
+    {
+      "group": "inspected",
+      "checkpoint_h": 0.5,
+      "all_original_episodes": 34,
+      "forecastable_eligible": 22,
+      "calendar_weeks_with_forecasts": 9,
+      "trades_exited_by_model": 3,
+      "helped_original_losers": 3,
+      "harmed_original_winners": 0,
+      "model_economic_lift_on_test_episodes_pp": 0.23908,
+      "naive_close_below_entry_same_episodes_pp": 0.000867,
+      "baseline_always_hold_same_episodes_pp": 0.0,
+      "hindsight_oracle_upper_bound_same_episodes_pp": 0.568053,
+      "model_economic_lift_per_all_original_opportunities_pp": 0.154699,
+      "model_leave_biggest_benefit_out_mean": 0.143843,
+      "no_forecast_original_opportunities": 12,
+      "model_week_block95": [
+        0.0,
+        0.686055
+      ],
+      "naive_week_block95": [
+        -0.601452,
+        0.32251
+      ]
+    },
+    {
+      "group": "sector_controls",
+      "checkpoint_h": 0.5,
+      "all_original_episodes": 10,
+      "forecastable_eligible": 7,
+      "calendar_weeks_with_forecasts": 7,
+      "trades_exited_by_model": 5,
+      "helped_original_losers": 2,
+      "harmed_original_winners": 3,
+      "model_economic_lift_on_test_episodes_pp": -1.343515,
+      "naive_close_below_entry_same_episodes_pp": -0.347342,
+      "baseline_always_hold_same_episodes_pp": 0.0,
+      "hindsight_oracle_upper_bound_same_episodes_pp": 0.789145,
+      "model_economic_lift_per_all_original_opportunities_pp": -0.940461,
+      "model_leave_biggest_benefit_out_mean": -1.988684,
+      "no_forecast_original_opportunities": 3,
+      "model_week_block95": [
+        -3.864265,
+        0.720944
+      ],
+      "naive_week_block95": [
+        -3.04839,
+        1.531996
+      ]
+    },
+    {
+      "group": "all",
+      "checkpoint_h": 3.0,
+      "all_original_episodes": 91,
+      "forecastable_eligible": 34,
+      "calendar_weeks_with_forecasts": 13,
+      "trades_exited_by_model": 6,
+      "helped_original_losers": 3,
+      "harmed_original_winners": 3,
+      "model_economic_lift_on_test_episodes_pp": -0.197953,
+      "naive_close_below_entry_same_episodes_pp": 0.040674,
+      "baseline_always_hold_same_episodes_pp": 0.0,
+      "hindsight_oracle_upper_bound_same_episodes_pp": 0.611026,
+      "model_economic_lift_per_all_original_opportunities_pp": -0.073961,
+      "model_leave_biggest_benefit_out_mean": -0.28618,
+      "no_forecast_original_opportunities": 57,
+      "model_week_block95": [
+        -0.631717,
+        0.105203
+      ],
+      "naive_week_block95": [
+        -0.289303,
+        0.335978
+      ]
+    },
+    {
+      "group": "new_semis",
+      "checkpoint_h": 3.0,
+      "all_original_episodes": 47,
+      "forecastable_eligible": 11,
+      "calendar_weeks_with_forecasts": 7,
+      "trades_exited_by_model": 1,
+      "helped_original_losers": 1,
+      "harmed_original_winners": 0,
+      "model_economic_lift_on_test_episodes_pp": 0.13196,
+      "naive_close_below_entry_same_episodes_pp": 0.189241,
+      "baseline_always_hold_same_episodes_pp": 0.0,
+      "hindsight_oracle_upper_bound_same_episodes_pp": 0.976873,
+      "model_economic_lift_per_all_original_opportunities_pp": 0.030884,
+      "model_leave_biggest_benefit_out_mean": 0.0,
+      "no_forecast_original_opportunities": 36,
+      "model_week_block95": [
+        0.0,
+        0.395879
+      ],
+      "naive_week_block95": [
+        -0.02765,
+        0.728676
+      ]
+    },
+    {
+      "group": "inspected",
+      "checkpoint_h": 3.0,
+      "all_original_episodes": 34,
+      "forecastable_eligible": 17,
+      "calendar_weeks_with_forecasts": 7,
+      "trades_exited_by_model": 1,
+      "helped_original_losers": 0,
+      "harmed_original_winners": 1,
+      "model_economic_lift_on_test_episodes_pp": -0.34033,
+      "naive_close_below_entry_same_episodes_pp": 0.075199,
+      "baseline_always_hold_same_episodes_pp": 0.0,
+      "hindsight_oracle_upper_bound_same_episodes_pp": 0.222707,
+      "model_economic_lift_per_all_original_opportunities_pp": -0.170165,
+      "model_leave_biggest_benefit_out_mean": -0.361601,
+      "no_forecast_original_opportunities": 17,
+      "model_week_block95": [
+        -0.913517,
+        0.0
+      ],
+      "naive_week_block95": [
+        0.0,
+        0.20185
+      ]
+    },
+    {
+      "group": "sector_controls",
+      "checkpoint_h": 3.0,
+      "all_original_episodes": 10,
+      "forecastable_eligible": 6,
+      "calendar_weeks_with_forecasts": 6,
+      "trades_exited_by_model": 4,
+      "helped_original_losers": 2,
+      "harmed_original_winners": 2,
+      "model_economic_lift_on_test_episodes_pp": -0.399394,
+      "naive_close_below_entry_same_episodes_pp": -0.329518,
+      "baseline_always_hold_same_episodes_pp": 0.0,
+      "hindsight_oracle_upper_bound_same_episodes_pp": 1.040544,
+      "model_economic_lift_per_all_original_opportunities_pp": -0.239636,
+      "model_leave_biggest_benefit_out_mean": -1.021979,
+      "no_forecast_original_opportunities": 4,
+      "model_week_block95": [
+        -2.162726,
+        1.294064
+      ],
+      "naive_week_block95": [
+        -1.677696,
+        0.689142
+      ]
+    }
+  ],
+  "regular_session_only": true,
+  "training_scope": "only earlier market weeks, \u226520 eligible rows and \u22656 distinct earlier weeks",
+  "source_price_PIT_verified": false,
+  "model_originated_sizing_allowed": false,
+  "hindsight_oracle_is_not_tradable": true,
+  "selection_note": "Two predeclared stages are not independently held-out and are highly correlated. No extra model variants selected."
+}

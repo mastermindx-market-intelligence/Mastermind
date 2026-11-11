@@ -1,0 +1,76 @@
+{
+  "schema": "mastermind.fabric_final_protected_composition.v1",
+  "status": "SOURCE_QUALIFIED_NOT_DEPLOYED",
+  "qualified_return_merge": "3ac0ba258ed8536e69cbfcdecc0c75b474372fa0",
+  "protected_base": "320611cbd7eca66af86a09d0c6f7622f229bdf73",
+  "procedure_pin": "e37dc82f070fd391e29f0dbd0bf46b022166beea",
+  "procedure_compatibility": "No changed AGENTS/CLAUDE/docs/sol_skills through this protected base",
+  "conflict_resolution": {
+    "head": "3ac0ba258ed8536e69cbfcdecc0c75b474372fa0",
+    "protected": "320611cbd7eca66af86a09d0c6f7622f229bdf73",
+    "file": "integrations/studio_direct_mcp/private_service_pin_enrollment.py",
+    "conflict_preimage_sha256": "33f925d5be5669c831ed66e4b1a7317957df08f2ad90dc9d62329b30330173df",
+    "postimage_sha256": "1e1f5950fc57b6301b63569fa825f1ee2bdb9265f5dd6cf94c0566127887da9e",
+    "postimage_blob": "81cee792e23bf63f25e5cea0a47be49b95e8f151",
+    "decision": "Retain protected _c4_publisher_native_context and c4_publisher argument; retain qualified return forward_original argument and original authentication; merge both keyword parameters. No guard relaxation."
+  },
+  "focused_proofs": [
+    {
+      "report": "mastermind-protected-studio-v1.json",
+      "returncode": 0,
+      "seconds": 46.43,
+      "named_testcases": 305,
+      "junit_total": 570,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log_sha256": "d6d0d4c08ce2a71262d5c35f9df2f5f31c92e75365164edb723c6250bd21b739",
+      "xml_sha256": "fe86abd891d9e5621bcfa36d4806623c2fbd61ba675702811ee50c631bb199cc"
+    },
+    {
+      "report": "mastermind-protected-identity-v1.json",
+      "returncode": 0,
+      "seconds": 14.865,
+      "named_testcases": 203,
+      "junit_total": 203,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "log_sha256": "22a580bf3eae5b81637785a52a6b19ddfece4633ab6dc2923175803d5192cd91",
+      "xml_sha256": "de3c4c3c630c5e4ebb46b2933d6e3a753830eb871826d83d2a134571dc5c0981"
+    }
+  ],
+  "native_payload_delta_from_qualified_return": [],
+  "prior_composition_report": "review_evidence/fabric_application/final-return-composition-20261107.json",
+  "macro_runtime_pair": "a577dbbf605474f97bbafa4ceeb0daf841292421",
+  "macro_ci_only_successor": "e85fcf2248f52a8e25a9c850ab3ebd047555c75a",
+  "remaining": [
+    "exact published-head required CI",
+    "protected merge",
+    "rebuild exact protected release provenance",
+    "native publication and selection",
+    "original C3/J continuity reconciliation",
+    "qualified service enrollment and VPS deployment",
+    "actual consumer acceptance"
+  ],
+  "diff_self_check": {
+    "inherited_formatting": [
+      {
+        "path": "integrations/hermes_qualification/workspace_oauth_privacy/fixtures/hermes_constants.py.source",
+        "blob": "7c00d84a32c21de3afd5713c3ce3cc29f8d960e9",
+        "reason": "Exact protected source/patch bytes; preserve upstream fixture and unified-diff context formatting"
+      },
+      {
+        "path": "integrations/hermes_qualification/workspace_oauth_privacy/guard.patch",
+        "blob": "db2234d36549fa774d5eaf76c47bcb90b8aae92a",
+        "reason": "Exact protected source/patch bytes; preserve upstream fixture and unified-diff context formatting"
+      },
+      {
+        "path": "tests/test_hermes_workspace_oauth.py",
+        "blob": "8c94d6e2a85d8c153bea4109884d867af0259fa4",
+        "reason": "Exact protected source/patch bytes; preserve upstream fixture and unified-diff context formatting"
+      }
+    ],
+    "all_other_changed_paths_returncode": 0
+  }
+}

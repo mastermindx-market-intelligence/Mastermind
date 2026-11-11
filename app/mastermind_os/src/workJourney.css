@@ -1,0 +1,283 @@
+/* Namespaced layout for workJourney components
+   (ProjectWorkDetail / ProjectEvidence / ProjectJournal).
+   Layout only: reuses shared app classes (card, section-title, muted,
+   empty, segmented, badge) and existing tokens. No palette, no literal
+   colors, no colored container edges are defined here. */
+
+.mm-work-journey {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  min-width: 0;
+  font-family: var(--font-ui);
+}
+
+.mm-work-journey__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.mm-work-journey__title {
+  margin: 0;
+}
+
+.mm-work-journey__answer {
+  margin: 0;
+  font-family: var(--font-display);
+  overflow-wrap: anywhere;
+}
+
+.mm-work-journey__caveat,
+.mm-work-journey__note {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mm-work-journey__columns,
+.mm-work-journey__evcols {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: var(--sp-5);
+  align-items: start;
+  min-width: 0;
+}
+
+.mm-work-journey__evcols {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.mm-work-journey__main,
+.mm-work-journey__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.mm-work-journey__block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.mm-work-journey__blocktitle {
+  margin: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mm-work-journey__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-6);
+  min-width: 0;
+}
+
+.mm-work-journey__kv {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+  min-width: 0;
+}
+
+.mm-work-journey__kvpair {
+  display: contents;
+}
+
+.mm-work-journey__kv dt {
+  color: var(--muted);
+  min-width: 0;
+}
+
+.mm-work-journey__kv dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mm-work-journey__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.mm-work-journey__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: 44px;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+}
+
+.mm-work-journey__row:hover {
+  background: var(--hover);
+}
+
+.mm-work-journey__row[aria-pressed="true"] {
+  border-color: var(--focus);
+  background: var(--hover);
+}
+
+.mm-work-journey__rowmain {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mm-work-journey__seg {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.mm-work-journey__segbtn,
+.mm-work-journey__btn {
+  min-height: 44px;
+  padding: 0 var(--sp-4);
+  font: inherit;
+  color: inherit;
+  background: var(--raised);
+  border: 1px solid var(--control-border);
+  border-radius: var(--r-btn);
+  cursor: pointer;
+  min-width: 0;
+}
+
+.mm-work-journey__segbtn:hover,
+.mm-work-journey__btn:hover {
+  background: var(--hover);
+}
+
+.mm-work-journey__segbtn[aria-pressed="true"] {
+  border-color: var(--focus);
+  background: var(--hover);
+}
+
+.mm-work-journey__btn {
+  align-self: flex-start;
+}
+
+.mm-work-journey__actions {
+  min-width: 0;
+}
+
+.mm-work-journey__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.mm-work-journey__details {
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-panel);
+  min-width: 0;
+}
+
+.mm-work-journey__details > summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+  color: var(--text);
+}
+
+.mm-work-journey__details[open] > summary {
+  margin-bottom: var(--sp-3);
+}
+
+.mm-work-journey__continuity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  min-width: 0;
+}
+
+.mm-work-journey__tuple > summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.mm-work-journey__tuple[open] > summary {
+  margin-bottom: var(--sp-2);
+}
+
+.mm-work-journey__ladder {
+  margin: 0;
+  padding-inline-start: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.mm-work-journey__ladder li {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.mm-work-journey__row:focus-visible,
+.mm-work-journey__segbtn:focus-visible,
+.mm-work-journey__btn:focus-visible,
+.mm-work-journey__details > summary:focus-visible,
+.mm-work-journey__tuple > summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Light-mode materials via the existing shell theme attribute:
+   same tokens, only a modest token-colored shadow. */
+.shell[data-theme="light"] .mm-work-journey__card,
+.shell[data-theme="light"] .mm-work-journey__details {
+  background: var(--panel);
+  border-color: var(--border);
+  box-shadow: 0 1px 2px var(--border);
+}
+
+@media (max-width: 760px) {
+  .mm-work-journey__columns,
+  .mm-work-journey__evcols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.mm-work-journey:lang(zh) .mm-work-journey__blocktitle { letter-spacing: normal; text-transform: none; }
+
+.mm-work-journey__facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); }
+.mm-work-journey__facts h3 { margin: 0 0 var(--sp-2); color: var(--muted); font-size: inherit; font-weight: 500; }
+.mm-work-journey__facts p { margin: 0; overflow-wrap: anywhere; }
+.mm-work-journey__side .mm-work-journey__facts { grid-template-columns: repeat(2,minmax(0,1fr)); }
+@media(max-width:760px) {
+  .mm-work-journey__card { padding: var(--sp-5); }
+  .mm-work-journey__facts { grid-template-columns: repeat(2,minmax(0,1fr)); padding: var(--sp-5); }
+}

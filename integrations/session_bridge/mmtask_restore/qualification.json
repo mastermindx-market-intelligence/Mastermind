@@ -1,0 +1,41 @@
+{
+  "schema": "mastermind.mmtask_restore.qualification.v1",
+  "at": "2026-11-02T21:49:46.326514+00:00",
+  "task": "P7.T5.S1",
+  "verdict": "SOURCE_PACKAGE_AND_ISOLATED_REHEARSAL_PASS",
+  "helper_sha256": "711ba4f46c80e518d99167877738db9e92182b78bf7b4e3052bcfee79316d54a",
+  "tests_sha256": "3537346e391956ac17dfb44c844766011a5884cedcc4bd221fada88ae04811ec",
+  "patch_sha256": "53423ebd9e7e6f6c262a230939ee7fd7657eefc8e78522532a2cc6c860dc8048",
+  "synthetic_fixture_sha256": "61c8276552e66000b9f09c39d179cc0d9f0c532ec2fb492b7a62928e30d53d59",
+  "macro_commit": "b03edd4902a5582ed59773ec12ff2c2fa37aadf7",
+  "macro_archive_sha256": "bb39b20cd4cbbe3f6944e134a1791d93f82c62b5ed63edc39b0e6024d1c431f0",
+  "macro_agentos_tree": "32face937f9841f79bd67b8a437bd484339c9c5c",
+  "macro_agentos_validator_blob": "24ead782bde838d4c6af31a2a9f82f668db4a323",
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "pyyaml": "6.0.3",
+  "tests": 35,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "elapsed_seconds": 87.654,
+  "patch_reconstruction": "Both preimages reconstructed zero-fuzz and matched exact supplied postimages in private staging",
+  "isolation": "fresh HOME/TMPDIR, tracked Macro archive without .git, explicit frozen helper; no live helper/charter execution",
+  "accepted_test_suffix": ".py.source prevents automatic CI collection; copied to originalfilename only in private testroot",
+  "reported_original_private_fixture_result": "Portfolio reported35PASS separately; not reexecuted or republished here",
+  "synthetic_fixture_run": "mmtask-synthetic-fixture-01a19a8e-v1",
+  "synthetic_fixture_stdout_sha256": "dfe6505ff832499ea4933653e3332a714223618afedef1a6c3ed305670da1c6c",
+  "synthetic_fixture_quality": "deterministic accepted after source-only35test rehearsal; no parentrepair",
+  "local_full_rehearsal_receipt_sha256": "35bec7f756d433b242b90a8c16b2fc1c72c4868dc3939bac174dd7b3c6244acc",
+  "rehearsal_source_manifest_sha256": "f80159da6464cee5c5df04d6ec9539fed7db9b0724ee5e870ed95bed90d779dc",
+  "manifest_change_after_rehearsal": "Only acceptedverdict metadata added; all7inputpaths/bytes/modes unchanged",
+  "runner_sha256": "0dfd1fcf7454f416c4f2f5d9312d47a06ff9c937ab2975cdb44d0b870cee02f1",
+  "scope": "NO_INSTALL;NO_LIVE_HELPER_OR_REAL_CHARTER_EXECUTION;NO_HOOK_OR_REGISTRY;NO_NATIVE_BEHAVIOR_CLAIM",
+  "package_negative_checks": [
+    "Changed frozen source rejected before rehearsal",
+    "Existing unqualified result file preserved byte-for-byte; O_EXCL rejects replay before execution"
+  ],
+  "whitespace_check": {
+    "authored_files": "PASS",
+    "frozen_data": "Exact suppliedpatch has8contextblankline whitespace findings; frozen pre/posttestsource each retain same inheritedtrailing line174. Ten findings preserved to maintain approvedsha256bytes; no guard or attributes changed."
+  }
+}

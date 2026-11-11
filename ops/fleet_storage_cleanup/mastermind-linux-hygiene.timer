@@ -1,0 +1,13 @@
+[Unit]
+Description=Hourly Mastermind Linux storage triage and safe cache reclamation
+
+[Timer]
+OnBootSec=4min
+OnCalendar=hourly
+RandomizedDelaySec=3min
+AccuracySec=1min
+Persistent=true
+Unit=mastermind-linux-hygiene.service
+
+[Install]
+WantedBy=timers.target
