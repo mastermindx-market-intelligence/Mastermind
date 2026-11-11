@@ -16,6 +16,13 @@ thread start/send/show/list and project add/remove/rename; pin lives behind
 the web client's thread action menu, apps/web/src/components/
 threadActionMenu.logic.ts:136). Pin the threads with roster_browser.js pin.
 
+Renaming also has no stock CLI command. ``apply`` drives
+``roster_browser.js rename`` whenever a saved/recovered thread's durable
+title differs from its canonical short title. Set ``browser_profile`` to an
+isolated, already-paired profile; renames are otherwise reported as pending
+and apply exits nonzero without claiming convergence. No credentials or
+pairing URLs are put on a command line.
+
 The server watches settings.json and reloads it live while running
 (apps/server/src/serverSettings.ts:1303-1311, debounced 100ms), so instance
 edits take effect without a restart; apply still works against a stopped
@@ -24,12 +31,28 @@ server.
 import argparse
 import json
 import os
+import re
 import sqlite3
+import stat
 import subprocess
 import sys
 import time
 
 RESERVED_PORTS = (3773, 3774)  # the Chairman's own T3 Code app
+
+# A teammate's primary thread is titled exactly "Name — one-word-role". The
+# sidebar ellipsizes long titles, so the whole title must fit in 24 characters.
+TITLE_MAX = 24
+ROLE_LINE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+
+
+def teammate_title(mate):
+    """The one canonical title for a teammate's primary thread.
+
+    Exactly ``Name — role_line`` (em dash, single spaces). ``role_line`` is a
+    single ASCII word; ``load_spec`` enforces that and the 24-character cap.
+    """
+    return f"{mate['name']} — {mate['role_line']}"
 
 
 def die(msg):
@@ -88,6 +111,15 @@ def load_spec(path):
             die(f"duplicate slug {mate['slug']!r}")
         if mate["accent_color"].lower() in colors:
             die(f"duplicate accent_color {mate['accent_color']!r}")
+        if "—" in mate["name"] or mate["name"] != mate["name"].strip():
+            die(f"{where}.name must not contain an em dash or outer spaces")
+        if not ROLE_LINE_RE.fullmatch(mate["role_line"]):
+            die(f"{where}.role_line must be one ASCII word (letters, digits, "
+                f"'_' or '-'), got {mate['role_line']!r}")
+        title = teammate_title(mate)
+        if len(title) > TITLE_MAX:
+            die(f"{where} title {title!r} is {len(title)} characters; the "
+                f"sidebar fits at most {TITLE_MAX}")
         names.add(mate["name"])
         instances.add(mate["instance"])
         slugs.add(mate["slug"])
@@ -144,15 +176,33 @@ def project_by_root(spec):
     return dict(row) if row else None
 
 
-def threads_in_project(spec, project_id):
+def list_threads(spec, project_id):
+    """Every live thread in the project, with its durable provider instance.
+
+    ``provider_instance_id`` is the column the server writes for a thread's
+    provider instance (``orchestration_v2_projection_threads``); the same value
+    is mirrored in ``payload_json.providerInstanceId``. Either is durable
+    evidence of which teammate a thread belongs to, independent of its title.
+    """
     with db(spec) as conn:
         rows = conn.execute(
-            "SELECT thread_id, json_extract(payload_json, '$.title') AS title, "
-            "json_extract(payload_json, '$.pinnedAt') AS pinned_at, deleted_at "
+            "SELECT thread_id, "
+            "COALESCE(title, json_extract(payload_json, '$.title')) AS title, "
+            "json_extract(payload_json, '$.pinnedAt') AS pinned_at, "
+            "COALESCE(provider_instance_id, "
+            "json_extract(payload_json, '$.providerInstanceId')) AS instance "
             "FROM orchestration_v2_projection_threads "
-            "WHERE project_id = ? AND deleted_at IS NULL", (project_id,)).fetchall()
-    return {r["title"]: {"threadId": r["thread_id"], "pinnedAt": r["pinned_at"]}
-            for r in rows}
+            "WHERE project_id = ? AND deleted_at IS NULL "
+            "ORDER BY created_at, thread_id", (project_id,)).fetchall()
+    return [{"threadId": r["thread_id"], "title": r["title"],
+             "pinnedAt": r["pinned_at"], "instance": r["instance"]}
+            for r in rows]
+
+
+def threads_in_project(spec, project_id):
+    """Compatibility view: exact title → {threadId, pinnedAt}."""
+    return {t["title"]: {"threadId": t["threadId"], "pinnedAt": t["pinnedAt"]}
+            for t in list_threads(spec, project_id)}
 
 
 def ensure_project(spec):
@@ -326,36 +376,207 @@ def environment_id(spec):
         return None
 
 
+def _recover_thread(mate, live, recorded_by_name):
+    """The one live thread that is this teammate's, or ``(None, None)``.
+
+    Evidence, strongest first: the thread id saved in state (a renamed title
+    is still the same thread), then the thread's durable provider instance,
+    then the stable ``"Name — "`` title prefix. Returns ``(thread, problem)``;
+    ``problem`` is a sentence when the evidence is ambiguous or points at
+    another teammate. Adopting the wrong thread would put a teammate into
+    someone else's conversation, so ambiguity is refused, never guessed.
+    """
+    name = mate["name"]
+    others = {n: tid for n, tid in recorded_by_name.items()
+              if n != name and tid}
+    by_id = {t["threadId"]: t for t in live}
+    recorded = recorded_by_name.get(name)
+    if recorded:
+        if recorded in others.values():
+            return None, (f"saved thread {recorded} is also recorded for "
+                          f"another teammate")
+        if recorded in by_id:
+            found = by_id[recorded]
+            if found["instance"] and found["instance"] != mate["instance"]:
+                return None, (f"saved thread {recorded} belongs to provider "
+                              f"instance {found['instance']!r}, not "
+                              f"{mate['instance']!r}")
+            return found, None
+    candidates = {}
+    for t in live:
+        if t["threadId"] in others.values():
+            continue  # recorded to another teammate
+        if t["instance"] == mate["instance"]:
+            candidates[t["threadId"]] = t
+    prefix = f"{name} — "
+    for t in live:
+        if t["threadId"] in others.values():
+            continue
+        if (t["title"] or "").startswith(prefix):
+            candidates[t["threadId"]] = t
+    if len(candidates) > 1:
+        return None, (f"{len(candidates)} threads could be its primary "
+                      f"({', '.join(sorted(candidates))})")
+    if not candidates:
+        return None, None
+    found = next(iter(candidates.values()))
+    if found["instance"] and found["instance"] != mate["instance"]:
+        return None, (f"thread {found['threadId']} is titled for {name} but "
+                      f"belongs to provider instance {found['instance']!r}")
+    return found, None
+
+
+def _recovered_by(mate, found, recorded):
+    if found["threadId"] == recorded:
+        return "state"
+    if found["instance"] == mate["instance"]:
+        return "instance"
+    return "title"
+
+
 def ensure_threads(spec, project_id):
     state, state_path = load_state(spec)
-    existing = threads_in_project(spec, project_id)
+    live = list_threads(spec, project_id)
+    recorded_by_name = {name: (entry or {}).get("threadId")
+                        for name, entry in state["teammates"].items()}
     threads = {}
     for mate in spec["teammates"]:
-        title = f"{mate['name']} — {mate['role_line']}"
-        recorded = (state["teammates"].get(mate["name"]) or {}).get("threadId")
-        if recorded and recorded in [v["threadId"] for v in existing.values()]:
-            threads[mate["name"]] = {"threadId": recorded, "title": title,
-                                     "created": False}
-            continue
-        if title in existing:  # recovery: thread exists but state was lost
-            threads[mate["name"]] = {"threadId": existing[title]["threadId"],
-                                     "title": title, "created": False}
+        title = teammate_title(mate)
+        recorded = recorded_by_name.get(mate["name"])
+        found, problem = _recover_thread(mate, live, recorded_by_name)
+        if problem:
+            die(f"{mate['name']}: {problem}; refusing to pick or create a "
+                f"primary thread")
+        if found is not None:
+            threads[mate["name"]] = {
+                "threadId": found["threadId"], "title": title,
+                "created": False, "currentTitle": found["title"],
+                "projectId": project_id, "pinnedAt": found["pinnedAt"],
+                "recoveredBy": _recovered_by(mate, found, recorded),
+                "instance": found["instance"] or mate["instance"],
+            }
+            if found["title"] != title:
+                log(f"{mate['name']}: thread {found['threadId']} is titled "
+                    f"{found['title']!r}; the roster title is {title!r}")
             continue
         launched = t3_json(t3(spec, [
             "thread", "start", project_id, "Reply with just: READY",
             "--provider", mate["instance"], "--model", spec["model"],
             "--title", title, "--json"]), "t3 thread start")
         threads[mate["name"]] = {"threadId": launched["threadId"],
-                                 "title": title, "created": True}
+                                 "projectId": project_id, "pinnedAt": None,
+                                 "currentTitle": title,
+                                 "title": title, "created": True,
+                                 "recoveredBy": None,
+                                 "instance": mate["instance"]}
         log(f"primary thread for {mate['name']}: {launched['threadId']}")
+    seen = {}
+    for name, info in threads.items():
+        if info["threadId"] in seen:
+            die(f"{name} and {seen[info['threadId']]} resolved to the same "
+                f"thread {info['threadId']}; refusing")
+        seen[info["threadId"]] = name
     by_name = {mate["name"]: mate for mate in spec["teammates"]}
     state["teammates"] = {name: {"instance": by_name[name]["instance"],
                                  "threadId": info["threadId"],
-                                 "title": info["title"]}
+                                 "title": info["title"],
+                                 "threadInstance": info["instance"],
+                                 "recoveredBy": info["recoveredBy"]}
                           for name, info in threads.items()}
     state["appliedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     save_state(spec, state, state_path)
     return threads, state_path
+
+
+def rename_threads(spec, threads):
+    """Apply short titles through the web UI, then require DB read-back.
+
+    Every call receives its already-known thread id and current title. No
+    operation can target a title prefix or another teammate's thread. The
+    profile is supplied by the operator, never inferred from a live server's
+    credential files, and no token appears in argv.
+    """
+    stale = [(mate, threads[mate["name"]]["currentTitle"])
+             for mate in spec["teammates"]
+             if threads[mate["name"]]["currentTitle"] != teammate_title(mate)]
+    if not stale:
+        return {mate["name"]: False for mate in spec["teammates"]}, []
+    profile = spec.get("browser_profile")
+    if not profile:
+        log("title renames pending: browser_profile is not configured")
+        return ({mate["name"]: False for mate in spec["teammates"]},
+                [mate["name"] for mate, _ in stale])
+    # A profile is credential-bearing state: require a private directory and
+    # an absolute root supplied by the spec (defaults to the server root).
+    profile = os.path.realpath(expand(profile))
+    allowed_root = os.path.realpath(expand(
+        spec.get("browser_profile_root") or spec["server"]["root"]))
+    if profile == allowed_root or not profile.startswith(allowed_root + os.sep):
+        die("browser_profile must be a private child of browser_profile_root "
+            "(default: the team server root)")
+    if not os.path.isdir(profile):
+        die(f"browser_profile does not exist: {profile}; pair it before apply")
+    if os.stat(profile).st_uid != os.getuid():
+        die("browser_profile belongs to another user")
+    if stat.S_IMODE(os.stat(profile).st_mode) & 0o077:
+        die("browser_profile must not be accessible by group or other users")
+    driver = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "roster_browser.js")
+    env_id = environment_id(spec)
+    if not env_id:
+        die("environment-id missing from the team home")
+    node_bin = spec.get("browser_node") or os.environ.get("TEAM_ROSTER_NODE")
+    if not node_bin:
+        import shutil
+        node_bin = shutil.which("node")
+    if not node_bin or not os.access(expand(node_bin), os.X_OK):
+        die("no executable Node for roster_browser.js; set browser_node")
+    evidence_path = expand(spec.get("rename_evidence_file") or os.path.join(
+        spec["server"]["root"], "run", "team_renames.jsonl"))
+    os.makedirs(os.path.dirname(evidence_path), exist_ok=True)
+    failures = []
+    with open(evidence_path, "a") as evidence:
+        os.chmod(evidence_path, 0o600)
+        for stale_thread in stale:
+            mate, current_title = stale_thread
+            title = teammate_title(mate)
+            tid = threads[mate["name"]]["threadId"]
+            url = (f"http://127.0.0.1:{spec['server']['port']}/{env_id}/"
+                   f"{tid.replace(':', '%3A')}")
+            result_path = (f"{evidence_path}.tmp.{os.getpid()}."
+                           f"{mate['slug']}.json")
+            proc = subprocess.run(
+                [expand(node_bin), driver, "rename", profile, url, tid,
+                 current_title, title, result_path],
+                cwd="/tmp", capture_output=True, text=True, timeout=120)
+            ok = proc.returncode == 0 and os.path.isfile(result_path)
+            live = None
+            if ok:
+                # Re-read the persisted projection; an in-memory or sidebar
+                # title update does not prove durable rename completion.
+                live = next((t for t in list_threads(
+                    spec, threads[mate["name"]]["projectId"])
+                    if t["threadId"] == tid), None)
+                ok = (live is not None and live["title"] == title and
+                      live["pinnedAt"] == threads[mate["name"]]["pinnedAt"])
+            row = {"threadId": tid, "oldTitle": current_title,
+                   "newTitle": title, "verified": ok,
+                   "pinnedAtBefore": threads[mate["name"]]["pinnedAt"],
+                   "pinnedAtAfter": (live or {}).get("pinnedAt")}
+            if not ok:
+                row["error"] = (proc.stderr or proc.stdout or
+                                "no durable title read-back")[:300]
+                failures.append(mate["name"])
+            evidence.write(json.dumps(row) + "\n")
+            evidence.flush()
+            if os.path.exists(result_path):
+                os.unlink(result_path)
+            if ok:
+                threads[mate["name"]]["title"] = title
+                threads[mate["name"]]["renamed"] = True
+                log(f"{mate['name']}: renamed {current_title!r} -> {title!r}")
+    return {mate["name"]: threads[mate["name"]].get("renamed", False)
+            for mate in spec["teammates"]}, failures
 
 
 def write_urls_file(spec, threads):
@@ -394,6 +615,7 @@ def cmd_apply(spec):
             + (f"(wrote {', '.join(wrote)})" if wrote else "(unchanged)"))
     ensure_instances(spec)
     threads, _ = ensure_threads(spec, project_id)
+    renames, rename_failures = rename_threads(spec, threads)
     urls_path = write_urls_file(spec, threads)
     log(f"thread URLs written: {urls_path} (0600, no credentials)")
     report = {
@@ -403,12 +625,17 @@ def cmd_apply(spec):
              "home": teammate_home(spec, mate),
              "threadId": threads[mate["name"]]["threadId"],
              "threadTitle": threads[mate["name"]]["title"],
-             "threadCreated": threads[mate["name"]]["created"]}
+             "threadCreated": threads[mate["name"]]["created"],
+             "renamed": renames[mate["name"]]}
             for mate in spec["teammates"]],
         "pin": "not applied by this tool; pin via roster_browser.js pin "
                "(web-client-only action)",
     }
     print(json.dumps(report, indent=2))
+    if rename_failures:
+        print("team_roster: INCOMPLETE title(s); these threads failed durable "
+              "read-back: " + ", ".join(rename_failures), file=sys.stderr)
+        return 1
     return 0
 
 
@@ -417,19 +644,15 @@ def cmd_status(spec):
     settings = load_settings(spec)
     instances = settings.get("providerInstances", {})
     state, _ = load_state(spec)
-    existing = threads_in_project(spec, project["project_id"]) if project else {}
+    live = list_threads(spec, project["project_id"]) if project else []
+    recorded_by_name = {name: (entry or {}).get("threadId")
+                        for name, entry in state["teammates"].items()}
     rows = []
     for mate in spec["teammates"]:
         home = teammate_home(spec, mate)
         instance = instances.get(mate["instance"])
-        title = f"{mate['name']} — {mate['role_line']}"
-        thread = existing.get(title)
-        if thread is None:
-            recorded = (state["teammates"].get(mate["name"]) or {}).get("threadId")
-            for candidate in existing.values():
-                if candidate["threadId"] == recorded:
-                    thread = candidate
-                    break
+        title = teammate_title(mate)
+        thread, problem = _recover_thread(mate, live, recorded_by_name)
         rows.append({
             "name": mate["name"],
             "home": home,
@@ -441,7 +664,9 @@ def cmd_status(spec):
                           instance.get("accentColor") == mate["accent_color"],
             "threadTitle": title,
             "threadId": (thread or {}).get("threadId"),
+            "threadCurrentTitle": (thread or {}).get("title"),
             "pinned": bool((thread or {}).get("pinnedAt")),
+            "recoveryProblem": problem,
         })
     print(json.dumps({"project": project, "teammates": rows,
                       "environmentId": environment_id(spec)}, indent=2))
