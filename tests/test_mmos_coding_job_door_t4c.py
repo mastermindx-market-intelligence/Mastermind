@@ -642,3 +642,367 @@ def test_f12_an_unageable_wait_is_retried_not_stranded(scratch, monkeypatch):
     entry = {"admit_requested_at": "not-a-timestamp",
              "admit_outcome": "WAIT"}
     assert d._entry_action(entry) == "admit"
+
+
+# ---------------------------------------------------------------------------
+# Step 3 — F15 (R4b finding 15) + attack F8: ONE owner for recovery, the
+# engine.  The door composes the real t3-native supervisor, drives
+# reconcile_restart at start and on a cadence, and finishes from the
+# engine's recovered ActiveRun; its own record_process+adopt_attempt block
+# is gone.  Every test here failed on the Step-2 code for the finding's
+# reason (the door adopted itself / composed no supervisor / blocked
+# startup on the mint).
+# ---------------------------------------------------------------------------
+
+
+def test_step3_source_law_the_door_owns_no_recovery_of_its_own():
+    """F15: recovery has exactly one owner — the engine.  The door source
+    contains no DoorSupervisor, no record_process call and no adopt_attempt
+    call; the service's supervisor_factory composes the real supervisor."""
+    src = Path(DOOR_SRC).read_text(encoding="utf-8")
+    assert "class DoorSupervisor" not in src
+    assert "record_process(" not in src
+    assert "adopt_attempt(" not in src
+    assert "self._compose_supervisor(" in src  # the factory's owner
+
+
+def test_step3_compose_supervisor_builds_the_real_engine_owner(
+        scratch, monkeypatch, tmp_path):
+    """Enrolled: ``_compose_supervisor`` returns the composed t3-native
+    supervisor (boundary adapter + wired provider_receipt_reader).  Not
+    enrolled (no token — the dev server was down at start): the PLAIN
+    primary comes back, never an exception."""
+    from control_plane import t3_native_composition as composition_mod
+    from tests.test_executive_supervisor import _runtime_and_job
+    runtime, _job, _attempt = _runtime_and_job(tmp_path)
+
+    class _FakeComposedAdapter:
+        adapter_id = "t3-native"
+
+        def __init__(self):
+            self.inspector = SimpleNamespace()
+
+        def launch_receipt(self, run_id):
+            return None
+
+        def retained_original_ref(self, run_id):
+            return None
+
+    seen = {}
+
+    def fake_adapter_compose(runtime_arg, **kwargs):
+        seen["kwargs"] = kwargs
+        return SimpleNamespace(
+            composed=True, status="T3_COMPOSED", reason="",
+            adapter=_FakeComposedAdapter())
+
+    monkeypatch.setattr(composition_mod, "compose_t3_native_adapter",
+                        fake_adapter_compose)
+    d = _attack_door(scratch, monkeypatch)
+    composed = d._compose_supervisor(
+        runtime, port_factory=d._reconcile_only_port_factory)
+    # the composed t3 owner: the boundary adapter + the wired receipt reader
+    from control_plane.t3_native_composition import SupervisorBoundaryT3Adapter
+    assert isinstance(composed.adapter, SupervisorBoundaryT3Adapter)
+    assert composed._provider_receipt_reader is not None
+    # the composition shares the door's durable adapter store (the crashed
+    # door's receipts are the recovery's evidence)
+    assert "state_store" in seen["kwargs"]
+
+    # not enrolled: the typed fail-closed result, never an exception — the
+    # plain primary serves while no token exists
+    def not_enrolled(runtime_arg, **kwargs):
+        return SimpleNamespace(composed=False, status="T3_NOT_ENROLLED",
+                               reason="no token file", adapter=None)
+
+    monkeypatch.setattr(composition_mod, "compose_t3_native_adapter",
+                        not_enrolled)
+    plain = d._compose_supervisor(
+        runtime, port_factory=d._reconcile_only_port_factory)
+    assert plain.adapter is None and plain._provider_receipt_reader is None
+    assert plain.process_controller is not None
+
+
+def test_step3_start_mints_only_against_a_ready_pinned_server(
+        scratch, monkeypatch):
+    """``start()`` mints the worker token ONCE before the service composes,
+    and NEVER blocks door startup on a down dev server: the pairing CLI is
+    withheld (finding 8 — it would fall back to the live app), the
+    executor's mint loop owns the retry, and the service composes plain."""
+    d = _attack_door(scratch, monkeypatch)
+
+    def forbidden(*_a, **_k):
+        raise AssertionError("the pairing CLI must never run against an "
+                             "unready or unpinned server")
+
+    monkeypatch.setattr(
+        "integrations.t3.live_proof.t3_live_proof.obtain_mcp_access_token",
+        forbidden)
+    monkeypatch.setattr(d, "_dev_server_ready", lambda: False)
+    asyncio.run(asyncio.wait_for(d._ensure_worker_token(), timeout=5.0))
+    # no token file was minted by the withheld path
+    assert not Path(d.config.t3_token_path).exists()
+
+    minted = {}
+
+    def fake_mint(path, label, *, base_url, home_dir):
+        minted.update(path=path, label=label, base_url=base_url,
+                      home_dir=home_dir)
+
+    monkeypatch.setattr(
+        "integrations.t3.live_proof.t3_live_proof.obtain_mcp_access_token",
+        fake_mint)
+    monkeypatch.setattr(d, "_dev_server_ready", lambda: True)
+    asyncio.run(asyncio.wait_for(d._ensure_worker_token(), timeout=5.0))
+    assert minted["path"] == str(d.config.t3_token_path)
+    assert minted["base_url"] == d.config.t3_proof_base
+    assert minted["home_dir"] == d.config.t3_home_dir
+
+
+def test_step3_reconcile_routes_a_recovered_run_to_its_entry(
+        scratch, monkeypatch):
+    """The periodic/restart reconcile adopts nothing itself: it drains the
+    engine's recovered ActiveRuns and routes each one to its frozen entry —
+    engine fence/token/ref, phase reattached, executor woken, cadence
+    stamped."""
+    d = _attack_door(scratch, monkeypatch)
+    command = d.freeze_issue(_issue_row("iss-rc"))
+    entry = d.frozen[command]
+    entry.update({"job_id": "JOB-RC", "attempt_id": "ATT-RC",
+                  "phase": "awaiting-lease-expiry"})
+    run = SimpleNamespace(
+        lease=SimpleNamespace(
+            attempt=SimpleNamespace(attempt_id="ATT-RC", fence_generation=7),
+            lease_token="engine-token"),
+        process_ref=SimpleNamespace(provider_session_id="mcp:engine-reattach"))
+    d._supervisor = SimpleNamespace(
+        reconcile_restart=lambda **_kw: [SimpleNamespace(
+            attempt_id="ATT-RC", status=SimpleNamespace(
+                name="RECEIPT_RECOVERED"), error="")],
+        take_recovered_runs=lambda: [run])
+    before = d._last_reconcile
+    outcomes = d._reconcile(object())
+    assert len(outcomes) == 1
+    assert d._last_reconcile > before
+    assert entry["phase"] == "reattached"
+    assert entry["fence_generation"] == 7
+    assert entry["lease_token"] == "engine-token"
+    assert entry["provider_session_id"] == "mcp:engine-reattach"
+    assert d._wake.is_set()
+
+
+def _crash_window_entry(d, runtime, job_id, attempt_id, lease):
+    """The frozen entry of a door that died mid-flight: claimed, attempt
+    durable, receipt present (so the door's own receipt read routes to the
+    engine lane, never the F1/F13 launch windows)."""
+    command = d.freeze_issue(_issue_row("iss-cw"))
+    entry = d.frozen[command]
+    entry.update({"job_id": job_id, "attempt_id": attempt_id,
+                  "fence_generation": lease.attempt.fence_generation,
+                  "lease_token": lease.lease_token, "phase": "launched"})
+    d._save_frozen()
+    real_spec = d._launch_spec(
+        run_id=attempt_id, job_id=job_id,
+        prompt=d._worker_prompt(attempt_id, "t3/mmos-t4b-job-deadbeef"))
+    fake_run = SimpleNamespace(
+        spec=real_spec,
+        original_ref=SimpleNamespace(provider_session_id="x", pid=None,
+                                     run_id=attempt_id))
+
+    class _FakeStore:
+        def load_run(self, run_id):
+            return fake_run
+
+    import control_plane.t3_execution_adapter as adapter_module
+    return entry, _FakeStore, adapter_module
+
+
+def test_step3_live_lease_defers_to_the_engine_and_retries_on_a_cadence(
+        scratch, monkeypatch, tmp_path):
+    """Attack F8's wedge, closed: an identity-less claim with a durable
+    receipt under a LIVE lease is DEFERRED by the engine
+    (AWAITING_LEASE_EXPIRY) — the door records the deferral and re-asks on
+    the reconcile cadence; it never adopts, records or launches."""
+    from tests.test_executive_supervisor import _runtime_and_job
+    runtime, job_id, _ = _runtime_and_job(tmp_path)
+    lease = runtime.broker.claim(job_id, lease_owner="t4b-door-dead")
+    attempt_id = lease.attempt.attempt_id
+
+    d = _attack_door(scratch, monkeypatch)
+    entry, fake_store, adapter_module = _crash_window_entry(
+        d, runtime, "JOB-DEF", attempt_id, lease)
+    monkeypatch.setattr(adapter_module, "SQLiteT3AdapterStateStore",
+                        lambda _path: fake_store())
+
+    def forbidden(*_a, **_k):
+        raise AssertionError("the door never records a process or adopts "
+                             "a lease itself")
+
+    monkeypatch.setattr(runtime.attempts, "record_process", forbidden)
+    monkeypatch.setattr(runtime.attempts, "adopt_attempt", forbidden)
+
+    def engine_defers(_runtime, attempt_ids=None):
+        assert attempt_ids == frozenset({attempt_id})
+        return [SimpleNamespace(attempt_id=attempt_id,
+                                status=SimpleNamespace(
+                                    name="AWAITING_LEASE_EXPIRY"),
+                                error="")]
+
+    monkeypatch.setattr(d, "_reconcile", engine_defers)
+    d._execute(runtime, entry["command"], entry)
+    assert entry["phase"] == "awaiting-lease-expiry"
+    assert entry["reconcile_last_ask"]
+    # retry-gated: a fresh ask is not due yet; an aged one re-executes
+    assert d._entry_action(entry) == "skip"
+    entry["reconcile_last_ask"] = _iso(3600)
+    assert d._entry_action(entry) == "execute"
+    # the lease was never fenced by the door
+    assert runtime.attempts.get_attempt(attempt_id).lease_owner == (
+        "t4b-door-dead")
+
+
+def test_step3_recovery_branch_seals_from_the_engine_adopted_run(
+        scratch, monkeypatch, tmp_path):
+    """At lease expiry the ENGINE adopts the same attempt; the door seals
+    from the ENGINE's lease and the engine-reattached ref — its own
+    fence/token are replaced by the engine's, and the launch port is
+    composed only for the seal's terminal read."""
+    from tests.test_executive_supervisor import _runtime_and_job
+    runtime, job_id, _ = _runtime_and_job(tmp_path)
+    lease = runtime.broker.claim(job_id, lease_owner="t4b-door-dead")
+    attempt_id = lease.attempt.attempt_id
+
+    d = _attack_door(scratch, monkeypatch)
+    entry, fake_store, adapter_module = _crash_window_entry(
+        d, runtime, "JOB-ADOPT", attempt_id, lease)
+    monkeypatch.setattr(adapter_module, "SQLiteT3AdapterStateStore",
+                        lambda _path: fake_store())
+
+    engine_run = SimpleNamespace(
+        lease=SimpleNamespace(
+            attempt=SimpleNamespace(attempt_id=attempt_id, fence_generation=7),
+            lease_token="engine-token"),
+        process_ref=SimpleNamespace(provider_session_id="mcp:engine-reattach"))
+    asked = []
+
+    def engine_adopts(_runtime, attempt_ids=None):
+        asked.append(attempt_ids)
+        d._recovered[attempt_id] = engine_run
+        return [SimpleNamespace(attempt_id=attempt_id,
+                                status=SimpleNamespace(
+                                    name="RECEIPT_RECOVERED"), error="")]
+
+    monkeypatch.setattr(d, "_reconcile", engine_adopts)
+    sealed = {}
+
+    def fake_seal(_runtime, _entry, _attempt, _adapter, ref, _branch):
+        sealed["ref"] = ref
+
+    monkeypatch.setattr(d, "_seal_and_deliver", fake_seal)
+    monkeypatch.setattr(d, "_compose_adapter",
+                        lambda *_a, **_k: (SimpleNamespace(), {}))
+    d._execute(runtime, entry["command"], entry)
+
+    assert asked == [frozenset({attempt_id})]  # scoped to THIS attempt
+    assert entry["phase"] == "reattached"
+    assert entry["fence_generation"] == 7          # the ENGINE's fence
+    assert entry["lease_token"] == "engine-token"  # the ENGINE's token
+    assert entry["provider_session_id"] == "mcp:engine-reattach"
+    assert sealed["ref"] is engine_run.process_ref  # sealed from the run
+
+
+def test_step3_engine_quarantine_parks_the_entry_with_a_typed_blocker(
+        scratch, monkeypatch, tmp_path):
+    """A typed engine refusal (e.g. STALE_FENCE_QUARANTINED) parks the entry
+    with a RECONCILE_<status> blocker and HOLDS its slot — the receipt
+    proved a live native execution; the thread budget is not freed."""
+    from tests.test_executive_supervisor import _runtime_and_job
+    runtime, job_id, _ = _runtime_and_job(tmp_path)
+    lease = runtime.broker.claim(job_id, lease_owner="t4b-door-dead")
+    attempt_id = lease.attempt.attempt_id
+
+    d = _attack_door(scratch, monkeypatch)
+    entry, fake_store, adapter_module = _crash_window_entry(
+        d, runtime, "JOB-Q", attempt_id, lease)
+    monkeypatch.setattr(adapter_module, "SQLiteT3AdapterStateStore",
+                        lambda _path: fake_store())
+    assert d._reserve_thread("job:JOB-Q") is True  # the crashed slot
+
+    def engine_quarantines(_runtime, attempt_ids=None):
+        return [SimpleNamespace(
+            attempt_id=attempt_id,
+            status=SimpleNamespace(name="STALE_FENCE_QUARANTINED"),
+            error="the fence moved before the adoption")]
+
+    monkeypatch.setattr(d, "_reconcile", engine_quarantines)
+    d._execute(runtime, entry["command"], entry)
+    assert entry["phase"] == "reconcile-quarantined"
+    assert entry["blocker"]["code"] == "RECONCILE_STALE_FENCE_QUARANTINED"
+    assert d.paperclip.comments  # surfaced to the task
+    # surfaced is terminal for this executor; the slot HOLDS
+    assert d._entry_action(entry) == "skip"
+    budget = json.loads(d._budget.read_text())
+    assert "job:JOB-Q" in budget["reserved"]  # the slot is HELD
+    # a FRESH door (frozen.json reload, nothing surfaced yet) routes the
+    # parked entry to the blocker branch, which re-surfaces without
+    # releasing the slot
+    entry["blocker_surfaced"] = None
+    assert d._entry_action(entry) == "blocker"  # PARKED_PHASES
+
+
+def test_step3_engine_owned_phase_executes_and_watches(scratch, monkeypatch):
+    """The engine-owned watch: the entry stays executable (the executor
+    polls for the terminal row through the ordinary F3 read) and a second
+    pass never re-drives reconcile (a live finisher's lease is never
+    fenced by a re-ask)."""
+    d = _attack_door(scratch, monkeypatch)
+    entry = {"phase": "engine-owned", "job_id": "JOB-EO",
+             "reconcile_last_ask": _iso(0)}
+    assert d._entry_action(entry) == "execute"
+    entry["phase"] = "reattached"  # transient engine phases execute too
+    assert d._entry_action(entry) == "execute"
+
+
+def test_step3_placement_job_names_its_workspace(scratch, monkeypatch,
+                                                  tmp_path):
+    """The worktree gate: a placement Job that cannot name its workspace can
+    never be adopted by restart reconciliation, so ``compose_child_execution``
+    records the door's job-scoped workspace on the Job."""
+    from control_plane.child_request_execution_composition import (
+        compose_child_execution,
+    )
+    from tests.test_executive_supervisor import _runtime_and_job
+    from tools.mmos_coding_job.envelope import build_task_request
+
+    runtime, _job, _attempt = _runtime_and_job(tmp_path)
+    d = _attack_door(scratch, monkeypatch)
+    request = build_task_request(
+        issue_id="iss-ws", agent_id="ag-1", company_id="c",
+        title="t", description="d", key="coding-job-1")
+    composed = compose_child_execution(
+        runtime, request=request, spec=d._spec(request), branch="b",
+        worktree=str(tmp_path / "ws"))
+    job = runtime.jobs.get_job(composed.placement_job.job_id)
+    assert job is not None
+    assert str(job.worktree) == str(tmp_path / "ws")
+    replay = compose_child_execution(
+        runtime, request=request, spec=d._spec(request), branch="b",
+        worktree=str(tmp_path / "ws"))
+    assert replay.placement_job.job_id == composed.placement_job.job_id
+
+
+def test_step3_launch_spec_writes_the_engine_binding_prompt_name(
+        scratch, monkeypatch):
+    """The engine's binding rebuild reads ``input/worker-prompt.txt``; the
+    door writes BOTH prompt files with the same bytes at 0600."""
+    d = _attack_door(scratch, monkeypatch)
+    spec = d._launch_spec(run_id="ATT-LP", job_id="JOB-LP",
+                          prompt="the worker prompt bytes")
+    run_dir = Path(spec.run_dir)
+    door_prompt = run_dir / "input" / "prompt.txt"
+    engine_prompt = run_dir / "input" / "worker-prompt.txt"
+    assert (door_prompt.read_bytes()
+            == engine_prompt.read_bytes()
+            == b"the worker prompt bytes")
+    assert _mode(door_prompt) == 0o600
+    assert _mode(engine_prompt) == 0o600

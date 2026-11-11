@@ -39,7 +39,7 @@ result landed** — then `PASS` or `FAIL`.
 | scenario | proves | PASS means |
 |---|---|---|
 | `default` | goal 1+2: one task → ONE coding job → sealed → result comment on the SAME task, no window | phase `delivered`, native launches 1, a `paperclip-return-attempt:` comment on the task |
-| `crash` | goal 3 (L1B3-5): door dies (exit 90) between launch receipt and process record; a FRESH door recovers the SAME attempt | same attempt id after recovery, native launches STILL 1, result still lands |
+| `crash` | goal 3 (L1B3-5): door dies (exit 90) between launch receipt and process record; a FRESH door recovers the SAME attempt — through the ENGINE's `reconcile_restart` (T4c: one recovery owner; the door never records a process or adopts a lease itself) | same attempt id after recovery, native launches STILL 1, result still lands |
 | `wait` | goal 4a: fleet queue full — the second task gets WAIT and a precise blocker comment, no job created | blocker body carries `CHILD_QUEUE_FLEET_READY_FULL`, no `job_id` for the waiting task |
 | `undeliverable` | goal 4b: transport withheld — the refused receipt is surfaced as a blocker with its code | phase `delivery-refused`, blocker carries `ORIGIN_KIND_UNKNOWN` |
 
@@ -56,13 +56,16 @@ canary's GitHub-evidence shape: a branch on the existing repo, no PR against
 ```bash
 TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q \
   -p no:cacheprovider tests/test_mmos_teammate_coding_job.py \
-  tests/test_mmos_coding_job_door.py tests/test_paperclip_result_delivery.py \
+  tests/test_mmos_coding_job_door.py tests/test_mmos_coding_job_door_t4c.py \
+  tests/test_paperclip_result_delivery.py \
   tests/test_t3_native_composition.py \
   tests/test_t3_native_supervisor_receipt_wiring.py \
   tests/test_mmos_teammate_carrier.py tests/test_mmos_teammate_cutover.py \
-  tests/test_executive_supervisor_provider_reattach.py
+  tests/test_executive_supervisor_provider_reattach.py \
+  tests/test_executive_supervisor_receipt_recovery_t4c.py
 ```
 
-(163 passed on the final tree.) The carrier/door files carry the
-attack-round fixes — one test per finding; see `T4B_ATTACK_FINDINGS.md`
-for the disposition table.
+(163 passed on the T4b final tree; the T4c tree's counts are in the T4c
+evidence ledger — door, delivery, carrier and engine suites green at the
+Step-3 push.) The carrier/door files carry the attack-round fixes — one
+test per finding; see `T4B_ATTACK_FINDINGS.md` for the disposition table.
