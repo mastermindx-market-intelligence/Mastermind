@@ -706,3 +706,40 @@ that starts with `[coding-job]` or `[t2-carrier]` is never a person's words, fee
 answer), the blocked-task gap above, a stricter check on the conversation link, the waiting
 line reworded as Assurance proposed in MAS-10, and tests for the three behaviours the lane
 said it had not covered. The door key stays unread by any installed teammate.
+
+
+## 20. Amendment, 2026-11-11 01:10 UTC: an unanswered question is recoverable, proven live
+
+**Lane CQ's second task returned and is merged** (`ff3552c58`, trunk `8a226cd39`, 151 tests).
+I read the carrier diff in full and installed it for both teammates (carrier sha256
+`69846ac9…`). Neither settings file has the coding-job door key.
+
+**The live test, MAS-11.** Assurance's question wait was set to 60 seconds for this one test.
+A real task that needed one fact from a person, and nobody answered:
+
+| Time (UTC) | What happened |
+|---|---|
+| 00:58:55 | Task assigned; run starts |
+| 00:59:20 | Question asked; the reworded line with the conversation link posted once |
+| 01:00:22 | Run ends with the task unchanged; Paperclip retries (two more runs, neither posts the line again) |
+| 01:03:56 | Paperclip marks the task blocked and names the board as recovery owner |
+| 01:04:18 | I answer in the web page; the teammate finishes its turn; the task stays blocked, no run |
+| 01:04:51 | I add one comment on the task; Paperclip wakes Assurance |
+| 01:04:54 | The carrier finds the finished reply and delivers it with its confirmation, in a 4-second run |
+| — | I accept; the task is done; the attention list drops from 4 to 3 |
+
+So the line's promise holds: answer late, add any comment, and the work is picked up. The
+blocked-to-in-review change works on the real server. The wait is back at 15 minutes for both
+teammates. Evidence: `~/.mastermind/mmos_evidence/cq-20261111/unanswered/`.
+
+**What the test also showed.**
+- With the real 15-minute wait, Paperclip's two retries each stay with the question too, so a
+  person has about 45 minutes before the task is marked blocked. The line says 15; it is the
+  safe figure and I leave it.
+- Assurance's own review in MAS-11: the `[t2-carrier]` tag at the front of the line reads as an
+  error code to a first-time reader. The tag is what marks the line as machine text, so it
+  stays until the window can hide it; that is a display job for the window lane, not a
+  carrier change.
+
+**Closed by this:** the carrier halves of review findings 4 and 5, and the blocked-task gap
+from section 19. Still open on the coding job: everything in lane T4c.
