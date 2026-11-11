@@ -26,8 +26,12 @@ Policy (per ruling, repair round 1): resolve the real path (symlinks, ``..``,
 - searches (Glob/Grep): the search root must itself pass the read policy and
   must not sit at or above a denied folder; patterns must be relative and
   stay inside the root (no leading / ~, no ``..``).
-- web (WebFetch and any web-reader tool): the host is resolved by address;
-  loopback, link-local, private, reserved and non-http(s) targets refused.
+- web: there is NO web access (decision 2026-11-11, H-1 decided): every
+  fetch-capable tool is refused by exact name before any URL logic, so the
+  check-time/fetch-time DNS window is unreachable — no fetch ever runs.
+  The address-class vetting below (``check_web`` and helpers) is kept as a
+  library for the future pinned fetch tool (15-h1-options.md option 2) and
+  is deliberately unreachable from ``decide()``.
 - unknown tool or unparseable input: refused.
 
 Deny-list entries may end with ``*`` for a prefix family (e.g. the
@@ -90,8 +94,22 @@ def unreadable_name(name):
 PATH_WRITE_TOOLS = frozenset({"Write", "Edit", "NotebookEdit", "MultiEdit"})
 READ_TOOLS = frozenset({"Read"})
 SEARCH_TOOLS = frozenset({"Glob", "Grep"})
-WEB_TOOLS = frozenset({"WebFetch", "mcp__web_reader__webReader"})
-FREE_TOOLS = frozenset({"TodoWrite", "WebSearch", "ToolSearch"})
+# Decision 2026-11-11 (H-1 decided; RL-NF): teammates get NO web access.
+# Every fetch-capable tool is refused BY NAME, before any URL logic —
+# a PreToolUse hook cannot pin the client's fetch-time DNS resolution, so
+# the only sound close is that no fetch runs at all. Destination: a pinned
+# fetch tool (15-h1-options.md option 2) as a later lane with its own
+# review. team_roster.py derives its census denies from this one list.
+FETCH_FORBIDDEN_TOOLS = frozenset({
+    "WebFetch",                    # client URL fetch
+    "WebSearch",                   # client web search (also fetches)
+    "mcp__web_reader__webReader",  # router-attached server-side reader
+    # live census 2026-11-11 (evidence 17): the preview browser navigates
+    # URLs client-side, so it is the same fetch-time DNS surface
+    "mcp__t3-code__preview_navigate",
+    "mcp__t3-code__preview_open",
+})
+FREE_TOOLS = frozenset({"TodoWrite", "ToolSearch"})
 
 
 def refuse(reason):
@@ -522,6 +540,11 @@ def _resolve_host(host):
 
 
 def check_web(tool_input):
+    # LIBRARY, unreachable from decide() since the no-web decision of
+    # 2026-11-11: kept for the future pinned fetch tool (15-h1-options.md
+    # option 2), which must apply exactly these classes to the address it
+    # is about to connect to.
+    #
     # R1 (panel 2 H1): read exactly the url field the fetcher uses — the
     # old scan took the FIRST http(s)-prefixed string, so a public `prompt`
     # hid a loopback `url`.
@@ -569,6 +592,14 @@ def decide(payload):
         return "no tool name in hook input"
     if not isinstance(tool_input, dict):
         return f"unparseable input for {tool}"
+    # No-web decision (2026-11-11, H-1 decided): refuse fetch-capable
+    # tools BY NAME, before any URL logic and before the allowlist — the
+    # input is never inspected, so no URL spelling can matter and a tool
+    # 'loaded' by ToolSearch is refused identically at call time.
+    if tool in FETCH_FORBIDDEN_TOOLS:
+        return (f"tool {tool} gives web access; teammates have no web "
+                "access (decision 2026-11-11); the pinned fetch tool is a "
+                "later lane")
     cfg = CONFIG
     cwd = payload.get("cwd")
     if tool in PATH_WRITE_TOOLS:
@@ -586,8 +617,6 @@ def decide(payload):
         return check_path_read(path, cfg)
     if tool in SEARCH_TOOLS:
         return check_search(tool_input, cwd, cfg)
-    if tool in WEB_TOOLS:
-        return check_web(tool_input)
     if tool in FREE_TOOLS:
         return None
     return f"tool {tool} is not on this teammate's allowlist"

@@ -300,8 +300,9 @@ class TestWeb:
 
 class TestToolAllowlist:
     def test_free_tools_allowed(self, rig):
+        # WebSearch left this set with the no-web decision (TestNoFetch):
+        # fetch-capable tools are refused by name
         for tool, inp in (("TodoWrite", {"todos": []}),
-                          ("WebSearch", {"query": "example"}),
                           ("ToolSearch", {"query": "web"})):
             rig.allowed(tool, inp)
 
@@ -632,3 +633,72 @@ class TestRepairRound3:
         config_path.write_text(json.dumps(config))
         rig.refused("Read", {"file_path": str(
             rig.dotssh / "id_rsa.stand-in")}, config=config_path)
+
+
+class TestNoFetch:
+    """Decision 2026-11-11 (H-1 decided; RL-NF): teammates get NO web
+    access. Every fetch-capable tool is refused by exact name BEFORE any
+    URL logic, so the H-1 check-time/fetch-time DNS window is unreachable
+    (no fetch ever runs). The address-class helpers (check_web and below)
+    stay in the module as a vetted library for the future pinned fetch
+    tool (15-h1-options.md option 2, a later lane) but decide() no longer
+    routes anything to them — TestWeb/TestRepairRound2 web cases keep
+    passing because the name refusal fires first; their in-process
+    assertions pin the library itself."""
+
+    FETCH_TOOLS = ("WebFetch", "WebSearch", "mcp__web_reader__webReader",
+                   # live census 2026-11-11 (evidence 17): the preview
+                    # browser tools navigate URLs — same fetch-time surface
+                   "mcp__t3-code__preview_navigate",
+                   "mcp__t3-code__preview_open")
+
+    def test_fetch_tools_refused_by_name_before_any_url_logic(self, rig):
+        # a plain-DNS https URL the old web check would have ALLOWED is
+        # refused now — by name, before resolution, without touching DNS
+        for tool in self.FETCH_TOOLS:
+            proc = rig.refused(tool, {"url": "http://example.com/",
+                                      "prompt": "x"})
+            assert tool in proc.stderr, proc.stderr
+            assert "no web access" in proc.stderr, proc.stderr
+            # no URL-class reason can appear: that path is unreachable
+            for absent in ("resolves", "scheme", "authority", "backslash"):
+                assert absent not in proc.stderr, (tool, proc.stderr)
+
+    def test_fetch_refusal_is_identical_for_any_input(self, rig):
+        # same tool, wildly different URLs (loopback, literal, non-string,
+        # missing) => byte-identical reason: the input is never inspected
+        for tool in self.FETCH_TOOLS:
+            reasons = set()
+            for inp in ({"url": "http://127.0.0.1:50821/"},
+                        {"url": "http://93.184.216.34/"},
+                        {"url": 12345}, {"query": "x"}, {}):
+                reasons.add(rig.refused(tool, inp).stderr)
+            assert len(reasons) == 1, (tool, reasons)
+
+    def test_decide_never_routes_to_the_web_library(self, monkeypatch,
+                                                    tmp_path):
+        # in-process, resolution faked PUBLIC: decide() must still return
+        # the name refusal, never check_web's None — the allow path is gone
+        fake = [(2, 1, 6, "", ("93.184.216.34", 0))]
+        monkeypatch.setattr(teammate_gate.socket, "getaddrinfo",
+                            lambda *a, **k: fake)
+        home = str(tmp_path)
+        teammate_gate.CONFIG = {"home": home, "read_roots": None,
+                                "deny_reads": [], "write_names": None}
+        try:
+            for tool in self.FETCH_TOOLS:
+                reason = teammate_gate.decide(
+                    {"tool_name": tool,
+                     "tool_input": {"url": "http://example.com/"},
+                     "cwd": home, "hook_event_name": "PreToolUse"})
+                assert reason and tool in reason and "no web access" in reason
+        finally:
+            teammate_gate.CONFIG = None
+
+    def test_toolsearch_stays_allowed_and_loads_no_exception(self, rig):
+        # ToolSearch itself remains free; a fetch tool it 'loads' is still
+        # an ordinary tool call at use time — the matcher-* hook fires and
+        # the exact name is refused (live-probed, evidence 17)
+        rig.allowed("ToolSearch", {"query": "web"})
+        rig.refused("WebFetch", {"url": "https://example.com/", "prompt": "x"})
+        rig.refused("WebSearch", {"query": "example"})

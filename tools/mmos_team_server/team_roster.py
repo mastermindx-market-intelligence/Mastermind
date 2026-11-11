@@ -504,10 +504,11 @@ USER_PROTECTED = (
 # neither mcp__*, mcp__server__*, nor the bare local name. mcp__
 # web_reader__webReader stays denied here even though its execution is
 # server-side (see RL_TEAMMATE_LIMITS.md residual: it must also be removed
-# from the server build). ToolSearch is deliberately NOT denied: it is how
-# WebFetch/WebSearch load, and the gate refuses every non-allowlisted tool
-# at call time anyway (the gate is the primary fence; this is the
-# snapshot second layer).
+# from the server build). ToolSearch is deliberately NOT denied: loading a
+# tool changes nothing — the gate refuses fetch-capable tools BY NAME at
+# call time (decision 2026-11-11, no web access; FETCH_FORBIDDEN_TOOLS).
+# The fetch names are DERIVED from the gate's one canonical list so the
+# two layers cannot drift (same single-source rule as the unreadable set).
 TOOL_DENY_CENSUS = (
     # census: client tools a teammate session is actually offered
     "Agent", "AskUserQuestion", "ListAgents", "ReportFindings",
@@ -519,7 +520,7 @@ TOOL_DENY_CENSUS = (
     "CronCreate", "CronDelete", "CronList",
     # MCP tools offered to a teammate session, by exact name
     "mcp__t3-code__request_secret", "mcp__web_reader__webReader",
-)
+) + tuple(sorted(_gate.FETCH_FORBIDDEN_TOOLS))
 
 # The primary fence (repair round 1 design ruling): one PreToolUse hook
 # program, stored where no teammate can write, wired into every teammate's
@@ -946,7 +947,7 @@ def tool_limits(spec, mate):
     # the named write-sensitive surfaces, Read/Glob/Grep denies for
     # deny_read_paths. Everything outside those names is the gate's call.
     allow = [
-        "Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite",
+        "Read", "Glob", "Grep", "TodoWrite",
         "ToolSearch", f"Write(/{home}/**)", f"Edit(/{home}/**)",
     ]
     if read_rooted:
@@ -972,7 +973,8 @@ def tool_limits(spec, mate):
     note += (" SECOND LAYER. The primary fence is the PreToolUse hook "
              "below: it resolves every path (symlinks, .., case, Unicode, "
              "firmlinks) at call time and fences reads to the roots, "
-             "writes to the home and web to public hosts — including "
+             "writes to the home, and refuses every fetch-capable tool "
+             "by exact name (no web access, decision 2026-11-11) — including "
              "folders created after this apply. These deny rules are the "
              "short-list backstop for the named sensitive surfaces only "
              "(census bare denies, write-sensitive names, deny_read_paths); "

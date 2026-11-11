@@ -328,7 +328,7 @@ class TestToolLimitsNewKeys:
         # same first-occurrence dedupe as tool_limits
         seen = set()
         deny = [d for d in deny if not (d in seen or seen.add(d))]
-        allow = ["Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite",
+        allow = ["Read", "Glob", "Grep", "TodoWrite",
                  "ToolSearch", f"Write(/{home}/**)", f"Edit(/{home}/**)"]
         return {"permissions": {"allow": allow, "deny": deny}}
 
@@ -1855,9 +1855,11 @@ class TestRepairRound2:
             assert tool in deny
         assert not any("*" in d and d.startswith("mcp__") for d in deny), \
             "wildcard mcp denies do not bind (live-proved); name each"
-        # the allowlist is untouched by the census denies
-        for tool in ("Read", "Glob", "Grep", "WebFetch", "WebSearch",
-                     "TodoWrite", "ToolSearch"):
+        # no-web decision (2026-11-11): fetch-capable tools ARE denied now
+        for tool in ("WebFetch", "WebSearch"):
+            assert tool in deny, f"{tool} must be bare-denied (no web)"
+        # the allowlist tools that remain working tools stay undenied
+        for tool in ("Read", "Glob", "Grep", "TodoWrite", "ToolSearch"):
             assert tool not in deny
 
     # ---- R6c: status catches mode, interpreter, disabled hooks, canary ----
@@ -2061,3 +2063,28 @@ class TestRepairRound3:
                             "/nonexistent/python3")
         with pytest.raises(SystemExit):
             team_roster.ensure_gate(spec)
+
+
+class TestNoFetchRoster:
+    """Decision 2026-11-11 (H-1 decided; RL-NF): no general web fetch for
+    teammates. The rule layer bare-denies every fetch-capable tool by
+    exact name, derived from the gate's one canonical list so the layers
+    cannot drift; the allow list drops the web tools."""
+
+    def test_fetch_names_denied_and_synced_with_gate(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        gate = TestRepairRound3._gate_module()
+        for tool in ("WebFetch", "WebSearch", "mcp__web_reader__webReader"):
+            assert tool in deny, f"fetch tool {tool} must be bare-denied"
+        # one source of truth: the gate's refusal list feeds the census
+        assert set(gate.FETCH_FORBIDDEN_TOOLS) <= set(team_roster.TOOL_DENY_CENSUS)
+        assert set(gate.FETCH_FORBIDDEN_TOOLS) <= set(deny)
+
+    def test_allow_list_has_no_web_tools(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        allow = team_roster.tool_limits(spec, mate)["permissions"]["allow"]
+        assert "WebFetch" not in allow
+        assert "WebSearch" not in allow
