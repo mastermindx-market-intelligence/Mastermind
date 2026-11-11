@@ -1775,20 +1775,32 @@ def run_carrier(pc, t3_factory, opts):
     issue = None
     for row in candidates:
         full = pc.issue(row["id"])
-        mine = active_run_id(row) == pc.run_id
         try:
             pc.checkout(row["id"], me["id"],
                         allow_blocked=(row.get("status") == "blocked"))
         except CarrierError as exc:
-            if mine and "HTTP 409" in str(exc):
-                # The assignment wake bound this issue to THIS run before the
-                # carrier started; a 409 here means "already checked out" by
-                # us. That is not a refusal — proceed with our own issue.
-                log(f"{row.get('identifier')} already checked out by this run "
-                    f"({pc.run_id}); proceeding")
-            else:
+            if "HTTP 409" not in str(exc):
                 log(f"checkout of {row.get('identifier')} refused ({exc}); next")
                 continue
+            # R2a finding 25: the inbox row can predate the assignment wake
+            # that bound this issue to THIS run — a 409 on a row that still
+            # showed no active run must not read as a refusal. Re-read the
+            # issue; the FRESH row decides: this run holds it -> proceed
+            # with the fresh read; another run holds it -> real refusal.
+            try:
+                fresh = pc.issue(row["id"])
+            except CarrierError as read_exc:
+                log(f"checkout of {row.get('identifier')} got 409 and the "
+                    f"re-read failed ({read_exc}); next")
+                continue
+            if active_run_id(fresh) == pc.run_id:
+                log(f"{row.get('identifier')} already checked out by this run "
+                    f"({pc.run_id}); proceeding")
+                issue = fresh
+                break
+            log(f"checkout of {row.get('identifier')} refused ({exc}); held "
+                f"by run {active_run_id(fresh) or 'unknown'}; next")
+            continue
         issue = full
         break
     if issue is None:

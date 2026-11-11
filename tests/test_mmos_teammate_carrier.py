@@ -181,6 +181,48 @@ def run(pc, t3, opts=None, agent_env="ag-1"):
     return wc.run_carrier(pc, lambda tid: t3, opts or {})
 
 
+def test_checkout_409_rereads_the_issue_and_holds_it_when_it_is_ours():
+    # R2a finding 25: the inbox row can predate the assignment wake that
+    # bound the issue to THIS run — a 409 then read as a refusal and the run
+    # skipped its own issue. On a 409 the carrier re-reads the issue: the
+    # FRESH row decides. This run holds it -> proceed; another run holds it
+    # -> refused.
+    base = {"identifier": "MMO-12", "status": "todo",
+            "title": "T45 task", "description": "Reply: OK",
+            "activeRun": {"id": "run-9"}}
+
+    def stale_inbox(pc):
+        # the snapshot predates the binding: no active run shown
+        return [{"id": "is-1", "identifier": "MMO-12", "status": "todo",
+                 "updatedAt": "1", "activeRun": None, "dependencyReady": True}]
+
+    def checkout_409(pc):
+        def _checkout(issue_id, agent_id, allow_blocked=False):
+            pc.calls.append(("checkout", issue_id, agent_id, allow_blocked))
+            raise wc.CarrierError(
+                "POST /api/issues/is-1/checkout -> HTTP 409 "
+                '{"error":"issue already checked out"}')
+        return _checkout
+
+    pc = FakePaperclip(issues={"is-1": dict(base)})
+    pc.inbox = lambda: stale_inbox(pc)
+    pc.checkout = checkout_409(pc)
+    t3 = FakeT3(replies=["STALE-INBOX-OK"])
+    assert run(pc, t3) == 0
+    assert len(t3.sends) == 1                # our own issue was not skipped
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"]
+    assert bodies == ["STALE-INBOX-OK"]
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+    # a fresh read naming ANOTHER run is still a refusal
+    pc2 = FakePaperclip(issues={"is-1": dict(base, activeRun={"id": "run-777"})})
+    pc2.inbox = lambda: stale_inbox(pc2)
+    pc2.checkout = checkout_409(pc2)
+    t3b = FakeT3(replies=["SHOULD NOT SEND"])
+    assert run(pc2, t3b) == 0
+    assert t3b.sends == []
+
+
 def test_happy_path_one_send_one_comment_confirmation_status():
     pc, t3 = FakePaperclip(issues=one_issue()), FakeT3(replies=["line1\nline2\nline3"])
     assert run(pc, t3) == 0
@@ -373,7 +415,10 @@ def test_assignment_wake_run_does_the_work_on_own_active_run():
     # carrier starts (activeRun == pc.run_id). The carrier must do the work,
     # not skip it. A checkout 409 because it is already ours is not a refusal.
     issues = {"is-1": {"identifier": "MMO-12", "status": "in_progress",
-                       "title": "T45 task", "description": "Reply: OK"}}
+                       "title": "T45 task", "description": "Reply: OK",
+                       # R2a finding 25: the binding shows on the issue row
+                       # too (the re-read after a 409 must see it)
+                       "activeRun": {"id": "run-9"}}}
     pc = FakePaperclip(issues=issues)
     pc.inbox_rows_override = [{"id": "is-1", "identifier": "MMO-12",
                                "status": "in_progress",
