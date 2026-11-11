@@ -168,10 +168,13 @@ def resolve(asof, realized: dict | None = None, *, theses: list | None = None) -
         return 0
     rows = theses if theses is not None else all_theses()
     by_id = {t.get("id"): t for t in rows}
+    # Skip historical dependencies for completed rows. The locked check below still
+    # decides KEEP-FIRST if another resolver publishes while snapshots are being read.
+    recorded = _scored_ids()
     candidates: list[dict] = []
     asof_resolved = asof if isinstance(asof, str) else (asof.isoformat() if isinstance(asof, date) else None)
     for tid, rel in rmap.items():
-        if tid not in by_id:
+        if tid in recorded or tid not in by_id:
             continue
         t = by_id[tid]
         check = (t.get("falsifier") or {}).get("check") or {}

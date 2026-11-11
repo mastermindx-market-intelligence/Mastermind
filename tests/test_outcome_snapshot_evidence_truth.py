@@ -63,3 +63,27 @@ def test_available_snapshot_is_recorded_as_available_even_with_no_directional_le
     assert row["confluence_at_entry"] == 0.0
     assert row["size_authority_at_entry"] == "hold"
     assert row["quad_at_entry"] == "Q2"
+
+
+def test_recorded_outcome_skips_history_while_new_outcomes_remain_retryable(tmp_path, monkeypatch):
+    ol, sh = _wire(tmp_path, monkeypatch)
+    first = _thesis()
+    assert ol.resolve("2026-09-17", {"t1": 0.10}, theses=[first]) == 1
+    original = ol._PATH.read_bytes()
+    sh._PATH.write_text("{broken\n")
+
+    assert ol.resolve("2026-09-18", {"t1": -0.20}, theses=[first]) == 0
+    assert ol._PATH.read_bytes() == original
+
+    undated = _thesis("t2", state_asof=None)
+    assert ol.resolve("2026-09-18", {"t1": -0.20, "t2": 0.10}, theses=[first, undated]) == 1
+    assert ol.load()[1]["lens_snapshot_status"] == "missing"
+
+    new = _thesis("t3")
+    before_retry = ol._PATH.read_bytes()
+    with pytest.raises(json.JSONDecodeError):
+        ol.resolve("2026-09-18", {"t3": 0.10}, theses=[new])
+    assert ol._PATH.read_bytes() == before_retry
+
+    sh._PATH.write_text("")
+    assert ol.resolve("2026-09-18", {"t3": 0.10}, theses=[new]) == 1
