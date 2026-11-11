@@ -132,7 +132,13 @@ Proved, live, on the dev/t8 bundle against a private dev T3 server
   on the Team thread with no typing (`01-first-open`, `PAIRING.DONE`).
 - Session-expiry equivalent: the dev bundle's cookie container deleted, the
   app reopened — a second `PAIRING.DONE` and the signed-in thread again with
-  no typing (`02-reopen-after-cookie-delete`).
+  no typing (`02-reopen-after-cookie-delete`), re-proved on the final
+  binary after the View-menu fix
+  (`02-reopen-after-cookie-delete/final-binary/keep-final-binary.png`).
+- The View menu items this lane added (Reload, Zoom In/Out, Actual Size,
+  Back) are present and registered with their key equivalents on the final
+  binary (`03-typing/task4/menus-final-binary.json`); see section 6 for
+  which of them were proven to take effect.
 - The failure path, live: before the fragment-navigation fix the exchange
   timed out; the window showed the plain one-sentence page and the log
   gained exactly one input-free `PAIRING.FAILED.exchange_timeout` record.
@@ -148,13 +154,60 @@ and multi-user Macs (authority is file ownership by the server home's
 owner; a second local user gets the plain failure page, which is tested,
 but no live second-user run happened).
 
-## 6. Keyboard table
+## 6. Typing and keyboard table
 
-Filled from the typing child's run against the dev bundle on the dev
-server; raw captures and its own table live in
-`~/.mastermind/mmos_evidence/t8-20261110/03-typing/`.
+Typing was proven by a `kimi-k3.1-pro` child (three dispatches; two died
+on gateway/router errors); keyboard verdicts come from its accessibility
+receipts plus one lane keystroke run, all under
+`~/.mastermind/mmos_evidence/t8-20261110/03-typing/` (the child's own
+narrative: `KEYBOARD_TABLE.md`; final-binary shortcut receipts: `task5/`).
 
-<!-- T8-TYPING-TABLE: inserted from the child's KEYBOARD_TABLE.md when it returns -->
+What a person experiences when typing:
+
+- Type a message, press Enter: the reply arrives while writing (exact
+  request `T8 typing check one: reply with exactly the word ACK.` →
+  exact reply `ACK` in ~2 s). Proven via the child's approved headless
+  browser fallback against the signed-in thread; native per-PID typing
+  of the message itself was refused by the desktop tooling, and message
+  *content* typing into the composer by synthetic keystrokes is not a
+  proven native path.
+- Send a second message while the first is generating: accepted as a
+  *steer*; the second answer arrives but the first answer stops
+  mid-sentence and stays incomplete. Two independently completed
+  answers from one queued pair is NOT what happens.
+- Answer one pending request (a shell-command approval card): NOT
+  TESTED. In the dev session shell commands ran without any permission
+  card (4.4 s, output visible); the retry set the thread control to
+  "Supervised" (projection eventually read `approval-required`) and a
+  second identical command still produced no card in 90 s, so there was
+  no card to answer.
+
+Keyboard table (menu items added by this lane are marked T8; all other
+rows were measured on the shipped menu):
+
+| Action | Verdict | Evidence and limitation |
+|---|---|---|
+| Copy — ⌘C | does-not-work | Key event delivered to the exact PID with the draft selected; system pasteboard unchanged. Menu item `Edit > Copy` exists. |
+| Paste — ⌘V | does-not-work | Pasteboard set to a known marker; ⌘V left the draft unchanged, marker still on pasteboard. Menu item exists. |
+| Select all — ⌘A | works | Draft range `17,0` → `0,17` after the key (`task4`, `task5` receipts). |
+| Undo — ⌘Z | works | Lane keystroke run: draft typed with real per-PID keystrokes, ⌘Z reverted the field to empty (`task4-lane/edit-run-final2.txt`). |
+| Find — ⌘F | works | Opens the in-window "Find in thread" field (web-side control; there is no Find menu item — noted, not fixed: it already works). |
+| Reload — ⌘R (T8) | NOT TESTED | Menu item present; the child's dispatch receipt is empty and before/after AX reads are identical, so neither works nor fails is proven. |
+| Close window — ⌘W | works via menu | `File > Close Window` terminated the single-window app; the ⌘W key itself was not separately fired. |
+| Quit — ⌘Q | not-tested | Menu advertises ⌘Q; every attempt found the process already gone (close had terminated it). |
+| Zoom in — ⌘= (T8) | works | AX element sizes grew 28→32 px / 239→264 px after the key (`task5/zoom-*-verified-ax.json`). |
+| Zoom out — ⌘- (T8) | does-not-work | Dispatch receipt present; AX sizes unchanged from the zoomed state across two passes. |
+| Actual size — ⌘0 (T8) | does-not-work | Dispatch receipt present; AX sizes unchanged from the zoomed state across two passes. |
+| Back — ⌘[ (T8) | NOT TESTED | Navigating to a second thread first was refused by the desktop tooling, so no history existed for ⌘[ to walk. |
+| Reopen after close | works | 30 s after verified process exit, `open -n` returned exactly one instance, signed in on the same thread, no pairing. |
+
+Honest caveat on the T8 zoom rows: all shortcuts were driven by synthetic
+per-PID CGEvents, not a human keyboard. ⌘= took effect through exactly the
+path ⌘- and ⌘0 did not, so the asymmetry is real as measured, but a human
+pressing the keys may see different routing; if the principal sees the same
+failure by hand, the fix belongs in `shell_menu.rs` (the handlers exist for
+all three). Copy/paste failing while select-all and undo work points at the
+page's own clipboard handling, not the menu.
 
 ## 7. Two T3 servers on one Mac: the cookie hazard
 
