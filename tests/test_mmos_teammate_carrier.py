@@ -742,6 +742,111 @@ def test_blocked_issue_without_ask_child_is_left_alone():
     assert pc.issues["is-1"]["status"] == "blocked"
 
 
+# --- a blocked task whose turn was in flight finishes (marker-gated) ---------
+
+def blocked_issue():
+    return {"is-1": {"identifier": "MMO-1", "status": "blocked",
+                     "dependencyReady": True, "title": "Wait on infra",
+                     "description": "Waiting on a deploy"}}
+
+
+def test_blocked_task_with_answered_marker_finishes():
+    # Item 5, scan state "reply": the issue was blocked while the teammate's
+    # turn ran; the blockers_resolved wake finds the marker answered and the
+    # normal path delivers it — comment, confirmation, in_review — with no
+    # second send.
+    op = wc.op_id("is-1", "Wait on infra\nWaiting on a deploy")
+    pc = FakePaperclip(issues=blocked_issue())
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}] the task"),
+                          ("assistant", "r1", "deploy done, answer ready")])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert t3.sends == []
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"]
+    assert bodies == ["deploy done, answer ready"]
+    assert "interaction" in [c[0] for c in pc.calls]
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_blocked_task_with_pending_question_stays_with_it():
+    # Item 5, scan state "pending" on a question: the carrier stays with the
+    # question, says the waiting line once, and at the deadline leaves the
+    # issue blocked (nothing released, nothing un-blocked).
+    op = wc.op_id("is-1", "Wait on infra\nWaiting on a deploy")
+    asked = [("user", "r1", f"[{op}] the task"),
+             ("assistant", "r1", "which environment?")]
+    t3 = ScriptedT3(states=[(th(active="r1", latest="r1", pending=1), asked)])
+    pc = FakePaperclip(issues=blocked_issue())
+    opts = wait_opts(Clock(), t3, question_wait_sec=30)
+    with pytest.raises(wc.NeedsHuman):
+        run_with_roster(pc, t3, {}, opts)
+    assert t3.sends == []
+    assert [c[2] for c in pc.calls if c[0] == "comment"] == \
+        [wc.waiting_note(opts, "th-1")]
+    assert pc.issues["is-1"]["status"] == "blocked"
+
+
+def test_blocked_task_with_slow_marker_waits_then_releases():
+    # Item 5, scan state "pending" with no question: the slow-turn wait runs;
+    # at its deadline the issue is released for a person (todo, release note).
+    op = wc.op_id("is-1", "Wait on infra\nWaiting on a deploy")
+    t3 = ScriptedT3(states=[(th(latest="r1", pending=0),
+                             [("user", "r1", f"[{op}] the task")])])
+    pc = FakePaperclip(issues=blocked_issue())
+    clock = Clock()
+
+    def nap(seconds):
+        clock.nap(seconds)
+        t3.nap(seconds)
+    opts = {"clock": clock.time, "sleep": nap,
+            "pending_timeout_sec": 20, "poll_interval_sec": 10}
+    with pytest.raises(wc.CarrierError):
+        run_with_roster(pc, t3, {}, opts)
+    assert t3.sends == []
+    assert any("did not complete" in (c[2] if c[0] == "comment" else "")
+               for c in pc.calls)
+    assert pc.issues["is-1"]["status"] == "todo"
+
+
+def test_blocked_issue_with_board_feedback_and_marker_revises():
+    # Item 5: board feedback on a blocked issue is handled the same way — the
+    # marker gate admits it, and the normal feedback round runs.
+    op = fb_op()
+    issues = {"is-1": {"identifier": "MMO-1", "status": "blocked",
+                       "dependencyReady": True, "title": "Summarize file X",
+                       "description": "Write a three-line summary."}}
+    pc = FakePaperclip(issues=issues)
+    pc.comment_rows["is-1"] = [
+        {"body": "answer v1", "authorType": "agent"},
+        {"body": "the numbers were wrong", "authorType": "user"}]
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "rejected",
+         "result": {"reason": "line count is off"}}]
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}] task"),
+                          ("assistant", "r1", "answer v1")],
+                replies=["answer v2, now correct"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert len(t3.sends) == 1 and f"[{op}-rev1]" in t3.sends[0]
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_blocked_issue_with_feedback_but_no_marker_is_left():
+    # ...and with no marker in the thread the same issue stays with a person.
+    issues = {"is-1": {"identifier": "MMO-1", "status": "blocked",
+                       "dependencyReady": True, "title": "Summarize file X",
+                       "description": "Write a three-line summary."}}
+    pc = FakePaperclip(issues=issues)
+    pc.comment_rows["is-1"] = [
+        {"body": "answer v1", "authorType": "agent"},
+        {"body": "the numbers were wrong", "authorType": "user"}]
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "rejected",
+         "result": {"reason": "line count is off"}}]
+    t3 = FakeT3()
+    assert run_with_roster(pc, t3, {}) == 0
+    assert t3.sends == []
+    assert pc.issues["is-1"]["status"] == "blocked"
+
+
 def test_ask_child_delivers_done_without_board_confirmation():
     # Atlas's inbox: the child created by Mira's ask (marker in description)
     ask_op = "pc-is1-abc123def0-ask"
@@ -756,6 +861,26 @@ def test_ask_child_delivers_done_without_board_confirmation():
     # done so the asker's issue_blockers_resolved wake can fire
     assert "comment" in kinds and "interaction" not in kinds
     assert pc.issues["is-1"]["status"] == "done"
+
+
+def test_ask_child_is_never_offered_the_coding_job_block():
+    # R4b finding 5: a teammate answering an ask child works delegated work;
+    # the asker owns the coding-job decision, so the message never teaches
+    # the block — whatever the door config says.
+    ask_op = "pc-is1-abc123def0-ask"
+    pc = FakePaperclip(issues={"is-1": {
+        "identifier": "MMO-2", "status": "in_progress",
+        "title": "Count lines", "assigneeAgentId": "ag-1",
+        "description": f"Run wc -l.\n\nAsked by Mira on MMO-1 [{ask_op}]"}})
+    t3 = FakeT3(replies=["The file has 12 lines"])
+    opts = {"coding_job_door": "/tmp/a-configured-door.sock"}
+    assert run_with_roster(pc, t3, {}, opts) == 0
+    assert len(t3.sends) == 1
+    assert "paperclip-coding-job" not in t3.sends[0]
+    # the same door key on a PLAIN task still teaches the block
+    pc2, t3b = FakePaperclip(issues=one_issue()), FakeT3(replies=["x"])
+    assert run(pc2, t3b, opts) == 0
+    assert "paperclip-coding-job" in t3b.sends[0]
 
 
 def test_resumed_parent_after_children_completed_runs_return():
@@ -1018,6 +1143,96 @@ def test_system_notice_is_not_board_feedback():
          "result": {"reason": ""}}]
     assert wc.board_feedback(pc, pc.issue("is-1")) is None
     assert wc.board_notes(pc, pc.issue("is-1")) == []
+
+
+# --- machine comments are never a person's words (R4b findings 4/5) ---------
+#
+# The installed Paperclip records every loopback write as authorType "user",
+# so text written by the door, the result transport or this carrier reaches
+# the board and a teammate as if a person wrote it. The agreed lane line with
+# T4c: door/transport comments start with `[coding-job]`, carrier notes with
+# `[t2-carrier]`. The reader trusts the prefix, never the authorType.
+
+
+def test_is_machine_comment_recognises_the_lane_prefixes_only():
+    assert wc.is_machine_comment("[coding-job] result: job-42 sealed") is True
+    assert wc.is_machine_comment("[t2-carrier] coding job blocked — WAIT") is True
+    assert wc.is_machine_comment("  [coding-job] indented") is True
+    assert wc.is_machine_comment("\n[t2-carrier] on its own line") is True
+    assert wc.is_machine_comment("[coding-job]") is True
+    assert wc.is_machine_comment("a person wrote this") is False
+    assert wc.is_machine_comment("fine start\n[coding-job] later line") is False
+    assert wc.is_machine_comment("") is False
+    assert wc.is_machine_comment(None) is False
+    # the pre-T4c door prefix is NOT in the lane line; pinned deliberately
+    assert wc.is_machine_comment("[t4b-door] old door blocker") is False
+
+
+def test_machine_comments_are_never_board_notes_or_feedback():
+    pc = FakePaperclip(issues=feedback_issue())
+    pc.comment_rows["is-1"] = [
+        {"body": "answer v1", "authorType": "agent"},
+        {"body": "[coding-job] result: job-42 sealed", "authorType": "user"},
+        {"body": "[t2-carrier] waiting for your answer", "authorType": "user"},
+        {"body": "use lines, not words", "authorType": "user"}]
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "rejected",
+         "result": {"reason": "wrong unit"}}]
+    # notes and feedback both skip the machine rows whatever their authorType
+    assert wc.board_notes(pc, pc.issue("is-1")) == ["use lines, not words"]
+    assert wc.board_feedback(pc, pc.issue("is-1")) == ("wrong unit",
+                                                       "use lines, not words")
+    # machine words alone are never the board's comment
+    pc.comment_rows["is-1"] = [
+        {"body": "answer v1", "authorType": "agent"},
+        {"body": "[coding-job] result: job-42 sealed", "authorType": "user"}]
+    assert wc.board_feedback(pc, pc.issue("is-1")) == ("wrong unit", None)
+
+
+def test_last_result_comment_skips_machine_comments():
+    pc = FakePaperclip(issues=one_issue())
+    pc.comment_rows["is-1"] = [
+        {"body": "the real answer", "authorType": "agent"},
+        {"body": "[coding-job] result: job-42 sealed", "authorType": "user"}]
+    assert wc.last_result_comment(pc, "is-1") == "the real answer"
+    pc.comment_rows["is-1"] = [
+        {"body": "[t2-carrier] waiting for your answer", "authorType": "user"}]
+    assert wc.last_result_comment(pc, "is-1") == \
+        "(no answer comment on the child issue)"
+
+
+# --- every comment this carrier writes is a machine comment ------------------
+
+def test_coding_job_admission_comment_carries_the_lane_prefix(monkeypatch):
+    # Item 2: the admission/replay comment is a carrier note, so it must
+    # start with `[t2-carrier]` — the reader-side filter of item 1 relies on
+    # every carrier-written comment carrying the prefix.
+    class FakeDoor:
+        def __init__(self, socket_path):
+            pass
+
+        def _request(self, method, path, body=None):
+            return 200, {"result": {"state": "ADMITTED", "job_id": "job-42"}}
+    monkeypatch.setattr(wc, "DoorClient", FakeDoor)
+    pc = FakePaperclip(issues=one_issue())
+    wc.handle_coding_job(pc, pc.issue("is-1"), "the answer",
+                         {"key": "coding-job-1"}, {"coding_job_door": "/x/sock"})
+    assert len(pc.calls) == 1
+    body = pc.calls[0][2]
+    assert body.startswith("[t2-carrier] coding job ")
+    assert "job-42" in body and "ADMITTED" in body
+    assert wc.is_machine_comment(body) is True
+
+    class ReplayDoor(FakeDoor):
+        def _request(self, method, path, body=None):
+            return 200, {"result": {"state": "REPLAY", "job_id": "job-42"}}
+    monkeypatch.setattr(wc, "DoorClient", ReplayDoor)
+    pc2 = FakePaperclip(issues=one_issue())
+    wc.handle_coding_job(pc2, pc2.issue("is-1"), "the answer",
+                         {"key": "coding-job-1"}, {"coding_job_door": "/x/sock"})
+    replay = pc2.calls[0][2]
+    assert replay.startswith("[t2-carrier] coding job ")
+    assert wc.is_machine_comment(replay) is True
 
 
 def test_board_notes_keep_order_and_cap():
@@ -1310,26 +1525,28 @@ def test_wait_for_reply_deadline_without_question_is_carrier_error():
 
 
 def test_waiting_note_with_template_and_without():
-    # Rule D: the line names the teammate, links the conversation when a
-    # loopback template is configured, and says what to do and for how long.
+    # Rule D, reworded (item 7): the line names the teammate as an AI
+    # teammate, links the conversation when a loopback template is
+    # configured, and says what to do, for how long, and how to wake it later.
     os.environ["PAPERCLIP_AGENT_ID"] = "ag-1"
     tpl = "http://127.0.0.1:3774/thread/{thread}"
     note = wc.waiting_note({"roster": {"Assurance": "ag-1", "Design Lead": "ag-2"},
                             "question_wait_sec": 900,
                             "thread_url_template": tpl}, "mcp:a-1")
     assert note == (
-        "[t2-carrier] Assurance asked a question in its conversation and is "
-        "waiting for your answer: http://127.0.0.1:3774/thread/mcp%3Aa-1. "
-        "Answer it there. This task continues by itself if the answer "
-        "arrives within 15 minutes. After that, add a comment here to wake "
-        "it.")
+        "[t2-carrier] Assurance, an AI teammate, needs your answer to "
+        "continue this task. Open its chat: "
+        "http://127.0.0.1:3774/thread/mcp%3Aa-1 and reply there. If you "
+        "answer within 15 minutes the task continues by itself. Later than "
+        "that, add any comment here and Assurance picks the work up again.")
     plain = wc.waiting_note({"roster": {"Assurance": "ag-1"},
                              "question_wait_sec": 900}, "mcp:a-1")
     assert plain == (
-        "[t2-carrier] Assurance asked a question in its conversation and is "
-        "waiting for your answer in its team conversation. Answer it there. "
-        "This task continues by itself if the answer arrives within 15 "
-        "minutes. After that, add a comment here to wake it.")
+        "[t2-carrier] Assurance, an AI teammate, needs your answer to "
+        "continue this task. Open its chat in the Team list and reply there. "
+        "If you answer within 15 minutes the task continues by itself. "
+        "Later than that, add any comment here and Assurance picks the work "
+        "up again.")
     # a non-loopback template is ignored, never followed
     bad = wc.waiting_note({"roster": {"Assurance": "ag-1"},
                            "question_wait_sec": 900,
@@ -1338,8 +1555,9 @@ def test_waiting_note_with_template_and_without():
     assert bad == plain
     # no roster entry for this agent -> the generic name; minutes follow the key
     generic = wc.waiting_note({"roster": {}, "question_wait_sec": 1200}, "t-1")
-    assert generic.startswith("[t2-carrier] The teammate asked a question")
+    assert generic.startswith("[t2-carrier] The teammate, an AI teammate,")
     assert "within 20 minutes" in generic and "http" not in generic
+    assert generic.endswith("The teammate picks the work up again.")
 
 
 def test_thread_url_template_law():
@@ -1352,6 +1570,9 @@ def test_thread_url_template_law():
     assert wc.thread_url("http://127.0.0.1.evil.test:80/{thread}", "t") is None
     assert wc.thread_url("http://127.0.0.1:3774/thread/", "t") is None
     assert wc.thread_url("http://127.0.0.1:3774/{thread}/{thread}", "t") is None
+    # the port must be followed by a "/", exactly as issue_link demands: a
+    # userinfo trick would otherwise smuggle a real foreign host through
+    assert wc.thread_url("http://127.0.0.1:80@example.com/{thread}", "t") is None
 
 
 def test_feedback_round_waits_with_the_question_too():
@@ -1463,3 +1684,142 @@ def test_waiting_note_is_repeated_after_the_board_writes():
         run(pc, t3, opts)
     assert [c[2] for c in pc.calls if c[0] == "comment"] == \
         [wc.waiting_note(opts, "th-1")] * 2
+
+
+# --- the run options come from one place (config file + environ) -------------
+
+def test_build_opts_maps_every_key_and_reads_the_door_from_config_only():
+    # Item 4: one function builds the opts. The coding-job door comes from
+    # the CONFIG FILE only — absent means dormant, exactly as before — and
+    # every other key keeps its default when the config does not carry it.
+    cfg = {
+        "pending_timeout_sec": 700, "poll_interval_sec": 6,
+        "question_wait_sec": 800, "run_budget_sec": 1300,
+        "question_poll_interval_sec": 12,
+        "teammates": {"Assurance": "ag-1"},
+        "issue_url_template": "http://127.0.0.1:3100/MAS/issues/{identifier}",
+        "thread_url_template": "http://127.0.0.1:3780/x/{thread}",
+        "coding_job_door": "/path/to/door.sock",
+    }
+    opts = wc.build_opts(cfg, {"MMOS_T2_CARRIER_CRASH_AFTER": "pre-comment"},
+                         1234.5)
+    assert opts == {
+        "crash_after": "pre-comment",
+        "pending_timeout_sec": 700,
+        "poll_interval_sec": 6,
+        "question_wait_sec": 800,
+        "run_budget_sec": 1300,
+        "question_poll_interval_sec": 12,
+        "roster": {"Assurance": "ag-1"},
+        "issue_url_template": "http://127.0.0.1:3100/MAS/issues/{identifier}",
+        "thread_url_template": "http://127.0.0.1:3780/x/{thread}",
+        "coding_job_door": "/path/to/door.sock",
+        "run_start": 1234.5,
+    }
+    # an empty config: every default, and the door stays dormant
+    minimal = wc.build_opts({}, {}, 0.0)
+    assert minimal == {
+        "crash_after": None,
+        "pending_timeout_sec": 600,
+        "poll_interval_sec": 5,
+        "question_wait_sec": 900,
+        "run_budget_sec": 1320,
+        "question_poll_interval_sec": 10,
+        "roster": {},
+        "issue_url_template": None,
+        "thread_url_template": None,
+        "coding_job_door": None,
+        "run_start": 0.0,
+    }
+    # the door never comes from the environment
+    env_door = wc.build_opts({}, {"coding_job_door": "/env/door.sock"}, 0.0)
+    assert env_door["coding_job_door"] is None
+
+
+# --- item 8: the three behaviors named untested in the first return ---------
+#
+# Task 1 implemented these; no test proved them. They pin the behavior, not
+# a change: a reader that fails once or twice must not end a wait, three in a
+# row must; the run budget caps the slow-turn wait too; and a stay that
+# already sent once never sends again when the marker fails to appear.
+
+class GlitchT3(ScriptedT3):
+    """A scripted thread whose reads raise CarrierError for the first
+    `glitches` calls (a transient t3 failure), then serve the states."""
+
+    def __init__(self, states, glitches=0, **kw):
+        super().__init__(states, **kw)
+        self.glitches = glitches
+        self.failed_reads = 0
+
+    def messages(self, count=60):
+        if self.glitches > 0:
+            self.glitches -= 1
+            self.failed_reads += 1
+            raise wc.CarrierError("t3 thread show failed (exit 1): glitch")
+        return super().messages(count)
+
+
+def test_question_wait_survives_two_failed_reads():
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    asked = [("user", "r1", f"[{op}] the task"),
+             ("assistant", "r1", "mid-turn prose")]
+    answered = asked + [("assistant", "r1", "the final answer")]
+    t3 = GlitchT3(states=[(th(active="r1", latest="r1", pending=1), asked),
+                          (th(latest="r1", pending=0), answered)], glitches=2)
+    pc = FakePaperclip(issues=one_issue())
+    opts = wait_opts(Clock(), t3)
+    assert wc.stay_with_question(pc, t3, pc.issue("is-1"), op, opts) == \
+        "the final answer"
+
+
+def test_question_wait_fails_after_three_reads_in_a_row():
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    asked = [("user", "r1", f"[{op}] the task")]
+    t3 = GlitchT3(states=[(th(active="r1", latest="r1", pending=1), asked)],
+                  glitches=99)
+    pc = FakePaperclip(issues=one_issue())
+    opts = wait_opts(Clock(), t3)
+    with pytest.raises(wc.CarrierError):
+        wc.stay_with_question(pc, t3, pc.issue("is-1"), op, opts)
+    assert t3.failed_reads == 3  # exactly three strikes, not fewer
+
+
+def test_run_budget_caps_wait_for_reply_too():
+    # The slow-turn wait ends at the earlier of pending_timeout_sec and the
+    # run budget: here 50s of budget against a 600s timeout.
+    op = "pc-is-1-budget"
+    t3 = ScriptedT3(states=[(th(latest="r1", pending=0),
+                             [("user", "r1", f"[{op}] the task")])])
+    clock = Clock(1000.0)
+
+    def nap(seconds):
+        clock.nap(seconds)
+        t3.nap(seconds)
+    opts = {"clock": clock.time, "sleep": nap, "pending_timeout_sec": 600,
+            "poll_interval_sec": 10, "run_budget_sec": 50, "run_start": 1000.0}
+    with pytest.raises(wc.CarrierError):
+        wc.wait_for_reply(t3, op, opts)
+    assert clock.now == 1050.0  # the budget (not the timeout) set the end
+
+
+def test_stay_never_sends_again_when_the_marker_fails_to_appear():
+    # The hardening of rule B: when the thread's story is inconsistent (sends
+    # stop on a question but the marker never shows, and no question waits
+    # afterwards), a stay sends at most once itself — the outer send plus the
+    # stay's own, never a third.
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    q1 = [("user", "r9", "unrelated question")]
+    a1 = q1 + [("assistant", "r9", "unrelated answer")]
+    t3 = ScriptedT3(states=[
+        (th(pending=0), []),                              # before the send
+        (th(active="r9", latest="r9", pending=1), q1),    # the send asked
+        (th(latest="r9", pending=0), a1),                 # answered, no marker
+        (th(latest="r10", pending=0), a1),                # still no marker
+    ], ask_on_send=True)
+    pc = FakePaperclip(issues=one_issue())
+    opts = wait_opts(Clock(), t3, question_wait_sec=30)
+    with pytest.raises(wc.NeedsHuman):
+        run(pc, t3, opts)
+    assert len(t3.sends) == 2              # one outer, one from the stay
+    assert pc.issues["is-1"]["status"] == "in_progress"  # nothing released
