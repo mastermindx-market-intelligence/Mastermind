@@ -996,15 +996,29 @@ class CodingJobDoor:
             "attempt_id": entry.get("attempt_id"),
             "phase": entry.get("phase"),
             "delivery": entry.get("delivery"),
-            "native_launches": self._native_launch_count(),
+            "native_launches": self._native_launch_count(
+                entry.get("attempt_id")),
         }
 
-    def _native_launch_count(self) -> int:
-        if not self.launch_census.exists():
+    def _native_launch_count(self, attempt_id) -> int:
+        """L7 (wait-frees journey, 2026-11-11): count only THIS attempt's
+        tagged launches.  The census is one file per scratch; answering a
+        command's state with the whole-file count made two single-launch
+        tasks each report 2.  Untagged rows (the service-side ports) are
+        never this attempt's launch; an entry with no attempt yet has no
+        launch of its own."""
+        if not attempt_id or not self.launch_census.exists():
             return 0
-        rows = self.launch_census.read_text(encoding="utf-8").splitlines()
-        return sum(1 for line in rows if line.strip()
-                   and json.loads(line).get("tool") == "t3_thread_launch")
+        count = 0
+        for line in self.launch_census.read_text(
+                encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if (row.get("tool") == "t3_thread_launch"
+                    and row.get("attempt") == attempt_id):
+                count += 1
+        return count
 
     def _ensure_admitted(self, command: str, entry: dict) -> None:
         """F3 (attack review): a crash between the admission commit and the
@@ -1036,16 +1050,22 @@ class CodingJobDoor:
         self._save_frozen()
         self._surface_blocker(entry, code, reason[:200])
 
-    def _record_census(self, tool: str, arguments: dict) -> None:
+    def _record_census(self, tool: str, arguments: dict,
+                       attempt_id: str | None = None) -> None:
         # F11: the census rides the owner-only run directory
         self.launch_census.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(self.launch_census.parent, 0o700)
+        row = {"t": _now(), "tool": tool,
+               "clientRequestId": arguments.get("clientRequestId")}
+        if attempt_id:
+            # L7 (wait-frees journey, 2026-11-11): per-attempt attribution —
+            # the census is per-scratch, but a command's state must answer
+            # for THAT command's attempt
+            row["attempt"] = attempt_id
         fd = os.open(self.launch_census,
                      os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"t": _now(), "tool": tool,
-                                 "clientRequestId":
-                                     arguments.get("clientRequestId")}) + "\n")
+            fh.write(json.dumps(row) + "\n")
 
     # ------------------------------------------------------------ executor
 
@@ -1357,10 +1377,13 @@ class CodingJobDoor:
             if "already registered" not in str(exc):
                 raise
 
-    def _compose_adapter(self, request, branch: str, *, fresh: bool):
+    def _compose_adapter(self, request, branch: str, *, fresh: bool,
+                         attempt_id: str | None = None):
         """The canary's `_compose` per job: real transport + port with the
         job's own launch arguments, durable census wrapper, optional crash
-        hook on the fresh launch only."""
+        hook on the fresh launch only.  The census rows this port writes
+        carry the attempt it was composed for (L7: a command's state
+        counts only its own attempt's launches)."""
         from control_plane.t3_execution_adapter import SQLiteT3AdapterStateStore
         from control_plane.t3_native_composition import (
             T3McpHttpTransport,
@@ -1379,7 +1402,7 @@ class CodingJobDoor:
                 self.config.t3_proof_base + "/mcp", token_value)
 
             def call_tool(tool: str, arguments: dict):
-                self._record_census(tool, arguments)
+                self._record_census(tool, arguments, attempt_id=attempt_id)
                 return transport.call_tool(tool, arguments)
 
             port = T3McpToolPort.from_access_token(
@@ -1494,7 +1517,8 @@ class CodingJobDoor:
             self._save_frozen()
             _log(f"claimed {attempt_id} on placement "
                  f"{composed.placement_job.job_id}; branch {branch}")
-            adapter, _box = self._compose_adapter(request, branch, fresh=True)
+            adapter, _box = self._compose_adapter(
+                request, branch, fresh=True, attempt_id=attempt_id)
             # The spec must name the job the attempt was CLAIMED on (the
             # placement job), not the request job: the engine's
             # receipt-adoption identity check compares spec.job_id against
@@ -1587,8 +1611,8 @@ class CodingJobDoor:
                 # claim's lease is still held by this door's persisted
                 # credentials, so START the claimed attempt now.  This is
                 # the attempt's first and only launch.
-                adapter, _box = self._compose_adapter(request, branch,
-                                                      fresh=False)
+                adapter, _box = self._compose_adapter(
+                    request, branch, fresh=False, attempt_id=attempt_id)
                 # Same law as the first claim: the engine's receipt-adoption
                 # check compares spec.job_id with the ATTEMPT row's job, so
                 # the relaunch names the attempt's own job (the frozen entry
@@ -1711,7 +1735,8 @@ class CodingJobDoor:
             _log(f"engine recovered {attempt_id} under fence "
                  f"{run.lease.attempt.fence_generation} "
                  f"({run.process_ref.provider_session_id})")
-            adapter, _box = self._compose_adapter(request, branch, fresh=False)
+            adapter, _box = self._compose_adapter(
+                request, branch, fresh=False, attempt_id=attempt_id)
             # L4 (crash journey, 2026-11-11): the recovered ActiveRun carries
             # the supervisor-boundary TWIN ref (the runtime's provider-managed
             # recording shape: pid/pgid/process_start_identity/boot_session_id
@@ -1909,7 +1934,8 @@ class CodingJobDoor:
              "once from the terminal rows")
         request = ChildExecutionRequest.from_dict(dict(entry["envelope"]))
         branch = f"t3/mmos-t4b-job-{request.request_digest[:8]}"
-        adapter, _box = self._compose_adapter(request, branch, fresh=False)
+        adapter, _box = self._compose_adapter(
+            request, branch, fresh=False, attempt_id=attempt_id)
         registry = ResultDeliveryRegistry()
         if self.config.register_transport:
             from control_plane.paperclip_result_delivery import (

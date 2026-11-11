@@ -1533,3 +1533,41 @@ def test_step6_the_launch_spec_names_the_placement_jobs_own_paths(
     assert str(launched[1].workspace_path) == str(job.worktree)
     assert str(launched[1].result_schema_path).endswith(
         "worker-result.schema.json")
+
+
+def test_step7_job_state_counts_native_launches_per_attempt(
+        scratch, monkeypatch):
+    """Caught live by the round-4 wait-frees journey (2026-11-11, L7): the
+    census file is per-SCRATCH, but ``job_state`` answered a COMMAND's
+    "native launches" with the whole-file count — two tasks that each
+    launched exactly once both reported 2, and the journey's per-task
+    exactly-once proof could not pass.  The per-job launch port now tags
+    its census rows with the attempt it was composed for, and a command's
+    state counts only ITS attempt's tagged launches."""
+    d = _attack_door(scratch, monkeypatch)
+    command_a = d.freeze_issue(_issue_row("iss-l7a"))
+    d.frozen[command_a].update({"job_id": "JOB-A", "attempt_id": "ATT-A"})
+    command_b = d.freeze_issue(_issue_row("iss-l7b"))
+    d.frozen[command_b].update({"job_id": "JOB-B", "attempt_id": "ATT-B"})
+    # one tagged launch per attempt, one untagged row (the service-side
+    # port records untagged), and reads never count
+    d._record_census("t3_thread_launch", {"clientRequestId": "x"})
+    d._record_census("t3_thread_read", {}, attempt_id="ATT-A")
+    d._record_census("t3_thread_launch", {"clientRequestId": "a"},
+                     attempt_id="ATT-A")
+    d._record_census("t3_thread_launch", {"clientRequestId": "b"},
+                     attempt_id="ATT-B")
+    assert d.job_state(command_a)["native_launches"] == 1
+    assert d.job_state(command_b)["native_launches"] == 1
+    # an entry with no attempt yet has no launch of its own — never the
+    # whole scratch's
+    command_c = d.freeze_issue(_issue_row("iss-l7c"))
+    assert d.job_state(command_c)["native_launches"] == 0
+    # source law: every adapter composition names the attempt it launches
+    # (one first claim, three fresh=False compositions: F1 relaunch, the
+    # engine-recovered seal, and the return-seam re-drive), so no census
+    # row is ever tagged with a guess
+    src = Path(DOOR_SRC).read_text(encoding="utf-8")
+    assert src.count("self._compose_adapter(") == 4
+    assert src.count("fresh=True, attempt_id=attempt_id") == 1
+    assert src.count("fresh=False, attempt_id=attempt_id") == 3
