@@ -98,7 +98,22 @@ class Audit:
 
 
 class FakeBridge:
-    """Bridge stand-in: records ops, returns canned results."""
+    """Bridge stand-in: records ops, returns canned results.
+
+    Repair-round law (panel A H1): rejects any argument key the real bridge
+    op would not accept, so an edge/bridge schema drift fails loudly here
+    instead of being masked by a permissive fake.
+    """
+
+    OP_ARGUMENTS = {
+        "ask": {"kind", "principal", "target", "title", "body",
+                "idempotency_key", "correlation", "asker"},
+        "answer": {"principal", "ask_id", "answer", "idempotency_key"},
+        "question": {"principal", "ask_id"},
+        "result": {"principal", "ask_id"},
+        "status": {"principal", "ask_id"},
+        "reconcile": {"ask_id"},
+    }
 
     def __init__(self, result=None, error=None):
         self.calls: list[tuple[str, dict]] = []
@@ -106,6 +121,9 @@ class FakeBridge:
         self.error = error            # (code, detail) to raise typed
 
     def call(self, op, arguments):
+        expected = self.OP_ARGUMENTS[op]
+        unknown = set(arguments) - expected
+        assert not unknown, f"edge sent unknown bridge kwargs: {unknown}"
         self.calls.append((op, dict(arguments)))
         if self.error is not None:
             from integrations.gbl.mcp_server import GblEdgeError
@@ -611,6 +629,29 @@ class TestRealBridgeSocket(unittest.IsolatedAsyncioTestCase):
         assert ask_id.startswith("gb-")
         assert self.store.read_ask(ask_id) is not None
 
+    async def test_team_answer_reaches_the_real_bridge(self):
+        # H1 end-to-end: the edge's team.answer drives the REAL bridge op
+        # (post_answer over the socket), then team.result returns it.
+        created = tool_payload(await self.harness.call(
+            "team.delegate",
+            {"target": "secretary", "title": "Standing check",
+             "body": "Fixture brief words.", "idempotency_key": "gb-3-2000"},
+            token=self.harness.token()))
+        ask_id = created["result"]["ask"]["ask_id"]
+        answered = tool_payload(await self.harness.call(
+            "team.answer",
+            {"ask_id": ask_id, "answer": "The bot's harmless fixture answer.",
+             "idempotency_key": "gb-3-2001"},
+            token=self.harness.token()))
+        assert answered["ok"] is True
+        assert answered["result"]["status"] == "ANSWERED"
+        assert answered["result"]["answer_id"].startswith("gbm-")
+        result = tool_payload(await self.harness.call(
+            "team.result", {"ask_id": ask_id},
+            token=self.harness.token()))
+        assert result["result"]["status"] == "ANSWER_UNCONSUMED"
+        assert result["result"]["answer"] == "The bot's harmless fixture answer."
+
 
 # ── One real HTTP listener on 127.0.0.1, ephemeral, stopped in the test ─────
 
@@ -666,4 +707,73 @@ class TestRealListener(unittest.IsolatedAsyncioTestCase):
             server.should_exit = True
             thread.join(timeout=10)
             listener.close()
+            await harness.stop()
+
+
+# ── Repair round 1 (panel A H1 edge half + LOW advertised caps) ──────────────
+
+
+class TestRepairAnswerSchema:
+    def test_team_answer_uses_the_shared_contract_schema(self):
+        from common.gbl_contract import ANSWER_ARGUMENT_KEYS
+        assert set(TOOL_ARGUMENT_KEYS["team.answer"]) == (
+            set(ANSWER_ARGUMENT_KEYS) - {"principal"})
+        schema = {spec.name: spec for spec in TOOL_SPECS}["team.answer"]
+        assert "answer" in schema.input_schema["properties"]
+        assert "text" not in schema.input_schema["properties"]
+
+
+class TestAdvertisedCaps(unittest.IsolatedAsyncioTestCase):
+    """The advertised maxLength/pattern are enforced at the edge door."""
+
+    async def _run(self, tool, arguments):
+        harness = Harness()
+        await harness.start()
+        try:
+            response = await harness.call(tool, arguments, token=harness.token())
+            return harness, tool_error(response)
+        finally:
+            await harness.stop()
+
+    async def test_over_cap_body_refused_before_bridge(self):
+        from common.gbl_contract import BODY_MAX_CHARS
+        harness = Harness()
+        await harness.start()
+        try:
+            error = tool_error(await harness.call(
+                "team.message",
+                {"environment_id": ENV_ID, "thread_ref": THREAD_REF,
+                 "body": "x" * (BODY_MAX_CHARS + 1),
+                 "idempotency_key": "gb-m-cap"},
+                token=harness.token()))
+            assert error["code"] == "INVALID_ARGUMENTS"
+            assert harness.runner.calls == []
+        finally:
+            await harness.stop()
+
+    async def test_malformed_ask_id_refused_before_bridge(self):
+        harness = Harness()
+        await harness.start()
+        try:
+            error = tool_error(await harness.call(
+                "team.result", {"ask_id": "not-an-ask-id"},
+                token=harness.token()))
+            assert error["code"] == "INVALID_ARGUMENTS"
+            assert harness.bridge.calls == []
+        finally:
+            await harness.stop()
+
+    async def test_malformed_idempotency_key_refused_before_bridge(self):
+        harness = Harness()
+        await harness.start()
+        try:
+            error = tool_error(await harness.call(
+                "team.delegate",
+                {"target": "secretary", "title": "Standing check",
+                 "body": "Fixture brief words.",
+                 "idempotency_key": "bad key with spaces!"},
+                token=harness.token()))
+            assert error["code"] == "INVALID_ARGUMENTS"
+            assert harness.bridge.calls == []
+        finally:
             await harness.stop()

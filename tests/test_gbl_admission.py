@@ -177,3 +177,27 @@ class TestMessageAllowlist:
         with pytest.raises(ValueError):
             row(message_allowlist=({"environment_id": ENV_ID,
                                     "thread_ref": "",},))
+
+
+# ── Repair round 1: the principal label is header-interpolated, so its
+#    charset is load-bearing (panel A LOW: `\n` in the wrapper header).
+#    PrincipalAdmission must refuse control characters at construction —
+#    config-authored, but refused at the same place every other row
+#    invariant is refused.
+
+
+class TestRepairPrincipalLabel:
+    def test_newline_in_principal_refused(self):
+        with pytest.raises(ValueError):
+            row(principal="grok\naccount-main")
+
+    def test_tab_and_carriage_return_refused(self):
+        with pytest.raises(ValueError):
+            row(principal="grok\taccount")
+        with pytest.raises(ValueError):
+            row(principal="grok\raccount")
+
+    def test_plain_labels_still_admitted(self):
+        admitted = admit_principal((row(principal="grok-account.main_2"),),
+                                   SUBJECT)
+        assert admitted.principal == "grok-account.main_2"

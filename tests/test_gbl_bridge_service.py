@@ -20,6 +20,8 @@ import pytest
 
 from common.gbl_contract import (
     GBLContractError,
+    decode_gbl_frame,
+    encode_gbl_frame,
     mint_ask_id,
 )
 from integrations.gbl.bridge_service import (
@@ -81,12 +83,36 @@ class FakeStore:
 
 
 class FakeNudgeSender:
+    """Records send/reconcile; returns the configured TransportReceipt."""
+
     def __init__(self):
         self.calls: list[tuple[str, str, str]] = []
+        self.reconcile_calls: list[tuple[str, str, str]] = []
+        self.receipt = None            # TransportReceipt for send()
+        self.reconcile_receipt = None  # TransportReceipt for reconcile()
+        self.error = None              # exception to raise from send()
 
     def send(self, ask_id, state, native_handle):
         self.calls.append((ask_id, state, native_handle))
-        return "receipt-fixture"
+        if self.error is not None:
+            raise self.error
+        if self.receipt is not None:
+            return self.receipt
+        from control_plane.wake_dispatcher import (
+            TransportOutcome, TransportReceipt)
+        return TransportReceipt(outcome=TransportOutcome.ACCEPTED,
+                                reason_code="accepted",
+                                created_at="2026-11-11T12:00:00Z")
+
+    def reconcile(self, ask_id, state, native_handle):
+        self.reconcile_calls.append((ask_id, state, native_handle))
+        if self.reconcile_receipt is not None:
+            return self.reconcile_receipt
+        from control_plane.wake_dispatcher import (
+            TransportOutcome, TransportReceipt)
+        return TransportReceipt(outcome=TransportOutcome.ACCEPTED,
+                                reason_code="accepted",
+                                created_at="2026-11-11T12:00:00Z")
 
 
 def admission(**over):
@@ -554,5 +580,383 @@ class TestSocketService:
             assert response["ok"] is True
             assert response["result"]["status"] == "CREATED"
             assert response["result"]["ask"]["ask_id"] == ASK_ID
+        finally:
+            server.close()
+
+
+# ── Repair round 1 (panel A H2/H3/M1-M8, panel B H1/M1/M2) ──────────────────
+
+
+class TestRepairAnswerWrite:
+    def test_post_answer_appends_exactly_one_event(self):
+        store = FakeStore()
+        core = bridge(store)
+        core.submit_ask(**submit())
+        before = len(store.asks[ASK_ID]["events"])
+        core.post_answer(principal=PRINCIPAL, ask_id=ASK_ID,
+                         answer="A harmless fixture answer.",
+                         idempotency_key="gb-ans-0001")
+        events = store.asks[ASK_ID]["events"]
+        assert len(events) - before == 1          # ONE write, no second append
+        assert events[-1]["type"] == "answer"
+
+    def test_partial_legacy_answer_record_is_repaired_by_replay(self):
+        # Panel B H1: a legacy/partial record whose ANSWERED state event was
+        # lost must not strand the answer — replay infers ANSWERED from the
+        # answer event, and the same-key retry completes as IDEMPOTENT.
+        store = FakeStore()
+        core = bridge(store)
+        core.submit_ask(**submit())
+        answer_event = {"type": "answer",
+                        "answer_id": "gbm-" + "b" * 32,
+                        "idempotency_key": "gb-ans-partial",
+                        "text": "The stranded fixture answer."}
+        store.asks[ASK_ID]["events"].append(answer_event)   # no state event
+        result = core.fetch_result(principal=PRINCIPAL, ask_id=ASK_ID)
+        assert result["status"] == "ANSWER_UNCONSUMED"
+        assert result["answer"] == "The stranded fixture answer."
+        assert core.ask_status(principal=PRINCIPAL,
+                               ask_id=ASK_ID)["status"] == "ANSWER_UNCONSUMED"
+        retry = core.post_answer(principal=PRINCIPAL, ask_id=ASK_ID,
+                                 answer="The stranded fixture answer.",
+                                 idempotency_key="gb-ans-partial")
+        assert retry["status"] == "IDEMPOTENT"
+
+    def test_answer_over_the_one_cap_is_refused(self):
+        store = FakeStore()
+        core = bridge(store)
+        core.submit_ask(**submit())
+        with pytest.raises(GBLContractError) as err:
+            core.post_answer(principal=PRINCIPAL, ask_id=ASK_ID,
+                             answer="x" * 4097, idempotency_key="gb-ans-big")
+        assert err.value.code == "INVALID_BODY"
+
+
+class TestRepairServeLoop:
+    def _alive(self, server):
+        response = _exchange(server, REQUEST)
+        assert response["ok"] is True
+
+    def test_client_hangup_mid_reply_keeps_serving(self, tmp_path):
+        import time
+        class SlowCore:
+            def __init__(self):
+                self.calls = 0
+            def ask_status(self, **_):
+                self.calls += 1
+                time.sleep(0.3)
+                return {"status": "FIXTURE"}
+        core = SlowCore()
+        server = _server(tmp_path, core, (os.getuid(),))
+        try:
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.connect(str(server.config.socket_path))
+            client.sendall(encode_gbl_frame(REQUEST))
+            client.close()                     # hang up before the reply
+            time.sleep(0.6)                    # let the doomed sendall happen
+            self._alive(server)                # the loop must still serve
+            assert core.calls == 2
+        finally:
+            server.close()
+
+    def test_unhashable_op_is_typed_refusal(self, tmp_path):
+        core = FakeCore()
+        server = _server(tmp_path, core, (os.getuid(),))
+        try:
+            request = {"schema": "mastermind.gbl.request.v1",
+                       "op": {"evil": 1}, "arguments": {}}
+            response = _exchange(server, request)
+            assert response["ok"] is False
+            assert response["error"]["code"] == "REQUEST_INVALID"
+            self._alive(server)
+        finally:
+            server.close()
+
+    def test_unencodable_reply_is_typed_and_keeps_serving(self, tmp_path):
+        class SurrogateCore:
+            def ask_status(self, **_):
+                return {"status": "FIXTURE", "poison": "\ud800"}
+        server = _server(tmp_path, SurrogateCore(), (os.getuid(),))
+        try:
+            response = _exchange(server, REQUEST)
+            assert response["ok"] is False
+            assert response["error"]["code"] == "REPLY_FRAME_REFUSED"
+            self._alive(server)
+        finally:
+            server.close()
+
+    def test_oversized_op_echo_never_crosses_the_wire(self, tmp_path):
+        core = FakeCore()
+        server = _server(tmp_path, core, (os.getuid(),))
+        try:
+            request = {"schema": "mastermind.gbl.request.v1",
+                       "op": "x" * 32000, "arguments": {}}
+            response = _exchange(server, request)
+            assert response["ok"] is False
+            assert response["error"]["code"] == "UNKNOWN_OP"
+            assert len(str(response["error"].get("detail", ""))) <= 96
+            self._alive(server)
+        finally:
+            server.close()
+
+    def test_oversized_reply_is_typed_and_keeps_serving(self, tmp_path):
+        class HugeCore:
+            def ask_status(self, **_):
+                return {"status": "FIXTURE", "blob": "y" * 40000}
+        server = _server(tmp_path, HugeCore(), (os.getuid(),))
+        try:
+            response = _exchange(server, REQUEST)
+            assert response["ok"] is False
+            assert response["error"]["code"] == "REPLY_FRAME_REFUSED"
+            self._alive(server)
+        finally:
+            server.close()
+
+    def test_silent_client_times_out_typed(self, tmp_path):
+        core = FakeCore()
+        config = BridgeServiceConfig(
+            socket_path=tmp_path / "gbl-timeout.sock",
+            allowed_peer_uids=(os.getuid(),),
+            request_timeout_seconds=0.2)
+        server = BridgeServer(config, core).open()
+        try:
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.settimeout(10.0)
+            client.connect(str(config.socket_path))
+            import time
+            time.sleep(0.6)                    # let the read time out
+            buffer = b""
+            while not buffer.endswith(b"\n"):
+                chunk = client.recv(4096)
+                if not chunk:
+                    break
+                buffer += chunk
+            client.close()
+            response = decode_gbl_frame(buffer)
+            assert response["ok"] is False
+            assert response["error"]["code"] == "REQUEST_INVALID"
+            self._alive(server)
+        finally:
+            server.close()
+
+    def test_listener_failure_releases_socket_and_open_restarts(self, tmp_path):
+        core = FakeCore()
+        server = _server(tmp_path, core, (os.getuid(),))
+        path = server.config.socket_path
+        self._alive(server)
+        server._socket.close()                 # fatal listener injury
+        server._thread.join(timeout=5.0)
+        assert server._serving is False
+        assert not path.exists()               # the stale socket was removed
+        replacement = BridgeServer(server.config, FakeCore()).open()
+        try:
+            self._alive(replacement)           # open() can restart cleanly
+        finally:
+            replacement.close()
+
+
+class TestRepairOrderingAndAuth:
+    def test_idempotent_replay_at_ceiling_is_not_rate_limited(self):
+        row = admission(max_asks_per_hour=1)
+        store = FakeStore()
+        core = bridge(store, table=(row,))
+        core.submit_ask(**submit())
+        replay = core.submit_ask(**submit())   # same key, same content
+        assert replay["status"] == "IDEMPOTENT"   # not RATE_LIMITED
+
+    def test_ask_status_reports_expired(self):
+        store = FakeStore()
+        bridge(store).submit_ask(**submit())
+        later = lambda: T0 + timedelta(days=2)
+        result = bridge(store, clock=later).ask_status(
+            principal=PRINCIPAL, ask_id=ASK_ID)
+        assert result["state"] == "EXPIRED"
+        assert result["status"] == "EXPIRED"
+
+    def test_addressee_can_fetch_question_and_answer(self):
+        store = FakeStore()
+        core = bridge(store)
+        core.submit_ask(**submit())            # target is "secretary"
+        question = core.fetch_question(principal="secretary", ask_id=ASK_ID)
+        assert question["question"] == "Please summarize the standing priorities."
+        result = core.post_answer(principal="secretary", ask_id=ASK_ID,
+                                  answer="The addressee's fixture answer.",
+                                  idempotency_key="gb-ans-target")
+        assert result["status"] == "ANSWERED"
+        # A third party is still refused.
+        with pytest.raises(GblBridgeError) as err:
+            core.fetch_question(principal=OTHER_PRINCIPAL, ask_id=ASK_ID)
+        assert err.value.code == "ASK_NOT_FOR_PRINCIPAL"
+        with pytest.raises(GblBridgeError) as err:
+            core.post_answer(principal=OTHER_PRINCIPAL, ask_id=ASK_ID,
+                             answer="Not mine.", idempotency_key="gb-ans-x")
+        assert err.value.code == "ASK_NOT_FOR_PRINCIPAL"
+
+
+class TestRepairStoreTrust:
+    def test_untrusted_events_are_ignored_by_replay(self):
+        store = FakeStore()
+        core = bridge(store)
+        core.submit_ask(**submit())
+        # A forged CONSUMED from an untrusted commenter must not consume the
+        # ask; a forged answer must not be served as the bot's answer.
+        store.asks[ASK_ID]["events"].append(
+            {"type": "state", "state": "CONSUMED", "seq": 99,
+             "trusted": False})
+        store.asks[ASK_ID]["events"].append(
+            {"type": "answer", "answer_id": "gbm-" + "c" * 32,
+             "idempotency_key": "gb-forged", "text": "Forged answer.",
+             "seq": 100, "trusted": False})
+        assert core.fetch_result(principal=PRINCIPAL,
+                                 ask_id=ASK_ID)["status"] == "NOT_YET"
+        core.post_answer(principal=PRINCIPAL, ask_id=ASK_ID,
+                         answer="The real fixture answer.",
+                         idempotency_key="gb-ans-real")
+        result = core.fetch_result(principal=PRINCIPAL, ask_id=ASK_ID)
+        assert result["answer"] == "The real fixture answer."
+
+    def test_equal_or_missing_sequence_stamps_are_typed(self):
+        store = FakeStore()
+        core = bridge(store)
+        core.submit_ask(**submit())
+        store.asks[ASK_ID]["events"].append(
+            {"type": "state", "state": "ANSWERED", "seq": 5, "trusted": True})
+        store.asks[ASK_ID]["events"].append(
+            {"type": "state", "state": "CONSUMED", "seq": 5, "trusted": True})
+        with pytest.raises(GblBridgeError) as err:
+            core.ask_status(principal=PRINCIPAL, ask_id=ASK_ID)
+        assert err.value.code == "EVENT_SEQ_INVALID"
+        # A missing stamp is refused the same typed way.
+        store2 = FakeStore()
+        core2 = bridge(store2)
+        core2.submit_ask(**submit())
+        store2.asks[ASK_ID]["events"].append(
+            {"type": "state", "state": "ANSWERED", "trusted": True})
+        with pytest.raises(GblBridgeError) as err:
+            core2.ask_status(principal=PRINCIPAL, ask_id=ASK_ID)
+        assert err.value.code == "EVENT_SEQ_INVALID"
+
+
+class TestRepairCreateIfAbsent:
+    def test_store_create_ask_returns_existing_record(self):
+        store = FakeStore()
+        core = bridge(store)
+        envelope = core.submit_ask(**submit())["ask"]
+        first = store.create_ask(envelope)
+        assert first is None or first["ask_id"] == ASK_ID
+        existing = store.create_ask(envelope)
+        assert existing is not None            # the store signals presence
+        assert existing["ask_id"] == ASK_ID
+        assert len([a for a in store.asks if a == ASK_ID]) == 1
+
+    def test_lagging_read_cannot_double_create(self):
+        class LaggingStore(FakeStore):
+            def read_ask(self, ask_id):        # stale view: never sees records
+                return None
+        store = LaggingStore()
+        core = bridge(store)
+        first = core.submit_ask(**submit())
+        second = core.submit_ask(**submit())   # read raced: create-if-absent
+        assert {first["status"], second["status"]} == {"CREATED", "IDEMPOTENT"}
+        assert len(store.asks) == 1            # exactly one record
+
+
+class TestRepairRenudge:
+    def _answered(self, store):
+        core = bridge(store)
+        core.submit_ask(**submit())
+        core.post_answer(principal=PRINCIPAL, ask_id=ASK_ID,
+                         answer="A harmless fixture answer.",
+                         idempotency_key="gb-ans-0001")
+        return core
+
+    def _receipt(self, outcome):
+        from control_plane.wake_dispatcher import TransportOutcome, TransportReceipt
+        return TransportReceipt(outcome=TransportOutcome(outcome),
+                                reason_code="fixture", created_at="2026-11-11T12:00:00Z")
+
+    def test_definite_no_start_is_typed_no_nudge(self):
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        sender.receipt = self._receipt("TARGET_UNAVAILABLE")
+        core = bridge(store, sender=sender)
+        self._answered(store)
+        result = core.maybe_renudge(ask_id=ASK_ID)
+        assert result["status"] == "NUDGE_NOT_DELIVERED"
+        nudges = [e for e in store.asks[ASK_ID]["events"]
+                  if e.get("type") == "nudge"]
+        assert nudges == []                    # budget never burned
+        assert len(sender.calls) == 1
+        # A later healthy receipt can still re-nudge (budget intact).
+        sender.receipt = self._receipt("ACCEPTED")
+        tick = {"now": T0 + timedelta(seconds=RENUDGE_COOLDOWN_SECONDS + 1)}
+        core2 = bridge(store, sender=sender,
+                       clock=lambda: tick["now"])
+        assert core2.maybe_renudge(ask_id=ASK_ID)["status"] == "RENUDGED"
+
+    def test_effect_unknown_persists_attempt_and_never_resends(self):
+        from control_plane.wake_dispatcher import WakeEffectUnknownError
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        sender.error = WakeEffectUnknownError("submission result unavailable")
+        core = bridge(store, sender=sender)
+        self._answered(store)
+        result = core.maybe_renudge(ask_id=ASK_ID)
+        assert result["status"] == "NUDGE_EFFECT_UNKNOWN"
+        attempts = [e for e in store.asks[ASK_ID]["events"]
+                    if e.get("type") == "nudge_attempt"]
+        assert len(attempts) == 1              # persisted independent of outcome
+        with pytest.raises(GblBridgeError) as err:
+            core.maybe_renudge(ask_id=ASK_ID)  # immediate retry is cooled down
+        assert err.value.code == "RENUDGE_COOLDOWN"
+        assert len(sender.calls) == 1          # never a second POST
+
+    def test_reconcile_op_settles_without_sending(self):
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        sender.reconcile_receipt = self._receipt("DELIVERED")
+        core = bridge(store, sender=sender)
+        self._answered(store)
+        sender.error = None
+        from control_plane.wake_dispatcher import WakeEffectUnknownError
+        sender.error = WakeEffectUnknownError("submission result unavailable")
+        core.maybe_renudge(ask_id=ASK_ID)      # effect unknown, attempt persisted
+        sender.error = None
+        result = core.reconcile_nudge(ask_id=ASK_ID)
+        assert result["status"] == "RECONCILED_DELIVERED"
+        assert len(sender.reconcile_calls) == 1
+        assert len(sender.calls) == 1          # reconcile never sends
+        nudges = [e for e in store.asks[ASK_ID]["events"]
+                  if e.get("type") == "nudge"]
+        assert len(nudges) == 1                # the attempt is now budget-counted
+
+    def test_reconcile_without_attempt_is_typed(self):
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        core = bridge(store, sender=sender)
+        core.submit_ask(**submit())
+        with pytest.raises(GblBridgeError) as err:
+            core.reconcile_nudge(ask_id=ASK_ID)
+        assert err.value.code == "NUDGE_ATTEMPT_NOT_FOUND"
+        assert sender.reconcile_calls == []
+
+    def test_reconcile_is_a_wire_op(self, tmp_path):
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        sender.reconcile_receipt = self._receipt("TARGET_UNAVAILABLE")
+        core = bridge(store, sender=sender)
+        self._answered(store)
+        sender.error = None
+        from control_plane.wake_dispatcher import WakeEffectUnknownError
+        sender.error = WakeEffectUnknownError("submission result unavailable")
+        core.maybe_renudge(ask_id=ASK_ID)
+        sender.error = None
+        server = _server(tmp_path, core, (os.getuid(),))
+        try:
+            response = _exchange(server, {
+                "schema": "mastermind.gbl.request.v1", "op": "reconcile",
+                "arguments": {"ask_id": ASK_ID}})
+            assert response["ok"] is True
+            assert response["result"]["status"] == "RECONCILED_NOT_DELIVERED"
         finally:
             server.close()
