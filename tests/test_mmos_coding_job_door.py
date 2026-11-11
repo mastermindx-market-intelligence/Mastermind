@@ -565,7 +565,8 @@ def test_f2_durable_identity_routes_to_the_engine_owned_watch_never_adopts(
     real_spec = d._launch_spec(
         run_id=attempt_id, job_id="JOB-F2",
         prompt=d._worker_prompt(attempt_id,
-                                "t3/mmos-t4b-job-deadbeef"))
+                                "t3/mmos-t4b-job-deadbeef"),
+        workspace=d.root / "run" / "jobs" / "job-f2-ws")
     fake_run = SimpleNamespace(
         spec=real_spec,
         original_ref=SimpleNamespace(provider_session_id="x", pid=None,

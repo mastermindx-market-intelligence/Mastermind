@@ -30,6 +30,7 @@ attack finding F8 from `T4B_ATTACK_FINDINGS.md`. Base commit `676786c71`
 | L3 (live, crash journey) | the launch spec carried NO authorities while `compose_child_execution`'s placement Job carries the runtime's default `["READ"]`; the receipt-adoption contract check refused ("launch contract differs from the durable Job") and the recovery looped `LIVE_QUARANTINED` forever | CLOSED (the launch spec carries the placement Job's own authority set) | `…door_t4c.py::test_step4_launch_spec_carries_the_attempt_s_own_job` (authorities leg) | this step |
 | L4 (live, crash journey) | the engine's supervisor-boundary projection returns the recovered `ActiveRun` in the TWIN ref shape (pid/pgid/start-identity/boot-session None — the runtime's provider-managed recording shape), but the door seals through its own INNER adapter whose retained-ref check demands the DURABLE NEUTRAL ref (pid=0): `_require_run_state` refused the door's own recovered run ("ref does not match the retained original ref"), the entry froze at execute-failed and reconcile spun `ALREADY_RECOVERED` forever | CLOSED (the seal runs on the adapter's own durable ref, read through its fail-closed `retained_original_ref` accessor; an unreadable ref parks typed `RECOVERED_REF_UNREADABLE`, never a translated guess) | `…door_t4c.py::test_step4_a_recovered_run_seals_through_the_durable_neutral_ref` | this step |
 | L5 (live, crash journey round 4) | the engine adopts the recovered attempt with a FRESH short lease, then the door honestly WAITS for the native run to finish — a wait longer than the lease made `complete_attempt` refuse (`StateConflict: attempt … lease has expired`) with the result in hand; the entry froze execute-failed | CLOSED (a live owner extends its lease while its execution runs: the door heartbeats through the terminal wait — before each poll and once more before the seal — through the runtime's typed `heartbeat_attempt` seam; a refusal propagates, the door no longer holds the attempt and must not seal it) | `…door_t4c.py::test_step5_a_wait_longer_than_the_lease_still_seals` | this step |
+| L6 (live, lease-expiry journey round 4) | the ADOPTED attempt's bound-path recovery check compares `spec.workspace_path` with the placement Job's OWN worktree and `spec.result_schema_path` with the engine's canonical `worker-result.schema.json`; the door's spec named an attempt-scoped `{run_id}-ws` workspace and a bare `schema.json`, so the reconcile AFTER the successful adoption refused (`LIVE_QUARANTINED`, "worker recovery launch contract differs from durable Job") → whole-service quarantine → the recovery door died at `register-worker` | CLOSED (the spec names the placement Job's paths at BOTH launch sites: the first claim passes the workspace it just created and recorded on the Job; the F1 relaunch reads the attempt's job worktree from the durable Job) | `…door_t4c.py::test_step6_the_launch_spec_names_the_placement_jobs_own_paths` | this step |
 
 ## Step-4 proof (dev instances)
 
@@ -46,7 +47,7 @@ task shows.
 | `default` | one task → one job → sealed → result comment on the same task | PASS (1 launch); PASS again on `5b3efef6f` (round 3) |
 | `crash` | exit 90 at the receipt; fresh door recovers the SAME attempt through the engine's defer-then-adopt cadence | engine lane PASS live (defer → `RECEIPT_RECOVERED` → same run under fence 2, ONE native launch); seal refused by L4, then the seal's commit refused by L5 — re-running on the L4+L5 fixes |
 | `crash-seal` | exit 91 after the seal commit; fresh door finishes the job, result comment EXACTLY once | PASS on `d222e9d80`; PASS on `5b3efef6f` (round 3) |
-| `lease-expiry` | door down longer than its 20s lease; first reconcile adopts at once, no deferral round | FAILED on `deb89b5cd` — live defect L1; re-running on the fixed tree |
+| `lease-expiry` | door down longer than its 20s lease; first reconcile adopts at once, no deferral round | FAILED on `deb89b5cd` — live defect L1; FAILED on `8da58b12d` (round 4) — live defect L6; re-running on the fixed tree |
 | `wait` | fleet full: second task WAITs with the precise blocker | PASS |
 | `wait-frees` | WAIT then live capacity: the door re-admits by itself | FAILED on `deb89b5cd` — live defect L2; L2 fix proven live (admission retired → task two admitted + launched) on `deb89b5cd`; full re-run on the fixed tree |
 | `undeliverable` | refused receipt surfaced with its code | see below |
@@ -122,6 +123,24 @@ live in the T4c evidence ledger's `step4-journeys/` folder.)
   `max(existing, now+duration)`, monotonic forward).  A renewal refusal
   propagates — that door no longer holds the attempt and must not seal
   it; the engine's re-adoption owns the next one.
+- **L6 (lease-expiry round 4, 2026-11-11):** the round-4 lease-expiry
+  run died at `register-worker` with the service QUARANTINED — but this
+  time by the BOUND-path check, not the receipt-path one (which L1/L3
+  fixed).  A read-only probe on a copy of the scratch runtime reproduced
+  it: `reconcile_restart` → `LIVE_QUARANTINED "worker recovery launch
+  contract differs from durable Job"` from `_recover_existing_attempt`
+  (the path taken once the attempt was already adopted and carries
+  `worker_recovery_binding`).  The field dump isolated it: the door's
+  durable launch spec named `workspace_path = …/run/jobs/ATT-…-ws`
+  (attempt-scoped) while the placement Job's own worktree is
+  `…/run/jobs/job-4924ab80-ws`, and `result_schema_path = …/schema.json`
+  while the engine's canonical name is `worker-result.schema.json`;
+  authorities, write-paths, base_sha and all three ids matched.  The
+  engine's checks are correct — the door's independently built spec was
+  the defect (as in L1 and L3).  Fixed at both launch sites: the first
+  claim passes the workspace it just created and recorded on the Job;
+  the F1 relaunch reads the attempt's job worktree from the durable Job
+  itself, and the schema path uses the engine's canonical name.
 
 ## Attack round (Step 5)
 

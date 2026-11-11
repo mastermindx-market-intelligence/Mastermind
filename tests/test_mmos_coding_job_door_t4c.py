@@ -359,7 +359,8 @@ def test_f3_crash_after_seal_commit_finishes_sealed_never_execute_failed(
 
     real_spec = d._launch_spec(
         run_id=aid, job_id="J",
-        prompt=d._worker_prompt(aid, "t3/mmos-t4b-job-deadbeef"))
+        prompt=d._worker_prompt(aid, "t3/mmos-t4b-job-deadbeef"),
+        workspace=scratch / "run" / "jobs" / "job-f3-ws")
     fake_run = SimpleNamespace(spec=real_spec,
                                original_ref=SimpleNamespace(
                                    provider_session_id="x", pid=None,
@@ -803,7 +804,8 @@ def _crash_window_entry(d, runtime, job_id, attempt_id, lease):
     d._save_frozen()
     real_spec = d._launch_spec(
         run_id=attempt_id, job_id=job_id,
-        prompt=d._worker_prompt(attempt_id, "t3/mmos-t4b-job-deadbeef"))
+        prompt=d._worker_prompt(attempt_id, "t3/mmos-t4b-job-deadbeef"),
+        workspace=d.root / "run" / "jobs" / "job-cw-ws")
     fake_run = SimpleNamespace(
         spec=real_spec,
         original_ref=SimpleNamespace(provider_session_id="x", pid=None,
@@ -1005,7 +1007,8 @@ def test_step3_launch_spec_writes_the_engine_binding_prompt_name(
     door writes BOTH prompt files with the same bytes at 0600."""
     d = _attack_door(scratch, monkeypatch)
     spec = d._launch_spec(run_id="ATT-LP", job_id="JOB-LP",
-                          prompt="the worker prompt bytes")
+                          prompt="the worker prompt bytes",
+                          workspace=scratch / "run" / "jobs" / "job-lp-ws")
     run_dir = Path(spec.run_dir)
     door_prompt = run_dir / "input" / "prompt.txt"
     engine_prompt = run_dir / "input" / "worker-prompt.txt"
@@ -1448,3 +1451,85 @@ def test_step5_a_wait_longer_than_the_lease_still_seals(scratch, monkeypatch,
     assert entry["final_status"] == "COMPLETED"
     row = runtime.attempts.get_attempt(attempt_id)
     assert getattr(getattr(row, "status", None), "value", "") == "COMPLETED"
+
+
+def test_step6_the_launch_spec_names_the_placement_jobs_own_paths(
+        scratch, monkeypatch, tmp_path):
+    """Caught live by the round-4 lease-expiry journey (2026-11-11, L6): the
+    recovery door died at register-worker — the service's startup reconcile
+    quarantined on "worker recovery launch contract differs from durable
+    Job".  Reproduced read-only on the scratch copy: the ADOPTED attempt's
+    bound-path recovery check compares ``spec.workspace_path`` against the
+    placement Job's OWN worktree and ``spec.result_schema_path`` against the
+    engine's canonical ``worker-result.schema.json`` — but the door's launch
+    spec named an attempt-scoped ``{run_id}-ws`` workspace and a bare
+    ``schema.json``, so every reconcile AFTER the (successful) adoption
+    refused the engine's own recovered run.  The spec must name the
+    placement Job's paths at BOTH launch sites."""
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+    from tests.test_executive_supervisor import _runtime_and_job
+    import control_plane.t3_execution_adapter as adapter_module
+
+    d = _attack_door(scratch, monkeypatch)
+    door_globals = type(d)._execute.__globals__
+    launched = []
+
+    class _RecordingAdapter:
+        async def start(self, spec):
+            launched.append(spec)
+            return SimpleNamespace(provider_session_id="mcp:launch:j")
+
+    monkeypatch.setattr(d, "_compose_adapter",
+                        lambda *a, **k: (_RecordingAdapter(), {}))
+    monkeypatch.setattr(d, "_seal_and_deliver",
+                        lambda *a, **k: None)
+    placement = SimpleNamespace(job_id="JOB-PLACE")
+    monkeypatch.setitem(door_globals, "compose_child_execution",
+                        lambda *a, **k: SimpleNamespace(
+                            placement_job=placement))
+    command = d.freeze_issue(_issue_row("iss-l6"))
+    entry = d.frozen[command]
+    entry["job_id"] = "JOB-REQ"
+
+    def fake_claim_job(job_id, **_kw):
+        return SimpleNamespace(
+            attempt=SimpleNamespace(attempt_id="ATT-SPEC6",
+                                    fence_generation=1),
+            lease_token="lease-6")
+
+    runtime = SimpleNamespace(attempts=SimpleNamespace(
+        claim_job=fake_claim_job))
+    d._execute(runtime, command, entry)
+    assert len(launched) == 1
+    digest = ChildExecutionRequest.from_dict(
+        dict(entry["envelope"])).request_digest
+    # the placement Job's workspace is job-<digest>-ws (compose_child_
+    # execution's worktree), NOT an attempt-scoped path
+    assert str(launched[0].workspace_path) == str(
+        scratch / "run" / "jobs" / f"job-{digest[:8]}-ws")
+    # the engine's canonical result-schema name
+    assert str(launched[0].result_schema_path).endswith(
+        "worker-result.schema.json")
+
+    # --- leg 2 (F1 relaunch): the spec carries the ATTEMPT's job worktree
+    real_runtime, real_job_id, _ = _runtime_and_job(tmp_path)
+    lease = real_runtime.broker.claim(real_job_id, lease_owner="t4b-door")
+    attempt_id = lease.attempt.attempt_id
+    job = real_runtime.jobs.get_job(real_job_id)
+    monkeypatch.setitem(door_globals, "compose_child_execution",
+                        lambda *a, **k: SimpleNamespace(
+                            placement_job=SimpleNamespace(
+                                job_id=real_job_id)))
+    command2 = d.freeze_issue(_issue_row("iss-l6b"))
+    entry2 = d.frozen[command2]
+    entry2.update({"job_id": "JOB-REQ-6", "attempt_id": attempt_id,
+                   "fence_generation": lease.attempt.fence_generation,
+                   "lease_token": lease.lease_token, "phase": "claimed"})
+    d._save_frozen()
+    monkeypatch.setattr(adapter_module, "SQLiteT3AdapterStateStore",
+                        lambda _p: SimpleNamespace(load_run=lambda _r: None))
+    d._execute(real_runtime, command2, entry2)
+    assert len(launched) == 2
+    assert str(launched[1].workspace_path) == str(job.worktree)
+    assert str(launched[1].result_schema_path).endswith(
+        "worker-result.schema.json")

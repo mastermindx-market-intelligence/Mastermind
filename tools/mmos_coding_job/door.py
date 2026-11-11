@@ -1500,10 +1500,15 @@ class CodingJobDoor:
             # receipt-adoption identity check compares spec.job_id against
             # the attempt row's job, and a mismatch refuses the door's own
             # durable receipt as a foreign execution (caught live by the
-            # lease-expiry journey, 2026-11-11).
+            # lease-expiry journey, 2026-11-11).  L6 (same journey): the
+            # spec's paths are the placement Job's OWN — the workspace this
+            # lane just created and recorded on the Job via
+            # compose_child_execution, and the engine's canonical schema
+            # name — never an attempt-scoped path.
             spec = self._launch_spec(
                 run_id=attempt_id, job_id=composed.placement_job.job_id,
-                prompt=self._worker_prompt(attempt_id, branch))
+                prompt=self._worker_prompt(attempt_id, branch),
+                workspace=workspace)
             entry["spec"] = {
                 "run_id": spec.run_id, "job_id": spec.job_id,
                 "worker_id": spec.worker_id,
@@ -1587,11 +1592,27 @@ class CodingJobDoor:
                 # Same law as the first claim: the engine's receipt-adoption
                 # check compares spec.job_id with the ATTEMPT row's job, so
                 # the relaunch names the attempt's own job (the frozen entry
-                # still carries the request job's id).
+                # still carries the request job's id).  L6: the spec's
+                # workspace is the attempt's job's OWN durable worktree
+                # (read from the Job; the digest-named workspace only if
+                # the Job cannot be read), and the schema name is the
+                # engine's canonical one.
+                attempt_job_id = getattr(row, "job_id", None) or job_id
+                relaunch_workspace = None
+                try:
+                    attempt_job = runtime.jobs.get_job(attempt_job_id)
+                    relaunch_workspace = getattr(attempt_job, "worktree",
+                                                 None)
+                except Exception:  # noqa: BLE001 - typed fallback below
+                    relaunch_workspace = None
+                if not relaunch_workspace:
+                    relaunch_workspace = (
+                        self.root / "run" / "jobs"
+                        / f"job-{request.request_digest[:8]}-ws")
                 spec = self._launch_spec(
-                    run_id=attempt_id,
-                    job_id=(getattr(row, "job_id", None) or job_id),
-                    prompt=self._worker_prompt(attempt_id, branch))
+                    run_id=attempt_id, job_id=attempt_job_id,
+                    prompt=self._worker_prompt(attempt_id, branch),
+                    workspace=relaunch_workspace)
                 launch_flag.write_text(_now(), encoding="utf-8")
                 _log(f"launch of {attempt_id} was never attempted; starting "
                      "the claimed attempt now (its first launch)")
@@ -1972,7 +1993,8 @@ class CodingJobDoor:
             "preferred_host": HOST_ID,
         }
 
-    def _launch_spec(self, *, run_id: str, job_id: str, prompt: str):
+    def _launch_spec(self, *, run_id: str, job_id: str, prompt: str,
+                     workspace):
         from control_plane.worker_execution_contract import WorkerLaunchSpec
         run_dir = self.root / "run" / "jobs" / run_id
         (run_dir / "input").mkdir(parents=True, exist_ok=True)
@@ -1989,12 +2011,19 @@ class CodingJobDoor:
         (run_dir / "input" / "worker-prompt.txt").write_text(
             prompt, encoding="utf-8")
         os.chmod(run_dir / "input" / "worker-prompt.txt", 0o600)
+        # L6 (lease-expiry journey, 2026-11-11): the bound-path recovery
+        # check compares the spec's paths against the placement Job's OWN
+        # durable record — workspace_path == job.worktree and
+        # result_schema_path == the engine's canonical name — so the spec
+        # names the JOB's workspace (passed in by the caller that knows it)
+        # and the engine's schema name, never an attempt-scoped guess.
         return WorkerLaunchSpec(
             run_id=run_id, job_id=job_id, worker_id=WORKER_ID,
             authorities=("READ",),
-            workspace_path=self.root / "run" / "jobs" / f"{run_id}-ws",
+            workspace_path=Path(workspace),
             run_dir=run_dir, prompt=prompt,
-            result_schema_path=run_dir / "input" / "schema.json",
+            result_schema_path=(run_dir / "input"
+                                / "worker-result.schema.json"),
             model=self.config.t3_model_selection)
 
     def _worker_prompt(self, attempt_id: str, branch: str) -> str:
