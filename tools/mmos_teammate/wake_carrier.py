@@ -37,6 +37,7 @@ carrier's own run budget. An unanswered question ends the run with the issue
 left in_progress — a board comment on the issue wakes it again.
 See T2_TEAMMATE_BINDING_AND_DISPATCH.md.
 """
+import fcntl
 import hashlib
 import json
 import os
@@ -1042,6 +1043,73 @@ def budget_left(opts):
         opts.get("delivery_reserve_sec", DELIVERY_RESERVE_SEC) or 0)
 
 
+# R2a finding 7: the twin-carrier overlap is real. One teammate agent binds
+# ONE t3 thread for every issue it owns, and the installed Paperclip CAN run
+# two processes for one agent at once — per-agent concurrency defaults to 20
+# runs with one child process each (`AGENT_DEFAULT_MAX_CONCURRENT_RUNS` in
+# paperclipai shared/dist/constants.js:61; slot accounting in
+# @paperclipai/server dist/services/heartbeat/queue.js
+# startNextQueuedRunForAgent; the process spawn per run in
+# server/dist/adapters/process/execute.js). Only the per-ISSUE execution run
+# is single-flight. An advisory flock per thread, held from the scan to the
+# end of the run, serializes the two processes on the one shared thread; a
+# runner that cannot take it within its budget leaves the inbox untouched
+# for the next wake (its twin already owns the thread), and a run with no
+# lock directory configured behaves exactly as before.
+THREAD_LOCK_BUSY = object()
+
+
+def thread_lock_path(lock_dir, thread_id):
+    """The advisory lock file for one t3 thread. Thread ids can contain ':'
+    (node:thread:...), so keep only file-system-safe characters."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(thread_id))
+    return os.path.join(str(lock_dir), f"thread-{safe}.lock")
+
+
+def acquire_thread_lock(lock_dir, thread_id, opts):
+    """Take the advisory lock for the bound thread (R2a finding 7).
+
+    Returns an open file handle held by the caller for the rest of the run,
+    None when no lock can be used at all (no directory configured, or the
+    lock file cannot be opened — the run then proceeds exactly as before
+    this guard existed), or the THREAD_LOCK_BUSY sentinel when a twin
+    carrier holds the lock for longer than this run's budget allows
+    waiting. The file is never removed after use: an unlink would let a
+    third process lock a fresh inode beside a holder that still owns the
+    old one."""
+    if not lock_dir:
+        return None
+    path = thread_lock_path(lock_dir, thread_id)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    except OSError as exc:
+        log(f"thread lock {path} cannot be opened ({exc}); continuing "
+            "without it")
+        return None
+    interval = float(opts.get("poll_interval_sec", 5) or 5)
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return os.fdopen(fd, "a")
+        except OSError:
+            left = budget_left(opts)
+            if left is not None and left <= 0:
+                os.close(fd)
+                return THREAD_LOCK_BUSY
+            _doze(opts, min(interval, left) if left is not None
+                  else interval)
+
+
+def release_thread_lock(handle):
+    """Drop the advisory lock at the end of the run. Closing the file
+    handle releases the flock; a missing handle is a no-op."""
+    if handle is not None:
+        try:
+            handle.close()
+        except OSError:
+            pass
+
+
 def question_waiting(t3):
     """True when a human question waits in the thread right now."""
     thread = t3.messages(1)[0]
@@ -1873,14 +1941,36 @@ def confirmation_verdict(pc, issue_id, op):
 
 
 def run_carrier(pc, t3_factory, opts):
-    """One wake. Returns an exit code; raises nothing."""
-    crash_after = opts.get("crash_after")
-    delivered = False  # R2a finding 22: set once the answer is on the issue
+    """One wake. Returns an exit code; raises nothing.
+
+    R2a finding 7: before any scan, checkout or send, take the advisory
+    lock for the bound thread and hold it for the whole run, so a second
+    carrier process Paperclip started for the same agent (different issue,
+    same one bound thread) cannot interleave its own send and waiting
+    lines with this one's. A twin that holds the lock past this run's
+    budget ends the run quietly — the twin already owns the thread, and
+    the next wake picks the issue up."""
     me = pc.me()
     if me.get("id") != os.environ.get("PAPERCLIP_AGENT_ID"):
         raise CarrierError("run token is for a different agent")
     binding = binding_of(me)
     thread_id = binding["primaryThreadId"]
+    lock = acquire_thread_lock(opts.get("thread_lock_dir"), thread_id, opts)
+    if lock is THREAD_LOCK_BUSY:
+        log(f"another carrier run holds thread {thread_id}; leaving the "
+            "inbox for the next wake")
+        return 0
+    try:
+        return _run_carrier_locked(pc, t3_factory, opts, me, binding,
+                                   thread_id)
+    finally:
+        release_thread_lock(lock)
+
+
+def _run_carrier_locked(pc, t3_factory, opts, me, binding, thread_id):
+    """The carrier journey, under the thread lock taken by run_carrier."""
+    crash_after = opts.get("crash_after")
+    delivered = False  # R2a finding 22: set once the answer is on the issue
     t3 = t3_factory(thread_id)
 
     # R2a finding 12: the bound thread must belong to the bound provider
@@ -2220,7 +2310,7 @@ def load_config(path):
         return json.load(fh)
 
 
-def build_opts(cfg, environ, now):
+def build_opts(cfg, environ, now, config_path=None):
     """One place that turns the carrier config file and the process
     environment into the run opts `run_carrier` takes.
 
@@ -2228,7 +2318,11 @@ def build_opts(cfg, environ, now):
     (`coding_job_door`): absent means dormant — no block taught, no door
     call — exactly as before this key existed. `now` is the process start,
     recorded once by main(); the run budget is measured from it. Tests may
-    override the clock, sleep and start time through these opts."""
+    override the clock, sleep and start time through these opts.
+
+    `config_path` seeds the finding-7 thread-lock directory: the config
+    file lives in the agent's own home, so its directory is the per-agent
+    place for the lock file; an explicit `thread_lock_dir` key wins."""
     return {
         "crash_after": environ.get("MMOS_T2_CARRIER_CRASH_AFTER"),
         "pending_timeout_sec": cfg.get("pending_timeout_sec", 600),
@@ -2260,6 +2354,13 @@ def build_opts(cfg, environ, now):
         # of the run budget no wait, poll, HTTP timeout or retry sleep eats.
         "delivery_reserve_sec": cfg.get("delivery_reserve_sec",
                                         DELIVERY_RESERVE_SEC),
+        # R2a finding 7: the directory for the advisory per-thread lock
+        # (thread-<thread id>.lock). Defaults to the config file's own
+        # directory — the agent's home — so two carrier processes Paperclip
+        # starts for this agent on one host contend on one file.
+        "thread_lock_dir": cfg.get("thread_lock_dir") or (
+            os.path.dirname(os.path.abspath(config_path))
+            if config_path else None),
     }
 
 
@@ -2282,7 +2383,7 @@ def main() -> int:
     if pin:
         log(pin)
         return 2
-    opts = build_opts(cfg, os.environ, time.time())
+    opts = build_opts(cfg, os.environ, time.time(), config_path=argv_config[0])
     # R2a finding 8: both transports take their waits from the run budget.
     pc = PaperclipClient(os.environ["PAPERCLIP_API_URL"],
                          os.environ["PAPERCLIP_API_KEY"],

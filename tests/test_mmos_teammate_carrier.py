@@ -3,6 +3,7 @@
 Run: TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q \
      tests/test_mmos_teammate_carrier.py
 """
+import fcntl
 import importlib.util
 import json
 import os
@@ -2201,6 +2202,7 @@ def test_build_opts_maps_every_key_and_reads_the_door_from_config_only():
         "coding_job_door": "/path/to/door.sock",
         "run_start": 1234.5,
         "delivery_reserve_sec": 120,
+        "thread_lock_dir": None,
     }
     # an empty config: every default, and the door stays dormant
     minimal = wc.build_opts({}, {}, 0.0)
@@ -2218,10 +2220,18 @@ def test_build_opts_maps_every_key_and_reads_the_door_from_config_only():
         "coding_job_door": None,
         "run_start": 0.0,
         "delivery_reserve_sec": 120,
+        "thread_lock_dir": None,
     }
     # the door never comes from the environment
     env_door = wc.build_opts({}, {"coding_job_door": "/env/door.sock"}, 0.0)
     assert env_door["coding_job_door"] is None
+    # R2a finding 7: the thread-lock directory defaults to the config file's
+    # own directory (the agent's home); an explicit key wins.
+    seeded = wc.build_opts({}, {}, 0.0, config_path="/home/ag/teammate.json")
+    assert seeded["thread_lock_dir"] == "/home/ag"
+    override = wc.build_opts({"thread_lock_dir": "/var/lock/ag"},
+                             {}, 0.0, config_path="/home/ag/teammate.json")
+    assert override["thread_lock_dir"] == "/var/lock/ag"
 
 
 # --- item 8: the three behaviors named untested in the first return ---------
@@ -3251,4 +3261,84 @@ def test_return_marker_beyond_the_window_is_found_by_looking_back():
     t3 = WindowedT3(messages=msgs + side)
     assert run_with_roster(pc, t3, {}) == 0
     assert t3.sends == []
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+# R2a finding 7: one teammate agent binds ONE t3 thread for every issue it
+# owns, and the installed Paperclip CAN start two carrier processes for one
+# agent at once (per-agent concurrency defaults to 20 runs, one child process
+# each; only the per-ISSUE execution run is single-flight — server evidence
+# in the lane RF return). Without a guard the second process sends the task
+# message again and posts waiting lines about the first one's question. The
+# advisory lock is per thread, held from the scan to the end of the run; a
+# runner that cannot take it within its budget leaves the inbox for the next
+# wake, and a run with no lock configured behaves exactly as before.
+def take_thread_lock(path):
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    return fd
+
+
+def lock_opts(lock_dir, clock, sleep):
+    return {
+        "thread_lock_dir": str(lock_dir),
+        "roster": {},
+        "run_start": 1000.0,
+        "run_budget_sec": 60,
+        "delivery_reserve_sec": 50,
+        "clock": clock,
+        "sleep": sleep,
+    }
+
+
+def test_a_twin_holding_the_thread_lock_leaves_the_inbox_alone(tmp_path):
+    lock_dir = tmp_path / "locks"
+    lock_dir.mkdir()
+    holder = take_thread_lock(wc.thread_lock_path(str(lock_dir), "th-1"))
+    try:
+        clock = {"t": 1000.0}
+        sleeps = []
+
+        def fake_sleep(sec):
+            sleeps.append(sec)
+            clock["t"] += sec
+
+        pc = FakePaperclip(issues=one_issue())
+        t3 = FakeT3(replies=["the twin's answer"])
+        opts = lock_opts(lock_dir, lambda: clock["t"], fake_sleep)
+        assert run_with_roster(pc, t3, {}, opts) == 0
+        assert t3.sends == []      # the task message was never sent
+        assert not any(c[0] == "checkout" for c in pc.calls)
+        assert len(sleeps) == 2    # waited out the small budget, then gave up
+        assert os.path.exists(wc.thread_lock_path(str(lock_dir), "th-1"))
+    finally:
+        os.close(holder)
+
+
+def test_thread_lock_wait_within_budget_then_the_journey_runs(tmp_path):
+    lock_dir = tmp_path / "locks"
+    lock_dir.mkdir()
+    holder = take_thread_lock(wc.thread_lock_path(str(lock_dir), "th-1"))
+    clock = {"t": 1000.0}
+    released = []
+
+    def fake_sleep(sec):
+        clock["t"] += sec
+        released.append(sec)
+        os.close(holder)           # the twin's run finishes while we wait
+
+    pc = FakePaperclip(issues=one_issue())
+    t3 = FakeT3(replies=["the answer after the twin"])
+    opts = lock_opts(lock_dir, lambda: clock["t"], fake_sleep)
+    assert run_with_roster(pc, t3, {}, opts) == 0
+    assert released               # the lock was worth one bounded wait
+    assert len(t3.sends) == 1     # sent the task exactly once
+    assert pc.issues["is-1"]["status"] == "in_review"   # and delivered it
+
+
+def test_a_run_with_no_thread_lock_dir_behaves_as_before():
+    pc = FakePaperclip(issues=one_issue())
+    t3 = FakeT3(replies=["plain answer"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert len(t3.sends) == 1
     assert pc.issues["is-1"]["status"] == "in_review"
