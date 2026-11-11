@@ -2018,7 +2018,12 @@ def run_carrier(pc, t3_factory, opts):
         deliver(pc, issue, reply, op, crash_after,
                 ask_child=ask_parent is not None)
         delivered = True  # the answer is on the issue; nothing may undo it
-        job = parse_coding_job_block(reply)
+        # Attack finding 8: depth one withholds the ask help AND the job help
+        # from an asked child, but the reply was still parsed for a job block
+        # — a block the asked teammate emitted anyway opened a governed door
+        # the asker never authorised. The asker owns the job decision: an
+        # asked child's reply is never parsed for one.
+        job = None if ask_parent else parse_coding_job_block(reply)
         if job:
             handle_coding_job(pc, issue, reply, job, opts)
         return 0
