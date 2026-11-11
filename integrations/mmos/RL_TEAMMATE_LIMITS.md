@@ -19,6 +19,26 @@ evidence files in `~/.mastermind/mmos_evidence/rl-20261111/`.
 > targets by resolved address, and refuses every tool not on the
 > teammate's allowlist. Fail-open caveat stated in §3a.
 
+> **Repair round 2 (2026-11-11, after panel 2 scored `7e9a29aa4` —
+> "install: ready after listed repairs"):** all nine repairs landed in
+> two commits — `9cd4df3a7` (R1–R6) and `2f82f6c8a` (the rule-layer
+> cut). The gate's web check now reads exactly the `url` field and
+> refuses every address literal, so only plain DNS names pass to
+> resolution, where every resolved address must clear an explicit
+> refusal-net list stricter than `is_global` (R1/R2/R6a). The hook
+> command is interpreter-isolated and fail-closed:
+> `/usr/bin/env python3 -I '<gate>' --config '<cfg>' || exit 2` (R4 —
+> hooks run with `HOME` = the real user home). One unreadable set
+> (preimage, credentials, `.claude.json` + backups, carrier, limits,
+> `settings*.json`, `projects/`) gates reads AND search roots, with
+> searchable-folder hints (R3). `@` import lines are refused in
+> client-loaded files (R5 — the client resolves them at session
+> start). The rule layer is bare census denies plus the score's
+> "Volume" short list (R6b): **8,629 → 1,127 deny rules, 441 → 69 KB
+> per teammate.** `status` now fails on gate-mode drift, missing
+> python3, `disableAllHooks`, or a canary that does not exit 2 (R6c).
+> Live probes: evidence 13. Residuals in §4, plainly.
+
 ## 1. How a teammate session actually launches
 
 A teammate is a T3 thread pinned to a per-teammate provider instance
@@ -78,7 +98,7 @@ Consequences:
    that could write its home's `settings.json`/`.mcp.json`/`skills/` gains
    arbitrary command execution on the next restart.
 
-## 3a. The PRIMARY fence: the PreToolUse hook gate (repair round 1)
+## 3a. The PRIMARY fence: the PreToolUse hook gate (repair rounds 1–2)
 
 One program, `tools/mmos_team_server/teammate_gate.py`, installed by
 `apply` at `<server root>/bin/teammate_gate.py` (mode 0555 — `bin` is
@@ -89,9 +109,29 @@ outside the home, so it protects its own binary). Each teammate's
 ```json
 {"hooks": {"PreToolUse": [{"matcher": "*", "hooks":
   [{"type": "command",
-    "command": "<root>/bin/teammate_gate.py --config <root>/config/teammate-gate/<slug>.json",
+    "command": "/usr/bin/env python3 -I '<root>/bin/teammate_gate.py' --config '<root>/config/teammate-gate/<slug>.json' || exit 2",
     "timeout": 20}]}]}}
 ```
+
+Round 2 (R4) rewrote that command; each part earns its place
+(`test_r4_gate_command_shape`, `test_r4_fail_closed_through_the_wired_
+command`, live evidence 13 items 4–5):
+
+- **Both paths single-quoted** by the generator — a server root
+  containing a space still parses (tested with root `"server root"`).
+- **`-I` (isolated mode)** — hooks run with `HOME=/Users/chriswong`
+  (the REAL user home; only `CLAUDE_CONFIG_DIR` points at the teammate
+  home — live-captured, evidence 13 item 4), so a bare `python3` hook
+  would load `usercustomize.py` and user site-packages from the user's
+  own home, a file any teammate could try to plant. `-I` skips
+  site-packages, `PYTHON*` env vars and usercustomize (panel N1).
+- **`env python3`** — the gate's own exec bit is irrelevant to this
+  command (`env python3 <file>` reads the file); mode integrity is
+  `status`'s job (R6c).
+- **`|| exit 2`** — the client fails OPEN on any hook exit other than
+  0/2 (panel M2); the wrapper collapses crash (exit 1), kill, missing
+  file and unreadable file all to 2 = refuse. Live: gate at mode 0000
+  → the client shows the refusal.
 
 The per-teammate config (0600, under server-private `config/`) carries
 `home`, `read_roots` (workspace + spec `allow_read_roots` — **always
@@ -99,30 +139,60 @@ rooted**, which is the P5 fix: the production spec needs no new key to
 get read rooting), `deny_reads`, and `write_names` (mirrors
 `home_write_allow`).
 
-What it enforces at every tool call (all live-proved from a real seat,
-evidence 12):
+What it enforces at every tool call (live-proved from a real seat,
+evidence 12 for round 1, evidence 13 for the round-2 checks):
 
 - **writes** (Write/Edit/NotebookEdit/MultiEdit): only inside the home,
   never a protected name (`HOME_LOCKED` ∪ `HOME_CONFIG` ∪
   `.claude.json.backup`); with `write_names`, only those entries.
+  Writes into ANOTHER teammate's home are refused by the same
+  home-fence line (`test_bcu_m14_write_into_other_teammate_home_refused`
+  — lane BCU's M14 question, answered yes with a pinned test).
+- **@ import lines** (R5): Write/Edit/MultiEdit are refused when the
+  new content would add a line starting with `@` to a client-loaded
+  file (`CLAUDE.md` and friends). Why load-bearing: the client
+  RESOLVES `@/abs/path` imports in CLAUDE.md at session start and
+  pulls the target into model context with no warning (live, N2,
+  evidence 13) — a planted import is a read-primitive outside every
+  fence. @ lines in non-client-loaded files (`notes/memo.md`) stay
+  allowed.
 - **reads** (Read): only inside home + read roots, minus `deny_reads`,
   checked AFTER resolution. In deny-list mode (spec without
   `allow_read_roots`) the deny list alone decides, matching the rule
   layer's semantics — but the production shape still gets rooting
   because the gate always roots to home + workspace + spec roots.
-- **searches** (Glob/Grep): the search root must pass the read policy
-  AND must not sit at or above a denied folder (P4: enumerating a
-  denied folder's parent leaks its names); patterns must be relative
-  and non-climbing.
-- **web** (WebFetch + any `webReader` tool): the host is resolved;
-  loopback, link-local, private and reserved addresses are refused —
-  `localhost` was refused as `127.0.0.1` (probe 12), no request sent.
+  One unreadable set (R3, panel H3/M5): `cutover-preimage.json`,
+  `.credentials.json`, `.claude.json` + backups, `carrier.json`,
+  `tool-limits.json`, `settings*.json`, `projects/` — the same list
+  the rule layer carries, sync-tested.
+- **searches** (Glob/Grep): the search root must pass the read policy,
+  must not sit at or above any unreadable/denied path (P4 + R3), and
+  when refused the message NAMES searchable folders ("search instead:
+  <workspace>, <home>/notes"). Patterns containing braces (`{...}`),
+  backslashes or `..` are refused outright (R2 family; live: `{..}/*`
+  arrives at the hook VERBATIM — the client does not expand braces
+  before PreToolUse, N3).
+- **web** (WebFetch + any `webReader` tool): the gate reads exactly
+  the `url` field (R1 — a public address in `prompt` never reaches
+  the check; live item 1a) and refuses BEFORE any request on: any
+  address literal in any notation (dotted, integer, octal `0177.0.0.1`,
+  hex, IPv6), userinfo, backslashes (incl. the `\@` confusion form),
+  whitespace/control characters, percent- or non-ASCII authority,
+  non-http(s) schemes, and non-default ports. Only plain DNS-label
+  hostnames (all-digit and 0x-prefixed labels refused) pass to
+  resolution, and EVERY resolved address must clear an explicit net
+  list (R6a): loopback, private, link-local, ULA, multicast,
+  unspecified, reserved, IPv4-mapped/-compatible, NAT64
+  (`64:ff9b::/96` and the IPv4-translatable well-known prefix),
+  6to4, Teredo, and CGNAT `100.64.0.0/10` — stricter than
+  `ipaddress.is_global`, which passes several of those (M1). DNS
+  lookups run in a thread with a 5-second join (R4), so a hung
+  resolver fails closed rather than hanging the call.
 - **unknown tools / unparseable input / unreadable config**: refused.
-  The live census surface (Workflow, SendMessage, ListAgents,
-  ScheduleWakeup, Skill, `mcp__t3-code__request_secret`) is refused
-  here AND bare-denied in the rule layer (`EXTRA_TOOL_DENIES`); those
-  tools are NOT denied in the real server's shipped limits today —
-  that gap is part of the install recommendation.
+  The census surface is refused here AND bare-denied in the rule
+  layer (`TOOL_DENY_CENSUS`, §3); those tools are NOT denied in the
+  real server's shipped limits today — that gap is part of the
+  install recommendation.
 
 **Spelling family closed by resolution**: the gate resolves symlinks,
 `..`, `//`, `/./`, expands `~`, canonicalizes each component to its
@@ -133,135 +203,144 @@ inside the home pointing out were ALL refused (evidence 12, items 1–8;
 the rule layer refused them — the matcher canonicalizes case and
 firmlinks too — and the gate refuses them independently).
 
-**Fail-open, stated plainly** (design ruling requirement): a hook that
-exits any code other than 0/2, or a missing hook binary, lets the tool
-call THROUGH (live-proved in the calibration round). Mitigations: the
-gate wraps every decision in a fail-closed handler (any internal error
-→ exit 2), refuses when its config is missing/corrupt, and
-`apply`/`status` verify presence + sha256 + wiring, with `status`
-exiting 1 and printing `FENCE BROKEN` on any problem. If the server's
-hook support were ever removed, the second layer (deny rules) still
-stands on its own.
+**Fail-open, stated plainly** (design ruling requirement): the CLIENT
+lets the call through on any hook exit other than 0/2 and on a missing
+hook binary (live-proved in the calibration round). Round 2 closes
+what a wrapper can close: `|| exit 2` collapses every non-0/2 exit
+(crash, kill, unreadable gate — live item 5) to refuse; the gate wraps
+every decision in a fail-closed handler (any internal error → exit 2,
+and `refuse` survives a broken stderr pipe); it refuses on
+missing/corrupt config. `status` (R6c) now fails with exit 1 /
+`FENCE BROKEN` when the gate mode is not exactly 0555, `python3` is
+not on PATH, any applying settings file sets `disableAllHooks`, or the
+wired canary call does not exit 2 — so a drifted fence is caught
+before a teammate sits down, not mid-call. What no wrapper closes: the
+client itself timing out or killing the hook (20 s wired; the gate
+answers in tens of ms), the hook subsystem being removed server-side
+(the rule layer still stands alone), and the gate binary being
+replaced by something that exits 0 — which is exactly what the canary
+and sha256 checks exist to catch.
 
 **A new folder needs no regeneration** (step 6 of the panel score): the
 gate resolves and roots at CALL time, so a folder created after apply is
 still refused (unit test `test_gate_refuses_post_apply_folder_without_
-regeneration`; live items 9–10 refused a fresh stand-in in `run/`). The
-deny-rule snapshot is the layer that needs regeneration — re-running
-`apply` regenerates it; no separate `refresh` command exists or is
-needed.
+regeneration`; live items 9–10 refused a fresh stand-in in `run/`).
+Since the round-2 cut the deny-rule snapshot no longer tracks the
+surrounding directories at all — re-running `apply` matters only for
+spec edits (roots, census, `deny_read_paths`); no separate `refresh`
+command exists or is needed.
 
-**Cost**: 171–740 ms per gated tool call (Python startup + path
-canonicalization), measured on a production-shaped config. Rule volume
-is unchanged in kind: the dev seat ran 8,560 rules / 486 KB fully
-enforced; the production shape generates 66,386 rules / 3.9 MB.
+**Cost**: 20 warm gate calls ran at 56.0 ms/call in a quiet moment;
+143.4 ms/call best-of-5 under machine load ~45 (the spread is load,
+not code — round-1 measurements of 171–740 ms were taken on the same
+loaded box). **Rule volume, round 2 (the cut)**: 8,629 → 1,127 deny
+rules (441 → 69 KB per teammate). The cut cannot change gate latency:
+the gate never reads the rules file.
 
-## 3. The rooted design (spec keys; absent = exactly today's rules)
+## 3. The rule layer after the round-2 cut (commit `2f82f6c8a`)
 
-`allow_read_roots` and `home_write_allow` compile to deny rules in
-`tool_limits()` (Q2/Q3). Both are second layers: every existing deny
-survives, deny wins, and a spec without the keys (or with empty lists)
-generates byte-identical permissions to today's (regression test
-`test_absent_keys_give_exactly_today_rules`).
+The gate is the primary fence, so the rule snapshot is now deliberately
+SMALL: the two sibling enumerations (rooted reads; always-on write
+fence) were deleted. Why they had to go: a directory deny matches its
+whole subtree (live, 10 D2), so rooting by enumeration meant denying
+every non-chain directory on the volume — 8,629 rules on the dev box,
+~66,000 in the production shape — and the snapshot went stale whenever
+the surrounding directories changed. The gate roots at CALL time
+(§3a); the rules now keep only what the panel score's "Volume" short
+list names:
 
-- `allow_read_roots` (list of absolute dirs): reads allowed only under
-  those roots plus the teammate's own home. Compiled by **sibling
-  enumeration**: collect every chain from `/` down to each root (the own
-  home included), then every directory NOT on any chain gets file+tree
-  denies for Read/Glob/Grep. **Chain directories get no rule in any
-  form** — a deny on a directory matches its whole subtree, so even a
-  file-form deny on a chain directory refuses the allowed roots beneath
-  it (live-proved, 10 D2: the first-cut design did exactly that and
-  refused all 21 probe actions, allowed reads included). Enumeration is
-  two-pass so a directory that sits on root 2's chain is never denied as
-  root 1's sibling. Locked files stay denied; plain
-  `Read`/`Glob`/`Grep` allows are replaced by rooted allows
-  (documentation under bypass; correct if a mode ever changes).
-  Bonus vs today: the enumeration read-denies `~/.t3`, every other user
-  folder, AND every other teammate's home — none of which today's deny
-  list covers.
-- `home_write_allow` (list of home-relative names, e.g. `["CLAUDE.md",
-  "notes/"]`): replaces the home-wide write allow. The named entries stay
-  writable; every existing home child and every `HOME_CONFIG` /
-  `HOME_LOCKED` name is denied (Write+Edit, file+tree) whether or not it
-  exists — locked/config names are never grantable even if a spec lists
-  them. With this key set, the same sibling enumeration is also emitted
-  for Write/Edit, so writes outside the home + read roots are denied
-  structurally. Note the scopes: `allow_read_roots` are *read* scopes;
-  the shared workspace stays write-denied by the base rule regardless.
-- `deny_write_roots` (list of absolute paths, predates round 2):
-  Write/Edit denied on the path itself and its whole tree, built from
-  realpath (a symlinked spelling would never match) plus its firmlink
-  twin when under /Users.
-- **Always-on write fence (attack round, findings 1-4)**: in every spec,
-  with no new keys, Write/Edit are fenced to the teammate's own home by
-  the same sibling enumeration. This closes what the attack round
-  confirmed writable under the real spec today: the server's own home
-  (its `userdata/settings.json` is watched and reloaded **live** by the
-  running server — writing it rewrites launchArgs and can drop
-  `--settings` at the next session spawn), `fabric.env`, every OTHER
-  teammate's home (their limits/charter would bind at their next
-  process start — lateral takeover), and the user's own config surfaces
-  (`~/.zshenv`, `~/.ssh`, `~/Library/LaunchAgents`, `~/.claude`,
-  `~/.codex`, `~/.gitconfig` — `deny_read_roots` never covered writes).
-  The t3 CLI install dir (`dirname` of `server.t3_bin`) gets its own
-  explicit deny: apply/status execute that binary with the team home,
-  and it need not sit near the home chain. Live-proof: evidence 11,
-  actions N1-N7.
-- `SERVER_INFRASTRUCTURE` (no key; always on): Write/Edit denies
-  (file+tree) for `<server root>/{bin,config,runtime,run}` in every
-  spec. Whoever can write those folders chooses which program the server
-  runs at its next start — the defense cannot be optional.
-- `assets_dir` (Q4): **implemented, then removed and refused by
-  `load_spec`.** Moving the `--settings` file outside the teammate home
-  loads it, but its Read/Glob/Grep deny rules then silently never bind
-  (10 D1 — proved both directions with the same 9-rule file), so the
-  "hardening" disabled the read fence while keeping the write fence:
-  a regression. `tool-limits.json` and `CHARTER.md` stay in the home,
-  guarded by `HOME_LOCKED` file+tree denies (live-proved in 10b).
+- **Bare tool denies — `TOOL_DENY_CENSUS` (R6b)**: every
+  non-allowlisted tool from the live census of the dev-server teammate
+  session (Agent, AskUserQuestion, ListAgents, ReportFindings,
+  ScheduleWakeup, Skill, Workflow, `mcp__t3-code__request_secret`,
+  `mcp__web_reader__webReader`) plus a belt of client tools another
+  build may offer (Bash, Task, LS, NotebookEdit/NotebookRead,
+  SlashCommand, BashOutput, KillShell, EnterPlanMode/ExitPlanMode,
+  Monitor, ReadMcpResource, ListMcpResources, MultiEdit, SendMessage,
+  CronCreate/CronDelete/CronList). **Exact MCP names only** —
+  live-proved (N4, evidence 13) that neither `mcp__*` wildcards, nor
+  prefix forms, nor bare `webReader` binds; a new MCP tool needs a
+  census update. Allowlist (Read, Glob, Grep, WebFetch, WebSearch,
+  TodoWrite, ToolSearch) untouched.
+- **Write/Edit file+tree denies** for: `HOME_LOCKED` ∪ `HOME_CONFIG` ∪
+  backup names (inside the home, whether or not they exist);
+  `SERVER_INFRASTRUCTURE` — `<server root>/{bin, config, runtime, run,
+  home, claude-home}` and `fabric.env`; the t3 CLI install dir
+  (`dirname` of `server.t3_bin`); every `deny_write_roots` entry
+  (spec key, realpath + firmlink twin); every OTHER teammate's home;
+  and the user-protected family (`~/.zshenv`, `~/.ssh`,
+  `~/Library/LaunchAgents`, `~/.claude`, `~/.codex`, `~/.gitconfig`).
+  These are the surfaces the attack round proved load-bearing (evidence
+  11, N1–N7): the server's own `userdata/settings.json` is reloaded
+  LIVE by the running server, and other homes' limits bind at their
+  next process start — lateral takeover paths.
+- **Read/Glob/Grep denies** for `deny_read_paths` (spec key, kept).
 
-## 4. What the rooted design still does not cover (stated plainly)
+Spec keys unchanged in MEANING but not in compilation:
+`allow_read_roots` and `home_write_allow` now configure the GATE config
+(rooted reads; named home writes) instead of compiling to sibling
+enumerations; locked/config names remain ungrantable either way. The
+regression tests were rewritten to the cut semantics: read rooting
+holds through named rules + gate
+(`test_allow_read_roots_enforced_by_named_rules_and_gate`), and a home
+that stops matching the spec fails closed
+(`test_home_enumeration_fails_closed`).
 
-- **Glob/Grep name enumeration on a chain directory** (rule-layer
-  residual, CLOSED by the gate for search roots at/above denied folders
-  and outside the read roots — gate §3a; live items 9–10): chain dirs
-  carry no RULE (see D2), so the snapshot alone still lets a Glob whose
-  path IS a chain directory list sibling NAMES one level above an
-  allowed root. The gate refuses any search root outside home+roots and
-  any root at/above a deny entry, so through the gate this is closed;
-  it remains open only if the hook is missing/crashing (fail-open).
-- **Future top-level names in the home** (rule-layer residual, CLOSED
-  by the gate: `write_names` mode refuses every non-named entry, and
-  default mode still refuses nothing NEW outside the home): a file
-  named neither in `HOME_CONFIG`/`HOME_LOCKED` nor among existing
-  children at apply time was creatable under `home_write_allow` (W7).
-  Under the gate, a post-apply folder OUTSIDE the home/roots is refused
-  without regeneration (§3a, step 6); inside the home the spec's own
-  `write_names` decides. Load surfaces (shell startup files, launchd
-  plists dir, `HOME_CONFIG`) are denied at both layers whether or not
-  they exist (P3).
-- **Symlink escapes are blocked by the matcher AND by the gate** (both
-  resolve links — evidence 09, gate unit tests, live item 8): a link
-  inside an allowed root pointing outside is refused when the target is
-  outside the roots or denied.
-- **Web tools**: the GATE refuses loopback/link-local/private/reserved
-  targets by resolved address and requires http(s) (live, evidence 12,
-  items 11–12; closed port also refused). Remaining rule-layer residual
-  without the gate: a public-destination WebFetch is unrestricted (Q5,
-  evidence 07) — exfiltration to a public host is NOT prevented by
-  either layer; that is a charter/trust matter, stated plainly.
-- **Deny beats allow at any specificity** (evidence 09b): a more-specific
-  allow inside a tree deny does NOT unlock the subtree. There is no
-  gitignore-style cascade, so a compact deny/allow cascade is impossible
-  and the enumeration must be precise.
-- **Rule volume**: the always-on write fence alone compiles to ~3,400
-  deny rules on this Mac (838 non-chain sibling paths, 710 of them in
-  the user home alone, × 4); with the rooted read keys the final
-  measured dev file is 8,560 rules / ~486 KB, and the production shape
-  (no rooted keys, P3/P5 user-protected family included) generates
-  66,386 rules / 3.9 MB. No cap was observed — files of that size load
-  and enforce fully (panel scratch runs to 167k) — but apply time, file
-  size and per-call hook latency (§3a) are the cost.
+Historical note (why `assets_dir` does not exist, Q4): moving the
+`--settings` file outside the teammate home loads it, but its
+Read/Glob/Grep deny rules then silently never bind (10 D1, proved both
+directions with the same 9-rule file) — a "hardening" that disabled
+the read fence while keeping the write fence. `tool-limits.json` and
+`CHARTER.md` stay in the home, guarded by `HOME_LOCKED` denies
+(live-proved in 10b), and `load_spec` refuses the key.
+
+## 4. What is still not covered (stated plainly, after round 2)
+
+The panel accepted the fence with these known residuals; they are the
+principal's named list plus two round-2 discoveries:
+
+1. **DNS rebinding**: a name that resolves public at check time and
+   private at fetch time. The gate resolves when the hook fires; the
+   client fetches afterwards.
+2. **Redirects**: a redirect from a public host to a private one. The
+   gate checks the original URL only.
+3. **The client timing out or killing the hook process** (20 s
+   wired). `|| exit 2` covers the hook failing, not the client
+   discarding it; the gate answers in tens of ms, so the margin is
+   large but not infinite.
+4. **A teammate sending what it MAY read** — its own home, the shared
+   workspace — **to a public host** by WebFetch. No secrets remain in
+   the readable set, but the channel is open at both layers; a
+   charter/trust matter.
+5. **`mcp__web_reader__webReader` executes SERVER-side and is
+   unfenced at every client-side layer** (round-2 finding, beyond the
+   panel): the transcript records the bare name `webReader` in
+   `mcp_tool_use` — no PreToolUse hook fires for it (contrast:
+   `request_secret`'s call was hook-refused live), and no permissions
+   deny binds MCP tools (N4). Only its server-side "Network error"
+   behavior currently limits it. **Recommendation to the server lane:
+   remove/disable the web_reader tool in team-server builds, or
+   egress-block it.** The gate fences the name whenever a hook does
+   fire and R6b bare-denies the exact name; neither reaches a
+   server-side execution path.
+6. **New MCP tools need exact-name census updates** (consequence of
+   N4): a newly offered MCP tool carries no wildcard protection in the
+   rule layer until its exact name joins `TOOL_DENY_CENSUS`; the
+   gate's allowlist-only stance refuses it meanwhile — where a hook
+   fires.
+
+Two former rule-layer residuals (chain-directory name enumeration,
+post-apply folders) are closed by the gate and, after the cut, moot
+for the rules — the snapshot no longer enumerates chains, so it cannot
+go stale against them. They reopen only in the fail-open states of
+§3a, and `status` (R6c) now detects the drift states that produce
+those (mode, python3, disableAllHooks, canary).
+
+Still-true rule semantics worth remembering when editing the short
+list: deny beats allow at any specificity (no cascade, 09b); a deny on
+a directory matches its whole subtree (10 D2); the matcher resolves
+symlinks and canonicalizes firmlinks (09, 11 S2) — and the gate
+resolves both again at call time.
 
 ## 5. Safe session restart (for installing new limits)
 
@@ -289,6 +368,8 @@ and resumes the same thread with full history (transcript-based resume,
 | HOME_LOCKED exact-form hole and the tree-member fix, live-proved on today's-shape rules | `10b-locked-tree-member-proof.md` + `10b-probe-reply.txt` |
 | attack round: 12 findings + dispositions, exact-Read binding (S1), firmlink canonicalization (S2), final 8-action fence proof on the 445c2662e-generated file (N1-N7 refused, N8 allowed, disk clean) | `11-attack-round-and-fixes.md`, `11-attack-findings.txt`, `11-fence-probe-reply.txt` |
 | repair round 1: the hook gate live from a real seat (12/12 probes refused, hook-text refusals for search/web), hook freshness in a running session, restart semantics, `.claude.json` corruption blocks start (backup not honored), volume + latency, status verification | `12-gate-hook-live-proof.md` |
+| panel 2 blind score of `7e9a29aa4` (3 HIGH, 6 MED, two live-proof items, "install: ready after listed repairs") | `panel2/SCORE.md` + reviewer files beside it |
+| repair round 2: the 7 live probes (url-field, octal/backslash-`@`, home Grep with hints, `@` write + what the client does with an `@` import, hook env `HOME`/`CLAUDE_CONFIG_DIR`, gate mode 0644/0000 + `status` exit 1, brace-verbatim + 20-call timing), N4 MCP-wildcard non-binding, the webReader server-side finding, the BCU M14 answer, red logs + suite logs | `13-repair2-live-probes.md` + `probe2/` |
 | Q1 source citations and reconciliation (incl. two child claims refuted by live proof) | `08-q1-child-answers.md`, `08-q1-reconciliation.md` |
 | web-tool facts for the three real charters | `07-q5-web-facts.md` |
 | Part A atomic writes / Paperclip binding / pairing URL | ledger lines 1-5 in `LEDGER.md` |
@@ -321,10 +402,12 @@ are spec-level; all three teammates get the same compile):
   workspace; charter sources (`~/.hermes/.../SOUL.md`) are build-time
   inputs apply already inlined, not runtime reads. Side effects that are
   pure gains: every other user folder (`~/.t3`, `~/.claude`, `~/.ssh`,
-  …) and every OTHER teammate's home become read-denied — today nothing
-  denies them. If a future workflow needs another root, it is one more
-  list entry (per-teammate rooting is not implemented; a teammate that
-  genuinely needs a different root than its peers needs that follow-up).
+  …) and every OTHER teammate's home become read-refused — by the GATE
+  at call time (the round-2 cut removed the rule enumeration; today's
+  shipped limits deny neither). If a future workflow needs another
+  root, it is one more list entry (per-teammate rooting is not
+  implemented; a teammate that genuinely needs a different root than
+  its peers needs that follow-up).
 - `home_write_allow: ["CLAUDE.md"]` — all three charters define the
   home CLAUDE.md as the only long-term memory ("nothing else
   persists"); Secretary's records go to issue comments, not home files.
@@ -339,14 +422,12 @@ gate configs, reports `limitsPendingRestart` with the running PIDs),
 let each teammate's session restart at a safe boundary (30-min idle
 self-exit or an attended `thread.stop`/`releaseUnlessBusy` — never from
 this lane on the real server), then confirm the new processes started
-after the file mtimes. Expected size: ~8,500 deny rules per teammate on
-this Mac (~480 KB; loads fully — evidence 10/11); the production shape
-(no rooted keys) generates ~66,000 rules / ~3.9 MB per teammate with
-the P3/P5 user-protected family included. Apply is content-diffed: when
-the surrounding directories change, the generated rules change and the
-next apply rewrites the file — re-run apply after any team-layout
-change (the `_note` in each generated file says so). The GATE layer
-needs no regeneration for new folders (§3a, step 6).
+after the file mtimes. Expected size after the round-2 cut: ~1,100
+deny rules per teammate (~69 KB) — and, because the rules no longer
+enumerate sibling directories, the file no longer changes when the
+surrounding directories change; re-running `apply` matters only for
+spec edits (roots, census, `deny_read_paths`). The GATE layer needs no
+regeneration for new folders (§3a, step 6).
 
 Two install notes from repair round 1:
 
@@ -357,9 +438,11 @@ Two install notes from repair round 1:
 2. The real server's currently-shipped limits do NOT deny
    Workflow/SendMessage/ListAgents/ScheduleWakeup/Skill/
    `mcp__t3-code__request_secret` (live census, evidence 12 round C3).
-   The generated limits now bare-deny them (`EXTRA_TOOL_DENIES`) and the
-   gate refuses them at call time; installing the new limits closes
-   that gap on the real roster.
+   The generated limits now bare-deny the full census
+   (`TOOL_DENY_CENSUS`, R6b — every non-allowlisted tool from the live
+   census plus a belt of build-dependent names; MCP tools by exact
+   name only, N4) and the gate refuses unknown tools at call time;
+   installing the new limits closes that gap on the real roster.
 
 ## 8. What could not be proved
 
@@ -381,10 +464,16 @@ Two install notes from repair round 1:
   outside the dev root before deletion, is disclosed in
   `10-rule-semantics-round2.md`. Only runs with verified
   process-start > limits-mtime count as proof.
-- Repair round 1: the gate was live-proved on the DEV seat only; the
-  real roster's fence must be verified with `status` (which now checks
-  limits-bytes, gate sha, hook wiring and instance launchArgs) plus one
+- Repair rounds 1–2: the gate was live-proved on the DEV seat only;
+  the real roster's fence must be verified with `status` — which now
+  checks limits-bytes, gate sha, hook wiring, instance launchArgs,
+  gate mode 0555, `python3` on PATH, no `disableAllHooks` in any
+  applying settings file, and a canary call exiting 2 (R6c) — plus one
   spelling-family probe from a real seat before any credential-bearing
   roster relies on it (the panel's own condition). WebFetch
-  exfiltration to PUBLIC hosts remains possible at both layers (only
-  loopback/private is refused); that is accepted residual, §4.
+  exfiltration to PUBLIC hosts remains possible at both layers; that is
+  accepted residual, §4. The tool census is build-dependent (TodoWrite,
+  WebSearch, LS, Bash were not offered in the probed build but stay in
+  the belt denies) — re-run the census probe after any server/client
+  upgrade. `webReader` executes server-side and stays unfenced until
+  the server lane removes it (§4 item 5).
