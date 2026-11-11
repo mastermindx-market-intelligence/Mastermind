@@ -1382,3 +1382,63 @@ still needs one Load unpacked round by the Chairman, asked once, batched.
 limit, a subagent posts the text as a GitHub issue or comment and the operator fills only
 the link and one line of instruction. Sent to Sector Intelligence as an addition to harness
 item 3. Not yet checked: that each ChatGPT account's GitHub connector can open the link.
+
+## 34. Amendment, 2026-11-11 18:50 UTC: the first day under the deputy, a provider-path defect, the Grok Bot link lane
+
+**The real team server could not start Claude runs** from the 15:05 switch until 18:22 UTC.
+The window showed "Claude Agent CLI (claude) was not found on PATH": the runner's PATH
+(`bin/server_runner.sh` lines 57 and 155) does not include `~/.local/bin`. Remedy without a
+restart, applied by the principal: `binaryPath` set on the four provider instances in the
+team server's `settings.json` (0600 backup `settings.json.pre-binarypath-20261111` beside
+it). The banner was read gone at 18:24 UTC. The durable repair is lane TSHc's item F
+(`config/provider-cli-dir`, head `f1c8354af`); release `-3`'s last step decides whether
+`binaryPath` stays. Not yet proven: one real teammate run on the real server. Lesson: the
+switch proof in section 32 read the window and the server's answer, not a run; a switch
+proof now includes one teammate turn.
+
+**The slow start is explained.** Lane TSHc proved the 22-minute restart was the launchd job
+running at background priority (no `ProcessType`); with `ProcessType=Interactive` the same
+boot took 22 s instead of 282 s under load. Delta check 3 at `aec3ff23b` is not ready: three
+HIGHs in the code that round added (a `curl` with no time limit that can hang the install,
+a node verify that writes no progress note so a live verify is booted out, and a two-walk
+cache race that would let the mandatory digest check pass on changed files). One micro-fix
+round of four listed items and a narrow delta check follow.
+
+**Rulings 7 to 10** (`integrations/mmos/deputy/RULINGS.md`): a reviewed patch is not held
+for defects that were already in the code under it (7); changes that each need a restart
+ride one packed release and one restart (8); a HIGH first seen at a late check gets one
+more limited round, and "better than what is live" does not install a known HIGH (9);
+ruling 2's stop counts only a HIGH an earlier check listed, and any HIGH after the extra
+round stops the lane (10).
+
+**Panel results since section 33.** T10 (silent stops): install-ready, merged to the trunk
+at `5a7aad8e3b29`, waits for release `-3`. RL (teammate limits) at `45a3ea404`: not ready
+(DNS rebinding in the web check, unreadable set too narrow, a firmlink path, an interpreter
+on PATH) and a new HIGH, the `webReader` tool outside the fence; install 3 does not go
+ahead with it reachable, and if the web check cannot pin the address it fetches, teammates
+get no general web fetch in install 3. RF (ask and return) at `42b0ffe1d`: two HIGHs first
+seen at delta 3 (answers of two finished asks delivered in the wrong order); round 4 is
+out. BR (browser fill) at `8f14c2604`: the fill reports `APPLIED` without reading the
+content back; round 4 is out and also carries a paged whole-page read.
+
+**Harness item 13 (Sector Intelligence, 16:09 UTC):** reading a finished ChatGPT answer
+whole. Not possible today: the page read stops at 10,000 characters from the top of the
+page and has no offset. The paged read is ordered into the same bridge release; the
+debugger route is closed in their profile by another extension and is not routed around.
+
+**Lane GBL (the Chairman's order, 15:38 UTC):** a two-way link between bots in Grok Bot
+and Mastermind OS teammates, team threads and the T3 development threads. Architecture
+first: Grok Bot's real capabilities from its own documentation, three transports compared
+(direct connector, Slack thread relay, routine or webhook), addressing, the return path,
+admission, exactly-once, and the human-only steps. The first run on `gpt-6.1-sol` looped
+for three hours on tool calls with empty input and wrote nothing; relaunched on `glm-5.3`
+with staged deliverables in `~/.mastermind/mmos_evidence/gbl-20261111/`.
+
+**Routing fact.** Three `gpt-6.1-sol` children on two programmes showed that loop between
+18:05 and 18:40 UTC. It is not dispatched again until one small canary child completes.
+A long-running child with a climbing item count and no output file gets one activity read.
+
+**Deputy, first measure.** Nine deputy wakes, one escalation, twelve recorded decisions.
+Two panel verdicts reached the principal two hours late because a panel lead's interim note
+arrives as "completed"; the principal now reads the final with one status call after any
+interim note.
