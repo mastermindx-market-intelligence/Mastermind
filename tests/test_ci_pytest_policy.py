@@ -899,58 +899,77 @@ def test_worker_switch_parallel_values_add_loadfile_xdist(monkeypatch, switch):
 
 
 @pytest.mark.parametrize("runner_temp", ["/home/runner/work/_temp", "  /home/runner/work/_temp  "])
-def test_worker_switch_on_runner_parks_basetemp_in_runner_temp(monkeypatch, runner_temp):
-    # On hosted runners the parallel argv also pins --basetemp into the
-    # runner's quiet per-job area and loads the worker-env plugin: pytest's
-    # default tmp root (/tmp/pytest-of-*) and every other tempfile consumer
-    # sit under the hot /tmp that all four workers churn with transient
-    # entries, and the hold-and-double-stat custody guards cross those
-    # ancestors on their way to / (CI run 42994920108 shard 0 refused with
-    # "retained supersession entry is unsafe", shard 1 with
-    # "changed_during_read"). Serial values never add either.
+def test_worker_switch_on_runner_pins_short_unique_basetemp(
+        tmp_path, monkeypatch, runner_temp):
+    # On hosted runners the parallel argv also pins --basetemp into a short
+    # per-process root under $HOME and loads the worker-env plugin. Both the
+    # default tmp root (/tmp/pytest-of-*, churned by all four workers under
+    # -n 4 and crossed by the hold-and-double-stat custody guards, CI run
+    # 42994920108) and the first attempted placement under RUNNER_TEMP
+    # itself (whose "_temp" component the custody alphabet rejects, whose
+    # sticky-shared-root ancestors the capacity walk does not authenticate,
+    # and whose prefix crosses the 103-byte AF_UNIX bound the socket
+    # constructors enforce, CI run 43015530899) are unusable: $HOME/mmx/
+    # b<pid> keeps components clean, ancestor modes free of group/other-
+    # write bits, socket paths ~90 bytes, and concurrent pytest builders
+    # (each an own process with an own pid) distinct -- pytest removes an
+    # explicit --basetemp at session start. Serial values never add either.
+    home = tmp_path / "home"
     monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
     monkeypatch.setenv("RUNNER_TEMP", runner_temp)
+    monkeypatch.setenv("HOME", str(home))
     modules = ("tests/test_fixture_a.py",)
     argv = cip.pytest_argv(modules)
     assert argv == [
         cip.sys.executable, "-m", "pytest", "--durations=25", "-q",
         "-n", "4", "--dist", "loadfile",
         "-p", "scripts.ci_pytest_worker_env",
-        "--basetemp", "/home/runner/work/_temp/mmx-pytest-basetemp", *modules,
+        "--basetemp", str(home / "mmx" / f"b{cip.os.getpid()}"), *modules,
     ]
     monkeypatch.setenv("CI_PYTEST_WORKERS", "1")
     assert cip.pytest_argv(modules) == [
         cip.sys.executable, "-m", "pytest", "--durations=25", "-q", *modules,
+    ]
+    # Without HOME the argv degrades to the placement flags only.
+    monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
+    monkeypatch.delenv("HOME", raising=False)
+    argv = cip.pytest_argv(modules)
+    assert argv == [
+        cip.sys.executable, "-m", "pytest", "--durations=25", "-q",
+        "-n", "4", "--dist", "loadfile", *modules,
     ]
 
 
 def test_worker_env_plugin_scopes_tmpdir_per_process(tmp_path, monkeypatch):
     # The -p plugin applies at import time, before any test asks tempfile for
     # a directory: every process (each xdist worker) gets its own TMPDIR root
-    # under the runner's quiet per-job area, created at bring-up, so no
-    # sibling ever creates an entry inside another worker's ancestor chain.
+    # under $HOME/mmx, created at bring-up, so no sibling ever creates an
+    # entry inside another worker's ancestor chain.
     import importlib
 
     import scripts.ci_pytest_worker_env as worker_env
 
+    home = tmp_path / "home"
     monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "runner-temp"))
+    monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("TMPDIR", raising=False)
     reloaded = importlib.reload(worker_env)
     try:
         root = reloaded._ROOT
         assert root is not None
         assert root.is_dir()
-        assert root == (tmp_path / "runner-temp" / "pytest-worker-tmp"
-                        / f"p{cip.os.getpid()}")
+        assert root == home / "mmx" / f"w{cip.os.getpid()}"
         assert cip.os.environ["TMPDIR"] == str(root)
         # Serial switch values and missing RUNNER_TEMP never scope, and never
         # disturb an already-scoped TMPDIR.
         monkeypatch.setenv("CI_PYTEST_WORKERS", "1")
         monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "runner-temp"))
+        monkeypatch.setenv("HOME", str(home))
         assert importlib.reload(worker_env)._ROOT is None
         monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
         monkeypatch.delenv("RUNNER_TEMP", raising=False)
+        monkeypatch.setenv("HOME", str(home))
         assert importlib.reload(worker_env)._ROOT is None
         assert cip.os.environ["TMPDIR"] == str(root)
     finally:

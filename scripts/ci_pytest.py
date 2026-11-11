@@ -240,26 +240,48 @@ def pytest_argv(
         # one worker (intra-module order preserved). CI_PYTEST_WORKERS=0/1
         # restores today's exact serial argv.
         argv.extend(["-n", str(workers), "--dist", "loadfile"])
-        runner_temp = os.environ.get("RUNNER_TEMP", "").strip()
-        if runner_temp:
-            # Under -n N the four workers churn transient /tmp entries, and
-            # tests that hold-and-double-stat their fixture's whole ancestor
-            # chain (the acceptance-maintenance and native current-source
-            # custody guards) cross that hot /tmp while pytest's own tmp root
-            # sits at /tmp/pytest-of-*: a sibling worker's transient entry
+        home = os.environ.get("HOME", "").strip()
+        if os.environ.get("RUNNER_TEMP", "").strip() and home:
+            # Two placement constraints, both learned on hosted runners.
+            #
+            # pytest's default tmp root (/tmp/pytest-of-*) cannot stay: under
+            # -n N the four workers churn transient /tmp entries, and tests
+            # that hold-and-double-stat their fixture's whole ancestor chain
+            # (the acceptance-maintenance and native current-source custody
+            # guards) cross that hot /tmp: a sibling worker's transient entry
             # flips an ancestor's mtime/ctime/nlink between the two stats and
             # the guard refuses ("retained supersession entry is unsafe", CI
             # run 42994920108 shard 0; "changed_during_read", shard 1).
-            # RUNNER_TEMP is the hosted runner's quiet per-job area, so the
-            # parallel argv parks basetemp there and loads the worker-env
-            # plugin, which scopes every worker's TMPDIR to its own root under
-            # it: each guard's ancestor chain is then churn-free. Serial argv
-            # (the rollback) and local runs without RUNNER_TEMP stay
-            # unchanged.
+            #
+            # RUNNER_TEMP itself is also unusable (CI run 43015530899): its
+            # path component "_temp" starts with an underscore, which the
+            # custody component alphabet rejects outright ("custody_path_
+            # invalid" in every current-source worktree fixture, shard 1);
+            # it is a second sticky shared root, which the capacity artifact
+            # ancestor walk does not authenticate -- only one /tmp-style
+            # sticky root is permitted, and every other ancestor must carry
+            # no group/other-write bits ("SOURCE_METADATA_INVALID" for the
+            # whole capacity module, shard 2); and the prefix is too long
+            # for the AF_UNIX socket constructors, which bound the encoded
+            # path at 103 bytes ("AF_UNIX path too long", shard 0; "invalid
+            # principal Company host binding", shard 1; "SERVICE_UNAVAIL-
+            # ABLE" socket-refusal, shard 5).
+            #
+            # So the parallel argv pins basetemp into a short per-process
+            # root under $HOME -- hosted runners use /home/runner, whose
+            # components are clean, ownership is the control uid, there are
+            # no ancestor xattrs, and the prefix keeps tmp-derived socket
+            # paths at ~90 bytes -- and loads the worker-env plugin, which
+            # scopes every worker's TMPDIR to its own sibling root. The pid
+            # in the path keeps concurrent pytest builders distinct: pytest
+            # removes an explicit --basetemp at session start, and every
+            # nested gate/shard child is its own process with its own pid.
+            # Serial argv (the rollback) and local runs without RUNNER_TEMP
+            # stay unchanged.
             argv.extend([
                 "-p", "scripts.ci_pytest_worker_env",
                 "--basetemp",
-                str(Path(runner_temp) / "mmx-pytest-basetemp"),
+                str(Path(home) / "mmx" / f"b{os.getpid()}"),
             ])
     return [*argv, *included]
 

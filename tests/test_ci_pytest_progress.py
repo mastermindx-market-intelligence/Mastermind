@@ -109,6 +109,11 @@ def test_real_pytest_timing_reports_each_module_once_under_xdist(tmp_path):
     )
     assert result.returncode == 1
     assert "retained assertion" in result.stdout
+    # Captured stdout renders only on failure: this print exists so that a
+    # rare interleaving miss (seen once, on CI run 43015530899 with counts
+    # [1, 1] for one module and no local reproduction in 30 rounds) leaves
+    # the child's full record stream in the failure evidence.
+    print(result.stdout)
     records = [json.loads(line.removeprefix("CI_MODULE "))
                for line in result.stdout.splitlines() if line.startswith("CI_MODULE ")]
     starts = [r for r in records if r["event"] == "start"]
