@@ -207,7 +207,7 @@ def validate_request(value):
         _require(set(params) == {"url"} and valid_url(params["url"]))
     elif action == "fill":
         _require(set(params) == {"text"} and type(params["text"]) is str
-                 and len(params["text"]) <= 8000 and "\x00" not in params["text"])
+                 and len(params["text"]) <= 30000 and "\x00" not in params["text"])
     elif action == "select":
         _require(set(params) == {"value"} and _text(params["value"], 0, 512))
     elif action == "press":

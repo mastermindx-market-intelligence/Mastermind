@@ -38,6 +38,10 @@ def request(action="click", **changes):
         value.update(snapshot_id=None, ref=None)
     elif action not in protocol.PAGE_ACTIONS:
         value.update(ref=None)
+    # Snapshot-free reads (0b5edb927) take no snapshot id; diagnostics alone
+    # also accepts the last observation's id, so keep its string to cover that.
+    if action in protocol.NO_SNAPSHOT and action != "diagnostics":
+        value.update(snapshot_id=None)
     value.update(changes)
     return value
 
@@ -46,7 +50,16 @@ def request(action="click", **changes):
 def test_closed_actions_round_trip(action):
     params = {"open":{"url":"https://example.test/"}, "navigate":{"url":"http://localhost:8080/page"},
         "fill":{"text":"Hello\nworld"}, "select":{"value":"one"}, "press":{"key":"Enter"},
-        "scroll":{"x":0,"y":700}}.get(action,{})
+        "scroll":{"x":0,"y":700},
+        # Advanced actions carry their payload in params; each needs its own
+        # minimal valid shape to round-trip validate_window.
+        "cdp":{"method":"Page.enable"}, "evaluate":{"expression":"1+1"},
+        "interact":{"ref":"n"+"a"*24,"kind":"click"}, "locate":{"locator":{"css":"div"}},
+        "wait":{"locator":{"css":"div"}},
+        "download":{"url":"https://example.test/file.bin"},
+        "response_body":{"request_id":"request-one"}, "result":{"result_id":"result-one"},
+        "route":{"rules":[{"url_pattern":"https://example.test/","action":"continue"}]},
+        "upload":{"ref":"n"+"a"*24,"files":["/tmp/upload.txt"]}}.get(action,{})
     original=request(action,params=params)
     accepted=protocol.validate_window(original)
     assert accepted == original and accepted is not original

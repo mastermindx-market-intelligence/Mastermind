@@ -53,7 +53,7 @@
     const p = r.params;
     if (CDP && CDP.ACTIONS.has(r.action)) {if (!CDP.validate(r.action,p)) return false;}
     else if (["open", "navigate"].includes(r.action)) {if (!exact(p,["url"]) || !url(p.url)) return false;}
-    else if (r.action === "fill") {if (!exact(p,["text"]) || typeof p.text !== "string" || p.text.length > 8000 || p.text.includes("\u0000")) return false;}
+    else if (r.action === "fill") {if (!exact(p,["text"]) || typeof p.text !== "string" || p.text.length > 30000 || p.text.includes("\u0000")) return false;}
     else if (r.action === "select") {if (!exact(p,["value"]) || !bounded(p.value,0,512)) return false;}
     else if (r.action === "press") {if (!exact(p,["key"]) || !Object.hasOwn(KEY_CODES,p.key)) return false;}
     else if (r.action === "scroll") {if (!exact(p,["x","y"]) || ![p.x,p.y].every(x=>Number.isInteger(x)&&Math.abs(x)<=3000)) return false;}
