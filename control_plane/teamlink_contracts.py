@@ -59,7 +59,8 @@ PACKET_ID_RE = re.compile(r"^tlp-[0-9a-f]{32}$")
 # Same grammar and 96-char ceiling as the Session Bridge operation_key.
 OPERATION_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$")
 REQUEST_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
-ISO_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:?\d{2}|Z)")
+# The wire caps the hour at 23 even on runtimes that normalize 24:00 to tomorrow.
+ISO_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):\d{2}:\d{2}(\.\d+)?([+-]\d{2}:?\d{2}|Z)")
 
 # The WO-17 correlation keys, verbatim (executive_decision_ledger
 # JSONL_CORRELATION_KEYS).  TeamLink copies these from an admitted
