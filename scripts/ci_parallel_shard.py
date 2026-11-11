@@ -194,6 +194,14 @@ _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 
 # independently of the change under test. No self-hosted runner carries this
 # label. Scope classification and the `test` fan-in run no suite.
 HOSTED_TEST_RUNNER = "ubuntu-24.04"
+# The workflow root may declare exactly the released keys. A workflow-level
+# `defaults:` (e.g. defaults.run.shell injection) or `env:` (e.g.
+# npm_config_dry_run) applies to every job and could neuter all steps while
+# every per-job check still passes, so unknown root keys are drift.
+# ci_pytest._WorkflowYAMLLoader keeps the bare `on:` trigger key a string
+# (never a YAML 1.1 boolean), so this set comparison matches the real file.
+_WORKFLOW_ROOT_KEYS = frozenset(
+    {"name", "on", "permissions", "concurrency", "jobs"})
 _PIN_GUARDS_JOB_KEYS = frozenset(
     {"name", "if", "permissions", "runs-on", "timeout-minutes", "steps"})
 _QUALIFICATION_JOB_KEYS = frozenset(
@@ -446,6 +454,12 @@ def validate_parallel_workflow(text: str) -> None:
 
     ci_pytest.validate_workflow(text)
     payload = yaml.load(text, Loader=ci_pytest._WorkflowYAMLLoader)
+    # validate_workflow already refused non-string root keys (a coerced
+    # boolean `on` among them), so the set comparison below is exact.
+    if set(payload) != _WORKFLOW_ROOT_KEYS:
+        raise ci_pytest.PolicyError(
+            "CI workflow root keys must be exactly name, on, permissions, concurrency, jobs"
+        )
     if payload.get("permissions") != {"contents": "read"}:
         raise ci_pytest.PolicyError("CI workflow root may only read source")
     jobs = payload.get("jobs")

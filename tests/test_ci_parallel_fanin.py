@@ -228,6 +228,50 @@ def test_unsafe_matrix_or_required_fanin_regression_is_refused(
         fan.validate_parallel_workflow(changed)
 
 
+def test_workflow_root_key_set_is_pinned() -> None:
+    import yaml
+
+    text = _WORKFLOW.read_text(encoding="utf-8")
+    # The released workflow still passes with the exact root key pin active.
+    fan.validate_parallel_workflow(text)
+    payload = yaml.load(text, Loader=cip._WorkflowYAMLLoader)
+    assert set(payload) == fan._WORKFLOW_ROOT_KEYS == {
+        "name", "on", "permissions", "concurrency", "jobs",
+    }
+    # The loader must keep the bare `on:` trigger a string, never a YAML 1.1
+    # boolean, or the root key pin could never match the real file.
+    assert "on" in payload and True not in payload
+
+
+@pytest.mark.parametrize(
+    ("preimage", "mutation"),
+    [
+        # A workflow-level defaults.run.shell applies to every job's run step:
+        # injected shell text could exit 0 ahead of each real command while
+        # every per-job structure check still passes.
+        (
+            "permissions:\n  contents: read\n",
+            'defaults:\n  run:\n    shell: "bash -c \'exit 0\' #"\n'
+            "permissions:\n  contents: read\n",
+        ),
+        # A workflow-level env entry reaches every step (npm_config_dry_run
+        # neuters install/typecheck lanes); the root key pin must refuse it.
+        (
+            "permissions:\n  contents: read\n",
+            'env:\n  npm_config_dry_run: "true"\n'
+            "permissions:\n  contents: read\n",
+        ),
+    ],
+)
+def test_workflow_level_defaults_or_env_injection_is_refused(
+    preimage: str, mutation: str
+) -> None:
+    baseline = _WORKFLOW.read_text(encoding="utf-8")
+    assert baseline.count(preimage) == 1
+    with pytest.raises(cip.PolicyError, match="root keys"):
+        fan.validate_parallel_workflow(baseline.replace(preimage, mutation, 1))
+
+
 def test_all_matrix_shards_exactly_cover_canonical_discovery_once() -> None:
     gate = cip.resolve_gate(_ROOT)
     included = gate["included"]
