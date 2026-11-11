@@ -107,8 +107,15 @@ class FakePaperclip:
         self.calls.append(("document", issue_id, key))
 
     def children(self, issue_id):
-        # mirrors the real surface: company issues filtered by parentId
-        return [dict(c) for c in self.child_rows.get(issue_id, [])]
+        # mirrors the real surface: company issues filtered by parentId —
+        # and the client's stamping of rows the projection left parentless
+        # (attack finding 7)
+        rows = []
+        for c in self.child_rows.get(issue_id, []):
+            row = dict(c)
+            row.setdefault("parentId", issue_id)
+            rows.append(row)
+        return rows
 
     def create_issue(self, company_id, payload):
         self._guard("create_issue")
@@ -2483,12 +2490,89 @@ def test_children_pages_past_the_first_page():
     rows = PagedClient(53).children("is-1")
     assert len(rows) == 53
     assert "limit=1000" in calls[0]
-    # 2500 children: the offset walk follows the pages to the end
+    # 2500 children: the offset walk follows the pages to the end. Attack
+    # finding 6: the end is the first EMPTY page (a short page is not proof
+    # of the end — a clamping server serves short pages forever), so the
+    # walk makes one confirming call past the last full one.
     calls.clear()
     rows = PagedClient(2500).children("is-1")
     assert len(rows) == 2500
-    assert len(calls) == 3                      # 1000 + 1000 + 500
+    assert len(calls) == 4         # 1000 + 1000 + 500 + the empty confirm
     assert "offset=1000" in calls[1] and "offset=2000" in calls[2]
+
+
+def test_children_walk_survives_a_server_that_clamps_the_page():
+    # Attack finding 6: stopping at the first short page truncated every
+    # scan whenever the server clamps `limit` below the request — the cap
+    # undercounted (a fourth ask was created past three) and a done return
+    # child past the clamp was missed (the asker stranded). The walk
+    # continues on any non-empty page and stops only on an empty one.
+    class ClampedClient(wc.PaperclipClient):
+        def __init__(self, n, clamp):
+            super().__init__("http://127.0.0.1:1", "tok", "run-1")
+            self.rows = [{"id": f"c{i}", "parentId": "is-1"}
+                         for i in range(n)]
+            self.clamp = clamp
+
+        def _request(self, method, path, body=None):
+            limit = int(path.split("limit=")[1].split("&")[0])
+            offset = int(path.split("offset=")[1])
+            return self.rows[offset:offset + min(limit, self.clamp)]
+
+    assert len(ClampedClient(120, 50).children("is-1")) == 120
+
+    # offset paging over a list that mutates between calls can serve a row
+    # twice — the accumulated set is deduplicated by id
+    class ShiftingClient(ClampedClient):
+        def __init__(self, n, clamp):
+            super().__init__(n, clamp)
+            self.served = 0
+
+        def _request(self, method, path, body=None):
+            self.served += 1
+            if self.served == 2:  # a child inserted at the front mid-walk
+                self.rows.insert(0, {"id": "c0", "parentId": "is-1"})
+            return super()._request(method, path, body)
+
+    got = ShiftingClient(120, 50).children("is-1")
+    assert len(got) == len({r["id"] for r in got})
+
+
+def test_children_stamp_the_parent_the_query_proves():
+    # Attack finding 7, unit level on the real client: the query is
+    # parentId-filtered server-side, so a row it serves belongs to this
+    # issue even when the projection omits the field — the client stamps
+    # it, and a value already present is never overwritten.
+    class ProjectingClient(wc.PaperclipClient):
+        def __init__(self):
+            super().__init__("http://127.0.0.1:1", "tok", "run-1")
+            self.rows = [{"id": "ch-1"}, {"id": "ch-2", "parentId": "other"}]
+
+        def _request(self, method, path, body=None):
+            return [dict(r) for r in self.rows]
+
+    got = ProjectingClient().children("is-1")
+    assert got[0]["parentId"] == "is-1"   # stamped from the filtered query
+    assert got[1]["parentId"] == "other"  # a present value is never touched
+
+
+def test_children_row_without_parent_id_still_binds_to_the_issue():
+    # Attack finding 7: a list projection that drops parentId made a done
+    # marker-matching child invisible to the return edge — the asker stayed
+    # blocked forever and a re-ask created a duplicate child. The query is
+    # parentId-filtered server-side, so a row from it belongs to the issue
+    # even when the row omits the field; the walk stamps it.
+    issues, ask_op, child = blocked_parent_with_done_child()
+    pc = FakePaperclip(issues=issues)
+    row = {k: v for k, v in child.items() if k != "parentId"}
+    pc.child_rows["is-1"] = [row]
+    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines",
+                                "authorType": "agent",
+                                "author": {"id": "ag-atlas"}}]
+    t3 = FakeT3(replies=["FINAL: the file has 12 lines"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert len(t3.sends) == 1 and f"[{ask_op}-ret]" in t3.sends[0]
+    assert pc.issues["is-1"]["status"] == "in_review"
 
 
 # --- R2a finding 6: no blind retries of creates; lost answers read back -------

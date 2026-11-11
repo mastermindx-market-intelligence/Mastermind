@@ -827,24 +827,42 @@ class PaperclipClient:
     def children(self, issue_id):
         """Issues whose parentId is this issue, PAGED: the old single 50-row
         page silently hid older children (R2a finding 4 — a cap count or a
-        return scan that stops at 50 is wrong). The company list serves
-        `limit` (this build clamps to 1000) with `offset`; the walk stops at
-        the first short page, bounded at ten pages — beyond ten thousand
-        children this returns a truncated set rather than looping forever."""
+        return scan that stops at 50 is wrong). Attack finding 6: a SHORT
+        page is not proof of the end — a server that clamps `limit` below
+        the request serves short pages forever, and the old walk truncated
+        at the first one. The walk continues on any non-empty page, steps
+        `offset` by what the server actually served, deduplicates by id
+        (offset paging over a list that changes between calls can serve a
+        row twice), and stops at the first EMPTY page, bounded at ten pages
+        — beyond that this returns a truncated set rather than looping
+        forever. Attack finding 7: the query is parentId-filtered
+        server-side, so a row from it belongs to this issue even when the
+        list projection omits the field — the walk stamps it, and the
+        return edge cannot be stranded by a row shape."""
         company_id = os.environ.get("PAPERCLIP_COMPANY_ID", "")
         rows = []
+        seen = set()
         limit = 1000
-        for page in range(10):
+        offset = 0
+        for _ in range(10):
             batch = self._request(
                 "GET",
                 f"/api/companies/{company_id}/issues?parentId={issue_id}"
-                f"&limit={limit}&offset={page * limit}")
+                f"&limit={limit}&offset={offset}")
             if isinstance(batch, dict):
                 batch = batch.get("issues") or batch.get("children") \
                     or batch.get("rows") or []
-            rows.extend(batch)
-            if len(batch) < limit:
+            for row in batch:
+                row = dict(row)
+                row.setdefault("parentId", issue_id)
+                key = row.get("id")
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(row)
+            if not batch:
                 break
+            offset += len(batch)
         return rows
 
     def create_issue(self, company_id, payload):
