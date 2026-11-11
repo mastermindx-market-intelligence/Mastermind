@@ -981,3 +981,59 @@ establishes whether the runtime loads a settings file from the home, and adds a 
 
 **Running now, six lanes:** T8, T4c, TSHb, RF, RL, and the calibration panel (four read-only
 reviewers, scratch only).
+
+## 26. Amendment, 2026-11-11 03:40 UTC: reviews leave Opus; the second limits fix is proven; the server hardening is merged
+
+**The measurement asked for in section 25 is in.** Four reviewers read the commit review R2a
+(Opus) had read, without its findings. Scores, my checks of every new finding and the session
+search behind the correction below are in `~/.mastermind/mmos_evidence/r2cal-20261111/SCORE.md`.
+
+| Reviewer | Cost to us | R2a HIGH found | R2a findings found | New real findings |
+| --- | --- | --- | --- | --- |
+| Opus, whole scope (R2a itself) | expensive | 4 of 4 | 15 | the baseline |
+| GLM 5.3, whole scope | cheap | 2 of 3 | 5.5 of 14 | 5 |
+| DeepSeek, three narrow questions, together | free | 3 of 3 | 11 of 14 | 13 |
+
+Finding 1 is left out of both open-model rows: every child session starts with the recent
+commit subjects, and one of them named finding 1's fix. None of the four opened the findings
+file. What decided the result was the question, not the model. The whole-scope GLM reviewer
+wrote that the exactly-once core was sound; the DeepSeek reviewer asked only "whose words does
+the carrier trust, and can the wrong ones win" found and reproduced finding 2. The three
+findings the panel missed (5, 7, 15) are one kind: what the code does when the record is in a
+state its author did not walk through. Opus missed 13 real defects the panel found.
+
+**Ruling.** Reviews of critical surfaces are done by a panel of DeepSeek reviewers, one narrow
+question each, blind to each other and to the lane's own attack round, each with probes:
+1. whose words or bytes does this code trust, and can the wrong ones win;
+2. what happens when each call fails, times out, or succeeds without its answer arriving;
+3. for every state the record can be in and every reason the code can be woken, what does it
+   do (added because of the three misses);
+4. installation, cut-over and rollback.
+Kimi adds one attacker's-view pass when its pool is free. I check every HIGH finding against
+the code before acting on it. Opus is kept for one case: a change that cannot be undone once
+applied, where the panel's answers disagree. A panel that finds nothing still proves nothing
+by itself. Long DeepSeek runs died on a gateway error twice in one hour and finished after one
+restart; `LANE_RULES_V4.md` now tells every DeepSeek child to write its result file early.
+
+**The second limits fix binds after a restart (MAS-17).** Assurance's idle process exited by
+itself. In a process started after the limits file was written, it could not create a settings
+file, an MCP file or a skill in its home, and could still write a notes file and its memory.
+I checked the file system and the process start time, not only its report. Section 25's
+"not yet proven" line is closed.
+
+**Lane TSHb is merged, not applied.** The pinned-Node installer, the packed server and the
+runner are on the trunk with their runbook. The real team server is unchanged. The installer
+decides which downloaded program gets run, so two reviewers are reading it now (Kimi from an
+attacker's view; DeepSeek on failure, rollback and the runbook's steps). I make the real switch
+after their findings are dealt with, with no teammate run live.
+
+**Lane RF now holds findings 2 to 31**, the last sixteen from the panel. Fixed and pushed so
+far: 2, 3, 4, 6 and 9, each with a failing test first. Lane RL holds the roster side of 11, 12
+and 14 (pushed), the report line for limits not yet in force (pushed), finding 32 (a spec's
+`slug` is not validated) and the allow-list design. RF's delta and my own two limits commits
+go to the panel before anything is installed.
+
+**DONE_WHEN.** Unchanged from section 25's count: 5, 6, 7 and 8 done on the installed app; 9
+checked; 10's improvement loop met; 1 and 2 with lane T8; 3 needs the linked-environment
+switch in the Chairman's app; 4 owes rotation on a real teammate; 10's coding job on the
+installed app is lane T4d, after T4c and its review.
