@@ -358,7 +358,11 @@ def op_id(issue_id: str, content: str) -> str:
 # 2026-11-11 end with "... on MMO-17 [pc-…-ask]" instead; both end with the
 # marker, which is what the anchored scan reads). A `[pc-…-ask]` token
 # anywhere else in a description is teammate text (R2a finding 3).
-ASK_CHILD_MARKER_RE = re.compile(r"\[(pc-[A-Za-z0-9-]+-ask)\]\s*$")
+# Attack finding 13: op_id interpolates the raw issue id, so the recognized
+# shape must cover every id it can produce (is_issued_ask_child already
+# escaped the id; the two sites now agree). Equality with the carrier's
+# computed op still gates everything downstream.
+ASK_CHILD_MARKER_RE = re.compile(r"\[(pc-[A-Za-z0-9_.-]+-ask)\]\s*$")
 
 
 def ask_child_op(text: str):

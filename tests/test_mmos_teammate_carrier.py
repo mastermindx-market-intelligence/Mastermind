@@ -2324,6 +2324,21 @@ def parent_and_ask_op():
             wc.op_id("par-1", content) + "-ask")
 
 
+def test_ask_marker_rules_survive_issue_ids_outside_the_word_charset():
+    # Attack finding 13: op_id interpolates the raw issue id, but the marker
+    # regex only matched [A-Za-z0-9-] — an id with other characters made
+    # every ask-child rule (depth one, cap, return edge) silently off, while
+    # is_issued_ask_child (which escapes the id) disagreed. The recognized
+    # marker shape covers the ids op_id can actually produce.
+    parent = {"id": "iss_01H8X", "title": "T", "description": "D"}
+    ask_op = wc.expected_ask_op(parent)
+    assert wc.ask_child_op(f"Asked by Mira on MMO-9\n[{ask_op}]") == ask_op
+    row = {"id": "ch-9", "parentId": "iss_01H8X",
+           "description": f"work\n[{ask_op}]"}
+    assert wc.is_ask_child_of(row, parent)
+    assert wc.is_issued_ask_child(row, parent)
+
+
 def test_ask_marker_reads_only_the_end_of_the_description():
     # ask_child_op: only a marker at the very END of the description counts.
     assert wc.ask_child_op("do things [pc-any-ask] and more") is None
