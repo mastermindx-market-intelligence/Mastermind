@@ -1355,8 +1355,18 @@ def deliver(pc, issue, reply, op, crash_after=None, ask_child=False):
     if crash_after == "pre-comment":
         log(f"CRASH_SWITCH pre-comment (run {pc.run_id}); no comment will be posted")
         os._exit(97)
-    if not comment_already_present(pc, issue["id"], reply):
-        pc.add_comment(issue["id"], reply)
+    # R2a finding 26: a teammate answer that itself begins with a machine
+    # prefix ([t2-carrier]/[coding-job]) would be stored looking like a
+    # machine comment — last_result_comment, board_feedback and board_notes
+    # all skip such bodies, so a later return edge would surface an OLDER
+    # comment as "the answer". Such an answer is posted under one fixed
+    # first line; the wrapper is a pure function of the answer text, so
+    # exact-text dedupe across runs still matches.
+    body = reply
+    if is_machine_comment(reply):
+        body = "Answer:\n\n" + reply
+    if not comment_already_present(pc, issue["id"], body):
+        pc.add_comment(issue["id"], body)
     if ask_child:
         final = "done"
     else:

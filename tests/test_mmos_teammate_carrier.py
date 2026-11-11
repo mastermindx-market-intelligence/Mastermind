@@ -986,6 +986,33 @@ def test_return_reply_with_an_ask_block_round_trips_the_ask_path():
     assert "interaction" not in kinds  # no confirmation, not in_review
 
 
+def test_an_answer_beginning_with_a_machine_prefix_is_stored_under_the_answer_line():
+    # R2a finding 26: a teammate answer that itself begins with [t2-carrier]
+    # or [coding-job] would be stored looking like a machine comment —
+    # last_result_comment/board_feedback/board_notes all skip machine bodies,
+    # so a later return edge would surface an OLDER comment as "the answer".
+    # Such an answer is posted under one fixed first line; the wrapper is a
+    # pure function of the answer text, so exact-text dedupe still matches.
+    answer = ("[t2-carrier] quoting the carrier, but this is my answer: "
+              "12 lines")
+    pc = FakePaperclip(issues=one_issue())
+    t3 = FakeT3(replies=[answer])
+    assert run(pc, t3) == 0
+    stored = [c[2] for c in pc.calls if c[0] == "comment"][0]
+    assert stored == "Answer:\n\n" + answer
+    assert not wc.is_machine_comment(stored)  # no longer looks machine-made
+    # the stored body is what the return edge surfaces, not an older comment
+    rows = [{"body": "an older person comment", "authorType": "user"},
+            {"body": stored, "authorType": "agent",
+             "author": {"id": "ag-atlas"}}]
+
+    class Pc:
+        def comments(self, _issue_id):
+            return rows
+    assert wc.last_result_comment(
+        Pc(), {"id": "is-1", "assigneeAgentId": "ag-atlas"}) == stored
+
+
 def test_return_replay_never_resends_or_duplicates():
     issues, ask_op, child = blocked_parent_with_done_child()
     ret_op = f"{ask_op}-ret"
