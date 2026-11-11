@@ -898,9 +898,14 @@ def test_step3_recovery_branch_seals_from_the_engine_adopted_run(
     def fake_seal(_runtime, _entry, _attempt, _adapter, ref, _branch):
         sealed["ref"] = ref
 
+    durable_ref = SimpleNamespace(provider_session_id="mcp:engine-reattach",
+                                  run_id=attempt_id)
     monkeypatch.setattr(d, "_seal_and_deliver", fake_seal)
     monkeypatch.setattr(d, "_compose_adapter",
-                        lambda *_a, **_k: (SimpleNamespace(), {}))
+                        lambda *_a, **_k: (SimpleNamespace(
+                            retained_original_ref=lambda rid: (
+                                durable_ref if rid == attempt_id else None)),
+                            {}))
     d._execute(runtime, entry["command"], entry)
 
     assert asked == [frozenset({attempt_id})]  # scoped to THIS attempt
@@ -908,7 +913,10 @@ def test_step3_recovery_branch_seals_from_the_engine_adopted_run(
     assert entry["fence_generation"] == 7          # the ENGINE's fence
     assert entry["lease_token"] == "engine-token"  # the ENGINE's token
     assert entry["provider_session_id"] == "mcp:engine-reattach"
-    assert sealed["ref"] is engine_run.process_ref  # sealed from the run
+    # L4 (crash journey, 2026-11-11): the seal runs on the ADAPTER's durable
+    # neutral ref — the engine's ActiveRun ref is the supervisor-boundary
+    # twin, which the inner adapter's retained-ref check refuses.
+    assert sealed["ref"] is durable_ref
 
 
 def test_step3_engine_quarantine_parks_the_entry_with_a_typed_blocker(
@@ -1266,3 +1274,111 @@ def test_step4_a_terminal_placement_frees_the_admission_ready_slot(
     d._finish_sealed(runtime, entry)
     job2 = runtime.jobs.get_job(admission_job_id)
     assert getattr(job2.status, "value", str(job2.status)) == "CANCELLED"
+
+
+def test_step4_a_recovered_run_seals_through_the_durable_neutral_ref(
+        scratch, monkeypatch, tmp_path):
+    """Caught live by the crash journey (2026-11-11, L4): the engine's
+    supervisor-boundary projection hands the door a recovered ActiveRun whose
+    process_ref is the TWIN shape (pid/pgid/process_start_identity/
+    boot_session_id all None — the runtime's provider-managed recording
+    shape), while the door seals through its OWN adapter (the reviewed
+    inner adapter, whose start() returns the DURABLE NEUTRAL ref with
+    pid=0/pgid=0).  ``_require_run_state`` compares the passed ref against
+    the retained neutral ref and refused the door's own recovered run:
+    "ref does not match the retained original ref" — the entry froze at
+    execute-failed and the reconcile loop spun ALREADY_RECOVERED forever.
+    The seal must run on the ADAPTER's durable neutral ref."""
+    from dataclasses import replace as dataclass_replace
+    from tests.test_executive_supervisor import _runtime_and_job
+    from control_plane.t3_execution_adapter import _T3_REMOTE_BINARY_PLACEHOLDER
+    from control_plane.worker_execution_contract import WorkerProcessRef
+    import control_plane.t3_execution_adapter as adapter_module
+
+    runtime, _job_id, _attempt = _runtime_and_job(tmp_path)
+    lease = runtime.broker.claim(
+        _job_id, lease_owner="t4b-door")
+    attempt_id = lease.attempt.attempt_id
+    assert attempt_id is not None
+
+    neutral = WorkerProcessRef(
+        run_id=attempt_id, pid=0, pgid=0, session_id=None,
+        process_start_identity="t3:mcp:launch:twin:run:thread:x",
+        boot_session_id="t3-native:mcp:launch:twin",
+        launch_nonce="key-l4", provider_session_id="mcp:launch:twin",
+        stdout_path="t3://thread/x/events", stderr_path="t3://thread/x/events",
+        result_path="t3://thread/x/result", started_at="",
+        binary=_T3_REMOTE_BINARY_PLACEHOLDER, base_sha="")
+    twin = dataclass_replace(
+        neutral, pid=None, pgid=None, process_start_identity=None,
+        boot_session_id=None)
+    assert twin != neutral  # the boundary projection's recording shape
+
+    d = _attack_door(scratch, monkeypatch)
+    command = d.freeze_issue(_issue_row("iss-l4"))
+    entry = d.frozen[command]
+    entry.update({"job_id": _job_id, "attempt_id": attempt_id,
+                  "fence_generation": lease.attempt.fence_generation,
+                  "lease_token": lease.lease_token, "phase": "claimed",
+                  "envelope": entry["envelope"]})
+    d._save_frozen()
+
+    # the durable receipt exists (the crashed door persisted it), so the
+    # execute lane goes to the ENGINE recovery, and the recovered ActiveRun
+    # is already in hand carrying the supervisor-boundary TWIN.
+    monkeypatch.setattr(adapter_module, "SQLiteT3AdapterStateStore",
+                        lambda _p: SimpleNamespace(
+                            load_run=lambda _r: SimpleNamespace(
+                                spec=object(), original_ref=neutral)))
+    d._recovered[attempt_id] = SimpleNamespace(
+        lease=SimpleNamespace(
+            attempt=SimpleNamespace(fence_generation=2),
+            lease_token="lease-recovered"),
+        process_ref=twin)
+
+    sealed = []
+
+    class _DurableAdapter:
+        def retained_original_ref(self, run_id):
+            return neutral if run_id == attempt_id else None
+
+    monkeypatch.setattr(d, "_compose_adapter",
+                        lambda *a, **k: (_DurableAdapter(), {}))
+    monkeypatch.setattr(d, "_seal_and_deliver",
+                        lambda runtime_, entry_, attempt_, adapter_,
+                        ref, branch:
+                        sealed.append(ref))
+    d._execute(runtime, command, entry)
+    # THE regression: the seal ran exactly once, on the ADAPTER's durable
+    # neutral ref — never on the supervisor-boundary twin (which the inner
+    # adapter's retained-ref check refuses).
+    assert len(sealed) == 1
+    assert sealed[0] == neutral
+
+    # --- leg 2: an adapter whose durable ref is NOT readable never seals a
+    # translated or guessed ref — the entry parks with a typed blocker.
+    command_b = d.freeze_issue(_issue_row("iss-l4b"))
+    entry_b = d.frozen[command_b]
+    entry_b.update({"job_id": _job_id, "attempt_id": attempt_id,
+                    "fence_generation": 2, "lease_token": "lease-x",
+                    "phase": "claimed", "envelope": entry_b["envelope"]})
+    d._save_frozen()
+    d._recovered[attempt_id] = SimpleNamespace(
+        lease=SimpleNamespace(
+            attempt=SimpleNamespace(fence_generation=2),
+            lease_token="lease-recovered"),
+        process_ref=twin)
+
+    class _BlindAdapter:
+        def retained_original_ref(self, _run_id):
+            return None
+
+    monkeypatch.setattr(d, "_compose_adapter",
+                        lambda *a, **k: (_BlindAdapter(), {}))
+    surfaced = []
+    monkeypatch.setattr(d, "_surface_blocker",
+                        lambda *a, **k: surfaced.append(a))
+    d._execute(runtime, command_b, entry_b)
+    assert sealed == [neutral]  # no second seal
+    assert entry_b["phase"] == "reconcile-quarantined"
+    assert entry_b["blocker"]["code"] == "RECOVERED_REF_UNREADABLE"

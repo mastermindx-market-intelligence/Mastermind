@@ -1658,8 +1658,37 @@ class CodingJobDoor:
                  f"{run.lease.attempt.fence_generation} "
                  f"({run.process_ref.provider_session_id})")
             adapter, _box = self._compose_adapter(request, branch, fresh=False)
+            # L4 (crash journey, 2026-11-11): the recovered ActiveRun carries
+            # the supervisor-boundary TWIN ref (the runtime's provider-managed
+            # recording shape: pid/pgid/process_start_identity/boot_session_id
+            # all None), while this door's adapter is the reviewed INNER
+            # adapter whose status()/collect_result() take the DURABLE
+            # NEUTRAL ref (pid=0/pgid=0).  Sealing on the twin was refused by
+            # the adapter's retained-ref check ("ref does not match the
+            # retained original ref") and the entry froze at execute-failed
+            # while reconcile spun ALREADY_RECOVERED forever.  The seal runs
+            # on the adapter's OWN durable ref, read through its fail-closed
+            # accessor — never translated, never guessed.
+            retained_source = getattr(adapter, "retained_original_ref", None)
+            seal_ref = (retained_source(attempt_id)
+                        if callable(retained_source) else None)
+            if seal_ref is None:
+                entry["phase"] = "reconcile-quarantined"
+                entry["blocker"] = {
+                    "code": "RECOVERED_REF_UNREADABLE",
+                    "reason": "the engine recovered this attempt but the "
+                              "adapter's durable original ref is not "
+                              "readable; refusing to seal on a translated "
+                              "or guessed ref"}
+                entry["reconcile_last_ask"] = _now()
+                self._save_frozen()
+                _log(f"recovered run {attempt_id} has no durable neutral "
+                     "ref; parked without sealing")
+                self._surface_blocker(entry, entry["blocker"]["code"],
+                                      entry["blocker"]["reason"])
+                return
             self._seal_and_deliver(runtime, entry, attempt_id, adapter,
-                                   run.process_ref, branch)
+                                   seal_ref, branch)
             return
 
         self._seal_and_deliver(runtime, entry, attempt_id, adapter, ref,

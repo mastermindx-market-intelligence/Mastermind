@@ -28,6 +28,7 @@ attack finding F8 from `T4B_ATTACK_FINDINGS.md`. Base commit `676786c71`
 | L1 (live, lease-expiry journey) | the launch spec named the REQUEST job while the attempt was claimed on the PLACEMENT job; the engine's receipt-adoption identity check refused the door's own durable receipt as a foreign execution, the service quarantined at startup and the recovery door died at `register-worker` | CLOSED (both launch sites build the spec with the job the attempt was CLAIMED on) | `…door_t4c.py::test_step4_launch_spec_carries_the_attempt_s_own_job` | this step |
 | L2 (live, wait-frees journey) | the admission-ledger Job (a record of WHO ASKED) never left the runtime's ready count (`QUEUED`, never claimed) after its placement delivered, so fleet capacity never freed — the second task WAITed forever with the door faithfully re-asking every 30s | CLOSED (finishing a sealed entry retires its admission Job through the runtime's typed cancel seam, idempotently) | `…door_t4c.py::test_step4_a_terminal_placement_frees_the_admission_ready_slot` | this step |
 | L3 (live, crash journey) | the launch spec carried NO authorities while `compose_child_execution`'s placement Job carries the runtime's default `["READ"]`; the receipt-adoption contract check refused ("launch contract differs from the durable Job") and the recovery looped `LIVE_QUARANTINED` forever | CLOSED (the launch spec carries the placement Job's own authority set) | `…door_t4c.py::test_step4_launch_spec_carries_the_attempt_s_own_job` (authorities leg) | this step |
+| L4 (live, crash journey) | the engine's supervisor-boundary projection returns the recovered `ActiveRun` in the TWIN ref shape (pid/pgid/start-identity/boot-session None — the runtime's provider-managed recording shape), but the door seals through its own INNER adapter whose retained-ref check demands the DURABLE NEUTRAL ref (pid=0): `_require_run_state` refused the door's own recovered run ("ref does not match the retained original ref"), the entry froze at execute-failed and reconcile spun `ALREADY_RECOVERED` forever | CLOSED (the seal runs on the adapter's own durable ref, read through its fail-closed `retained_original_ref` accessor; an unreadable ref parks typed `RECOVERED_REF_UNREADABLE`, never a translated guess) | `…door_t4c.py::test_step4_a_recovered_run_seals_through_the_durable_neutral_ref` | this step |
 
 ## Step-4 proof (dev instances)
 
@@ -41,12 +42,12 @@ task shows.
 
 | scenario | proves | result |
 |---|---|---|
-| `default` | one task → one job → sealed → result comment on the same task | PASS (1 launch) |
-| `crash` | exit 90 at the receipt; fresh door recovers the SAME attempt through the engine's defer-then-adopt cadence | re-running on the fixed tree |
-| `crash-seal` | exit 91 after the seal commit; fresh door finishes the job, result comment EXACTLY once | PASS on `d222e9d80`; re-running on the fixed tree |
-| `lease-expiry` | door down longer than its 20s lease; first reconcile adopts at once, no deferral round | FAILED on `deb89b5cd` — live defect L1 (below); re-running on the fixed tree |
+| `default` | one task → one job → sealed → result comment on the same task | PASS (1 launch); PASS again on `5b3efef6f` (round 3) |
+| `crash` | exit 90 at the receipt; fresh door recovers the SAME attempt through the engine's defer-then-adopt cadence | engine lane PASS live (defer → `RECEIPT_RECOVERED` → same run under fence 2, ONE native launch); seal refused by L4 — re-running on the L4 fix |
+| `crash-seal` | exit 91 after the seal commit; fresh door finishes the job, result comment EXACTLY once | PASS on `d222e9d80`; PASS on `5b3efef6f` (round 3) |
+| `lease-expiry` | door down longer than its 20s lease; first reconcile adopts at once, no deferral round | FAILED on `deb89b5cd` — live defect L1; re-running on the fixed tree |
 | `wait` | fleet full: second task WAITs with the precise blocker | PASS |
-| `wait-frees` | WAIT then live capacity: the door re-admits by itself | FAILED on `deb89b5cd` — live defect L2 (below); re-running on the fixed tree |
+| `wait-frees` | WAIT then live capacity: the door re-admits by itself | FAILED on `deb89b5cd` — live defect L2; L2 fix proven live (admission retired → task two admitted + launched) on `deb89b5cd`; full re-run on the fixed tree |
 | `undeliverable` | refused receipt surfaced with its code | see below |
 | `hash-refused` | hash-knowledge caller refused with typed TASK_REQUEST_MISSING, nothing burned | PASS |
 
@@ -78,6 +79,33 @@ live in the T4c evidence ledger's `step4-journeys/` folder.)
   the end of `_finish_sealed` (both delivered and delivery-refused
   outcomes — the placement is terminal either way), through the runtime's
   own `cancel_job` seam, idempotently.
+- **L3 (crash, 2026-11-11):** the round-3 crash journey got PAST L1's
+  identity check (spec.job_id == attempt.job_id — the L1 fix works live)
+  and died at the engine's contract check: the launch spec carried NO
+  authorities while the placement Job carries the runtime's default
+  `["READ"]` (`create_job`'s default).  `_reconcile_receipt_claim`'s
+  launch-contract comparison refused (`LIVE_QUARANTINED`, "launch
+  contract differs from the durable Job") on every cadence.  Fixed in
+  `_launch_spec` (`authorities=("READ",)`), asserted in the L1 test's
+  spec leg.
+- **L4 (crash, 2026-11-11):** with L1+L3 fixed the engine lane itself
+  worked end to end — defer to lease expiry, then `RECEIPT_RECOVERED`,
+  the SAME native run adopted under fence 2, one native launch — but the
+  seal refused: `T3ExecutionAdapterError: ref does not match the retained
+  original ref`.  Root cause (read from the crash scratch's durable
+  stores): the supervisor's `SupervisorBoundaryT3Adapter` projection
+  returns the recovered `ActiveRun.process_ref` in the TWIN shape
+  (pid/pgid/process_start_identity/boot_session_id all None — the
+  runtime's provider-managed recording shape), while the door's seal runs
+  on its OWN composed adapter, the reviewed inner adapter whose
+  `start()`/`status()`/`collect_result()` all take the DURABLE NEUTRAL ref
+  (pid=0/pgid=0, filled identity fields).  The first-launch flow never
+  hits this because inner `start()` returns the neutral ref directly.
+  Fixed door-side: the seal reads the adapter's own durable ref through
+  its fail-closed `retained_original_ref` accessor; an unreadable ref
+  parks typed `RECOVERED_REF_UNREADABLE` instead of sealing a translated
+  or guessed ref.  The engine's projection and its twin checks stay
+  exactly as reviewed.
 
 ## Attack round (Step 5)
 
