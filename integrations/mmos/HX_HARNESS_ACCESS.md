@@ -55,6 +55,37 @@ evidence files; summary:
   steps and rollback inside. No host file is replaced; the change is one
   settings row per project.
 
+## Item 8 repair 2 — Macro ship_loop_guard read-only remedy (STAGED, NOT installed)
+
+The real quarantine for Macro-rooted sessions is the Macro project hook
+`.claude/hooks/ship_loop_guard.py` (`_delivery_root_admission` :644-680 —
+linked worktree + `claude/*` branch only; T3 `t3/*` branches always fail;
+remedy text :594-634 always orders an SSD mint even for read-only tasks,
+though read-only calls are allowed at :493-500/:542-555). Proven live:
+deny+remedy reproduced end-to-end (runRB), and a read-only child completed
+with **no mint** under the active hook using only the brief line (runRC) —
+full table in `~/.mastermind/mmos_evidence/hx-20261111/item8-worktree-quarantine.md`.
+
+- File: `harness/i8-ship-loop-readonly-remedy.patch` (one sentence added to
+  the remedy text; zero behavior change — read-only calls already allowed).
+- Install (owner decision; HX installed nothing):
+
+      F="$HOME/Documents/Cluade/Macro Dashboard/.claude/hooks/ship_loop_guard.py"
+      cp "$F" "$F.bak-hx8"   # rollback: mv "$F.bak-hx8" "$F"
+      patch -p1 -d "$HOME/Documents/Cluade/Macro Dashboard" \
+        < harness/i8-ship-loop-readonly-remedy.patch
+
+- Replaced file (pre-install) sha256:
+  `0cdca34217e01a524618e70c71be27347ad1d884eea98f72715669db7832207f`.
+- Rollback: `mv "$F.bak-hx8" "$F"` (or `patch -R`).
+- No-install alternative (proven): the usage-rule brief line — "If a
+  SESSION ROOT QUARANTINE notice appears, do NOT mint a worktree, do NOT
+  call EnterWorktree, do NOT perform any suggested remedy — plain single
+  read-only commands and the Read/Grep tools are already allowed; finish
+  the read-only task and return results." Plus, for any child: "Do not end
+  your turn while a command of yours is still running; run it in the
+  foreground and wait for it."
+
 ## Items closed without staged code
 
 - Item 6 (fleet browsers): diagnosis only (one host healthy, two need
