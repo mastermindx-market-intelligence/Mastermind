@@ -44,6 +44,8 @@ _MAX_ENTRIES = 512
 _DENY_PREFIXES = ("/api/self_directed/search", "/api/self_directed/quote", "/api/pfolio/",
                   "/api/account",        # per-user Supabase profile — never shared/public
                   "/api/live_marks",     # active-book intraday marks + session clock
+                  "/api/market_view",    # reassess published evidence at each serving time
+                  "/api/performance",    # observed availability/source clocks; preserve no-store
                   "/api/mastermind_ai")  # W-AI admin surface — always fresh, never mirror-cached
 
 # The origin already holds these read-only responses for ``MASTERMIND_RESP_CACHE_TTL`` seconds.
@@ -70,15 +72,16 @@ def _cacheable(path: str) -> bool:
 def _cache_key(path: str, query: str) -> str:
     """Path + CANONICALISED query.
 
-    Sorting the parameters makes ``?a=1&b=2`` and ``?b=2&a=1`` one cache identity instead of two.
-    These handlers read parameters by name and never depend on their order, so this only collapses
-    duplicates — it cannot merge two semantically different requests. Falls back to the raw query
-    when it cannot be parsed, which is still a stable key for a given input.
+    Sorting by parameter name makes ``?a=1&b=2`` and ``?b=2&a=1`` one cache identity.
+    Preserve the relative order of repeated names: FastAPI scalar parameters use the last value,
+    while list parameters retain value order. Sorting values would merge different requests.
+    Falls back to the raw query when it cannot be parsed, which is still a stable key.
     """
     if not query:
         return path + "?"
     try:
-        return path + "?" + urlencode(sorted(parse_qsl(query, keep_blank_values=True)))
+        pairs = parse_qsl(query, keep_blank_values=True)
+        return path + "?" + urlencode(sorted(pairs, key=lambda pair: pair[0]))
     except Exception:  # noqa: BLE001 — an unparseable query still deserves a stable key
         return path + "?" + query
 
@@ -118,7 +121,14 @@ def install(app) -> None:
     @app.middleware("http")
     async def _resp_cache(request, call_next):
         ttl = _ttl()
-        if ttl <= 0 or request.method != "GET" or not _cacheable(request.url.path):
+        # Decision/account observation clocks must survive intact; do not replace no-store with
+        # the general dashboard cache headers or reuse an earlier book observation.
+        decision_availability = (
+            request.url.path == "/api/portfolio"
+            and request.query_params.get("view") == "decision_availability"
+        )
+        if (decision_availability or ttl <= 0 or request.method != "GET"
+                or not _cacheable(request.url.path)):
             return await call_next(request)
 
         key = _cache_key(request.url.path, request.url.query or "")

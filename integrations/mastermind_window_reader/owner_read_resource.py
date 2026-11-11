@@ -7,6 +7,7 @@ Tests using OwnerFixture establish consumer semantics, not real user login.
 """
 from __future__ import annotations
 import asyncio
+from dataclasses import dataclass
 import hashlib
 from http import HTTPStatus
 import json
@@ -15,6 +16,7 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol
 from urllib.parse import urlsplit
 
+from common.executive_workspace_contract import _check_attempt_id, _check_job_id
 from integrations.mastermind_window_reader.recorded_view import (
     CaptureError,
     MAX_INPUT,
@@ -24,8 +26,32 @@ from integrations.mastermind_window_reader.recorded_view import (
 
 WIRE_SCHEMA='mastermind.workspace.recorded_read_candidate.v1'
 WINDOW_WIRE_SCHEMA='mastermind.workspace.window_read_candidate.v1'
+WINDOW_WIRE_SCHEMA_V2='mastermind.workspace.window_read_candidate.v2'
 CONTENT_SCOPE='mastermind.workspace.content.read'  # proposed resource scope; not enrolled
 MAX_RESPONSE_BYTES=2_000_000
+
+
+@dataclass(frozen=True)
+class ObservationBinding:
+    """Frozen owner Job/Attempt tuple. Not a generic metadata dict."""
+    job_id: str
+    attempt_id: str
+
+    def __post_init__(self):
+        if not _check_job_id(self.job_id) or not _check_attempt_id(self.attempt_id):
+            raise ValueError('invalid observation binding')
+
+    def as_wire(self):
+        return {'job_id': self.job_id, 'attempt_id': self.attempt_id}
+
+
+def snapshot_observation_binding(value):
+    """Copy and re-validate a typed owner binding. Never coerce a mapping."""
+    if value is None:
+        return None
+    if type(value) is not ObservationBinding:
+        raise ValueError('invalid observation binding')
+    return ObservationBinding(job_id=value.job_id, attempt_id=value.attempt_id)
 
 class ExistingReadOwner(Protocol):
     async def authorize(self,header:str,resource:str,source_ref:str)->tuple|None: ...
@@ -56,7 +82,8 @@ def _url(value,*,origin=False):
 class NativeOutputReadResource:
     """Mount-only fixed GET resource; no automatic service or source enrollment."""
     def __init__(self,*,owner:ExistingReadOwner,resource:str,source_ref:str,
-                 allowed_origin:str,max_response_bytes=MAX_RESPONSE_BYTES,timeout_seconds=15,source_kind="recorded"):
+                 allowed_origin:str,max_response_bytes=MAX_RESPONSE_BYTES,timeout_seconds=15,source_kind="recorded",
+                 observation_binding=None):
         if owner is None or not callable(getattr(owner,'authorize',None)) or not callable(getattr(owner,'read',None)):
             raise TypeError('existing read owner required')
         p=_url(resource);o=_url(allowed_origin,origin=True)
@@ -68,9 +95,14 @@ class NativeOutputReadResource:
         if type(max_response_bytes) is not int or not 256<=max_response_bytes<=MAX_RESPONSE_BYTES:
             raise ValueError('invalid response limit')
         if type(timeout_seconds) not in (int,float) or not 0<timeout_seconds<=30:raise ValueError('invalid time limit')
+        binding=snapshot_observation_binding(observation_binding)
+        if binding is not None and source_kind!='live-window':
+            raise ValueError('invalid observation binding')
         self._owner=owner;self._resource=resource;self._ref=source_ref;self._kind=source_kind
         self._path=p.path.encode('ascii');self._host=p.netloc.encode('ascii');self._origin=allowed_origin.encode('ascii')
         self._limit=max_response_bytes;self._timeout=timeout_seconds
+        self._binding=binding
+        self._content_identity_binding = None
 
     async def __call__(self,scope,receive,send):
         async def reply(status,payload):
@@ -138,7 +170,12 @@ class NativeOutputReadResource:
                 from integrations.mastermind_window_reader.live_window_read import project_window
                 view=project_window(load_capture(raw))
                 if view['source_ref']!=self._ref:raise CaptureError('SOURCE_SCOPE_MISMATCH')
-                wire={'schema':WINDOW_WIRE_SCHEMA,'selection_ref':self._ref,'mode':'observed-turn-window','view':view}
+                if self._binding is None:
+                    wire={'schema':WINDOW_WIRE_SCHEMA,'selection_ref':self._ref,'mode':'observed-turn-window','view':view}
+                else:
+                    binding=snapshot_observation_binding(self._binding)
+                    wire={'schema':WINDOW_WIRE_SCHEMA_V2,'selection_ref':self._ref,'mode':'observed-turn-window',
+                          'view':view,'observation_binding':binding.as_wire()}
             encoded=json.dumps(wire,ensure_ascii=True,allow_nan=False,separators=(',',':')).encode()
             if len(encoded)>self._limit:raise CaptureError('OUTPUT_BOUND')
         except Exception:
@@ -153,7 +190,7 @@ class NativeOutputReadResource:
         await reply(200,encoded)
 
 
-def from_existing_business_owner(*,authenticator,policy,current_access,read_source,source_ref,now,allowed_origin,audit_sink,source_kind="recorded"):
+def from_existing_business_owner(*,authenticator,policy,current_access,read_source,source_ref,now,allowed_origin,audit_sink,source_kind="recorded",observation_binding=None):
     """Optional production-composition seam; never used to mint new authority.
 
     Imports the actual incumbent classes only when configured by that owner.
@@ -201,5 +238,63 @@ def from_existing_business_owner(*,authenticator,policy,current_access,read_sour
         async def read(self,ref):
             if ref!=source_ref:raise ValueError('source changed')
             return await read_source()
-    return NativeOutputReadResource(owner=BusinessOwner(),resource=expected.resource,
-        source_ref=source_ref,allowed_origin=allowed_origin,source_kind=source_kind)
+    issued_owner = BusinessOwner()
+    resource = NativeOutputReadResource(owner=issued_owner,resource=expected.resource,
+        source_ref=source_ref,allowed_origin=allowed_origin,source_kind=source_kind,
+        observation_binding=observation_binding)
+    # Only this actual JWT/current-permission factory can issue the native
+    # metadata seam. Ordinary injected fixture owners gain no identity route.
+    if (expected.resource == "https://mcp.mastermind-x.com/workspace/window/current"
+            and allowed_origin == "https://mcp.mastermind-x.com"):
+        resource._content_identity_binding = _ContentIdentityBinding(
+            resource, issued_owner, issued_owner.authorize, now,
+            resource._ref, resource._resource, resource._origin)
+    return resource
+
+
+@dataclass(frozen=True)
+class _ContentIdentityBinding:
+    """Private process-local issuance, not a Python sandbox or action grant."""
+    reader: object
+    owner: object
+    authorize: object
+    clock: object
+    source_ref: str
+    resource: str
+    origin: bytes
+
+    def current(self):
+        reader = self.reader
+        method = getattr(self.owner, "authorize", None)
+        if (type(reader) is not NativeOutputReadResource or reader._owner is not self.owner
+            or reader._content_identity_binding is not self
+            or reader._ref != self.source_ref or reader._resource != self.resource
+            or reader._origin != self.origin or method != self.authorize):
+            raise ValueError("identity_unavailable")
+
+    async def read(self, header):
+        from common import native_authorization_identity_contract as wire
+        self.current()
+        ticket = _ticket(await self.authorize(header, self.resource, self.source_ref))
+        self.current()
+        now = self.clock()
+        # This tuple exists only after the actual BusinessOwner's verifier,
+        # policy, current source permission and final clock checks above.
+        if (ticket is None or len(ticket) < 8 or type(now) is not int
+            or type(ticket[5]) is not int or type(ticket[6]) is not int
+            or not ticket[5] <= now < ticket[6]):
+            raise ValueError("identity_unavailable")
+        body = wire.validate_body({"schema": wire.SCHEMA, "resource": "CONTENT",
+            "account_digest": wire.comparable_account_digest(ticket[1], ticket[2], ticket[3]),
+            "expires_at_ms": ticket[6] * 1000}, "CONTENT")
+        return body, ticket
+
+
+def _content_identity_reader(reader):
+    if type(reader) is not NativeOutputReadResource:
+        raise TypeError("existing content owner required")
+    binding = reader._content_identity_binding
+    if type(binding) is not _ContentIdentityBinding or binding.reader is not reader:
+        raise TypeError("actual Business JWT content owner required")
+    binding.current()
+    return binding.read

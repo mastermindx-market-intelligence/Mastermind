@@ -12,13 +12,15 @@ import hashlib
 import inspect
 import json
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from typing import Any
 
+from control_plane.child_execution_contracts import ExecutionBinding
 from control_plane.codex_worker import (
     _MAX_SCHEMA_BYTES, _git_changed_paths, _git_snapshot, _read_limited, validate_json_schema,
 )
+from control_plane.execution_binding_compat import binding_for_launch_spec
 from control_plane.executive_worker_broker import (
     BrokerEffectUnknownError, BrokerProtocolError, BrokerStateError,
 )
@@ -29,6 +31,7 @@ from control_plane.worker_execution_contract import (
 from integrations.acp_worker.turn import (
     AcpCandidate, AcpProfile, AcpReadOnlyTurn, _nonfinite, _object_pairs,
 )
+from integrations.acp_worker.tool_admission import AcpToolAdmission
 from scripts.ohf.acp_probe_boundary import ProbeClient, ProbeLimits
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -68,10 +71,13 @@ class _TurnFrameGuard(ProbeClient):
 
     def admit_update(self, update: Any) -> int:
         # Structural bounds remain in StrictFrameReader. The typed production
-        # turn applies the phase/session-aware read-only policy below.
-        self._turn.validate_update(update, commit=False)
-        if self._turn._error:
-            raise ValueError(self._turn._error)
+        # turn applies the phase/session-aware read-only policy below. A
+        # pre-existing cancellation/refusal must not turn a valid already-in-
+        # flight frame into a framing violation; reject only when THIS update
+        # introduces a semantic refusal.
+        reason = self._turn.validate_update(update, commit=False)
+        if reason is not None:
+            raise ValueError(reason)
         return 0
 
 
@@ -105,6 +111,7 @@ class AcpRunResources:
     launch_attestation: Any
     result_schema: Any
     finish: Callable[[str | None], Awaitable[AcpProcessCompletion]]
+    prepare_prompt: Callable[[str, str], Awaitable[AcpToolAdmission]] | None = None
 
 
 @dataclasses.dataclass
@@ -114,6 +121,7 @@ class _Run:
     baseline: Any
     schema: Any
     turn: AcpReadOnlyTurn
+    binding: ExecutionBinding | None = None
     cancelled: asyncio.Event = dataclasses.field(default_factory=asyncio.Event)
     cancel_reason: str | None = None
     task: asyncio.Task[CollectionReceipt] | None = None
@@ -131,10 +139,14 @@ class AcpWorkerAdapter:
     Tests may inject a fixture owner without registering a production descriptor.
     """
     def __init__(self, profile: AcpProfile, *, inspector: ProcessInspector,
-                 open_run: Callable[[WorkerLaunchSpec], Awaitable[AcpRunResources]]) -> None:
+                 open_run: Callable[[WorkerLaunchSpec], Awaitable[AcpRunResources]],
+                 binding_required: bool = False) -> None:
         if not callable(open_run):
             raise ValueError("ACP native resource owner is required")
         self.profile, self.inspector, self._open_run = profile, inspector, open_run
+        #: WO-16: a binding-required lane (placement child) refuses to accept
+        #: any start without the broker-issued ExecutionBinding.v1.
+        self.binding_required = bool(binding_required)
         self._runs: dict[str, _Run] = {}
         self._opening: asyncio.Task[AcpRunResources] | None = None
         self._active: str | None = None
@@ -166,7 +178,15 @@ class AcpWorkerAdapter:
             raise BrokerStateError("unknown or altered ACP process reference")
         return run
 
-    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
+    async def start(self, spec: WorkerLaunchSpec, *,
+                    binding: ExecutionBinding | Mapping[str, Any] | None = None
+                    ) -> WorkerProcessRef:
+        # WO-16 compatibility gate: accept ExecutionBinding.v1 and the admitted
+        # class BEFORE any turn/spec effect.  A binding-required lane refuses a
+        # start without the broker-issued binding; a mismatched binding never
+        # reaches open_run.
+        admitted_binding = binding_for_launch_spec(
+            spec, binding, required=self.binding_required)
         AcpReadOnlyTurn.validate_spec(spec)
         if (self._quarantined or self._opening is not None or self._active is not None
                 or spec.run_id in self._runs or len(self._runs) >= _RUN_LIMIT):
@@ -200,9 +220,11 @@ class AcpWorkerAdapter:
                     or (spec.expected_worker_uid is not None and ref.effective_uid != spec.expected_worker_uid)
                     or (spec.expected_worker_gid is not None and ref.effective_gid != spec.expected_worker_gid)
                     or not callable(resources.finish) or resources.launch_attestation is None
-                    or resources.result_schema != schema):
+                    or resources.result_schema != schema
+                    or (resources.prepare_prompt is not None and not callable(resources.prepare_prompt))):
                 raise BrokerProtocolError("ACP native resources do not match admission")
-            run = _Run(spec, resources, baseline, schema, AcpReadOnlyTurn(self.profile))
+            run = _Run(spec, resources, baseline, schema, AcpReadOnlyTurn(self.profile),
+                       binding=admitted_binding)
             self._runs[spec.run_id] = run
             self._active = spec.run_id
             run.task = asyncio.create_task(self._execute(run))
@@ -220,11 +242,20 @@ class AcpWorkerAdapter:
     async def _execute(self, run: _Run) -> CollectionReceipt:
         resources, spec = run.resources, run.spec
         driver_error: BaseException | None = None
+
+        async def prepare_prompt(session_id: str, model: str) -> AcpToolAdmission:
+            admission = await resources.prepare_prompt(session_id, model)
+            if (not isinstance(admission, AcpToolAdmission)
+                    or not admission.matches(spec, resources.process_ref, session_id, model)):
+                raise BrokerProtocolError("ACP pre-prompt admission binding refused")
+            return admission
+
         try:
             run.candidate = await run.turn.run(
                 spec, resources.writer, resources.reader, cancelled=run.cancelled,
                 validate_output=lambda value: validate_json_schema(value, run.schema),
                 frame_guard=_TurnFrameGuard(run.turn),
+                prepare_prompt=prepare_prompt if resources.prepare_prompt is not None else None,
             )
         except BaseException as exc:
             driver_error = exc
@@ -300,10 +331,26 @@ class AcpWorkerAdapter:
                 result_hash, status = candidate.output_sha256, WorkerRunStatus.SUCCEEDED
             except Exception:
                 output, result_hash, error = None, None, "ACP_CANONICAL_RESULT_REFUSED"
+        usage = dict(candidate.usage)
+        admission = run.turn.tool_admission
+        if admission is not None:
+            # Existing common result metadata carries owner evidence. This is
+            # observational provenance, not provider usage or a new result store.
+            usage["acp_tool_observation"] = {
+                "schema": "mastermind.acp_tool_observation/v1",
+                "run_id": spec.run_id, "job_id": spec.job_id, "worker_id": spec.worker_id,
+                "process_ref_sha256": hashlib.sha256(json.dumps(dataclasses.asdict(ref),
+                    sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+                "session_id": admission.session_id, "model": admission.model,
+                "projection_sha256": admission.projection_sha256,
+                "artifact_sha256": admission.artifact_sha256,
+                "admitted_tools": [dataclasses.asdict(tool) for tool in admission.tools],
+                "observations": dict(run.turn.tool_observations),
+            }
         return CollectionReceipt(
             process_ref=dataclasses.replace(ref, provider_session_id=candidate.session_id),
             result=WorkerResult(spec.job_id, spec.run_id, spec.worker_id, status, output,
-                (), git_manifest, candidate.usage, candidate.session_id, completion.exit_code,
+                (), git_manifest, usage, candidate.session_id, completion.exit_code,
                 ref.started_at, completion.finished_at, error),
             stdout_sha256=completion.stdout_sha256, stderr_sha256=completion.stderr_sha256,
             result_sha256=result_hash,

@@ -396,17 +396,13 @@ def _post_exec_main() -> int:
         release=release,
         sentinel=sentinel,
     )
-    from scripts.executive_os_phase1c import main as service_main
+    from scripts.executive_os_phase1c import load_control_config, serve_installed_control
+    from ops.executive_os.control_aead_profile import activate_if_enrolled
+    # Select the event-only dependency closure only after the existing config
+    # owner validates enrollment, before entering the fixed installed service.
+    activate_if_enrolled(load_control_config(args.config), release)
 
-    return int(
-        service_main(
-            [
-        "serve",
-        "--config",
-        os.fspath(args.config),
-            ]
-        )
-    )
+    return int(serve_installed_control(args.config))
 
 
 def main() -> int:

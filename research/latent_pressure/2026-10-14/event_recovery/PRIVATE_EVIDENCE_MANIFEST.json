@@ -1,0 +1,66 @@
+{
+  "private/archive.sha256": {
+    "sha256": "1f0cf759a783a0de8de28c1c01cd5e40a8501816ec523f51b9d0e961c657ecf7",
+    "bytes": 156
+  },
+  "private/full_scan/scan.json": {
+    "sha256": "2b49c332ed3b709813d06c788d06e188726b96d7f023df275bca7ff77ee79624",
+    "bytes": 808
+  },
+  "private/full_scan/executions.csv.gz": {
+    "sha256": "d967e15a6148b96d155f733b64154c2256df07cfb3443c62c2df3be8ca54afe1",
+    "bytes": 1498117
+  },
+  "private/full_scan/selected_messages.bin": {
+    "sha256": "2e398a87f7ed3d8e8d327d14dc4b31024aeff39663b28e7075b40e0f016eca62",
+    "bytes": 439282528
+  },
+  "private/study01/report.json": {
+    "sha256": "20ffa09a073eb7b224df03425ba160f6d866cb6d9851b429690705aa41ba5737",
+    "bytes": 9228
+  },
+  "private/study01/predictions.csv.gz": {
+    "sha256": "d3ee9cc1d77b0cf91e1757f83e16b311baf5e688cb23c0a64254b772ee0da355",
+    "bytes": 373857
+  },
+  "private/decoder_added_red.log": {
+    "sha256": "2e92c6b72411adb2c877d50b0a1ebbd7e24cb60a8ed25cf900120d165f31c228",
+    "bytes": 3264
+  },
+  "private/decoder_final.log": {
+    "sha256": "105a7eb93087734b0e0f9da8632704f9a8ac2c7e5d47b1c3a8468241448f73c4",
+    "bytes": 1581
+  },
+  "private/recovery_tests.log": {
+    "sha256": "6316036a26e7442f5be7e81e0edd1c9e95085b04520d096af27e37db9eeec03a",
+    "bytes": 1557
+  },
+  "private/study_tests.log": {
+    "sha256": "fa605d3a58d5a91fd4070d5f5f5ab996a26a5a56028e659c245561c0e2a688b9",
+    "bytes": 742
+  },
+  "private/framing_added_red.log": {
+    "sha256": "a30d4c30f4b3581c09624e326894a6c74b59bff5c2d5b601cdf2f0f69c7de3c4",
+    "bytes": 4430
+  },
+  "private/review_packet.txt": {
+    "sha256": "e9bdfb2d2c5ee2a91088d7933f6cc0fa4e5b9f1e8104263d1b35f5c3de44d540",
+    "bytes": 14008
+  },
+  "private/review_return.txt": {
+    "sha256": "cc42701e437505d6d4f47a39b47a7c86e6d2ff521febe18a20a886149cd16fdb",
+    "bytes": 7906
+  },
+  "private/requalified_scan/scan.json": {
+    "sha256": "2b49c332ed3b709813d06c788d06e188726b96d7f023df275bca7ff77ee79624",
+    "bytes": 808
+  },
+  "private/requalified_scan/executions.csv.gz": {
+    "sha256": "d967e15a6148b96d155f733b64154c2256df07cfb3443c62c2df3be8ca54afe1",
+    "bytes": 1498117
+  },
+  "private/requalified_scan/selected_messages.bin": {
+    "sha256": "2e398a87f7ed3d8e8d327d14dc4b31024aeff39663b28e7075b40e0f016eca62",
+    "bytes": 439282528
+  }
+}

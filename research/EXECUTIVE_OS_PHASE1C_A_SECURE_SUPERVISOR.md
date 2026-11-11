@@ -59,16 +59,22 @@ The intended interruption path is:
 
 ```text
 active worker process
-→ identity-checked cancel or control restart
-→ broker terminates the process group
-→ dedicated worker UID sweep catches setsid/detached descendants
-→ control-owned reconciliation receipt proves the terminal sweep
+→ abrupt control-owner interruption, then abrupt worker-broker interruption
+→ replacement broker startup sweeps the dedicated worker UID, including detached descendants
+→ replacement control remains AWAITING_CANARY until both owners and startup cleanup are verified
+→ exact missing run plus a fresh same-owner UID sweep proves canonical owner loss
+→ control-owned reconciliation receipt preserves startup and fresh absence sweeps
 → workspace/run child roots are sealed to control-owned 0700
 → Attempt and Job become LOST, never successful from file presence
 → checkpoint remains durable
 → explicit operator requeue archives the sealed workspace and creates a
   fresh worker-accessible exact-SHA workspace, Attempt, and fence
 ```
+
+A control-only restart preserves the canonical worker owner and recovers the same
+Attempt when its durable recovery binding remains valid. It is not a LOST fault.
+The bounded interruption proof deliberately loses both owners; generic broker
+errors never establish process absence.
 
 ## 2. Non-goals and inertness
 

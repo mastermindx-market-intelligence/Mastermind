@@ -1,0 +1,18 @@
+{
+  "schema": "mastermind.source_test_evidence.v1",
+  "premise": "Synthetic live Acquisition; exact Content Pending timeout in actual Inner owner; no auth/network/store effects",
+  "fixtures": {
+    "eligible": {
+      "reason": "CONTENT_PENDING_TIMEOUT",
+      "resource": "CONTENT",
+      "schema": "mastermind.native_authorization_continuation.v1",
+      "state": "ELIGIBLE"
+    },
+    "success_status": {
+      "acquisition": true,
+      "content": true,
+      "reason": null,
+      "status": "signed_in"
+    }
+  }
+}

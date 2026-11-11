@@ -203,11 +203,11 @@ def _json_value(value: Any, max_chars: int = 12000) -> Any:
 
 
 def _latest_holdings(book: str) -> dict[str, dict]:
-    """Reconstruct the actual account book, using average cost when quotes are down.
+    """Reconstruct the actual account book using the existing market-price owner.
 
     The account is the position authority.  Published rows only enrich its rationale.
-    If even a conservative mark is unavailable for one held line, normalization freezes
-    instead of accidentally treating the line as absent.
+    If a usable mark is unavailable for one held line, normalization freezes
+    instead of substituting historical cost or treating the line as absent.
     """
     from portfolio import fx, paper_account, registry
 
@@ -274,8 +274,11 @@ def _latest_holdings(book: str) -> dict[str, dict]:
             continue
         price = None
         try:
+            # The accepted current-valuation authority for this boundary: the live mark, else
+            # the last point of the engine price series. Both are real observations of the
+            # market, already USD-normalised by the account layer.
             price = paper_account._current_price(ticker)
-        except Exception:  # noqa: BLE001 - average cost is the conservative fallback
+        except Exception:  # noqa: BLE001 - an unreachable quote source is an absent mark
             price = None
         try:
             price = float(price) if price is not None else None
@@ -286,17 +289,15 @@ def _latest_holdings(book: str) -> dict[str, dict]:
                 price = fx.usd_to(price, currency)
             except (AttributeError, TypeError, ValueError):
                 price = None
-        try:
-            avg_cost = float(raw_rec.get("avg_cost"))
-        except (TypeError, ValueError):
-            avg_cost = 0.0
-        mark_source = "live_quote"
+        # ``avg_cost`` is historical transaction evidence, not a current market observation.
+        # It cannot establish current valuation, regardless of the currency in which it is
+        # stored. Substitution makes the asserted current composition depend on an old fill
+        # price rather than an available mark. Freeze before constructing numeric targets
+        # so the caller preserves the standing book. Cost basis keeps its legitimate
+        # historical and P&L roles elsewhere.
         if price is None or not math.isfinite(price) or price <= 0:
-            price = avg_cost
-            mark_source = "account_avg_cost_fallback"
-        if not math.isfinite(price) or price <= 0:
             raise DecisionBoundaryFreeze(f"unpriceable_held_position:{ticker}")
-        marked[ticker] = (raw_rec, shares, price, mark_source)
+        marked[ticker] = (raw_rec, shares, price, "live_quote")
 
     nav = cash + sum(shares * mark for _, shares, mark, _ in marked.values())
     if not math.isfinite(nav) or nav <= 0:
@@ -1012,6 +1013,9 @@ def normalize(
         "mandatory_instrument_migrations": mandatory_migrations,
         "identity": identity_audit,
         "unallocated_adds": unallocated_adds,
+        # Structurally empty: ``_latest_holdings`` freezes rather than marking a held line at
+        # average cost, so no submission can carry that provenance. Retained as a standing
+        # invariant check (and a schema-stable field) rather than removed.
         "quote_fallback_holdings": sorted(
             rec.get("ticker")
             for rec in cleaned
@@ -1048,13 +1052,91 @@ def normalize(
     return payload, audit
 
 
-def write_atomic(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(
-        json.dumps(payload, indent=2, default=str, ensure_ascii=False), encoding="utf-8"
-    )
-    os.replace(tmp, path)
+def _submission_book(path: Path) -> str | None:
+    from portfolio import registry
+    candidate = Path(path).absolute()
+    for book in ("autonomous", "china", "hk"):
+        if candidate == (registry.data_dir(book) / "_pending_decision.json").absolute():
+            return book
+    return None
+
+
+def _selected_submission_locked(path: Path, correlation: dict) -> tuple[dict, dict]:
+    from brain import runlog, fabric_portfolio
+    book = _submission_book(path)
+    if (book is None or type(correlation) is not dict
+            or set(correlation) != {"run_id", "tool_id"}):
+        raise runlog.PortfolioRunError("fabric_submission_correlation_invalid")
+    doc = runlog.portfolio_pending_locked(book)
+    if doc is None or doc["state"]["run_id"] != correlation["run_id"]:
+        raise runlog.PortfolioRunError("fabric_submission_original_missing")
+    effect = next((row for row in doc["state"].get("tools", [])
+                   if row.get("id") == correlation["tool_id"]), None)
+    prepared = effect.get("submission") if effect is not None else None
+    if (effect is None or effect.get("name") != fabric_portfolio.tool_name(book, "submit_book")
+            or type(prepared) is not dict or effect.get("state") not in {"pending", "complete"}
+            or prepared.get("payload_digest") != runlog.digest(prepared.get("payload"))):
+        raise runlog.PortfolioRunError("fabric_submission_intent_missing")
+    payload = prepared["payload"]
+    if payload.get("_fabric_submission") != {
+            "schema": "mastermind.submission_origin.v1", "run_id": correlation["run_id"],
+            "tool_id": correlation["tool_id"], "book": book,
+            "asof": doc["state"]["asof"],
+            "normalized_digest": runlog.digest({k: v for k, v in payload.items()
+                                               if k != "_fabric_submission"})}:
+        raise runlog.PortfolioRunError("fabric_submission_origin_invalid")
+    return prepared, payload
+
+
+def reconcile_submission(path: Path, correlation: dict) -> dict:
+    """Read only the exact original effect; never normalize or rewrite its target."""
+    from brain import runlog
+    with runlog.portfolio_lock():
+        prepared, payload = _selected_submission_locked(path, correlation)
+        raw = runlog.strict_read(path)
+        if runlog.strict_json(raw) != payload:
+            raise runlog.PortfolioRunError("fabric_submission_effect_unsettled")
+        # A prior visible replace whose fsync/ACK failed is not durable until this succeeds.
+        runlog.durable_existing(path, raw)
+        return {"schema": "mastermind.submission_receipt.v1", **correlation,
+                "book": payload["_fabric_submission"]["book"], "asof": payload["_fabric_submission"]["asof"],
+                "payload_digest": prepared["payload_digest"],
+                "written_sha256": __import__("hashlib").sha256(raw).hexdigest()}
+
+
+def write_atomic(path: Path, payload: dict, *, correlation: dict | None = None):
+    from brain import runlog
+    book = _submission_book(path)
+    if book is None:
+        if correlation is not None:
+            raise runlog.PortfolioRunError("fabric_submission_book_invalid")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(
+            json.dumps(payload, indent=2, default=str, ensure_ascii=False), encoding="utf-8"
+        )
+        os.replace(tmp, path)
+        return None
+    with runlog.portfolio_lock():
+        original = runlog.portfolio_pending_locked(book)
+        if correlation is None:
+            if original is not None:
+                raise runlog.PortfolioRunError("fabric_submission_owned")
+            old = runlog.strict_read(path, absent=True)
+            runlog.durable_replace(path, json.dumps(
+                payload, indent=2, default=str, ensure_ascii=False).encode("utf-8"), expected=old)
+            return None
+        prepared, expected_payload = _selected_submission_locked(path, correlation)
+        if payload != expected_payload:
+            raise runlog.PortfolioRunError("fabric_submission_payload_changed")
+        raw = runlog.strict_read(path, absent=True)
+        before = __import__("hashlib").sha256(raw).hexdigest() if raw is not None else None
+        wanted = runlog.canonical(payload)
+        if raw != wanted:
+            if before != prepared.get("before_sha256"):
+                raise runlog.PortfolioRunError("fabric_submission_preimage_changed")
+            runlog.durable_replace(path, wanted, expected=raw)
+    return reconcile_submission(path, correlation)
 
 
 def holding_audit_fields(holding: dict | None) -> dict:

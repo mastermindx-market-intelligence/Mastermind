@@ -1,0 +1,64 @@
+{
+  "catalogue": {
+    "schema": "mastermind.project_conversation_catalogue.v1",
+    "work_ref": "WS:WORKSPACE-AGENT-PROGRAM",
+    "coverage": "PARTIAL",
+    "conversations": [
+      {
+        "conversation_ref": "conversation-c1dc56b9a3e7bbdceba63b085d948783dfa8dda83b446d57f98b718ec2c0c759",
+        "revision": "318ac0bec7c2450227390de26742b006c2ea512651b9ffb79f332eb1550fd8b0",
+        "root_job_id": "JOB-001",
+        "title": null,
+        "last_request_at": "2026-11-05T14:40:50+00:00",
+        "requests": [
+          {
+            "read_ref": "session-reply-71224e37eade0d94d1196e32aa5aed3015291ea3afd8bdc185c7fd5b2abc506f",
+            "request_revision": "115ea2fd382f077eef9fa8e2ad065353a11c2d13fd17d9690cbdb9d367b136b0"
+          }
+        ]
+      }
+    ],
+    "next_cursor": null,
+    "high_water": 5,
+    "can_send": false
+  },
+  "selection": {
+    "work_ref": "WS:WORKSPACE-AGENT-PROGRAM",
+    "conversation_ref": "conversation-c1dc56b9a3e7bbdceba63b085d948783dfa8dda83b446d57f98b718ec2c0c759",
+    "revision": "318ac0bec7c2450227390de26742b006c2ea512651b9ffb79f332eb1550fd8b0",
+    "requests": [
+      {
+        "read_ref": "session-reply-71224e37eade0d94d1196e32aa5aed3015291ea3afd8bdc185c7fd5b2abc506f",
+        "request_revision": "115ea2fd382f077eef9fa8e2ad065353a11c2d13fd17d9690cbdb9d367b136b0"
+      }
+    ]
+  },
+  "read": {
+    "schema": "mastermind.project_conversation_read.v1",
+    "work_ref": "WS:WORKSPACE-AGENT-PROGRAM",
+    "conversation_ref": "conversation-c1dc56b9a3e7bbdceba63b085d948783dfa8dda83b446d57f98b718ec2c0c759",
+    "revision": "318ac0bec7c2450227390de26742b006c2ea512651b9ffb79f332eb1550fd8b0",
+    "root_job_id": "JOB-001",
+    "title": null,
+    "coverage": "PARTIAL",
+    "can_send": false,
+    "turns": [
+      {
+        "read_ref": "session-reply-71224e37eade0d94d1196e32aa5aed3015291ea3afd8bdc185c7fd5b2abc506f",
+        "request_revision": "115ea2fd382f077eef9fa8e2ad065353a11c2d13fd17d9690cbdb9d367b136b0",
+        "requested_at": "2026-11-05T14:40:50+00:00",
+        "instruction": "Read and return the bounded finding.",
+        "stop_condition": "Return one finding.",
+        "reply": {
+          "text": "The bounded finding is confirmed.",
+          "next_step": "Continue the parent task.",
+          "read_ref": "session-reply-71224e37eade0d94d1196e32aa5aed3015291ea3afd8bdc185c7fd5b2abc506f",
+          "message_key": "asd-native-reply-966d3a11b566ffc6cb3ddb8c275bcc591bb51f01",
+          "fingerprint": "a4ba0403946df7b09e60f9943f8b118743a2f81c9603c4b800d7c2f0dde7f182",
+          "parent_consumed": false
+        },
+        "state": "AVAILABLE"
+      }
+    ]
+  }
+}

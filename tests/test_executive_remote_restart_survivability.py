@@ -53,6 +53,7 @@ class RestartCompletionAdapter(FakeAdapter):
             "rendered_argv": [ref.binary.real_path, "exec", "--json", "-"],
             "environment_keys": ["CODEX_HOME", "HOME", "PATH"],
             "permission_profile_sha256": "c" * 64,
+            "isolation_manifest_sha256": self.spec.isolation_manifest_sha256,
             "prompt_sha256": hashlib.sha256(
                 self.spec.prompt.encode("utf-8")
             ).hexdigest(),
@@ -244,6 +245,7 @@ async def _serve_fixture(tmp_path: Path):
     broker, _fixture_adapter, sweeper, peer, _fixture_spec = _fixture(tmp_path)
     adapter = RestartCompletionAdapter(broker.policy.provider_home)
     broker.adapter = adapter
+    broker.validation_adapter = adapter
     broker.startup_sweep = sweeper.sweep("broker_startup")
     broker.last_sweep = broker.startup_sweep
     socket_path = _socket_path()

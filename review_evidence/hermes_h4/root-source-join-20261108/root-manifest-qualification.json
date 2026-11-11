@@ -1,0 +1,45 @@
+{
+  "results": [
+    {
+      "committed_manifest_byte_equal": true,
+      "error": "",
+      "flags": [],
+      "inventory_sha256": "aa4ca6b0f27e411870f9bad325aca295da1bf3fbf6c536d213d002f675eb2b68",
+      "manifest_sha256": "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada",
+      "output": "{\"native_files\": 107, \"total_bytes\": 3250577, \"manifest_sha256\": \"22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada\", \"source_inventory_sha256\": \"aa4ca6b0f27e411870f9bad325aca295da1bf3fbf6c536d213d002f675eb2b68\"}",
+      "returncode": 0,
+      "seconds": 0.159,
+      "variant": "default"
+    },
+    {
+      "error": "",
+      "flags": [
+        "--include-go-application",
+        "--include-application-http",
+        "--include-provider-plan-application"
+      ],
+      "inventory_sha256": "7c301e72aa5720216ed06ef04b1d180af46c9747dc6a51aa14870a415337d9a3",
+      "manifest_sha256": "3dd50a56e1cf1071445ab3f9c26ba28775312c5195797ca393dee58d4fc79615",
+      "output": "{\"native_files\": 121, \"total_bytes\": 3849998, \"manifest_sha256\": \"3dd50a56e1cf1071445ab3f9c26ba28775312c5195797ca393dee58d4fc79615\", \"source_inventory_sha256\": \"7c301e72aa5720216ed06ef04b1d180af46c9747dc6a51aa14870a415337d9a3\"}",
+      "returncode": 0,
+      "seconds": 0.212,
+      "variant": "provider116"
+    },
+    {
+      "error": "",
+      "flags": [
+        "--include-go-application",
+        "--include-application-http",
+        "--include-provider-plan-application",
+        "--include-quota-reset-recovery"
+      ],
+      "inventory_sha256": "aba155d2497e2b95d44826922523c7b9251da6a27a7ff2050551fd01345c243d",
+      "manifest_sha256": "2ff09d1770f826adaa21202cdaef6cee78008b3a66f12e1a8de59e4227788ffb",
+      "output": "{\"native_files\": 121, \"total_bytes\": 3897616, \"manifest_sha256\": \"2ff09d1770f826adaa21202cdaef6cee78008b3a66f12e1a8de59e4227788ffb\", \"source_inventory_sha256\": \"aba155d2497e2b95d44826922523c7b9251da6a27a7ff2050551fd01345c243d\"}",
+      "returncode": 0,
+      "seconds": 0.222,
+      "variant": "full"
+    }
+  ],
+  "runtime_selected": false
+}

@@ -34,9 +34,12 @@
 # -----------------------
 # A0-A7 remains the portfolio effect taxonomy below.  This separate section is
 # read by the Executive OS worker path before job creation and again before a
-# claim.  The Phase 1B code accepts exactly the four allowed capabilities shown
+# claim.  The Phase 1B code accepts exactly the five allowed capabilities shown
 # here; YAML alone cannot expand the grant.  Missing, unknown, or ambiguous
-# capabilities fail closed.
+# capabilities fail closed.  REQUEST_WORKER_LOGIN_CHECK is declarative-only: it
+# lets the trusted controller ask the fixed broker to verify the current
+# Attempt's already-assigned reviewed slot, and grants no action/slot/path/host
+# evidence by itself; the controller's current-attempt join enforces the scope.
 executive_worker_policy:
   schema_version: 1
   allowed_capabilities:
@@ -44,6 +47,7 @@ executive_worker_policy:
     - RESEARCH
     - WRITE_BRANCH
     - RUN_TESTS
+    - REQUEST_WORKER_LOGIN_CHECK
   denied_capabilities:
     - OPEN_PR
     - MERGE
@@ -59,6 +63,7 @@ executive_worker_policy:
   scope_requirements:
     WRITE_BRANCH: assigned_workspace_and_declared_paths
     RUN_TESTS: declared_argv_commands
+    REQUEST_WORKER_LOGIN_CHECK: current_attempt_assigned_worker_slot
 
 # ───────────────────────────────────────────────────────────────────────────────
 # PHASE 1F-C COO RUN-ONCE POLICY
@@ -76,6 +81,32 @@ coo_cycle_policy:
   max_attempts_per_orchestration_job: 2
   review_job_attempt_limit: 1
   allowed_child_cost_classes: [default, small]
+
+# Versioned opt-in for nested coordinators. Existing roots retain the v1 hash.
+# The 16-Job allowance is shared by all descendants, including planning,
+# reviews and repairs; it is never multiplied by the number of coordinators.
+coo_hierarchy_policy:
+  schema_version: 2
+  max_fan_out_per_parent: 16
+  max_depth: 3
+  max_repair_rounds: 2
+  max_review_attempts_per_job: 2
+  max_children_total: 16
+  max_attempts_per_orchestration_job: 2
+  review_job_attempt_limit: 1
+  allowed_child_cost_classes: [default, small]
+
+# Explicit authenticated initial-project requests use the existing native
+# read-only owner. This is an authorization ceiling per original request,
+# independent of a caller asking for one attempt. Runtime's original command
+# and Attempt rows enforce it; no new budget ledger or automatic CREATE work.
+project_initial_planning_policy:
+  schema_version: 1
+  max_jobs_per_original_request: 1
+  max_attempts_per_job: 1
+  max_worker_seconds: 300
+  max_artifacts: 0
+  cancel_grace_seconds: 10
 
 # FLAGS
 # ───────────────────────────────────────────────────────────────────────────────

@@ -26,6 +26,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from integrations.studio_direct_mcp import control_bundle as studio_control_bundle
+
 from control_plane.sol_ops_health import (
     OpsHealthEnvelope,
     ServiceFact,
@@ -33,9 +35,19 @@ from control_plane.sol_ops_health import (
     project_ops_health,
 )
 
-PERSONAL_ACCOUNTS = ("chatgpt1", "chatgpt2", "chatgpt3", "chatgpt4")
+STUDIO_ACCOUNT_SCOPES = {
+    "chatgpt1": "personal_account",
+    "chatgpt2-personal": "personal_account",
+    "chatgpt2-business": "business_workspace",
+    "admin-business": "business_workspace",
+    "chatgpt3-w570f6f34": "workspace_account",
+    "chatgpt3-wa2a9e6f9": "workspace_account",
+    "chatgpt4": "personal_account",
+}
+STUDIO_ACCOUNTS = tuple(STUDIO_ACCOUNT_SCOPES)
 TUNNEL_RE = re.compile(r"^tunnel_[0-9a-f]{32}$")
 CONTROL_ROOT = Path.home() / ".local" / "share" / "studio-direct-mcp" / "control"
+STUDIO_LAUNCHER = Path.home() / ".local" / "bin" / "studio-direct"
 MAX_PROFILE_BYTES = 64 * 1024
 MAX_HEALTH_REF_BYTES = 256
 MAX_HEALTH_RESPONSE_BYTES = 256
@@ -87,9 +99,27 @@ def _run_json(argv: list[str]) -> dict[str, object]:
     return value
 
 
+def verify_studio_control_owner(
+    *,
+    control_root: Path = CONTROL_ROOT,
+    launcher: Path = STUDIO_LAUNCHER,
+) -> dict[str, object]:
+    try:
+        value = studio_control_bundle.verify(
+            control_root=control_root,
+            launcher=launcher,
+        )
+    except (OSError, studio_control_bundle.Refusal) as error:
+        raise RuntimeError("existing Studio Direct control bundle is unverified") from error
+    if not isinstance(value, dict) or value.get("state") != "CONTROL_BUNDLE_VERIFIED":
+        raise RuntimeError("existing Studio Direct control bundle is unverified")
+    return value
+
+
 def read_personal_status(account: str) -> dict[str, object]:
-    if account not in PERSONAL_ACCOUNTS:
-        raise ValueError("account is outside the closed Personal seat allowlist")
+    if account not in STUDIO_ACCOUNTS:
+        raise ValueError("account is outside the closed Studio seat allowlist")
+    verify_studio_control_owner(control_root=CONTROL_ROOT, launcher=STUDIO_LAUNCHER)
     helper = CONTROL_ROOT / "studio_direct_control.py"
     return _run_json(
         [sys.executable, str(helper), "status", "--account", account]
@@ -105,26 +135,31 @@ def personal_facts(
     status: dict[str, object],
     observed_at: str,
 ) -> tuple[ServiceFact, TunnelFact | None]:
-    if account not in PERSONAL_ACCOUNTS:
-        raise ValueError("account is outside the closed Personal seat allowlist")
+    if account not in STUDIO_ACCOUNTS:
+        raise ValueError("account is outside the closed Studio seat allowlist")
     gateway = status.get("gateway") if isinstance(status.get("gateway"), dict) else {}
     tunnel = status.get("tunnel") if isinstance(status.get("tunnel"), dict) else {}
     issues: list[str] = []
-    if gateway.get("configurationDrift") is True:
+    tunnel_configuration_drift = tunnel.get("configurationDrift") is True
+    if gateway.get("configurationDrift") is True or tunnel_configuration_drift:
         issues.append("CONFIGURATION_DRIFT")
 
     runtime_version = gateway.get("runtimeVersion")
     if not isinstance(runtime_version, str):
         runtime_version = None
 
+    service_ready = _bool_or_none(gateway.get("runtimeReady"))
+    if service_ready is None:
+        service_ready = _bool_or_none(status.get("ready"))
+
     service = ServiceFact(
         service_ref=f"studio-direct.{account}",
         service_kind="studio_direct_gateway",
-        scope="personal_account",
+        scope=STUDIO_ACCOUNT_SCOPES[account],
         owner_ref="studio-direct",
         observed_at=observed_at,
         live=_bool_or_none(gateway.get("running")),
-        ready=_bool_or_none(gateway.get("runtimeReady")),
+        ready=service_ready,
         runtime_version=runtime_version,
         deployment_ref=(
             f"gateway-{runtime_version}" if runtime_version is not None else None
@@ -137,6 +172,8 @@ def personal_facts(
     if not isinstance(tunnel_id, str) or TUNNEL_RE.fullmatch(tunnel_id) is None:
         return service, None
     tunnel_issues: list[str] = []
+    if tunnel_configuration_drift:
+        tunnel_issues.append("CONFIGURATION_DRIFT")
     if tunnel.get("managedAliasRunning") is True:
         tunnel_issues.append("FOREIGN_MANAGED_ALIAS_RUNNING")
     tunnel_fact = TunnelFact(
@@ -276,7 +313,7 @@ def build_snapshot(*, observed_at: str | None = None) -> OpsHealthEnvelope:
     services: list[ServiceFact] = []
     tunnels: list[TunnelFact] = []
 
-    for account in PERSONAL_ACCOUNTS:
+    for account in STUDIO_ACCOUNTS:
         try:
             status = read_personal_status(account)
             service, tunnel = personal_facts(account, status, observed)
@@ -284,7 +321,7 @@ def build_snapshot(*, observed_at: str | None = None) -> OpsHealthEnvelope:
             service = ServiceFact(
                 service_ref=f"studio-direct.{account}",
                 service_kind="studio_direct_gateway",
-                scope="personal_account",
+                scope=STUDIO_ACCOUNT_SCOPES[account],
                 owner_ref="studio-direct",
                 observed_at=observed,
                 live=None,

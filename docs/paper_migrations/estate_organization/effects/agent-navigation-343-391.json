@@ -1,0 +1,2849 @@
+{
+  "schema": "paper.estate.receipts.v1",
+  "operation": "paper-estate-organization-20261108-c1",
+  "source_pin": "a9f0b4e1fc7f419e2cf377d3132061169c986a21",
+  "observed_at": "2026-11-09T12:03:37.574Z",
+  "note": "Compact canonical receipts: exact call arguments, response result, effect state, identities and drift snapshots. No replay.",
+  "count": 49,
+  "operations": [
+    {
+      "operation_id": "peo-20261109-c1-source-links-015",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "set_text_content",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "updates": [
+          {
+            "nodeId": "GW-0",
+            "html": "AI-worker continuation · checkpoint a7f57df<br/>https://github.com/mastermindx-market-intelligence/Mastermind/blob/a7f57dfb3c1eb2d0f953a413efd9181f29cb3371/docs/paper_migrations/estate_organization/README.md"
+          },
+          {
+            "nodeId": "G8-0",
+            "html": "Recoverable checkpoint · 15 local guides verified; rollout continues · copy URL<br/>https://github.com/mastermindx-market-intelligence/Mastermind/blob/a7f57dfb3c1eb2d0f953a413efd9181f29cb3371/docs/paper_migrations/estate_organization/CHECKPOINT.md"
+          }
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "after_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+      },
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "updates": [
+          {
+            "nodeId": "GW-0"
+          },
+          {
+            "nodeId": "G8-0"
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-source-links-015-finish",
+      "file_id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+        "nodeIds": [
+          "GW-0",
+          "G8-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "after_snapshot": "ddb4bed20f9e735b1019fdc1e13fb78abad2ad474b8a2bc12cef4273573edc41",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW"
+      },
+      "result": {
+        "file": {
+          "id": "01M6XQ0KYY6ZDDV6F3G85SX6WW",
+          "name": "00 · Paper Estate · Start Here"
+        },
+        "contentHash": {
+          "tokens": "811c9dc5"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-16-page",
+      "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M6Y32A3E4XC51FQVJN98YRPH",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "5caaf9ce32c8dbac96bdbdad27b27736b959a971d90a77c9ad09d1a031414be1",
+      "after_snapshot": "409ceb74623676152f798e206378335f193919360b91debed1afa56c79e86f0a",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y32A3E4XC51FQVJN98YRPH",
+          "name": "Shared Market · Tools and Research Launcher"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pageId": "p-3-0",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-16-header",
+      "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y32A3E4XC51FQVJN98YRPH",
+        "targetNodeId": "root_node_p-3-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Shared Market · Tools and Research Launcher</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M6Y32A3E4XC51FQVJN98YRPH<br/>PAGE_ID: p-3-0<br/>FILE_ROLES: retained_reference<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "409ceb74623676152f798e206378335f193919360b91debed1afa56c79e86f0a",
+      "after_snapshot": "012f247dddeded52221d35c3fd3124ff7aa23f7e618f6dbd3f86207fccf058f4",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y32A3E4XC51FQVJN98YRPH",
+          "name": "Shared Market · Tools and Research Launcher"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "38N-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "38O-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "38P-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "38Q-0",
+            "name": "Shared Market · Tool…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "38R-0",
+            "name": "FILE_ID: 01M6Y32A3E4…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-16-route-1",
+      "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y32A3E4XC51FQVJN98YRPH",
+        "targetNodeId": "38N-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | LEARN\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · LEARN</b> — Existing scope entry; inspect its named product/contract boards<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y32A3E4XC51FQVJN98YRPH · PAGE_ID: p-1-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "012f247dddeded52221d35c3fd3124ff7aa23f7e618f6dbd3f86207fccf058f4",
+      "after_snapshot": "012f247dddeded52221d35c3fd3124ff7aa23f7e618f6dbd3f86207fccf058f4",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y32A3E4XC51FQVJN98YRPH",
+          "name": "Shared Market · Tools and Research Launcher"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "38T-0",
+            "name": "READ_NEXT 1 | LEARN",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-16-route-2",
+      "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y32A3E4XC51FQVJN98YRPH",
+        "targetNodeId": "38N-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | BUILD_READ\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · BUILD_READ</b> — Inspect mobile category-navigation contract<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y32A3E4XC51FQVJN98YRPH · PAGE_ID: p-2-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y32A3E4XC51FQVJN98YRPH/p-2-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "012f247dddeded52221d35c3fd3124ff7aa23f7e618f6dbd3f86207fccf058f4",
+      "after_snapshot": "012f247dddeded52221d35c3fd3124ff7aa23f7e618f6dbd3f86207fccf058f4",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y32A3E4XC51FQVJN98YRPH",
+          "name": "Shared Market · Tools and Research Launcher"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "38V-0",
+            "name": "READ_NEXT 2 | BUILD_READ",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-16-qualification",
+      "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y32A3E4XC51FQVJN98YRPH",
+        "targetNodeId": "38N-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "012f247dddeded52221d35c3fd3124ff7aa23f7e618f6dbd3f86207fccf058f4",
+      "after_snapshot": "012f247dddeded52221d35c3fd3124ff7aa23f7e618f6dbd3f86207fccf058f4",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y32A3E4XC51FQVJN98YRPH",
+          "name": "Shared Market · Tools and Research Launcher"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "38X-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-16-footer",
+      "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y32A3E4XC51FQVJN98YRPH",
+        "targetNodeId": "38N-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. Inspect the exact returned page to select a board. Export only product boards, excluding guides and internal contracts.<br/><b>READING PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>CURRENT ORGANIZATION CHECKPOINT</b> · Follow the source/checkpoint link on AI START: https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0<br/><b>DATED SCOPE SNAPSHOT · baf6737</b> · This is evidence at that commit, not the current estate head. Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "012f247dddeded52221d35c3fd3124ff7aa23f7e618f6dbd3f86207fccf058f4",
+      "after_snapshot": "012f247dddeded52221d35c3fd3124ff7aa23f7e618f6dbd3f86207fccf058f4",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y32A3E4XC51FQVJN98YRPH",
+          "name": "Shared Market · Tools and Research Launcher"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "38Z-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-16-page-first",
+      "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M6Y32A3E4XC51FQVJN98YRPH",
+        "order": [
+          "p-3-0",
+          "p-1-0",
+          "p-2-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "012f247dddeded52221d35c3fd3124ff7aa23f7e618f6dbd3f86207fccf058f4",
+      "after_snapshot": "ed2aed9ab47d05ea0aaba9e08713b3649e983da49b85f91ca7a49ecf8491f7f4",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y32A3E4XC51FQVJN98YRPH",
+          "name": "Shared Market · Tools and Research Launcher"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-3-0",
+            "name": "00 · AGENT README · Read first",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "Shared Market · All Tools + Research Launcher · Reference",
+            "icon": "design",
+            "isActive": true
+          },
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "Build · Mobile category navigation",
+            "icon": "blueprint",
+            "isActive": false
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-16-finish",
+      "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6Y32A3E4XC51FQVJN98YRPH",
+        "nodeIds": [
+          "38N-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "ed2aed9ab47d05ea0aaba9e08713b3649e983da49b85f91ca7a49ecf8491f7f4",
+      "after_snapshot": "ed2aed9ab47d05ea0aaba9e08713b3649e983da49b85f91ca7a49ecf8491f7f4",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y32A3E4XC51FQVJN98YRPH"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y32A3E4XC51FQVJN98YRPH",
+          "name": "Shared Market · Tools and Research Launcher"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-17-page",
+      "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "43855db95f446ae0cabd980cf554ebd58c97f8029428d5ed0eca47412a2171b3",
+      "after_snapshot": "90d52b83c80765cb7010b9b5e82e45cd63298c3ab50f330765b65e28cd0fe2ff",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "name": "Shared Market · Watchlists and Save States"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pageId": "p-3-0",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-17-header",
+      "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+        "targetNodeId": "root_node_p-3-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Shared Market · Watchlists and Save States</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M6Y309YH7PJZMF23R7EDH3CM<br/>PAGE_ID: p-3-0<br/>FILE_ROLES: retained_reference<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "90d52b83c80765cb7010b9b5e82e45cd63298c3ab50f330765b65e28cd0fe2ff",
+      "after_snapshot": "0a0834209cf9a08af60dce501c7288510f46c112012e4abc9235009c6c93b961",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "name": "Shared Market · Watchlists and Save States"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2SF-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "2SG-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "2SH-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "2SI-0",
+            "name": "Shared Market · Watc…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "2SJ-0",
+            "name": "FILE_ID: 01M6Y309YH7…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-17-route-1",
+      "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+        "targetNodeId": "2SF-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | LEARN\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · LEARN</b> — Existing scope entry; inspect its named product/contract boards<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y309YH7PJZMF23R7EDH3CM · PAGE_ID: p-1-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0a0834209cf9a08af60dce501c7288510f46c112012e4abc9235009c6c93b961",
+      "after_snapshot": "0a0834209cf9a08af60dce501c7288510f46c112012e4abc9235009c6c93b961",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "name": "Shared Market · Watchlists and Save States"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2SL-0",
+            "name": "READ_NEXT 1 | LEARN",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-17-route-2",
+      "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+        "targetNodeId": "2SF-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | SOURCE_SELECTION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · SOURCE_SELECTION</b> — Read applicable family source; no current build selection is inferred here<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6XQ0KYY6ZDDV6F3G85SX6WW · PAGE_ID: p-6-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0a0834209cf9a08af60dce501c7288510f46c112012e4abc9235009c6c93b961",
+      "after_snapshot": "0a0834209cf9a08af60dce501c7288510f46c112012e4abc9235009c6c93b961",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "name": "Shared Market · Watchlists and Save States"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2SN-0",
+            "name": "READ_NEXT 2 | SOURCE_SELECTION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-17-route-3",
+      "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+        "targetNodeId": "2SF-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 3 | PROPOSAL\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>03 · PROPOSAL</b> — Proposed saved-item to exact-watchlist flow<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y309YH7PJZMF23R7EDH3CM · PAGE_ID: p-2-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y309YH7PJZMF23R7EDH3CM/p-2-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0a0834209cf9a08af60dce501c7288510f46c112012e4abc9235009c6c93b961",
+      "after_snapshot": "0a0834209cf9a08af60dce501c7288510f46c112012e4abc9235009c6c93b961",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "name": "Shared Market · Watchlists and Save States"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2SP-0",
+            "name": "READ_NEXT 3 | PROPOSAL",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-17-qualification",
+      "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+        "targetNodeId": "2SF-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0a0834209cf9a08af60dce501c7288510f46c112012e4abc9235009c6c93b961",
+      "after_snapshot": "0a0834209cf9a08af60dce501c7288510f46c112012e4abc9235009c6c93b961",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "name": "Shared Market · Watchlists and Save States"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2SR-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-17-footer",
+      "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+        "targetNodeId": "2SF-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. Inspect the exact returned page to select a board. Export only product boards, excluding guides and internal contracts.<br/><b>READING PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>CURRENT ORGANIZATION CHECKPOINT</b> · Follow the source/checkpoint link on AI START: https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0<br/><b>DATED SCOPE SNAPSHOT · baf6737</b> · This is evidence at that commit, not the current estate head. Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0a0834209cf9a08af60dce501c7288510f46c112012e4abc9235009c6c93b961",
+      "after_snapshot": "0a0834209cf9a08af60dce501c7288510f46c112012e4abc9235009c6c93b961",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "name": "Shared Market · Watchlists and Save States"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2ST-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-17-page-first",
+      "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+        "order": [
+          "p-3-0",
+          "p-1-0",
+          "p-2-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "0a0834209cf9a08af60dce501c7288510f46c112012e4abc9235009c6c93b961",
+      "after_snapshot": "965a03d9e13bb8e05cc4275a7da28e3e8e536b95ba4c646f58a84c61fd091b8d",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "name": "Shared Market · Watchlists and Save States"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-3-0",
+            "name": "00 · AGENT README · Read first",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "Shared Market · Watchlists + Save States · Reference",
+            "icon": "design",
+            "isActive": true
+          },
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "Proposed · Saved item to exact watchlist",
+            "icon": "design",
+            "isActive": false
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-17-finish",
+      "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6Y309YH7PJZMF23R7EDH3CM",
+        "nodeIds": [
+          "2SF-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "965a03d9e13bb8e05cc4275a7da28e3e8e536b95ba4c646f58a84c61fd091b8d",
+      "after_snapshot": "965a03d9e13bb8e05cc4275a7da28e3e8e536b95ba4c646f58a84c61fd091b8d",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y309YH7PJZMF23R7EDH3CM"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y309YH7PJZMF23R7EDH3CM",
+          "name": "Shared Market · Watchlists and Save States"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-18-page",
+      "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M6Y2P933V2Z18V1S8703YXEJ",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "a2f46f1eeaa6675feafe4a334a9066317edcc7bb7deb65c3edb44bbd200bc592",
+      "after_snapshot": "032cf79ae40c0cafaba803cf484e32faf558a977d61eb9a45dedfb116498a980",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2P933V2Z18V1S8703YXEJ",
+          "name": "Shared Shell · Earlier Design Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pageId": "p-3-0",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-18-header",
+      "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2P933V2Z18V1S8703YXEJ",
+        "targetNodeId": "root_node_p-3-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Shared Shell · Earlier Design Studies</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M6Y2P933V2Z18V1S8703YXEJ<br/>PAGE_ID: p-3-0<br/>FILE_ROLES: retained_reference<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "032cf79ae40c0cafaba803cf484e32faf558a977d61eb9a45dedfb116498a980",
+      "after_snapshot": "7b03a8403a9b4ad5a92832f2a6dc7c83ef99cc277e873e9242e2575da9545c80",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2P933V2Z18V1S8703YXEJ",
+          "name": "Shared Shell · Earlier Design Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1WL-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "1WM-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "1WN-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "1WO-0",
+            "name": "Shared Shell · Earli…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "1WP-0",
+            "name": "FILE_ID: 01M6Y2P933V…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-18-route-1",
+      "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2P933V2Z18V1S8703YXEJ",
+        "targetNodeId": "1WL-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | LEARN\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · LEARN</b> — Existing scope entry; inspect its named product/contract boards<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y2P933V2Z18V1S8703YXEJ · PAGE_ID: p-1-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y2P933V2Z18V1S8703YXEJ/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "7b03a8403a9b4ad5a92832f2a6dc7c83ef99cc277e873e9242e2575da9545c80",
+      "after_snapshot": "7b03a8403a9b4ad5a92832f2a6dc7c83ef99cc277e873e9242e2575da9545c80",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2P933V2Z18V1S8703YXEJ",
+          "name": "Shared Shell · Earlier Design Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1WR-0",
+            "name": "READ_NEXT 1 | LEARN",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-18-route-2",
+      "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2P933V2Z18V1S8703YXEJ",
+        "targetNodeId": "1WL-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | SOURCE_SELECTION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · SOURCE_SELECTION</b> — Read applicable family source; no current build selection is inferred here<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6XQ0KYY6ZDDV6F3G85SX6WW · PAGE_ID: p-6-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "7b03a8403a9b4ad5a92832f2a6dc7c83ef99cc277e873e9242e2575da9545c80",
+      "after_snapshot": "7b03a8403a9b4ad5a92832f2a6dc7c83ef99cc277e873e9242e2575da9545c80",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2P933V2Z18V1S8703YXEJ",
+          "name": "Shared Shell · Earlier Design Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1WT-0",
+            "name": "READ_NEXT 2 | SOURCE_SELECTION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-18-route-3",
+      "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2P933V2Z18V1S8703YXEJ",
+        "targetNodeId": "1WL-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 3 | STUDY\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>03 · STUDY</b> — Earlier investor-shell market-overview candidates<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y2P933V2Z18V1S8703YXEJ · PAGE_ID: p-2-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y2P933V2Z18V1S8703YXEJ/p-2-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "7b03a8403a9b4ad5a92832f2a6dc7c83ef99cc277e873e9242e2575da9545c80",
+      "after_snapshot": "7b03a8403a9b4ad5a92832f2a6dc7c83ef99cc277e873e9242e2575da9545c80",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2P933V2Z18V1S8703YXEJ",
+          "name": "Shared Shell · Earlier Design Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1WV-0",
+            "name": "READ_NEXT 3 | STUDY",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-18-qualification",
+      "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2P933V2Z18V1S8703YXEJ",
+        "targetNodeId": "1WL-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "7b03a8403a9b4ad5a92832f2a6dc7c83ef99cc277e873e9242e2575da9545c80",
+      "after_snapshot": "7b03a8403a9b4ad5a92832f2a6dc7c83ef99cc277e873e9242e2575da9545c80",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2P933V2Z18V1S8703YXEJ",
+          "name": "Shared Shell · Earlier Design Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1WX-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-18-footer",
+      "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2P933V2Z18V1S8703YXEJ",
+        "targetNodeId": "1WL-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. Inspect the exact returned page to select a board. Export only product boards, excluding guides and internal contracts.<br/><b>READING PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>CURRENT ORGANIZATION CHECKPOINT</b> · Follow the source/checkpoint link on AI START: https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0<br/><b>DATED SCOPE SNAPSHOT · baf6737</b> · This is evidence at that commit, not the current estate head. Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "7b03a8403a9b4ad5a92832f2a6dc7c83ef99cc277e873e9242e2575da9545c80",
+      "after_snapshot": "7b03a8403a9b4ad5a92832f2a6dc7c83ef99cc277e873e9242e2575da9545c80",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2P933V2Z18V1S8703YXEJ",
+          "name": "Shared Shell · Earlier Design Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "1WZ-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-18-page-first",
+      "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M6Y2P933V2Z18V1S8703YXEJ",
+        "order": [
+          "p-3-0",
+          "p-1-0",
+          "p-2-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "7b03a8403a9b4ad5a92832f2a6dc7c83ef99cc277e873e9242e2575da9545c80",
+      "after_snapshot": "c1da68ee51613df23f59694d9f58636308e608f985b7110603cd54a10267ef57",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2P933V2Z18V1S8703YXEJ",
+          "name": "Shared Shell · Earlier Design Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-3-0",
+            "name": "00 · AGENT README · Read first",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "Mastermind · Shared Shell · Review 01 · 2026-09-24",
+            "icon": "design",
+            "isActive": true
+          },
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "Investor Shell · Market Overview · Design Candidates",
+            "icon": "design",
+            "isActive": false
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-18-finish",
+      "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6Y2P933V2Z18V1S8703YXEJ",
+        "nodeIds": [
+          "1WL-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "c1da68ee51613df23f59694d9f58636308e608f985b7110603cd54a10267ef57",
+      "after_snapshot": "c1da68ee51613df23f59694d9f58636308e608f985b7110603cd54a10267ef57",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2P933V2Z18V1S8703YXEJ"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2P933V2Z18V1S8703YXEJ",
+          "name": "Shared Shell · Earlier Design Studies"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-19-page",
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "456000832656f00dd8263c20a28ed78b64d870983eb78daa8409d51a48a3c618",
+      "after_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2GT8S3YP4TK052PPESZEC",
+          "name": "Shared Shell · F01 Candidate and Integration"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pageId": "p-5-0",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-19-header",
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+        "targetNodeId": "root_node_p-5-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Shared Shell · F01 Candidate and Integration</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M6Y2GT8S3YP4TK052PPESZEC<br/>PAGE_ID: p-5-0<br/>FILE_ROLES: proposal<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "after_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2GT8S3YP4TK052PPESZEC",
+          "name": "Shared Shell · F01 Candidate and Integration"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3V9-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "3VA-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "3VB-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "3VC-0",
+            "name": "Shared Shell · F01 C…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "3VD-0",
+            "name": "FILE_ID: 01M6Y2GT8S3…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-19-route-1",
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+        "targetNodeId": "3V9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | CANDIDATE\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · CANDIDATE</b> — F01 shell candidate; review pending<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y2GT8S3YP4TK052PPESZEC · PAGE_ID: p-1-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "after_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2GT8S3YP4TK052PPESZEC",
+          "name": "Shared Shell · F01 Candidate and Integration"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3VF-0",
+            "name": "READ_NEXT 1 | CANDIDATE",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-19-route-2",
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+        "targetNodeId": "3V9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | INTEGRATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · INTEGRATION</b> — Inspect shell integration and source bindings<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y2GT8S3YP4TK052PPESZEC · PAGE_ID: p-2-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-2-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "after_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2GT8S3YP4TK052PPESZEC",
+          "name": "Shared Shell · F01 Candidate and Integration"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3VH-0",
+            "name": "READ_NEXT 2 | INTEGRATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-19-route-3",
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+        "targetNodeId": "3V9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 3 | PROPOSAL\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>03 · PROPOSAL</b> — Proposed Today comparison basis<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y2GT8S3YP4TK052PPESZEC · PAGE_ID: p-3-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y2GT8S3YP4TK052PPESZEC/p-3-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "after_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2GT8S3YP4TK052PPESZEC",
+          "name": "Shared Shell · F01 Candidate and Integration"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3VJ-0",
+            "name": "READ_NEXT 3 | PROPOSAL",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-19-route-4",
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+        "targetNodeId": "3V9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 4 | COMPLEMENT\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>04 · COMPLEMENT</b> — F02 Candidate 2 system scope<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M312VSDSZFVT45674GDVJVZN · PAGE_ID: p-9-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M312VSDSZFVT45674GDVJVZN/p-9-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "after_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2GT8S3YP4TK052PPESZEC",
+          "name": "Shared Shell · F01 Candidate and Integration"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3VL-0",
+            "name": "READ_NEXT 4 | COMPLEMENT",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-19-route-5",
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+        "targetNodeId": "3V9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 5 | SOURCE_SELECTION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>05 · SOURCE_SELECTION</b> — Read the existing F01/F02 source and acceptance qualifications<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6XQ0KYY6ZDDV6F3G85SX6WW · PAGE_ID: p-6-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-6-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "after_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2GT8S3YP4TK052PPESZEC",
+          "name": "Shared Shell · F01 Candidate and Integration"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3VN-0",
+            "name": "READ_NEXT 5 | SOURCE_SELECTION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-19-qualification",
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+        "targetNodeId": "3V9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>F01 candidate/integration references. Central build-source guide carries qualified source status; original held/uncertain targets remain fenced. Original atlas effects 710Z/711X and readme drift refusal 6ZZX retain original custody; navigation edits do not reconcile them. Consult the existing recovery checkpoint, not bare IDs, for their original targets.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "after_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2GT8S3YP4TK052PPESZEC",
+          "name": "Shared Shell · F01 Candidate and Integration"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3VP-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-19-footer",
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+        "targetNodeId": "3V9-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. Inspect the exact returned page to select a board. Export only product boards, excluding guides and internal contracts.<br/><b>READING PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>CURRENT ORGANIZATION CHECKPOINT</b> · Follow the source/checkpoint link on AI START: https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0<br/><b>DATED SCOPE SNAPSHOT · baf6737</b> · This is evidence at that commit, not the current estate head. Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "after_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2GT8S3YP4TK052PPESZEC",
+          "name": "Shared Shell · F01 Candidate and Integration"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "3VR-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-19-page-first",
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+        "order": [
+          "p-5-0",
+          "p-1-0",
+          "p-4-0",
+          "p-3-0",
+          "p-2-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "da928bf5940c2c5b82f26231e2eca641a9f892a68288bc7fadaecbebce9d3c58",
+      "after_snapshot": "dbfc530064866eac52d52b2ad65147aca70aeabdb224221428b3dc9401131793",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2GT8S3YP4TK052PPESZEC",
+          "name": "Shared Shell · F01 Candidate and Integration"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-5-0",
+            "name": "00 · AGENT README · Read first",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "F01 · Shell system · v1 candidate · Review pending",
+            "icon": "design",
+            "isActive": true
+          },
+          {
+            "type": "page",
+            "id": "p-4-0",
+            "name": "Today · Daily desk · Implementation candidate · 9 Nov",
+            "icon": "design",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-3-0",
+            "name": "Proposed · Today comparison basis",
+            "icon": "design",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "Shared Shell · Integration reference · R1",
+            "icon": "design",
+            "isActive": false
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-19-finish",
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6Y2GT8S3YP4TK052PPESZEC",
+        "nodeIds": [
+          "3V9-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "dbfc530064866eac52d52b2ad65147aca70aeabdb224221428b3dc9401131793",
+      "after_snapshot": "dbfc530064866eac52d52b2ad65147aca70aeabdb224221428b3dc9401131793",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y2GT8S3YP4TK052PPESZEC"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y2GT8S3YP4TK052PPESZEC",
+          "name": "Shared Shell · F01 Candidate and Integration"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "text": "OK"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-20-page",
+      "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "tool": "create_page",
+      "arguments": {
+        "fileId": "01M6Y3DCDDW541ZR38J1V52A9Y",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "3f3d7d43488dc0dec84da504d85d85413a2acdac6571317a5f27d6d3e2aa411a",
+      "after_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+          "name": "Confluence Screener · R2 and Governed References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pageId": "p-5-0",
+        "name": "00 · AGENT README · Read first",
+        "icon": "arrow"
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-20-header",
+      "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3DCDDW541ZR38J1V52A9Y",
+        "targetNodeId": "root_node_p-5-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"AGENT README | INTERNAL | NOT PRODUCT UI\" style=\"width:1440px;height:auto;background:#F4F7FC;display:flex;flex-direction:column;gap:20px;padding:36px;font-family:Inter,system-ui,sans-serif;overflow-wrap:anywhere;border:1px solid #D9E2EF;\"><div layer-name=\"Agent README header\" style=\"display:flex;flex-direction:column;gap:10px;\"><div style=\"font-size:14px;line-height:20px;font-weight:700;letter-spacing:0.06em;color:#285FFF;\">INTERNAL AGENT GUIDE · NOT PRODUCT UI</div><div style=\"font-size:30px;line-height:38px;font-weight:700;color:#1C2430;\">Confluence Screener · R2 and Governed References</div><div style=\"font-family:monospace;font-size:14px;line-height:22px;color:#526278;\">FILE_ID: 01M6Y3DCDDW541ZR38J1V52A9Y<br/>PAGE_ID: p-5-0<br/>FILE_ROLES: retained_reference<br/>GUIDE_ROLE: guide · EXPORT_AS_PRODUCT_UI: no</div></div></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "after_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+          "name": "Confluence Screener · R2 and Governed References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2Q1-0",
+            "name": "AGENT README | INTERNAL | NOT PRODUCT UI",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "2Q2-0",
+            "name": "Agent README header",
+            "component": "Frame",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "2Q3-0",
+            "name": "INTERNAL AGENT GUIDE…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "2Q4-0",
+            "name": "Confluence Screener …",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          },
+          {
+            "id": "2Q5-0",
+            "name": "FILE_ID: 01M6Y3DCDDW…",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-20-route-1",
+      "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3DCDDW541ZR38J1V52A9Y",
+        "targetNodeId": "2Q1-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 1 | LEARN\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>01 · LEARN</b> — Dated governed reference<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3DCDDW541ZR38J1V52A9Y · PAGE_ID: p-1-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-1-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "after_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+          "name": "Confluence Screener · R2 and Governed References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2Q7-0",
+            "name": "READ_NEXT 1 | LEARN",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-20-route-2",
+      "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3DCDDW541ZR38J1V52A9Y",
+        "targetNodeId": "2Q1-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 2 | STUDY\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>02 · STUDY</b> — R2 study scope<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3DCDDW541ZR38J1V52A9Y · PAGE_ID: p-2-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-2-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "after_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+          "name": "Confluence Screener · R2 and Governed References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2Q9-0",
+            "name": "READ_NEXT 2 | STUDY",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-20-route-3",
+      "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3DCDDW541ZR38J1V52A9Y",
+        "targetNodeId": "2Q1-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 3 | STATES\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>03 · STATES</b> — Public snapshot states<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3DCDDW541ZR38J1V52A9Y · PAGE_ID: p-3-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-3-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "after_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+          "name": "Confluence Screener · R2 and Governed References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2QB-0",
+            "name": "READ_NEXT 3 | STATES",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-20-route-4",
+      "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3DCDDW541ZR38J1V52A9Y",
+        "targetNodeId": "2Q1-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READ_NEXT 4 | PRESERVE\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>04 · PRESERVE</b> — Retained filter controls<br/><span style=\"font-family:monospace;font-size:14px;line-height:22px;\">FILE_ID: 01M6Y3DCDDW541ZR38J1V52A9Y · PAGE_ID: p-4-0 · BOARD: inspect the requested page result<br/>https://app.paper.design/file/01M6Y3DCDDW541ZR38J1V52A9Y/p-4-0</span></div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "after_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+          "name": "Confluence Screener · R2 and Governed References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2QD-0",
+            "name": "READ_NEXT 4 | PRESERVE",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-20-qualification",
+      "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3DCDDW541ZR38J1V52A9Y",
+        "targetNodeId": "2Q1-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"SOURCE_QUALIFICATION\" style=\"font-size:17px;line-height:27px;color:#1C2430;\"><b>SOURCE_QUALIFICATION</b><br/>Preserve existing design and source qualifications. Inventory and page routing do not prove complete old/new feature parity or deletion eligibility.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "after_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+          "name": "Confluence Screener · R2 and Governed References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2QF-0",
+            "name": "SOURCE_QUALIFICATION",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-20-footer",
+      "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "tool": "write_html",
+      "arguments": {
+        "fileId": "01M6Y3DCDDW541ZR38J1V52A9Y",
+        "targetNodeId": "2Q1-0",
+        "mode": "insert-children",
+        "html": "<div layer-name=\"READING_RULES | source\" style=\"font-size:14px;line-height:22px;color:#1C2430;\"><b>USE</b> · Follow the route matching the current assignment. These are reading destinations, not implementation or release approval. Inspect the exact returned page to select a board. Export only product boards, excluding guides and internal contracts.<br/><b>READING PROTOCOL</b> · https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-B-0<br/><b>CURRENT ORGANIZATION CHECKPOINT</b> · Follow the source/checkpoint link on AI START: https://app.paper.design/file/01M6XQ0KYY6ZDDV6F3G85SX6WW/p-1-0<br/><b>DATED SCOPE SNAPSHOT · baf6737</b> · This is evidence at that commit, not the current estate head. Read only this FILE_ID's record: https://github.com/mastermindx-market-intelligence/Mastermind/blob/baf67374d54ae69eb50a68cc54ab10fe9a5477cd/docs/paper_migrations/estate_organization/FILE_INDEX.json<br/><b>OBSERVED</b> · 9 November 2026, America/Vancouver. Navigation observation only; refresh the exact target before editing.</div>"
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "after_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+          "name": "Confluence Screener · R2 and Governed References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "createdNodes": [
+          {
+            "id": "2QH-0",
+            "name": "READING_RULES | source",
+            "component": "Text",
+            "worldX": null,
+            "worldY": null,
+            "x": null,
+            "y": null
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-20-page-first",
+      "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "tool": "arrange_pages",
+      "arguments": {
+        "fileId": "01M6Y3DCDDW541ZR38J1V52A9Y",
+        "order": [
+          "p-5-0",
+          "p-1-0",
+          "p-2-0",
+          "p-3-0",
+          "p-4-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "05dbd8ac738df1a6167fc89c77e697c78cb9b85ce373f2b626be416555c86899",
+      "after_snapshot": "62a3656f55068ae6c6c9492469739447c90a228f61c6f8f8508f1817df54b290",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+          "name": "Confluence Screener · R2 and Governed References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "pages": [
+          {
+            "type": "page",
+            "id": "p-5-0",
+            "name": "00 · AGENT README · Read first",
+            "icon": "arrow",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-1-0",
+            "name": "Confluence Screener · Governed Reference · 2026-09-22",
+            "icon": "design",
+            "isActive": true
+          },
+          {
+            "type": "page",
+            "id": "p-2-0",
+            "name": "Confluence Screener · R2 · 2026-09-26",
+            "icon": "design",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-3-0",
+            "name": "R3 · Public snapshot states",
+            "icon": "design",
+            "isActive": false
+          },
+          {
+            "type": "page",
+            "id": "p-4-0",
+            "name": "Studies · Retained filter controls",
+            "icon": "paper",
+            "isActive": false
+          }
+        ]
+      }
+    },
+    {
+      "operation_id": "peo-20261109-c1-local-20-finish",
+      "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "tool": "finish_working_on_nodes",
+      "arguments": {
+        "fileId": "01M6Y3DCDDW541ZR38J1V52A9Y",
+        "nodeIds": [
+          "2Q1-0"
+        ]
+      },
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "retry_allowed": false,
+      "production_acceptance": false,
+      "before_snapshot": "62a3656f55068ae6c6c9492469739447c90a228f61c6f8f8508f1817df54b290",
+      "after_snapshot": "62a3656f55068ae6c6c9492469739447c90a228f61c6f8f8508f1817df54b290",
+      "before_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "after_identity": {
+        "kind": "file-id",
+        "id": "01M6Y3DCDDW541ZR38J1V52A9Y"
+      },
+      "result": {
+        "file": {
+          "id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+          "name": "Confluence Screener · R2 and Governed References"
+        },
+        "contentHash": {
+          "tokens": "6234666b"
+        },
+        "text": "OK"
+      }
+    }
+  ],
+  "completed_local_guides": [
+    {
+      "file_id": "01M6FAXA774QT1VRDMAG7DFQ2W",
+      "page_id": "p-9-0",
+      "board_id": "HBU-0",
+      "node_id": "HD9-0",
+      "kind": "reused_guidance_page",
+      "steps": [
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "route-5",
+        "qualification",
+        "footer",
+        "guide-first",
+        "page-label",
+        "finish",
+        "dated-source-footer"
+      ],
+      "proof": {
+        "exact_jsx": true,
+        "preserved_original_nodes": 42,
+        "screenshot": "visually verified; no clipping or overlap",
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish",
+        "dated-source-footer"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-5-0",
+      "node_id": "3L1-0",
+      "board_id": "3L1-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 4,
+        "consumer_probe": "Reached saved-case proposal and retained behavior, without adopting R4 by date; wording refined to preserve revision scope.",
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M6Y3GS3GDTC3Q1J64QCGZHJ8",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish",
+        "dated-source-footer"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-3-0",
+      "node_id": "52A-0",
+      "board_id": "52A-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 2,
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M6Y3Z73MXTN3MDX5661VV0KB",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish",
+        "dated-source-footer"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-2-0",
+      "node_id": "5G9-0",
+      "board_id": "5G9-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 1,
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M6Y3K1SSX1M108ZY90KJX382",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish",
+        "dated-source-footer"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-5-0",
+      "node_id": "2ZU-0",
+      "board_id": "2ZU-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 4,
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M6Y2V2M0J28M2PYAHWZ8SB98",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish",
+        "dated-source-footer"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-3-0",
+      "node_id": "HK-0",
+      "board_id": "HK-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 2,
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M6PXFEP1E1T59M2B3N673PMG",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish",
+        "dated-source-footer"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-5-0",
+      "node_id": "1O6-0",
+      "board_id": "1O6-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 4,
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M5EXPMQTSBFBAM8KKG83FTZH",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish",
+        "dated-source-footer"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-6-0",
+      "node_id": "43A-0",
+      "board_id": "43A-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 5,
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M6Y3BP50DDJVKT3Q7FMTSY3K",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish",
+        "dated-source-footer"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-2-0",
+      "node_id": "2R5-0",
+      "board_id": "2R5-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 1,
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M312VSDSZFVT45674GDVJVZN",
+      "steps": [
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "qualification",
+        "footer",
+        "guide-first",
+        "page-label",
+        "finish",
+        "dated-source-footer"
+      ],
+      "kind": "reused_guidance_page",
+      "page_id": "p-9-0",
+      "board_id": "47Q-0",
+      "node_id": "AOC-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 11,
+        "preserved_original_nodes": 72,
+        "screenshot": "Visually verified dark guide; no clipping or overlap.",
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M6Y2EJJ05SE2NCVBHKSE2BX8",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish",
+        "dated-source-footer"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-4-0",
+      "node_id": "1DI-0",
+      "board_id": "1DI-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 3,
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M6Y2T8WVHR3AS82TSSCNN6YS",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish",
+        "dated-source-footer"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-2-0",
+      "node_id": "GT-0",
+      "board_id": "GT-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 1,
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M32XYWDYSFTNDZVJKQ5QHT33",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish",
+        "dated-source-footer"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-9-0",
+      "node_id": "4H7-0",
+      "board_id": "4H7-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 8,
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M6Y2Z642VN20X8WDSWV07M0M",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish",
+        "dated-source-footer"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-2-0",
+      "node_id": "29O-0",
+      "board_id": "29O-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 1,
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M6Y31C449F02KGRNPGK94Q8D",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish",
+        "dated-source-footer"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-3-0",
+      "node_id": "1FO-0",
+      "board_id": "1FO-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 2,
+        "dated_source_footer": true
+      }
+    },
+    {
+      "file_id": "01M6Y32A3E4XC51FQVJN98YRPH",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-3-0",
+      "node_id": "38N-0",
+      "board_id": "38N-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 2
+      }
+    },
+    {
+      "file_id": "01M6Y309YH7PJZMF23R7EDH3CM",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-3-0",
+      "node_id": "2SF-0",
+      "board_id": "2SF-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 2
+      }
+    },
+    {
+      "file_id": "01M6Y2P933V2Z18V1S8703YXEJ",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-3-0",
+      "node_id": "1WL-0",
+      "board_id": "1WL-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 2
+      }
+    },
+    {
+      "file_id": "01M6Y2GT8S3YP4TK052PPESZEC",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "route-5",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-5-0",
+      "node_id": "3V9-0",
+      "board_id": "3V9-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 4
+      }
+    },
+    {
+      "file_id": "01M6Y3DCDDW541ZR38J1V52A9Y",
+      "steps": [
+        "page",
+        "header",
+        "route-1",
+        "route-2",
+        "route-3",
+        "route-4",
+        "qualification",
+        "footer",
+        "page-first",
+        "finish"
+      ],
+      "kind": "dedicated_agent_page",
+      "page_id": "p-5-0",
+      "node_id": "2Q1-0",
+      "board_id": "2Q1-0",
+      "proof": {
+        "exact_jsx": true,
+        "all_routes_present": true,
+        "preexisting_pages_preserved": 4
+      }
+    }
+  ]
+}

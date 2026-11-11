@@ -1,0 +1,93 @@
+name: vps-main-deploy
+# Release wake for accepted, protected master only. The incumbent deployment
+# owner retains the exact-ref archive, dry-run, snapshot, rollback and health
+# checks. Never deploy a PR head or a dirty Web-session workspace.
+on:
+  push:
+    branches: [master]
+    paths:
+      - "app/**"
+      - "control_plane/**"
+      - "portfolio/**"
+      - "engine/**"
+      - "config/**"
+      - "scripts/**"
+      - "web/**"
+      - "templates/**"
+      - "requirements*.txt"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# Never cancel an executing production transaction. Newer pushes coalesce to
+# the latest pending wake. This is host-side release transport, not a new merger.
+concurrency:
+  group: mastermind-vps-main-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.repository == 'mastermindx-market-intelligence/Mastermind' && github.ref == 'refs/heads/master'
+    # GitHub-hosted only. The org's fleet-ci runners carry `ubuntu-latest` as a
+    # custom label and reuse a persistent workspace, so a previous job's
+    # sparse-checkout can survive into this one and hide ops/ from the pin check.
+    # No self-hosted runner carries `ubuntu-24.04`.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The existing deploy_from_git.sh fetches and verifies current master
+          # before archiving the immutable accepted SHA.
+          fetch-depth: 1
+      - name: Materialise the full checkout tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A reused self-hosted workspace can still be sparse from an earlier
+          # job; a sparse tree must never masquerade as a missing host pin.
+          git sparse-checkout disable 2>/dev/null || true
+          git config --local --unset-all core.sparseCheckout 2>/dev/null || true
+          if git sparse-checkout list >/dev/null 2>&1; then
+            echo "::error::Workspace is still sparse after disable"
+            exit 1
+          fi
+          test -s ops/vps_origin_known_hosts ||
+            { echo "::error::VPS host pin missing after full-tree refresh"; exit 1; }
+      - name: Deploy exact accepted master using incumbent rollback owner
+        shell: bash
+        env:
+          VPS_DEPLOY_KEY: ${{ secrets.VPS_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Expected full accepted master SHA"; exit 1; }
+          [ -n "$VPS_DEPLOY_KEY" ] || { echo "::error::VPS_DEPLOY_KEY not configured in this repository"; exit 1; }
+
+          # Reuse the trusted public VPS host key already accepted by Macro's
+          # origin, not a fresh ssh-keyscan or Trust On First Use.
+          PIN="$GITHUB_WORKSPACE/ops/vps_origin_known_hosts"
+          [ -s "$PIN" ] || { echo "::error::VPS host pin missing"; exit 1; }
+          grep -qx '146.190.142.17 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEc8ibhWOj35RC4FXjydG27GMxKfjiVXOw0s7hiCySkk' "$PIN" ||
+            { echo "::error::VPS host pin mismatch"; exit 1; }
+          umask 077
+          mkdir -p "$HOME/.ssh"
+          cp "$PIN" "$HOME/.ssh/known_hosts"
+          cat > "$HOME/.ssh/config" <<'SSH_CONFIG'
+          Host 146.190.142.17
+            StrictHostKeyChecking yes
+            UserKnownHostsFile ~/.ssh/known_hosts
+            GlobalKnownHostsFile /dev/null
+            IdentitiesOnly yes
+          SSH_CONFIG
+
+          KEYFILE="$(mktemp "$RUNNER_TEMP/mastermind-vps-key.XXXXXX")"
+          trap 'rm -f "$KEYFILE"' EXIT
+          printf '%s\n' "$VPS_DEPLOY_KEY" > "$KEYFILE"
+
+          # Fail closed if main advanced after this wake: the next event owns
+          # the newer exact release. No direct main pushes or force deployment.
+          MASTERMIND_VPS_KEY="$KEYFILE" \
+          MASTERMIND_VPS_HOST="root@146.190.142.17" \
+            ./scripts/deploy_from_git.sh "$GITHUB_SHA"
+          echo "::notice::Canonical deployment returned for accepted $GITHUB_SHA; runtime proof remains distinct"

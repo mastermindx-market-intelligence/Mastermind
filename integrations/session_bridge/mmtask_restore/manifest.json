@@ -1,0 +1,65 @@
+{
+  "schema": "mastermind.mmtask_restore.v1",
+  "protected_mastermind_base": "04ca04c703855183924c7a0e048ac8b5b1b7e261",
+  "canonical_scope": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1842#issuecomment-6588972253",
+  "files": [
+    {
+      "path": "preimage/mmtask",
+      "bytes": 53053,
+      "mode": "0o755",
+      "sha256": "9567ecad658e50b149a14f4c0cd0c7b42d15ad546b0508e2153619f14d0eb336",
+      "provenance": "Portfolio approved frozen handoff through Root; no sourceownership inferred from path"
+    },
+    {
+      "path": "preimage/test_mmtask.py.source",
+      "bytes": 19770,
+      "mode": "0o644",
+      "sha256": "3b803cc10e4ec3277c1cf16fedc44f52af17aaba66765a09699052bf6618dfc1",
+      "provenance": "Portfolio approved frozen handoff through Root; no sourceownership inferred from path"
+    },
+    {
+      "path": "payload/mmtask",
+      "bytes": 61010,
+      "mode": "0o755",
+      "sha256": "711ba4f46c80e518d99167877738db9e92182b78bf7b4e3052bcfee79316d54a",
+      "provenance": "Portfolio approved frozen handoff through Root; no sourceownership inferred from path"
+    },
+    {
+      "path": "payload/test_mmtask.py.source",
+      "bytes": 30007,
+      "mode": "0o644",
+      "sha256": "3537346e391956ac17dfb44c844766011a5884cedcc4bd221fada88ae04811ec",
+      "provenance": "Portfolio approved frozen handoff through Root; no sourceownership inferred from path"
+    },
+    {
+      "path": "payload/charterlib.py",
+      "bytes": 12486,
+      "mode": "0o755",
+      "sha256": "a0d88124f19d3467b0e6b341138754bcc4162b7c0ad5d4366fe3f0813ed1c731",
+      "provenance": "Portfolio approved frozen handoff through Root; no sourceownership inferred from path"
+    },
+    {
+      "path": "mmtask-selector-recovery.patch",
+      "bytes": 26432,
+      "mode": "0o644",
+      "sha256": "53423ebd9e7e6f6c262a230939ee7fd7657eefc8e78522532a2cc6c860dc8048",
+      "provenance": "Portfolio approved frozen handoff through Root; no sourceownership inferred from path"
+    },
+    {
+      "path": "payload/fixtures/shared-shell-TASKS.null-bound.json",
+      "sha256": "61c8276552e66000b9f09c39d179cc0d9f0c532ec2fb492b7a62928e30d53d59",
+      "bytes": 6233,
+      "mode": "0o644",
+      "provenance": "Wholly synthetic Fabric fixture; no historical privatefixture content read/copied. Mode0644 is public source-data packaging, not originalprivatefixture mode."
+    }
+  ],
+  "scope": "Source data and isolated rehearsal only; no install, hook, scheduler, registry, live helper or real charter mutation.",
+  "frozen_tests": "Accepted bytes retained under .py.source to avoid automatic pytest discovery.",
+  "fixture": "Wholly synthetic fixture supplied separately; original privatefixture never read or copied.",
+  "synthetic_fixture_fabric": {
+    "run": "mmtask-synthetic-fixture-01a19a8e-v1",
+    "stdout_sha256": "dfe6505ff832499ea4933653e3332a714223618afedef1a6c3ed305670da1c6c",
+    "artifact_sha256": "61c8276552e66000b9f09c39d179cc0d9f0c532ec2fb492b7a62928e30d53d59",
+    "acceptance": "Accepted deterministic after unchanged35tests PASS on exact frozenhelper+pinnedMacroarchive"
+  }
+}

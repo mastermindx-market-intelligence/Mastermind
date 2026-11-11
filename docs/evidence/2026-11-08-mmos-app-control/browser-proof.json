@@ -1,0 +1,375 @@
+{
+  "schema": "mastermind.os.app_control_source_proof.v1",
+  "passed": true,
+  "live_acceptance": false,
+  "source_revision": null,
+  "run_id": null,
+  "run_attempt": null,
+  "synthetic_auth": true,
+  "synthetic_owners": true,
+  "transport": "MCP_SDK_TO_OWNED_PLAYWRIGHT_CONTEXT",
+  "routes": [
+    "Search",
+    "Today",
+    "Projects",
+    "Inbox",
+    "Conversations",
+    "Knowledge",
+    "Sources",
+    "Tools",
+    "Meta-CEO",
+    "Work",
+    "Programs",
+    "Control Room",
+    "Session Estate",
+    "Fleet & Capacity",
+    "Mission Workspace",
+    "Conversation",
+    "Activity",
+    "Connections",
+    "Evidence"
+  ],
+  "calls": 61,
+  "checks": [
+    "source catalogue",
+    "primary and advanced navigation",
+    "Executive without Content",
+    "project selection",
+    "React search field",
+    "theme and locale",
+    "stale observation",
+    "duplicate refusal",
+    "mobile layout",
+    "ambiguous app page",
+    "sign-out privacy"
+  ],
+  "registration": {
+    "transport": "WEBMCP",
+    "documentModelContext": true
+  },
+  "trace": [
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Today"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Today"
+    },
+    {
+      "tool": "mastermind_os_navigate",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Projects"
+    },
+    {
+      "tool": "mastermind_os_check",
+      "status": "PASS",
+      "route": "Projects"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Projects"
+    },
+    {
+      "tool": "mastermind_os_navigate",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Inbox"
+    },
+    {
+      "tool": "mastermind_os_check",
+      "status": "PASS",
+      "route": "Inbox"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Inbox"
+    },
+    {
+      "tool": "mastermind_os_navigate",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Conversations"
+    },
+    {
+      "tool": "mastermind_os_check",
+      "status": "PASS",
+      "route": "Conversations"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Conversations"
+    },
+    {
+      "tool": "mastermind_os_navigate",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Knowledge"
+    },
+    {
+      "tool": "mastermind_os_check",
+      "status": "PASS",
+      "route": "Knowledge"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Knowledge"
+    },
+    {
+      "tool": "mastermind_os_navigate",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_check",
+      "status": "PASS",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_navigate",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Fleet & Capacity"
+    },
+    {
+      "tool": "mastermind_os_check",
+      "status": "PASS",
+      "route": "Fleet & Capacity"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Fleet & Capacity"
+    },
+    {
+      "tool": "mastermind_os_navigate",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Projects"
+    },
+    {
+      "tool": "mastermind_os_check",
+      "status": "PASS",
+      "route": "Projects"
+    },
+    {
+      "tool": "mastermind_os_check",
+      "status": "PASS",
+      "route": "Projects"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Projects"
+    },
+    {
+      "tool": "mastermind_os_act",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Projects"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Projects"
+    },
+    {
+      "tool": "mastermind_os_navigate",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_check",
+      "status": "PASS",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_act",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_act",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_act",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_act",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_act",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_act",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_act",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_navigate",
+      "status": "REFUSED",
+      "code": "STALE_OBSERVATION"
+    },
+    {
+      "tool": "mastermind_os_check",
+      "status": "PASS",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Search"
+    },
+    {
+      "tool": "mastermind_os_navigate",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Today"
+    },
+    {
+      "tool": "mastermind_os_navigate",
+      "status": "REFUSED",
+      "code": "STALE_OBSERVATION"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Today"
+    },
+    {
+      "tool": "mastermind_os_navigate",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": "Projects"
+    },
+    {
+      "tool": "mastermind_os_check",
+      "status": "PASS",
+      "route": "Projects"
+    },
+    {
+      "tool": "mastermind_os_check",
+      "status": "PASS",
+      "route": "Projects"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "REFUSED",
+      "code": "APP_PAGE_AMBIGUOUS"
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AVAILABLE",
+      "route": "Projects"
+    },
+    {
+      "tool": "mastermind_os_act",
+      "status": "DISPATCHED",
+      "code": "UI_EVENT_DISPATCHED",
+      "route": null
+    },
+    {
+      "tool": "mastermind_os_inspect",
+      "status": "AUTH_REQUIRED"
+    }
+  ]
+}

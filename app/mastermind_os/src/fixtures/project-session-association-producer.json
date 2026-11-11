@@ -1,0 +1,34 @@
+{
+  "availability": "AVAILABLE",
+  "can_send": false,
+  "continuation_target": null,
+  "materialization": {
+    "epoch_sha256": "a0a545c3ac282d797bb96a702cd8103eb5838bd351522a44ecff59e144447561",
+    "generation_number": 1,
+    "operation_kind": "start_session",
+    "process_generation_sha256": "5213aa590e46dd08180f8ce1516d87219eff735ef543d6286961262f7136f984",
+    "provider_session_sha256": "c68fd444865b4ca9ccdf2c0f18447f21bc7802fc76fda71f36c8bdc3913fed02",
+    "receipt_sha256": "19af3366a37a60761094e44b3d08d85d960199cd3c54b9b2df71dd370bb3f10f",
+    "recorded_at": "2026-09-03T00:00:00+00:00"
+  },
+  "observational_only": true,
+  "project_source": {
+    "commit": "2222222222222222222222222222222222222222",
+    "content_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "path": "agentos/workstreams/WS-SYNTHETIC-PROJECT.md",
+    "repository": "macro",
+    "request_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "reason": null,
+  "runtime_creation": {
+    "creation_event_sha256": "85c7314f71d92018fa84c0646a15fbf6e79996952f766dd3b7515db0713a67d9",
+    "fingerprint": "46fe481fbe1a9e31922bd6535f06b3a9e3c3d04d0baf4270bab3d5b2e4862a70",
+    "intent_id": "CEO-2026-08-13-A"
+  },
+  "schema": "mastermind.workspace_project_session_association.v1",
+  "selection": {
+    "root_job_id": "JOB-001",
+    "work_ref": "WS:SYNTHETIC-PROJECT"
+  },
+  "state": "MATERIALIZED_OBSERVATION"
+}

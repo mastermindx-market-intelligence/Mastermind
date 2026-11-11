@@ -1,0 +1,211 @@
+{
+  "baseline_sha256": "aad443d4d712cc2483a912b6371779bd56f05ee08bc07bff9b3c3008ab0b52e7",
+  "candidate_sha256": "4a9aa64a34cbc84601fbfd5ea68b9792eb1c5558116c48d52c797ad0c83758a5",
+  "derivation": "Derived from the original native receipt with host UID omitted; all timing rows retained.",
+  "executable": "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+  "fixture_removed": true,
+  "iterations_per_sample": 512,
+  "machine": "arm64",
+  "native_acl_transition": [
+    "absent",
+    "present",
+    "absent"
+  ],
+  "pairs_per_mode": 5,
+  "python": "3.12.10",
+  "samples": [
+    {
+      "candidate": "baseline",
+      "cpu_ns": 45075000,
+      "mode": "path_owned",
+      "observations": 512,
+      "pair": 0,
+      "wall_ns": 149908625
+    },
+    {
+      "candidate": "candidate",
+      "cpu_ns": 16997000,
+      "mode": "path_owned",
+      "observations": 512,
+      "pair": 0,
+      "wall_ns": 68976667
+    },
+    {
+      "candidate": "candidate",
+      "cpu_ns": 12355000,
+      "mode": "path_owned",
+      "observations": 512,
+      "pair": 1,
+      "wall_ns": 109875208
+    },
+    {
+      "candidate": "baseline",
+      "cpu_ns": 46154000,
+      "mode": "path_owned",
+      "observations": 512,
+      "pair": 1,
+      "wall_ns": 153193750
+    },
+    {
+      "candidate": "baseline",
+      "cpu_ns": 44333000,
+      "mode": "path_owned",
+      "observations": 512,
+      "pair": 2,
+      "wall_ns": 154026791
+    },
+    {
+      "candidate": "candidate",
+      "cpu_ns": 18027000,
+      "mode": "path_owned",
+      "observations": 512,
+      "pair": 2,
+      "wall_ns": 90859584
+    },
+    {
+      "candidate": "candidate",
+      "cpu_ns": 15317000,
+      "mode": "path_owned",
+      "observations": 512,
+      "pair": 3,
+      "wall_ns": 79659208
+    },
+    {
+      "candidate": "baseline",
+      "cpu_ns": 46174000,
+      "mode": "path_owned",
+      "observations": 512,
+      "pair": 3,
+      "wall_ns": 304818917
+    },
+    {
+      "candidate": "baseline",
+      "cpu_ns": 33419000,
+      "mode": "path_owned",
+      "observations": 512,
+      "pair": 4,
+      "wall_ns": 105438125
+    },
+    {
+      "candidate": "candidate",
+      "cpu_ns": 11183000,
+      "mode": "path_owned",
+      "observations": 512,
+      "pair": 4,
+      "wall_ns": 62920417
+    },
+    {
+      "candidate": "baseline",
+      "cpu_ns": 32645000,
+      "mode": "held_descriptor",
+      "observations": 512,
+      "pair": 0,
+      "wall_ns": 97955333
+    },
+    {
+      "candidate": "candidate",
+      "cpu_ns": 1397000,
+      "mode": "held_descriptor",
+      "observations": 512,
+      "pair": 0,
+      "wall_ns": 1397833
+    },
+    {
+      "candidate": "candidate",
+      "cpu_ns": 1381000,
+      "mode": "held_descriptor",
+      "observations": 512,
+      "pair": 1,
+      "wall_ns": 1382000
+    },
+    {
+      "candidate": "baseline",
+      "cpu_ns": 25403000,
+      "mode": "held_descriptor",
+      "observations": 512,
+      "pair": 1,
+      "wall_ns": 39565292
+    },
+    {
+      "candidate": "baseline",
+      "cpu_ns": 24090000,
+      "mode": "held_descriptor",
+      "observations": 512,
+      "pair": 2,
+      "wall_ns": 84608500
+    },
+    {
+      "candidate": "candidate",
+      "cpu_ns": 1372000,
+      "mode": "held_descriptor",
+      "observations": 512,
+      "pair": 2,
+      "wall_ns": 1399125
+    },
+    {
+      "candidate": "candidate",
+      "cpu_ns": 1635000,
+      "mode": "held_descriptor",
+      "observations": 512,
+      "pair": 3,
+      "wall_ns": 5110958
+    },
+    {
+      "candidate": "baseline",
+      "cpu_ns": 23277000,
+      "mode": "held_descriptor",
+      "observations": 512,
+      "pair": 3,
+      "wall_ns": 46421291
+    },
+    {
+      "candidate": "baseline",
+      "cpu_ns": 35438000,
+      "mode": "held_descriptor",
+      "observations": 512,
+      "pair": 4,
+      "wall_ns": 211640333
+    },
+    {
+      "candidate": "candidate",
+      "cpu_ns": 3554000,
+      "mode": "held_descriptor",
+      "observations": 512,
+      "pair": 4,
+      "wall_ns": 22740208
+    }
+  ],
+  "schema": "mastermind.acl_binding_microbenchmark_metrics.v1",
+  "scope": "isolated observer calls; no installed acceptance speedup claimed",
+  "source_receipt_commit": "9a0b1c50affabab716de54ee8077928a61a94651",
+  "source_receipt_sha256": "c55677ea9391b86279ccbec6f03a24889d90666180886849423995e6aecdaeb6",
+  "source_receipt_url": "https://github.com/mastermindx-market-intelligence/Mastermind/blob/9a0b1c50affabab716de54ee8077928a61a94651/docs/evidence/2026-11-03-acl-binding-reuse/native-microbenchmark.json",
+  "source_schema": "mastermind.acl_binding_microbenchmark.v1",
+  "summaries": {
+    "held_descriptor": {
+      "cpu_ns_baseline_over_candidate": 18.183965640658553,
+      "cpu_ns_per_observation": {
+        "baseline": 49615.234375,
+        "candidate": 2728.515625
+      },
+      "wall_ns_baseline_over_candidate": 60.472438130974716,
+      "wall_ns_per_observation": {
+        "baseline": 165250.9765625,
+        "candidate": 2732.666015625
+      }
+    },
+    "path_owned": {
+      "cpu_ns_baseline_over_candidate": 2.9428086439903374,
+      "cpu_ns_per_observation": {
+        "baseline": 88037.109375,
+        "candidate": 29916.015625
+      },
+      "wall_ns_baseline_over_candidate": 1.9231141489631682,
+      "wall_ns_per_observation": {
+        "baseline": 299206.54296875,
+        "candidate": 155584.390625
+      }
+    }
+  },
+  "transition_passed": true
+}

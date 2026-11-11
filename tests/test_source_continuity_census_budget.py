@@ -12,14 +12,48 @@ import test_source_continuity as fx
 class EstateHTTP(fx._ProbeHTTP):
     """Existing identity fixture plus a paginated, changing foreign PR estate."""
 
-    def __init__(self, count=143, *, files_per_pr=1, change=None, overlap=False):
+    def __init__(
+        self,
+        count=143,
+        *,
+        files_per_pr=1,
+        file_counts=None,
+        change=None,
+        overlap=False,
+        identity_complete=False,
+        move_overlap=False,
+    ):
         super().__init__()
         self.count = count
         self.files_per_pr = files_per_pr
+        self.file_counts = {} if file_counts is None else dict(file_counts)
         self.change = change
         self.overlap = overlap
+        self.identity_complete = identity_complete
+        self.move_overlap = move_overlap
         self.passes = 0
         self.after_read = None
+
+    def _foreign_row(self, number):
+        head_sha = f"{number:040x}"[-40:]
+        if (
+            self.move_overlap
+            and self.passes > 1
+            and number == 1000 + self.count - 2
+        ):
+            head_sha = "e" * 40
+        return {
+            "number": number,
+            "state": "open",
+            "head": {
+                "sha": head_sha,
+                "repo": {"full_name": fx.REPOSITORY},
+            },
+            "base": {
+                "sha": "f" * 40,
+                "repo": {"full_name": fx.REPOSITORY},
+            },
+        }
 
     def __call__(self, url, *, token, timeout):
         parsed = urlparse(url)
@@ -28,8 +62,14 @@ class EstateHTTP(fx._ProbeHTTP):
             self.calls.append((url, token, timeout))
             if page == 1:
                 self.passes += 1
-            rows = [{"number": fx.PR_NUMBER}] + [
-                {"number": 1000 + i} for i in range(self.count - 1)]
+            foreign_rows = []
+            for i in range(self.count - 1):
+                number = 1000 + i
+                if self.identity_complete:
+                    foreign_rows.append(self._foreign_row(number))
+                else:
+                    foreign_rows.append({"number": number})
+            rows = [{"number": fx.PR_NUMBER}] + foreign_rows
             if self.change == "membership" and self.passes > 1:
                 rows[-1] = {"number": 9000}
             if self.change == "duplicate" and page == 2:
@@ -39,13 +79,22 @@ class EstateHTTP(fx._ProbeHTTP):
                 f"/pulls/{fx.PR_NUMBER}/" not in parsed.path):
             self.calls.append((url, token, timeout))
             number = int(parsed.path.split("/")[-2])
+            file_count = self.file_counts.get(number, self.files_per_pr)
             rows = [{"filename": f"docs/foreign-{number}-{i}.md", "status": "modified"}
-                    for i in range(self.files_per_pr)]
+                    for i in range(file_count)]
             if self.overlap and number == 1000 + self.count - 2:
                 rows[-1]["filename"] = fx.FINAL_OWNED_PATHS[0]
             if self.change == "paths" and self.passes > 1:
                 rows[-1]["filename"] += ".changed"
             result = rows[(page - 1) * 100:page * 100]
+        elif (
+            self.identity_complete
+            and parsed.path.startswith(f"/repos/{fx.REPOSITORY}/pulls/")
+            and parsed.path.rsplit("/", 1)[-1].isdigit()
+            and 1000 <= int(parsed.path.rsplit("/", 1)[-1]) < 1000 + self.count - 1
+        ):
+            self.calls.append((url, token, timeout))
+            result = self._foreign_row(int(parsed.path.rsplit("/", 1)[-1]))
         else:
             result = super().__call__(url, token=token, timeout=timeout)
         if self.after_read:
@@ -69,7 +118,7 @@ def run_cli(module, capsys, http, *, kind="checkpoint", runner=None):
     return exit_code, json.loads(captured.out)
 
 
-@pytest.mark.parametrize("count", [1, 100, 143, 200, 256])
+@pytest.mark.parametrize("count", [1, 100, 143, 200, 256, 409, 419, 450, 451, 457, 458, 465, 470, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490])
 @pytest.mark.parametrize("kind", ["checkpoint", "remote-complete"])
 def test_real_main_completes_bounded_estate(count, kind, capsys, monkeypatch):
     module = fx._cli_module()
@@ -84,7 +133,7 @@ def test_real_main_completes_bounded_estate(count, kind, capsys, monkeypatch):
     assert payload["collision_state"] == ("NONE" if count == 1 else "DISJOINT")
 
 
-@pytest.mark.parametrize("count", [401, 1000])
+@pytest.mark.parametrize("count", [491, 1000])
 def test_over_ceiling_refuses_before_foreign_files(count, capsys, monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
@@ -106,6 +155,114 @@ def test_large_estate_still_requires_stable_complete_observations(
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
     rc, payload = run_cli(module, capsys, EstateHTTP(143, change=change))
     assert rc != 0 and payload["code"] == code
+
+
+def _foreign_file_call_count(http: EstateHTTP) -> int:
+    return sum(
+        1
+        for url, _token, _timeout in http.calls
+        if "/files?" in url and f"/pulls/{fx.PR_NUMBER}/" not in url
+    )
+
+
+def _foreign_detail_call_count(http: EstateHTTP) -> int:
+    return sum(
+        1
+        for url, _token, _timeout in http.calls
+        if urlparse(url).path.rsplit("/", 1)[0].endswith("/pulls")
+        and urlparse(url).path.rsplit("/", 1)[-1].isdigit()
+        and urlparse(url).path.rsplit("/", 1)[-1] != str(fx.PR_NUMBER)
+    )
+
+
+def test_490_selective_revalidation_reuses_stable_foreign_evidence(monkeypatch):
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
+    estate_size = 490
+    http = EstateHTTP(
+        estate_size,
+        overlap=True,
+        identity_complete=True,
+    )
+
+    first = module._collision_census_details(
+        http, fx.TOKEN, fx.REPOSITORY, fx.PR_NUMBER, fx.FINAL_OWNED_PATHS
+    )
+    assert first.complete is True
+    assert first.state is module.CollisionState.OVERLAP
+    first_file_calls = _foreign_file_call_count(http)
+    assert first_file_calls == estate_size - 1
+
+    matched, complete, final_records = module._revalidate_collision_census(
+        http,
+        fx.TOKEN,
+        fx.REPOSITORY,
+        fx.PR_NUMBER,
+        fx.FINAL_OWNED_PATHS,
+        first.foreign_records,
+        first.colliding_pr_numbers,
+    )
+
+    assert (matched, complete) == (True, True)
+    assert len(final_records) == estate_size - 1
+    assert _foreign_file_call_count(http) == first_file_calls
+    assert _foreign_detail_call_count(http) == 1
+    assert http.passes == 2
+
+
+def test_490_selective_revalidation_reproves_only_moved_foreign_identity(monkeypatch):
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
+    estate_size = 490
+    http = EstateHTTP(
+        estate_size,
+        overlap=True,
+        identity_complete=True,
+        move_overlap=True,
+    )
+
+    first = module._collision_census_details(
+        http, fx.TOKEN, fx.REPOSITORY, fx.PR_NUMBER, fx.FINAL_OWNED_PATHS
+    )
+    first_file_calls = _foreign_file_call_count(http)
+
+    matched, complete, final_records = module._revalidate_collision_census(
+        http,
+        fx.TOKEN,
+        fx.REPOSITORY,
+        fx.PR_NUMBER,
+        fx.FINAL_OWNED_PATHS,
+        first.foreign_records,
+        first.colliding_pr_numbers,
+    )
+
+    assert (matched, complete) == (True, True)
+    assert len(final_records) == estate_size - 1
+    assert _foreign_file_call_count(http) == first_file_calls + 1
+    assert _foreign_detail_call_count(http) == 2
+    assert http.passes == 2
+
+
+def test_490_estate_moved_collider_same_projection_stays_within_closed_budget(
+        capsys, monkeypatch):
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
+    estate_size = 490
+    http = EstateHTTP(
+        estate_size,
+        overlap=True,
+        identity_complete=True,
+        move_overlap=True,
+    )
+    rc, payload = run_cli(module, capsys, http)
+    assert rc == 0, payload
+    assert payload["collision_state"] == "OVERLAP"
+    assert payload["colliding_pr_numbers"] == [1000 + estate_size - 2]
+    assert payload["receipt_version"] == "v2"
+    assert len(payload["collision_evidence_fingerprint"]) == 64
+    assert len(http.calls) < module._MAX_HTTP_CALLS
+    assert _foreign_detail_call_count(http) == 2
+    assert http.passes == 2
 
 
 def test_last_foreign_pr_overlap_is_preserved(capsys, monkeypatch):
@@ -297,10 +454,35 @@ def test_exact_call_and_byte_limit_remains_successful(capsys, monkeypatch):
 
 def test_budget_constants_are_closed_and_raw_response_cap_is_unchanged():
     module = fx._cli_module()
-    assert (module._MAX_COLLISION_PRS, module._MAX_HTTP_CALLS) == (400, 1152)
-    assert module._MAX_HTTP_NORMALIZED_BYTES == 96 * 1024 * 1024
+    assert (module._MAX_COLLISION_PRS, module._MAX_HTTP_CALLS) == (490, 1152)
+    assert module._MAX_HTTP_NORMALIZED_BYTES == 128 * 1024 * 1024
     assert module._HTTP_READ_BUDGET_SECONDS == 300.0
     assert module._MAX_HTTP_BODY_BYTES == 5_000_000
+
+
+def test_current_macro_estate_payload_fits_successor_byte_budget(monkeypatch):
+    """Measured current census payload must fit without changing any other ceiling."""
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock())
+    bounded = module._BoundedHTTPGet(lambda *_args, **_kwargs: None)
+    bounded._bytes = 104_630_037
+
+    assert bounded._bytes > 96 * 1024 * 1024
+    assert bounded._bytes < 128 * 1024 * 1024
+    bounded.check()
+
+
+def test_normalized_byte_budget_accepts_exact_128_mib_and_refuses_one_over(monkeypatch):
+    module = fx._cli_module()
+    monkeypatch.setattr(module, "monotonic", Clock())
+    bounded = module._BoundedHTTPGet(lambda *_args, **_kwargs: None)
+
+    bounded._bytes = 128 * 1024 * 1024
+    bounded.check()
+
+    bounded._bytes += 1
+    with pytest.raises(module._ReadBudgetExceeded):
+        bounded.check()
 
 
 def test_single_get_rejects_accounting_overrun_before_return(monkeypatch):
