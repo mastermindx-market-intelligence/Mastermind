@@ -426,9 +426,15 @@ def _sanitize_messages(payload: dict) -> None:
             content = message.get("content")
             if isinstance(content, str) and content.strip():
                 directives.append({"type": "text", "text": content})
-            elif isinstance(content, list):
-                directives.extend(block for block in content
-                                  if isinstance(block, dict) and block.get("type") == "text")
+            elif isinstance(content, list) and content and all(
+                isinstance(block, dict) and block.get("type") == "text"
+                and isinstance(block.get("text"), str) and block["text"].strip()
+                for block in content
+            ):
+                directives.extend(content)
+            else:
+                # Folding a subset would silently change the instructions.
+                raise ValueError("FABRIC_INVALID_REQUEST")
             _log.warning("fabric sanitized messages.%d folded role=system model=%s",
                          index, payload.get("model"))
             continue
@@ -440,11 +446,11 @@ def _sanitize_messages(payload: dict) -> None:
                          index, ",".join(sorted(extra)), payload.get("model"))
         kept.append(message)
     if directives:
-        system = payload.get("system")
+        system = payload.get("system", [])
         if isinstance(system, str):
             system = [{"type": "text", "text": system}] if system else []
         if not isinstance(system, list):
-            system = []
+            raise ValueError("FABRIC_INVALID_REQUEST")
         # APPEND, never prepend: the prompt cache is prefix-exact, so putting the
         # folded directives in front of the system block changes the very first
         # token of every turn and cold-prefills the whole context. Appending keeps
