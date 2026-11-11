@@ -77,6 +77,12 @@ fn readiness() -> Readiness {
 
 const MAIN_WINDOW_LABEL: &str = "main";
 
+/// Serializes tests that temporarily swap process-wide environment variables
+/// (`HOME`, `MMOS_DEV_ROOT`): several of them exist across modules and would
+/// otherwise race each other's save/restore windows.
+#[cfg(test)]
+pub static ENV_SWAP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Reads the shell URL exactly once, preferring `MM_SHELL_URL_FILE` over the
 /// legacy `MM_SHELL_URL`, both over the fixed per-user config file (lane T8:
 /// a Finder/Dock launch has no environment). The file keeps a one-time
@@ -87,7 +93,10 @@ fn shell_url_from_env(identifier: &str) -> (Option<url::Url>, shell_mode::ShellC
     shell_mode::resolve_shell_settings(identifier)
 }
 
-/// Build the shell-mode main window.
+/// Build (or rebuild) the one configured main window. This is the *one*
+/// shared window-building function: the first shell-mode build in `setup` and
+/// the Dock-reopen rebuild both go through it, so the two paths cannot drift
+/// (panel repair A).
 ///
 /// The configuration window is normally created by Tauri before `setup` runs, which
 /// leaves no way to add an initialization script. In shell mode the config entry is
@@ -95,11 +104,20 @@ fn shell_url_from_env(identifier: &str) -> (Option<url::Url>, shell_mode::ShellC
 /// page bootstrap before any page script runs. `.navigate` then points the webview
 /// at the local shell server; `setup` runs before the event loop, so the app
 /// frontend never gets a chance to paint (no sign-in gate flash).
-fn build_shell_window(
+///
+/// Panel repair B: every shell window this builds carries the navigation
+/// allowlist — the configured origin (scheme, host and port exact), the inert
+/// blank page and the pairing failure page; every other http or https
+/// address is refused in the window and opened in the person's default
+/// browser through the opener plugin, and everything else is refused and
+/// logged. Each successful build bumps the window generation so the
+/// process-wide pairing watchdog can tell window instances apart. The
+/// watchdog itself is started exactly once, in `setup`, when a helper is
+/// configured — never here.
+fn create_main_window(
     app: &tauri::AppHandle,
-    url: &url::Url,
-    pair_helper: Option<&std::path::Path>,
-) -> Result<(), Box<dyn std::error::Error>> {
+    shell: Option<&url::Url>,
+) -> Result<tauri::WebviewWindow, &'static str> {
     let config = app
         .config()
         .app
@@ -107,21 +125,115 @@ fn build_shell_window(
         .iter()
         .find(|config| config.label == MAIN_WINDOW_LABEL)
         .ok_or("MAIN_WINDOW_CONFIG_UNAVAILABLE")?;
-    let window = tauri::WebviewWindowBuilder::from_config(app, config)?
-        .initialization_script(shell_mode::SHELL_PAGE_BOOTSTRAP)
-        .build()?;
-    window.navigate(url.clone())?;
-    if let Some(helper) = pair_helper {
-        // Unattended re-pairing (lane T8): runs the fixed helper only when the
-        // loaded page turns out to be this server's pairing page, once per
-        // launch. See shell_pairing.rs for the authority and secret rules.
-        shell_pairing::spawn_watchdog(app.clone(), MAIN_WINDOW_LABEL, url.clone(), helper.to_path_buf());
+    let mut builder = tauri::WebviewWindowBuilder::from_config(app, config)
+        .map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
+    // Only shell mode builds its window with the page bootstrap and the
+    // navigation allowlist.
+    if let Some(url) = shell {
+        let origin = url.clone();
+        let failure_page = shell_pairing::failure_page_url().to_string();
+        let handle = app.clone();
+        builder = builder.on_navigation(move |url| {
+            match shell_pairing::navigation_allowed(url, &origin, &failure_page) {
+                shell_pairing::NavDecision::Allow => true,
+                shell_pairing::NavDecision::External => {
+                    // The maintained way to hand an outside address to the
+                    // person's default browser is the opener plugin.
+                    let target = url.to_string();
+                    let handle = handle.clone();
+                    std::thread::spawn(move || {
+                        use tauri_plugin_opener::OpenerExt;
+                        let _ = handle.opener().open_url(target, None::<&str>);
+                    });
+                    shell_pairing::log_navigation_refused();
+                    false
+                }
+                shell_pairing::NavDecision::Refuse => {
+                    shell_pairing::log_navigation_refused();
+                    false
+                }
+            }
+        });
+        builder = builder.initialization_script(shell_mode::SHELL_PAGE_BOOTSTRAP);
     }
-    Ok(())
+    let window = builder
+        .build()
+        .map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
+    shell_pairing::bump_window_generation();
+    if let Some(url) = shell {
+        window
+            .navigate(url.clone())
+            .map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
+    }
+    Ok(window)
 }
 
 fn terminal_callback_owner(url: &url::Url) -> bool {
     url.scheme() == "com.mastermind.os" && url.host_str() == Some("terminal")
+}
+
+/// Panel repair M: `--check-window-config`. One judge: this mode runs the
+/// same loader functions a real launch runs (`fixed_config_dir`, the
+/// repair-N folder check, the 0600/no-symlink file readers, the URL and
+/// helper-line parsers, the helper trust walk) and prints one line per
+/// item — `shell-url: ok` or `shell-url: refused <code>`, same for
+/// `pair-helper` and `config-dir`. No window is built, no helper or
+/// watchdog is started, and no address or file contents are printed. Exit 0
+/// only when every item passes.
+fn run_window_config_check(identifier: &str) -> i32 {
+    use std::io::Write as _;
+    let mut all_ok = true;
+    let mut line = |item: &str, outcome: Result<(), String>| {
+        match outcome {
+            Ok(()) => println!("{item}: ok"),
+            Err(code) => {
+                all_ok = false;
+                println!("{item}: refused {code}");
+            }
+        }
+    };
+    let home = std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(std::path::PathBuf::from);
+    let Some(dir) = home.as_deref().and_then(|home| {
+        shell_mode::fixed_config_dir(identifier, home)
+    }) else {
+        for item in ["config-dir", "shell-url", "pair-helper"] {
+            line(item, Err("no_dir_for_identifier".into()));
+        }
+        let _ = std::io::stdout().flush();
+        return 1;
+    };
+    line(
+        "config-dir",
+        shell_mode::config_dir_refusal(&dir).map_or(Ok(()), |r| Err(r.subcode())),
+    );
+    let address = shell_mode::read_config_line(&dir, shell_mode::SHELL_URL_CONFIG_NAME)
+        .and_then(|value| {
+            shell_mode::parse_shell_url(&value).map_err(shell_mode::ShellUrlFileRefusal::Url)
+        });
+    match address {
+        Ok(_) => line("shell-url", Ok(())),
+        Err(refusal) => line("shell-url", Err(refusal.subcode())),
+    }
+    let helper = shell_mode::read_config_line(&dir, shell_mode::PAIR_HELPER_CONFIG_NAME)
+        .and_then(|value| shell_mode::parse_pair_helper_line(&value));
+    match helper {
+        Ok(path) => {
+            if shell_pairing::helper_is_trusted(&path) {
+                line("pair-helper", Ok(()));
+            } else {
+                line("pair-helper", Err("helper_untrusted".into()));
+            }
+        }
+        Err(refusal) => line("pair-helper", Err(refusal.subcode())),
+    }
+    let _ = std::io::stdout().flush();
+    if all_ok {
+        0
+    } else {
+        1
+    }
 }
 
 fn dispatch_auth_callback(app: tauri::AppHandle, url: url::Url) {
@@ -139,29 +251,13 @@ fn reopen_main_window(app: &tauri::AppHandle, shell: Option<&url::Url>) -> Resul
     use tauri::Manager;
 
     // Closing the macOS window can leave the existing application alive. Reopen
-    // its one configured window without rebuilding app state or restarting auth.
+    // its one configured window through the shared builder (repair A) without
+    // rebuilding app state or restarting auth. The rebuild bumps the window
+    // generation, so the process-wide pairing watchdog drops any address it
+    // minted for the previous instance and re-arms.
     let window = match app.get_webview_window(MAIN_WINDOW_LABEL) {
         Some(window) => window,
-        None => {
-            let config = app.config().app.windows.iter()
-                .find(|config| config.label == MAIN_WINDOW_LABEL)
-                .ok_or("MAIN_WINDOW_CONFIG_UNAVAILABLE")?;
-            let mut builder = tauri::WebviewWindowBuilder::from_config(app, config)
-                .map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
-            // Only shell mode reopens its window with the page bootstrap.
-            if shell.is_some() {
-                builder = builder.initialization_script(shell_mode::SHELL_PAGE_BOOTSTRAP);
-            }
-            let window = builder
-                .build()
-                .map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
-            if let Some(url) = shell {
-                window
-                    .navigate(url.clone())
-                    .map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
-            }
-            window
-        }
+        None => create_main_window(app, shell)?,
     };
     window.show().map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
     window.unminimize().map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
@@ -170,7 +266,15 @@ fn reopen_main_window(app: &tauri::AppHandle, shell: Option<&url::Url>) -> Resul
 }
 
 fn main() {
+    use tauri::Manager;
+
     let mut context = tauri::generate_context!();
+    // Panel repair M: `--check-window-config` builds no window, starts no
+    // helper and no watchdog; it judges the fixed config with the same
+    // loader a real launch uses and exits before any Tauri runtime exists.
+    if std::env::args().nth(1).as_deref() == Some("--check-window-config") {
+        std::process::exit(run_window_config_check(&context.config().identifier));
+    }
     let (shell_url, shell_config) = shell_url_from_env(&context.config().identifier);
     if shell_url.is_some() {
         // Shell mode builds the main window in `setup` so it can carry the page
@@ -183,10 +287,36 @@ fn main() {
     }
     let setup_shell_url = shell_url.clone();
     let setup_shell_config = shell_config;
+    // Captured for the single-instance callback below (repair G).
+    let single_instance_shell_url = shell_url.clone();
     let app = tauri::Builder::default()
         .manage(auth::NativeAuth::new().expect("native transport configuration"))
         .manage(terminal_session::TerminalSession::new().expect("Terminal transport configuration"))
         .manage(shell_menu::ZoomState::default())
+        // Registered first so it wins before any other plugin observes the
+        // second launch. A second launch must never start a second session,
+        // watchdog or auth restore: it only brings the existing window
+        // forward, rebuilding it through the shared builder exactly like a
+        // Dock reopen if the person had closed it.
+        .plugin(tauri_plugin_single_instance::init(
+            move |app, _argv, _cwd| {
+                #[cfg(target_os = "macos")]
+                if let Err(code) =
+                    reopen_main_window(app, single_instance_shell_url.as_ref())
+                {
+                    // Only a fixed local window error is logged, never callback data.
+                    eprintln!("Mastermind OS: {code}");
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    use tauri::Manager;
+                    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+            },
+        ))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
         .on_menu_event(|app, event| shell_menu::handle_event(app, event.id().as_ref()))
@@ -200,6 +330,11 @@ fn main() {
                 }
             });
             auth::start_restore(app.handle().clone());
+            if let Some(url) = setup_shell_url.as_ref() {
+                // The configured origin, for the View > Go to Server item.
+                // Managed before the menu installs so the item can be enabled.
+                app.manage(shell_menu::ShellAddress(url.clone()));
+            }
             shell_menu::install(app.handle())?;
             if let Some(urls) = app.deep_link().get_current()? {
                 for url in urls {
@@ -207,11 +342,18 @@ fn main() {
                 }
             }
             if let Some(url) = setup_shell_url.as_ref() {
-                build_shell_window(
-                    app.handle(),
-                    url,
-                    setup_shell_config.pair_helper.as_deref(),
-                )?;
+                create_main_window(app.handle(), Some(url))?;
+                // One watchdog per app process (repair A): started here, once,
+                // only when a pair helper is configured. It follows the window
+                // by generation, not label, and outlives every window build.
+                if let Some(helper) = setup_shell_config.pair_helper.as_deref() {
+                    shell_pairing::spawn_watchdog(
+                        app.handle().clone(),
+                        MAIN_WINDOW_LABEL,
+                        url.clone(),
+                        helper.to_path_buf(),
+                    );
+                }
             }
             Ok(())
         })
@@ -313,6 +455,67 @@ fn main() {
 #[cfg(test)]
 mod readiness_tests {
     use super::*;
+
+    /// Panel repair M: the `--check-window-config` judge runs the real
+    /// loader — a well-formed config passes all three items, and a symlinked
+    /// config folder refuses every item with the folder's own code (N).
+    /// Output is stdout-only codes; this test asserts the exit semantics.
+    #[test]
+    fn window_config_check_judges_the_real_loader_outcomes() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::ENV_SWAP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!(
+            "mmos-config-check-{}-{}",
+            std::process::id(),
+            nanos
+        ));
+        let config = home
+            .join(".mastermind")
+            .join("mmos_dev")
+            .join("window-dev-t8");
+        let bin = home.join("bin");
+        fs::create_dir_all(&config).unwrap();
+        fs::create_dir_all(&bin).unwrap();
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o700)).unwrap();
+        let helper = bin.join("helper.sh");
+        fs::write(&helper, "#!/bin/sh\ntrue\n").unwrap();
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+        for (name, contents) in [
+            ("shell-url", "http://127.0.0.1:3780/env-1/thread-1"),
+            ("pair-helper", helper.to_str().unwrap()),
+        ] {
+            fs::write(config.join(name), format!("{contents}\n")).unwrap();
+            fs::set_permissions(config.join(name), fs::Permissions::from_mode(0o600)).unwrap();
+        }
+
+        let previous = std::env::var_os("HOME");
+        std::env::set_var("HOME", &home);
+        let good = run_window_config_check("com.mastermind.os.dev.t8");
+        // A symlinked config folder (to an identical, valid folder) refuses
+        // every item (repair N): replace the directory with a link to a copy.
+        let real = home.join("config-real");
+        fs::rename(&config, &real).unwrap();
+        std::os::unix::fs::symlink(&real, &config).unwrap();
+        let broken = run_window_config_check("com.mastermind.os.dev.t8");
+        match previous {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+
+        assert_eq!(good, 0, "a well-formed config passes all items");
+        assert_eq!(broken, 1, "a symlinked config folder fails the check");
+
+        let _ = fs::remove_file(&config);
+        fs::remove_dir_all(&home).ok();
+    }
 
     #[test]
     fn terminal_callback_dispatch_keeps_existing_auth0_owner_separate() {

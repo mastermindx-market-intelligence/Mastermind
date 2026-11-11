@@ -8,9 +8,21 @@
 //! the server home's files: nothing here admits over loopback TCP or a
 //! request header. The minted URL travels only through the helper's stdout
 //! pipe and a webview navigation; it never enters argv, a log, another
-//! process's environment, or an error. One attempt per launch. On failure the
-//! person is left on a plain page that says in one sentence what to do, and
-//! exactly one input-free log record is written.
+//! process's environment, or an error. On failure the person is left on a
+//! plain page that says in one sentence what to do, and exactly one
+//! input-free log record is written.
+//!
+//! One watchdog per app process (panel repair A): it is started once, when a
+//! helper is configured, and follows the *window instance*, not the window
+//! label — a generation counter that every window build and reopen increments
+//! identifies the instance. When the window is absent, or a different
+//! instance than the one the current phase began on, any minted address is
+//! dropped and the watchdog returns to Armed. After a verified pairing it
+//! logs `PAIRING.DONE` and returns to Armed, so a later arrival at `/pair`
+//! (session expiry, Reload, Back) is paired again without a relaunch; a mint
+//! budget bounds loops. The shell window also carries a navigation allowlist
+//! (panel repair B): only the configured origin, `about:blank` and this
+//! module's own failure page may load.
 //!
 //! The minted address is only ever loaded into a document that was replaced
 //! first: the webview hops through an inert blank page, so whatever script
@@ -20,8 +32,10 @@
 //! to this user or root and admit no group or other writes, so a substituted
 //! executable cannot inherit the config file's trust.
 
+use std::collections::VecDeque;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use url::Url;
@@ -35,6 +49,9 @@ pub const PAIR_PATH: &str = "/pair";
 /// How often the watchdog reads the webview's current URL.
 const POLL_INTERVAL: Duration = Duration::from_millis(750);
 /// Upper bound for the helper (node start-up, server probe, token mint).
+/// One deadline covers reading the helper's output *and* waiting for its
+/// exit (panel repair C): a helper that prints its line and then keeps
+/// running is still cut off here.
 const HELPER_TIMEOUT: Duration = Duration::from_secs(30);
 /// Upper bound for the webview to report the blank page after we navigate to
 /// it, and for the page to leave `/pair` after the minted address is loaded
@@ -56,6 +73,71 @@ const MAX_HELPER_OUTPUT: usize = 8 * 1024;
 /// holding the pairing page's script is unloaded here, before any URL carries
 /// a token, so no surviving page script can read the minted fragment.
 const BLANK_PAGE: &str = "about:blank";
+/// At most this many helper runs (mints) in any trailing
+/// [`MINT_WINDOW`]; past it the watchdog shows one rate-limited failure page
+/// and mints nothing until the window has passed (panel repair A).
+const MINT_LIMIT: usize = 3;
+const MINT_WINDOW: Duration = Duration::from_secs(10 * 60);
+/// The sliding budget that bounds pairing loops.
+pub struct MintPolicy {
+    mints: VecDeque<Instant>,
+    window: Duration,
+    limit: usize,
+}
+
+impl MintPolicy {
+    pub fn new() -> Self {
+        MintPolicy {
+            mints: VecDeque::new(),
+            window: MINT_WINDOW,
+            limit: MINT_LIMIT,
+        }
+    }
+
+    fn prune(&mut self, now: Instant) {
+        while self
+            .mints
+            .front()
+            .is_some_and(|at| now.duration_since(*at) > self.window)
+        {
+            self.mints.pop_front();
+        }
+    }
+
+    /// A new mint is currently allowed (fewer than [`MINT_LIMIT`] mints in
+    /// the trailing [`MINT_WINDOW`]).
+    pub fn can_mint(&mut self, now: Instant) -> bool {
+        self.prune(now);
+        self.mints.len() < self.limit
+    }
+
+    /// Count one mint attempt (a helper run, successful or not).
+    pub fn record(&mut self, now: Instant) {
+        self.mints.push_back(now);
+    }
+}
+
+impl Default for MintPolicy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Identifies the current main-window *instance*. Every build and reopen of
+/// the shell window increments it; the watchdog compares it against the
+/// generation its current phase began on, so a window that was closed and
+/// rebuilt can never inherit a phase minted for a different instance.
+static WINDOW_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Called by the one shared window-building path on every successful build.
+pub fn bump_window_generation() -> u64 {
+    WINDOW_GENERATION.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// The current main-window instance's generation.
+pub fn window_generation() -> u64 {
+    WINDOW_GENERATION.load(Ordering::SeqCst)
+}
 
 /// Two URLs are on the same origin (scheme, host, port).
 pub fn same_origin(a: &Url, b: &Url) -> bool {
@@ -117,6 +199,9 @@ pub enum PairingFailure {
     /// The exchange seemed to finish, but the configured address bounced
     /// straight back to the pairing page: no session was established.
     NoSession,
+    /// More than [`MINT_LIMIT`] mints inside [`MINT_WINDOW`]: the watchdog
+    /// refuses to keep minting until the budget window has passed.
+    RateLimited,
 }
 
 impl PairingFailure {
@@ -131,6 +216,7 @@ impl PairingFailure {
             Self::LoadFailed => "load_failed",
             Self::ExchangeTimeout => "exchange_timeout",
             Self::NoSession => "no_session",
+            Self::RateLimited => "rate_limited",
         }
     }
 
@@ -140,14 +226,17 @@ impl PairingFailure {
 }
 
 /// The helper path is trusted only when the leaf is a regular executable
-/// file (or a symlink to one) owned by this user or root, every directory
-/// component is a real directory owned by this user or root, and nothing
-/// along the path admits group or other writes. A root-owned symlink
-/// component is allowed (macOS `/var`, `/tmp`), because only root can point
-/// it; a user-owned symlink component is this user's own act and equally
-/// fine, but any component another user could rewrite voids the trust: the
-/// 0600 config names a path, and a path through a writable directory is not
-/// an identity.
+/// file owned by this user or root, every directory component of the
+/// **resolved** path is a real directory owned by this user or root with no
+/// group or other write, and every symlink component on the path **as
+/// written** is owned by this user or root (macOS `/var`, `/tmp` are root's
+/// and fine). Panel repair K: the whole path is canonicalized first and the
+/// ownership/no-write walk runs on every component of the resolved path —
+/// an intermediate symlink used to be skipped after an ownership check and
+/// the folder it pointed into was never examined, so an own link into a
+/// world-writable directory could smuggle a planted helper. Any component
+/// another user could rewrite voids the trust: the 0600 config names a
+/// path, and a path through a writable directory is not an identity.
 pub fn helper_is_trusted(path: &Path) -> bool {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
@@ -157,29 +246,36 @@ pub fn helper_is_trusted(path: &Path) -> bool {
         meta.permissions().mode() & 0o022 == 0
     };
 
-    let mut prefix = PathBuf::new();
+    // The path as written: every symlink component must be ours or root's.
+    // (Only root can point a root-owned link; a user-owned link is this
+    // user's own act. Who owns what the link *targets* is decided by the
+    // resolved walk below.)
+    let mut written = PathBuf::new();
     for component in path.components() {
+        written.push(component);
+        let Ok(meta) = std::fs::symlink_metadata(&written) else {
+            return false;
+        };
+        if meta.file_type().is_symlink() && !owned_by_us(&meta) {
+            return false;
+        }
+    }
+
+    // The resolved path: walk every component. A group- or other-writable
+    // directory anywhere in the real chain — including one an intermediate
+    // symlink pointed into — fails the walk.
+    let Ok(resolved) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    let mut prefix = PathBuf::new();
+    for component in resolved.components() {
         prefix.push(component);
         let Ok(meta) = std::fs::symlink_metadata(&prefix) else {
             return false;
         };
-        let is_leaf = prefix == path;
+        let is_leaf = prefix == resolved;
         if meta.file_type().is_symlink() {
-            if !owned_by_us(&meta) {
-                return false;
-            }
-            if is_leaf {
-                // Where the link points must pass the same walk; otherwise a
-                // link into a group-writable directory would inherit trust.
-                match std::fs::canonicalize(&prefix) {
-                    Ok(resolved) if resolved != prefix => return helper_is_trusted(&resolved),
-                    Ok(_) => return false,
-                    Err(_) => return false,
-                }
-            }
-            // An intermediate symlink must be ours (or root's, like macOS
-            // `/var`); the components after it are checked through the link.
-            continue;
+            return false; // canonicalize left a link behind: refuse
         }
         if is_leaf {
             if !meta.is_file() || !owned_by_us(&meta) || !no_group_other_write(&meta) {
@@ -200,8 +296,15 @@ pub fn helper_is_trusted(path: &Path) -> bool {
 /// The helper is executed with a minimal environment (its own defaults decide
 /// which server home it serves) and its stderr is discarded unread, so no
 /// child diagnostics can carry a secret into this process. Stdout must be
-/// exactly one line: the pairing URL, which must be loopback http and on the
-/// same origin as the configured address.
+/// exactly one line: the pairing URL, which must be loopback http, on the
+/// same origin as the configured address, exactly `/pair` with no query and
+/// a fragment that starts with `token=` (panel repair D).
+///
+/// Panel repair C: one deadline ([`HELPER_TIMEOUT`]) covers reading the
+/// output and waiting for the exit together. The helper runs in its own
+/// process group and the whole group is killed at the deadline, so a
+/// pipeline the helper started cannot outlive it; the reader thread is
+/// always joined.
 pub fn run_pair_helper(helper: &Path, origin: &Url) -> Result<Url, PairingFailure> {
     if !helper_is_trusted(helper) {
         return Err(PairingFailure::HelperUntrusted);
@@ -221,6 +324,14 @@ pub fn run_pair_helper(helper: &Path, origin: &Url) -> Result<Url, PairingFailur
             "TMPDIR",
             std::env::var_os("TMPDIR").unwrap_or_else(|| "/tmp".into()),
         );
+    // The helper gets its own process group: at the deadline the whole group
+    // is killed, not just the leaf shell, so a `t3 pair` it started cannot
+    // keep running (and minting) after the window has given up on it.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     let mut child = command.spawn().map_err(|_| PairingFailure::HelperLaunch)?;
     let mut stdout = child
         .stdout
@@ -247,6 +358,7 @@ pub fn run_pair_helper(helper: &Path, origin: &Url) -> Result<Url, PairingFailur
         let _ = sender.send(collected);
     });
 
+    // One deadline for reading and exiting.
     let deadline = Instant::now() + HELPER_TIMEOUT;
     let collected = loop {
         match receiver.recv_timeout(POLL_INTERVAL) {
@@ -256,16 +368,33 @@ pub fn run_pair_helper(helper: &Path, origin: &Url) -> Result<Url, PairingFailur
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    kill_helper_group(&mut child);
+                    let _ = reader.join();
                     return Err(PairingFailure::HelperTimeout);
                 }
                 // The reader is still running; keep waiting for it.
             }
         }
     };
+    // The output is complete; the process must still exit before the same
+    // deadline (a wrapper that prints its line and keeps working is refused
+    // here, not allowed to hang the watchdog with the URL already read).
+    let status = loop {
+        if Instant::now() >= deadline {
+            kill_helper_group(&mut child);
+            let _ = reader.join();
+            return Err(PairingFailure::HelperTimeout);
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(_) => {
+                let _ = reader.join();
+                return Err(PairingFailure::HelperExit);
+            }
+        }
+    };
     let _ = reader.join();
-    let status = child.wait().map_err(|_| PairingFailure::HelperExit)?;
     if !status.success() {
         return Err(PairingFailure::HelperExit);
     }
@@ -278,7 +407,32 @@ pub fn run_pair_helper(helper: &Path, origin: &Url) -> Result<Url, PairingFailur
     if !same_origin(&url, origin) {
         return Err(PairingFailure::OriginMismatch);
     }
+    if url.path() != PAIR_PATH
+        || url.query().is_some()
+        || !url.fragment().unwrap_or_default().starts_with("token=")
+    {
+        return Err(PairingFailure::HelperOutput);
+    }
     Ok(url)
+}
+
+/// Kill the helper's whole process group and reap the direct child. The
+/// reader thread is joined by the caller on every path.
+#[cfg(unix)]
+fn kill_helper_group(child: &mut std::process::Child) {
+    let pid = child.id() as libc::pid_t;
+    // The child is its own group leader (process_group(0)), so -pid is the
+    // group: the shell, the `t3 pair` it ran and any other pipeline member.
+    unsafe {
+        libc::kill(-pid, libc::SIGKILL);
+    }
+    let _ = child.wait();
+}
+
+#[cfg(not(unix))]
+fn kill_helper_group(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// The one sentence the failure page shows.
@@ -304,6 +458,83 @@ pub fn failure_page_url() -> Url {
         }
     }
     Url::parse(&encoded).expect("failure page data url must parse")
+}
+
+/// What the shell window's navigation handler (panel repair B) does with a
+/// URL the page is trying to load.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavDecision {
+    /// Load it in the window.
+    Allow,
+    /// Refuse it in the window; it is an outside http(s) address, which the
+    /// app opens in the person's default browser instead.
+    External,
+    /// Refuse it in the window; nothing else happens.
+    Refuse,
+}
+
+/// The navigation allowlist for the shell window: the configured origin
+/// (scheme, host and port exact), the inert blank page used as the token's
+/// disclosure boundary, and this module's own failure page (exact constant).
+/// Nothing else is loadable in the window; every other http or https address
+/// is [`NavDecision::External`].
+pub fn navigation_allowed(url: &Url, origin: &Url, failure_page: &str) -> NavDecision {
+    if same_origin(url, origin) {
+        return NavDecision::Allow;
+    }
+    if url.as_str() == BLANK_PAGE || url.as_str() == failure_page {
+        return NavDecision::Allow;
+    }
+    if url.scheme() == "http" || url.scheme() == "https" {
+        NavDecision::External
+    } else {
+        NavDecision::Refuse
+    }
+}
+
+/// Throttle for refused-navigation records: a page that keeps retrying a
+/// refused address must not grow the log without bound.
+static LAST_NAV_LOG: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
+const NAV_LOG_INTERVAL: Duration = Duration::from_secs(60);
+
+/// One input-free record that a navigation was refused by the allowlist (at
+/// most one per [`NAV_LOG_INTERVAL`]); the address itself is never recorded.
+pub fn log_navigation_refused() {
+    let throttle = (|| {
+        let mut last = LAST_NAV_LOG.lock().ok()?;
+        let now = Instant::now();
+        let due = last.is_none_or(|at| now.duration_since(at) >= NAV_LOG_INTERVAL);
+        if due {
+            *last = Some(now);
+        }
+        Some(due)
+    })()
+    .unwrap_or(false);
+    if !throttle {
+        return;
+    }
+    if let Some(root) = shell_mode::dev_root() {
+        if let Ok(log) = DevLog::open(&root.join("app.log")) {
+            let _ = log.native_failure("shell_mode", "SHELL_NAV.REFUSED");
+        }
+    }
+    eprintln!(
+        "Mastermind OS shell window: navigation refused; outside http(s) addresses open in the default browser."
+    );
+}
+
+/// One input-free record that the failure explanation page itself could not
+/// be loaded (panel repair J): the person was left on whatever the webview
+/// was showing, and the record is the only trace of that.
+pub fn log_failure_page_refused() {
+    if let Some(root) = shell_mode::dev_root() {
+        if let Ok(log) = DevLog::open(&root.join("app.log")) {
+            let _ = log.native_failure("shell_pairing", "PAIRING.FAILED_PAGE.refused");
+        }
+    }
+    eprintln!(
+        "Mastermind OS shell pairing: the failure page itself could not be loaded."
+    );
 }
 
 /// Write exactly one input-free failure record to the dev log.
@@ -419,7 +650,133 @@ fn decide(phase: &Phase, current: Option<&Url>, original: &Url) -> Decision {
     }
 }
 
-/// Start the once-per-launch pairing watchdog for one shell window.
+/// The per-tick decision of the process-wide watchdog, including the
+/// window-identity and mint-budget gates that wrap [`decide`] (panel
+/// repair A).
+#[derive(Debug)]
+pub(crate) enum Action {
+    /// Nothing to do this tick.
+    Wait,
+    /// The pairing page appeared and a mint is allowed: run the helper.
+    Mint,
+    /// The blank page is showing: load the minted address.
+    LoadMinted(Url),
+    /// The exchange finished: return the window to the configured address.
+    ReturnToThread,
+    /// A session is verified: log `PAIRING.DONE` and re-arm.
+    Verified,
+    /// Show the failure page for this input-free reason, log once, re-arm.
+    Fail(PairingFailure),
+}
+
+/// The state of the one-per-process pairing watchdog, decided purely from
+/// (phase, window generation, current URL, configured address, mint budget).
+pub struct WatchdogCore {
+    phase: Phase,
+    /// The window generation the current phase belongs to.
+    generation: u64,
+    mints: MintPolicy,
+    /// Whether the rate-limited failure page has already been shown for the
+    /// current blocked episode (one page per episode).
+    rate_limit_shown: bool,
+}
+
+impl WatchdogCore {
+    pub fn new(generation: u64) -> Self {
+        WatchdogCore {
+            phase: Phase::Armed,
+            generation,
+            mints: MintPolicy::new(),
+            rate_limit_shown: false,
+        }
+    }
+
+    pub fn phase_is_armed(&self) -> bool {
+        matches!(self.phase, Phase::Armed)
+    }
+
+    /// One poll: follows the window instance (not the label), drops any
+    /// minted address when the window is absent or replaced, and gates mints
+    /// on the sliding budget.
+    pub fn observe(
+        &mut self,
+        generation: u64,
+        current: Option<&Url>,
+        original: &Url,
+        now: Instant,
+    ) -> Action {
+        if generation != self.generation {
+            // A different window instance than the one this phase began on:
+            // drop any minted address and return to Armed.
+            self.generation = generation;
+            self.phase = Phase::Armed;
+        }
+        let Some(current) = current else {
+            // The window is absent: same reset, and nothing to do.
+            self.phase = Phase::Armed;
+            return Action::Wait;
+        };
+        if self.phase_is_armed() {
+            if !needs_pairing(current, original) {
+                // Off the pairing page with budget available again: a fresh
+                // episode may later show its own rate-limited page.
+                if self.mints.can_mint(now) {
+                    self.rate_limit_shown = false;
+                }
+                return Action::Wait;
+            }
+            if !self.mints.can_mint(now) {
+                if !self.rate_limit_shown {
+                    self.rate_limit_shown = true;
+                    return Action::Fail(PairingFailure::RateLimited);
+                }
+                return Action::Wait;
+            }
+            return Action::Mint;
+        }
+        match decide(&self.phase, Some(current), original) {
+            Decision::Wait => Action::Wait,
+            Decision::Mint => Action::Mint,
+            Decision::LoadMinted(url) => Action::LoadMinted(url),
+            Decision::ReturnToThread => Action::ReturnToThread,
+            Decision::Verified => Action::Verified,
+            Decision::NoSession => Action::Fail(PairingFailure::NoSession),
+            Decision::TimedOut => Action::Fail(PairingFailure::ExchangeTimeout),
+        }
+    }
+
+    /// Count one mint attempt (the helper is about to run).
+    pub fn mint_attempted(&mut self, now: Instant) {
+        self.mints.record(now);
+    }
+
+    /// The webview was blanked; hold the minted address until the blank page
+    /// is observed.
+    pub fn blanking(&mut self, pairing_url: Url) {
+        self.phase = Phase::Blanking { pairing_url, since: Instant::now() };
+    }
+
+    /// The minted address was loaded.
+    pub fn awaiting(&mut self) {
+        self.phase = Phase::Awaiting { since: Instant::now() };
+    }
+
+    /// The window was returned to the configured address.
+    pub fn verifying(&mut self) {
+        self.phase = Phase::Verifying { since: Instant::now() };
+    }
+
+    /// Return to Armed, keeping the generation and the mint budget.
+    pub fn rearm(&mut self) {
+        self.phase = Phase::Armed;
+    }
+}
+
+/// Start the one-per-process pairing watchdog (panel repair A). Called once
+/// from `setup` when a helper is configured; never per window build. The
+/// reopen path only rebuilds the window (through the shared builder, which
+/// bumps the generation), and this thread adopts the new instance from
+/// Armed.
 ///
 /// Polls the webview's current URL (the unauthenticated redirect to `/pair`
 /// is a client-side history change, so no navigation event fires for it).
@@ -428,61 +785,77 @@ fn decide(phase: &Phase, current: Option<&Url>, original: &Url) -> Decision {
 /// returns the window to the address it was configured with — and believes
 /// the exchange only after that address stays off the pairing page for
 /// [`VERIFY_HOLD`], so a bounce back is recorded as [`PairingFailure::NoSession`]
-/// rather than success. Any terminal state ends the watchdog; nothing pairs
-/// twice in one launch.
+/// rather than success. A verified pairing logs `PAIRING.DONE` and re-arms,
+/// so a later arrival at `/pair` pairs again; a failure shows the failure
+/// page, logs once, and re-arms when the window is next seen on the
+/// configured origin. The return to the configured address uses
+/// `location.replace`, so the spent one-time address is replaced in the back
+/// list instead of remaining behind the person (panel repair E).
 pub fn spawn_watchdog(app: tauri::AppHandle, window_label: &str, original: Url, helper: PathBuf) {
     let window_label = window_label.to_string();
     std::thread::spawn(move || {
         use tauri::Manager;
         let blank = Url::parse(BLANK_PAGE).expect("blank page url must parse");
-        let mut phase = Phase::Armed;
+        let mut core = WatchdogCore::new(window_generation());
         loop {
             std::thread::sleep(POLL_INTERVAL);
-            let window = match app.get_webview_window(&window_label) {
-                Some(window) => window,
-                None => continue,
+            let generation = window_generation();
+            let window = app.get_webview_window(&window_label);
+            let current = window.as_ref().and_then(|window| window.url().ok());
+            let action = core.observe(generation, current.as_ref(), &original, Instant::now());
+            let Some(window) = window else {
+                continue;
             };
-            let current = window.url().ok();
-            match decide(&phase, current.as_ref(), &original) {
-                Decision::Wait => {}
-                Decision::Mint => match run_pair_helper(&helper, &original) {
-                    Ok(pairing_url) => {
-                        if window.navigate(blank.clone()).is_err() {
-                            fail(&window, PairingFailure::LoadFailed);
-                            return;
+            match action {
+                Action::Wait => {}
+                Action::Mint => {
+                    core.mint_attempted(Instant::now());
+                    match run_pair_helper(&helper, &original) {
+                        Ok(pairing_url) => {
+                            if window.navigate(blank.clone()).is_err() {
+                                fail(&window, PairingFailure::LoadFailed);
+                                core.rearm();
+                                continue;
+                            }
+                            core.blanking(pairing_url);
                         }
-                        phase = Phase::Blanking { pairing_url, since: Instant::now() };
+                        Err(failure) => {
+                            fail(&window, failure);
+                            core.rearm();
+                        }
                     }
-                    Err(failure) => {
-                        fail(&window, failure);
-                        return;
-                    }
-                },
-                Decision::LoadMinted(pairing_url) => {
+                }
+                Action::LoadMinted(pairing_url) => {
                     if window.navigate(pairing_url).is_err() {
                         fail(&window, PairingFailure::LoadFailed);
-                        return;
+                        core.rearm();
+                        continue;
                     }
-                    phase = Phase::Awaiting { since: Instant::now() };
+                    core.awaiting();
                 }
-                Decision::ReturnToThread => {
-                    if window.navigate(original.clone()).is_err() {
+                Action::ReturnToThread => {
+                    // replace(), not a plain navigation: the history entry
+                    // that holds the spent minted address is overwritten, so
+                    // Back cannot walk into it.
+                    let script = format!(
+                        "location.replace({})",
+                        serde_json::to_string(original.as_str())
+                            .expect("thread address serializes as json")
+                    );
+                    if window.eval(&script).is_err() {
                         fail(&window, PairingFailure::LoadFailed);
-                        return;
+                        core.rearm();
+                        continue;
                     }
-                    phase = Phase::Verifying { since: Instant::now() };
+                    core.verifying();
                 }
-                Decision::Verified => {
+                Action::Verified => {
                     log_pairing_done();
-                    return;
+                    core.rearm();
                 }
-                Decision::NoSession => {
-                    fail(&window, PairingFailure::NoSession);
-                    return;
-                }
-                Decision::TimedOut => {
-                    fail(&window, PairingFailure::ExchangeTimeout);
-                    return;
+                Action::Fail(failure) => {
+                    fail(&window, failure);
+                    core.rearm();
                 }
             }
         }
@@ -491,7 +864,11 @@ pub fn spawn_watchdog(app: tauri::AppHandle, window_label: &str, original: Url, 
 
 fn fail(window: &tauri::WebviewWindow, failure: PairingFailure) {
     log_pairing_failure(failure);
-    let _ = window.navigate(failure_page_url());
+    if window.navigate(failure_page_url()).is_err() {
+        // Panel repair J: the explanation itself never arrived; leave a
+        // record so the log does not claim a page the person never saw.
+        log_failure_page_refused();
+    }
 }
 
 #[cfg(test)]
@@ -646,16 +1023,356 @@ mod tests {
             assert_eq!(run_pair_helper(&helper, &origin), Err(expected), "{name}");
         }
 
-        // A helper that never finishes is killed at the deadline. The test
-        // uses the real timeout, so it costs ~30 seconds once.
-        let sleeper = write_helper(&dir, "sleep.sh", "#!/bin/sh\nsleep 600\n");
+        // A helper that never finishes is killed at the deadline, together
+        // with the whole process group it started: the grandchild it left
+        // running must not survive the timeout. The test uses the real
+        // timeout, so it costs ~30 seconds once.
+        let grandchild_pid_file = dir.join("grandchild.pid");
+        let grandchild_ref = grandchild_pid_file.display().to_string();
+        let sleeper = write_helper(
+            &dir,
+            "sleep.sh",
+            &format!(
+                "#!/bin/sh\nsleep 600 &\necho $! > '{grandchild_ref}'\nsleep 600\n"
+            ),
+        );
         let started = Instant::now();
         assert_eq!(
             run_pair_helper(&sleeper, &origin),
             Err(PairingFailure::HelperTimeout)
         );
         assert!(started.elapsed() >= HELPER_TIMEOUT);
+        let grandchild: i32 = fs::read_to_string(&grandchild_pid_file)
+            .expect("grandchild pid recorded")
+            .trim()
+            .parse()
+            .expect("grandchild pid is an integer");
+        let mut grandchild_gone = false;
+        for _ in 0..40 {
+            if unsafe { libc::kill(grandchild, 0) } != 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+            {
+                grandchild_gone = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        if !grandchild_gone {
+            unsafe { libc::kill(grandchild, libc::SIGKILL) };
+            panic!("the helper's grandchild survived the deadline kill");
+        }
         fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Panel repair C: one deadline covers reading and exiting together. A
+    /// helper whose output is complete but whose process keeps running is
+    /// refused at the deadline instead of hanging the watchdog (and losing
+    /// the record) while holding an already-minted address.
+    #[test]
+    fn run_pair_helper_deadline_covers_read_and_exit_together() {
+        let dir = unique_temp_dir();
+        let origin = url("http://127.0.0.1:3780/env-1/thread-1");
+        let lingering = write_helper(
+            &dir,
+            "linger.sh",
+            "#!/bin/sh\nprintf 'http://127.0.0.1:3780/pair#token=synthetic0123456789\\n'\nexec 1>&-\nsleep 600\n",
+        );
+        let started = Instant::now();
+        assert_eq!(
+            run_pair_helper(&lingering, &origin),
+            Err(PairingFailure::HelperTimeout)
+        );
+        // It must return at the deadline, not when the helper eventually
+        // exits on its own (600 s away).
+        assert!(started.elapsed() < Duration::from_secs(120));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Panel repair D: the minted address is accepted only when its path is
+    /// exactly `/pair`, it carries no query, and its fragment starts with
+    /// `token=`. A same-origin address of any other shape is helper output
+    /// failure, not a pairing address.
+    #[test]
+    fn run_pair_helper_requires_the_minted_address_shape() {
+        let dir = unique_temp_dir();
+        let origin = url("http://127.0.0.1:3780/env-1/thread-1");
+        let cases: [(&str, &str, PairingFailure); 5] = [
+            (
+                "wrong-path.sh",
+                "#!/bin/sh\nprintf 'http://127.0.0.1:3780/other#token=x\\n'\n",
+                PairingFailure::HelperOutput,
+            ),
+            (
+                "query-present.sh",
+                "#!/bin/sh\nprintf 'http://127.0.0.1:3780/pair?next=/t#token=x\\n'\n",
+                PairingFailure::HelperOutput,
+            ),
+            (
+                "empty-fragment.sh",
+                "#!/bin/sh\nprintf 'http://127.0.0.1:3780/pair\\n'\n",
+                PairingFailure::HelperOutput,
+            ),
+            (
+                "other-fragment.sh",
+                "#!/bin/sh\nprintf 'http://127.0.0.1:3780/pair#session=x\\n'\n",
+                PairingFailure::HelperOutput,
+            ),
+            (
+                "pair-subpath.sh",
+                "#!/bin/sh\nprintf 'http://127.0.0.1:3780/pair/x#token=x\\n'\n",
+                PairingFailure::HelperOutput,
+            ),
+        ];
+        for (name, body, expected) in cases {
+            let helper = write_helper(&dir, name, body);
+            assert_eq!(run_pair_helper(&helper, &origin), Err(expected), "{name}");
+        }
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Panel repair A: the mint budget bounds pairing loops.
+    #[test]
+    fn mint_budget_allows_three_mints_in_any_ten_minutes() {
+        let mut policy = MintPolicy::new();
+        let t0 = Instant::now();
+        assert!(policy.can_mint(t0));
+        for index in 0..MINT_LIMIT {
+            policy.record(t0 + Duration::from_secs(index as u64));
+        }
+        assert!(!policy.can_mint(t0 + Duration::from_secs(30)));
+        // Inside the window nothing is allowed...
+        assert!(!policy.can_mint(t0 + MINT_WINDOW - Duration::from_secs(1)));
+        // ...and once the oldest mint has fallen out of the window, mints
+        // are allowed again (the window has passed), with a fresh budget of
+        // three.
+        assert!(policy.can_mint(t0 + MINT_WINDOW + Duration::from_secs(1)));
+        for index in 0..MINT_LIMIT {
+            policy.record(t0 + MINT_WINDOW + Duration::from_secs(1 + index as u64));
+        }
+        assert!(!policy.can_mint(t0 + MINT_WINDOW + Duration::from_secs(30)));
+    }
+
+    /// Panel repair A: the watchdog follows the window instance, drops any
+    /// minted address when the window is absent or replaced, re-arms after
+    /// a verified pairing, and shows the rate-limited page once per blocked
+    /// episode.
+    #[test]
+    fn watchdog_core_follows_the_window_and_rearms() {
+        let original = url("http://127.0.0.1:3780/env-1/thread-1");
+        let minted = url("http://127.0.0.1:3780/pair#token=synthetic0123456789");
+        let failure_page = failure_page_url();
+        let now = Instant::now();
+
+        // Verified pairing logs DONE and re-arms: a later arrival at /pair
+        // (session expiry, Reload, Back) mints again without a relaunch.
+        let mut core = WatchdogCore::new(1);
+        assert!(matches!(
+            core.observe(1, Some(&original), &original, now),
+            Action::Wait
+        ));
+        assert!(matches!(
+            core.observe(1, Some(&url("http://127.0.0.1:3780/pair")), &original, now),
+            Action::Mint
+        ));
+        core.mint_attempted(now);
+        core.blanking(minted.clone());
+        assert!(!core.phase_is_armed());
+        // The window is absent: any minted address is dropped, Armed again.
+        assert!(matches!(core.observe(1, None, &original, now), Action::Wait));
+        assert!(core.phase_is_armed());
+        // A replaced window (generation moved) gets the same reset, even
+        // mid-exchange.
+        core.blanking(minted.clone());
+        assert!(matches!(
+            core.observe(2, Some(&original), &original, now),
+            Action::Wait
+        ));
+        assert!(core.phase_is_armed());
+        // A failure shows the failure page once and re-arms; the failure
+        // page itself is not the configured origin, so the watchdog waits
+        // until the window is next seen there.
+        core.mint_attempted(now);
+        assert!(matches!(
+            core.observe(2, Some(&url("http://127.0.0.1:3780/pair")), &original, now),
+            Action::Mint
+        ));
+        assert!(core.phase_is_armed());
+        assert!(matches!(
+            core.observe(2, Some(&failure_page), &original, now),
+            Action::Wait
+        ));
+
+        // The full happy path still reaches Verified and re-arms.
+        core.observe(2, Some(&url("http://127.0.0.1:3780/pair")), &original, now);
+        core.mint_attempted(now);
+        core.blanking(minted.clone());
+        assert!(matches!(
+            core.observe(2, Some(&url("about:blank")), &original, now),
+            Action::LoadMinted(_)
+        ));
+        core.awaiting();
+        assert!(matches!(
+            core.observe(
+                2,
+                Some(&url("http://127.0.0.1:3780/env-1/thread-1")),
+                &original,
+                now
+            ),
+            Action::ReturnToThread
+        ));
+        core.verifying();
+        // The hold is measured from phase entry on the real clock, so the
+        // test waits it out instead of inventing a future Instant.
+        std::thread::sleep(VERIFY_HOLD + Duration::from_millis(200));
+        assert!(matches!(
+            core.observe(2, Some(&original), &original, Instant::now()),
+            Action::Verified
+        ));
+        // Verified logs DONE and re-arms on the caller's side of the action,
+        // exactly as the thread loop does.
+        core.rearm();
+        assert!(core.phase_is_armed());
+    }
+
+    /// Panel repair A: at most three mints in any ten minutes; past it, one
+    /// rate-limited failure page and no mint until the window has passed.
+    #[test]
+    fn watchdog_core_rate_limits_the_fourth_mint_with_one_page() {
+        let original = url("http://127.0.0.1:3780/env-1/thread-1");
+        let pair_page = url("http://127.0.0.1:3780/pair");
+        let mut core = WatchdogCore::new(1);
+        let t0 = Instant::now();
+        for _ in 0..MINT_LIMIT {
+            assert!(matches!(core.observe(1, Some(&pair_page), &original, t0), Action::Mint));
+            core.mint_attempted(t0);
+            // Each failed attempt ends on the failure page; the person
+            // returns to the configured origin, which is the pairing page
+            // again.
+            core.rearm();
+        }
+        // The fourth attempt inside the window: one rate-limited page...
+        assert!(matches!(
+            core.observe(1, Some(&pair_page), &original, t0 + Duration::from_secs(5)),
+            Action::Fail(PairingFailure::RateLimited)
+        ));
+        core.rearm();
+        // ...then no page and no mint while the window has not passed.
+        for probe in [6, 60, 300] {
+            assert!(
+                matches!(
+                    core.observe(
+                        1,
+                        Some(&pair_page),
+                        &original,
+                        t0 + Duration::from_secs(probe)
+                    ),
+                    Action::Wait
+                ),
+                "probe at {probe}s"
+            );
+        }
+        // Once the budget window has passed, a mint is allowed again and a
+        // fresh episode can show its own page.
+        assert!(matches!(
+            core.observe(
+                1,
+                Some(&pair_page),
+                &original,
+                t0 + MINT_WINDOW + Duration::from_secs(2)
+            ),
+            Action::Mint
+        ));
+    }
+
+    /// Panel repair B: the navigation allowlist. The configured origin (any
+    /// path, query or fragment), the inert blank page and the failure page
+    /// load; every other http(s) address is External (refused in the window,
+    /// opened in the default browser); everything else is Refuse.
+    #[test]
+    fn navigation_allowlist_permits_only_the_configured_origin_and_two_constants() {
+        let origin = url("http://127.0.0.1:3780/env-1/thread-1");
+        let failure_page = failure_page_url().to_string();
+        let allowed = [
+            "http://127.0.0.1:3780/pair",
+            "http://127.0.0.1:3780/pair#token=synthetic",
+            "http://127.0.0.1:3780/other/thread?x=1",
+            "about:blank",
+        ];
+        for value in allowed {
+            assert_eq!(
+                navigation_allowed(&url(value), &origin, &failure_page),
+                NavDecision::Allow,
+                "{value}"
+            );
+        }
+        assert_eq!(
+            navigation_allowed(&failure_page_url(), &origin, &failure_page),
+            NavDecision::Allow,
+            "the failure page constant must be loadable"
+        );
+        let external = [
+            "http://127.0.0.1:3781/pair",
+            "http://localhost:3780/env-1/thread-1",
+            "http://example.com/",
+            "https://127.0.0.1:3780/env-1/thread-1",
+        ];
+        for value in external {
+            assert_eq!(
+                navigation_allowed(&url(value), &origin, &failure_page),
+                NavDecision::External,
+                "{value}"
+            );
+        }
+        let refused = [
+            "data:text/html,<script>1</script>",
+            "about:srcdoc",
+            "com.mastermind.os://oauth/callback?code=x",
+            "t3code://pair?u=x",
+            "file:///etc/passwd",
+        ];
+        for value in refused {
+            assert_eq!(
+                navigation_allowed(&url(value), &origin, &failure_page),
+                NavDecision::Refuse,
+                "{value}"
+            );
+        }
+    }
+
+    /// Panel repair J: a failure page that could not be loaded leaves one
+    /// input-free record, so the log does not silently claim a page the
+    /// person never saw.
+    #[test]
+    fn failure_page_refusal_is_logged_input_free() {
+        let _guard = crate::ENV_SWAP_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let dir = unique_temp_dir();
+        let previous = std::env::var_os("MMOS_DEV_ROOT");
+        std::env::set_var("MMOS_DEV_ROOT", &dir);
+        log_failure_page_refused();
+        let contents = fs::read_to_string(dir.join("app.log")).expect("app.log written");
+        match previous {
+            Some(value) => std::env::set_var("MMOS_DEV_ROOT", value),
+            None => std::env::remove_var("MMOS_DEV_ROOT"),
+        }
+        let lines: Vec<&str> = contents.lines().filter(|line| !line.trim().is_empty()).collect();
+        assert_eq!(lines.len(), 1, "exactly one record");
+        let record: serde_json::Value = serde_json::from_str(lines[0]).expect("jsonl record");
+        assert_eq!(record["kind"], "native_failure");
+        assert_eq!(record["command"], "shell_pairing");
+        assert_eq!(record["code"], "PAIRING.FAILED_PAGE.refused");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Panel repair A: every build and reopen bumps the generation, and the
+    /// counter is observable, so the watchdog can tell window instances
+    /// apart.
+    #[test]
+    fn window_generation_increments_on_each_bump() {
+        let before = window_generation();
+        let first = bump_window_generation();
+        let second = bump_window_generation();
+        assert!(first > before);
+        assert!(second > first);
+        assert_eq!(window_generation(), second);
     }
 
     /// The helper executable earns the config's trust only through a path
@@ -700,6 +1417,27 @@ mod tests {
         let risky_link = dir.join("risky-link.sh");
         std::os::unix::fs::symlink(&planted, &risky_link).unwrap();
         assert!(!helper_is_trusted(&risky_link));
+        // Panel repair K: an *intermediate* own symlink into a 0777 folder
+        // holding an own 0755 helper must be refused too. The old walk
+        // checked only the link's owner and then skipped the folder it
+        // pointed into, so the planted helper below it inherited trust.
+        let tunnel = dir.join("tunnel"); // own symlink into `open`
+        std::os::unix::fs::symlink(&open, &tunnel).unwrap();
+        let through_link = tunnel.join("planted.sh");
+        assert!(!helper_is_trusted(&through_link));
+        // The same shape through a private directory stays trusted.
+        let private = dir.join("private");
+        fs::create_dir(&private).unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+        let hidden_good = write_helper(
+            &private,
+            "hidden-good.sh",
+            "#!/bin/sh\nprintf 'http://127.0.0.1:3780/pair#token=x\\n'\n",
+        );
+        let private_tunnel = dir.join("private-tunnel");
+        std::os::unix::fs::symlink(&private, &private_tunnel).unwrap();
+        assert!(helper_is_trusted(&private_tunnel.join("hidden-good.sh")));
+        assert!(helper_is_trusted(&hidden_good));
         // ...while one to the trusted helper stays trusted.
         let alias = dir.join("alias.sh");
         std::os::unix::fs::symlink(&good, &alias).unwrap();
@@ -748,6 +1486,7 @@ mod tests {
             PairingFailure::LoadFailed,
             PairingFailure::ExchangeTimeout,
             PairingFailure::NoSession,
+            PairingFailure::RateLimited,
         ]
         .iter()
         .map(|failure| failure.code())
@@ -940,6 +1679,7 @@ mod tests {
 
     #[test]
     fn failure_logging_writes_exactly_one_record_without_the_token() {
+        let _guard = crate::ENV_SWAP_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let dir = unique_temp_dir();
         let previous = std::env::var_os("MMOS_DEV_ROOT");
         std::env::set_var("MMOS_DEV_ROOT", &dir);

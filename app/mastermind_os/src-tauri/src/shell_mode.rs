@@ -176,6 +176,12 @@ pub enum ShellUrlFileRefusal {
     WrongPermissions,
     InvalidContents,
     Url(ShellUrlRefusal),
+    /// Panel repair N: the containing config directory itself is not a real,
+    /// user-owned, mode-0700 directory. Reported for both files alike.
+    ConfigDirSymlink,
+    ConfigDirNotDirectory,
+    ConfigDirWrongOwner,
+    ConfigDirWrongPermissions,
 }
 
 impl ShellUrlFileRefusal {
@@ -188,8 +194,45 @@ impl ShellUrlFileRefusal {
             Self::WrongPermissions => "wrong_permissions".into(),
             Self::InvalidContents => "invalid_contents".into(),
             Self::Url(refusal) => format!("url.{}", refusal.subcode()),
+            Self::ConfigDirSymlink => "config_dir_symlink".into(),
+            Self::ConfigDirNotDirectory => "config_dir_not_directory".into(),
+            Self::ConfigDirWrongOwner => "config_dir_wrong_owner".into(),
+            Self::ConfigDirWrongPermissions => "config_dir_wrong_permissions".into(),
         }
     }
+}
+
+/// Panel repair N: the config directory itself must be a real directory (no
+/// symlink), owned by this user, mode exactly 0700. `None` means the check
+/// passed; a missing directory maps to [`ShellUrlFileRefusal::Missing`] so a
+/// wholly absent config stays the normal no-error case.
+pub fn config_dir_refusal(dir: &std::path::Path) -> Option<ShellUrlFileRefusal> {
+    config_dir_refusal_for_uid(dir, unsafe { libc::getuid() })
+}
+
+#[cfg(unix)]
+fn config_dir_refusal_for_uid(
+    dir: &std::path::Path,
+    current_uid: libc::uid_t,
+) -> Option<ShellUrlFileRefusal> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let metadata = match std::fs::symlink_metadata(dir) {
+        Ok(metadata) => metadata,
+        Err(_) => return Some(ShellUrlFileRefusal::Missing),
+    };
+    if metadata.file_type().is_symlink() {
+        return Some(ShellUrlFileRefusal::ConfigDirSymlink);
+    }
+    if !metadata.is_dir() {
+        return Some(ShellUrlFileRefusal::ConfigDirNotDirectory);
+    }
+    if metadata.uid() != current_uid {
+        return Some(ShellUrlFileRefusal::ConfigDirWrongOwner);
+    }
+    if metadata.permissions().mode() & 0o777 != 0o700 {
+        return Some(ShellUrlFileRefusal::ConfigDirWrongPermissions);
+    }
+    None
 }
 
 /// Log a fixed refusal code only; never the setting path or file contents.
@@ -261,10 +304,27 @@ pub struct ShellConfig {
 /// configured and the window behaves exactly as it did before.
 pub fn read_pair_helper_file(path: &std::path::Path) -> Result<PathBuf, ShellUrlFileRefusal> {
     let value = read_single_line_config_file(path)?;
+    parse_pair_helper_line(&value)
+}
+
+/// The helper line's own shape: one absolute path with no `..` component.
+pub fn parse_pair_helper_line(value: &str) -> Result<PathBuf, ShellUrlFileRefusal> {
     if !value.starts_with('/') || value.contains("..") {
         return Err(ShellUrlFileRefusal::InvalidContents);
     }
     Ok(PathBuf::from(value))
+}
+
+/// Panel repair N: read one config file only after the containing directory
+/// passes the folder check (real directory, user-owned, mode 0700), so both
+/// files refuse a symlinked or loosened config folder with the folder's own
+/// code. An absent folder is the normal missing case. Also the reader the
+/// `--check-window-config` judge uses, so there is exactly one loader.
+pub fn read_config_line(dir: &std::path::Path, name: &str) -> Result<String, ShellUrlFileRefusal> {
+    if let Some(refusal) = config_dir_refusal(dir) {
+        return Err(refusal);
+    }
+    read_single_line_config_file(&dir.join(name))
 }
 
 /// Resolve the shell settings for one bundle identifier from the environment
@@ -300,7 +360,9 @@ pub fn resolve_shell_settings(identifier: &str) -> (Option<Url>, ShellConfig) {
     }
     let config = helper_config(identifier);
     let url = config.dir.as_ref().map(|dir| {
-        match read_shell_url_file(&dir.join(SHELL_URL_CONFIG_NAME)) {
+        match read_config_line(dir, SHELL_URL_CONFIG_NAME)
+            .and_then(|line| parse_shell_url(&line).map_err(ShellUrlFileRefusal::Url))
+        {
             Ok(url) => Some(url),
             Err(ShellUrlFileRefusal::Missing) => None,
             Err(refusal) => {
@@ -322,7 +384,9 @@ fn helper_config(identifier: &str) -> ShellConfig {
     let Some(dir) = fixed_config_dir(identifier, &home) else {
         return ShellConfig { dir: None, pair_helper: None };
     };
-    let pair_helper = match read_pair_helper_file(&dir.join(PAIR_HELPER_CONFIG_NAME)) {
+    let pair_helper = match read_config_line(&dir, PAIR_HELPER_CONFIG_NAME)
+        .and_then(|line| parse_pair_helper_line(&line))
+    {
         Ok(path) => Some(path),
         // Missing is normal: pairing is simply not configured.
         Err(ShellUrlFileRefusal::Missing) => None,
@@ -525,6 +589,70 @@ mod tests {
         }
     }
 
+    /// Panel repair N: the config folder itself must be a real, user-owned,
+    /// mode-0700 directory, and both files refuse a folder that is not —
+    /// each with the folder's own refusal code.
+    #[test]
+    fn config_folder_itself_is_checked_for_both_files() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = unique_temp_dir();
+        let config = root.join("window-dev-t8");
+        fs::create_dir(&config).unwrap();
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).unwrap();
+        for (name, contents) in [
+            (SHELL_URL_CONFIG_NAME, "http://127.0.0.1:3780/env-1/thread-1"),
+            (PAIR_HELPER_CONFIG_NAME, "/usr/bin/true"),
+        ] {
+            fs::write(config.join(name), format!("{contents}\n")).unwrap();
+            fs::set_permissions(config.join(name), fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        assert_eq!(config_dir_refusal(&config), None);
+        assert!(read_config_line(&config, SHELL_URL_CONFIG_NAME).is_ok());
+        assert!(read_config_line(&config, PAIR_HELPER_CONFIG_NAME).is_ok());
+
+        // A loosened folder refuses both files with the folder code.
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            config_dir_refusal(&config),
+            Some(ShellUrlFileRefusal::ConfigDirWrongPermissions)
+        );
+        for name in [SHELL_URL_CONFIG_NAME, PAIR_HELPER_CONFIG_NAME] {
+            assert_eq!(
+                read_config_line(&config, name),
+                Err(ShellUrlFileRefusal::ConfigDirWrongPermissions)
+            );
+        }
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).unwrap();
+
+        // A symlinked folder (even to a valid one) refuses both files.
+        let linked = root.join("window-dev-linked");
+        std::os::unix::fs::symlink(&config, &linked).unwrap();
+        assert_eq!(
+            config_dir_refusal(&linked),
+            Some(ShellUrlFileRefusal::ConfigDirSymlink)
+        );
+        for name in [SHELL_URL_CONFIG_NAME, PAIR_HELPER_CONFIG_NAME] {
+            assert_eq!(
+                read_config_line(&linked, name),
+                Err(ShellUrlFileRefusal::ConfigDirSymlink)
+            );
+        }
+
+        // An absent folder is the normal missing case for both files.
+        assert_eq!(
+            config_dir_refusal(&root.join("absent")),
+            Some(ShellUrlFileRefusal::Missing)
+        );
+        assert_eq!(
+            read_config_line(&root.join("absent"), SHELL_URL_CONFIG_NAME),
+            Err(ShellUrlFileRefusal::Missing)
+        );
+
+        let _ = fs::remove_file(&linked);
+        fs::remove_dir_all(&root).ok();
+    }
+
     #[test]
     fn refuses_everything_but_loopback_http() {
         use ShellUrlRefusal::*;
@@ -562,6 +690,7 @@ mod tests {
 
     #[test]
     fn refusal_logging_writes_one_parseable_record_without_the_input() {
+        let _guard = crate::ENV_SWAP_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         let dir = unique_temp_dir();
         let previous = std::env::var_os("MMOS_DEV_ROOT");
         std::env::set_var("MMOS_DEV_ROOT", &dir);
@@ -631,11 +760,33 @@ mod tests {
     /// S1 attack finding 1 fix: the capability scan must also cover capabilities
     /// declared inline in the merged configs (`app.security.capabilities` resolves
     /// through the same ACL as capabilities/*.json).
+    ///
+    /// Panel repair I: the scan globs every `tauri.conf*.json` in the manifest
+    /// directory instead of a fixed list, so a future variant config (like
+    /// `tauri.conf.t8.json`) cannot silently escape it. A file that matches
+    /// the glob but fails to parse fails the test rather than being skipped.
     #[test]
     fn merged_config_declares_no_inline_remote_capability() {
-        for name in ["tauri.conf.json", "tauri.conf.dev.json"] {
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(name);
-            let text = fs::read_to_string(&path).expect(name);
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut scanned = 0;
+        let mut names: Vec<String> = Vec::new();
+        for entry in fs::read_dir(dir).expect("manifest directory") {
+            let path = entry.expect("manifest entry").path();
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !name.starts_with("tauri.conf") || !name.ends_with(".json") {
+                continue;
+            }
+            names.push(name.to_string());
+        }
+        names.sort();
+        assert!(
+            names.contains(&"tauri.conf.json".to_string()),
+            "the release config must exist"
+        );
+        for name in &names {
+            let text = fs::read_to_string(dir.join(name)).expect(name);
             let value: serde_json::Value = serde_json::from_str(&text).expect(name);
             let caps = &value["app"]["security"]["capabilities"];
             if let Some(entries) = caps.as_array() {
@@ -646,7 +797,10 @@ mod tests {
                     );
                 }
             }
+            scanned += 1;
         }
+        assert_eq!(scanned, names.len());
+        assert!(scanned >= 3, "expected release, dev and t8 configs, saw {names:?}");
     }
 
     /// S1 attack finding 2 fix: exotic loopback spellings and lookalikes.
@@ -892,10 +1046,20 @@ mod tests {
         /// and environment settings must keep winning over the fixed file.
         #[test]
         fn resolve_prefers_environment_then_fixed_file() {
+            let _guard = crate::ENV_SWAP_LOCK.lock().unwrap_or_else(|p| p.into_inner());
             let dir = unique_temp_dir();
-            // Mirror the real layout the release/dev mapping produces.
+            // Mirror the real layout the release/dev mapping produces —
+            // including the repair-N folder contract (real, 0700).
             let config_dir = dir.join(".mastermind").join("mmos_dev").join("window-dev");
             fs::create_dir_all(&config_dir).expect("config dir");
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(
+                    &config_dir,
+                    fs::Permissions::from_mode(0o700),
+                )
+                .expect("config dir mode");
+            }
             write_file(
                 &config_dir,
                 SHELL_URL_CONFIG_NAME,

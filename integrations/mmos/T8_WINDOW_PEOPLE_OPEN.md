@@ -1,12 +1,14 @@
 # T8 — the window a person opens (runbook for the principal)
 
-Lane T8 of program plan V4 (branch `t3/mmos-v4-t8`). The goal: a person
-double-clicks the Mastermind OS app and it opens on the Team project of its
-T3 server, signed in, with no login step — the first time and after the
-session expires. This file is the principal's switch-over runbook for the
-real team server on `127.0.0.1:3780`. The lane itself proved everything on a
-dev bundle (`com.mastermind.os.dev.t8`) against a private dev T3 server on
-port 3797; the team server was never touched by the lane.
+Lane T8 of program plan V4 (branch `t3/mmos-v4-t8`), with the panel-repair
+round of lane T8b on top (branch `t3/mmos-v4-t8b`; what changed and why:
+`integrations/mmos/T8B_PANEL_REPAIRS.md`). The goal: a person double-clicks
+the Mastermind OS app and it opens on the Team project of its T3 server,
+signed in, with no login step — the first time and after the session
+expires. This file is the principal's switch-over runbook for the real team
+server on `127.0.0.1:3780`. The lanes proved everything on a dev bundle
+(`com.mastermind.os.dev.t8`) against private dev T3 servers; the team server
+was never touched by the lanes.
 
 How the app finds its server, in order: the `MM_SHELL_URL_FILE` environment
 variable, then `MM_SHELL_URL`, then a fixed per-user config file. A person
@@ -17,23 +19,56 @@ what serves them:
 |---|---|---|
 | Release (installed) | `com.mastermind.os` | `~/.mastermind/window` |
 | Dev | `com.mastermind.os.dev` | `~/.mastermind/mmos_dev/window-dev` |
-| T8 proof | `com.mastermind.os.dev.t8` | `~/.mastermind/mmos_dev/window-dev-t8` |
+| T8/T8b proof | `com.mastermind.os.dev.t8` | `~/.mastermind/mmos_dev/window-dev-t8` |
 
 Each directory holds two 0600 files: `shell-url` (one line: the loopback
 thread address, never a pairing token) and `pair-helper` (one line: absolute
-path to an executable that mints a fresh pairing URL). No file means today's
-ordinary window with no error. When the server answers with its pairing
-page — first run, or an expired or cleared session cookie — the window runs
-the helper once, loads the minted one-time address, and lands signed-in on
-the configured thread. The helper reuses `t3 pair`; its only authority is
-being the macOS user who owns the server home's files. Nothing is admitted
-over loopback TCP or a request header, and the token never enters argv, a
-log, another process's environment, or evidence.
+path to an executable that mints a fresh pairing URL — for a dev server,
+a wrapper script; see below). No file means today's ordinary window with no
+error. When the server answers with its pairing page — first run, or an
+expired or cleared session cookie — the window's pairing watchdog (one per
+app process, started only when the config names a helper) runs the helper,
+loads the minted one-time address, and lands signed-in on the configured
+thread. After a verified pairing the watchdog re-arms: a *later* `/pair`
+arrival in the same launch (session revoked or expired mid-run) re-pairs
+the same way, with no relaunch. It mints at most 3 addresses in any
+10 minutes; past that it shows one plain rate-limit page (log record
+`PAIRING.FAILED.rate_limited`) and mints nothing more until the window has
+passed. After any pairing failure the window shows its one-sentence failure
+page and the watchdog re-arms when the window is next seen on the
+configured origin; `View > Go to Server` takes the window back to the
+configured address at any time. The helper reuses `t3 pair`; its only
+authority is being the macOS user who owns the server home's files. Nothing
+is admitted over loopback TCP or a request header, and the token never
+enters argv, a log, another process's environment, or evidence.
+
+Only one instance of the app runs: a second launch focuses the first
+window (rebuilding it like a Dock reopen if it was closed) and starts
+nothing. The shell window also carries a navigation allowlist: exactly the
+configured origin (scheme, host and port), the app's own inert blank page
+and its failure page load in the window; any other http/https address is
+refused in the window and opened in the person's default browser, and
+everything else is refused and logged.
+
+Because the window clears the helper's environment, `WINDOW_PAIR_T3_BIN` /
+`WINDOW_PAIR_T3_HOME` cannot aim a config-named helper at a dev server. The
+supported way is a wrapper script that exports those two variables and
+execs `window_pair_helper.sh`, named in the config via
+`window_config.sh write --pair-helper <wrapper>`.
 
 ## 1. Build the release bundle from this branch
 
+Prerequisites, all real: `node_modules` installed in `app/mastermind_os`
+(`npm ci` — the tauri CLI is `node_modules/.bin/tauri`), the
+`/Volumes/Mastermind` build volume mounted (the command below puts both the
+cargo cache and the bundle on it; unmounted, the build fails rather than
+falling back to the internal disk), and whatever code signing this machine
+does by default — an unconfigured Mac ad-hoc signs, which is enough to run
+locally; a distribution certificate is only needed for handing the bundle
+to another Mac.
+
 ```sh
-git -C <your checkout of t3/mmos-v4-t8> rev-parse HEAD   # record it
+git -C <your checkout of t3/mmos-v4-t8b> rev-parse HEAD   # record it
 cd <your checkout>/app/mastermind_os
 MM_SOURCE_REVISION=$(git rev-parse HEAD) \
 MM_BUILD_IDENTITY=$(whoami)-release \
@@ -45,7 +80,7 @@ The bundle lands at
 `/Volumes/Mastermind/build-cache/t8-release-cargo-target/release/bundle/macos/Mastermind OS.app`
 with identifier `com.mastermind.os`, so it reads `~/.mastermind/window`. Use
 a target directory of your own; never `t3-t1w-cargo-target` (another lane's)
-or `t3-t8-cargo-target` (this lane's debug artifacts).
+or `t8b-cargo-target` (this lane's debug artifacts).
 
 Honesty note: this lane proved the code on the dev/t8 bundle, not on a
 release build. The release mapping itself (`com.mastermind.os` reading
@@ -58,18 +93,28 @@ build-config question, not a regression in this lane.
 ## 2. Write the config that points it at the team server
 
 Pick the thread the window should open on. The roster file is read-only for
-you (never send a request to port 3780):
+you (never send a request to port 3780), and it prints as instance id and
+name only — the addresses stay out of your terminal scrollback. To get the
+one address you are about to write into the config, print it for that one
+teammate:
 
 ```sh
 sh tools/mmos_team_server/open_team_window.sh --list   # instance ids and names
-/usr/bin/python3 -I -c 'import json;[print(t["instanceId"],t["url"]) for t in json.load(open("'$HOME'/.mastermind/t3-team/run/team_urls.json"))["teammates"]]'
+/usr/bin/python3 -I -c 'import json,sys
+ts = json.load(open(sys.argv[1]))["teammates"]
+print(next(t["url"] for t in ts if t["instanceId"] == sys.argv[2]))' \
+  "$HOME/.mastermind/t3-team/run/team_urls.json" <instance-id>
 ```
 
 Put the pairing helper somewhere stable (a checkout path dies with the
 worktree). It needs no environment overrides — its defaults are exactly the
-team server's own `t3` and home:
+team server's own `t3` and home. Create the directory first, and keep it
+0700: the app's helper trust walk requires no group/other write on every
+directory the resolved helper path passes through:
 
 ```sh
+mkdir -p ~/.mastermind/t3-team-server/bin
+chmod 700 ~/.mastermind/t3-team-server/bin
 cp tools/mmos_team_server/window_pair_helper.sh \
    ~/.mastermind/t3-team-server/bin/window-pair-helper.sh
 chmod 700 ~/.mastermind/t3-team-server/bin/window-pair-helper.sh
@@ -83,15 +128,31 @@ sh tools/mmos_team_server/window_config.sh write --bundle release \
   --pair-helper "$HOME/.mastermind/t3-team-server/bin/window-pair-helper.sh"
 ```
 
-The tool refuses non-loopback, https, bare-origin and fragment-carrying
-URLs, and non-executable or relative helper paths. Files are written 0600
-into a 0700 directory.
+The tool refuses non-loopback, https, bare-origin, fragment-carrying,
+`localhost`-spelled and `/pair`-path URLs (the server root, `/pair` and
+anything under it belong to the pairing flow, never to a saved config), and
+non-executable, relative, symlinked or group-writable helper paths. A
+`write` without `--pair-helper` **removes** an existing helper (pass
+`--keep-pair-helper` to keep one), so an edit meant to withdraw minting
+actually withdraws it. Files are staged in 0600 temporaries under `umask
+077` (a trap removes them on any exit) and committed helper-first into the
+0700 directory.
 
 ## 3. Check it
 
+Quit any running copy of Mastermind OS first (⌘Q, or Activity Monitor):
+the single-instance plugin makes a second launch focus the existing window
+and start nothing, so an old running copy would mask the new bundle
+entirely.
+
+Verify the config with the same judge the app itself runs — it prints one
+line per item (`shell-url`, `pair-helper`, `config-dir`), never an address,
+and exits non-zero on any refusal:
+
 ```sh
-sh tools/mmos_team_server/window_config.sh show --bundle release
-open -n "/Volumes/Mastermind/build-cache/t8-release-cargo-target/release/bundle/macos/Mastermind OS.app"
+sh tools/mmos_team_server/window_config.sh check --bundle release \
+  --app "/Volumes/Mastermind/build-cache/t8-release-cargo-target/release/bundle/macos/Mastermind OS.app/Contents/MacOS/mastermind-os"
+open "/Volumes/Mastermind/build-cache/t8-release-cargo-target/release/bundle/macos/Mastermind OS.app"
 ```
 
 Within a few seconds the window should sit on the Team thread you chose,
@@ -115,11 +176,19 @@ re-pairs itself once and is signed in again with no typing.
 sh tools/mmos_team_server/window_config.sh clear --bundle release   # today's ordinary window
 ```
 
-and restore the previous `Mastermind OS.app` bundle from wherever you keep
-it (the lane's `INSTALL_RECEIPTS_AND_ROLLBACK.md` records the install
-receipts pattern). A cleared config plus an old bundle is exactly the
-pre-T8 state: the old app never read the file, so leaving it would also be
-harmless — but clearing it removes the temptation.
+`clear` removes exactly the two config files and leaves everything else.
+What is left on the Mac afterwards, and how to remove each if you want a
+full cleanup:
+
+| Leftover | Where | Remove with |
+|---|---|---|
+| Helper copy | `~/.mastermind/t3-team-server/bin/window-pair-helper.sh` | `rm` it (the dir is yours to keep or `rmdir`) |
+| Config directory | `~/.mastermind/window` — present but empty, still 0700 | `rmdir ~/.mastermind/window` |
+| Cookie store | `~/Library/WebKit/com.mastermind.os` and `~/Library/HTTPStorages/com.mastermind.os*` | delete those folders once (also the right move before pointing one bundle at a different server — see §7) |
+| The app itself | the running copy, if any, plus the built bundle | quit it (⌘Q) and delete the `.app` |
+
+A cleared config is the pre-T8 behaviour on any bundle: the app never read
+the file, so nothing else needs restoring.
 
 ## 5. What was proved and what was not
 
