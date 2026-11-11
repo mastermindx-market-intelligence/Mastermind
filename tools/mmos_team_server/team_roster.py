@@ -44,6 +44,9 @@ import stat
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 RESERVED_PORTS = (3773, 3774)  # the Chairman's own T3 Code app
 
@@ -107,6 +110,19 @@ def load_spec(path):
     dot_t3 = os.path.realpath(expand("~/.t3"))
     if root == dot_t3 or root.startswith(dot_t3 + os.sep):
         die(f"server root {root} is at or inside ~/.t3; refusing")
+    if spec.get("paperclip_base"):
+        # Parsed, never prefix-compared: a userinfo or subdomain trick must
+        # not smuggle a foreign host past the loopback requirement.
+        try:
+            parsed = urllib.parse.urlparse(spec["paperclip_base"])
+            hostname = parsed.hostname
+            scheme = parsed.scheme
+        except ValueError:
+            hostname, scheme = None, None
+        if scheme != "http" or hostname not in ("127.0.0.1", "localhost",
+                                                "::1"):
+            die(f"paperclip_base {spec['paperclip_base']!r} is not a "
+                f"loopback http URL (for example http://127.0.0.1:3100)")
     if not isinstance(spec["teammates"], list) or not spec["teammates"]:
         die("spec.teammates must be a non-empty list")
     names, instances, slugs, colors = set(), set(), set(), set()
@@ -116,6 +132,12 @@ def load_spec(path):
                     "instance", "charter"):
             if not mate.get(key):
                 die(f"{where} missing required key '{key}'")
+        agent_id = mate.get("paperclip_agent_id")
+        if agent_id is not None and (
+                not isinstance(agent_id, str) or not agent_id.strip()
+                or "/" in agent_id or agent_id != agent_id.strip()):
+            die(f"{where}.paperclip_agent_id must be a plain id without "
+                f"slashes or padding, got {agent_id!r}")
         if mate["name"] in names:
             die(f"duplicate teammate name {mate['name']!r}")
         if mate["instance"] in instances:
@@ -553,12 +575,46 @@ def _recovered_by(mate, found, recorded):
     return "title"
 
 
+def paperclip_binding(spec, mate, opener=None):
+    """The thread id Paperclip binds this teammate's agent to, or None.
+
+    Review R2a finding 12, roster side. The wake carrier sends each task to
+    ``metadata.teammate.t3.primaryThreadId`` on the agent record, while this
+    tool tracked threads only in its own state file; if the state file is
+    lost, apply could create a second primary thread under a still-bound
+    agent. When the spec names a binding source (``paperclip_base`` plus the
+    teammate's ``paperclip_agent_id``), this does exactly one GET of the
+    agent record; without a source nothing is read and behaviour is
+    unchanged. Errors refuse rather than guess: an unreadable binding cannot
+    be verified.
+    """
+    base = spec.get("paperclip_base")
+    agent_id = mate.get("paperclip_agent_id")
+    if not base or not agent_id:
+        return None
+    url = f"{base.rstrip('/')}/api/agents/{agent_id}"
+    op = opener or urllib.request.build_opener()
+    try:
+        with op.open(urllib.request.Request(url, method="GET"),
+                     timeout=30) as resp:
+            payload = json.loads(resp.read() or b"{}")
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        die(f"{mate['name']}: cannot read the Paperclip record of agent "
+            f"{agent_id} ({exc}); refusing to create or adopt a thread")
+    meta = ((payload.get("metadata") or {}).get("teammate") or {})
+    return (meta.get("t3") or {}).get("primaryThreadId")
+
+
 def ensure_threads(spec, project_id):
     state, state_path = load_state(spec)
     live = list_threads(spec, project_id)
     recorded_by_name = {name: (entry or {}).get("threadId")
                         for name, entry in state["teammates"].items()}
+    # One GET per configured agent, before any thread is created (R2a 12).
+    bindings = {mate["name"]: paperclip_binding(spec, mate)
+                for mate in spec["teammates"]}
     threads = {}
+    to_create = []
     for mate in spec["teammates"]:
         title = teammate_title(mate)
         recorded = recorded_by_name.get(mate["name"])
@@ -566,6 +622,19 @@ def ensure_threads(spec, project_id):
         if problem:
             die(f"{mate['name']}: {problem}; refusing to pick or create a "
                 f"primary thread")
+        bound = bindings[mate["name"]]
+        if bound is not None:
+            if found is None:
+                die(f"{mate['name']}: Paperclip binds its agent to thread "
+                    f"{bound}, which this roster does not know; refusing to "
+                    f"create a second primary thread. If {bound} is the real "
+                    f"primary, record it in {state_path} (or unbind the agent "
+                    f"in Paperclip) and apply again")
+            if found["threadId"] != bound:
+                die(f"{mate['name']}: Paperclip binds its agent to thread "
+                    f"{bound}, but the roster resolved {found['threadId']}; "
+                    f"refusing. Reconcile the Paperclip binding and the "
+                    f"roster to one thread and apply again")
         if found is not None:
             threads[mate["name"]] = {
                 "threadId": found["threadId"], "title": title,
@@ -578,6 +647,11 @@ def ensure_threads(spec, project_id):
                 log(f"{mate['name']}: thread {found['threadId']} is titled "
                     f"{found['title']!r}; the roster title is {title!r}")
             continue
+        to_create.append(mate)
+    # Every check has passed for every teammate; only now is a thread created,
+    # so one teammate's refusal leaves the whole roster untouched.
+    for mate in to_create:
+        title = teammate_title(mate)
         launched = t3_json(t3(spec, [
             "thread", "start", project_id, "Reply with just: READY",
             "--provider", mate["instance"], "--model", spec["model"],

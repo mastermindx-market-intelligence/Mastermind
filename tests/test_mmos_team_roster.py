@@ -363,6 +363,225 @@ class TestAtomicWrites:
         assert leftovers == [], "a failed write must clean up its temp file"
 
 
+class FakeT3Launch:
+    """Records every thread launch; never runs a process."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, spec, args, stdin_text=None, timeout=900):
+        self.calls.append(list(args))
+
+        class Proc:
+            returncode = 0
+            stdout = json.dumps({"threadId": f"mcp:new-{len(self.calls)}"}) + "\n"
+            stderr = ""
+        return Proc()
+
+
+@pytest.fixture
+def fake_t3(monkeypatch):
+    fake = FakeT3Launch()
+    monkeypatch.setattr(team_roster, "t3", fake)
+    return fake
+
+
+PROJECT = "project-1"
+
+
+THREADS_DDL = """
+CREATE TABLE orchestration_v2_projection_threads (
+  thread_id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  default_provider TEXT NOT NULL,
+  runtime_mode TEXT NOT NULL,
+  interaction_mode TEXT NOT NULL,
+  active_provider_thread_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  archived_at TEXT,
+  deleted_at TEXT,
+  payload_json TEXT NOT NULL,
+  provider_instance_id TEXT
+)
+"""
+
+
+def make_db(spec, threads=()):
+    import sqlite3
+    path = team_roster.db_path(spec)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.execute(THREADS_DDL)
+    for t in threads:
+        payload = {"id": t["threadId"], "projectId": PROJECT,
+                   "title": t["title"], "providerInstanceId": t.get("instance")}
+        conn.execute(
+            "INSERT INTO orchestration_v2_projection_threads "
+            "(thread_id, project_id, title, default_provider, runtime_mode, "
+            "interaction_mode, created_at, updated_at, payload_json, "
+            "provider_instance_id) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (t["threadId"], PROJECT, t["title"], "claudeAgent", "full-access",
+             "default", "2026-11-10T00:00:00Z", "2026-11-10T00:00:00Z",
+             json.dumps(payload), t.get("instance")))
+    conn.commit()
+    conn.close()
+    return path
+
+
+class TestPaperclipBinding:
+    """Review R2a finding 12, roster side: the carrier sends each task to the
+    thread id recorded on the agent in Paperclip; the roster tool kept its own
+    state and never read that field, so a lost state file could create a
+    second primary thread. With a binding source configured, apply does one
+    GET per agent and refuses to create or adopt a thread the binding
+    contradicts. Without a source, behaviour is unchanged."""
+
+    def with_binding(self, tmp_path, **extra):
+        raw = make_spec(tmp_path)
+        raw["paperclip_base"] = "http://127.0.0.1:3100"
+        for mate in raw["teammates"]:
+            mate["paperclip_agent_id"] = f"agent-{mate['slug']}"
+        raw.update(extra)
+        return load(tmp_path, raw)
+
+    @pytest.mark.parametrize("bad", [
+        "http://10.0.0.5:3100",                       # not loopback
+        "https://127.0.0.1:3100",                     # not http
+        "http://127.0.0.1:3100@example.com/",         # userinfo smuggles a host
+        "http://127.0.0.1.example.com:3100/",         # host is a subdomain
+        "http://[::1]:3100@evil.example/",            # bracketed userinfo
+        "ftp://127.0.0.1:3100",
+        "not a url",
+    ])
+    def test_non_loopback_base_refused(self, tmp_path, bad):
+        raw = make_spec(tmp_path)
+        raw["paperclip_base"] = bad
+        with pytest.raises(SystemExit):
+            load(tmp_path, raw)
+
+    @pytest.mark.parametrize("good", ["http://127.0.0.1:3100",
+                                      "http://localhost:3100",
+                                      "http://127.0.0.1:3100/"])
+    def test_loopback_base_accepted(self, tmp_path, good):
+        raw = make_spec(tmp_path)
+        raw["paperclip_base"] = good
+        spec = load(tmp_path, raw)
+        assert spec["paperclip_base"] == good
+
+    def test_one_get_per_agent_and_thread_id_read(self, tmp_path):
+        import io
+        import urllib.error
+
+        spec = self.with_binding(tmp_path)
+        mate = spec["teammates"][0]
+
+        class Opener:
+            def __init__(self, payload):
+                self.payload = payload
+                self.calls = []
+
+            def open(self, req, timeout=None):
+                self.calls.append(req.full_url)
+                return io.BytesIO(json.dumps(self.payload).encode())
+
+        bound = {"metadata": {"teammate": {"t3": {"primaryThreadId": "mcp:x"}}}}
+        opener = Opener(bound)
+        assert team_roster.paperclip_binding(
+            spec, mate, opener=opener) == "mcp:x"
+        assert opener.calls == ["http://127.0.0.1:3100/api/agents/agent-a"]
+        unbound = Opener({"metadata": {}})
+        assert team_roster.paperclip_binding(
+            spec, mate, opener=unbound) is None
+        assert len(unbound.calls) == 1
+
+        class Boom:
+            def open(self, req, timeout=None):
+                raise urllib.error.URLError("connection refused")
+
+        with pytest.raises(SystemExit):
+            team_roster.paperclip_binding(spec, mate, opener=Boom())
+
+    def test_no_get_without_a_full_source(self, tmp_path):
+        import io
+
+        class Opener:
+            calls = []
+
+            def open(self, req, timeout=None):
+                Opener.calls.append(req.full_url)
+                return io.BytesIO(b"{}")
+
+        # agent ids but no base (the real spec today): no request, no refusal
+        raw = make_spec(tmp_path)
+        for mate in raw["teammates"]:
+            mate["paperclip_agent_id"] = f"agent-{mate['slug']}"
+        spec = load(tmp_path, raw)
+        assert team_roster.paperclip_binding(
+            spec, spec["teammates"][0], opener=Opener()) is None
+        # base but no agent id for the teammate: also no request
+        raw = make_spec(tmp_path)
+        raw["paperclip_base"] = "http://127.0.0.1:3100"
+        spec = load(tmp_path, raw)
+        assert team_roster.paperclip_binding(
+            spec, spec["teammates"][0], opener=Opener()) is None
+        assert Opener.calls == []
+
+    def test_matching_binding_adopts_thread_and_creates_none(
+            self, tmp_path, fake_t3, monkeypatch):
+        spec = self.with_binding(tmp_path)
+        monkeypatch.setattr(team_roster, "paperclip_binding",
+                            lambda s, m: "t1" if m["name"] == "A" else None)
+        make_db(spec, [{"threadId": "t1", "title": "A — quality",
+                        "instance": "a"}])
+        threads, _ = team_roster.ensure_threads(spec, PROJECT)
+        assert threads["A"]["threadId"] == "t1"
+        assert threads["A"]["created"] is False
+        # B has no binding and no live thread: unchanged behaviour, it creates
+        assert len(fake_t3.calls) == 1
+        assert fake_t3.calls[0][fake_t3.calls[0].index("--provider") + 1] == "b"
+
+    def test_bound_thread_unknown_refuses_before_creating(
+            self, tmp_path, fake_t3, monkeypatch, capsys):
+        spec = self.with_binding(tmp_path)
+        make_db(spec, [])  # nothing live: apply would create
+        monkeypatch.setattr(team_roster, "paperclip_binding",
+                            lambda s, m: "mcp:bound-elsewhere")
+        with pytest.raises(SystemExit):
+            team_roster.ensure_threads(spec, PROJECT)
+        assert fake_t3.calls == [], \
+            "no thread may be created while the binding is unknown"
+        out = capsys.readouterr().err
+        assert "mcp:bound-elsewhere" in out
+        assert "state" in out  # the message says what to do
+
+    def test_bound_to_different_thread_than_roster_refuses(
+            self, tmp_path, fake_t3, monkeypatch):
+        spec = self.with_binding(tmp_path)
+        make_db(spec, [{"threadId": "t1", "title": "A — quality",
+                        "instance": "a"}])
+        monkeypatch.setattr(team_roster, "paperclip_binding",
+                            lambda s, m: "mcp:other" if m["name"] == "A"
+                            else None)
+        with pytest.raises(SystemExit):
+            team_roster.ensure_threads(spec, PROJECT)
+        assert fake_t3.calls == []
+
+    def test_binding_checked_before_any_thread_is_created(
+            self, tmp_path, fake_t3, monkeypatch):
+        """A refuses (unknown binding) and B would create: no thread at all
+        may be created by that apply."""
+        spec = self.with_binding(tmp_path)
+        make_db(spec, [])
+        monkeypatch.setattr(
+            team_roster, "paperclip_binding",
+            lambda s, m: "mcp:unknown" if m["name"] == "A" else None)
+        with pytest.raises(SystemExit):
+            team_roster.ensure_threads(spec, PROJECT)
+        assert fake_t3.calls == []
+
+
 class TestFileAssets:
     def test_write_and_rewrite_home(self, tmp_path):
         spec = load(tmp_path, make_spec(tmp_path))
