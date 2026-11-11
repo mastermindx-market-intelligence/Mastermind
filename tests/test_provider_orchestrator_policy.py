@@ -3545,3 +3545,184 @@ def test_r7_unarmed_sessions_keep_the_legacy_posture_behavior(
     ):
         guard.guard_bash(_payload(cwd, command), {"command": command})
         assert capsys.readouterr().out == "", command
+
+
+# --- rework r8: round-6 posture review blockers (B-R6-1/B-R6-2/M-R6-1) ---------
+#
+# REVIEW_2329 r6 posture verification found two no-third-state violations:
+# armed commands ADMITTED while a wrapper-shaped, shell-expanded launch word
+# sat where the token-free classifier never wrapper-shape-checked it. Both
+# were live-confirmed to execute (echo stand-ins); B-R6-1 was also a
+# REGRESSION (the identical command was refused at the r6 parent head).
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # B-R6-1: every word scanner treats a glued <( / >( word as a
+        # redirection, but bash runs the payload in a SUBSHELL — the glob
+        # expands to the wrapper there (live-confirmed via PATH stand-in;
+        # an exploratory leg reached the real wrapper's economic policy).
+        "cat <(poo* run grok 'x' /tmp grok-4.6)",
+        "diff <(poo* run grok 'x' /tmp grok-4.6) /dev/null",
+        "echo x > >(poo* run grok 'x' /tmp grok-4.6)",
+        "cat <(su?.sh grok 'x')",
+        # $( glued openers are executed constructs of the same genus.
+        "cat $(poo* run grok 'x' /tmp grok-4.6)",
+    ],
+    ids=["cat-procsub", "diff-procsub", "write-procsub", "extglob-procsub",
+         "command-sub"],
+)
+def test_r8_br61_process_substitution_glob_payloads_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # PS-2: the escape BESIDE a faithful launch — a literal wrapper
+        # token is present, so the wrapper-present leg runs, but the glued
+        # <( / >( word was skipped by every scanner there too.
+        _IDENTITY_PREFIX
+        + "pool run glm a /tmp glm-5.3 && cat <(poo* run grok x /tmp grok-4.6)",
+        _IDENTITY_PREFIX
+        + "pool run glm a /tmp glm-5.3; echo x > >(poo* run grok x /tmp grok-4.6)",
+        # The same escape shape with the substitution feeding the faithful
+        # launch's own stdin.
+        _IDENTITY_PREFIX
+        + "pool run glm a /tmp glm-5.3 < <(poo* run grok x /tmp grok-4.6)",
+    ],
+    ids=["beside-faithful", "write-beside-faithful", "stdin-beside-faithful"],
+)
+def test_r8_br61_process_substitution_beside_faithful_launch_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # B-R6-2: the keyword takes the command slot in
+        # _expanded_command_word and the promoted head is never
+        # wrapper-shape-checked in _unprovable_position_word — so the glob
+        # condition of if/while/until/elif/! executed unobserved (the
+        # while form also runtime-multiplexes: live stand-in ran twice).
+        "if poo* run grok 'x' /tmp grok-4.6; then :; fi",
+        "while poo* run grok 'x' /tmp grok-4.6; do :; done",
+        "until poo* run grok 'x' /tmp grok-4.6; do :; done",
+        "! poo* run grok 'x' /tmp grok-4.6",
+        "if :; then :; elif poo* run grok 'x' /tmp grok-4.6; then :; fi",
+        # M-R6-1's genus, spelled with the transparent-runner keyword: the
+        # head-position check must not depend on 'time' being listed.
+        "time poo? run grok 'x' /tmp grok-4.6",
+    ],
+    ids=["if", "while", "until", "negation", "elif", "time-glob"],
+)
+def test_r8_br62_keyword_condition_glob_heads_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+def test_r8_mr61_time_entry_is_optimization_only(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # M-R6-1: the r6 scratch falsification emptied _TRANSPARENT_RUNNERS and
+    # the token-free `time poo? …` refusal DISAPPEARED (the entry was
+    # load-bearing: without it `time` was skipped as a keyword and the
+    # promoted head was never shape-checked). Since r8 the keyword/prefix
+    # head no longer consumes the command slot and the resulting head is
+    # wrapper-shape-checked, so removing the entry must NOT lose the
+    # refusal — the list is optimization-only again.
+    _install(monkeypatch, tmp_path, _binding())
+    without_time = frozenset(guard._TRANSPARENT_RUNNERS - {"time"})
+    assert "time" in guard._TRANSPARENT_RUNNERS  # the cell exists to remove
+    monkeypatch.setattr(guard, "_TRANSPARENT_RUNNERS", without_time)
+    with pytest.raises(SystemExit):
+        _guard_launch(
+            shared_placement, "time poo? run grok 'x' /tmp grok-4.6"
+        )
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+    # And the listed-runner optimization still carries the flag grammar
+    # when the entry IS present (pinned above, r6 time-faithful): a
+    # faithful literal launch behind `time` stays allowed either way.
+    _guard_launch(
+        shared_placement, "time " + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3"
+    )
+    assert capsys.readouterr().out == ""
+
+
+def test_r8_process_substitution_without_wrapper_token_stays_allowed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Controls: an ordinary process substitution with NO wrapper token is
+    # an unarmed-style construct — the payload reduces to safe-data heads,
+    # so it stays allowed in armed sessions.
+    _install(monkeypatch, tmp_path, _binding())
+    for command in (
+        "cat <(ls)",
+        "diff <(echo a) <(echo b)",
+        "echo x > >(wc -l)",
+    ):
+        _guard_launch(shared_placement, command)
+        assert capsys.readouterr().out == "", command
+
+
+def test_r8_keyword_condition_without_wrapper_token_stays_allowed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Controls: a keyword-headed condition whose head is a recognized
+    # safe-data utility — with an argument glob, not a wrapper-shaped
+    # command word — stays allowed (the condition position is judged as a
+    # COMMAND position, and `ls`/`grep` are recognized heads). A `for`
+    # loop's glob list is deliberately absent: its loop variable is an
+    # UNRECOGNIZED head under the r7 posture, so that shape was already
+    # refused before r8 (documented over-refusal, unchanged).
+    _install(monkeypatch, tmp_path, _binding())
+    for command in (
+        "if ls *.py; then :; fi",
+        "while grep -q pool README.md; do sleep 1; done",
+    ):
+        _guard_launch(shared_placement, command)
+        assert capsys.readouterr().out == "", command

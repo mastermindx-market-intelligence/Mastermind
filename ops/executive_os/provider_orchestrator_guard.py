@@ -43,6 +43,16 @@ do/done pair inside a loop condition, a concatenated trap program.
 Refusing the irreducible replaces enumerating escape spellings: five
 review rounds showed the shell surface always outruns a vocabulary, so
 correctness no longer depends on the runner/interpreter lists' completeness.
+WO-11 r8 POSTURE CLOSURE (REVIEW_2329 r6 B-R6-1/B-R6-2/M-R6-1): a GLUED
+``<(…``/``>(…``/``$(…`` word is a process/command substitution — bash
+runs the payload in a subshell — so the payload is an EXECUTED construct
+that receives the full armed posture, alone and beside a faithful launch
+alike (it used to be skipped as a redirection by every scanner); and a
+shell keyword/prefix head (if/while/until/elif/!/time/…) does not OCCUPY
+its segment's command slot, so the word the shell executes after it — an
+if/while/until/elif/! CONDITION — is judged at command position and
+wrapper-shape-checked as the head itself (the ``time`` transparent-runner
+entry is thereby optimization-only, verified by a list-emptied pin).
 There is no independent signing authority — the binding is only an assignment
 of opaque references, trusted exactly as far as it matches the owner's current
 lease. The gate fences every lexically observed launch in the commands it is
@@ -330,7 +340,16 @@ _TRANSPARENT_RUNNERS = frozenset(
 #: sits at an unprovable position — :func:`_unprovable_position_word`
 #: refuses a wrapper-shaped expanded word there, with or without a wrapper
 #: token in the text. Correctness does not depend on this list's
-#: completeness.
+#: completeness — r8 (REVIEW_2329 r6 M-R6-1): that claim is now true for
+#: EVERY entry, ``time`` included. The r6 scratch falsification showed
+#: ``time`` was load-bearing: a keyword head consumed the command slot in
+#: :func:`_expanded_command_word` and the promoted head was never
+#: wrapper-shape-checked in :func:`_unprovable_position_word`, so removing
+#: the entry lost the token-free ``time poo? …`` refusal. Since r8 both
+#: scanners judge the word that FOLLOWS a skipped keyword/prefix head, so
+#: ``<keyword> <expanded-wrapper-word>`` refuses whether or not the
+#: keyword is listed here (pinned by
+#: ``test_r8_mr61_time_entry_is_optimization_only``).
 #: Runner flags that CONSUME the following word as their own argument
 #: (``sudo -u root …``, ``nice -n 5 …``): without this the consumed
 #: argument would be mistaken for the runner's payload command.
@@ -923,6 +942,21 @@ def _expanded_command_word(canon: str) -> str | None:
             if not command_seen and base in _TRANSPARENT_RUNNERS:
                 runner = base  # transparent: its payload is the command
                 continue
+            if not command_seen and (
+                base in _COMMAND_PREFIX_WORDS or base in _SHELL_KEYWORDS
+            ):
+                # r8 (REVIEW_2329 r6 B-R6-2/M-R6-1): a shell keyword or
+                # command-prefix word HEADS a segment but does not OCCUPY
+                # its command slot — the shell executes the word that
+                # follows it (``if poo* run …; then``, ``while poo* …``,
+                # ``! poo* …``, ``elif poo* …``). Letting the keyword set
+                # ``command_seen`` left the expansion-dependent wrapper in
+                # the condition position unjudged; skipping it keeps that
+                # word in COMMAND position. This also makes the ``time``
+                # entry in _TRANSPARENT_RUNNERS optimization-only: with it
+                # removed, ``time`` is still skipped here (it is a shell
+                # keyword) and the payload word is still judged.
+                continue
             if not command_seen and _expansion_dependent(word):
                 return word  # a head, or a runner chain's payload command
             command_seen = True  # this segment's command word is now fixed
@@ -1099,6 +1133,37 @@ def _wrapper_shaped(word: str) -> bool:
     return False
 
 
+#: r8 (REVIEW_2329 r6 B-R6-1): GLUED process-substitution / command-
+#: substitution openers. Every word scanner above treats a word starting
+#: with ``<``/``>`` as a REDIRECTION, but ``<(cmd)`` / ``>(cmd)`` glued to
+#: the redirect is a PROCESS SUBSTITUTION: bash runs ``cmd`` in a subshell,
+#: so the payload is an executed construct, not data (``$(cmd)`` command
+#: substitution likewise). The payload therefore receives the FULL armed
+#: posture — alone in the token-free leg and beside a faithful launch in
+#: the wrapper-present leg alike — via
+#: :func:`_process_substitution_payloads`. Canon-coordinate scanning (the
+#: module-wide trade): a QUOTED ``'<(…)'`` string is seen as if the quotes
+#: were gone, which can only over-refuse.
+_PROC_SUB_OPEN_RE = re.compile(r"\d*[<>]\(|\$\(")
+
+
+def _process_substitution_payloads(canon: str) -> list[str]:
+    """The substituted text of every glued ``<(…``/``>(…``/``$(…`` group.
+
+    The walk is nesting-aware (parens counted, so a payload containing
+    further groups is extracted whole); an unterminated group spans to the
+    end of the text — conservative in the refusing direction. Payloads of
+    NESTED groups appear both here and inside their parent's payload; the
+    recursion in :func:`_deny_computed_launch` judges every level, so the
+    duplication is harmless.
+    """
+    payloads: list[str] = []
+    for match in _PROC_SUB_OPEN_RE.finditer(canon):
+        body, _ = _read_pattern_group(canon, match.end() - 1)
+        payloads.append(body)
+    return payloads
+
+
 def _unprovable_position_word(canon: str) -> tuple[str, str] | None:
     """``(wrapper-shaped word, governing head)`` for the first shell-expanded
     word at a position the guard cannot reduce to a plain data argument —
@@ -1120,6 +1185,7 @@ def _unprovable_position_word(canon: str) -> tuple[str, str] | None:
     runners reduce their payload through the flag tables."""
     for segment in re.split(r"[;&|\n]", canon):
         head: str | None = None
+        governing = ""
         rest: list[str] = []
         for word in segment.split():
             if word in ("(", ")", "{", "}"):
@@ -1131,8 +1197,17 @@ def _unprovable_position_word(canon: str) -> tuple[str, str] | None:
             if head is None:
                 base = word.rsplit("/", 1)[-1].lower()
                 if base in _COMMAND_PREFIX_WORDS or base in _SHELL_KEYWORDS:
+                    governing = base  # r8: what was skipped before the head
                     continue  # a keyword: the command word follows it
                 head = word
+                # r8 (REVIEW_2329 r6 B-R6-2): the head itself was never
+                # wrapper-shape-checked — only `rest` words were. After a
+                # skipped keyword/prefix the head IS the word the shell
+                # executes (``if poo* run …; then``, ``time poo? …``),
+                # so an expansion-dependent wrapper-shaped head —
+                # with or without a governing keyword — is refused.
+                if _expansion_dependent(word) and _wrapper_shaped(word):
+                    return word, governing
                 continue
             rest.append(word)
         if head is None:
@@ -1268,6 +1343,21 @@ def _deny_computed_launch(canon: str, raw: str | None = None) -> None:
       runner-chain payload (``nohup timeout 5 poo[l] …``). Correctness does
       not depend on the runner/interpreter vocabularies: an unclassifiable
       head itself triggers the refusal.
+    * r8 (REVIEW_2329 r6 B-R6-1): a GLUED ``<(…``/``>(…``/``$(…`` word is
+      a process/command substitution — the payload runs in a subshell, so
+      it is an executed construct, not a redirection. Every word scanner
+      skips the glued word, so the payload text gets the FULL armed
+      posture recursively (:func:`_process_substitution_payloads`), in the
+      token-free leg and beside a faithful launch alike.
+    * r8 (REVIEW_2329 r6 B-R6-2/M-R6-1): a shell keyword/prefix head
+      (if/while/until/elif/!/time/…) does not occupy its segment's command
+      slot — the word the shell EXECUTES after it (the loop/conditional's
+      condition) stays at command position in
+      :func:`_expanded_command_word`, and the head itself is
+      wrapper-shape-checked in :func:`_unprovable_position_word`, so an
+      expansion-dependent wrapper-shaped condition (``if poo* run …``,
+      ``while poo* …``, ``! poo? …``, ``time poo[l] …``) is refused with
+      or without any keyword/runner vocabulary entry.
 
     The head vocabulary is judged on the heredoc-stripped text so a staged
     body's words (and its delimiter line) are not command heads; the
@@ -1287,6 +1377,11 @@ def _deny_computed_launch(canon: str, raw: str | None = None) -> None:
         if _expanded_command_word(canon) is None:
             found = _unprovable_position_word(canon)
             if found is None:
+                # r8 (B-R6-1): process-substitution payloads are executed
+                # constructs, so the full posture runs inside them before
+                # the token-free leg can admit the surrounding command.
+                for payload in _process_substitution_payloads(canon):
+                    _deny_computed_launch(payload)
                 return
             posture_word, posture_head = found
     if _INTERPRETER_WORD_RE.search(canon):
@@ -1307,14 +1402,19 @@ def _deny_computed_launch(canon: str, raw: str | None = None) -> None:
             "nested shell). Run the paid launch as a plain command."
         )
     if posture_word is not None:
+        where = (
+            f"behind {posture_head!r}, a command word whose argument "
+            "grammar the guard cannot reduce to a plain data argument"
+            if posture_head
+            else "at a command position the guard cannot reduce to a "
+            "plain data argument"
+        )
         deny(
             "Mastermind shared-placement guard: unobservable launch — the "
             f"wrapper-shaped word {posture_word!r} is shell-expanded at "
-            f"runtime and sits behind {posture_head!r}, a command word "
-            "whose argument grammar the guard cannot reduce to a plain "
-            "data argument, so the guard cannot prove it is not the paid "
-            "wrapper (fail-closed posture, REVIEW_2329 r5 B-1). Invoke the "
-            "wrapper by its literal name."
+            f"runtime and sits {where}, so the guard cannot prove it is "
+            "not the paid wrapper (fail-closed posture, REVIEW_2329 r5 "
+            "B-1, r6 B-R6-2). Invoke the wrapper by its literal name."
         )
     word = _computed_command_word(canon)
     if word is not None:
@@ -1336,6 +1436,14 @@ def _deny_computed_launch(canon: str, raw: str | None = None) -> None:
             "or payload behind it is unreadable (fail-closed posture, "
             "REVIEW_2329 r5 M-3). Run the paid launch as a plain command."
         )
+
+    # r8 (REVIEW_2329 r6 B-R6-1): with a wrapper token present, the glued
+    # <( / >( / $( word is skipped by every scanner above (it looks like a
+    # redirection), so an expansion-dependent wrapper inside the payload
+    # escaped beside a faithful launch. The payload runs in a subshell —
+    # the full armed posture applies inside it.
+    for payload in _process_substitution_payloads(canon):
+        _deny_computed_launch(payload)
 
 
 def _paren_body_spans_raw(
