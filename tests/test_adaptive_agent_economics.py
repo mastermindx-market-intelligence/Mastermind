@@ -90,8 +90,11 @@ def test_principal_judgment_does_not_become_worker_admission():
 
 @pytest.mark.parametrize("aliases", ["glm.flash", [None], [True], ["bad/alias"], ["a"] * 33])
 def test_considered_aliases_are_bounded_and_strict(aliases):
+    # Load outside the bare assertion: a config-loading RoutingPolicyError must
+    # not satisfy this block and hide a broken alias check (false green).
+    router = ModelRouter.load()
     with pytest.raises(RoutingPolicyError):
-        ModelRouter.load().explain_route(WorkRequest("tests"), considered_aliases=aliases)
+        router.explain_route(WorkRequest("tests"), considered_aliases=aliases)
 
 
 def test_alias_order_is_deterministic_and_disabled_provider_is_source_only(tmp_path):
