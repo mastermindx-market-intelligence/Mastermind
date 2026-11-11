@@ -93,6 +93,9 @@ def carrier_config(spec):
             spec.get("question_poll_interval_sec", 10)),
         "teammates": dict(spec.get("teammates") or {}),
     }
+    # Optional (R2a finding 4): the carrier defaults to 3 when absent.
+    if spec.get("max_asks_per_issue") is not None:
+        cfg["max_asks_per_issue"] = int(spec["max_asks_per_issue"])
     if spec.get("issue_url_template"):
         cfg["issue_url_template"] = spec["issue_url_template"]
     if spec.get("thread_url_template"):

@@ -214,6 +214,9 @@ def write_carrier_config(spec, agent_dir):
     # ask block; a name not in this map cannot become a child issue.
     if spec.get("teammates"):
         cfg["teammates"] = dict(spec["teammates"])
+    # Optional (R2a finding 4): the carrier defaults to 3 when absent.
+    if spec.get("max_asks_per_issue") is not None:
+        cfg["max_asks_per_issue"] = int(spec["max_asks_per_issue"])
     path = os.path.join(agent_dir, "carrier.json")
     with open(path, "w") as fh:
         json.dump(cfg, fh, indent=2)

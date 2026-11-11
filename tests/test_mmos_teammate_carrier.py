@@ -1726,6 +1726,7 @@ def test_build_opts_maps_every_key_and_reads_the_door_from_config_only():
         "run_budget_sec": 1300,
         "question_poll_interval_sec": 12,
         "roster": {"Assurance": "ag-1"},
+        "max_asks_per_issue": 3,
         "issue_url_template": "http://127.0.0.1:3100/MAS/issues/{identifier}",
         "thread_url_template": "http://127.0.0.1:3780/x/{thread}",
         "coding_job_door": "/path/to/door.sock",
@@ -1741,6 +1742,7 @@ def test_build_opts_maps_every_key_and_reads_the_door_from_config_only():
         "run_budget_sec": 1320,
         "question_poll_interval_sec": 10,
         "roster": {},
+        "max_asks_per_issue": 3,
         "issue_url_template": None,
         "thread_url_template": None,
         "coding_job_door": None,
@@ -1948,3 +1950,94 @@ def test_handle_ask_strips_marker_text_from_teammate_words():
     # the carrier's own marker is the only one there, on the last line
     real_op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
     assert child["description"].endswith(f"\n[{real_op}-ask]")
+
+
+# --- R2a finding 4: ask depth one, no self-ask, per-issue cap, full children --
+
+def test_asked_child_cannot_pass_the_ask_on_depth_one():
+    # The asked teammate's reply is never parsed for an ask block, and its
+    # task message says it cannot hand work on and must say what it needs.
+    ask_op = wc.op_id("par-1", "Report the line count\nAsk an engineer for "
+                               "the count.") + "-ask"
+    pc = ask_child_issue(ask_op)
+    t3 = FakeT3(replies=[ASK_REPLY])          # asks Atlas-TEST back
+    assert run_with_roster(pc, t3, {"Atlas-TEST": "ag-atlas"}) == 0
+    assert [c for c in pc.calls if c[0] == "create_issue"] == []  # depth one
+    assert pc.issues["is-1"]["status"] == "done"
+    assert "cannot hand" in t3.sends[0]
+    assert "what you still need" in t3.sends[0]
+    assert "paperclip-ask" not in t3.sends[0]  # not even taught
+
+
+def test_self_ask_is_refused_reply_still_delivered():
+    # A teammate asking itself is refused with one plain line; the reply
+    # still reaches the board as the answer (no child issue).
+    roster = {"Mira-TEST": "ag-1"}            # ag-1 is the asker itself
+    self_ask = ASK_REPLY.replace("Atlas-TEST", "Mira-TEST")
+    pc = FakePaperclip(issues=one_issue())
+    t3 = FakeT3(replies=[self_ask])
+    assert run_with_roster(pc, t3, roster) == 0
+    assert [c for c in pc.calls if c[0] == "create_issue"] == []
+    notes = [c[2] for c in pc.calls if c[0] == "comment"
+             if c[2].startswith("[t2-carrier]")]
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    assert notes == [f"[t2-carrier] ask {op}-ask for Mira-TEST refused: a "
+                     "teammate cannot ask itself; the reply stands as the "
+                     "answer"]
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"
+              if not c[2].startswith("[t2-carrier]")]
+    assert bodies == [self_ask]                # the answer itself, delivered
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_ask_cap_default_three_refuses_the_fourth():
+    # Three ask children already hang off this issue (different content
+    # revisions, so three different markers). The fourth ask is refused with
+    # one plain line; the reply is delivered as the plain answer.
+    roster = {"Atlas-TEST": "ag-atlas"}
+    pc = FakePaperclip(issues=one_issue())
+    pc.child_rows["is-1"] = [
+        {"id": f"ch-{n}", "identifier": f"MMO-{n}", "parentId": "is-1",
+         "assigneeAgentId": "ag-atlas", "title": f"Ask {n}", "status": "done",
+         "description": f"Asked by Mira on MMO-1\n[pc-is-1-{'a' * 9}{n}-ask]"}
+        for n in (1, 2, 3)]
+    t3 = FakeT3(replies=[ASK_REPLY])
+    assert run_with_roster(pc, t3, roster) == 0
+    assert [c for c in pc.calls if c[0] == "create_issue"] == []
+    notes = [c[2] for c in pc.calls if c[0] == "comment"
+             if c[2].startswith("[t2-carrier]")]
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    assert notes == [f"[t2-carrier] ask {op}-ask for Atlas-TEST refused: the "
+                     "per-issue ask cap (3) is already reached; the reply "
+                     "stands as the answer"]
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_children_pages_past_the_first_page():
+    # The old single 50-row request hid older children. The client now asks
+    # for a full page and walks `offset` while the server keeps returning a
+    # full page (the real list serves `limit` up to 1000 and honors it).
+    calls = []
+
+    class PagedClient(wc.PaperclipClient):
+        def __init__(self, n):
+            super().__init__("http://127.0.0.1:1", "tok", "run-1")
+            self.rows = [{"id": f"c{i}", "parentId": "is-1"} for i in range(n)]
+
+        def _request(self, method, path, body=None):
+            calls.append(path)
+            limit = int(path.split("limit=")[1].split("&")[0])
+            offset = int(path.split("offset=")[1])
+            return self.rows[offset:offset + limit]
+    # 53 children: one page when the page is 1000 — but the request must not
+    # stop at the old 50
+    calls.clear()
+    rows = PagedClient(53).children("is-1")
+    assert len(rows) == 53
+    assert "limit=1000" in calls[0]
+    # 2500 children: the offset walk follows the pages to the end
+    calls.clear()
+    rows = PagedClient(2500).children("is-1")
+    assert len(rows) == 2500
+    assert len(calls) == 3                      # 1000 + 1000 + 500
+    assert "offset=1000" in calls[1] and "offset=2000" in calls[2]

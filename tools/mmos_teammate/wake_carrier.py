@@ -386,6 +386,22 @@ def strip_markers(text: str):
     return re.sub(r"\[pc-[^\]\n]*\]", "", text or "").strip()
 
 
+def is_issued_ask_child(row, issue):
+    """True when `row` looks like an ask child the carrier issued from
+    `issue` under ANY content revision: parented on it and ending with a
+    marker of this issue's op family (`pc-<issue id>-<hex10>-ask`). The
+    per-issue ask cap counts these (R2a finding 4); a hand-written child
+    that fits the shape counts too — overcounting only refuses asks."""
+    if row.get("parentId") != issue.get("id"):
+        return False
+    marker = ask_child_op(row.get("description") or "")
+    if not marker:
+        return False
+    return re.fullmatch(
+        rf"pc-{re.escape(str(issue.get('id')))}-[0-9a-f]{{10}}-ask",
+        marker) is not None
+
+
 def issue_link(template, identifier):
     """A labelled link to the issue page for the conversation, or None.
 
@@ -424,7 +440,7 @@ def ask_help(roster, my_agent_id):
 
 def build_message(identifier: str, title: str, body: str, op: str,
                   link: str = None, asking: str = None, job_help: str = None,
-                  notes: list = None) -> str:
+                  notes: list = None, no_ask: str = None) -> str:
     body = (body or "").strip()
     if notes:
         body += ("\n\nNotes the board wrote on the issue before you were "
@@ -434,6 +450,7 @@ def build_message(identifier: str, title: str, body: str, op: str,
              f"{link}\n\n") if link else ""
     how_to_ask = f"\n\n{asking}" if asking else ""
     how_to_job = f"\n\n{job_help}" if job_help else ""
+    why_no_ask = f"\n\n{no_ask}" if no_ask else ""
     return (
         f"[{op}]\n\n"
         f"You were woken for Paperclip issue {identifier}: {title}\n\n"
@@ -443,6 +460,7 @@ def build_message(identifier: str, title: str, body: str, op: str,
         "the issue comment and completes the issue."
         f"{how_to_ask}"
         f"{how_to_job}"
+        f"{why_no_ask}"
     )
 
 
@@ -671,15 +689,26 @@ class PaperclipClient:
              "changeSummary": f"teammate output via {OUTPUT_BLOCK} block"})
 
     def children(self, issue_id):
-        """Issues whose parentId is this issue. The OpenAPI lists
-        /api/issues/{id}/children but this build 404s it (verified live
-        2026-11-10); the company issue list filtered by parentId is the
-        implemented surface."""
+        """Issues whose parentId is this issue, PAGED: the old single 50-row
+        page silently hid older children (R2a finding 4 — a cap count or a
+        return scan that stops at 50 is wrong). The company list serves
+        `limit` (this build clamps to 1000) with `offset`; the walk stops at
+        the first short page, bounded at ten pages — beyond ten thousand
+        children this returns a truncated set rather than looping forever."""
         company_id = os.environ.get("PAPERCLIP_COMPANY_ID", "")
-        rows = self._request(
-            "GET", f"/api/companies/{company_id}/issues?parentId={issue_id}&limit=50")
-        if isinstance(rows, dict):
-            rows = rows.get("issues") or rows.get("children") or rows.get("rows") or []
+        rows = []
+        limit = 1000
+        for page in range(10):
+            batch = self._request(
+                "GET",
+                f"/api/companies/{company_id}/issues?parentId={issue_id}"
+                f"&limit={limit}&offset={page * limit}")
+            if isinstance(batch, dict):
+                batch = batch.get("issues") or batch.get("children") \
+                    or batch.get("rows") or []
+            rows.extend(batch)
+            if len(batch) < limit:
+                break
         return rows
 
     def create_issue(self, company_id, payload):
@@ -1161,7 +1190,24 @@ def handle_return(pc, t3, issue, ask_op, opts):
     return 0
 
 
-def handle_ask(pc, issue, reply, ask, op, roster):
+# What an asked child is told instead of the ask help (depth one, R2a
+# finding 4): the chain stops with it, so it must say what it still needs.
+NO_ASK_NOTE = ("Another teammate asked you for this work. You cannot hand it "
+               "on to a third teammate. If you cannot finish part of it "
+               "yourself, say exactly what you still need in your answer.")
+
+
+def machine_note_once(pc, issue_id, note):
+    """One idempotent `[t2-carrier]` line on an issue: exact-text dedupe, so
+    wake replays of a refusal never stack copies of the same note."""
+    try:
+        if not comment_already_present(pc, issue_id, note):
+            pc.add_comment(issue_id, note)
+    except CarrierError as exc:
+        log(f"note on {issue_id} also failed: {exc}")
+
+
+def handle_ask(pc, issue, reply, ask, op, opts):
     """A teammate's reply asked another teammate for work (```paperclip-ask).
 
     Creates the child issue under the current issue for the named teammate
@@ -1169,9 +1215,12 @@ def handle_ask(pc, issue, reply, ask, op, roster):
     on it with an unblock descriptor, and posts the asking reply as the
     parent comment. No confirmation and no in_review: the parent is waiting,
     not ready for review. Idempotent across runs via the ask marker in the
-    child description. Returns True when the ask was placed."""
+    child description. Self-asks and asks past max_asks_per_issue (default
+    3) are refused with one plain line and the reply stands as the answer.
+    Returns True when the ask was placed."""
+    roster = (opts or {}).get("roster") or {}
     ask_op = f"{op}-ask"
-    agent_id = (roster or {}).get(ask["assignee"])
+    agent_id = roster.get(ask["assignee"])
     if not agent_id:
         log(f"ask block names unknown teammate {ask['assignee']!r}; "
             "reply delivered as a plain answer, no child issue")
@@ -1181,12 +1230,31 @@ def handle_ask(pc, issue, reply, ask, op, roster):
         log("no PAPERCLIP_COMPANY_ID; cannot create the child issue")
         return False
     me = pc.me()
+    if agent_id == me.get("id"):
+        # Depth zero of the depth-one rule: a teammate cannot ask itself.
+        machine_note_once(pc, issue["id"],
+                          f"[t2-carrier] ask {ask_op} for {ask['assignee']} "
+                          "refused: a teammate cannot ask itself; the reply "
+                          "stands as the answer")
+        log(f"ask {ask_op} refused: {ask['assignee']} is the asker itself")
+        return False
     child = None
     for row in pc.children(issue["id"]):
         if is_ask_child_of(row, issue):
             child = row
             break
     if child is None:
+        issued = [row for row in pc.children(issue["id"])
+                  if is_issued_ask_child(row, issue)]
+        cap = int((opts or {}).get("max_asks_per_issue", 3) or 3)
+        if len(issued) >= cap:
+            machine_note_once(pc, issue["id"],
+                              f"[t2-carrier] ask {ask_op} for "
+                              f"{ask['assignee']} refused: the per-issue ask "
+                              f"cap ({cap}) is already reached; the reply "
+                              "stands as the answer")
+            log(f"ask {ask_op} refused: per-issue ask cap ({cap}) reached")
+            return False
         # The teammate's own words are sanitised first (R2a finding 3): no
         # `[pc-…` text it wrote can ride into the child description.
         title = strip_markers(ask["title"]) or ask["title"]
@@ -1520,11 +1588,12 @@ def run_carrier(pc, t3_factory, opts):
                 "issue done")
             return 0
         thread, msgs = t3.messages()
+        # The structural test (R2a finding 3): one parent read settles
+        # whether THIS issue is an ask child — used by the message build,
+        # the depth-one ask rule and delivery below.
+        ask_parent = asked_child_of(pc, issue)
         state, existing = scan_marker(msgs, op, thread)
         if state is None:
-            # The structural test (R2a finding 3): one parent read settles
-            # whether THIS issue is an ask child.
-            ask_parent = asked_child_of(pc, issue)
             asked_child = ask_parent is not None
             message = build_message(
                 issue.get("identifier"), issue.get("title"),
@@ -1539,7 +1608,10 @@ def run_carrier(pc, t3_factory, opts):
                 # finding 5): the asker owns the job decision.
                 job_help=None if asked_child
                 else coding_job_help(opts.get("coding_job_door")),
-                notes=board_notes(pc, issue))
+                notes=board_notes(pc, issue),
+                # ...and it is told that it cannot ask (R2a finding 4,
+                # depth one): the chain stops with it.
+                no_ask=NO_ASK_NOTE if asked_child else None)
             log(f"sending {op} to thread {thread_id}")
             reply = send_and_stay(pc, t3, issue, message, op, opts)
         elif state == "pending":
@@ -1554,12 +1626,13 @@ def run_carrier(pc, t3_factory, opts):
             reply = existing
         if not reply.strip():
             raise CarrierError("thread reply was empty")
-        ask = parse_ask_block(reply)
-        if ask and handle_ask(pc, issue, reply, ask, op,
-                              opts.get("roster") or {}):
+        # Depth one (R2a finding 4): an asked child's reply is never parsed
+        # for an ask block — the chain stops with it.
+        ask = None if ask_parent else parse_ask_block(reply)
+        if ask and handle_ask(pc, issue, reply, ask, op, opts):
             return 0
         deliver(pc, issue, reply, op, crash_after,
-                ask_child=asked_child_of(pc, issue) is not None)
+                ask_child=ask_parent is not None)
         job = parse_coding_job_block(reply)
         if job:
             handle_coding_job(pc, issue, reply, job, opts)
@@ -1659,6 +1732,9 @@ def build_opts(cfg, environ, now):
         # Same-company teammate roster: display name -> agent id. An ask block
         # naming anyone else resolves to nothing (plain reply, no child issue).
         "roster": cfg.get("teammates") or {},
+        # R2a finding 4: the per-issue ask cap; asks beyond it are refused
+        # with one plain line and the reply stands as the answer.
+        "max_asks_per_issue": cfg.get("max_asks_per_issue", 3),
         # Optional: "http://127.0.0.1:<port>/<PREFIX>/issues/{identifier}".
         "issue_url_template": cfg.get("issue_url_template"),
         # Optional, same law: "http://127.0.0.1:<port>/<PREFIX>/{thread}".
