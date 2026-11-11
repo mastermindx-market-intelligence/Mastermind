@@ -316,3 +316,115 @@ one genuinely new residual and several sharpened notes:
 - No server, port, browser or live journey was touched by this lane; the
   Paperclip server files were read read-only (finding 7) and no filename
   matching the forbidden patterns was opened.
+
+## Round 2 (2026-11-11) — fixtures from the real server's shape
+
+The independent panel scored the round-1 delta "do not install as is" on
+one decisive fact: the installed board (build 2026.1106.0) never serves
+`blockedByIssueIds` on GET /api/issues/:id — relations arrive as
+`blockedBy` summaries — so the blocker-set defence read a field that was
+always empty in production. Round-1 tests passed because they injected
+the field by hand.
+
+### The fixture rule now in force
+
+Every board answer in this lane's tests is built from sanitized captures
+of the real server (`tests/mmos_board_fixtures/*.json`, GET-only against
+the installed loopback board, existing issues only, ids kept, free text
+placeholdered, no token in any file). The endpoint each capture came
+from is listed in `tests/mmos_board_fixtures.py`. Two of those captures
+are error bodies captured as they were served (the agent-scoped inbox
+answers 401 to the board actor; the company agents list answers 400
+without filters) — they document actor scope, not board shapes.
+
+### Board fields the carrier reads, and whether the server serves them
+
+field                      where read                                 served?
+-------------------------  -----------------------------------------  --------------------
+id / identifier / title /  issue GET, list, inbox, blockedBy          served (captures)
+  description / status
+assigneeAgentId            issue GET, list rows, blockedBy summaries  served
+parentId                   issue GET, list rows                       served
+blockedBy (summaries: id,  issue GET (parents)                        served (parent
+  status, title, identifier, assigneeAgentId, …)                        captures)
+blockedByIssueIds          issue GET                                  NOT SERVED on GET —
+                                                                      legacy fallback for
+                                                                      boards that did
+activeRun                  inbox rows (agent token)                   served on the inbox
+                                                                      projection; NOT on
+                                                                      an issue GET
+checkoutRunId              issue GET (409 recheck)                    served (issue capture)
+dependencyReady            inbox rows                                 served (projection)
+updatedAt / createdAt      inbox rows / comment rows                  served
+body / authorType /        comment rows                               served
+  authorAgentId / authorUserId
+author.id / authorId       comment rows (last_result_comment)         NOT SERVED — read
+                                                                      removed this round
+kind / status /            interaction rows                           served
+  idempotencyKey / result(.reason)
+metadata.teammate.t3       agent GET                                  served
+
+An agent-scoped inbox read cannot be captured with the board actor (the
+401 above is the proof); its field list is taken from the installed
+projection. Every not-served field above was a finding and is repaired
+or removed this round.
+
+### Repairs (this round, red test first)
+
+- 612fc80d9 — the return edge derives its blocker set from the served
+  `blockedBy` summaries; a marker-matching done child with no recorded
+  relation is left for a person; `last_result_comment` matches
+  `authorAgentId` (the served field).
+- 651bdce86 — an identical re-ask no longer re-blocks the parent on a
+  DONE child (reuse scan checks status).
+- 225640be5 — WAIT / unreachable / unreadable coding-job outcomes carry
+  a retry line and are re-issued on a later wake; unreadable door
+  answers are transient.
+- 57c3dc2db — an unreadable interactions list fails the run instead of
+  reading as "no feedback" at exit 0.
+- af8f6d7d4 — multi-child returns deliver this run's answer, not the
+  last-processed one; the create-failure read-back adopts only this
+  ask's child; a second ask merges the blocker set instead of replacing
+  it; ask action titles are marker-sanitized.
+- c25958dbb — re-apply respects changes made after the move (a rotate
+  refuses instead of reverting); rollback refuses when a third party
+  changed the adapter after the move and marks the result file.
+- a6d87be66 — the dev-instance client refuses redirects and prints
+  status only; an unsignalable pid means the server runs; issue-list
+  reads walk pages; rotate waits for an empty board.
+- 58d85ba9a — failed board reads stop lying (comments read, children
+  shape, reply-wait tolerance); the 409 recheck reads `checkoutRunId`;
+  the live config is written staged at 0600.
+
+### R8 and R11 stay as recorded
+
+- **R8** (a forged-child marker surviving the blocker-set tighten on a
+  never-asked parent): closing it fully needs the ask operation
+  persisted as board state (on the child or the parent relation) rather
+  than inferred from the title hash — an A4-class protocol migration,
+  decided by the principal, not patched silently here.
+- **R11** (the carrier is not pinned to an exact source revision): the
+  pin is an operator-facing config change that belongs to
+  refresh-carrier/install time; deciding it here would couple a running
+  fleet's wake path to this delta.
+
+### Accepted with a reason (not fixed this round)
+
+- **R23 waiting-note discriminator** — by design (panel q3-8): the
+  waiting note is a person-facing line, not a machine protocol.
+- **R24 feedback single ~1620-char read / clamp** — a t3 server fact;
+  changing the read depth needs a server-side answer, not carrier code.
+- **R25 content-edit op change** — A4 protocol migration, principal
+  decision.
+- **q2-4 / q2-5 / q2-6** — t3 server facts (NEEDS SERVER FACT).
+- **R20a deep window per poll** — accepted: read amplification on every
+  wake for a window the marker discipline already bounds (R20b's
+  tolerant read is fixed).
+- **TOCTOU windows on accept/reject** — acknowledged: bounded by
+  idempotency keys and status guards; a transactional board API is a
+  server change.
+- **Directory-mode cosmetics** (0700 on files vs dirs) — no enforcement
+  gap; the files that carry secrets are 0600.
+
+No panel finding was judged false after reading the code; none is
+refuted.
