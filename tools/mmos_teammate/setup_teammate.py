@@ -181,9 +181,26 @@ def ensure_t3_instance(spec):
         },
     }
     settings.setdefault("providerInstances", {})[t3["instance_id"]] = instance
-    with open(settings_path, "w") as fh:
-        json.dump(settings, fh, indent=2)
-    os.chmod(settings_path, 0o600)
+    # R2a finding 11: the dev server watches settings.json and reloads about
+    # 100ms after a change, so the file is swapped in by ONE rename from a
+    # staged file that is 0600 from creation — never truncated in place. A
+    # failed write leaves the original bytes untouched and removes the
+    # staged file; a reader sees the old settings or the new ones, never
+    # half of either.
+    staged = f"{settings_path}.new-{os.getpid()}"
+    fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(settings, fh, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(staged, settings_path)
+    except BaseException:
+        try:
+            os.unlink(staged)
+        except OSError:
+            pass
+        raise
     log(f"provider instance {t3['instance_id']} in {settings_path} "
         f"(home {t3['home_path']})")
 
