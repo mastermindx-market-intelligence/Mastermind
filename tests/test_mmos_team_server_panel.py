@@ -407,6 +407,19 @@ class TestMF3OneWalkTriples:
             node_install.runtime_paths(str(root))   # the next boot re-hashes
 
 
+class TestMF4CacheDocstringHonesty:
+    def test_mf4_node_cache_docstring_states_the_same_user_concession(self):
+        # MED d2-2: the node-cache docstring claimed a deleted or forged
+        # cache can only make the next verify SLOW, "never wrong" — false
+        # for the root's own writer, who can forge triples (and the recorded
+        # digest is then never re-hashed). The server tree's cache docstring
+        # already concedes its same-user tamper model; the node cache must
+        # claim no more than that.
+        doc = node_install._verify_node_tree.__doc__
+        assert doc and "never wrong" not in doc, doc
+        assert "same-user" in doc, doc
+
+
 # --------------------------------------------------------------------------
 # Repair round 3 — C: a slow or empty lsof must never relabel our own
 # listener as "foreign". Unknown is unknown, with one retry.

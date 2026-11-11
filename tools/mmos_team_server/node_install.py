@@ -906,9 +906,14 @@ def _verify_node_tree(install_dir, recorded, status_file=None, force_full=False,
     matching cached digest == verified; any difference (a same-size in-place
     edit included — ctime is kernel-set) falls back to the full tree_sha256,
     which refuses on mismatch and rewrites the cache on success. The receipt,
-    not the cache, is the anchor: a deleted or forged cache can only make the
-    next verify SLOW (full re-hash), never wrong. force_full (doctor --full)
-    skips the cache read entirely."""
+    not the cache, is the anchor: a deleted cache can only make the next
+    verify SLOW (full re-hash) — but a FORGED cache (triples plus the
+    recorded digest, written by the root's own user) is accepted without any
+    re-hash. The cache therefore changes nothing about the tamper model: a
+    same-user writer of the root could edit the tree and the receipts alike,
+    exactly as before the cache existed (MED d2-2 — the server tree's
+    verify-stat-cache concedes the same). force_full (doctor --full) skips
+    the cache read entirely and re-hashes."""
     cache_path = os.path.join(os.path.dirname(os.path.abspath(install_dir)),
                               "node-tree-stat-cache.json")
     _verify_valve("verify-node", status_file, root=root)
