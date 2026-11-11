@@ -174,6 +174,10 @@ class TestR1ServerTreeDigest:
         # refuse in one line (exit 69), never exec the changed bytes.
         root, _, _ = packed_runtime(tmp_path, tamper=("bin.mjs", b"// tampered\n"))
         (root / "config" / "python3-path").write_text(PY + "\n")
+        # Item F: the runner requires a recorded provider CLI folder before it
+        # reaches the server-tree digest check this test exists to exercise.
+        (root / "provider-bin").mkdir()
+        (root / "config" / "provider-cli-dir").write_text(f"{root}/provider-bin\n")
         (root / "run").mkdir()
         (root / "run" / "port").write_text("50899\n")
         (root / "fabric.env").write_text("X=1\n")
@@ -209,6 +213,10 @@ class TestR2RunnerServerBin:
         # the writer's choice.
         root, _, _ = packed_runtime(tmp_path)
         (root / "config" / "python3-path").write_text(PY + "\n")
+        # Item F: the provider record the runner now requires before it will
+        # reach the receipt contradiction this test exists to check.
+        (root / "provider-bin").mkdir()
+        (root / "config" / "provider-cli-dir").write_text(f"{root}/provider-bin\n")
         (root / "run").mkdir()
         (root / "run" / "port").write_text("50899\n")
         (root / "fabric.env").write_text("X=1\n")
@@ -229,6 +237,10 @@ class TestR2RunnerServerBin:
         # 'Going back'), the operator-named config/server-bin still boots.
         root, _, _ = packed_runtime(tmp_path)
         (root / "config" / "python3-path").write_text(PY + "\n")
+        # Item F: the provider record the runner now requires before it will
+        # boot the legacy binary this test exercises.
+        (root / "provider-bin").mkdir()
+        (root / "config" / "provider-cli-dir").write_text(f"{root}/provider-bin\n")
         (root / "run").mkdir()
         (root / "run" / "port").write_text("50899\n")
         (root / "fabric.env").write_text("X=1\n")

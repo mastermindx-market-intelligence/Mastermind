@@ -134,13 +134,14 @@ plist_dir() { echo "${TEAM_SERVER_LAUNCHAGENTS_DIR:-$HOME/Library/LaunchAgents}"
 # ---------- shared option parsing ----------
 COMMAND="${1:-}"
 [ $# -gt 0 ] && shift
-ROOT=""; PORT=""; LABEL=""; SERVER_BIN=""; REPLACE=0
+ROOT=""; PORT=""; LABEL=""; SERVER_BIN=""; PROVIDER_CLI=""; REPLACE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --root) ROOT=${2:?}; shift 2 ;;
     --port) PORT=${2:?}; shift 2 ;;
     --label) LABEL=${2:?}; shift 2 ;;
     --server-bin) SERVER_BIN=${2:?}; shift 2 ;;
+    --provider-cli) PROVIDER_CLI=${2:?}; shift 2 ;;
     --replace) REPLACE=1; shift ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -568,6 +569,21 @@ cmd_install() {
   for _f in run/server.log run/port run/access.txt run/home.lock; do
     [ -L "$ROOT/$_f" ] && die "refusing symlinked $ROOT/$_f (planted link would redirect a write/read through it)"
   done
+  # Item F: the provider CLI. Since the switch the live server has reported
+  # "Claude Agent CLI (claude) was not found on PATH" — the runner's PATH was
+  # node + system dirs and claude lives in ~/.local/bin. install now records
+  # the provider CLI's folder (the way it records config/python3-path) and
+  # the runner adds it to the server PATH. Precedence: --provider-cli, then
+  # PROVIDER_CLI_BIN (operator knob, like PYTHON3_BIN), then `claude` on the
+  # installing shell's PATH. Missing or invalid is a NAMED refusal — never a
+  # silent install whose teammates cannot start a Claude run. Static check
+  # BEFORE the bootout below (LOW3): a refused install must not take a
+  # healthy server down.
+  if [ -z "$PROVIDER_CLI" ]; then PROVIDER_CLI="${PROVIDER_CLI_BIN:-}"; fi
+  if [ -z "$PROVIDER_CLI" ]; then PROVIDER_CLI=$(command -v claude 2>/dev/null || true); fi
+  [ -n "$PROVIDER_CLI" ] || die "provider CLI 'claude' not found on PATH and none given — pass --provider-cli <absolute path to the claude binary> (the runner adds its folder to the server PATH; without it no teammate can start a Claude run)"
+  PROVIDER_FOLDER=$("$PYTHON3_BIN" "$REPO_DIR/tools/mmos_team_server/node_install.py" provider-folder --root "$ROOT" --cli "$PROVIDER_CLI") \
+    || die "provider CLI refused: $PROVIDER_CLI — fix the condition above (or pass --provider-cli with an absolute path to a valid claude binary in a teammate-unwritable folder)"
   # Boot out a previous job for this label before replacing (idempotent) —
   # AFTER every static refusal above (LOW3). The a4 pre-check above let this
   # job's lock pass on the promise this bootout stops it, so re-verify: if
@@ -600,6 +616,11 @@ cmd_install() {
   # F17: temp+rename so a kill cannot leave a partial port or server-bin.
   atomic_write "$ROOT/run/port" "$PORT"
   atomic_write "$ROOT/config/server-bin" "$SERVER_BIN"
+  # Item F: the provider CLI folder record, written by the same validator
+  # that checked it above (0600, atomic, exactly like config/python3-path).
+  "$PYTHON3_BIN" "$REPO_DIR/tools/mmos_team_server/node_install.py" record-provider \
+    --root "$ROOT" --cli "$PROVIDER_CLI" >/dev/null \
+    || die "cannot record provider CLI folder for $ROOT (config/provider-cli-dir)"
   : > "$ROOT/run/server.log" || die "cannot truncate $ROOT/run/server.log"
   chmod 600 "$ROOT/run/server.log" || die "cannot chmod $ROOT/run/server.log"
   mkdir -p "$(plist_dir)"

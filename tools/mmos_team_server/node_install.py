@@ -410,6 +410,85 @@ def trusted_interpreter(path, root):
     return path
 
 
+def _require_teammate_safe_dir(folder, what, strict_leaf=True):
+    """Item F: every component from / down to `folder` must be a place a
+    teammate (another local user) cannot plant or swap a binary in.
+
+    The folder itself (strict_leaf=True, the recorded folder and the
+    resolution-target folder) must have NO group/other write at all. For the
+    ANCESTORS above it, group/other write is refused unless the sticky bit
+    is set — a sticky 1777 directory (/tmp, /var/tmp) is the OS's own
+    mitigation: anyone may create entries there, but only their owner may
+    rename or remove them, so this user's subtree under it cannot have its
+    entries swapped by anyone else. The owner of every component must be
+    root or the current user (root is the OS, not a teammate — /usr, /opt
+    and friends are root-owned by design)."""
+    folder = os.path.realpath(folder).rstrip("/") or "/"
+    components = [] if folder == "/" else folder.strip("/").split("/")
+    current = ""
+    for index, part in enumerate(components):
+        current += "/" + part
+        leaf = index == len(components) - 1
+        try:
+            info = os.stat(current)
+        except OSError as exc:
+            raise InstallError(f"{what} not found: {current}") from exc
+        if info.st_uid not in (0, os.getuid()):
+            raise InstallError(
+                f"{what} is owned by another user (a teammate could control "
+                f"it): {current}")
+        if info.st_mode & 0o022 and (leaf and strict_leaf
+                                     or not info.st_mode & stat.S_ISVTX):
+            raise InstallError(
+                f"{what} is writable by group or others: {current} "
+                f"({stat.filemode(info.st_mode)}) — a teammate could plant "
+                f"or swap a provider binary there")
+
+
+def validated_provider_cli(cli, root=None):
+    """Item F: validate the provider CLI binary and return the folder install
+    records as config/provider-cli-dir.
+
+    The record is the folder the binary is NAMEABLE in (its dirname, fully
+    resolved), because the server's PATH must resolve `claude` by name. The
+    binary's RESOLUTION target tree gets the same teammate-safety walk: the
+    stock Claude install is a symlink (`~/.local/bin/claude` ->
+    `~/.local/share/claude/versions/<v>`), and the folder that names the
+    binary is only as trustworthy as the tree the symlink resolves into.
+    python3-path precedent: the folder must not live inside the server root
+    (nothing inside the root is pinned by an outside authority, and uninstall
+    would delete it)."""
+    path = os.path.expanduser(str(cli))
+    if not path or not os.path.isabs(path):
+        raise InstallError(f"provider CLI must be an absolute path: {cli!r}")
+    try:
+        info = os.stat(path)
+    except OSError as exc:
+        raise InstallError(f"provider CLI not found: {path}") from exc
+    if not stat.S_ISREG(info.st_mode):
+        raise InstallError(f"provider CLI is not a regular file: {path}")
+    if not os.access(path, os.X_OK):
+        raise InstallError(f"provider CLI is not executable: {path}")
+    folder = os.path.dirname(path)
+    _require_teammate_safe_dir(folder, "provider CLI folder")
+    _require_teammate_safe_dir(os.path.dirname(os.path.realpath(path)),
+                               "provider CLI resolution target")
+    if root and realpath_inside(folder, root):
+        raise InstallError(
+            f"provider CLI must not live inside the server root: {folder}")
+    return os.path.realpath(folder)
+
+
+def record_provider_cli(root, cli):
+    """Item F: validate the provider CLI and record its folder the way
+    trusted_interpreter is recorded (config/, 0600, one atomic write)."""
+    root = validated_root(root)
+    folder = validated_provider_cli(cli, root=root)
+    config_dir = private_dir(os.path.join(root, "config"), create=True)
+    private_write(os.path.join(config_dir, "provider-cli-dir"), folder + "\n")
+    return folder
+
+
 def install_lock(runtime_dir):
     """F5/F6: one installer at a time per root. The lock is an flock on a
     private file inside runtime/; a second installer refuses in one line.
@@ -1257,6 +1336,18 @@ def doctor(root, label, verify_tree=True, port=None):
             if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
                 raise InstallError("pairing file must be owned by this user and mode 0600")
             age = max(0, int(time.time() - info.st_mtime))
+        # Item F: the recorded provider CLI folder. Doctor reports the RECORD
+        # (never resolves `claude` in its own shell — that is not the server's
+        # PATH); a pre-item-F root shows the re-run-install recovery inline.
+        provider_row = "missing (pre-item-F root; re-run install to record it)"
+        try:
+            with open(os.path.join(root, "config", "provider-cli-dir"),
+                      encoding="utf-8") as stream:
+                recorded_folder = stream.read().strip().splitlines()[0]
+            if recorded_folder.startswith("/") and os.path.isdir(recorded_folder):
+                provider_row = recorded_folder
+        except (OSError, ValueError, IndexError):
+            pass
         rows = [("label", label), ("loaded", "yes" if loaded else "no"),
                 ("pid", match.group(1) if match else "none"), ("port", port),
                 ("answeringPort", answering), ("answeringProcess", attributed),
@@ -1265,6 +1356,7 @@ def doctor(root, label, verify_tree=True, port=None):
                 ("nodeVersion", node_version), ("nodeExecCheck", node_exec_check),
                 ("buildPath", build_row), ("treeVerified", tree_row),
                 ("serverTreeFiles", server_files),
+                ("providerCliFolder", provider_row),
                 ("migrationHead", migration), ("serverLogBytes", size),
                 ("serverLogCapBytes", cap), ("pairingFileAgeSeconds", age)]
         for key, value in rows:
@@ -1317,14 +1409,20 @@ def doctor(root, label, verify_tree=True, port=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("install", "doctor", "resolve"):
+    for name in ("install", "doctor", "resolve", "provider-folder", "record-provider"):
         p = sub.add_parser(name)
-        p.add_argument("--root", required=True)
+        if name in ("provider-folder", "record-provider"):
+            # Item F: validate (and optionally record) the provider CLI whose
+            # folder install pins as config/provider-cli-dir.
+            p.add_argument("--root", required=True)
+            p.add_argument("--cli", required=True)
+        else:
+            p.add_argument("--root", required=True)
         if name == "install":
             p.add_argument("--archive", required=True)
             p.add_argument("--checksum", required=True)
             p.add_argument("--version", default=VERSION)
-        elif name == "doctor":
+        elif name in ("doctor",):
             p.add_argument("--label", required=True)
             p.add_argument("--verify-tree", action=argparse.BooleanOptionalAction,
                            default=True,
@@ -1337,7 +1435,7 @@ def main(argv=None):
             p.add_argument("--port", default=None,
                            help="probe this port when run/port is missing or "
                                 "unreadable (FU7)")
-        else:
+        elif name == "resolve":
             p.add_argument("--command", choices=("node", "serve"), default="serve")
             p.add_argument("--verify-tree", action=argparse.BooleanOptionalAction,
                            default=None,
@@ -1353,6 +1451,12 @@ def main(argv=None):
             return doctor(args.root, args.label,
                           verify_tree=("full" if args.full else args.verify_tree),
                           port=args.port)
+        elif args.command == "provider-folder":
+            # Item F: validate only; print the folder install would record.
+            print(validated_provider_cli(args.cli, root=validated_root(args.root)))
+        elif args.command == "record-provider":
+            # Item F: validate and record (config/provider-cli-dir, 0600).
+            print(record_provider_cli(args.root, args.cli))
         else:
             # F8: resolve applies the same root validation as install/doctor.
             print(resolve_command(validated_root(args.root), args.command,

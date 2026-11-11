@@ -123,6 +123,11 @@ class Harness:
             f"exec {PY} {FIX / 'fake_launchctl.py'} "
             f"--state {str(self.state)!r} \"$@\"\n")
         os.chmod(launchctl, 0o755)
+        # Item F: the provider CLI the way the real machine has it — `claude`
+        # nameable on PATH. install records this binary's folder.
+        claude = self.bindir / "claude"
+        claude.write_text(FIX.joinpath("fake_claude").read_text())
+        os.chmod(claude, 0o755)
 
     def env(self, **extra):
         env = {
@@ -1095,3 +1100,143 @@ def test_fu9_uninstall_verifies_the_root_is_down(h):
         assert "home.lock" in out and ("surviving" in out or "still held" in out), out
     finally:
         holder.kill(); holder.wait()
+
+
+# ==========================================================================
+# Item F — the provider CLI folder. Since the switch the live server has
+# reported "Claude Agent CLI (claude) was not found on PATH": the runner's
+# PATH was node + system dirs only, and the real claude lives in
+# ~/.local/bin. install now records the provider CLI's folder (validated,
+# owner-only, teammate-unwritable) the way it records config/python3-path,
+# and the runner puts that folder on the server's PATH.
+# ==========================================================================
+
+def test_f1_install_records_the_provider_cli_folder(h):
+    # Discovery path: no flag, `claude` found on PATH (the fixture's), the
+    # record is the folder of that binary — absolute, mode 0600.
+    h.seed_root()
+    proc = h.run_install("--server-bin", h.fake_server())
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    record = h.root / "config" / "provider-cli-dir"
+    assert record.exists(), out
+    assert oct(os.stat(record).st_mode & 0o777) == "0o600"
+    assert record.read_text().strip() == str(h.bindir.resolve())
+
+
+def test_f1b_provider_cli_flag_overrides_discovery(h):
+    # --provider-cli names the binary explicitly; its folder is recorded
+    # even though a different `claude` is on PATH.
+    custom = h.base / "pro-bin"
+    custom.mkdir()
+    cli = custom / "claude"
+    cli.write_text("#!/bin/sh\necho fake\n")
+    os.chmod(cli, 0o755)
+    h.seed_root()
+    proc = h.run_install("--server-bin", h.fake_server(),
+                         "--provider-cli", cli)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    record = h.root / "config" / "provider-cli-dir"
+    assert record.read_text().strip() == str(custom.resolve())
+
+
+def test_f2_install_fails_named_without_a_provider_cli(h):
+    # No claude on PATH and none given: install refuses with a named reason
+    # and the recovery flag — never silently installs a server whose
+    # teammates cannot start a Claude run. Static refusal: nothing loaded.
+    env = h.env()
+    env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+    h.seed_root()
+    proc = subprocess.run(
+        ["/bin/sh", str(TOOL), "install", "--root", str(h.root),
+         "--port", str(h.port), "--label", LABEL,
+         "--server-bin", str(h.fake_server())],
+        capture_output=True, text=True, env=env, timeout=120)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0
+    assert "provider CLI" in out
+    assert "claude" in out
+    assert "--provider-cli" in out
+    assert not h.loaded()
+
+
+def test_f3_install_refuses_a_team_writable_provider_folder(h):
+    # A folder a teammate can write into must never reach the server PATH:
+    # group-writable, other-writable and STICKY other-writable (1777 — the
+    # sticky bit pardons such an ANCESTOR, never the folder itself) are each
+    # refused by name, and the refusal fires before anything is booted out.
+    h.seed_root()
+    server = h.fake_server()
+    for bad_mode in (0o770, 0o777, 0o1777):
+        os.chmod(h.bindir, bad_mode)
+        try:
+            proc = h.run_install("--server-bin", server, "--replace")
+            out = proc.stdout + proc.stderr
+            assert proc.returncode != 0, (bad_mode, out)
+            assert "writable by group or others" in out, (bad_mode, out)
+            assert str(h.bindir) in out, (bad_mode, out)
+            assert not h.loaded()
+        finally:
+            os.chmod(h.bindir, 0o755)
+    # the folder restored to 0755 installs cleanly
+    assert h.run_install("--server-bin", server).returncode == 0
+
+
+def test_f3b_provider_cli_resolving_into_a_team_writable_tree_refused(h):
+    # The binary itself sits in a safe folder but resolves (symlink) into a
+    # tree a teammate can write: the recorded folder would let a teammate
+    # swap the resolved binary, so install refuses naming the unsafe tree.
+    target = h.base / "swaptree" / "v1"
+    target.mkdir(parents=True)
+    real_cli = target / "real-claude"
+    real_cli.write_text("#!/bin/sh\necho swapped\n")
+    os.chmod(real_cli, 0o755)
+    os.chmod(target, 0o770)  # teammate-writable resolution target
+    link = h.bindir / "claude-linked"
+    link.symlink_to(real_cli)
+    h.seed_root()
+    proc = h.run_install("--server-bin", h.fake_server(),
+                         "--provider-cli", link)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "writable by group or others" in out, out
+    assert str(target) in out, out
+    assert not (h.root / "config" / "provider-cli-dir").exists()
+
+
+def test_f4_runner_puts_the_recorded_folder_on_the_server_path(h):
+    # The packed boot REBUILDS PATH in the exec handoff — the exact line the
+    # defect lived in. The stub server records the environment it was exec'd
+    # with; the recorded provider folder must be on that PATH and `claude`
+    # must resolve against it.
+    _plant_packed_runtime(h, serving=FIX / "fake_t3_envdump.py")
+    packed_bin = h.root / "runtime" / "packed" / "dist" / "bin.mjs"
+    assert h.run_install("--server-bin", packed_bin).returncode == 0
+    dump = h.root / "scratch-project" / "env-dump.json"
+    assert wait_for(lambda: dump.exists(), 15), h.log()
+    import shutil
+    data = json.loads(dump.read_text())
+    recorded = (h.root / "config" / "provider-cli-dir").read_text().strip()
+    assert recorded in data["PATH"].split(os.pathsep), data["PATH"]
+    assert shutil.which("claude", path=data["PATH"]), data["PATH"]
+
+
+def test_f5_runner_refuses_to_boot_without_the_record(h):
+    # A root whose provider record vanished (pre-item-F root, or a partial
+    # copy) must not boot a server whose PATH quietly lost the folder — the
+    # runner refuses at boot naming the recovery, exactly like python3-path.
+    # The refusal is a TERMINAL boot stage (refused-provider), so install's
+    # wait does not spend its extension window on a crash-loop it can never
+    # out-wait: the failure names the refused stage immediately.
+    server = h.fake_server()
+    assert h.run_install("--server-bin", server).returncode == 0
+    assert h.run("stop", "--root", h.root, "--label", LABEL).returncode == 0
+    (h.root / "config" / "provider-cli-dir").unlink()
+    proc = h.run("start", "--root", h.root, "--label", LABEL, timeout=120)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0
+    assert "last stage: refused-provider" in out
+    log = h.log()
+    assert "no recorded provider CLI folder" in log
+    assert "install" in log
+    assert "not found on PATH" not in log  # never the operator's diagnosis again

@@ -53,6 +53,27 @@ digest and refuses; deleting the cache file only costs a slow pass.
 contradiction at boot (panel R2). `launchctl`, `curl`, `lsof`, `stat` and `ps`
 are invoked by absolute path, like python3 (panel R8).
 
+The **provider CLI is pinned the same way** (item F): after the switch the
+server reported `Claude Agent CLI (claude) was not found on PATH` because the
+runner's PATH was node + system dirs while `claude` lives in `~/.local/bin`.
+`install` now discovers the provider CLI (`--provider-cli <absolute path>`,
+or the `PROVIDER_CLI_BIN` operator knob, or `claude` on the installing
+shell's PATH), validates it — an absolute regular executable whose folder
+AND whose symlink-resolution target tree contain nothing a teammate can
+write (group/other write refused on every ancestor unless the sticky bit is
+set; owners must be root or this user; the stock install's
+`~/.local/bin/claude -> ~/.local/share/claude/versions/<v>` symlink is
+exactly why both trees are walked) — and records the binary's folder in
+`config/provider-cli-dir` (0600, one atomic write, like
+`config/python3-path`). Missing or invalid refuses the install with a named
+reason; it is never silently dropped. The runner adds that folder to the
+server's PATH (both the pre-resolve export and the packed-exec PATH rebuild
+— the latter is the exact line the defect lived in) and refuses to boot
+without the record, so a pre-item-F root fails loudly at `stage
+refused-provider` instead of quietly serving a server whose teammates
+cannot start a Claude run. `doctor` reports the record as
+`providerCliFolder=<folder>`.
+
 **Scope note (item 12):** the receipt/tree checks stop a *substituted or
 tampered runtime* — a different `installDir`, a swapped `bin/node`, a tree
 that no longer matches its recorded digest. A writer who can change the runner
@@ -339,6 +360,13 @@ tools/mmos_team_server/team_server.sh install --replace \
   --root ~/.mastermind/t3-team --port 3780 --label com.mastermind.t3-team
 ```
 
+Item F: this step also records the provider CLI's folder
+(`config/provider-cli-dir`) — `claude` is discovered on the installing
+shell's PATH (`~/.local/bin`); pass `--provider-cli <absolute path>` to name
+it explicitly. If no `claude` is found, or the folder fails the
+teammate-writability validation, install refuses in one line naming the
+condition and the flag; fix and re-run.
+
 Worked prints: `INSTALLED label=com.mastermind.t3-team … server_bin=/Users/chriswong/.mastermind/t3-team/runtime/t3team-0.1.7-pin0770446/dist/bin.mjs`
 and then one of exactly two truthful lines:
 - `pairing access saved to ~/.mastermind/t3-team/run/access.txt (mode 0600; not printed)` — banner captured; or
@@ -391,7 +419,9 @@ every boot stage as it happens — on screen via install's wait and in
 `<root>/run/boot.status` as `stage=<name> <epoch>` lines
 (`pre-flight`, `resolve-node`, `verify-node`, `resolve-server`,
 `verify-server`, `lock-port`, `exec-server`; the verify stages heartbeat
-every 500 files while hashing). While the wait window runs you see a line
+every 500 files while hashing; and the terminal refusal stages
+`refused-python3` / `refused-provider` for a missing interpreter or provider
+record). While the wait window runs you see a line
 every ~15 s: `waiting for first answer on 127.0.0.1:3780 — Ns elapsed, boot
 stage: verify-node`. If the base 180 s window expires while the LAST stage
 is still pre-exec, fresh (<30 s since its last heartbeat) and the job pid is
@@ -406,7 +436,11 @@ before, with the failure now naming the last stage and its age: `server did
 not answer on 127.0.0.1:3780 (last stage: exec-server, Ns ago; see
 ~/.mastermind/t3-team/run/boot.status)`. An empty `server.log` therefore
 never again reads as "working": the stage lines land in it (via stderr) and
-in boot.status from the first second.
+in boot.status from the first second. A `refused-*` stage is terminal: the
+wait never extends into a config refusal crash-loop — install/start fail
+immediately with `last stage: refused-provider, Ns ago` (item F) and the
+runner's one-line reason (with its recovery) is the line before it in
+`server.log`.
 
 ### Step 7 — doctor
 
@@ -421,7 +455,10 @@ Worked prints `loaded=yes`, a pid, `port=3780`, `answeringPort=3780`,
 `buildPath=…/runtime/t3team-0.1.7-pin0770446/dist/bin.mjs`,
 `treeVerified=node+server` with `serverTreeFiles=<N>` (both trees re-verified
 against their receipts, F23 + panel R1 — freshly hashed or tripwire-cached as
-above), `migrationHead=80`, log size vs cap,
+above), `providerCliFolder=/Users/chriswong/.local/bin` (item F: the folder
+install recorded; a pre-item-F root prints
+`providerCliFolder=missing (pre-item-F root; re-run install to record it)`),
+`migrationHead=80`, log size vs cap,
 pairing file age — and exits 0. On a rollback root (receipts moved aside) the
 same block prints `treeVerified=none(rollback)` and the operator-named
 binary as `buildPath`, instead of refusing. `doctor` deliberately never

@@ -73,9 +73,23 @@ case "$PY3" in
   /*) [ -f "$PY3" ] && [ -x "$PY3" ] || PY3="" ;;
   *) PY3="" ;;
 esac
-[ -n "$PY3" ] || { echo "server_runner: no recorded python3 interpreter (config/python3-path missing or invalid); recovery: runbook step 3 (node_install.py install) records it — see integrations/mmos/TSH_TEAM_SERVER_HARDENING.md" >&2; exit 78; }
+[ -n "$PY3" ] || { stage refused-python3; echo "server_runner: no recorded python3 interpreter (config/python3-path missing or invalid); recovery: runbook step 3 (node_install.py install) records it — see integrations/mmos/TSH_TEAM_SERVER_HARDENING.md" >&2; exit 78; }
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# Item F: the provider CLI's folder, recorded by install the same way
+# (config/provider-cli-dir). Without it the server PATH has only node and
+# the system dirs, and the server reports "Claude Agent CLI (claude) was
+# not found on PATH" — no teammate can start a Claude run. Missing or
+# invalid refuses at boot (never a silently degraded PATH).
+PDIR_CONF="$ROOT/config/provider-cli-dir"
+PDIR=""
+if [ -s "$PDIR_CONF" ]; then PDIR=$(head -1 "$PDIR_CONF" 2>/dev/null); fi
+case "$PDIR" in
+  /*) [ -d "$PDIR" ] || PDIR="" ;;
+  *) PDIR="" ;;
+esac
+[ -n "$PDIR" ] || { stage refused-provider; echo "server_runner: no recorded provider CLI folder (config/provider-cli-dir missing or invalid); recovery: re-run team_server.sh install — it records the claude CLI's folder and adds it to the server PATH (runbook item F)" >&2; exit 78; }
+
+export PATH="$PDIR:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 # FU4 (R8 pass 2): stat was still PATH-resolved here — pin it absolute like
 # every other system tool the runner trusts.
@@ -134,6 +148,9 @@ fi
 # whole server lifetime; launchd retries every ThrottleInterval while held out.
 export NODE_BIN
 export BOOT_STATUS
+# Item F: PDIR rides the runner's own environment into the handoff below
+# (the exec env whitelist drops it — the server never sees a stray var).
+export PDIR
 stage lock-port
 exec "$PY3" -I - "$ROOT" "$SERVER_BIN" "$ENV_FILE" "$LOG_FILE" <<'PY'
 import fcntl, os, sys, time
@@ -194,8 +211,12 @@ env["T3CODE_NO_BROWSER"] = "1"
 os.chdir(os.path.join(root, "scratch-project"))
 _stage("exec-server")   # past this line the server itself owns the answer
 node_bin = os.environ.get("NODE_BIN")
+provider_dir = os.environ.get("PDIR", "")
 if node_bin:
-    env["PATH"] = os.path.dirname(node_bin) + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    # Item F: the rebuilt PATH keeps the recorded provider CLI folder —
+    # this exact line is where "claude was not found on PATH" came from.
+    env["PATH"] = (os.path.dirname(node_bin) + ":" + provider_dir +
+                   ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
     os.execve(node_bin, [node_bin, server_bin, "serve"], env)
 os.execve(server_bin, [server_bin, "serve"], env)
 PY

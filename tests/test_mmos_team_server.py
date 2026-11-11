@@ -314,6 +314,10 @@ class TestAttackRoundFixes:
         (root / "fabric.env").write_text("DUMMY=1\n")
         (root / "fabric.env").chmod(0o600)
         (cfg / "python3-path").write_text("/opt/homebrew/bin/python3.12\n")
+        # Item F: the provider record the runner now requires before it will
+        # reach the server-bin refusal this test exists to check.
+        (root / "provider-bin").mkdir()
+        (cfg / "provider-cli-dir").write_text(f"{root}/provider-bin\n")
         (run / "port").write_text(str(free_port()))
         r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
                            capture_output=True, text=True, timeout=30)
@@ -355,6 +359,10 @@ class TestAttackRoundFixes:
         (root / "fabric.env").chmod(0o600)
         (cfg / "python3-path").write_text("/opt/homebrew/bin/python3.12\n")
         (cfg / "server-bin").write_text("/usr/bin/false\n")
+        # Item F: the provider record the runner now requires before it will
+        # reach the port refusal this test exists to check.
+        (root / "provider-bin").mkdir()
+        (cfg / "provider-cli-dir").write_text(f"{root}/provider-bin\n")
         for bad in ("", "03773", "65536", "37x3"):
             (run / "port").write_text(bad + "\n")
             r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
@@ -411,6 +419,10 @@ class TestRunnerHygiene:
         (root / "fabric.env").chmod(0o600)
         (cfg / "python3-path").write_text("/opt/homebrew/bin/python3.12\n")
         (cfg / "server-bin").write_text("/usr/bin/false\n")
+        # Item F: the provider record the runner now requires before it will
+        # reach the exec whose log truncation this test exists to check.
+        (root / "provider-bin").mkdir()
+        (cfg / "provider-cli-dir").write_text(f"{root}/provider-bin\n")
         (cfg / "log-cap").write_text("1024\n")
         (run / "port").write_text(str(free_port()))
         log = run / "server.log"
