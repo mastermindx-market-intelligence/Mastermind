@@ -1,0 +1,3 @@
+#!/bin/sh
+# Instant sleep: the tool's wait loops (180 x sleep 1) must not cost minutes.
+exit 0
