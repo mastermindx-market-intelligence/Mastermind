@@ -116,6 +116,17 @@ _EXPECTED_SHARD_SOURCE_STEPS = [
 ]
 
 
+# The fan-in job runs no suite, but its gate revalidates the canonical plan
+# with repository code. Pin every step before the gate so nothing can replace
+# that code or redirect the gate's working directory.
+_EXPECTED_GATE_SETUP_STEPS = [
+    {"uses": "actions/checkout@v4"},
+    {"uses": "actions/setup-python@v5", "with": {"python-version": "3.12"}},
+    {"name": "Install gate parser",
+     "run": "python -m pip install --disable-pip-version-check PyYAML==6.0.2"},
+]
+
+
 _EXPECTED_SCOPE_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 0, 'persist-credentials': False}},
  {'uses': 'actions/setup-python@v5', 'with': {'python-version': '3.12'}},
  {'name': 'Classify integrated source diff using protected base code',
@@ -203,6 +214,31 @@ _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 
 # independently of the change under test. No self-hosted runner carries this
 # label. Scope classification and the `test` fan-in run no suite.
 HOSTED_TEST_RUNNER = "ubuntu-24.04"
+# The workflow root may declare exactly the released keys. A workflow-level
+# `defaults:` (e.g. defaults.run.shell injection) or `env:` (e.g.
+# npm_config_dry_run) applies to every job and could neuter all steps while
+# every per-job check still passes, so unknown root keys are drift.
+# ci_pytest._WorkflowYAMLLoader keeps the bare `on:` trigger key a string
+# (never a YAML 1.1 boolean), so this set comparison matches the real file.
+_WORKFLOW_ROOT_KEYS = frozenset(
+    {"name", "on", "permissions", "concurrency", "jobs"})
+# Root content that is pinned beside the key set: renaming the workflow
+# re-splits the concurrency group and turning cancel-in-progress off lets
+# superseded runs keep consuming the hosted queue.
+_WORKFLOW_NAME = "CI"
+# Exact keys for every job, as for pin_guards and qualification below: a
+# job-level defaults/env/container/services (e.g. defaults.run.shell on `test`
+# makes the fan-in gate exit 0 without reading any shard result) changes what
+# the pinned step text executes while every per-step check still passes.
+_PR_SCOPE_JOB_KEYS = frozenset(
+    {"name", "if", "permissions", "runs-on", "timeout-minutes", "outputs", "steps"})
+_PR_FAST_JOB_KEYS = frozenset(
+    {"name", "needs", "if", "permissions", "runs-on", "timeout-minutes", "steps"})
+_PYTEST_SHARDS_JOB_KEYS = frozenset(
+    {"name", "needs", "if", "permissions", "runs-on", "timeout-minutes",
+     "strategy", "steps"})
+_TEST_GATE_JOB_KEYS = frozenset(
+    {"name", "needs", "if", "runs-on", "timeout-minutes", "steps"})
 _PIN_GUARDS_JOB_KEYS = frozenset(
     {"name", "if", "permissions", "runs-on", "timeout-minutes", "steps"})
 _QUALIFICATION_JOB_KEYS = frozenset(
@@ -335,6 +371,8 @@ def _validate_pr_fast_lane(jobs: dict) -> None:
         or fast.get("continue-on-error") is not None
     ):
         raise ci_pytest.PolicyError("PR scope must be trusted and PR fast lane must be bounded")
+    if set(scope) != _PR_SCOPE_JOB_KEYS or set(fast) != _PR_FAST_JOB_KEYS:
+        raise ci_pytest.PolicyError("PR scope or PR fast job keys drifted")
     scope_steps, fast_steps = scope.get("steps"), fast.get("steps")
     if not isinstance(scope_steps, list) or len(scope_steps) != 3 or not isinstance(fast_steps, list) or len(fast_steps) != 8:
         raise ci_pytest.PolicyError("PR scope/fast steps missing or duplicated")
@@ -455,8 +493,16 @@ def validate_parallel_workflow(text: str) -> None:
 
     ci_pytest.validate_workflow(text)
     payload = yaml.load(text, Loader=ci_pytest._WorkflowYAMLLoader)
+    # validate_workflow already refused non-string root keys (a coerced
+    # boolean `on` among them), so the set comparison below is exact.
+    if set(payload) != _WORKFLOW_ROOT_KEYS:
+        raise ci_pytest.PolicyError(
+            "CI workflow root keys must be exactly name, on, permissions, concurrency, jobs"
+        )
     if payload.get("permissions") != {"contents": "read"}:
         raise ci_pytest.PolicyError("CI workflow root may only read source")
+    if payload.get("name") != _WORKFLOW_NAME:
+        raise ci_pytest.PolicyError("CI workflow name must stay the released value")
     if payload.get("concurrency") != _REQUIRED_CONCURRENCY:
         raise ci_pytest.PolicyError("metadata edits must not cancel source/base qualification")
     jobs = payload.get("jobs")
@@ -497,6 +543,8 @@ def validate_parallel_workflow(text: str) -> None:
         or gate.get("continue-on-error") is not None
     ):
         raise ci_pytest.PolicyError("required test job must always aggregate all shards")
+    if set(shards) != _PYTEST_SHARDS_JOB_KEYS or set(gate) != _TEST_GATE_JOB_KEYS:
+        raise ci_pytest.PolicyError("pytest shard or test gate job keys drifted")
 
     # Guard each hosted job's total wall-clock budget, not just pytest time.
     # Preserve the existing <=100-minute shard+fan-in source contract (the
@@ -655,6 +703,11 @@ def validate_parallel_workflow(text: str) -> None:
     if len(test_steps) != 1:
         raise ci_pytest.PolicyError("required fan-in gate step is missing")
     final = test_steps[0]
+    if (gate_steps[:-1] != _EXPECTED_GATE_SETUP_STEPS or gate_steps[-1] is not final
+            or set(final) != {"name", "env", "run"}):
+        raise ci_pytest.PolicyError(
+            "required fan-in job steps must be exactly the pinned setup and gate"
+        )
     code = final.get("run")
     # Exact gate source is tested as a whole, not by searching for "exit 1"
     # text in comments or after a branch that already accepted fast PR mode.
