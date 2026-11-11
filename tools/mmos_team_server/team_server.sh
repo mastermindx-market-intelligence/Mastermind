@@ -6,6 +6,7 @@
 # Usage:
 #   team_server.sh install  --root DIR --port N --label ID [--server-bin PATH]
 #                           [--replace]
+#   team_server.sh doctor --root DIR --label ID
 #   team_server.sh start|stop|status|uninstall  --root DIR --label ID
 #   team_server.sh selftest
 #
@@ -16,6 +17,11 @@
 # <root>/fabric.env (0600, written by seed_dev_home.py), sourced by the runner —
 # never from the plist text.
 set -u
+# Everything this tool creates (root subdirs, port file, server.log,
+# access.txt) is private state or credential-bearing: create it 0700/0600
+# from the start instead of chmod-racing after a world-readable write
+# (attack findings 8 and 9).
+umask 077
 
 SELFTEST_ONLY=0
 
@@ -29,6 +35,9 @@ T3_DEV_LIB_ONLY=1
 # shellcheck disable=SC1090
 . "$T3_DEV"
 T3_DEV_LIB_ONLY=0
+# t3_dev.sh redefines die() with its own prefix; re-assert ours so this
+# tool's refusals are attributed correctly (attack finding 14).
+die() { echo "team_server: $1" >&2; exit 1; }
 # t3_dev.sh guards reused below: realpath_of, check_home_safe (HOME_DIR),
 # port_forbidden, port_busy. Its own DEV_ROOT/HOME_DIR are re-pointed per call.
 
@@ -108,6 +117,11 @@ cmd_selftest() {
 require_root_label() {
   [ -n "$ROOT" ] || die "missing --root"
   [ -n "$LABEL" ] || die "missing --label"
+  # Every command that builds a plist path from $LABEL must go through this
+  # check: an unvalidated label reaches rm -f, launchctl bootstrap and the
+  # plist heredoc write (attack finding 2).
+  label_valid "$LABEL" || die "invalid label: $LABEL"
+  [ -L "$ROOT" ] && die "refusing symlinked root: $ROOT"
   ROOT=$(root_is_safe "$ROOT") || die "refusing unsafe root: $ROOT (at/inside/resolves into $HOME/.t3)"
 }
 
@@ -121,21 +135,44 @@ wait_http() {
   return 1
 }
 
-# Capture the LAST complete pairing banner (never print it) into
+# Emit the last complete pairing banner from stdin (never print it elsewhere).
+banner_filter() {
+  awk '/^(Connection string|Token|Pairing URL):/ {
+    blk = blk $0 "\n"
+    if ($0 ~ /^Pairing URL:/) { last = blk; blk = "" }
+  } END { printf "%s", last }'
+}
+
+# Capture the LIVE pairing banner (never print it) into
 # <root>/run/access.txt 0600. Each server start mints a fresh one-time token
-# and launchd appends banners across restarts, so stale blocks must not win.
+# and launchd APPENDS banners across restarts. After install/restart the live
+# banner is the first one appended AFTER this call begins — the previous one
+# in the log is a dead token (attack finding 1). But `start` on an
+# already-running server appends nothing (kickstart does not bounce a healthy
+# job): then the live token is the last complete banner in the whole log.
+# The existing access.txt is replaced only when a banner was actually found,
+# so a failed capture can never truncate the live credential away.
 capture_access() {
-  _log="$ROOT/run/server.log"; _acc="$ROOT/run/access.txt"
+  _log="$ROOT/run/server.log"; _acc="$ROOT/run/access.txt"; _tmp="$_acc.new"
+  _off=$(stat -f%z "$_log" 2>/dev/null || echo 0)
+  rm -f "$_tmp"
   _i=0
   while [ "$_i" -lt 20 ]; do
-    awk '/^(Connection string|Token|Pairing URL):/ {
-      blk = blk $0 "\n"
-      if ($0 ~ /^Pairing URL:/) { last = blk; blk = "" }
-    } END { printf "%s", last }' "$_log" > "$_acc" 2>/dev/null || true
-    grep -q '^Pairing URL:' "$_acc" 2>/dev/null && break
+    tail -c +"$((_off + 1))" "$_log" 2>/dev/null | banner_filter > "$_tmp" 2>/dev/null || true
+    grep -q '^Pairing URL:' "$_tmp" 2>/dev/null && break
     _i=$((_i + 1)); sleep 1
   done
-  chmod 600 "$_acc" 2>/dev/null || true
+  if ! grep -q '^Pairing URL:' "$_tmp" 2>/dev/null; then
+    # nothing new was appended while waiting: the server was already up and
+    # its live token is the last complete banner in the whole log.
+    banner_filter < "$_log" > "$_tmp" 2>/dev/null || true
+    grep -q '^Pairing URL:' "$_tmp" 2>/dev/null \
+      || { rm -f "$_tmp"; die "no complete pairing banner found in $_log"; }
+  fi
+  # umask 077 made the temp 0600; a chmod failure here is a live credential
+  # sitting world-readable — fatal, never swallowed (attack finding 9).
+  chmod 600 "$_tmp" 2>/dev/null || { rm -f "$_tmp"; die "cannot secure $_acc"; }
+  mv "$_tmp" "$_acc"
 }
 
 cmd_install() {
@@ -164,7 +201,9 @@ cmd_install() {
     [ -d "$_d" ] || return 0
     for _p in "$_d"/*.plist; do
       [ -f "$_p" ] || continue
-      grep -q "<string>$ROOT/bin/server_runner.sh</string>" "$_p" 2>/dev/null || continue
+      # -F: $ROOT is data, never a regex. A root containing `[` made grep exit
+      # 2 (skip the plist); `.*` false-matched a different root (attack finding 3).
+      grep -qF "<string>$ROOT/bin/server_runner.sh</string>" "$_p" 2>/dev/null || continue
       _pl=$(basename "$_p" .plist)
       [ "$_pl" = "$LABEL" ] || die "root already used by label $_pl ($_p); one label per root"
     done
@@ -177,14 +216,19 @@ cmd_install() {
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null; sleep 2
   fi
   port_busy "$PORT" && die "port $PORT is busy"
-  # Server binary setting: default stock vendor CLI.
-  [ -n "$SERVER_BIN" ] || SERVER_BIN="$HOME/.t3/bin/t3"
-  [ -x "$SERVER_BIN" ] || die "server binary not executable: $SERVER_BIN"
+  # Hygiene and live-lock checks precede runtime selection: selecting a pack
+  # must never obscure these existing protections or this root's writer state.
+  if [ -n "$SERVER_BIN" ] && [ ! -x "$SERVER_BIN" ]; then
+    die "server binary not executable: $SERVER_BIN"
+  fi
+  [ -f "$ROOT/fabric.env" ] || die "missing $ROOT/fabric.env; run tools/mmos_dev/t3/seed_dev_home.py with MMOS_T3_DEV_ROOT=$ROOT first"
+  [ "$(stat -f '%Lp' "$ROOT/fabric.env")" = "600" ] || die "$ROOT/fabric.env must be mode 600"
   # Never mutate a root that is being served RIGHT NOW: its runner holds
   # <root>/run/home.lock across exec for the whole server lifetime. A second
   # install under any label (even with plists hidden from the scan above)
-  # must die here, BEFORE the mkdir/cp/port-write below (attack a4 finding:
-  # a hidden-plist install rewrote run/port on a live root).
+  # must die here, BEFORE runtime selection and the mkdir/cp/port-write below
+  # (attack a4 finding: a hidden-plist install rewrote run/port on a live
+  # root; a refused packed-runtime resolution must not mask this refusal).
   if ! "$PYTHON3_BIN" - "$ROOT" <<'PYLOCK'
 import fcntl, os, sys
 root = sys.argv[1]
@@ -201,13 +245,45 @@ PYLOCK
   then
     die "root $ROOT is live under a running server (home.lock held); stop or uninstall it first"
   fi
+  # A self-contained packed runtime is the default. An explicit --server-bin
+  # is the emergency legacy rollback, not a second default source-tree path.
+  if [ -z "$SERVER_BIN" ]; then
+    SERVER_BIN=$("$PYTHON3_BIN" "$REPO_DIR/tools/mmos_team_server/node_install.py" resolve --root "$ROOT" --command serve) \
+      || die "packed runtime unavailable; run node_install.py install and pack_server.mjs first, or explicitly supply --server-bin for rollback"
+    "$PYTHON3_BIN" "$REPO_DIR/tools/mmos_team_server/node_install.py" resolve --root "$ROOT" --command node >/dev/null \
+      || die "pinned Node receipt or executable is incomplete"
+  fi
+  [ -f "$SERVER_BIN" ] || die "server entrypoint does not exist: $SERVER_BIN"
+  # install (including the --server-bin rollback path, which skips the Python
+  # installer's own validation) applies the same root rule the installer does:
+  # an existing root must be a real 0700 directory we own (attack finding 11).
+  if [ -e "$ROOT" ]; then
+    [ -d "$ROOT" ] || die "root is not a directory: $ROOT"
+    [ "$(stat -f '%Lp' "$ROOT")" = "700" ] \
+      || die "root must be mode 0700 (chmod 700 $ROOT); it holds fabric.env, logs and thread state"
+  fi
+  # mkdir -p follows symlinked subdirs; a pre-planted home -> /tmp/victim link
+  # would let the copy/port-write below land outside the root (attack finding
+  # 10). Refuse any symlink among the subdirs we create or write through.
+  for _d in home home/userdata run bin config scratch-project claude-home; do
+    [ -L "$ROOT/$_d" ] && die "refusing symlinked subdir: $ROOT/$_d"
+  done
+  [ -L "$ROOT/fabric.env" ] && die "refusing symlinked fabric.env: $ROOT/fabric.env"
+  # Pre-existing owned subdirs (a legacy root's 0755 home/ run/ bin/) are
+  # tightened to 0700, mirroring the installer's owned-subdir rule; the ROOT
+  # itself is never auto-tightened — that stays the operator's explicit act.
+  for _d in home home/userdata run bin config scratch-project claude-home; do
+    if [ -d "$ROOT/$_d" ]; then
+      chmod 700 "$ROOT/$_d" || die "cannot tighten $ROOT/$_d to 0700"
+    fi
+  done
   mkdir -p "$ROOT/home/userdata" "$ROOT/run" "$ROOT/bin" "$ROOT/config" "$ROOT/scratch-project" "$ROOT/claude-home"
   cp "$REPO_DIR/tools/mmos_team_server/server_runner.sh" "$ROOT/bin/server_runner.sh"
+  cp "$REPO_DIR/tools/mmos_team_server/node_install.py" "$ROOT/bin/node_install.py"
+  chmod 700 "$ROOT/bin/node_install.py"
   chmod 700 "$ROOT/bin/server_runner.sh"
   printf '%s\n' "$PORT" > "$ROOT/run/port"
   printf '%s\n' "$SERVER_BIN" > "$ROOT/config/server-bin"
-  [ -f "$ROOT/fabric.env" ] || die "missing $ROOT/fabric.env; run tools/mmos_dev/t3/seed_dev_home.py with MMOS_T3_DEV_ROOT=$ROOT first"
-  [ "$(stat -f '%Lp' "$ROOT/fabric.env")" = "600" ] || die "$ROOT/fabric.env must be mode 600"
   : > "$ROOT/run/server.log"; chmod 600 "$ROOT/run/server.log"
   mkdir -p "$(plist_dir)"
   cat > "$PLIST" <<EOF
@@ -293,6 +369,13 @@ cmd_status() {
   [ -f "$ROOT/run/access.txt" ] && echo "access_file=$ROOT/run/access.txt (mode $(stat -f '%Lp' "$ROOT/run/access.txt"); not printed)"
 }
 
+cmd_doctor() {
+  require_root_label
+  label_valid "$LABEL" || die "invalid label: $LABEL"
+  "$PYTHON3_BIN" "$REPO_DIR/tools/mmos_team_server/node_install.py" doctor \
+    --root "$ROOT" --label "$LABEL"
+}
+
 cmd_uninstall() {
   require_root_label
   if label_loaded "$LABEL"; then
@@ -313,6 +396,7 @@ case "$COMMAND" in
   start) cmd_start ;;
   stop) cmd_stop ;;
   status) cmd_status ;;
+  doctor) cmd_doctor ;;
   uninstall) cmd_uninstall ;;
   selftest) cmd_selftest ;;
   *) usage ;;

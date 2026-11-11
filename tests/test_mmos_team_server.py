@@ -216,6 +216,89 @@ class TestInstallHygiene:
         assert "not executable" in (r.stdout + r.stderr)
 
 
+class TestAttackRoundFixes:
+    """Regression tests for the 2026-11-10 attack-round findings (writer:
+    glm-5.3; attacker: deepseek-v4.1-flash)."""
+
+    def test_label_traversal_refused_for_every_command(self, tmp_path, launchagents_dir):
+        # Attack finding 2: an unvalidated label reached rm -f / launchctl /
+        # the plist heredoc in start|stop|status|uninstall. '../escape' must
+        # be refused before any path is built from it.
+        victim = Path(tmp_path) / "escape.plist"
+        victim.write_text("do-not-delete")
+        (tmp_path / "root").mkdir()
+        for command in ("start", "stop", "status", "uninstall"):
+            r = run_tool(command, "--root", str(tmp_path / "root"),
+                         "--label", "../escape",
+                         env_extra={"TEAM_SERVER_LAUNCHAGENTS_DIR": launchagents_dir})
+            assert r.returncode != 0, command
+            assert "invalid label" in (r.stdout + r.stderr)
+        assert victim.read_text() == "do-not-delete"
+
+    def test_bracketed_root_matches_exactly(self, tmp_path, launchagents_dir):
+        # Attack finding 3: the one-label-per-root scan used grep -q (regex);
+        # a root containing '[' neither matched its own plist nor reliably
+        # failed. Literal (-F) matching must catch this root's own plist.
+        root = tmp_path / "t3-team[1]"
+        root.mkdir()
+        (root / "fabric.env").write_text("ANTHROPIC_BASE_URL=https://x\n")
+        (root / "fabric.env").chmod(0o600)
+        other = Path(launchagents_dir) / "com.example.a5-bracket.plist"
+        other.write_text(f"<string>{root}/bin/server_runner.sh</string>\n")
+        r = install(root, free_port(), "com.example.a5-second",
+                    env_extra={"TEAM_SERVER_LAUNCHAGENTS_DIR": launchagents_dir})
+        assert r.returncode != 0
+        assert "one label per root" in (r.stdout + r.stderr)
+
+    def test_symlinked_subdir_refused_before_mkdir(self, tmp_path, launchagents_dir):
+        # Attack finding 10: mkdir -p follows a pre-planted 'home -> victim'
+        # symlink; install must refuse before writing anything through it.
+        root = tmp_path / "t3-team"
+        root.mkdir(mode=0o700)
+        (root / "fabric.env").write_text("ANTHROPIC_BASE_URL=https://x\n")
+        (root / "fabric.env").chmod(0o600)
+        victim = tmp_path / "victim"
+        victim.mkdir()
+        os.symlink(victim, root / "home")
+        r = install(root, free_port(), "com.example.a5-sym",
+                    "--server-bin", "/usr/bin/true",
+                    env_extra={"TEAM_SERVER_LAUNCHAGENTS_DIR": launchagents_dir})
+        assert r.returncode != 0
+        assert "refusing symlinked subdir" in (r.stdout + r.stderr)
+        assert list(victim.iterdir()) == []  # nothing written through the link
+
+    def test_loose_existing_root_refused_even_with_server_bin(self, tmp_path, launchagents_dir):
+        # Attack finding 11: the --server-bin rollback path skipped the
+        # installer's root validation entirely; an existing loose root must
+        # still refuse before install mutates it.
+        root = tmp_path / "t3-team"
+        root.mkdir()
+        root.chmod(0o755)
+        (root / "fabric.env").write_text("ANTHROPIC_BASE_URL=https://x\n")
+        (root / "fabric.env").chmod(0o600)
+        r = install(root, free_port(), "com.example.a5-loose",
+                    "--server-bin", "/usr/bin/true",
+                    env_extra={"TEAM_SERVER_LAUNCHAGENTS_DIR": launchagents_dir})
+        assert r.returncode != 0
+        assert "0700" in (r.stdout + r.stderr)
+
+    def test_runner_refuses_unconfigured_without_guessing_default(self, tmp_path):
+        # Attack finding 12: the runner used to default to ~/.t3/bin/t3 when
+        # no config/server-bin existed; it must fail loudly instead, and the
+        # default must be gone from the script text.
+        root = tmp_path / "root"
+        run = root / "run"
+        run.mkdir(parents=True)
+        (root / "fabric.env").write_text("DUMMY=1\n")
+        (root / "fabric.env").chmod(0o600)
+        (run / "port").write_text(str(free_port()))
+        r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
+                           capture_output=True, text=True, timeout=30)
+        assert r.returncode == 78
+        assert "refusing to guess" in (r.stdout + r.stderr)
+        assert ".t3/bin/t3" not in RUNNER.read_text()
+
+
 class TestRunnerHygiene:
     def test_runner_refuses_without_root(self):
         r = subprocess.run(["/bin/sh", str(RUNNER)], capture_output=True, text=True, timeout=30)

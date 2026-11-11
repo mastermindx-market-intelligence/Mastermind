@@ -342,6 +342,19 @@ HOME_LOCKED = ("tool-limits.json", "CHARTER.md", "carrier.json",
                "cutover-preimage.json", "cutover-result.json")
 HOME_UNREADABLE = ("cutover-preimage.json",)
 
+# A teammate's home is also its Claude configuration folder. A settings file
+# or an MCP entry there can name a command to run, and a skill, agent, rule
+# or plugin there is loaded as instructions, so a teammate that may create
+# files in its home could give itself a shell (found by the principal with
+# MAS-15: creating a new file in the home is allowed). The runtime writes
+# these itself without the Write tool; the teammate's tools may not.
+HOME_CONFIG = ("settings.json", "settings.local.json", "managed-settings.json",
+               ".claude.json", ".mcp.json", ".credentials.json",
+               "keybindings.json", "CLAUDE.local.md", ".claude", "plugins",
+               "skills", "agents", "commands", "hooks", "rules",
+               "output-styles", "backups", "sessions", "projects", "todos",
+               "shell-snapshots", "statsig", "ide")
+
 
 def _read_deny(path):
     """Deny rules for one path: a directory denies its whole tree."""
@@ -392,6 +405,10 @@ def tool_limits(spec, mate):
     for name in HOME_LOCKED:
         locked = os.path.join(home, name)
         deny += [f"Write(/{locked})", f"Edit(/{locked})"]
+    for name in HOME_CONFIG:
+        config = os.path.join(home, name)
+        for tool in ("Write", "Edit"):
+            deny += [f"{tool}(/{config})", f"{tool}(/{config}/**)"]
     for path in deny_read_paths(spec, mate):
         deny += _read_deny(path)
     allow = [
