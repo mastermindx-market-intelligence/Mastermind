@@ -259,7 +259,8 @@ class TestToolLimitsNewKeys:
                        for r in spec.get("deny_write_roots", [])]
         deny = ["Bash", "Agent", "NotebookEdit"]
         for r in deny_roots:
-            deny += [f"Write(/{r}/**)", f"Edit(/{r}/**)"]
+            deny += [f"Write(/{r})", f"Write(/{r}/**)",
+                     f"Edit(/{r})", f"Edit(/{r}/**)"]
         for name in team_roster.HOME_LOCKED:
             locked = os.path.join(home, name)
             deny += [f"Write(/{locked})", f"Edit(/{locked})"]

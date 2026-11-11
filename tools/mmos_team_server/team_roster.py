@@ -546,7 +546,11 @@ def tool_limits(spec, mate):
     deny_roots += [os.path.abspath(r) for r in spec.get("deny_write_roots", [])]
     deny = ["Bash", "Agent", "NotebookEdit"]
     for root in deny_roots:
-        deny += [f"Write(/{root}/**)", f"Edit(/{root}/**)"]
+        # root itself too: if the folder does not exist (yet), a Write could
+        # otherwise create a file at that exact path (server-infrastructure
+        # review, 2026-11-11)
+        deny += [f"Write(/{root})", f"Write(/{root}/**)",
+                 f"Edit(/{root})", f"Edit(/{root}/**)"]
     for name in HOME_LOCKED:
         locked = os.path.join(home, name)
         deny += [f"Write(/{locked})", f"Edit(/{locked})"]
