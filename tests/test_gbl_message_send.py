@@ -53,7 +53,7 @@ class FakeRunner:
             raise self.raise_on[index]
         if self.responses:
             return self.responses.pop(0)
-        return CommandResult(stdout="{}")
+        return CommandResult(stdout='{"messages": []}')
 
 
 def sender(runner, *, allowlist=DEFAULT_ALLOWLIST,
@@ -165,7 +165,8 @@ class TestOneSend:
         first = transport.send(**send_kwargs())
         marker = message_marker(first["message_id"])
         # The thread now contains the marker (the scan reads it back).
-        runner.responses.append(CommandResult(stdout=f'{{"text": "{marker}"}}'))
+        runner.responses.append(CommandResult(stdout=thread_stdout(
+            [f"{marker}\n> delivered words"])))
         second = transport.send(**send_kwargs())          # redelivery: same key+content
         assert second["status"] == "ALREADY_SENT"
         assert second["message_id"] == first["message_id"]
@@ -180,8 +181,8 @@ class TestOneSend:
         # scan 1: no marker; the send times out after its effect; the
         # re-scan sees the marker the send left behind.
         runner.responses = [
-            CommandResult(stdout="{}"),
-            CommandResult(stdout=f'{{"text": "{marker}"}}'),
+            CommandResult(stdout='{"messages": []}'),
+            CommandResult(stdout=thread_stdout([f"{marker}\n> delivered words"])),
         ]
         runner.raise_on = {1: TimeoutError("send timed out after effect")}
         result = transport.send(**send_kwargs())
@@ -192,8 +193,8 @@ class TestOneSend:
     def test_crash_without_marker_is_typed_effect_unknown(self):
         runner = FakeRunner()
         transport = configured_sender(runner, allowlist=listed_allowlist())
-        runner.responses = [CommandResult(stdout="{}"),
-                            CommandResult(stdout="{}")]
+        runner.responses = [CommandResult(stdout='{"messages": []}'),
+                            CommandResult(stdout='{"messages": []}')]
         runner.raise_on = {1: TimeoutError("send timed out, nothing landed")}
         with pytest.raises(GblMessageError) as err:
             transport.send(**send_kwargs())
@@ -203,7 +204,7 @@ class TestOneSend:
 
     def test_send_failure_is_typed(self):
         runner = FakeRunner()
-        runner.responses.append(CommandResult(stdout="{}"))
+        runner.responses.append(CommandResult(stdout='{"messages": []}'))
         runner.responses.append(CommandResult(exit_code=1, stdout="err"))
         with pytest.raises(GblMessageError) as err:
             configured_sender(runner, allowlist=listed_allowlist()).send(**send_kwargs())
@@ -211,7 +212,7 @@ class TestOneSend:
 
     def test_needs_human_is_typed(self):
         runner = FakeRunner()
-        runner.responses.append(CommandResult(stdout="{}"))
+        runner.responses.append(CommandResult(stdout='{"messages": []}'))
         runner.responses.append(CommandResult(exit_code=2, stdout="blocked"))
         with pytest.raises(GblMessageError) as err:
             configured_sender(runner, allowlist=listed_allowlist()).send(**send_kwargs())
@@ -267,3 +268,165 @@ class TestQuotedData:
 class TestRunnerDefault:
     def test_default_runner_is_subprocess_based(self):
         assert SubprocessRunner is not None
+
+
+# ── Repair round 1 (panel A M5 + the two one-send MEDs, LOW typed rescan) ────
+
+
+def thread_stdout(messages):
+    """The scan output shape: parsed messages, never a raw blob."""
+    import json
+    return json.dumps({"messages": [{"id": f"m{i}", "text": text}
+                                    for i, text in enumerate(messages)]})
+
+
+class TestMarkerAnchoring:
+    def test_marker_mid_text_does_not_count_as_landed(self):
+        runner = FakeRunner()
+        marker = message_marker(mint_message_id(PRINCIPAL, ENV_ID, THREAD_REF,
+                                                KEY, BODY))
+        runner.responses.append(CommandResult(
+            stdout=thread_stdout([f"status words {marker} more words"])))
+        result = configured_sender(runner, allowlist=listed_allowlist()).send(
+            **send_kwargs())
+        assert result["status"] == "SENT"      # the spoof suppressed nothing
+        sends = [c for c in runner.calls if c["argv"][2:3] == ["send"]]
+        assert len(sends) == 1
+
+    def test_spoofed_quoted_marker_does_not_suppress_delivery(self):
+        # Another principal QUOTED our marker in their own message body: the
+        # substring is present in the thread, but no message's FIRST line is
+        # the marker — delivery must proceed.
+        runner = FakeRunner()
+        marker = message_marker(mint_message_id(PRINCIPAL, ENV_ID, THREAD_REF,
+                                                KEY, BODY))
+        runner.responses.append(CommandResult(
+            stdout=thread_stdout([f"> {marker}\n> quoted hostile words"])))
+        result = configured_sender(runner, allowlist=listed_allowlist()).send(
+            **send_kwargs())
+        assert result["status"] == "SENT"
+        assert len([c for c in runner.calls if c["argv"][2:3] == ["send"]]) == 1
+
+    def test_first_line_marker_lands(self):
+        runner = FakeRunner()
+        marker = message_marker(mint_message_id(PRINCIPAL, ENV_ID, THREAD_REF,
+                                                KEY, BODY))
+        runner.responses.append(CommandResult(
+            stdout=thread_stdout([f"{marker}\n> quoted words after"])))
+        result = configured_sender(runner, allowlist=listed_allowlist()).send(
+            **send_kwargs())
+        assert result["status"] == "ALREADY_SENT"
+        assert [c for c in runner.calls if c["argv"][2:3] == ["send"]] == []
+
+    def test_non_json_scan_output_is_typed_scan_failure(self):
+        runner = FakeRunner()
+        runner.responses.append(CommandResult(stdout="not json at all"))
+        with pytest.raises(GblMessageError) as err:
+            configured_sender(runner, allowlist=listed_allowlist()).send(
+                **send_kwargs())
+        assert err.value.code == "SCAN_FAILED"
+
+
+class ScanWindowRunner:
+    """Serves `--messages N` as the LAST N of a fixed thread, t3-style."""
+
+    def __init__(self, messages):
+        self.messages = messages
+        self.calls: list[dict] = []
+
+    def run(self, argv, *, stdin, env):
+        self.calls.append({"argv": list(argv), "stdin": stdin, "env": dict(env)})
+        depth = int(argv[argv.index("--messages") + 1])
+        window = self.messages[-depth:]
+        import json
+        from integrations.gbl.message_send import CommandResult as CR
+        return CR(exit_code=0,
+                  stdout=json.dumps({"messages": [
+                      {"id": f"m{i}", "text": text}
+                      for i, text in enumerate(window)]}))
+
+
+class TestScanWindow:
+    def test_marker_older_than_one_window_is_still_found(self):
+        marker = message_marker(mint_message_id(PRINCIPAL, ENV_ID, THREAD_REF,
+                                                KEY, BODY))
+        thread = [f"note {i}" for i in range(100)]
+        thread[0] = f"{marker}\n> the original delivery"   # oldest message
+        runner = ScanWindowRunner(thread)
+        result = configured_sender(runner, allowlist=listed_allowlist()).send(
+            **send_kwargs())
+        assert result["status"] == "ALREADY_SENT"
+        shows = [c for c in runner.calls if c["argv"][2:3] == ["show"]]
+        assert len(shows) >= 2              # the scan paged past one window
+        assert [c for c in runner.calls if c["argv"][2:3] == ["send"]] == []
+
+    def test_scan_window_cap_is_typed_and_sends_nothing(self):
+        thread = [f"note {i}" for i in range(200)]        # marker absent
+        runner = ScanWindowRunner(thread)
+        transport = MessageSender(
+            runner=runner, allowlist=listed_allowlist(),
+            environments=(EnvironmentRow(environment_id=ENV_ID,
+                                         t3code_home=HOME),),
+            scan_max_pages=2)
+        with pytest.raises(GblMessageError) as err:
+            transport.send(**send_kwargs())
+        assert err.value.code == "SCAN_WINDOW_EXCEEDED"
+        assert [c for c in runner.calls if c["argv"][2:3] == ["send"]] == []
+
+
+class TestConcurrentSend:
+    def test_concurrent_same_key_sends_exactly_once(self):
+        import threading
+        import time
+
+        class GatedRunner(FakeRunner):
+            def __init__(self):
+                super().__init__()
+                self.landed = threading.Event()
+                self.send_started = threading.Event()
+
+            def run(self, argv, *, stdin, env):
+                self.calls.append({"argv": list(argv), "stdin": stdin,
+                                   "env": dict(env)})
+                if argv[2] == "send":
+                    self.send_started.set()
+                    time.sleep(0.3)          # hold the first send in flight
+                    self.landed.set()
+                    return CommandResult(stdout="{}")
+                if self.landed.is_set():
+                    marker = message_marker(mint_message_id(
+                        PRINCIPAL, ENV_ID, THREAD_REF, KEY, BODY))
+                    return CommandResult(stdout=thread_stdout(
+                        [f"{marker}\n> delivered words"]))
+                return CommandResult(stdout='{"messages": []}')
+
+        runner = GatedRunner()
+        transport = configured_sender(runner, allowlist=listed_allowlist())
+        outcomes: list[str] = []
+
+        def deliver():
+            outcomes.append(transport.send(**send_kwargs())["status"])
+
+        first = threading.Thread(target=deliver)
+        second = threading.Thread(target=deliver)
+        first.start()
+        runner.send_started.wait(timeout=5.0)   # first is inside its send
+        second.start()
+        first.join(timeout=10.0)
+        second.join(timeout=10.0)
+        sends = [c for c in runner.calls if c["argv"][2:3] == ["send"]]
+        assert len(sends) == 1                  # exactly one send, ever
+        assert sorted(outcomes) == ["ALREADY_SENT", "SENT"]
+
+
+class TestRescueTyping:
+    def test_rescan_timeout_is_typed_effect_unknown(self):
+        runner = FakeRunner()
+        transport = configured_sender(runner, allowlist=listed_allowlist())
+        runner.responses = [CommandResult(stdout='{"messages": []}'),
+                            CommandResult(stdout='{"messages": []}')]
+        runner.raise_on = {1: TimeoutError("send timed out")}
+        runner.raise_on[2] = TimeoutError("rescan timed out too")
+        with pytest.raises(GblMessageError) as err:
+            transport.send(**send_kwargs())
+        assert err.value.code == "EFFECT_UNKNOWN"

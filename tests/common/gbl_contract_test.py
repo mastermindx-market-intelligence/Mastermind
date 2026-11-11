@@ -26,6 +26,7 @@ from common.company_consultation_host_contract import HostFrameError
 from common.gbl_contract import (
     ANSWER_UNCONSUMED,
     ASK_BODY_MAX_CHARS,
+    BODY_MAX_CHARS,
     ASK_CHAIN,
     ASK_ID_RE,
     ASK_KINDS,
@@ -234,14 +235,15 @@ class TestBudgetMaxima:
         assert MAX_RENUDGES_PER_ASK == 3
         assert ROUTINES_PER_ACCOUNT == 1
         assert ASK_BODY_MAX_CHARS == 16384
-        assert MAX_ANSWER_CHARS == 16384
+        # Repair M1: the answer cap IS the TeamLink body law — one cap.
+        assert MAX_ANSWER_CHARS == BODY_MAX_CHARS == 4096
         assert MAX_FRAME_BYTES == 32768
         assert BUDGET_MAXIMA == {
             "max_asks_per_hour_per_principal": 20,
             "max_renudges_per_ask": 3,
             "routines_per_account": 1,
             "max_question_chars": 16384,
-            "max_answer_chars": 16384,
+            "max_answer_chars": 4096,
             "max_frame_bytes": 32768,
         }
 
@@ -605,3 +607,60 @@ class TestFrameCodec:
                 "state": "ANSWERED", "pad": "x" * (MAX_FRAME_BYTES + 64)}
         with pytest.raises(HostFrameError):
             encode_gbl_frame(huge)
+
+
+# ── Repair round 1 (panel A M1/LOW, panel B H1-adjacent shared schema) ──────
+
+
+class TestRepairRound1:
+    def test_answer_cap_is_the_one_body_cap(self):
+        # M1: the advertised answer cap must equal the enforced mint-side
+        # body law (BODY_MAX_CHARS, 4096) — one cap, not 4x apart.
+        from common.gbl_contract import BODY_MAX_CHARS, MAX_ANSWER_CHARS
+        assert MAX_ANSWER_CHARS == BODY_MAX_CHARS == 4096
+
+    def test_answer_argument_keys_are_the_shared_schema(self):
+        # H1: ONE shared argument schema for team.answer, used by the edge
+        # and the bridge both.
+        from common.gbl_contract import ANSWER_ARGUMENT_KEYS
+        assert ANSWER_ARGUMENT_KEYS == frozenset(
+            {"principal", "ask_id", "answer", "idempotency_key"})
+
+    def test_principal_label_rejects_control_chars_and_newlines(self):
+        from common.gbl_contract import validate_principal_label
+        validate_principal_label("grok-account-main")   # lawful label passes
+        for bad in ("bad\nlabel", "bad\tlabel", "bad\rlabel",
+                    "bad\x00label", "bad\x1flabel", "bad\x7flabel"):
+            with pytest.raises(GBLContractError):
+                validate_principal_label(bad)
+
+    def test_text_fields_reject_lone_surrogates(self):
+        # UTF-8 encodability law: a lone surrogate must be refused at the
+        # contract door, not crash the reply encode later.
+        with pytest.raises(GBLContractError):
+            build_ask(kind="question", principal="grok-account-main",
+                      target="secretary", idempotency_key="gb-ask-s1",
+                      title="poison \ud800 title",
+                      body="Harmless fixture words.")
+
+    def test_wrap_rejects_control_and_bidi_body(self):
+        with pytest.raises(GBLContractError):
+            wrap_message_body("grok-account-main", "line‮evil")
+        with pytest.raises(GBLContractError):
+            wrap_message_body("grok-account-main", "line\x01evil")
+        # Newlines and tabs are lawful body formatting.
+        wrapped = wrap_message_body("grok-account-main", "one\ntwo\ttab")
+        assert wrapped.splitlines()[1:] == ["> one", "> two\ttab"]
+
+    def test_wrap_rejects_control_chars_in_principal(self):
+        with pytest.raises(GBLContractError):
+            wrap_message_body("outside\nparty", "Harmless fixture words.")
+
+    def test_allowlist_thread_ref_cannot_start_with_dash(self):
+        # An allowlisted thread_ref starting with "-" would land in option
+        # position in the carrier argv; refuse it when the row is checked.
+        with pytest.raises(GBLContractError) as err:
+            check_thread_allowlist(
+                ({"environment_id": "team-dev-1", "thread_ref": "-evil"},),
+                "team-dev-1", "-evil")
+        assert err.value.code == "INVALID_ALLOWLIST_THREAD_REF"

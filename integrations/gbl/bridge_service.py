@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, runtime_checkable
 
 from common.gbl_contract import (
+    ANSWER_ARGUMENT_KEYS,
     ASK_KINDS,
     DEFAULT_ALLOWLIST,
     GBLContractError,
@@ -56,6 +57,12 @@ from common.gbl_contract import (
     validate_wake,
 )
 from common.company_consultation_host_contract import HostFrameError
+from control_plane.wake_dispatcher import (
+    TransportOutcome,
+    WakeDispatchError,
+    WakeEffectUnknownError,
+    WakePreSubmitError,
+)
 
 # Lane-chosen default (not doc-pinned): one re-nudge per ask per 15-minute
 # cooldown, bounded by MAX_RENUDGES_PER_ASK (ARCHITECTURE flow 1 step 10).
@@ -63,7 +70,7 @@ RENUDGE_COOLDOWN_SECONDS = 900
 
 REQUEST_SCHEMA = "mastermind.gbl.request.v1"
 RESPONSE_SCHEMA = "mastermind.gbl.response.v1"
-OPS = frozenset({"ask", "answer", "result", "question", "status"})
+OPS = frozenset({"ask", "answer", "result", "question", "status", "reconcile"})
 
 
 class GblBridgeError(ValueError):
@@ -88,11 +95,25 @@ class GblCreateEffectUnknown(Exception):
 #   {"type": "answer", "answer_id", "idempotency_key", "text"}
 #   {"type": "state",  "state"}
 #   {"type": "nudge",  "state", "at"}          # at = UTC ISO-8601
+#
+# Repair-round contract (panel A M6, panel B M1/M2 — exact semantics in
+# integrations/mmos/gbl/GBL_REPAIR1_NOTES.md):
+#
+# * create_ask is CREATE-IF-ABSENT: it returns None when it created the
+#   record and the EXISTING record when the deterministic ask id is already
+#   present.  Two racing creates can never produce two records.
+# * every append_ask_event the STORE performs stamps the event with a
+#   per-record strictly-increasing integer "seq" and "trusted": True.  An
+#   event whose author is NOT the store (a foreign comment carrying the
+#   event marker) is surfaced with "trusted": False — the bridge never
+#   treats it as authoritative.
+# * legacy events that carry no "trusted" key at all are the store's own
+#   pre-contract appends and stay authoritative (ordered by list position).
 
 
 @runtime_checkable
 class GblAskStore(Protocol):
-    def create_ask(self, ask: Mapping[str, Any]) -> None: ...
+    def create_ask(self, ask: Mapping[str, Any]) -> Mapping[str, Any] | None: ...
     def read_ask(self, ask_id: str) -> Mapping[str, Any] | None: ...
     def append_ask_event(self, ask_id: str, event: Mapping[str, Any]) -> None: ...
     def count_asks(self, principal: str, since_iso: str) -> int: ...
@@ -175,23 +196,60 @@ class GblBridge:
         return dict(record)
 
     @staticmethod
-    def _require_principal(record: Mapping[str, Any], principal: str) -> None:
-        if record.get("principal") != principal:
+    def _require_party(record: Mapping[str, Any], principal: str) -> None:
+        """M4: both parties of the ask may read the question and act on the
+        answer — the creator (record principal) AND the addressee (target).
+        Everyone else is refused."""
+        if principal not in (record.get("principal"), record.get("target")):
             raise GblBridgeError("ASK_NOT_FOR_PRINCIPAL", principal or "")
 
     @staticmethod
-    def _replay_state(record: Mapping[str, Any]) -> str:
-        """Replay the record's state events through the contract chain.
-        Historical events were lawful when appended; expiry is enforced at
-        operation time, not on replay."""
+    def _ordered_events(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """The authoritative event list: untrusted (foreign-author) events
+        are dropped; the store's own stamps must form a strictly increasing
+        sequence or the defect is named typed (panel B M1/M2 — a broken
+        stamp may never silently reorder the chain, and the typed refusal
+        names the exact defect instead of bricking the record as a random
+        ASK_STATE_REGRESSION)."""
+        events = list(record.get("events", ()))
+        last_seq: int | None = None
+        for event in events:
+            if event.get("trusted") is False:
+                continue                       # foreign author: never authoritative
+            if event.get("trusted") is True:
+                seq = event.get("seq")
+                if type(seq) is not int:
+                    raise GblBridgeError("EVENT_SEQ_INVALID",
+                                         "trusted event without an integer seq")
+                if last_seq is not None and seq <= last_seq:
+                    raise GblBridgeError(
+                        "EVENT_SEQ_INVALID",
+                        f"seq {seq} does not follow {last_seq}")
+                last_seq = seq
+        return [event for event in events if event.get("trusted") is not False]
+
+    @classmethod
+    def _replay_state(cls, record: Mapping[str, Any]) -> str:
+        """Replay the record's authoritative events through the contract
+        chain.  Historical events were lawful when appended; expiry is
+        enforced at operation time, not on replay.  Repair H2/panel B H1:
+        a trusted answer event IS the answered state — a record whose
+        ANSWERED state event was lost (the legacy two-append write) is
+        repaired by inference, never stranded behind a false OPEN."""
         state = record["state"]
-        for event in record.get("events", ()):
+        answered = False
+        for event in cls._ordered_events(record):
             if event.get("type") == "state":
                 state = advance_ask_state(state, event["state"])
+            elif event.get("type") == "answer":
+                answered = True
+        if answered and state in ("OPEN", "QUESTION_AVAILABLE"):
+            state = advance_ask_state(state, "ANSWERED")
         return state
 
-    def _last_answer(self, record: Mapping[str, Any]) -> dict[str, Any]:
-        answers = [event for event in record.get("events", ())
+    @classmethod
+    def _last_answer(cls, record: Mapping[str, Any]) -> dict[str, Any]:
+        answers = [event for event in cls._ordered_events(record)
                    if event.get("type") == "answer"]
         return answers[-1] if answers else {}
 
@@ -206,6 +264,18 @@ class GblBridge:
             raise GblBridgeError("KIND_NOT_ALLOWED", kind)
         if target not in row.targets:
             raise GblBridgeError("TARGET_NOT_ALLOWED", target)
+        envelope = build_ask(kind=kind, principal=principal, target=target,
+                             title=title, body=body,
+                             idempotency_key=idempotency_key,
+                             correlation=dict(correlation or {}),
+                             asker=dict(asker) if asker else None,
+                             now=self._now())
+        ask_id = envelope["ask_id"]
+        # M2: the idempotency read comes BEFORE the rate gate — a replay of
+        # an ask that already exists is IDEMPOTENT, never RATE_LIMITED.
+        existing = self._store.read_ask(ask_id)
+        if existing is not None:
+            return self._classify_existing(existing, envelope)
         now = self._now()
         since = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
         asks_last_hour = self._store.count_asks(principal, since)
@@ -213,36 +283,35 @@ class GblBridge:
         if asks_last_hour + 1 > row.max_asks_per_hour:
             raise GblBridgeError("RATE_LIMITED",
                                  f"ceiling {row.max_asks_per_hour}/hour")
-        envelope = build_ask(kind=kind, principal=principal, target=target,
-                             title=title, body=body,
-                             idempotency_key=idempotency_key,
-                             correlation=dict(correlation or {}),
-                             asker=dict(asker) if asker else None, now=now)
-        ask_id = envelope["ask_id"]
-        existing = self._store.read_ask(ask_id)
-        if existing is not None:
-            verdict = classify_ask_duplicate(
-                _record_envelope(existing), envelope)
-            if verdict.value == "IDEMPOTENT":
-                return {"status": "IDEMPOTENT", "ask": dict(existing)}
-            raise GblBridgeError("CONFLICT",
-                                 f"key {idempotency_key} reused with new content")
         try:
-            self._store.create_ask(envelope)
+            # M6: create-if-absent — the STORE decides uniqueness, so a
+            # lagging read can never produce a second record.
+            landed = self._store.create_ask(envelope)
         except GblCreateEffectUnknown:
             # EFFECT_UNKNOWN law: reconcile by read-back of the deterministic
             # ask id; never a second create.
             landed = self._store.read_ask(ask_id)
-            if landed is not None:
-                return {"status": "IDEMPOTENT", "ask": dict(landed)}
-            raise GblBridgeError(
-                "EFFECT_UNKNOWN",
-                "issue create effect unknown; reconcile by ask-id read-back") from None
+            if landed is None:
+                raise GblBridgeError(
+                    "EFFECT_UNKNOWN",
+                    "issue create effect unknown; reconcile by ask-id "
+                    "read-back") from None
+        if landed is not None:
+            return self._classify_existing(landed, envelope)
         return {"status": "CREATED", "ask": dict(envelope)}
+
+    def _classify_existing(self, existing: Mapping[str, Any],
+                           envelope: Mapping[str, Any]) -> dict[str, Any]:
+        verdict = classify_ask_duplicate(_record_envelope(existing), envelope)
+        if verdict.value == "IDEMPOTENT":
+            return {"status": "IDEMPOTENT", "ask": dict(existing)}
+        raise GblBridgeError("CONFLICT",
+                             f"key {envelope['idempotency_key']} reused "
+                             "with new content")
 
     def fetch_question(self, *, principal: str, ask_id: str) -> dict[str, Any]:
         record = self._require_ask(ask_id)
-        self._require_principal(record, principal)
+        self._require_party(record, principal)
         if is_expired(record, self._now()):
             raise GblBridgeError("EXPIRED", ask_id)
         return {"ask_id": ask_id, "kind": record["kind"],
@@ -251,11 +320,11 @@ class GblBridge:
     def post_answer(self, *, principal: str, ask_id: str, answer: str,
                     idempotency_key: str) -> dict[str, Any]:
         record = self._require_ask(ask_id)
-        self._require_principal(record, principal)
+        self._require_party(record, principal)
         now = self._now()
         if is_expired(record, now):
             raise GblBridgeError("EXPIRED", ask_id)
-        for event in record.get("events", ()):
+        for event in self._ordered_events(record):
             if event.get("type") != "answer":
                 continue
             if event.get("idempotency_key") == idempotency_key:
@@ -270,16 +339,17 @@ class GblBridge:
                                     idempotency_key, answer)
         state = self._replay_state(record)
         advance_ask_state(state, "ANSWERED", record=record, now=now)
+        # H2: ONE event.  The trusted answer event IS the answered state
+        # (replay infers it) — there is no second append whose loss could
+        # strand the answer behind a false OPEN.
         self._store.append_ask_event(ask_id, {
             "type": "answer", "answer_id": answer_id,
             "idempotency_key": idempotency_key, "text": answer})
-        self._store.append_ask_event(ask_id, {"type": "state",
-                                              "state": "ANSWERED"})
         return {"status": "ANSWERED", "answer_id": answer_id}
 
     def fetch_result(self, *, principal: str, ask_id: str) -> dict[str, Any]:
         record = self._require_ask(ask_id)
-        self._require_principal(record, principal)
+        self._require_party(record, principal)
         now = self._now()
         if is_expired(record, now):
             raise GblBridgeError("EXPIRED", ask_id)   # never silence
@@ -300,10 +370,16 @@ class GblBridge:
 
     def ask_status(self, *, principal: str, ask_id: str) -> dict[str, Any]:
         record = self._require_ask(ask_id)
-        self._require_principal(record, principal)
+        self._require_party(record, principal)
+        # M3: status and result agree about expiry — a dead ask reports
+        # EXPIRED, never a live state it can no longer act in.
+        if is_expired(record, self._now()):
+            return {"ask_id": ask_id, "state": "EXPIRED", "status": "EXPIRED",
+                    "expires_at": record["expires_at"]}
         state = self._replay_state(record)
         return {"ask_id": ask_id, "state": state,
-                "status": surface_ask_state(state)}
+                "status": surface_ask_state(state),
+                "expires_at": record["expires_at"]}
 
     def handle_nudge_delivery(self, wake: Mapping[str, Any]) -> dict[str, Any]:
         """The webhook guard: a nudge is attention only.  A redelivered
@@ -317,20 +393,30 @@ class GblBridge:
 
     def maybe_renudge(self, *, ask_id: str) -> dict[str, Any]:
         """One re-nudge per cooldown for an unconsumed answer, bounded by
-        the contract budget (MAX_RENUDGES_PER_ASK).  A nudge whose send
-        effect is unknown propagates WakeEffectUnknown — reconcile, never
-        resend."""
+        the contract budget (MAX_RENUDGES_PER_ASK).  M8: the attempt is
+        persisted BEFORE the send and independent of its outcome, so an
+        effect-unknown send can never be repeated blindly — reconcile via
+        :meth:`reconcile_nudge`, never resend.  M7: the transport receipt
+        is consumed — a definite no-start (pre-submit refusal,
+        TARGET_UNAVAILABLE, FAILED) is a typed ``NUDGE_NOT_DELIVERED`` that
+        burns no budget, never a false RENUDGED."""
         record = self._require_ask(ask_id)
         state = self._replay_state(record)
         if state != "ANSWERED":
             return {"status": state, "ask_id": ask_id}
         now = self._now()
-        nudges = [event for event in record.get("events", ())
-                  if event.get("type") == "nudge"]
+        events = self._ordered_events(record)
+        nudges = [event for event in events if event.get("type") == "nudge"]
+        attempts = [event for event in events
+                    if event.get("type") == "nudge_attempt"]
         if len(nudges) >= MAX_RENUDGES_PER_ASK:
             raise GblBridgeError("RENUDGE_BUDGET_EXHAUSTED", ask_id)
-        if nudges:
-            last = _parse_iso(nudges[-1]["at"])
+        # Cooldown counts DELIVERED nudges and unresolved attempts alike:
+        # an attempt whose effect is unknown is inside its cooldown until
+        # reconcile settles it — an immediate second POST is never lawful.
+        markers = nudges + attempts
+        if markers:
+            last = max(_parse_iso(event["at"]) for event in markers)
             elapsed = (now - last).total_seconds()
             if elapsed < RENUDGE_COOLDOWN_SECONDS:
                 raise GblBridgeError(
@@ -339,12 +425,76 @@ class GblBridge:
         if self._nudge_sender is None or self._resolve_handle is None:
             raise GblBridgeError("NUDGE_SENDER_UNAVAILABLE", ask_id)
         native_handle = self._resolve_handle(record["principal"])
-        self._nudge_sender.send(ask_id, "ANSWERED", native_handle)
+        at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        # Persist first: whatever the send does, the attempt exists.
         self._store.append_ask_event(ask_id, {
-            "type": "nudge", "state": "ANSWERED",
-            "at": now.strftime("%Y-%m-%dT%H:%M:%SZ")})
-        return {"status": "RENUDGED", "ask_id": ask_id,
-                "nudge_count": len(nudges) + 1}
+            "type": "nudge_attempt", "state": "ANSWERED", "at": at})
+        try:
+            sent = self._nudge_sender.send(ask_id, "ANSWERED", native_handle)
+        except WakeEffectUnknownError:
+            return {"status": "NUDGE_EFFECT_UNKNOWN", "ask_id": ask_id}
+        except WakePreSubmitError as exc:
+            return {"status": "NUDGE_NOT_DELIVERED", "ask_id": ask_id,
+                    "reason_code": str(getattr(exc, "reason_code", ""))}
+        except WakeDispatchError as exc:
+            raise GblBridgeError("NUDGE_SEND_FAILED",
+                                 type(exc).__name__) from None
+        receipt = getattr(sent, "receipt", sent)   # unwrap a completion
+        outcome = getattr(receipt, "outcome", None)
+        if outcome in (TransportOutcome.ACCEPTED, TransportOutcome.DELIVERED):
+            self._store.append_ask_event(ask_id, {
+                "type": "nudge", "state": "ANSWERED", "at": at})
+            return {"status": "RENUDGED", "ask_id": ask_id,
+                    "nudge_count": len(nudges) + 1}
+        if outcome in (TransportOutcome.TARGET_UNAVAILABLE,
+                       TransportOutcome.FAILED):
+            return {"status": "NUDGE_NOT_DELIVERED", "ask_id": ask_id,
+                    "reason_code": str(getattr(receipt, "reason_code", ""))}
+        raise GblBridgeError("NUDGE_RECEIPT_INVALID",
+                             f"unrecognized receipt shape {type(sent).__name__}")
+
+    def reconcile_nudge(self, *, ask_id: str) -> dict[str, Any]:
+        """M8's settle path: reconcile the last unresolved nudge attempt by
+        OBSERVING the transport — never by sending again.  A delivered
+        outcome appends the budget-counting nudge event; a definite
+        non-delivery settles the attempt without burning budget."""
+        record = self._require_ask(ask_id)
+        events = self._ordered_events(record)
+        attempts = [event for event in events
+                    if event.get("type") == "nudge_attempt"]
+        nudges = [event for event in events if event.get("type") == "nudge"]
+        if not attempts:
+            raise GblBridgeError("NUDGE_ATTEMPT_NOT_FOUND", ask_id)
+        if nudges and (events.index(nudges[-1]) > events.index(attempts[-1])):
+            raise GblBridgeError("NUDGE_ALREADY_SETTLED", ask_id)
+        if self._nudge_sender is None or self._resolve_handle is None:
+            raise GblBridgeError("NUDGE_SENDER_UNAVAILABLE", ask_id)
+        native_handle = self._resolve_handle(record["principal"])
+        try:
+            settled = self._nudge_sender.reconcile(ask_id, "ANSWERED",
+                                                   native_handle)
+        except WakeEffectUnknownError:
+            return {"status": "NUDGE_EFFECT_UNKNOWN", "ask_id": ask_id}
+        except WakePreSubmitError as exc:
+            return {"status": "RECONCILED_NOT_DELIVERED", "ask_id": ask_id,
+                    "reason_code": str(getattr(exc, "reason_code", ""))}
+        except WakeDispatchError as exc:
+            raise GblBridgeError("NUDGE_RECONCILE_FAILED",
+                                 type(exc).__name__) from None
+        receipt = getattr(settled, "receipt", settled)
+        outcome = getattr(receipt, "outcome", None)
+        if outcome in (TransportOutcome.ACCEPTED, TransportOutcome.DELIVERED):
+            self._store.append_ask_event(ask_id, {
+                "type": "nudge", "state": "ANSWERED",
+                "at": attempts[-1]["at"]})
+            return {"status": "RECONCILED_DELIVERED", "ask_id": ask_id,
+                    "nudge_count": len(nudges) + 1}
+        if outcome in (TransportOutcome.TARGET_UNAVAILABLE,
+                       TransportOutcome.FAILED):
+            return {"status": "RECONCILED_NOT_DELIVERED", "ask_id": ask_id,
+                    "reason_code": str(getattr(receipt, "reason_code", ""))}
+        raise GblBridgeError("NUDGE_RECEIPT_INVALID",
+                             f"unrecognized receipt shape {type(settled).__name__}")
 
 
 # ── The loopback socket door (peer uid only, the B14 service pattern) ───────
@@ -462,16 +612,43 @@ class BridgeServer:
     # -- serving --------------------------------------------------------------
 
     def _serve_loop(self) -> None:
-        while self._serving:
-            try:
-                self.serve_once()
-            except (OSError, GblBridgeError):
-                return                  # listener closed or fatally broken
+        """H3: a per-connection failure NEVER ends the loop — only a fatal
+        listener injury does, and that exit clears ``_serving``, closes the
+        listener and unlinks the socket path so ``open()`` can restart
+        cleanly instead of refusing SOCKET_IN_USE forever."""
+        try:
+            while self._serving:
+                try:
+                    self.serve_once()
+                except OSError:
+                    if not self._serving:
+                        return          # normal close(): socket closed
+                    break               # listener fatally broken
+                except GblBridgeError:
+                    break               # SERVER_NOT_OPEN / fatal injury
+        finally:
+            self._serving = False
+            server = self._socket
+            self._socket = None
+            if server is not None:
+                try:
+                    server.close()
+                except OSError:
+                    pass
+            if self._owned_path is not None:
+                try:
+                    if self._owned_path.exists():
+                        self._owned_path.unlink()
+                except OSError:
+                    pass
+                self._owned_path = None
 
     def serve_once(self) -> bool:
         """Accept and serve exactly one connection.  False on accept
         timeout (nothing was served); raises OSError once the listener is
-        closed."""
+        closed.  H3: every per-connection failure — a client hang-up
+        mid-reply (EPIPE), a reply that cannot be framed (oversized or
+        unencodable) — is contained HERE; the loop keeps serving."""
         if self._socket is None:
             raise GblBridgeError("SERVER_NOT_OPEN")
         self._socket.settimeout(self.ACCEPT_TICK_SECONDS)
@@ -484,10 +661,22 @@ class BridgeServer:
                 return False
             raise
         try:
-            response = self._admit_and_dispatch(connection)
-            connection.sendall(encode_gbl_frame(response))
+            try:
+                response = self._admit_and_dispatch(connection)
+                frame = encode_gbl_frame(response)
+            except (HostFrameError, UnicodeError, ValueError):
+                # The reply could not be framed: answer with a small typed
+                # fallback frame.  Request bytes are never echoed into it.
+                frame = encode_gbl_frame(self._error("REPLY_FRAME_REFUSED"))
+            try:
+                connection.sendall(frame)
+            except OSError:
+                pass        # client hung up mid-reply: its loss, keep serving
         finally:
-            connection.close()
+            try:
+                connection.close()
+            except OSError:
+                pass
         return True
 
     # -- request handling -------------------------------------------------------
@@ -513,12 +702,22 @@ class BridgeServer:
             request = decode_gbl_frame(frame)
         except (HostFrameError, GblBridgeError, OSError):
             return self._error("REQUEST_INVALID")
+        # H3b: an unhashable or non-string op is a typed refusal BEFORE the
+        # frozenset membership test can raise outside every handler.
         if (set(request) != {"schema", "op", "arguments"}
                 or request["schema"] != REQUEST_SCHEMA
+                or type(request["op"]) is not str
                 or type(request["arguments"]) is not dict):
             return self._error("REQUEST_INVALID")
         if request["op"] not in OPS:
-            return self._error("UNKNOWN_OP", str(request["op"]))
+            # H3d: the detail is a bounded sanitized prefix — a ~32 KiB op
+            # never overflows the reply frame, and no raw request bytes
+            # cross the wire beyond this visible prefix.
+            return self._error("UNKNOWN_OP", _safe_detail(request["op"]))
+        required, allowed = _OP_ARGUMENTS[request["op"]]
+        keys = set(request["arguments"])
+        if not keys <= allowed or not required <= keys:
+            return self._error("INVALID_ARGUMENTS")
         method = getattr(self.bridge, _OP_METHODS[request["op"]])
         try:
             result = method(**request["arguments"])
@@ -538,12 +737,40 @@ class BridgeServer:
                 "error": {"code": code, "detail": detail}}
 
 
+def _safe_detail(value: str, limit: int = 48) -> str:
+    """A bounded, printable-ASCII detail prefix: never enough of a hostile
+    request to matter, never unencodable, never oversized."""
+    cleaned = "".join(chr(ch) if 32 <= ch < 127 else "?"
+                      for ch in value.encode("utf-8", "replace")[:limit])
+    return cleaned
+
+
+# H1: the wire validates the argument keys of every op against the same
+# shared schema the MCP edge validates ("answer" IS the contract's
+# ANSWER_ARGUMENT_KEYS), so an edge/bridge drift is a typed refusal at the
+# door, never a TypeError deep in the core.
+_OP_ARGUMENTS = {
+    "ask": (frozenset({"principal", "kind", "target", "title", "body",
+                       "idempotency_key"}),
+            frozenset({"principal", "kind", "target", "title", "body",
+                       "idempotency_key", "correlation", "asker"})),
+    "answer": (ANSWER_ARGUMENT_KEYS, ANSWER_ARGUMENT_KEYS),
+    "result": (frozenset({"principal", "ask_id"}),
+               frozenset({"principal", "ask_id"})),
+    "question": (frozenset({"principal", "ask_id"}),
+                 frozenset({"principal", "ask_id"})),
+    "status": (frozenset({"principal", "ask_id"}),
+               frozenset({"principal", "ask_id"})),
+    "reconcile": (frozenset({"ask_id"}), frozenset({"ask_id"})),
+}
+
 _OP_METHODS = {
     "ask": "submit_ask",
     "answer": "post_answer",
     "result": "fetch_result",
     "question": "fetch_question",
     "status": "ask_status",
+    "reconcile": "reconcile_nudge",
 }
 
 __all__ = [

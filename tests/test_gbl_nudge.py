@@ -190,3 +190,25 @@ class TestWakeNudgeShape:
         assert wake.obligation_ids == (ASK_ID, "ANSWERED")
         transport.send(ASK_ID, "ANSWERED", NATIVE_HANDLE)
         assert wake.nudge_id.startswith("NUDGE-")
+
+
+# ── Repair round 1: a digest refusal is a TYPED pre-submit refusal ──────────
+# Panel A LOW: build_wake's ValueError ("OPEN" is not a chain state) escapes
+# untyped — at the bridge it would surface as INTERNAL_ERROR. Pre-submit
+# means nothing was sent, so the caller must see WakePreSubmitError, the
+# dispatcher's own definite no-start shape.
+
+
+class TestRepairTypedPreSubmit:
+    def test_invalid_state_is_typed_pre_submit_refusal(self):
+        from control_plane.wake_dispatcher import WakePreSubmitError
+        transport = sender(RecordingPoster())
+        with pytest.raises(WakePreSubmitError):
+            transport.build_wake_nudge(ASK_ID, "OPEN", NATIVE_HANDLE)
+
+    def test_invalid_ask_id_is_typed_pre_submit_refusal(self):
+        from control_plane.wake_dispatcher import WakePreSubmitError
+        transport = sender(RecordingPoster())
+        with pytest.raises(WakePreSubmitError):
+            transport.build_wake_nudge("not-an-ask-id", "ANSWERED",
+                                       NATIVE_HANDLE)

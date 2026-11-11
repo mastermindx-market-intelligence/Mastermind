@@ -27,12 +27,13 @@ import asyncio
 from typing import Any, Mapping, Sequence
 
 from control_plane.wake_dispatcher import (
+    TransportOutcome,
     WakeNudge,
     WakePreSubmitError,
     mint_nudge_id,
 )
 from control_plane.wake_events import canonical_json_bytes
-from common.gbl_contract import build_wake
+from common.gbl_contract import GBLContractError, build_wake
 from integrations.executive_wake.grok_bot_http import (
     MAX_RESPONSE_BYTES,
     POST_TIMEOUT_SECONDS,
@@ -155,7 +156,17 @@ class GblNudgeSender:
 
     def build_wake_nudge(self, ask_id: str, state: str,
                          native_handle: str) -> WakeNudge:
-        wake = build_wake(ask_id, state)     # closed-key validation, GBL-1 law
+        try:
+            wake = build_wake(ask_id, state)  # closed-key validation, GBL-1 law
+        except GBLContractError as err:
+            # Typed pre-submit refusal (repair LOW): a digest/state rejection
+            # happens BEFORE any bytes cross — the dispatcher's own definite
+            # no-start shape, never a bare ValueError surfacing as
+            # INTERNAL_ERROR at the bridge.
+            raise WakePreSubmitError(
+                f"gb wake contract refused: {err.code}",
+                outcome=TransportOutcome.TARGET_UNAVAILABLE,
+                reason_code="target_unavailable") from None
         digest = grok_routine_target_digest(native_handle)
         nudge_id = mint_nudge_id(digest, (f"{ask_id}:{state}",))
         return WakeNudge(
