@@ -122,7 +122,10 @@ def verify_current_stage(output):
     """Qualify all current107 bytes before restoring historical fixtures."""
     import test_native_current_source as current_source
     native = Path(builder.__file__).parent.parent
-    if set(APPLICATION_PREIMAGES) != current_source.APPLICATION_MEMBERS:
+    # The busy epoch stages the go_lease pair from the sealed GLM preimage
+    # directory, so the candidate-staged members are a subset of the four
+    # historical application preimage restores below.
+    if not current_source.APPLICATION_MEMBERS <= set(APPLICATION_PREIMAGES):
         raise AssertionError("current application source binding differs")
     return current_source.verify_current_stage(
         output, native,
@@ -282,25 +285,21 @@ class PairedLauncherUpgrade(unittest.TestCase):
                         'ext/fabric_continuation.py', 'ext/remote_sub_exec.py',
                         'ext/remote_sub_helpers.py', 'ext/slot.py'}):
                 raise AssertionError('long-horizon predecessor scope differs')
-            helper_name = 'ext/remote_sub_helpers.py'
-            helper_item = long_fixture['files'][helper_name]
-            helper_payload = zlib.decompress(base64.b64decode(helper_item['zlib_base64'], validate=True))
-            if (len(helper_payload) != helper_item['bytes']
-                    or g.digest(helper_payload) != helper_item['sha256']
-                    or helper_item['sha256'] != old[helper_name]):
-                raise AssertionError('historical95 polling helper preimage differs')
-            (cls.built / 'native-code-stage' / helper_name).write_bytes(helper_payload)
+            # Both the polling helper and the pre-busy continuation belong to
+            # this already sealed historical102 fixture. Never try to undo a
+            # modern broker-busy change by text substitution into historical95.
+            for historical_name in ('ext/remote_sub_helpers.py',
+                                    'ext/fabric_continuation.py'):
+                item = long_fixture['files'][historical_name]
+                payload = zlib.decompress(base64.b64decode(item['zlib_base64'], validate=True))
+                if (len(payload) != item['bytes']
+                        or g.digest(payload) != item['sha256']
+                        or item['sha256'] != old[historical_name]):
+                    raise AssertionError('historical95 long-horizon preimage differs: '+historical_name)
+                (cls.built / 'native-code-stage' / historical_name).write_bytes(payload)
             inverse = {
                 'ext/commission_deadline.py': [
                     ('not 0 <= result <= 14400', 'not 0 <= result <= 7200'),
-                ],
-                'ext/fabric_continuation.py': [
-                    ('if not 1 <= budget <= 14400:', 'if not 1 <= budget <= 7200:'),
-                    ('floor = 14400 if kwargs.get("task_complexity") == "C3_FRONTIER_JUDGMENT" else (\n'
-                     '        7200 if kwargs.get("task_complexity") == "C2_COMPLEX_BOUNDED" else (\n'
-                     '        3600 if kwargs.get("task_complexity") in (None, "") else 0))',
-                     'floor = 7200 if kwargs.get("task_complexity") == "C3_FRONTIER_JUDGMENT" else (\n'
-                     '        3600 if kwargs.get("task_complexity") in (None, "", "C2_COMPLEX_BOUNDED") else 0)'),
                 ],
                 'ext/slot.py': [
                     ('MAX_CHILD_TIMEOUT_S = 14400.0', 'MAX_CHILD_TIMEOUT_S = 7200.0'),

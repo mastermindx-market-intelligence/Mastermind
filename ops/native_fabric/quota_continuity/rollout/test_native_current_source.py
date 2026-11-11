@@ -1,7 +1,11 @@
 """Exact current native source fixture; no runtime owners or live effects.
 
 The committed 107-file records remain immutable historical inputs. This shared
-test fixture derives only the three independently pinned GLM core successors.
+test fixture derives the current #2121 broker-busy epoch exactly as the builder
+stages it: the six reviewed busy members advance to their converged candidate
+bytes, while the two remaining GLM application-core members stay at their
+frozen preimages (the busy epoch bypasses the GLM helper composition), with
+their staged source rebound to the sealed preimage directory.
 """
 import hashlib
 import json
@@ -9,20 +13,44 @@ from pathlib import Path
 
 BASELINE_MANIFEST_SHA = "22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada"
 BASELINE_INVENTORY_SHA = "aa4ca6b0f27e411870f9bad325aca295da1bf3fbf6c536d213d002f675eb2b68"
-REVIEWED_CORE = {
-    "go_lease_capability.py": (
+GLM_CORE_SOURCE_DIRECTORY = "rollout/preimages/glm_application_core_5c3d"
+# The busy epoch does not re-derive the GLM helper composition; these two
+# members stage their exact sealed preimage bytes.
+GLM_CORE_PREIMAGE_SOURCES = {
+    "go_lease_capability.py":
         "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940",
-        "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86"),
-    "go_lease_gateway.py": (
+    "go_lease_gateway.py":
         "adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949",
-        "4e34f9aa2810a9d897d2b2b3135f91f6f4759e7c08c0575e50cdbab7996e8193"),
+}
+# The complete six-member AUTO prelease broker-busy epoch: each member's
+# baseline (pre-busy) pin advances to its converged #2121 candidate bytes.
+# The baseline manifest still pins each member's preimage.
+BUSY_CORE = {
+    "fabric_continuation.py": (
+        "7a4050051378fcacada2f2fe6d056649fb514077aacfb02751d61d6e67dfe405",
+        "8b3ab69abc6e61bdae98dea026c4dc5075ab7bc0b062624cb205df4a27a98030"),
+    "fabric_task.py": (
+        "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68",
+        "0e85036189cc074c3b1a463304f1ccadba82038beadff3b51255c1ef2ec68d66"),
+    "remote_sub.sh": (
+        "1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca",
+        "e140eb481c8c61f70eea6e8b8bcba175c18ba31bb3423f1ec182384cb54db449"),
+    # The AUTO prelease broker-busy epoch is the reviewed successor of the
+    # GLM-composed broker (a84752dc lineage); the baseline manifest still
+    # pins the GLM preimage 0bbf1ca0.
     "lease_broker.py": (
         "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
-        "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004"),
+        "5af51da91f8c13cedca525a906d211e0e03f53cdd19c041d638d35d85e60a24c"),
+    "pick.py": (
+        "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
+        "c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057"),
+    "quota_circuit.py": (
+        "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303",
+        "ba1f2582505a0350260d0bdc4a00f6374a2e1140bc4b6cead84368b606f9970e"),
 }
+# Current application members staged from their candidate/ successors.
 APPLICATION_MEMBERS = frozenset({
     "ext/quota_circuit.py", "ext/lease_broker.py",
-    "ext/go_lease_capability.py", "ext/go_lease_gateway.py",
 })
 
 
@@ -43,7 +71,25 @@ def expected_current_source_closure(native):
         raise AssertionError("immutable native source baseline differs")
     manifest = json.loads(baseline_raw)
     inventory = json.loads(baseline_inventory_raw)
-    for filename, (preimage, candidate) in REVIEWED_CORE.items():
+    # The two GLM core members stay at their sealed preimages; only their
+    # staged source moves to the preimage directory, mirroring the builder's
+    # busy-epoch staging (the GLM helper composition is not re-derived).
+    for filename, preimage in GLM_CORE_PREIMAGE_SOURCES.items():
+        member = "ext/" + filename
+        path = native / GLM_CORE_SOURCE_DIRECTORY / filename
+        if not path.is_file() or path.is_symlink():
+            raise AssertionError("glm core preimage source is not regular: " + member)
+        data = path.read_bytes()
+        if digest(data) != preimage:
+            raise AssertionError("glm core preimage source differs: " + member)
+        row = inventory["files"][member]
+        if manifest[member] != preimage or row["sha256"] != preimage:
+            raise AssertionError("glm core preimage pin differs: " + member)
+        row.update(bytes=len(data),
+                   source=GLM_CORE_SOURCE_DIRECTORY + "/" + filename)
+    # The complete six-member busy cohort advances to its converged
+    # candidates; partial or mixed cohorts are never projected here.
+    for filename, (preimage, candidate) in BUSY_CORE.items():
         member = "ext/" + filename
         path = native / "candidate" / filename
         if not path.is_file() or path.is_symlink():
@@ -54,9 +100,7 @@ def expected_current_source_closure(native):
                 or row["sha256"] != preimage or digest(data) != candidate):
             raise AssertionError("reviewed core successor differs: " + member)
         manifest[member] = candidate
-        row.update(bytes=len(data), sha256=candidate, composition={
-            "schema": "mastermind.glm-native-core-source.v1",
-            "preimage_sha256": preimage, "candidate_sha256": candidate})
+        row.update(bytes=len(data), sha256=candidate)
     return manifest, inventory
 
 
@@ -85,5 +129,3 @@ def verify_current_stage(output, native, expected_members):
             if row["source"] != candidate or (native / candidate).read_bytes() != data:
                 raise AssertionError("current application candidate differs: " + name)
     return manifest
-
-
