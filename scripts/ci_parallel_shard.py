@@ -194,6 +194,10 @@ _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 
 # independently of the change under test. No self-hosted runner carries this
 # label. Scope classification and the `test` fan-in run no suite.
 HOSTED_TEST_RUNNER = "ubuntu-24.04"
+# Values the shard job may pin for CI_PYTEST_WORKERS: "4" is the measured
+# placement for the hosted 4-vCPU runner; "0"/"1" are the exact serial
+# rollback argv. Any other value changes worker shape and must requalify.
+_ALLOWED_SHARD_PYTEST_WORKERS = frozenset({"0", "1", "4"})
 _PIN_GUARDS_JOB_KEYS = frozenset(
     {"name", "if", "permissions", "runs-on", "timeout-minutes", "steps"})
 _QUALIFICATION_JOB_KEYS = frozenset(
@@ -479,6 +483,18 @@ def validate_parallel_workflow(text: str) -> None:
         raise ci_pytest.PolicyError("parallel CI must execute all six shard indices")
     if shards.get("runs-on") != HOSTED_TEST_RUNNER:
         raise ci_pytest.PolicyError("pytest shards must run on the GitHub-hosted test image")
+    # The shard pytest worker switch is pinned: the job runs the measured
+    # pytest-xdist placement ("4") or its serial rollback ("0"/"1"), and can
+    # never lose, rename or silently alter the CI_PYTEST_WORKERS gate.
+    worker_env = shards.get("env")
+    if (
+        not isinstance(worker_env, dict)
+        or set(worker_env) != {"CI_PYTEST_WORKERS"}
+        or worker_env["CI_PYTEST_WORKERS"] not in _ALLOWED_SHARD_PYTEST_WORKERS
+    ):
+        raise ci_pytest.PolicyError(
+            "pytest shards must pin the CI_PYTEST_WORKERS worker switch"
+        )
     if (
         gate.get("name") != "test"
         or gate.get("needs") != ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards"]
@@ -703,6 +719,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         gate, selected, digest = shard_plan(
             root, jobs=args.jobs, index=args.index
         )
+        # Fail closed on a malformed worker switch before pytest starts.
+        workers = ci_pytest.resolve_pytest_workers()
     except ci_pytest.PolicyError as error:
         print(f"ci_parallel_shard policy error: {error}", file=sys.stderr)
         return 2
@@ -713,6 +731,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"modules={len(selected)} included_sha256={digest}",
         flush=True,
     )
+    if workers > 1:
+        # Kept off the strictly parsed parallel_shard record: this separate
+        # line states the pytest-xdist placement the shard actually runs.
+        print(f"pytest_workers={workers} dist=loadfile", flush=True)
     if args.plan_only:
         return 0
     # No hand-written selectors, mutating retry, positive allowlist or shell.

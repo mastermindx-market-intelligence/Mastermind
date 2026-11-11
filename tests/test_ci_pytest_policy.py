@@ -843,7 +843,10 @@ def test_validate_workflow_rejects_mixed_type_extra_keys():
         cip.validate_workflow(_workflow_text(on_block))
 
 
-def test_all_discovered_tests_are_accounted_for():
+def test_all_discovered_tests_are_accounted_for(monkeypatch):
+    # The exact serial argv contract is asserted without any worker override:
+    # CI exports CI_PYTEST_WORKERS on the shard jobs that run these tests.
+    monkeypatch.delenv("CI_PYTEST_WORKERS", raising=False)
     gate = cip.resolve_gate(_ROOT)
     discovered = set(gate["discovered"])
     excluded = set(gate["excluded"])
@@ -865,6 +868,41 @@ def test_all_discovered_tests_are_accounted_for():
     assert argv.count("--durations=25") == 1
 
 
+@pytest.mark.parametrize("switch", [None, "", "0", "1", " 1 "])
+def test_worker_switch_serial_values_keep_the_exact_serial_argv(monkeypatch, switch):
+    if switch is None:
+        monkeypatch.delenv("CI_PYTEST_WORKERS", raising=False)
+    else:
+        monkeypatch.setenv("CI_PYTEST_WORKERS", switch)
+    modules = ("tests/test_fixture_a.py", "tests/test_fixture_b.py")
+    assert cip.pytest_argv(modules) == [
+        cip.sys.executable, "-m", "pytest", "--durations=25", "-q", *modules,
+    ]
+    assert cip.resolve_pytest_workers() == 1
+
+
+@pytest.mark.parametrize("switch", ["2", "4", " 4 "])
+def test_worker_switch_parallel_values_add_loadfile_xdist(monkeypatch, switch):
+    monkeypatch.setenv("CI_PYTEST_WORKERS", switch)
+    modules = ("tests/test_fixture_a.py",)
+    argv = cip.pytest_argv(modules)
+    assert argv == [
+        cip.sys.executable, "-m", "pytest", "--durations=25", "-q",
+        "-n", "4" if "4" in switch else "2", "--dist", "loadfile", *modules,
+    ]
+    # Same module set, only placement of execution changes.
+    assert argv[-len(modules):] == list(modules)
+
+
+@pytest.mark.parametrize("switch", ["x", "-1", "1.5", "02x", "0x4", "65", "1000000"])
+def test_worker_switch_malformed_values_fail_closed(monkeypatch, switch):
+    monkeypatch.setenv("CI_PYTEST_WORKERS", switch)
+    with pytest.raises(cip.PolicyError, match="CI_PYTEST_WORKERS"):
+        cip.pytest_argv(("tests/test_fixture_a.py",))
+    with pytest.raises(cip.PolicyError, match="CI_PYTEST_WORKERS"):
+        cip.resolve_pytest_workers()
+
+
 def test_hosted_full_gate_has_a_bounded_completion_window():
     """Keep a finite, adequate 75-minute shard window with fail-closed fan-in."""
     import yaml
@@ -878,6 +916,7 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     gate = jobs["test"]
     assert workflow["permissions"] == {"contents": "read"}
     assert shards["permissions"] == {"contents": "read", "actions": "read"}
+    assert shards["env"] == {"CI_PYTEST_WORKERS": "4"}
     assert shards["timeout-minutes"] == 75
     assert shards["timeout-minutes"] + gate["timeout-minutes"] <= 100
     assert gate["timeout-minutes"] == 8

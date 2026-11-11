@@ -46,6 +46,9 @@ def _gate_fixture(tmp_path, monkeypatch, script):
     monkeypatch.setattr(rwe, "GATE_SCRIPT_RELATIVE", gate)
     monkeypatch.setenv("PYTHONPATH", str(root))
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    # This child asserts the serial progress path: a shard job exporting
+    # CI_PYTEST_WORKERS must not change the gate shape under test here.
+    monkeypatch.delenv("CI_PYTEST_WORKERS", raising=False)
     return argparse.Namespace(root=str(root), env=str(env_dir), subset=None), env_dir
 
 

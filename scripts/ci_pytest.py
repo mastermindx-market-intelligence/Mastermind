@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
 import subprocess
 import sys
@@ -195,6 +196,31 @@ def format_plan(plan: Mapping[str, int], *, shards: Sequence[Sequence[str]] | No
     return rendered
 
 
+def resolve_pytest_workers() -> int:
+    """Resolve the ``CI_PYTEST_WORKERS`` switch for a shard's pytest argv.
+
+    Unset, ``0`` and ``1`` keep today's exact serial argv. Two or more adds
+    ``-n <N> --dist loadfile`` so the same resolved module set runs under
+    pytest-xdist with every module whole on one worker. Anything else fails
+    closed: a malformed switch must change an expensive hosted run loudly,
+    never silently fall back to another shape.
+    """
+    raw = os.environ.get("CI_PYTEST_WORKERS", "").strip()
+    if raw in ("", "0", "1"):
+        return 1
+    try:
+        workers = int(raw, 10)
+    except ValueError:
+        raise PolicyError(
+            "CI_PYTEST_WORKERS must be 0, 1, or an integer worker count"
+        ) from None
+    if not 2 <= workers <= 64:
+        raise PolicyError(
+            "CI_PYTEST_WORKERS must be 0, 1, or a worker count from 2 to 64"
+        )
+    return workers
+
+
 def pytest_argv(
     included: Sequence[str], *, python: str | None = None, progress: bool = False,
 ) -> list[str]:
@@ -206,7 +232,15 @@ def pytest_argv(
     prefix.extend(["-m", "pytest"])
     if progress:
         prefix.extend(["-p", "scripts.ci_pytest_timing"])
-    return [*prefix, "--durations=25", "-q", *included]
+    argv = [*prefix, "--durations=25", "-q"]
+    workers = resolve_pytest_workers()
+    if workers > 1:
+        # Placement of execution only: the same discovered modules run with
+        # the same verdicts, and --dist loadfile keeps each module whole on
+        # one worker (intra-module order preserved). CI_PYTEST_WORKERS=0/1
+        # restores today's exact serial argv.
+        argv.extend(["-n", str(workers), "--dist", "loadfile"])
+    return [*argv, *included]
 
 
 _MEASURED_THREE_JOB_PLACEMENT = {
@@ -787,6 +821,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.jobs < 1:
             raise PolicyError("jobs must be at least 1")
         gate = resolve_gate(root)
+        # Validate the worker switch before any process starts so a malformed
+        # CI_PYTEST_WORKERS fails closed instead of failing inside a shard.
+        resolve_pytest_workers()
         # jobs=1 keeps the historical module set/order and default argv.
         # Progress is opt-in and changes observability only, never placement.
         shards = (

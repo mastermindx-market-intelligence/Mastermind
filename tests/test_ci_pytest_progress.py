@@ -57,7 +57,12 @@ def test_module_progress_arrives_before_shard_finishes(tmp_path, monkeypatch):
     assert "retained failure" in rendered
 
 
-def test_real_pytest_timing_preserves_failure_and_reports_every_module(tmp_path):
+def test_real_pytest_timing_preserves_failure_and_reports_every_module(
+    tmp_path, monkeypatch
+):
+    # This asserts the serial record contract; a shard job exporting
+    # CI_PYTEST_WORKERS must not change it.
+    monkeypatch.delenv("CI_PYTEST_WORKERS", raising=False)
     first = tmp_path / "test_first.py"
     second = tmp_path / "test_second.py"
     first.write_text("def test_pass(): pass\n")
@@ -81,6 +86,47 @@ def test_real_pytest_timing_preserves_failure_and_reports_every_module(tmp_path)
     assert all(r["reported_seconds"] >= 0 for r in summaries)
 
 
+def test_real_pytest_timing_reports_each_module_once_under_xdist(tmp_path):
+    """pytest-xdist interleaves forwarded modules; each still reports once."""
+    first = tmp_path / "test_first.py"
+    second = tmp_path / "test_second.py"
+    first.write_text("import time\n"
+                     "def test_one(): time.sleep(0.05)\n"
+                     "def test_two(): time.sleep(0.05)\n")
+    second.write_text("import pytest\n"
+                      "def test_skip(): pytest.skip('fixture')\n"
+                      "def test_fail(): assert False, 'retained assertion'\n")
+    env = dict(os.environ, PYTEST_DISABLE_PLUGIN_AUTOLOAD="1")
+    argv = [
+        cip.sys.executable, "-u", "-m", "pytest",
+        "-p", "xdist", "-p", "scripts.ci_pytest_timing",
+        "--durations=25", "-q", "-n", "2", "--dist", "loadfile",
+        str(first), str(second),
+    ]
+    result = subprocess.run(
+        argv, cwd=Path(__file__).resolve().parents[1], env=env,
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 1
+    assert "retained assertion" in result.stdout
+    records = [json.loads(line.removeprefix("CI_MODULE "))
+               for line in result.stdout.splitlines() if line.startswith("CI_MODULE ")]
+    starts = [r for r in records if r["event"] == "start"]
+    summaries = [r for r in records if r["event"] == "summary"]
+    assert sorted(Path(r["module"]).name for r in starts) == [
+        "test_first.py", "test_second.py",
+    ]
+    assert sorted(Path(r["module"]).name for r in summaries) == [
+        "test_first.py", "test_second.py",
+    ]
+    by_module = {Path(r["module"]).name: r for r in summaries}
+    assert [by_module["test_first.py"]["cases_started"],
+            by_module["test_first.py"]["cases_finished"]] == [2, 2]
+    assert [by_module["test_second.py"]["cases_started"],
+            by_module["test_second.py"]["cases_finished"]] == [2, 2]
+    assert all(r["reported_seconds"] >= 0 for r in summaries)
+
+
 def test_composed_runner_reports_real_module_before_test_returns(tmp_path, monkeypatch):
     release = tmp_path / "release"
     fixture = tmp_path / "test_waiting.py"
@@ -91,6 +137,9 @@ def test_composed_runner_reports_real_module_before_test_returns(tmp_path, monke
         "    assert False, 'actual child failure remains a gate failure'\n"
     )
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    # This child asserts the serial progress path: a shard job exporting
+    # CI_PYTEST_WORKERS must not add xdist flags it cannot load.
+    monkeypatch.delenv("CI_PYTEST_WORKERS", raising=False)
     progress = threading.Event()
     output = []
 
