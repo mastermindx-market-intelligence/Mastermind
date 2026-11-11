@@ -246,6 +246,9 @@ def test_door_executor_pins_base_and_home_and_survives_refusal(
     door = door_mod.CodingJobDoor(door_mod.DoorConfig({
         "scratch_root": str(tmp_path),
         "paperclip_base_url": "http://127.0.0.1:3190",
+        # F9 (step 2): the Paperclip base must match an EXPLICIT host:port
+        # allowlist — this config names the legal dev target
+        "paperclip_allowed": ["127.0.0.1:3190"],
         "paperclip_company_id": "c",
         "t3": {
             "proof_base_url": "http://127.0.0.1:3796",
