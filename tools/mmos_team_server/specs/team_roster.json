@@ -13,6 +13,7 @@
   "model": "glm-5.3",
   "state_file": "~/.mastermind/t3-team/run/team_roster_state.json",
   "urls_file": "~/.mastermind/t3-team/run/team_urls.json",
+  "browser_profile": "~/.mastermind/t3-team/run/browser-profile",
   "deny_write_roots": [
     "/tmp",
     "/private/tmp",
