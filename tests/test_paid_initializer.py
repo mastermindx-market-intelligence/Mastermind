@@ -27,6 +27,25 @@ def commitment():
 def selectors():return dict(host_ref='ubuntu2',transport_alias='ubuntu2',python_path='/usr/bin/python3',capture_root='/home/worker/lanes/ext/lanes')
 
 
+def _fixture_bootstrap(executable):
+    # Canonicalize runner-owned ancestors, retaining the real python3 selector.
+    return Path(executable).parent.resolve(strict=True)/'python3'
+
+
+def test_fixture_bootstrap_parent_alias_keeps_real_getpath(tmp_path):
+    executable=Path(sys.executable)
+    alias=tmp_path/'interpreter-parent'
+    alias.symlink_to(executable.parent,target_is_directory=True)
+    direct=_fixture_bootstrap(executable)
+    selected=_fixture_bootstrap(alias/executable.name)
+    assert selected==direct
+    assert selected.name=='python3'
+    assert selected.resolve(strict=True)==direct.resolve(strict=True)
+    code='import json,sys;print(json.dumps({k:getattr(sys,k) for k in ("executable","prefix","exec_prefix","base_prefix","base_exec_prefix")}))'
+    def observe(path):
+        return json.loads(subprocess.check_output([str(path),'-I','-S','-B','-c',code],timeout=10))
+    assert observe(selected)==observe(direct)
+
 
 def _preserving_stat_view(info,*,uid=None,mode=None):
     values=list(info)
@@ -429,7 +448,9 @@ def test_actual_pinned_image_exec_matches_normal_isolated_venv_startup(tmp_path,
 
 
 @pytest.mark.skipif(sys.platform!='linux' or sys.version_info[:2]!=(3,12),reason='requires actual Linux CPython3.12 initializer/getpath')
-def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,monkeypatch,request):
+@pytest.mark.parametrize('bootstrap_parent_alias',[False,True])
+@pytest.mark.parametrize('fixture_umask',[0o002,0o022])
+def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,monkeypatch,request,bootstrap_parent_alias,fixture_umask):
     """Real FD/snapshot/Bash/getpath; trusted-platform metadata is simulated.
 
     No remote/system mutation, credential read or provider is used. This does
@@ -445,7 +466,13 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     for key in tuple(os.environ):
         if key.startswith(('LD_','BASH_FUNC_')) or key in ('BASH_ENV','ENV','PYTHONHOME','PYTHONEXECUTABLE','__PYVENV_LAUNCHER__'):
             monkeypatch.delenv(key)
-    bootstrap=Path(sys.executable).with_name('python3')
+    executable=Path(sys.executable)
+    if bootstrap_parent_alias:
+        alias=tmp_path/'bootstrap-parent'
+        alias.symlink_to(executable.parent,target_is_directory=True)
+        executable=alias/executable.name
+    bootstrap=_fixture_bootstrap(executable)
+    assert bootstrap.resolve(strict=True)==Path(sys.executable).resolve(strict=True)
     system_launch=_system_fixture_launch()
     logical=system_launch or bootstrap
     monkeypatch.setenv('PATH',str(logical.parent)+':/usr/bin:/bin')
@@ -497,7 +524,10 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         return rawxattr(name,key,*args,**kwargs)
     with tempfile.TemporaryDirectory(prefix='.mmx-inert-init-',dir=account.pw_dir) as scratch:
         private.extend([str(v) for v in Path(scratch).parents]+[scratch])
-        lane=Path(scratch)/'lanes';(lane/'ext/lanes').mkdir(parents=True,mode=0o700)
+        lane=Path(scratch)/'lanes';previous_umask=os.umask(fixture_umask)
+        try:
+            for directory in (lane,lane/'ext',lane/'ext/lanes'):directory.mkdir(mode=0o700)
+        finally:os.umask(previous_umask)
         hook=lane/'ext/HOST_ENV.sh';config=Path(scratch)/'not-read.json'
         hook.write_text('export GLM_CONFIG='+str(config)+'\n');hook.chmod(0o600)
         c=commitment();c.update(lane_root=str(lane),account=dict(uid=os.getuid(),gid=os.getgid(),user=account.pw_name,home=account.pw_dir),
@@ -627,9 +657,20 @@ def test_native_initializer_extends_only_exact_preimage_members():
     assert {p for p in before if before[p]!=current[p]}==changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed
     # Census fallback advances exactly one additional historical member.
     assert sum(before[p]==current[p] for p in before)==59
+    core_successors = {
+        "ext/go_lease_capability.py": ("d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940", "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86"),
+        "ext/go_lease_gateway.py": ("adad5ea3bcfd091730b92707d1ad231f5566cb200b5ffedfe41ef086aab86949", "4e34f9aa2810a9d897d2b2b3135f91f6f4759e7c08c0575e50cdbab7996e8193"),
+        "ext/lease_broker.py": ("0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807", "b9b13f9a276c3ce814a43e91591588d0e2be9b59066125d7393343241f707004"),
+    }
     for name in added|changed|diagnostic_changed|long_horizon_changed|application_changed|recovery_changed|ubuntu4_changed|census_changed:
         source=native/'candidate'/('pool_launcher.sh' if name=='pool' else name.removeprefix('ext/'))
-        assert current[name]==hashlib.sha256(source.read_bytes()).hexdigest()
+        actual=hashlib.sha256(source.read_bytes()).hexdigest()
+        if name in core_successors:
+            predecessor,successor=core_successors[name]
+            assert current[name]==predecessor
+            assert actual==successor
+        else:
+            assert current[name]==actual
     # The paired-upgrade target remains historical; only ordinary generation
     # selection consumes the new complete current closure.
     source=(native/'rollout/native_install.py').read_text()
@@ -721,7 +762,8 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
     try:
         (lane/'ext/lanes').mkdir(parents=True,mode=0o700)
         (lane/'venv/bin').mkdir(parents=True,mode=0o700)
-        bootstrap=Path(sys.executable).with_name('python3')
+        bootstrap=_fixture_bootstrap(sys.executable)
+        assert bootstrap.resolve(strict=True)==Path(sys.executable).resolve(strict=True)
         system_launch=_system_fixture_launch();real=(system_launch or bootstrap).resolve()
         monkeypatch.setenv('PATH','/usr/bin:/bin')
         logical=lane/'venv/bin/python3';logical.symlink_to(real)
@@ -949,10 +991,11 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     text=(Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml').read_text()
     fan.validate_parallel_workflow(text)
     value=yaml.load(text,Loader=policy._WorkflowYAMLLoader)
-    # PR qualification adds two jobs, but full-mode H1 security checks and
-    # the required fan-in remain enforced by the canonical validator above.
-    assert set(value['jobs'])=={'pr_scope','pr_fast','pytest_shards','test'}
-    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pytest_shards']
+    # PR qualification, early pin guards and the non-pytest qualification
+    # lane add four jobs; full-mode H1 security checks and the required fan-in
+    # remain enforced by the validator.
+    assert set(value['jobs'])=={'pr_scope','pr_fast','pin_guards','qualification','pytest_shards','test'}
+    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pin_guards','qualification','pytest_shards']
     steps=value['jobs']['pytest_shards']['steps']
     preflight=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 initializer Linux fast preflight']
     positive=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 required real Linux no-ACL positive journey']
@@ -986,7 +1029,10 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
         'tests/test_paid_initializer_sysconfig.py',
         'tests/test_paid_initializer_runtime_library.py::test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed',
         'tests/test_paid_provider_entry_linux.py']
-    assert full[0][1]['run']=='python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}'
+    assert full[0][1]['run'] == (
+        'umask 022\n'
+        'python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}\n'
+    )
     # Only full pytest may reuse the exact prior proof; both H1 gates above
     # still execute on shard two before the proof/pytest steps.
     assert full[0][1].get('if') == "${{ steps.previous_ci.outputs.reuse != 'true' }}"
@@ -1083,3 +1129,4 @@ else:raise AssertionError('unmodeled writable file admitted')
     source='import sys\n'+_observer_metadata_fixture(definitions+'\n'+child_probe,exact=[*modeled.parents,modeled],prefixes=[],root_directories=[*modeled.parents,modeled,regular],root_files=[image])
     child=subprocess.run([sys.executable,'-I','-S','-B','-c',source,json.dumps(data)],capture_output=True,timeout=5)
     assert child.returncode==0 and not child.stdout and not child.stderr
+

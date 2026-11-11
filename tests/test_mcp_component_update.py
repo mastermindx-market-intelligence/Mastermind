@@ -163,6 +163,7 @@ class FakeHost:
         self.config_read_error = None
         self.manifest = MANIFEST
         self.closure = CLOSURE
+        self.os_web_assets_present = True
         self.crash_at = None
         self.fail_at = {}
         self.fail_after_at = {}
@@ -385,6 +386,10 @@ class FakeHost:
         if self.release_error is not None:
             raise m.UpdateRefused(self.release_error)
         return self.manifest
+
+    def require_os_web_assets(self, release_sha):
+        if not self.os_web_assets_present:
+            raise m.UpdateRefused("TARGET_OS_WEB_ASSETS_MISSING")
 
     def verify_closure(self):
         if self.closure_error is not None:
@@ -809,6 +814,38 @@ def test_plan_is_read_only_and_deterministic():
     assert first["plan"]["release_manifest_sha256"] == MANIFEST
     assert first["plan"]["network_closure_sha256"] == CLOSURE
     assert m.plan(host, release_sha=NEW_RELEASE, set_public=True)["plan_sha256"] != first["plan_sha256"]
+
+
+def test_os_transport_candidate_without_target_web_assets_refuses_before_effects(monkeypatch):
+    # Regression for the live incident: a valid sealed code release can lack
+    # the separately imported OS dist tree, while the installed config still
+    # enables OS Executive transport. Such a candidate must not boot out the
+    # working MCP listener and then fail OS StaticApp composition on startup.
+    host = FakeHost()
+    host.os_web_assets_present = False
+    real_compile = m.compile_candidate
+
+    def transport_candidate(*args, **kwargs):
+        candidate = real_compile(*args, **kwargs)
+        updated = json.loads(candidate.config_after)
+        updated["os_executive_transport"] = True
+        return dataclasses.replace(candidate, config_after=mcp_bytes(updated))
+
+    monkeypatch.setattr(m, "compile_candidate", transport_candidate)
+    expect(lambda: m.plan(host, release_sha=NEW_RELEASE, set_public=False),
+           m.UpdateRefused, "TARGET_OS_WEB_ASSETS_MISSING")
+    assert_no_effect(host)
+
+    host.os_web_assets_present = True
+    assert m.plan(host, release_sha=NEW_RELEASE, set_public=False)["outcome"] == "PLANNED"
+    assert_no_effect(host)
+
+
+def test_no_os_transport_does_not_require_web_assets():
+    host = FakeHost()
+    host.os_web_assets_present = False
+    assert m.plan(host, release_sha=NEW_RELEASE, set_public=False)["outcome"] == "PLANNED"
+    assert_no_effect(host)
 
 
 @pytest.mark.parametrize("attribute,value,code", [

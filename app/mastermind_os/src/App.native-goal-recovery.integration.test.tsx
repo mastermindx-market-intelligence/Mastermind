@@ -30,7 +30,7 @@ async function setup({legacyOwner=false,unavailableIdentity=false}={}){
   if(command==='auth_status')return structuredClone(state);
   if(command==='executive_auth_status')return {generation:0,available:false};
   if(command==='read_native_draft_continuity'){if(unavailableIdentity)throw Error('IDENTITY_SOURCE_UNAVAILABLE');return held??structuredClone(frame);}
-  if(command==='sign_in')return {status:'signing_in',reason:null,acquisition:false,content:false};
+  if(command==='sign_in_primary')return {status:'signing_in',reason:null,acquisition:false,content:false};
   if(command==='sign_out')return undefined;
   throw Error('Source not supplied by inert goal-only native fixture');
  });
@@ -76,7 +76,9 @@ it('genuine native expiry hides exact goal through sign-in and explicitly return
  const store=e.host.commandBinding!.store,scope=sequence.qualified.principal_scope;
  const pointer={kind:'launch' as const,operationKey:'mmos-launch-'+'1'.repeat(40),targetKey:'WS:GOAL-RECOVERY'};
  await store.reserve(scope,pointer);
- fireEvent.click(screen.getByRole('button',{name:'Sign in'}));await act(async()=>{});
+ fireEvent.click(screen.getByRole('button',{name:'Sign in to account'}));await act(async()=>{});
+ expect(e.invoke.mock.calls.filter(([name])=>name==='sign_in_primary')).toEqual([['sign_in_primary']]);
+ expect(e.invoke.mock.calls.some(([name])=>name==='sign_in'||name==='executive_authorize'||name==='continue_authorization')).toBe(false);
  expect(screen.queryByDisplayValue(text)).toBeNull();
  await e.returnSame();fireEvent.click(screen.getByRole('button',{name:'Recover unsent work'}));
  expect(await screen.findByRole('textbox',{name:'Your goal'})).toHaveProperty('value',text);

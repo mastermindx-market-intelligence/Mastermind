@@ -10,6 +10,7 @@ import { createWebAuth, handleWebAuthCallback } from "./web-auth";
 import "./styles.css";
 import { EVIDENCE_PATH, evidenceRoute } from "./research/evidence-contract";
 import { ResearchEvidenceEntry } from "./research/ResearchEvidenceEntry";
+import { installAppControl } from "./agent-control/install";
 
 async function mount() {
   // The exact callback completes and cleans up before the product can mount.
@@ -41,7 +42,15 @@ async function mount() {
   } catch {
     // The existing unavailable surface truthfully reports an absent host.
   }
-  createRoot(document.getElementById("root")!).render(
+  const appRoot = document.getElementById("root")!;
+  const appControl = installAppControl(appRoot);
+  const releaseAppControl = (event: PageTransitionEvent) => { if (!event.persisted) appControl.dispose(); };
+  window.addEventListener("pagehide", releaseAppControl);
+  import.meta.hot?.dispose(() => {
+    window.removeEventListener("pagehide", releaseAppControl);
+    appControl.dispose();
+  });
+  createRoot(appRoot).render(
     <StrictMode>
       <DisplayPreferencesRoot>
         {({ theme, locale, control }) => <App theme={theme} locale={locale}

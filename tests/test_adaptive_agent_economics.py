@@ -78,7 +78,9 @@ def test_admission_class_and_fast_name_are_not_price_evidence(tmp_path):
 
 
 def test_principal_judgment_does_not_become_worker_admission():
-    report = ModelRouter.load().explain_route(WorkRequest("implementation", ambiguity="high"))
+    # OQ-8 (WO-06): the principal-judgment lane is a lead task_kind; critical
+    # risk / high ambiguity no longer inflate worker cognition into it.
+    report = ModelRouter.load().explain_route(WorkRequest("planning"))
     assert report["decision"]["mode"] == "frontier_lead"
     assert report["decision"]["worker_eligible"] is False
     assert _rows(report)["frontier.orchestrator"]["source_disposition"] == "FRONTIER_JUDGMENT_ROUTE"
@@ -191,3 +193,276 @@ def test_current_provider_source_and_responsibility_are_preserved_without_live_c
     assert report["selected_worker"] is None
     assert report["live_admission"] is False
     assert all(row["measured_cost"] is None for row in report["aliases"])
+
+
+# --- WO-07 route_preview: shared-law composition (MMOS V1) ------------------
+#
+# The Executive MCP route_preview composes this module's explain_route source
+# economics with the WO-02 shared law and host-configured owner observations.
+# It stays source-only: the assertions below pin NONE_SOURCE_PREVIEW_ONLY,
+# the capacity-knowledge honesty ladder and zero runtime row changes.
+
+import sqlite3
+
+from integrations.executive_mcp.route_preview import (
+    ROUTE_PREVIEW_TOOL_NAME,
+    ROUTE_PREVIEW_TOOL_SPEC,
+    TOOL_AMBIGUITIES,
+    TOOL_RISKS,
+    TOOL_TASK_KINDS,
+    RoutePreviewSource,
+    compose,
+    validate_route_preview_tool_arguments,
+)
+from integrations.executive_mcp.schemas import GatewayError
+
+
+def test_route_preview_vocabularies_mirror_model_router_exactly():
+    from control_plane import model_router
+
+    assert TOOL_TASK_KINDS == model_router._WORKER_TASKS | model_router._LEAD_TASKS
+    assert set(TOOL_RISKS) == set(model_router._RISKS)
+    assert set(TOOL_AMBIGUITIES) == set(model_router._AMBIGUITIES)
+    assert ROUTE_PREVIEW_TOOL_SPEC.read_only is True
+    assert ROUTE_PREVIEW_TOOL_SPEC.annotations["readOnlyHint"] is True
+
+
+def test_route_preview_is_always_none_source_preview_only():
+    from control_plane.child_execution_contracts import RoutePreview
+
+    record = compose({"route_option": "routine", "goal": "Implement a bounded module"})
+    assert record["schema"] == "RoutePreview.v1"
+    assert record["authority"] == "NONE_SOURCE_PREVIEW_ONLY"
+    assert record["production_armed"] is False
+    assert record["requested_complexity"] == "C1_ROUTINE_BOUNDED"
+    assert record["effective_complexity"] == "C1_ROUTINE_BOUNDED"
+    assert record["witness_disposition"] == "not_required"
+    assert record["suitability_tiers"] == ["implementation.routine.primary"]
+    assert record["candidate_reason_codes"]
+    # With no observations the honesty fields degrade, never guess.
+    assert record["capacity_knowledge"] == "unknown"
+    assert record["rank_basis"] == "suitability_only"
+    assert record["observed_at"] == "" and record["expires_at"] == ""
+    # Distinct identities: a preview is not a decision or an attempt.
+    assert record["decision_id"] == "" and record["attempt_ref"] == ""
+    assert record["request_digest"] != record["preview_id"]
+    # The record round-trips through the shared contract unchanged.
+    assert RoutePreview.from_dict(record).to_dict() == record
+
+
+def test_route_preview_frontier_witness_gate_matches_the_shared_law():
+    witnessed = compose({
+        "route_option": "frontier", "goal": "cognition lane",
+        "context": "witness: unresolved cross-system carrier contract left open",
+    })
+    assert witnessed["witness_disposition"] == "accepted"
+    assert witnessed["requested_complexity"] == "C3_FRONTIER_JUDGMENT"
+    assert witnessed["effective_complexity"] == "C3_FRONTIER_JUDGMENT"
+    assert witnessed["suitability_tiers"][0] == "frontier.lead"
+    assert "effective_complexity_frontier_judgment" in witnessed["candidate_reason_codes"]
+    downgraded = compose({"route_option": "frontier", "goal": "make it big and critical"})
+    assert downgraded["requested_complexity"] == "C3_FRONTIER_JUDGMENT"
+    assert downgraded["effective_complexity"] == "C2_COMPLEX_BOUNDED"
+    assert downgraded["witness_disposition"] == "downgraded"
+    assert downgraded["suitability_tiers"][0] == "implementation.routine.primary"
+    assert not any(tier.startswith("frontier.") for tier in downgraded["suitability_tiers"])
+    assert "effective_complexity_c2_complex_bounded" in downgraded["candidate_reason_codes"]
+
+
+@pytest.mark.parametrize("route,complexity", [
+    ("mechanical", "C0_MECHANICAL"),
+    ("routine", "C1_ROUTINE_BOUNDED"),
+    ("hard", "C2_COMPLEX_BOUNDED"),
+])
+@pytest.mark.parametrize("review_input,reason", [
+    ({"risk": "critical"}, "critical_risk"),
+    ({"ambiguity": "high"}, "high_ambiguity"),
+])
+def test_route_preview_bounded_classes_retain_principal_review(route, complexity, review_input, reason):
+    preview = compose({"route_option": route, "goal": "bounded module", **review_input})
+    assert preview["effective_complexity"] == complexity
+    assert not any(tier.startswith("frontier.") for tier in preview["suitability_tiers"])
+    assert reason in preview["candidate_reason_codes"]
+    assert "principal_review_required" in preview["candidate_reason_codes"]
+    assert "effective_complexity_" + complexity.lower() in preview["candidate_reason_codes"]
+
+
+@pytest.mark.parametrize("task_kind", [None, "review"])
+def test_route_preview_reviewer_remains_separate_from_complexity(task_kind):
+    arguments = {"route_option": "review", "goal": "independent source review"}
+    if task_kind is not None:
+        arguments["task_kind"] = task_kind
+    preview = compose(arguments)
+    assert preview["requested_complexity"] == preview["effective_complexity"] == "REVIEWER"
+    assert preview["suitability_tiers"][0] == "review.routine.primary"
+    assert not any(tier.startswith("frontier.") for tier in preview["suitability_tiers"])
+    assert "bounded_review" in preview["candidate_reason_codes"]
+    assert not any(reason.startswith("effective_complexity_") for reason in preview["candidate_reason_codes"])
+    assert preview["authority"] == "NONE_SOURCE_PREVIEW_ONLY"
+    assert preview["production_armed"] is False
+
+
+@pytest.mark.parametrize("route,task_kind,context", [
+    ("hard", "planning", ""),
+    ("routine", "judgment", ""),
+    ("review", "judgment", ""),
+    ("review", "implementation", ""),
+    ("frontier", "implementation", "witness: unresolved cross-system carrier contract left open"),
+])
+def test_route_preview_refuses_task_kind_incompatible_with_effective_lane(route, task_kind, context):
+    with pytest.raises(GatewayError) as refused:
+        compose({"route_option": route, "goal": "bounded module",
+                 "task_kind": task_kind, "context": context})
+    assert refused.value.code == "invalid_input"
+
+
+def _observation_files(tmp_path, *, with_host=True, with_registry=True, with_quota=True):
+    paths = {}
+    if with_host:
+        host = tmp_path / "host.json"
+        host.write_text(json.dumps({
+            "schema": "mastermind.host_readiness_snapshot/v1",
+            "host_id": "m1-studio", "collected_at": "2026-11-08T14:18:56Z",
+        }))
+        paths["host"] = str(host)
+    if with_registry:
+        registry = tmp_path / "registry.json"
+        registry.write_text(json.dumps({
+            "schema": "mastermind.owner_ext_registry_projection/v1",
+            "registry_revision": "14259ca43e427ab28c65cb457449c909c8d3bd6862e03103cf1f6e9d504dc751",
+            "produced_at": "2026-11-08T14:18:20Z",
+        }))
+        paths["registry"] = str(registry)
+    if with_quota:
+        quota = tmp_path / "quota.json"
+        quota.write_text(json.dumps({
+            "schema": "mastermind.quota_economics_preview/v1",
+            "observed_at": "2026-11-08T14:20:00Z",
+        }))
+        paths["quota"] = str(quota)
+    return paths
+
+
+def _source(paths):
+    return RoutePreviewSource(
+        host_snapshot_paths=(paths["host"],) if "host" in paths else (),
+        registry_projection_path=paths.get("registry"),
+        quota_preview_path=paths.get("quota"),
+    )
+
+
+def test_route_preview_capacity_ladder_reads_owner_observations(tmp_path):
+    arguments = {"route_option": "routine", "goal": "Implement a bounded module"}
+    # WO-04 host snapshots alone: observed hosts, but ranking stays suitability.
+    record = compose(arguments, source=_source(_observation_files(
+        tmp_path, with_registry=False, with_quota=False)))
+    assert record["capacity_knowledge"] == "observed"
+    assert record["rank_basis"] == "suitability_only"
+    assert record["observation_refs"] == ["wo04:m1-studio"]
+    assert record["observed_at"] == "2026-11-08T14:18:56Z"
+    assert record["expires_at"] == "2026-11-08T14:33:56Z"
+    # Adding the WO-03 registry projection pins the registry revision.
+    record = compose(arguments, source=_source(_observation_files(
+        tmp_path, with_quota=False)))
+    assert record["registry_revision"] == (
+        "14259ca43e427ab28c65cb457449c909c8d3bd6862e03103cf1f6e9d504dc751")
+    assert "wo03:14259ca43e427ab2" in record["observation_refs"]
+    # A WO-09 quota preview is the only source that upgrades the rank basis.
+    record = compose(arguments, source=_source(_observation_files(tmp_path)))
+    assert record["capacity_knowledge"] == "observed"
+    assert record["rank_basis"] == "observed_headroom"
+    assert any(ref.startswith("wo09:") for ref in record["observation_refs"])
+
+
+def test_route_preview_sanitized_or_missing_observations_degrade_honestly(tmp_path):
+    arguments = {"route_option": "routine", "goal": "Implement a bounded module"}
+    # The distributed WO-03 artifact redacts its revision token: the schema
+    # still evidences configured ceilings (configured_only), without a pin.
+    registry = tmp_path / "registry.json"
+    registry.write_text(json.dumps({
+        "schema": "mastermind.owner_ext_registry_projection/v1",
+        "registry_revision": "<REDACTED:long-token-shaped>",
+        "produced_at": "2026-11-08T14:18:20Z",
+    }))
+    record = compose(arguments, source=RoutePreviewSource(
+        registry_projection_path=str(registry)))
+    assert record["capacity_knowledge"] == "configured_only"
+    assert record["rank_basis"] == "suitability_only"
+    assert record["registry_revision"] == ""
+    assert "wo03:sanitized" in record["observation_refs"]
+    # Missing, oversized or wrong-schema files contribute nothing at all.
+    missing = RoutePreviewSource(
+        host_snapshot_paths=(str(tmp_path / "absent.json"),),
+        registry_projection_path=str(tmp_path / "absent2.json"),
+        quota_preview_path=str(tmp_path / "absent3.json"))
+    record = compose(arguments, source=missing)
+    assert record["capacity_knowledge"] == "unknown"
+    assert record["rank_basis"] == "suitability_only"
+    assert record["observation_refs"] == []
+    oversized = tmp_path / "big.json"
+    oversized.write_text("x" * 262145)
+    record = compose(arguments, source=RoutePreviewSource(
+        host_snapshot_paths=(str(oversized),)))
+    assert record["capacity_knowledge"] == "unknown"
+
+
+def test_route_preview_arguments_are_closed_and_bounded():
+    valid = {"route_option": "hard", "goal": "bounded multi-file refactor",
+             "context": "module map", "task_kind": "implementation",
+             "risk": "elevated", "ambiguity": "medium",
+             "required_capabilities": ["tests", "review"]}
+    assert validate_route_preview_tool_arguments(
+        ROUTE_PREVIEW_TOOL_NAME, valid) == {
+            "route_option": "hard", "goal": "bounded multi-file refactor",
+            "context": "module map", "task_kind": "implementation",
+            "risk": "elevated", "ambiguity": "medium",
+            "required_capabilities": ["tests", "review"]}
+    assert validate_route_preview_tool_arguments(
+        ROUTE_PREVIEW_TOOL_NAME, {"route_option": "routine", "goal": "g"})["task_kind"] is None
+    bad = [
+        ("wrong tool name", lambda: validate_route_preview_tool_arguments(
+            "fabric_route_preview", {"route_option": "routine", "goal": "g"})),
+        ("unknown argument", lambda: validate_route_preview_tool_arguments(
+            ROUTE_PREVIEW_TOOL_NAME, {"route_option": "routine", "goal": "g", "pool": "p"})),
+        ("unknown lane", lambda: validate_route_preview_tool_arguments(
+            ROUTE_PREVIEW_TOOL_NAME, {"route_option": "domain_orchestration", "goal": "g"})),
+        ("empty goal", lambda: validate_route_preview_tool_arguments(
+            ROUTE_PREVIEW_TOOL_NAME, {"route_option": "routine", "goal": "   "})),
+        ("oversized goal", lambda: validate_route_preview_tool_arguments(
+            ROUTE_PREVIEW_TOOL_NAME, {"route_option": "routine", "goal": "x" * 4001})),
+        ("bad task kind", lambda: validate_route_preview_tool_arguments(
+            ROUTE_PREVIEW_TOOL_NAME, {"route_option": "routine", "goal": "g", "task_kind": "execute"})),
+        ("bad risk", lambda: validate_route_preview_tool_arguments(
+            ROUTE_PREVIEW_TOOL_NAME, {"route_option": "routine", "goal": "g", "risk": "existential"})),
+        ("non-string capability", lambda: validate_route_preview_tool_arguments(
+            ROUTE_PREVIEW_TOOL_NAME, {"route_option": "routine", "goal": "g",
+                                      "required_capabilities": [7]})),
+        ("too many capabilities", lambda: validate_route_preview_tool_arguments(
+            ROUTE_PREVIEW_TOOL_NAME, {"route_option": "routine", "goal": "g",
+                                      "required_capabilities": [f"c{n}" for n in range(9)]})),
+        ("non-object arguments", lambda: validate_route_preview_tool_arguments(
+            ROUTE_PREVIEW_TOOL_NAME, ["routine"]),
+         ),
+    ]
+    for name, call in bad:
+        with pytest.raises(GatewayError):
+            call()
+    with pytest.raises(GatewayError):
+        compose({"route_option": "routine", "goal": "g", "task_kind": "execute"})
+
+
+def test_route_preview_call_changes_no_runtime_rows(tmp_path):
+    from control_plane.executive_runtime import Runtime
+
+    runtime = Runtime.at(tmp_path)
+    database = tmp_path / "data" / "control_plane" / "executive.sqlite3"
+
+    def counts():
+        with sqlite3.connect(database) as connection:
+            return tuple(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                         for table in ("jobs", "attempts", "worker_quota_classes"))
+
+    assert counts() == (0, 0, 0)
+    for _ in range(3):
+        compose({"route_option": "hard", "goal": "bounded multi-file refactor"})
+    assert counts() == (0, 0, 0)

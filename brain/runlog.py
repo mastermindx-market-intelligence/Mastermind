@@ -13,6 +13,8 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
+import math
 import re
 import stat
 from contextlib import contextmanager
@@ -26,6 +28,7 @@ from typing import Any
 _RUNS_DIR = Path(__file__).resolve().parent.parent / "data" / "brain" / "runs"
 _INDEX = _RUNS_DIR / "index.jsonl"
 _LOCK = threading.RLock()          # index writes are rare; single lock is fine
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -36,8 +39,33 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
+_RUN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,95}")
+
+
+def validate_run_id(run_id: object) -> str:
+    """Boundary allowlist for run ids (API query params land here).
+
+    Plain token only: alnum first, then alnum/`_`/`.`/`:`/`-`, max 96 chars,
+    never `..` — same charset as ``portfolio_id`` so ids stay compatible.
+    Raises ``ValueError`` (fixed text, no caller data) on anything else.
+    """
+    if type(run_id) is not str or not _RUN_ID_RE.fullmatch(run_id) or ".." in run_id:
+        raise ValueError("invalid run_id")
+    return run_id
+
+
 def _run_path(run_id: str) -> Path:
-    return _RUNS_DIR / f"{run_id}.jsonl"
+    # Validation lives here, at the filesystem boundary, so every caller
+    # (read_run, log_step, start_run, ...) is covered — not just the API.
+    run_id = validate_run_id(run_id)
+    base = os.path.normpath(str(_RUNS_DIR))
+    candidate = os.path.normpath(os.path.join(base, f"{run_id}.jsonl"))
+    # Containment guard: the normalized candidate must sit directly inside the
+    # runs directory. Redundant with the allowlist by construction, kept as the
+    # explicit check so the join can never escape even if the charset changes.
+    if not candidate.startswith(base + os.sep) or os.path.dirname(candidate) != base:
+        raise ValueError("invalid run_id")
+    return Path(candidate)
 
 
 def _ensure_dir():
@@ -125,33 +153,95 @@ def end_run(run_id: str, summary: str = "", cost_usd: float | None = None) -> No
 # readers
 # ---------------------------------------------------------------------------
 
-def list_runs() -> list[dict]:
+def _validate_run_summary(row: dict) -> None:
+    """Check legacy render fields without imposing a closed kind vocabulary."""
+    validate_run_id(row.get("run_id"))
+    for key in ("ts", "kind", "title", "title_zh", "summary", "summary_zh", "status"):
+        if row.get(key) is not None and type(row[key]) is not str:
+            raise PortfolioRunError("run_summary_invalid")
+    count = row.get("n_steps")
+    if count is not None and (type(count) is not int or count < 0):
+        raise PortfolioRunError("run_summary_invalid")
+    cost = row.get("cost_usd")
+    if cost is not None:
+        try:
+            finite = type(cost) in (int, float) and math.isfinite(cost)
+        except OverflowError:
+            finite = False
+        if not finite:
+            raise PortfolioRunError("run_summary_invalid")
+    if row.get("status") == "unavailable":
+        raise PortfolioRunError("run_original_unavailable")
+
+
+def _strict_legacy_run(path: Path, run_id: str) -> dict:
+    """An intact seed may have zero steps; missing or partial evidence may not."""
+    rows = strict_rows(path)
+    if not rows or set(rows[0]) != {"_meta"} or type(rows[0]["_meta"]) is not dict:
+        raise PortfolioRunError("run_metadata_invalid")
+    meta = rows[0]["_meta"]
+    _validate_run_summary(meta)
+    if meta["run_id"] != run_id:
+        raise PortfolioRunError("run_identity_conflict")
+    steps = rows[1:]
+    for step in steps:
+        if type(step.get("type")) is not str or not step["type"].strip():
+            raise PortfolioRunError("run_step_invalid")
+        # A selected original can only be read through its existing index anchor.
+        if "_meta" in step or "_fabric_portfolio" in step:
+            raise PortfolioRunError("run_protocol_invalid")
+        for key in ("ts", "type", "title", "detail", "tool", "result"):
+            if step.get(key) is not None and type(step[key]) is not str:
+                raise PortfolioRunError("run_step_invalid")
+        if step.get("args") is not None and type(step["args"]) is not dict:
+            raise PortfolioRunError("run_step_invalid")
+    return {"run_id": run_id, "ts": meta.get("ts"), "kind": meta.get("kind"),
+            "title": meta.get("title", run_id), "steps": steps}
+
+
+def list_runs(*, strict: bool = False) -> list[dict]:
     """Selected summaries come from their validated original run revision."""
     try:
         with portfolio_lock():
-            rows = [_portfolio_public_read(row) if "_fabric_portfolio" in row
+            rows = [_portfolio_public_read(row, strict=strict) if "_fabric_portfolio" in row
                     else {key: value for key, value in row.items() if not key.startswith("_")}
                     for row in _portfolio_index()]
+            if strict:
+                for row in rows:
+                    _validate_run_summary(row)
         rows.sort(key=lambda row: row.get("ts") or "", reverse=True)
         return [{key: value for key, value in row.items() if key != "steps"} for row in rows]
     except Exception:
+        if strict:
+            raise
         return []
 
 
-def read_run(run_id: str | None = None) -> dict:
+def read_run(run_id: str | None = None, *, strict: bool = False) -> dict:
     """Return {run_id, ts, kind, steps:[...]} for the given run (or the latest)."""
     try:
         if run_id is None:
-            idx = list_runs()
+            idx = list_runs(strict=strict)
             if not idx:
                 return {"run_id": None, "ts": None, "kind": None, "steps": []}
             run_id = idx[0]["run_id"]
+
+        try:
+            run_id = validate_run_id(run_id)
+        except ValueError:
+            if strict:
+                raise
+            # Rejected at the boundary; the id is attacker data — not echoed.
+            return {"run_id": None, "ts": None, "kind": None, "steps": [],
+                    "error": "invalid run_id"}
 
         with portfolio_lock():
             entry = next((row for row in _portfolio_index()
                           if row.get("run_id") == run_id and "_fabric_portfolio" in row), None)
             if entry is not None:
-                return _portfolio_public_read(entry)
+                return _portfolio_public_read(entry, strict=strict)
+            if strict:
+                return _strict_legacy_run(_run_path(run_id), run_id)
         path = _run_path(run_id)
         if not path.exists():
             return {"run_id": run_id, "ts": None, "kind": None, "steps": [],
@@ -171,8 +261,14 @@ def read_run(run_id: str | None = None) -> dict:
             except Exception:
                 pass
         return {"run_id": run_id, "ts": ts, "kind": kind, "title": title, "steps": steps}
-    except Exception as exc:
-        return {"run_id": run_id, "ts": None, "kind": None, "steps": [], "error": str(exc)}
+    except Exception:
+        if strict:
+            raise
+        # Never surface exception text: this dict is the /api/runlog response
+        # body. Detail stays server-side only (stack-trace-exposure guard).
+        _log.exception("runlog read failed")
+        return {"run_id": run_id, "ts": None, "kind": None, "steps": [],
+                "error": "runlog read failed"}
 
 
 # ---------------------------------------------------------------------------
@@ -428,11 +524,13 @@ def _portfolio_projection(doc: dict, anchor: dict) -> dict:
         "models": sorted(models), "decision_status": decision, "steps": public_steps}
 
 
-def _portfolio_public_read(entry: dict) -> dict:
+def _portfolio_public_read(entry: dict, *, strict: bool = False) -> dict:
     """Caller owns portfolio_lock; invalid originals never expose raw private rows."""
     try:
         return _portfolio_projection(_portfolio_read(entry), entry)
     except Exception:
+        if strict:
+            raise
         return {"run_id": entry.get("run_id"), "ts": entry.get("ts"),
                 "kind": entry["_fabric_portfolio"]["book"],
                 "title": portfolio_title(entry["_fabric_portfolio"]["book"]), "status": "unavailable", "n_steps": None,

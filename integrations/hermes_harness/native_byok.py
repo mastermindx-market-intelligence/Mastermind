@@ -128,8 +128,8 @@ def render_disarmed_native_byok(profile: RuntimeProfile) -> str:
 def render_qualified_native_byok(profile: RuntimeProfile, publication) -> str:
     """Compose the exact native config of a *qualified* optional consumer.
 
-    The Steward MCP server stays disabled and every other member of the
-    reviewed disarmed model and tool config is unchanged. The exact
+    The Steward, Executive-read and Paper servers stay disabled and every
+    other member of the reviewed disarmed config is unchanged. Add the exact
     MCP/OAuth entry of the Executive connection, whose tool filter is empty so
     no raw Executive tool becomes model-facing, and the plugin grant that
     names exactly that one server. V2 also selects the native Agent OS memory
@@ -143,7 +143,12 @@ def render_qualified_native_byok(profile: RuntimeProfile, publication) -> str:
         render_consumer_plugin_config,
     )
 
-    base = render_disarmed_native_byok(profile)
+    # The same installer-owned disabled catalog is retained when the existing
+    # selected-child connection is enrolled. It adds no plugin or MCP grant.
+    from integrations.hermes_harness.executive_paper_mcp import render_disarmed_native_exec_paper
+    if publication.session.role != profile.role:
+        raise RuntimeRefusal("NATIVE_CONSUMER_ROLE_MISMATCH")
+    base = render_disarmed_native_exec_paper(profile)
     try:
         native = _load_unique_yaml(base.encode("utf-8"))
     except ValueError:
@@ -203,11 +208,13 @@ def render_qualified_native_byok(profile: RuntimeProfile, publication) -> str:
 def expected_native_config(profile: RuntimeProfile, consumer=None, *, evaluation_inputs=None) -> str:
     """The exact native config bytes this profile must carry.
 
-    Without a qualified consumer this is the reviewed disarmed BYOK config.
-    With one it is the qualified config, which still carries no credential.
+    Without a qualified consumer this is the reviewed disarmed BYOK/read
+    catalog. With one, the existing selected-child connection and its exact
+    plugin grant are composed onto that same catalog. No credential is added.
     """
     if consumer is None and evaluation_inputs is None:
-        return render_disarmed_native_byok(profile)
+        from integrations.hermes_harness.executive_paper_mcp import render_disarmed_native_exec_paper
+        return render_disarmed_native_exec_paper(profile)
     from integrations.hermes_harness.native_executive_consumer import (
         publication_from_document,
     )

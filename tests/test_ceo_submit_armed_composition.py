@@ -109,7 +109,7 @@ def _added_line_numbers(path: Path, base: str) -> set[int]:
 def _identity_guard_source_path(path: str) -> bool:
     """Keep the identity guard on source/config, not narrative proof records.
 
-    Markdown prose is not Python source. Evidence JSON is routed through the
+    Markdown prose is not Python source. Research JSON is routed through the
     structural identity check below, never exempted from identity checking.
     Executable code and all other configuration retain the generic token guard.
     """
@@ -118,7 +118,7 @@ def _identity_guard_source_path(path: str) -> bool:
         return True
     if parts[0] in {"docs", "research"} and Path(path).suffix == ".md":
         return False
-    if parts[:2] == ("research", "evidence") and Path(path).suffix == ".json":
+    if parts[:2] in {("research", "evidence"), ("research", "data")} and Path(path).suffix == ".json":
         return False
     return True
 
@@ -129,13 +129,26 @@ def _identity_guard_evidence_json_path(path: str) -> bool:
             and parts[:2] == ("research", "evidence") and Path(path).suffix == ".json")
 
 
-def _scan_evidence_identity_literals(document: str) -> list[str]:
+def _identity_guard_data_json_path(path: str) -> bool:
+    parts = Path(path).parts
+    return (not Path(path).is_absolute() and ".." not in parts
+            and parts[:2] == ("research", "data") and Path(path).suffix == ".json")
+
+
+def _scan_json_identity_literals(
+    document: str, *, research_data: bool = False, path_identity: bool = False,
+) -> list[str]:
     """Check identity-bearing JSON values without treating all metrics as UIDs.
 
     This is a bounded literal guard, not whole-program dataflow analysis. Runtime
-    admission remains authoritative. Malformed/duplicate-key evidence fails closed.
+    admission remains authoritative. Malformed/duplicate-key JSON fails closed.
+    Evidence keeps its record grammar and budgets; research datasets have a
+    larger, still finite profile and retain source/path identity semantics.
     """
-    assert len(document.encode("utf-8")) <= 1024 * 1024, "evidence JSON exceeds limit"
+    role = "data" if research_data else "evidence"
+    max_bytes = 4 * 1024 * 1024 if research_data else 1024 * 1024
+    max_nodes = 100000 if research_data else 10000
+    assert len(document.encode("utf-8")) <= max_bytes, f"{role} JSON exceeds limit"
 
     def unique_object(pairs):
         result = {}
@@ -152,25 +165,46 @@ def _scan_evidence_identity_literals(document: str) -> list[str]:
         value = json.loads(document, object_pairs_hook=unique_object,
                            parse_constant=reject_constant)
     except (ValueError, RecursionError) as exc:
-        raise AssertionError("evidence JSON is not an unambiguous document") from exc
-    assert isinstance(value, dict), "evidence JSON must be an object record"
+        raise AssertionError(f"{role} JSON is not an unambiguous document") from exc
+    if not research_data:
+        assert isinstance(value, dict), "evidence JSON must be an object record"
     identity_words = {"uid", "uids", "gid", "gids", "euid", "egid", "suid", "sgid",
                       "peer", "peers", "account", "accounts", "principal", "principals",
                       "user", "users", "group", "groups", "identity", "identities",
                       "owner", "owners"}
+    if research_data:
+        identity_words = _SOURCE_IDENTITY_WORDS
     flagged = []
-    pending = [(value, False, 0)]
+
+    def reserved_account(text):
+        # Preserve the generic scanner's NFKC and real token-boundary rule,
+        # including accounts in neutral notes and dictionary keys.
+        return re.search(r"(?<!\w)_mastermind_\w*", unicodedata.normalize("NFKC", text))
+
+    pending = [(value, path_identity, 0)]
     visited = 0
     while pending:
         item, identity, depth = pending.pop()
         visited += 1
-        assert depth <= 32 and visited <= 10000, "evidence JSON structure exceeds limit"
+        assert depth <= 32 and visited <= max_nodes, f"{role} JSON structure exceeds limit"
         if isinstance(item, float):
-            assert math.isfinite(item), "evidence JSON contains a non-finite number"
+            assert math.isfinite(item), f"{role} JSON contains a non-finite number"
+        if research_data and isinstance(item, str):
+            account = reserved_account(item)
+            if account:
+                flagged.append(account.group(0))
+                continue
         if isinstance(item, dict):
             for key, child in item.items():
-                words = set(re.split(r"[^a-z0-9]+", re.sub(
-                    r"(?<=[a-z0-9])(?=[A-Z])", "_", key).lower()))
+                if research_data:
+                    words = _semantic_words(key) | {unicodedata.normalize("NFKC", key).casefold()}
+                    if not identity:
+                        account = reserved_account(key)
+                        if account:
+                            flagged.append(account.group(0))
+                else:
+                    words = set(re.split(r"[^a-z0-9]+", re.sub(
+                        r"(?<=[a-z0-9])(?=[A-Z])", "_", key).lower()))
                 child_identity = identity or bool(words & identity_words)
                 pending.append((child, child_identity, depth + 1))
                 if identity:
@@ -179,7 +213,20 @@ def _scan_evidence_identity_literals(document: str) -> list[str]:
             pending.extend((child, identity, depth + 1) for child in item)
         elif identity and not isinstance(item, bool) and item is not None:
             if isinstance(item, str):
+                if research_data:
+                    item = unicodedata.normalize("NFKC", item)
                 item = item.strip()
+                if research_data and len(item) > 256:
+                    # Long labels/URLs are valid data. Long encoded numbers
+                    # fail closed before integer/Decimal expansion; the whole
+                    # document has already passed the data byte budget.
+                    numeric = re.fullmatch(
+                        r"[+-]?(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|"
+                        r"(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)",
+                        item.replace("_", ""),
+                    )
+                    assert not numeric, "data identity number exceeds normalization limit"
+                    continue
                 assert len(item) <= 256, "evidence identity string exceeds limit"
                 if item.startswith("_mastermind_"):
                     flagged.append(item)
@@ -206,6 +253,17 @@ def _scan_evidence_identity_literals(document: str) -> list[str]:
             if 400 <= number <= 999:
                 flagged.append(str(item))
     return flagged
+
+
+def _scan_evidence_identity_literals(document: str) -> list[str]:
+    return _scan_json_identity_literals(document)
+
+
+def _scan_data_identity_literals(document: str, *, path: str) -> list[str]:
+    return _scan_json_identity_literals(
+        document, research_data=True,
+        path_identity=bool(_semantic_words(path) & _SOURCE_IDENTITY_WORDS),
+    )
 
 
 _NON_PRODUCTION_IDENTITY_FILES = {"package-lock.json", "pnpm-lock.yaml", "yarn.lock"}
@@ -1607,11 +1665,13 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # The attended configuration adds one optional digest and its strict
     # validation. The installed event-loop anchor remains byte-for-byte the
     # same AST; retain every path, membership and mutation refusal below.
+    # The reviewed pure Memory-validator extraction also preserves that
+    # anchor and the imports; only the full-source fingerprint changes.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'a422011c13b7ee3646aab825a0147e8f224048c9654aa7e924ca189ee3f894ba'):
+            'dd09c1cfa20f75beee02dd9102356032bcfe6bdf813d55ab72451f1470fb35e1'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -2614,12 +2674,15 @@ def test_d8_template_topology_and_protected_defaults():
     for path in changed.split("\0"):
         if not path:
             continue
-        if _identity_guard_evidence_json_path(path):
+        if _identity_guard_evidence_json_path(path) or _identity_guard_data_json_path(path):
             document = subprocess.run(
                 ["git", "show", f"HEAD:{path}"], cwd=ROOT,
                 check=True, capture_output=True, text=True,
             ).stdout
-            assert _scan_evidence_identity_literals(document) == [], path
+            if _identity_guard_data_json_path(path):
+                assert _scan_data_identity_literals(document, path=path) == [], path
+            else:
+                assert _scan_evidence_identity_literals(document) == [], path
             continue
         if not _identity_guard_source_path(path):
             continue
@@ -3532,4 +3595,209 @@ def test_d8_web_observation_real_committed_git_collector(tmp_path, monkeypatch, 
         source += "\npeer_uid = 777\n"
     test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
         tmp_path, monkeypatch, _WEB_OBSERVATION_PATH, source, identity,
+    )
+
+
+def test_d8_glm_claim_lifetime_only_masks_the_exact_reviewed_token():
+    import difflib
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    path = "ops/native_fabric/quota_continuity/candidate/go_lease_capability.py"
+    source = (ROOT / path).read_text()
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "c4b7ec997cb73a5fbbcd40868de9f9825e18770a82ba4202b8a6de27c9dbcc86"
+    )
+    predecessor = (ROOT / "ops/native_fabric/quota_continuity/rollout/"
+                   "preimages/glm_application_core_5c3d/go_lease_capability.py").read_text()
+    assert hashlib.sha256(predecessor.encode()).hexdigest() == (
+        "d8562f38a397900bd851ddbe8bb27f511fcefc2bcd2af6ae1eea5d55d15c5940"
+    )
+
+    def introduced_diff(postimage, source_path=path):
+        return f"diff --git a/{source_path} b/{source_path}\n" + "".join(
+            difflib.unified_diff(predecessor.splitlines(keepends=True),
+                                 postimage.splitlines(keepends=True),
+                                 fromfile="a/" + source_path,
+                                 tofile="b/" + source_path, n=0))
+
+    spans = reviewed_literal_spans(path, source)
+    assert spans == ((326, 113, 116, "int"),)
+    line = source.splitlines()[325]
+    assert line[113:116] == "900"
+    diff = introduced_diff(source)
+    exact_findings = _scan_added_identity_diff(diff, source_postimages={path: source})
+    assert exact_findings == []
+    missing_findings = _scan_added_identity_diff(diff)
+    assert "900" in missing_findings
+
+    foreign = path.removesuffix(".py") + "_unreviewed.py"
+    foreign_findings = _scan_added_identity_diff(
+        introduced_diff(source, foreign), source_postimages={foreign: source})
+    assert "900" in foreign_findings
+
+    changed = source.replace(line, line[:113] + "901" + line[116:], 1)
+    changed_spans = reviewed_literal_spans(path, changed)
+    assert changed_spans == ()
+    changed_findings = _scan_added_identity_diff(
+        introduced_diff(changed), source_postimages={path: changed})
+    assert "901" in changed_findings
+
+    drifted = source + "\n# unrelated source drift\n"
+    drifted_spans = reviewed_literal_spans(path, drifted)
+    assert drifted_spans == ()
+    drifted_findings = _scan_added_identity_diff(
+        introduced_diff(drifted), source_postimages={path: drifted})
+    assert "900" in drifted_findings
+
+    peer_source = source + "peer_uid = 900\n"
+    peer_findings = _scan_added_identity_diff(
+        introduced_diff(peer_source), source_postimages={path: peer_source})
+    assert "900" in peer_findings
+
+
+
+_HERMES_STARTUP_RECOVERY_PATH = (
+    "integrations/paperclip_hermes/native-startup-recovery.patch"
+)
+
+
+def _d8_hermes_startup_recovery_scan(
+    source, *, path=_HERMES_STARTUP_RECOVERY_PATH, postimage=True,
+):
+    return _scan_added_identity_diff(
+        _d8_frozen_source_diff(path, source),
+        source_postimages={path: source} if postimage else None,
+    )
+
+
+def test_d8_hermes_startup_recovery_masks_only_reviewed_detail_bound():
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _HERMES_STARTUP_RECOVERY_PATH).read_text(encoding="utf-8")
+    # The original queue composition flags this unrelated numeric bound.
+    assert _d8_hermes_startup_recovery_scan(source) == []
+    assert hashlib.sha256(source.encode()).hexdigest() == (
+        "3ecbaed255c705132f350735934b6d6b7935408a1e02e1f2b4a36b1a99c87910"
+    )
+    assert reviewed_literal_spans(_HERMES_STARTUP_RECOVERY_PATH, source) == (
+        (163, 41, 44, "int"),
+    )
+    lines = source.splitlines(keepends=True)
+    assert lines[162][41:44] == "500"
+    header = [line.rstrip() for line in lines[:163]
+              if line.startswith("diff --git ")][-1]
+    assert header == (
+        "diff --git a/hermes_cli/gateway_client.py b/hermes_cli/gateway_client.py"
+    )
+    # This unchanged native hunk context limits diagnostic text; it is not a
+    # new account, permission, timeout, routing or authentication operand.
+    assert lines[162].startswith(" ")
+    import textwrap
+
+    clause = textwrap.dedent("".join(line[1:] for line in lines[160:163]))
+    handler = ast.parse("try:\n    pass\n" + clause).body[0].handlers[0]
+    assert isinstance(handler.type, ast.Name) and handler.type.id == "DiscoveryError"
+    assert handler.name == "exc" and len(handler.body) == 1
+    statement = handler.body[0]
+    expected = ast.parse("detail = exc.bounded_detail(500)").body[0]
+    assert ast.dump(statement, include_attributes=False) == ast.dump(
+        expected, include_attributes=False,
+    )
+    literal = statement.value.args[0]
+    assert isinstance(literal, ast.Constant)
+    assert type(literal.value) is int and literal.value == 500
+    expected_lines = list(lines)
+    expected_lines[162] = lines[162][:41] + "0  " + lines[162][44:]
+    assert mask_reviewed_identity_literals(
+        _HERMES_STARTUP_RECOVERY_PATH, source,
+    ) == "".join(expected_lines)
+
+
+@pytest.mark.parametrize("postimage,path", [
+    (False, _HERMES_STARTUP_RECOVERY_PATH),
+    (True, "integrations/paperclip_hermes/other-startup-recovery.patch"),
+    (True, "control_plane/unreviewed-startup-recovery.patch"),
+])
+def test_d8_hermes_startup_recovery_requires_exact_path_and_postimage(postimage, path):
+    source = (ROOT / _HERMES_STARTUP_RECOVERY_PATH).read_text(encoding="utf-8")
+    assert _d8_hermes_startup_recovery_scan(
+        source, path=path, postimage=postimage,
+    ) == ["500"]
+
+
+def test_d8_hermes_startup_recovery_registry_removal_exposes_bound(monkeypatch):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _HERMES_STARTUP_RECOVERY_PATH).read_text(encoding="utf-8")
+    monkeypatch.delitem(REVIEWED_FILES, _HERMES_STARTUP_RECOVERY_PATH)
+    assert reviewed_literal_spans(_HERMES_STARTUP_RECOVERY_PATH, source) == ()
+    assert mask_reviewed_identity_literals(_HERMES_STARTUP_RECOVERY_PATH, source) == source
+    assert _d8_hermes_startup_recovery_scan(source) == ["500"]
+
+
+@pytest.mark.parametrize("old,new,expected", [
+    ("exc.bounded_detail(500)", "exc.bounded_detail(501)", "501"),
+    ("detail = exc.bounded_detail(500)",
+     "detail = exc.bounded_detail(500)\n             detail = exc.bounded_detail(500)", "500"),
+    ("exc.bounded_detail(500)", "exc.bounded_detail(peer_uid=500)", "500"),
+    ("detail = exc.bounded_detail(500)", "peer_uid = exc.bounded_detail(500)", "500"),
+    ("detail = exc.bounded_detail(500)", "detail = exc.set_uid(500)", "500"),
+    ("detail = exc.bounded_detail(500)",
+     "detail = exc.bounded_detail(500); worker_uid = 777", "777"),
+])
+def test_d8_hermes_startup_recovery_operand_and_identity_drift_is_guarded(
+    old, new, expected,
+):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _HERMES_STARTUP_RECOVERY_PATH).read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    changed = source.replace(old, new)
+    assert reviewed_literal_spans(_HERMES_STARTUP_RECOVERY_PATH, changed) == ()
+    assert mask_reviewed_identity_literals(_HERMES_STARTUP_RECOVERY_PATH, changed) == changed
+    assert expected in _d8_hermes_startup_recovery_scan(changed)
+
+
+@pytest.mark.parametrize("suffix,expected", [
+    ("\n# unrelated source byte drift\n", "500"),
+    ("\n+peer_uid = 777\n", "777"),
+    ("\n+peer_gid = 777\n", "777"),
+    ("\n+peer_port = 777\n", "777"),
+    ('\n+account = "_mastermind_unreviewed"\n', "_mastermind_unreviewed"),
+])
+def test_d8_hermes_startup_recovery_pin_cannot_hide_source_or_identity_drift(
+    suffix, expected,
+):
+    from tests.executive_identity_review import reviewed_literal_spans
+
+    source = (ROOT / _HERMES_STARTUP_RECOVERY_PATH).read_text(encoding="utf-8") + suffix
+    assert reviewed_literal_spans(_HERMES_STARTUP_RECOVERY_PATH, source) == ()
+    findings = _d8_hermes_startup_recovery_scan(source)
+    assert "500" in findings and expected in findings
+
+
+@pytest.mark.parametrize("changed_diff", [False, True])
+def test_d8_hermes_startup_recovery_false_postimage_is_rejected(changed_diff):
+    source = (ROOT / _HERMES_STARTUP_RECOVERY_PATH).read_text(encoding="utf-8")
+    changed = source.replace("exc.bounded_detail(500)", "exc.bounded_detail(501)")
+    with pytest.raises(AssertionError, match="diff/postimage line mismatch"):
+        _scan_added_identity_diff(
+            _d8_frozen_source_diff(
+                _HERMES_STARTUP_RECOVERY_PATH, changed if changed_diff else source,
+            ),
+            source_postimages={
+                _HERMES_STARTUP_RECOVERY_PATH: source if changed_diff else changed,
+            },
+        )
+
+
+@pytest.mark.parametrize("identity", [False, True])
+def test_d8_hermes_startup_recovery_real_committed_git_collector(
+    tmp_path, monkeypatch, identity,
+):
+    source = (ROOT / _HERMES_STARTUP_RECOVERY_PATH).read_text(encoding="utf-8")
+    if identity:
+        source += "\n+peer_uid = 777\n"
+    test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, _HERMES_STARTUP_RECOVERY_PATH, source, identity,
     )

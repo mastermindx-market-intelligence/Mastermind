@@ -35,8 +35,6 @@ type StateCopy = {
   waitingLabel?: string;
   waitingDetail?: string;
   note?: string;
-  /** Shows the "continue in your browser" note (signed_out and error only). */
-  browserNote?: boolean;
 };
 
 type LocaleCopy = {
@@ -47,7 +45,6 @@ type LocaleCopy = {
   storySubtitle: string;
   assurance: string;
   footer: string;
-  browserNote: string;
   states: Record<AuthEntryState, StateCopy>;
 };
 
@@ -60,13 +57,11 @@ const COPY: Record<AuthEntryLocale, LocaleCopy> = {
     storySubtitle: "Decisions, projects and conversations.",
     assurance: "Your workspace stays private until you sign in.",
     footer: "Mastermind OS",
-    browserNote: "Continue in your browser, then return here.",
     states: {
       signed_out: {
         eyebrow: "Your private workspace",
         heading: "Welcome back.",
         body: "Sign in to your workspace.",
-        browserNote: true,
       },
       signing_in: {
         eyebrow: "Sign-in in progress",
@@ -79,7 +74,6 @@ const COPY: Record<AuthEntryLocale, LocaleCopy> = {
       error: {
         eyebrow: "Your private workspace",
         heading: "Sign-in could not complete.",
-        browserNote: true,
       },
       unconfigured: {
         eyebrow: "Your private workspace",
@@ -96,13 +90,11 @@ const COPY: Record<AuthEntryLocale, LocaleCopy> = {
     storySubtitle: "决策、项目与对话。",
     assurance: "登录前，工作区保持私密。",
     footer: "Mastermind OS",
-    browserNote: "在浏览器中继续，完成后返回此处。",
     states: {
       signed_out: {
         eyebrow: "您的私密工作区",
         heading: "欢迎回来。",
         body: "登录以访问工作区。",
-        browserNote: true,
       },
       signing_in: {
         eyebrow: "正在登录",
@@ -115,7 +107,6 @@ const COPY: Record<AuthEntryLocale, LocaleCopy> = {
       error: {
         eyebrow: "您的私密工作区",
         heading: "暂时无法完成登录。",
-        browserNote: true,
       },
       unconfigured: {
         eyebrow: "您的私密工作区",
@@ -273,9 +264,6 @@ export function AuthEntry({
                 </div>
               ) : null}
 
-              {panel.browserNote ? (
-                <p className="auth-entry__note">{copy.browserNote}</p>
-              ) : null}
             </section>
             <p className="auth-entry__assurance">
               {panel.note || copy.assurance}

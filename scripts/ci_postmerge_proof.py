@@ -2,8 +2,9 @@
 
 This is not a release authority, check replacement, queue, or background
 observer. On a protected master push only, a successful *same-SHA* native
-merge_group CI workflow with all six shards and its required test may be
-reused. Missing, ambiguous, stale, unauthorized or invalid evidence means
+merge_group CI workflow with all six shards, its required test, successful
+scope classification and nonexecuted fast-check auxiliary may be reused.
+Missing, ambiguous, stale, unauthorized or invalid evidence means
 "reuse=false": the incumbent shard runs normally. Non-pytest gates still run.
 """
 from __future__ import annotations
@@ -21,7 +22,18 @@ from typing import Any
 _REPOSITORY = "mastermindx-market-intelligence/Mastermind"
 _WORKFLOW = ".github/workflows/ci.yml"
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
-_JOB_NAMES = {f"pytest shard {index}" for index in range(6)} | {"test"}
+# Current full merge-group inventory. Auxiliary jobs are part of the proof,
+# with exactly one permitted conclusion each. A workflow/schema change must
+# update this contract atomically; unknown shapes retain full pytest fallback.
+_JOB_CONCLUSIONS = {
+    **{f"pytest shard {index}": "success" for index in range(6)},
+    "test": "success",
+    "PR test scope": "success",
+    "Pin and identity guards": "success",
+    "Non-pytest qualification gates": "success",
+    "PR fast checks": "skipped",
+}
+_JOB_NAMES = set(_JOB_CONCLUSIONS)
 _API = "https://api.github.com"
 _MAX_RESPONSE = 256_000
 
@@ -170,7 +182,7 @@ def find_reusable_run(
             or type(check_id) is not int or check_id <= 0
             or check_id in check_ids
             or job.get("status") != "completed"
-            or job.get("conclusion") != "success"
+            or job.get("conclusion") != _JOB_CONCLUSIONS[name]
             or job.get("head_sha") != sha
             or job.get("run_id") != identifier
             or job.get("run_attempt") != attempt
@@ -178,6 +190,19 @@ def find_reusable_run(
             or job.get("check_run_url") != f"{_API}{prefix}/check-runs/{check_id}"
         ):
             return None
+        if name == "PR fast checks":
+            # GitHub synthesizes this nonexecuted job; its timestamps can be
+            # missing or inverted. They are not an execution interval. Retain
+            # identity/status checks above, reject any execution evidence, and
+            # still require every real shard/gate to prove successful work.
+            if job.get("steps") != [] or any(
+                job.get(key) is not None
+                for key in ("runner_id", "runner_name", "runner_group_id", "runner_group_name")
+            ):
+                return None
+            seen.add(name)
+            check_ids.add(check_id)
+            continue
         job_start = _time(job.get("started_at"))
         job_end = _time(job.get("completed_at"))
         if (
@@ -189,11 +214,19 @@ def find_reusable_run(
         # Verify the actual executable steps in the prior integrated run.
         required = (
             {"Run repository test gate"} if name == "test"
+            else {"Classify integrated source diff using protected base code"}
+            if name == "PR test scope"
+            else {"Run pinned source-identity guard suite"}
+            if name == "Pin and identity guards"
+            else {"Verify Paper direct pinned MCP SDK"}
+            if name == "Non-pytest qualification gates"
             else {"Run repository test shard", "Fast source-bound release preflight"}
         )
-        if name == "pytest shard 0":
+        # CI Lightning F3: the five non-pytest qualification gates moved from
+        # shard zero into the parallel qualification job; a reuse proof must
+        # still verify each gate actually executed successfully there.
+        if name == "Non-pytest qualification gates":
             required |= {
-                "Verify Paper direct pinned MCP SDK",
                 "Verify Paper Studio prepare guard",
                 "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
                 "Compile source",

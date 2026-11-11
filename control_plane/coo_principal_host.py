@@ -47,6 +47,7 @@ MISSION_KEYS_V1 = frozenset({"enabled", "work_ref", "principal_binding_digest",
     "capability_profile_id", "capability_profile_digest",
     "execution_profiles", "allowed_write_paths"})
 MISSION_KEYS_V2 = MISSION_KEYS_V1 | frozenset({"authority_version", "principal_actions"})
+MISSION_KEYS_V3 = MISSION_KEYS_V2 | frozenset({"memory_evaluation_delegation"})
 MISSION_KEYS = MISSION_KEYS_V1
 
 # --- the frozen selected-child target -------------------------------------------
@@ -229,10 +230,15 @@ def _mission_actions(row):
     keys = set(row)
     if keys == MISSION_KEYS_V1:
         return DEFAULT_PRINCIPAL_ACTIONS
-    if keys != MISSION_KEYS_V2 or type(row.get("authority_version")) is not int:
+    if keys not in (MISSION_KEYS_V2, MISSION_KEYS_V3) or type(row.get("authority_version")) is not int:
         _refuse()
-    if row["authority_version"] != MISSION_AUTHORITY_VERSION:
+    if row["authority_version"] != (3 if keys == MISSION_KEYS_V3 else MISSION_AUTHORITY_VERSION):
         _refuse()
+    if keys == MISSION_KEYS_V3:
+        from common.memory_evaluation_contract import delegation
+        grant = delegation(row["memory_evaluation_delegation"])
+        if grant["principal_binding_digest"] != row["principal_binding_digest"]:
+            _refuse()
     actions = row.get("principal_actions")
     if (type(actions) is not list or not actions
             or actions != sorted(set(actions))

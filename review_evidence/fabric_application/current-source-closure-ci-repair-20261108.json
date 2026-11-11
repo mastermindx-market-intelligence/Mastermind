@@ -1,0 +1,157 @@
+{
+  "actual_failed_hosted_merge": "7bdfe67e70523f021d25fed48c6b2e2296990d74",
+  "changed_source": {
+    ".github/workflows/hermes-application-enrollment.yml": {
+      "after_bytes": 6330,
+      "after_sha256": "90678c2735cc9b1a429414e11eebbb655a47c21bc37592f8c853d48306dbb39e",
+      "before_bytes": 6315,
+      "before_sha256": "6d01c14e5dd80aad7b0ac0693daef16fdd51eea73dda110258712972d7274e83"
+    },
+    "integrations/paper_desktop/bridge.py": {
+      "after_bytes": 86249,
+      "after_sha256": "7467d4534099657d3fd244641185e57675d5ec6ec2faeddad9d1cca2f5d18523",
+      "before_bytes": 84610,
+      "before_sha256": "af03759abbb493155ba32802a769b27699c672be716c1d29b1cab5b3b68a778b"
+    },
+    "integrations/paper_desktop/runtime_stage.py": {
+      "after_bytes": 14712,
+      "after_sha256": "58c613b63113ddceb99049c8114dc96933178078c8769e4b4b56064b4c353f10",
+      "before_bytes": 14544,
+      "before_sha256": "97320436bd93ca5b8a34ba119173caee203bdc31f1b908970570caddc394ef02"
+    },
+    "ops/native_fabric/quota_continuity/rollout/test_native_current_source.py": {
+      "after_bytes": 4218,
+      "after_sha256": "367b830f3b1b44eafd63c24b34f22704c40d8f7fcee27526c31addab529d8d1a",
+      "before_bytes": 0,
+      "before_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "ops/native_fabric/quota_continuity/rollout/test_native_launcher_upgrade.py": {
+      "after_bytes": 37274,
+      "after_sha256": "7574d0fd47dd3c070f026f13db7a289de4232834de0d3ebd824ca73ef630c2cd",
+      "before_bytes": 40179,
+      "before_sha256": "d0f9997a3fb2b78db1093868a750a8f834654fb8d87be39ae7ff61691c6f3426"
+    },
+    "ops/native_fabric/quota_continuity/tests/test_support_policy_source.py": {
+      "after_bytes": 7904,
+      "after_sha256": "17e22f19fd9d0e68d3888d9d3534dbaea3824116b302ae3d09aa9b1ce7df7359",
+      "before_bytes": 8080,
+      "before_sha256": "a7d28e6b771e5c8c8441e84db6ddaa6d411d697250c22357c53df3db198df6d0"
+    },
+    "tests/test_fabric_grok47_qwen_release_composition_20261022.py": {
+      "after_bytes": 24090,
+      "after_sha256": "2f9b7c68634a84731af55a6ce559163d4c2f70c7fbcd5d19f999285a4dcec79f",
+      "before_bytes": 20699,
+      "before_sha256": "9fa8a9e90fb3ad283a7cc35e1970a64104f2bf4f280ebf7cba3480994de62f2b"
+    },
+    "tests/test_fabric_native_security_composition_20261018.py": {
+      "after_bytes": 26679,
+      "after_sha256": "a977bf73db7befe2646e2ec32f3943dd4ed4c498ea63a2423ea59994f6f89536",
+      "before_bytes": 26584,
+      "before_sha256": "76cefbe9810ee29a8b1750ad461da3f87d3a20ec52e2f484c3419252140db46b"
+    },
+    "tests/test_paper_runtime_stage.py": {
+      "after_bytes": 13803,
+      "after_sha256": "9c42f7e44b6f8376d0715167b83e810947b7227e740de20946dba8f9b9cac7cc",
+      "before_bytes": 13625,
+      "before_sha256": "0dd17afc2633250d8d6bef8c6c587dff257906c3190de10a8ef53ab7f17b19ad"
+    }
+  },
+  "claims": {
+    "application_activation": false,
+    "full_h4_acceptance": false,
+    "installed_fabric_generation": false,
+    "protected_merge": false
+  },
+  "failures": {
+    "main_job": 128881310735,
+    "main_run": 42529791309,
+    "role_job": 128881235592,
+    "role_run": 42529791298,
+    "shadow_job": 128881296113,
+    "shadow_run": 42529791362
+  },
+  "protected_paper_source": "1d0579c0540f5281e52faf069dd7dba2f480c7c6",
+  "qualification": {
+    "errors": 0,
+    "failures": 0,
+    "jobs": [
+      {
+        "command": [
+          "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/macro-current-conflict-a5eed62a-20261108/macro-joint-py312-20261108/bin/python",
+          "-B",
+          "-m",
+          "pytest",
+          "-q",
+          "-o",
+          "addopts=",
+          "--noconftest",
+          "tests/test_fabric_grok47_qwen_release_composition_20261022.py",
+          "tests/test_fabric_native_security_composition_20261018.py",
+          "tests/test_paper_runtime_stage.py",
+          "--junitxml=/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/h4-current-ci-source-repair-20261108/root-source-contracts.xml",
+          "--durations=10"
+        ],
+        "completed_at": "2026-11-08T23:52:10.119085+00:00",
+        "counts": {
+          "errors": 0,
+          "failures": 0,
+          "skipped": 0,
+          "tests": 123
+        },
+        "log_sha256": "1024e165ccec210b86089077abe00a00a4131f11170d331ce9c8de2ead064d50",
+        "name": "root-source-contracts",
+        "returncode": 0,
+        "started_at": "2026-11-08T23:51:28.519729+00:00",
+        "xml_sha256": "8eb3c4195ac7e8e707cc12a5c1d242d733956ffadb467916d50a9573f0b44a54"
+      },
+      {
+        "command": [
+          "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/macro-current-conflict-a5eed62a-20261108/macro-joint-py312-20261108/bin/python",
+          "-B",
+          "-m",
+          "pytest",
+          "-q",
+          "-o",
+          "addopts=",
+          "--noconftest",
+          "ops/native_fabric/quota_continuity/rollout/test_native_launcher_upgrade.py",
+          "ops/native_fabric/quota_continuity/tests/test_support_policy_source.py",
+          "--junitxml=/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/h4-current-ci-source-repair-20261108/native-source-contracts.xml",
+          "--durations=10"
+        ],
+        "completed_at": "2026-11-08T23:51:46.846238+00:00",
+        "counts": {
+          "errors": 0,
+          "failures": 0,
+          "skipped": 0,
+          "tests": 28
+        },
+        "log_sha256": "1c51327f63057419ec03fca9c813964b1c84d0c37da6740a7fecde462b3a6015",
+        "name": "native-source-contracts",
+        "returncode": 0,
+        "started_at": "2026-11-08T23:51:28.520053+00:00",
+        "xml_sha256": "85664773f9653d888f94fc55d84b147f8e064d707e4ef9473e4dca4b8a505258"
+      }
+    ],
+    "receipt_sha256": "d0424fd875f977b5f18d4e95901455489bc6858d8f0a1918cb24c960c3303207",
+    "skipped": 0,
+    "source_unchanged_after_tests": true,
+    "total_tests": 151
+  },
+  "recorded_at": "2026-11-08T23:56:03.061321+00:00",
+  "repair": {
+    "enrollment_workflow": "Keep all15 files and both additional provider cohorts, original build flags and all three zero-failure/error/skip XML assertions; extend only job allowance45 to90minutes and make first cohort verbose with durations.",
+    "native": "Share the existing exact three-core successor projection and complete107-member verifier across current fixtures; preserve both immutable historical records and all original Grok/Qwen/security/lifecycle checks.",
+    "paper": "Retain protected2326 bridge bytes and appendv23; preserve all historical generation identities."
+  },
+  "schema": "h4-current-source-closure-ci-repair.v1",
+  "self_check": {
+    "git_diff_check": true,
+    "historical_manifest_and_inventory_preserved": true,
+    "native_production_sources_unchanged": true,
+    "paper_owner_only_appends_generation": true,
+    "scope_exact": true,
+    "workflow_only_allowance_and_observability": true
+  },
+  "source_parent": "7200f6003c53052302546785f4b5115532d9f53e"
+}

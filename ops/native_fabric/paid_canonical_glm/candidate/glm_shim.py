@@ -1964,3 +1964,134 @@ if __name__ == "__main__":
     except Exception:
         traceback.print_exc()
         sys.exit(1)
+
+
+# APPLICATION-only adapter. The incumbent worker/shim prefix above remains intact.
+try:
+    import application_http_transports as _application_http
+except ModuleNotFoundError as _application_import_error:
+    if _application_import_error.name != "application_http_transports":
+        raise
+    from ops.native_fabric.quota_continuity.candidate import application_http_transports as _application_http
+
+
+class GlmChatCompletionsDriver(_application_http._FixedResponsesDriver):
+    """Closed Coding Plan compiler using the existing one-send HTTP owner."""
+
+    driver_id = "zai-coding-plan.chat-completions"
+    realm_id = "zai-coding-plan"
+    pool = "glm"
+    allowed_models = frozenset({"glm-5.3", "glm-5.3-flash"})
+    default_model = None
+    wire_protocol = "openai-chat"
+    endpoint_suffix = "/chat/completions"
+    coding_base_url = "https://api.z.ai/api/coding/paas/v4"
+    credential_owner = "glm_keys.selected_account_key"
+    max_wire_bytes = 1048576
+
+    def __init_subclass__(cls, **kwargs):
+        raise TypeError("the GLM APPLICATION driver is sealed")
+
+    def __init__(self, *, realm_projection, projection_sha256, **kwargs):
+        if not isinstance(realm_projection, bytes) or not isinstance(projection_sha256, str):
+            raise _application_http.TransportRefused("verified_glm_projection_required")
+        super().__init__(
+            realm_projection=realm_projection,
+            projection_sha256=projection_sha256,
+            **kwargs,
+        )
+        if (self.identity.base_url != self.coding_base_url
+                or self.identity.provider != "glm"
+                or self.identity.env_key is not None):
+            raise _application_http.TransportRefused("glm_coding_plan_identity_mismatch")
+
+    def prepare_request(self, logical_request):
+        logical = self._logical_payload(logical_request)
+        model = self._model(logical)
+        max_tokens = self._max_output_tokens(logical)
+        if logical.get("tool_choice", "auto") != "auto":
+            raise _application_http.TransportRefused("glm_tool_choice_must_be_auto")
+        # Validate the shared text/tool grammar without discarding provider reasoning.
+        validation = json.loads(_application_http._canonical(logical))
+        for message in validation.get("messages", []):
+            if isinstance(message, dict) and "reasoning_content" in message:
+                reasoning = message.pop("reasoning_content")
+                if message.get("role") != "assistant" or not isinstance(reasoning, str):
+                    raise _application_http.TransportRefused("invalid_glm_reasoning_content")
+        _application_http._input_items(validation)
+        tools = _application_http._tools(validation)
+        _application_http._tool_choice(validation, tools)
+        wire = dict(logical)
+        wire["model"] = model
+        wire["stream"] = False
+        # Hash exactly the bytes passed to the sole shared bounded sender.
+        wire_body = json.dumps(wire, ensure_ascii=True, allow_nan=False).encode("utf-8")
+        if len(wire_body) > self.max_wire_bytes:
+            raise _application_http.TransportRefused("request_too_large")
+        identity = self.identity
+        return _application_http.CompiledCall(
+            driver_id=identity.driver_id,
+            realm_id=identity.realm_id,
+            provider=identity.provider,
+            pool=identity.pool,
+            endpoint=identity.endpoint,
+            protocol=identity.protocol,
+            model=model,
+            logical_payload_digest=hashlib.sha256(_application_http._canonical(logical)).hexdigest(),
+            wire_body=wire_body,
+            wire_body_digest=hashlib.sha256(wire_body).hexdigest(),
+            max_output_tokens=max_tokens,
+        )
+
+    def _usage_document(self, document):
+        usage = document.get("usage") if isinstance(document, dict) else None
+        usage = usage if isinstance(usage, dict) else {}
+        return {
+            "input_tokens": _application_http._token_value(usage.get("prompt_tokens")),
+            "output_tokens": _application_http._token_value(usage.get("completion_tokens")),
+        }
+
+    def _normalize_document(self, document):
+        if not isinstance(document, dict) or document.get("error"):
+            return None
+        choices = document.get("choices")
+        if not isinstance(choices, list) or len(choices) != 1:
+            return None
+        choice = choices[0]
+        if not isinstance(choice, dict) or choice.get("finish_reason") not in {"stop", "tool_calls"}:
+            return None
+        if "index" in choice and (type(choice["index"]) is not int or choice["index"] != 0):
+            return None
+        message = choice.get("message")
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            return None
+        content = message.get("content")
+        if content is not None and not isinstance(content, str):
+            return None
+        calls = message.get("tool_calls", [])
+        if calls is None:
+            calls = []
+        if not isinstance(calls, list):
+            return None
+        if (choice["finish_reason"] == "tool_calls") != bool(calls):
+            return None
+        try:
+            _application_http._tool_calls({"role": "assistant", "tool_calls": calls}, 0, set())
+        except _application_http.TransportRefused:
+            return None
+        if not content and not calls:
+            return None
+        reasoning = message.get("reasoning_content")
+        if reasoning is not None and not isinstance(reasoning, str):
+            return None
+        served_model, known = _application_http._serving_model(document)
+        normalized = {
+            "text": content or "",
+            "tool_calls": json.loads(json.dumps(calls, ensure_ascii=True, allow_nan=False)),
+            "served_model": served_model,
+            "served_model_known": known,
+            "usage": self._usage_document(document),
+        }
+        if reasoning is not None:
+            normalized["reasoning_content"] = reasoning
+        return normalized

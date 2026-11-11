@@ -422,8 +422,13 @@ class WorkspaceAppConfig:
     authorize_discovery: Callable[[VerifiedPrincipal], bool] | None = None
     authorize_actions: Mapping[str, Callable[[VerifiedPrincipal], bool]] | None = None
     source_operation_context: Any = None
+    paperclip: Any = None
 
     def __post_init__(self) -> None:
+        if self.paperclip is not None:
+            from integrations.paperclip_control.installed import PaperclipWorkspaceBinding
+            if type(self.paperclip) is not PaperclipWorkspaceBinding or self.paperclip.policy_id != self.authenticator.policy.policy_id:
+                raise ValueError("Paperclip must bind the same Workspace principal policy")
         if self.project_admission_load_bindings is not None and not callable(self.project_admission_load_bindings):
             raise ValueError("sealed current project membership loader required")
         if self.source_operation_context is not None:
@@ -1684,6 +1689,7 @@ class _RawPathFence:
     #: Starlette also binds HEAD for GET routes; the exact map refuses it.
     _READ_ROUTES = (
         "/workspace/native-draft-identity/current",
+        "/workspace/native-authorization-identity/acquisition/current",
         _PROGRAMS_ROUTE,
         _WORK_ROUTE,
         _MISSION_ROUTE,
@@ -1702,6 +1708,7 @@ class _RawPathFence:
         _ACTIVITY_ROUTE,
         _RESOURCE_CAPACITY_ROUTE,
         _MODEL_CONFIGURATION_ROUTE,
+        "/workspace/company/current",
         _HOST_OBSERVATION_ROUTE,
         _FABRIC_CATALOG_ROUTE,
         _FABRIC_STATUS_ROUTE,
@@ -1712,6 +1719,7 @@ class _RawPathFence:
     _ROUTE_METHODS = {
         **{path: "GET" for path in _READ_ROUTES},
         **{path: "POST" for path in _CCR_ACTION_ROUTES.values()},
+        "/workspace/company/command": "POST",
     }
 
     def __init__(self, app: Any) -> None:
@@ -1813,6 +1821,10 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
 
     async def plan_endpoint(request: Request) -> JSONResponse:
         return await plan_current(request, config=config)
+
+    async def native_authorization_identity_endpoint(request: Request):
+        from .native_authorization_identity import acquisition_identity_current
+        return await acquisition_identity_current(request, config=config)
 
     async def native_draft_identity_endpoint(request: Request):
         from .native_draft_identity import native_draft_identity_current
@@ -1923,6 +1935,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_RESULT_REFERENCES_ROUTE, result_references_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
         Route("/workspace/native-draft-identity/current", native_draft_identity_endpoint, methods=["GET"]),
+        Route("/workspace/native-authorization-identity/acquisition/current", native_authorization_identity_endpoint, methods=["GET"]),
         Route("/workspace/project-access/current", project_access_endpoint, methods=["GET"]),
         Route("/workspace/project-instructions/current", project_instructions_endpoint, methods=["GET"]),
         Route(_PROJECT_PLAN_ROUTE, project_plan_endpoint, methods=["GET"]),
@@ -1956,6 +1969,15 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         async def action_endpoint(request: Request, *, operation=operation) -> Response:
             return await control_room_action(request, config=config, operation=operation)
         routes.append(Route(path, action_endpoint, methods=["POST"]))
+    from integrations.mastermind_workspace_app.paperclip_http import paperclip_http
+    async def company_read_endpoint(request):
+        return await paperclip_http(request, config=config)
+    async def company_command_endpoint(request):
+        return await paperclip_http(request, config=config, command=True)
+    routes.extend([
+        Route("/workspace/company/current", company_read_endpoint, methods=["GET"]),
+        Route("/workspace/company/command", company_command_endpoint, methods=["POST"]),
+    ])
     application = Starlette(routes=routes)
     # Never silently rewrite a trailing-slash alias onto a different route:
     # an encoded/trailing-slash/raw-path ambiguity must refuse as a plain

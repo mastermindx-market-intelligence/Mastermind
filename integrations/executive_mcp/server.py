@@ -585,6 +585,7 @@ _WORKSPACE_SOURCE_OPERATION_POST_ROUTES: tuple[str, ...] = (
 # Fixed already-owned inner routes. These are transport classifications only;
 # the Workspace App retains each original READ/action principal and grant gate.
 _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
+    "/workspace/company/current",
     "/workspace/project-session/current",
     "/workspace/project-admission/current",
     "/workspace/project-admission/operation",
@@ -596,6 +597,7 @@ _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES: tuple[str, ...] = (
 )
 _WORKSPACE_ADDITIONAL_GET_ROUTES = _WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES + (
     "/workspace/native-draft-identity/current",
+    "/workspace/native-authorization-identity/acquisition/current",
     "/workspace/fabric/catalog/current",
     "/workspace/byok/roles/current",
     "/workspace/resources/models/current",
@@ -609,7 +611,7 @@ _WORKSPACE_INSTRUCTION_ADMISSION_ACTION_ROUTES: tuple[str, ...] = (
 )
 _WORKSPACE_ACTION_ROUTES = (
     _WORKSPACE_CONTROL_ROOM_ACTION_ROUTES + _WORKSPACE_PROJECT_ADMISSION_ACTION_ROUTES
-    + _WORKSPACE_INSTRUCTION_ADMISSION_ACTION_ROUTES
+    + _WORKSPACE_INSTRUCTION_ADMISSION_ACTION_ROUTES + ("/workspace/company/command",)
 )
 
 
@@ -691,6 +693,9 @@ class _ExecutivePathFence:
             self._query_routes.update(_WORKSPACE_ADDITIONAL_QUERY_GET_ROUTES)
         if content_app is not None:
             self._workspace_routes.add("/workspace/window/current")
+            from integrations.mastermind_steward_app.live_window import supports_native_content_identity
+            if supports_native_content_identity(content_app):
+                self._workspace_routes.add("/workspace/native-authorization-identity/content/current")
         self._routes.update({path: "GET" for path in self._workspace_routes})
         self._public_routes.update(self._workspace_routes)
         if workspace_app is not None:
@@ -1681,6 +1686,9 @@ def _build_profile_mcp_app(
         )
     if content_app is not None:
         outer_routes.append(Route("/workspace/window/current", content_app, methods=["GET"]))
+        from integrations.mastermind_steward_app.live_window import supports_native_content_identity
+        if supports_native_content_identity(content_app):
+            outer_routes.append(Route("/workspace/native-authorization-identity/content/current", content_app, methods=["GET"]))
     if os_app is not None:
         if type(os_app) is not OsStaticApp:
             raise ValueError("fixed OS static owner required")
@@ -2363,16 +2371,35 @@ def describe(config: GatewayConfig) -> str:
     ).decode("utf-8")
 
 
-def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target=None) -> Any:
+def build_coo_route_preview_tool() -> mcp_types.Tool:
+    """The one read-only ``route_preview`` advertisement descriptor.
+
+    ``_build_coo_mcp_app`` appends exactly this Tool to the legacy catalogue
+    when the host opts in with a ``RoutePreviewSource``; existing
+    compositions that do not opt in keep their exact tool list. The preview
+    is served locally by the composition (never forwarded to the inner App):
+    it reads no Executive OS state and cannot reserve, claim or launch.
+    """
+
+    from integrations.executive_mcp.route_preview import ROUTE_PREVIEW_TOOL_SPEC
+    spec = ROUTE_PREVIEW_TOOL_SPEC
+    return mcp_types.Tool(name=spec.name, description=spec.description,
+        inputSchema=spec.input_schema, annotations=mcp_types.ToolAnnotations(**spec.annotations))
+
+
+def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target=None,
+                      route_preview_source=None) -> Any:
     """Legacy standalone composition retains its primary-resource-only fence."""
     _refuse_public_policies(getattr(settings, "executive", None), "the COO MCP builder")
     if getattr(settings, "public_mcp", False):
         raise ValueError("public COO requires the explicit Web-CEO v3 composition")
     return _build_coo_mcp_app(settings, audit_sink=audit_sink,
-        principal_ruling_target=principal_ruling_target)
+        principal_ruling_target=principal_ruling_target,
+        route_preview_source=route_preview_source)
 
 
-def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target=None, workspace_app=None) -> Any:
+def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target=None,
+                       route_preview_source=None, workspace_app=None) -> Any:
     """One COO implementation with fixed, principal-selected catalogues."""
     from control_plane.coo_principal_request import principal_request_ref, principal_intent_id
     from control_plane import ceo_intent
@@ -2415,6 +2442,26 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
              context_wire.CATALOGUE: descriptors(COO_CONTEXT_TOOL_SPECS),
              context_wire.CURRENT_CATALOGUE: descriptors(COO_CURRENT_CONTEXT_TOOL_SPECS),
              discovery_wire.CATALOGUE: descriptors(COO_DISCOVERY_TOOL_SPECS)}
+    # Opt-in WO-07 preview facet: the read-only shared-law route_preview is
+    # appended to the legacy catalogue only, served locally, and never
+    # forwarded to the inner App. Compositions that do not opt in keep their
+    # exact advertised surface and schema digests.
+    preview_name = None
+    preview_schema = None
+    if route_preview_source is not None:
+        from integrations.executive_mcp.route_preview import (
+            ROUTE_PREVIEW_TOOL_NAME, ROUTE_PREVIEW_TOOL_SPEC, RoutePreviewSource,
+            ROUTE_PREVIEW_SCHEMA,
+            compose as compose_route_preview, validate_route_preview_tool_arguments,
+        )
+        if type(route_preview_source) is not RoutePreviewSource:
+            raise ValueError("route preview source must be the closed host composition type")
+        if settings.catalogue_provider is not None:
+            raise ValueError("route preview composes on the legacy catalogue only")
+        tools[context_wire.LEGACY_CATALOGUE] = (
+            tools[context_wire.LEGACY_CATALOGUE] + descriptors((ROUTE_PREVIEW_TOOL_SPEC,)))
+        preview_name = ROUTE_PREVIEW_TOOL_NAME
+        preview_schema = ROUTE_PREVIEW_SCHEMA
 
     @server.list_tools()
     async def list_tools():
@@ -2441,9 +2488,12 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
     def result(payload, challenge=None):
         # A valid selected-child envelope carries no top-level ``ok``: its
         # ``state`` is the outcome. It is a valid answer, not a protocol
-        # error, so it is never marked as one here.
+        # error, so it is never marked as one here. The read-only shared-law
+        # RoutePreview.v1 record is likewise a plain answer with no ``ok``.
         is_error = payload.get("ok") is not True
-        if isinstance(payload, dict) and payload.get("schema") in {SELECTED_CHILD_SCHEMA, discovery_wire.RESULT_SCHEMA}:
+        if isinstance(payload, dict) and (
+                payload.get("schema") in {SELECTED_CHILD_SCHEMA, discovery_wire.RESULT_SCHEMA}
+                or (preview_schema is not None and payload.get("schema") == preview_schema)):
             is_error = False
         return mcp_types.CallToolResult(content=[mcp_types.TextContent(type="text",
             text=canonical_json(payload).decode("utf-8"))], isError=is_error,
@@ -2454,6 +2504,22 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
         request = server.request_context.request
         if not isinstance(request, Request) or len(request.headers.getlist("authorization")) != 1:
             raise ValueError("unambiguous current authorization required")
+        if preview_name is not None and name == preview_name:
+            # Read-only shared-law preview served locally: it reads no
+            # Executive OS state and never touches the inner App, jobs,
+            # attempts or quota classes.
+            try:
+                payload = compose_route_preview(
+                    validate_route_preview_tool_arguments(name, arguments),
+                    source=route_preview_source)
+                reply = result(payload)
+                if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096:
+                    reply = result(error(name, "output_too_large"))
+                return reply
+            except GatewayError as exc:
+                return result(error(name, exc.code))
+            except Exception:
+                return result(error(name))
         try:
             validated = (validate_coo_context_tool_arguments(name, arguments)
                          if name in (context_wire.TOOL, context_wire.CURRENT_TOOL, *discovery_wire.TOOLS)
@@ -2608,7 +2674,7 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
 
     app = Starlette(routes=[Route(COO_MCP_PATH, authenticated, methods=["POST"])], lifespan=lifespan)
     app.router.redirect_slashes = False
-    coo = _LiteralCooRoute(app)
+    coo = _LiteralCooRoute(app, evaluation_core=core)
     if principal_ruling_target is None:
         return coo
     return _CooWithPrincipalRuling(coo,
@@ -2728,11 +2794,22 @@ def build_principal_ruling_mcp_app(core: Any, *, target: Any) -> Any:
 
 
 class _LiteralCooRoute:
-    def __init__(self, app):
+    def __init__(self, app, *, evaluation_core=None):
         self._app = app
         self._guard = _DuplicateAuthorizationGuard(app, mcp_path="/mcp/coo")
+        self._evaluation_core = evaluation_core
 
     async def __call__(self, scope, receive, send):
+        # One exact prospective purpose facet, using the SAME signed COO
+        # authenticator/core and installed App peer. No extra MCP tool, generic
+        # operation route, profile grant or default mission authority.
+        if (scope.get('type') == 'http' and self._evaluation_core is not None
+                and scope.get('path') == '/mcp/coo/evaluation-assessment'
+                and scope.get('raw_path') == b'/mcp/coo/evaluation-assessment'
+                and scope.get('method') == 'POST' and not scope.get('query_string')):
+            mapped = dict(scope, path='/v1/memory/evaluation-assessment', raw_path=b'/v1/memory/evaluation-assessment')
+            await self._evaluation_core(mapped, receive, send)
+            return
         if scope.get("type") == "http" and (
                 scope.get("path") != "/mcp/coo" or scope.get("raw_path") != b"/mcp/coo"
                 or scope.get("method") != "POST" or scope.get("query_string")):

@@ -1,0 +1,109 @@
+{
+  "checks": [
+    {
+      "name": "python",
+      "result": "317 passed, 180 subtests passed",
+      "retained_log_sha256": "d68d00ed3cc42f157b61782dd38742e768a9584db49644a12ab3439c22949e9f"
+    },
+    {
+      "name": "native-runtime-cli",
+      "result": "198 across three native commands: 184 here, 2 budget, 12 contracts",
+      "retained_log_sha256": "629e1c93ad1a1b9cce2eda66776c23ba93408940214a594984e92bad5276a2a2"
+    },
+    {
+      "name": "native-budget",
+      "result": "2 passed",
+      "retained_log_sha256": "b3e20aa3693b7f3ce71c213257bab822d976777627902c9e21ba5f2d30ced226"
+    },
+    {
+      "name": "native-contracts",
+      "result": "12 passed",
+      "retained_log_sha256": "b42838d70cbaab8570d901f9014676c17701faff8756a7fc7415459051cb291c"
+    },
+    {
+      "name": "native-typecheck",
+      "result": "2/2 successful",
+      "retained_log_sha256": "e4d2005883cafd0b3865f44ab1e817e00d403c3b0cbf20b06ed597e5b51e9562"
+    },
+    {
+      "name": "source-materialization",
+      "result": "13 postimages reproduced; installed=false",
+      "retained_log_sha256": "266b2c1275d8fb0c37a9fc087510b0d2a6611ae4a2fdfd3ae2f0885d7f32d2f4"
+    }
+  ],
+  "governing_source_pin": "f357bd0b3c31ee40f028590909678f01a3a9d413",
+  "installed": false,
+  "live_read_proof": "docs/evidence/t3-agent-bus-v4-native-read.json",
+  "native_dependencies": "Existing donor locked dependency installation reused in an isolated source fixture; workspace package resolution points to the patched fixture. No live app dependency changes.",
+  "native_patch_sha256": "60357937f08597de7229b84258c33430a190a35bfb244c2546837732bf5d2a0f",
+  "native_test_count": 198,
+  "native_test_suites": [
+    "cli/thread.native.test.ts",
+    "cli/thread.test.ts",
+    "mcp/AcpMcpStdioBridge.test.ts",
+    "mcp/toolkits/thread/handlers.test.ts",
+    "orchestration-v2/runtimeLayer.test.ts",
+    "provider/AgentContextBudget.test.ts",
+    "packages/contracts/src/orchestrationV2.test.ts"
+  ],
+  "native_typecheck_packages": [
+    "t3",
+    "@t3tools/contracts"
+  ],
+  "native_upstream_revision": "0770446869d247a8b28c27d7ed93f47f8ff0c1e4",
+  "not_proven": [
+    "Live strict lifecycle extension installation and loaded-byte verification.",
+    "Live launch/queue/steer/model-switch/archive/delete journey on newly owned disposable targets.",
+    "New long-horizon delegated result and original-parent acceptance.",
+    "Direct connected ChatGPT native OAuth endpoint or unsolicited event-return wake."
+  ],
+  "python_subtests": 180,
+  "python_tests": 317,
+  "recorded_at": "2026-11-10T06:48:49.260787+00:00",
+  "review_type": "principal self-review; not independent or GitHub APPROVED",
+  "schema": "mastermind.t3-agent-bus-verification.v1",
+  "self_review": [
+    "Capacity-only target/selection at client, CLI and native command boundary.",
+    "Existing native per-thread sequence checked under original lock and inside native commit transaction; same-millisecond ABA and decision/commit race regression.",
+    "Injected native transport preserves original envelope, cancellation, unknown effects and exact environment in one native session.",
+    "Legacy provider-default COO launch replaced by explicit native Capacity client; no alternate carrier after failure.",
+    "Native patch and minimum source archive preimages/postimages reproduced, without modifying donor or live app."
+  ],
+  "source_build_receipt": {
+    "base_archive_sha256": "6fb06ab0ab42dedd887b7c62f6c02631542a227976763378246c1673d0419d3e",
+    "files": {
+      "apps/server/src/cli/thread.native.test.ts": "417dc05d9283067465ba3a070ed4cee2a92fb724e68506e7fed20a0011e3ab0a",
+      "apps/server/src/cli/thread.test.ts": "cc05c83547dc8ee95d426e062f183b9f508f8fb4694df8f194d0a6fff385e008",
+      "apps/server/src/cli/thread.ts": "22f758d470499e1ebdb8525296fcea428050c76ba03d76efc090bd6f9be9d7ab",
+      "apps/server/src/mcp/AcpMcpStdioBridge.test.ts": "5e1008cf6e6fb3355f06e0fcda053f7fcc5e195a7e53dc310e2452799cd79533",
+      "apps/server/src/mcp/AcpMcpStdioBridge.ts": "c5eada8eb8495a48feb5c1077392dde5a5a8aba0a92967e3780324cd632e04c2",
+      "apps/server/src/mcp/toolkits/thread/handlers.test.ts": "5264f689409b443624a6380327b5501a47e8695af10a0d7da85b5cee3948f876",
+      "apps/server/src/mcp/toolkits/thread/handlers.ts": "18ff6594a47f2c20b936143fe004c6001ddef49b014a734bb5cff740203ef8f9",
+      "apps/server/src/mcp/toolkits/thread/tools.ts": "e115e61408ae3a8e6fcac9a04cf00e5a97c081641a7a890fec833433ea1ba9b1",
+      "apps/server/src/orchestration-v2/EventSink.ts": "fed9ab2369481f68b2ecfa7434211203a93e5cf4300c64a7c72b8b54118339d3",
+      "apps/server/src/orchestration-v2/Orchestrator.ts": "4a6e804f6fb7cde0079913a103462f1f1b1a0b56eccef563c92e36a460a9a8c5",
+      "apps/server/src/orchestration-v2/runtimeLayer.test.ts": "0bb0944f6a300d95dc6edf1f34e9cd2ff17dfadda50cfff5d1667dff5363ee5e",
+      "apps/server/src/provider/agentContextBudget.json": "3fbdad5abf22e04da53df7cf0d2b905e9d8d850d044af9db8260f4851686b399",
+      "packages/contracts/src/orchestrationV2.ts": "d624de3c2ac89ecb8627d972bbf84feeb32d9ce5837ee3aadff21b56fdb308d3"
+    },
+    "installed": false,
+    "output_kind": "affected-source-files-only",
+    "patch_sha256": "60357937f08597de7229b84258c33430a190a35bfb244c2546837732bf5d2a0f",
+    "runtime_effects": "none",
+    "schema": "mastermind.t3-agent-bus-source-build.v1",
+    "upstream_revision": "0770446869d247a8b28c27d7ed93f47f8ff0c1e4"
+  },
+  "source_hashes": {
+    "integrations/session_bridge/t3_cli_transport.py": "907e5282559800a61fbb86608dc3970189e169bb7db3a3d87d373f179858917e",
+    "integrations/session_bridge/t3_native_client.py": "ddf20497a98a1359de94d2f91a1832f03987a0ef7a00eb8652928ac3fde93768",
+    "integrations/session_bridge/t3_project_team.py": "e1f43345f32322d4d61442ea992ac1af95e3f1fcbc73df20b0859e3573106833",
+    "integrations/session_bridge/t3_project_team_cli.py": "52a7569126cec7bcb4c2edc253ae071484b190267ca3aa755403b87c634b4a9e",
+    "scripts/build_t3_agent_bus.py": "f020e4999e052cd279967d58d96cbbec9f2d5699ebb52e9b64f0b82d0d4417d3",
+    "scripts/build_t3_project_team.py": "5d9fde8f0b2ff4d239ae986291b7604fa5b4c3c543d3f1a0b3f08fdb24c3bd05",
+    "tests/test_t3_agent_bus_package.py": "63f6084dc0a364b71c3bfc664257e573d9eb01aa85cc562bbc38aac8bb624cdd",
+    "tests/test_t3_cli_transport.py": "f1e925a4b7d99ddb37dd6c4fb842b1474f9b5af61548ba428980dc6553b3dd8b",
+    "tests/test_t3_lifecycle_client.py": "18b66427a4c8ab01f1b300129c7278791082649d828f7c528e6fac0e15fa944a",
+    "tests/test_t3_project_team.py": "ad1459d5c25d8b2b6f25b2554e2066e8859e0ab3c719ed0b8935727a6e653b29",
+    "tests/test_t3_project_team_cli.py": "50a0bd0cb9b787be014920089b403571622c2d76b090a615693f9994ebf26752"
+  }
+}
