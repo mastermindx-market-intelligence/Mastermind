@@ -5,6 +5,10 @@
 //   pair <accessFile> <profileDir> <outJson>
 //       One-time-token pairing (token read from the 0600 file in-process,
 //       never printed or recorded). No screenshot of the pairing page.
+//   rename <profileDir> <threadUrl> <threadId> <currentTitle> <newTitle>
+//            <outJson>
+//       Rename exactly that thread through its web-client menu; verify its
+//       durable identity and leave pin state untouched. No screenshot.
 //   pin <profileDir> <threadUrl> <outJson> <shotPng>
 //       Open a deep thread URL, right-click its sidebar row, click the
 //       "Pin thread" menu item, verify the Pinned marker, screenshot.
@@ -198,6 +202,66 @@ async function modePin(profileDir, threadUrl, titleContains, outJson, shotPng) {
   console.log("PIN_DONE");
 }
 
+async function modeRename(profileDir, threadUrl, threadId, currentTitle,
+                          newTitle, outJson) {
+  if (newTitle.length > 24) throw new Error("thread title exceeds 24 characters");
+  if (!threadId) throw new Error("durable thread id is required");
+  const context = await launch(profileDir);
+  try {
+    const page = context.pages()[0] || (await context.newPage());
+    await openThread(page, threadUrl);
+    // The visible row may start with the pinned separator, so select the row
+    // that contains the exact current title. Confirm its durable identity
+    // against the persisted environmentId:threadId row key, never by title.
+    const target = page.locator(`[data-sidebar-row="${CSS.escape(
+      `${new URL(threadUrl).pathname.split("/").filter(Boolean)[0]}:${threadId}`)}"]`);
+    await target.waitFor({ state: "visible", timeout: 20000 });
+    if (await target.count() !== 1)
+      throw new Error(`expected exactly one durable row for ${threadId}`);
+    const before = await sidebarState(page);
+    if (before.rows.filter((r) => r.title === currentTitle).length !== 1)
+      throw new Error(`roster title is not exactly one visible row: ${currentTitle}`);
+    await target.click({ button: "right" });
+    const item = page.getByRole("menuitem", { name: "Rename thread", exact: true });
+    await item.waitFor({ state: "visible", timeout: 15000 });
+    await item.click();
+    const input = page.getByRole("textbox", { name: "Thread title", exact: true });
+    await input.waitFor({ state: "visible", timeout: 15000 });
+    await input.fill(newTitle);
+    await input.press("Enter");
+    await input.waitFor({ state: "hidden", timeout: 15000 });
+    await page.waitForFunction(
+      ({ key, title }) => {
+        const row = document.querySelector(`[data-sidebar-row="${CSS.escape(key)}"]`);
+        return row && [...row.querySelectorAll("span, div")]
+          .some((n) => n.children.length === 0 && n.textContent.trim() === title);
+      },
+      { key: await target.getAttribute("data-sidebar-row"), title: newTitle },
+      { timeout: 20000 },
+    );
+    await page.waitForTimeout(1500);
+    const after = await sidebarState(page);
+    const row = after.rows.filter((r) => r.title === newTitle);
+    if (row.length !== 1) throw new Error("rename did not read back exactly one row");
+    if (!decodeURIComponent(page.url()).includes(threadId))
+      throw new Error("renamed thread URL no longer matches durable id");
+    const beforeRow = before.rows.find((r) => r.title === currentTitle);
+    if (row[0].pinned !== (beforeRow && beforeRow.pinned))
+      throw new Error("rename changed pin state");
+    await writeOut(outJson, {
+      when: new Date().toISOString(),
+      threadId,
+      title: newTitle,
+      oldTitle: currentTitle,
+      pinned: row[0].pinned,
+      verifiedBy: "data-sidebar-row environmentId:threadId and deep-thread URL",
+    });
+    console.log(`RENAME_DONE ${threadId} ${newTitle}`);
+  } finally {
+    await context.close();
+  }
+}
+
 async function modeSnapshot(profileDir, url, outJson, shotPng, label) {
   const context = await launch(profileDir);
   const page = context.pages()[0] || (await context.newPage());
@@ -350,6 +414,7 @@ async function modeAnswer(profileDir, threadUrl, answerFile, outJson, shotPng,
   if (mode === "answer") return modeAnswer(...args);
   if (mode === "pair") return modePair(...args);
   if (mode === "pin") return modePin(...args);
+  if (mode === "rename") return modeRename(...args);
   if (mode === "snapshot") return modeSnapshot(...args);
   if (mode === "livetext") return modeLivetext(...args);
   throw new Error(`unknown mode ${mode}`);

@@ -6,6 +6,7 @@
 # Usage:
 #   team_server.sh install  --root DIR --port N --label ID [--server-bin PATH]
 #                           [--replace]
+#   team_server.sh doctor --root DIR --label ID
 #   team_server.sh start|stop|status|uninstall  --root DIR --label ID
 #   team_server.sh selftest
 #
@@ -177,9 +178,22 @@ cmd_install() {
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null; sleep 2
   fi
   port_busy "$PORT" && die "port $PORT is busy"
-  # Server binary setting: default stock vendor CLI.
-  [ -n "$SERVER_BIN" ] || SERVER_BIN="$HOME/.t3/bin/t3"
-  [ -x "$SERVER_BIN" ] || die "server binary not executable: $SERVER_BIN"
+  # Hygiene and live-lock checks precede runtime selection: selecting a pack
+  # must never obscure these existing protections or this root's writer state.
+  if [ -n "$SERVER_BIN" ] && [ ! -x "$SERVER_BIN" ]; then
+    die "server binary not executable: $SERVER_BIN"
+  fi
+  [ -f "$ROOT/fabric.env" ] || die "missing $ROOT/fabric.env; run tools/mmos_dev/t3/seed_dev_home.py with MMOS_T3_DEV_ROOT=$ROOT first"
+  [ "$(stat -f '%Lp' "$ROOT/fabric.env")" = "600" ] || die "$ROOT/fabric.env must be mode 600"
+  # A self-contained packed runtime is the default. An explicit --server-bin
+  # is the emergency legacy rollback, not a second default source-tree path.
+  if [ -z "$SERVER_BIN" ]; then
+    SERVER_BIN=$("$PYTHON3_BIN" "$REPO_DIR/tools/mmos_team_server/node_install.py" resolve --root "$ROOT" --command serve) \
+      || die "packed runtime unavailable; install node_install.py and pack_server.mjs, or explicitly supply --server-bin for rollback"
+    "$PYTHON3_BIN" "$REPO_DIR/tools/mmos_team_server/node_install.py" resolve --root "$ROOT" --command node >/dev/null \
+      || die "pinned Node receipt or executable is incomplete"
+  fi
+  [ -f "$SERVER_BIN" ] || die "server entrypoint does not exist: $SERVER_BIN"
   # Never mutate a root that is being served RIGHT NOW: its runner holds
   # <root>/run/home.lock across exec for the whole server lifetime. A second
   # install under any label (even with plists hidden from the scan above)
@@ -203,11 +217,11 @@ PYLOCK
   fi
   mkdir -p "$ROOT/home/userdata" "$ROOT/run" "$ROOT/bin" "$ROOT/config" "$ROOT/scratch-project" "$ROOT/claude-home"
   cp "$REPO_DIR/tools/mmos_team_server/server_runner.sh" "$ROOT/bin/server_runner.sh"
+  cp "$REPO_DIR/tools/mmos_team_server/node_install.py" "$ROOT/bin/node_install.py"
+  chmod 700 "$ROOT/bin/node_install.py"
   chmod 700 "$ROOT/bin/server_runner.sh"
   printf '%s\n' "$PORT" > "$ROOT/run/port"
   printf '%s\n' "$SERVER_BIN" > "$ROOT/config/server-bin"
-  [ -f "$ROOT/fabric.env" ] || die "missing $ROOT/fabric.env; run tools/mmos_dev/t3/seed_dev_home.py with MMOS_T3_DEV_ROOT=$ROOT first"
-  [ "$(stat -f '%Lp' "$ROOT/fabric.env")" = "600" ] || die "$ROOT/fabric.env must be mode 600"
   : > "$ROOT/run/server.log"; chmod 600 "$ROOT/run/server.log"
   mkdir -p "$(plist_dir)"
   cat > "$PLIST" <<EOF
@@ -293,6 +307,13 @@ cmd_status() {
   [ -f "$ROOT/run/access.txt" ] && echo "access_file=$ROOT/run/access.txt (mode $(stat -f '%Lp' "$ROOT/run/access.txt"); not printed)"
 }
 
+cmd_doctor() {
+  require_root_label
+  label_valid "$LABEL" || die "invalid label: $LABEL"
+  "$PYTHON3_BIN" "$REPO_DIR/tools/mmos_team_server/node_install.py" doctor \
+    --root "$ROOT" --label "$LABEL"
+}
+
 cmd_uninstall() {
   require_root_label
   if label_loaded "$LABEL"; then
@@ -313,6 +334,7 @@ case "$COMMAND" in
   start) cmd_start ;;
   stop) cmd_stop ;;
   status) cmd_status ;;
+  doctor) cmd_doctor ;;
   uninstall) cmd_uninstall ;;
   selftest) cmd_selftest ;;
   *) usage ;;

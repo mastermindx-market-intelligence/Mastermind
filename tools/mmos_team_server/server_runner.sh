@@ -42,18 +42,26 @@ if [ -f "$LOG_FILE" ] && [ "$(stat -f%z "$LOG_FILE" 2>/dev/null || echo 0)" -gt 
 fi
 chmod 600 "$LOG_FILE" 2>/dev/null || true
 
-# Read the server binary setting (default: the stock vendor CLI).
+# NODE_BIN is selected atomically with the packed server. Legacy --server-bin
+# overrides this path explicitly; absent that marker the old stock CLI remains.
+NODE_BIN=""
+if [ -s "$ROOT/config/server-runtime.json" ] && [ -s "$ROOT/config/node-runtime.json" ]; then
+  NODE_BIN="$($ROOT/bin/node_install.py resolve --root "$ROOT" --command node)" || {
+    echo "server_runner: incomplete pinned Node runtime" >&2; exit 69; }
+fi
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+PYTHON3=$(command -v python3 || echo /usr/bin/python3)
+# Read the server binary setting only after the pinned-runtime validation.
 SERVER_BIN="$HOME/.t3/bin/t3"
 if [ -s "$BIN_CONF" ]; then
   SERVER_BIN=$(cat "$BIN_CONF")
 fi
-[ -x "$SERVER_BIN" ] || { echo "server_runner: server binary not executable: $SERVER_BIN" >&2; exit 69; }
-
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-PYTHON3=$(command -v python3 || echo /usr/bin/python3)
+[ -f "$SERVER_BIN" ] || { echo "server_runner: server entrypoint missing: $SERVER_BIN" >&2; exit 69; }
 
 # flock survives execve (fd is made inheritable), so the lock is held for the
 # whole server lifetime; launchd retries every ThrottleInterval while held out.
+export NODE_BIN
 exec "$PYTHON3" - "$ROOT" "$SERVER_BIN" "$ENV_FILE" "$LOG_FILE" <<'PY'
 import fcntl, os, sys
 
@@ -92,5 +100,9 @@ env["T3CODE_PORT"] = port
 env["T3CODE_HOST"] = "127.0.0.1"
 env["T3CODE_NO_BROWSER"] = "1"
 os.chdir(os.path.join(root, "scratch-project"))
+node_bin = os.environ.get("NODE_BIN")
+if node_bin:
+    env["PATH"] = os.path.dirname(node_bin) + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    os.execve(node_bin, [node_bin, server_bin, "serve"], env)
 os.execve(server_bin, [server_bin, "serve"], env)
 PY
