@@ -983,6 +983,18 @@ def test_worker_env_plugin_scopes_tmpdir_per_process(tmp_path, monkeypatch):
         ).parent == elsewhere
         with tempfile_stdlib.TemporaryDirectory(prefix="td-", dir="/tmp") as d:
             assert Path(d).parent == root
+        # The redirect must keep TemporaryDirectory's class surface: tests
+        # read and monkeypatch .cleanup on it (CI run 43038560847 shard 5
+        # failed with "'function' object has no attribute 'cleanup'" when the
+        # redirect was a function wrapper instead of a subclass).
+        assert hasattr(tempfile_stdlib.TemporaryDirectory, "cleanup")
+        tempfile_stdlib.TemporaryDirectory.cleanup  # unbound attribute access
+        instance = tempfile_stdlib.TemporaryDirectory(prefix="td2-", dir="/tmp")
+        try:
+            assert Path(instance.name).parent == root
+            assert isinstance(instance, saved_tempdir_class)
+        finally:
+            instance.cleanup()
         # Serial switch values and missing RUNNER_TEMP never scope, and never
         # disturb an already-scoped TMPDIR.
         monkeypatch.setenv("CI_PYTEST_WORKERS", "1")

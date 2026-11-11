@@ -54,6 +54,10 @@ from pathlib import Path
 # on the parent worker's already-scoped TMPDIR.
 _SERIAL_VALUES = ("", "0", "1")
 
+# Captured at module import so the redirect subclass always derives from the
+# stdlib class, never from a previously-applied redirect (reload chains).
+_UNSCOPED_TEMPORARY_DIRECTORY = tempfile.TemporaryDirectory
+
 
 def _apply() -> Path | None:
     runner_temp = os.environ.get("RUNNER_TEMP", "").strip()
@@ -83,9 +87,13 @@ def _apply() -> Path | None:
     # roots in test fixtures) into this process's quiet root while scoping is
     # active, so /tmp itself never churns mid-run. Only the exact literal is
     # redirected: every prefix, suffix and semantic is untouched, and any
-    # other dir argument (including None) keeps stdlib behavior.
+    # other dir argument (including None) keeps stdlib behavior. mkdtemp is a
+    # plain function, so a wrapper is protocol-complete; TemporaryDirectory
+    # is a class that tests also use as a class (they read and monkeypatch
+    # its .cleanup), so the redirect must be a subclass -- a function wrapper
+    # breaks that class surface (CI run 43038560847 shard 5,
+    # "'function' object has no attribute 'cleanup'").
     unscoped_mkdtemp = tempfile.mkdtemp
-    unscoped_tempdir = tempfile.TemporaryDirectory
 
     def _scoped_dir(directory):
         return str(root) if directory == "/tmp" else directory
@@ -95,13 +103,14 @@ def _apply() -> Path | None:
             suffix=suffix, prefix=prefix, dir=_scoped_dir(dir), **kwargs
         )
 
-    def _temporary_directory(suffix=None, prefix=None, dir=None, **kwargs):
-        return unscoped_tempdir(
-            suffix=suffix, prefix=prefix, dir=_scoped_dir(dir), **kwargs
-        )
+    class _ScopedTemporaryDirectory(_UNSCOPED_TEMPORARY_DIRECTORY):
+        def __init__(self, suffix=None, prefix=None, dir=None, **kwargs):
+            super().__init__(
+                suffix=suffix, prefix=prefix, dir=_scoped_dir(dir), **kwargs
+            )
 
     tempfile.mkdtemp = _mkdtemp
-    tempfile.TemporaryDirectory = _temporary_directory
+    tempfile.TemporaryDirectory = _ScopedTemporaryDirectory
     return root
 
 
