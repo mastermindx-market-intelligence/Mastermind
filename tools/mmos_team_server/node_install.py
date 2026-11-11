@@ -43,7 +43,6 @@ REQUIRED_DIST_FILES = (
     "node_modules/playwright-core/package.json",
     "node_modules/node-pty/package.json",
 )
-BASE_ENV = {"PATH": "/usr/bin:/bin", "HOME": os.environ.get("HOME", "/")}
 
 
 class InstallError(Exception):
@@ -212,21 +211,79 @@ def idempotent_receipt(path, payload):
     private_write(path, payload)
 
 
+def tree_sha256(directory):
+    """Deterministic digest of a published tree, excluding its own receipt
+    (which embeds this digest and so cannot cover itself). Regular files
+    contribute path+size+bytes; symlinks contribute path+target. Used to
+    verify, on a retry, that an existing destination is still the tree this
+    exact archive produced — a planted receipt over a different tree must
+    not be blessed (attack finding 5)."""
+    digest = hashlib.sha256()
+    for current, dirnames, filenames in os.walk(directory):
+        dirnames.sort()
+        for name in sorted(filenames):
+            absolute = os.path.join(current, name)
+            relative = os.path.relpath(absolute, directory)
+            if relative == "INSTALL_RECEIPT.json":
+                continue
+            if os.path.islink(absolute):
+                digest.update(relative.encode("utf-8") + b"\0l" +
+                              os.readlink(absolute).encode("utf-8") + b"\0")
+                continue
+            digest.update(relative.encode("utf-8") + b"\0f" +
+                          str(os.path.getsize(absolute)).encode("ascii") + b"\0")
+            with open(absolute, "rb") as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(block)
+    return digest.hexdigest()
+
+
 def validated_root(root, create=False):
     """F4/F8: reject a symlinked root before any realpath, then require the
     resolved root to stay private, owned, and outside the Chairman's ~/.t3.
     A missing root may be created 0700; an existing loose root is refused,
-    never silently tightened (that tightening is the operator's act)."""
+    never silently tightened (that tightening is the operator's act).
+    The ~/.t3 scope is checked on the LEXICAL realpath (resolving only the
+    existing prefix) BEFORE anything is created, so a refused root never
+    leaves a freshly-created ~/.t3/<name> directory behind (attack finding 4)."""
     root = os.path.abspath(os.path.expanduser(root))
+    real_t3 = os.path.realpath(os.path.expanduser("~/.t3"))
+    probe = os.path.realpath(root)  # non-strict: resolves the existing prefix
+    if probe == real_t3 or probe.startswith(real_t3 + os.sep):
+        raise InstallError("the Chairman's ~/.t3 is out of scope")
     if create and not os.path.lexists(root):
         os.makedirs(root, mode=0o700)
     private_dir(root, create=False)
     root = os.path.realpath(root)
     private_dir(root)
-    real_t3 = os.path.realpath(os.path.expanduser("~/.t3"))
     if root == real_t3 or root.startswith(real_t3 + os.sep):
         raise InstallError("the Chairman's ~/.t3 is out of scope")
     return root
+
+
+def verified_extract(archive, expected, stage, prefix):
+    """F5: copy the archive into private staging, then hash, member-check and
+    extract that one copy from a single open file. The bytes extracted are
+    bound to the bytes verified. Used by both the fresh install and the
+    retry-repair branch (which must prove the published tree is what this
+    exact official archive produces — attack finding 5)."""
+    private_copy = os.path.join(stage, ARCHIVE)
+    shutil.copyfile(archive, private_copy)
+    os.chmod(private_copy, 0o600)
+    regular_file(private_copy)
+    with open(private_copy, "rb") as stream:
+        digest = hashlib.sha256()
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+        if digest.hexdigest() != expected:
+            raise InstallError("tampered archive: SHA-256 mismatch")
+        stream.seek(0)
+        with tarfile.open(fileobj=stream, mode="r:gz") as tf:
+            members, _ = checked_members(tf, prefix)
+            # 'data' is a second, independent safety filter; it also blocks
+            # archive-driven ownership changes.
+            tf.extractall(stage, members=members, filter="data")
+    os.unlink(private_copy)
 
 
 def install_node(root, archive, checksum, version=VERSION):
@@ -262,55 +319,74 @@ def install_node(root, archive, checksum, version=VERSION):
         "verification": "one private copy hashed, member-checked and extracted "
                         "from a single open file; receipt published by one rename",
     }
-    payload = json.dumps(receipt, indent=2) + "\n"
-    # A destination whose in-tree receipt already matches this exact payload is
-    # an interrupted-after-publish install: repair the two activation markers,
-    # never re-extract over it. Anything else refuses.
+    # A destination with this exact in-tree receipt is an interrupted-after-
+    # publish install: the receipt's fields AND its treeSha256 are verified
+    # against the tree actually on disk before any marker is repaired — a
+    # planted receipt over a tampered tree must refuse, not be blessed with
+    # the official sha attestation (attack finding 5).
     if os.path.lexists(destination):
         if os.path.islink(destination):
             raise InstallError(f"symlinked destination refused: {destination}")
         in_tree = os.path.join(destination, "INSTALL_RECEIPT.json")
+        content = None
         try:
             regular_file(in_tree)
             with open(in_tree, encoding="utf-8") as stream:
-                if stream.read() != payload:
-                    raise InstallError
-        except (InstallError, OSError):
+                content = stream.read()
+            existing = json.loads(content)
+        except (InstallError, OSError, ValueError):
             raise InstallError(
                 "destination already exists without this exact receipt; "
                 "inspect and move it away before retrying")
+        expected_fields = {
+            "schemaVersion": 1, "kind": "official-nodejs-install",
+            "version": "v" + VERSION, "architecture": "arm64", "platform": "darwin",
+            "nodePath": os.path.join(destination, "bin", "node"),
+            "installDir": destination, "archiveSha256": OFFICIAL_SHA256,
+        }
+        recorded = existing.get("treeSha256")
+        if any(existing.get(k) != v for k, v in expected_fields.items()) or \
+                not isinstance(recorded, str) or not HEX64.fullmatch(recorded):
+            raise InstallError(
+                "destination already exists without this exact receipt; "
+                "inspect and move it away before retrying")
+        if tree_sha256(destination) != recorded:
+            raise InstallError(
+                "destination tree no longer matches its receipt (treeSha256 "
+                "mismatch); inspect and move it away before retrying")
+        # A forged receipt whose digest was recomputed over a tampered tree
+        # still refuses here: the official archive is re-verified end-to-end
+        # and the published tree must be byte-identical to a fresh extraction
+        # of it (attack finding 5).
+        stage = tempfile.mkdtemp(prefix=".node-install-", dir=staging_parent)
+        try:
+            verified_extract(archive, expected, stage, prefix)
+            if tree_sha256(os.path.join(stage, prefix)) != recorded:
+                raise InstallError(
+                    "destination does not match a fresh extraction of the "
+                    "official archive; inspect and move it away before retrying")
+        finally:
+            if os.path.isdir(stage) and not os.path.islink(stage):
+                shutil.rmtree(stage)
+        payload = content  # the verified in-tree bytes are the canonical payload
         idempotent_receipt(os.path.join(runtime_dir, "install-receipt.json"), payload)
         idempotent_receipt(os.path.join(config_dir, "node-runtime.json"), payload)
         print(f"NODE_INSTALLED version=v{VERSION} node={receipt['nodePath']} "
-              f"sha256={OFFICIAL_SHA256} (activation repaired)")
-        return receipt
+              f"sha256={OFFICIAL_SHA256} (activation repaired; tree verified)")
+        return existing
     stage = tempfile.mkdtemp(prefix=".node-install-", dir=staging_parent)
     try:
-        # F5: copy the archive into private staging, then hash, member-check
-        # and extract that one copy from one open file. The bytes extracted
-        # are bound to the bytes verified.
-        private_copy = os.path.join(stage, ARCHIVE)
-        shutil.copyfile(archive, private_copy)
-        os.chmod(private_copy, 0o600)
-        regular_file(private_copy)
-        with open(private_copy, "rb") as stream:
-            digest = hashlib.sha256()
-            for block in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(block)
-            if digest.hexdigest() != expected:
-                raise InstallError("tampered archive: SHA-256 mismatch")
-            stream.seek(0)
-            with tarfile.open(fileobj=stream, mode="r:gz") as tf:
-                members, _ = checked_members(tf, prefix)
-                # 'data' is a second, independent safety filter; it also
-                # blocks archive-driven ownership changes.
-                tf.extractall(stage, members=members, filter="data")
-        os.unlink(private_copy)
+        verified_extract(archive, expected, stage, prefix)
         extracted = os.path.join(stage, prefix)
         executable = os.path.join(extracted, "bin", "node")
         info = os.lstat(executable)
         if not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o100:
             raise InstallError("extracted Node executable is missing")
+        # The receipt binds the exact tree it travels in: its digest is
+        # computed over the staged tree (self-excluded) and verified whenever
+        # this destination is later "repaired" (attack finding 5).
+        receipt["treeSha256"] = tree_sha256(extracted)
+        payload = json.dumps(receipt, indent=2) + "\n"
         # F1: the receipt travels inside the staged tree; one atomic rename
         # publishes tree and receipt together. No bytes are published without
         # their receipt, and no receipt is written after publication.
@@ -409,10 +485,14 @@ def doctor(root, label):
             pass
         answering = port if port != "unknown" and http_status(port) == "200" else "unanswered"
         node, server = runtime_paths(root)
-        version = subprocess.run([node, "--version"], cwd="/tmp", capture_output=True,
-                                 text=True, timeout=10, env=BASE_ENV)
-        if version.returncode or version.stdout.strip() != "v" + VERSION:
-            raise InstallError("installed Node version does not match its receipt")
+        # Never execute the installed binary: attesting provenance is doctor's
+        # job, and running the bytes under inspection would let a tampered tree
+        # execute attacker code (attack finding 6). The version below is
+        # receipt-attested (and the receipt's tree was digest-verified at
+        # install); the runbook has the operator run `<node> --version` once
+        # by hand when they want a live check.
+        node_version = "v" + VERSION
+        node_exec_check = "skipped-receipt-attested"
         migration = "not initialized"
         db = os.path.join(root, "home", "userdata", "statev2.sqlite")
         if os.path.isfile(db):
@@ -439,7 +519,8 @@ def doctor(root, label):
         rows = [("label", label), ("loaded", "yes" if loaded else "no"),
                 ("pid", match.group(1) if match else "none"), ("port", port),
                 ("answeringPort", answering), ("nodePath", node),
-                ("nodeVersion", "v" + VERSION), ("buildPath", server),
+                ("nodeVersion", node_version), ("nodeExecCheck", node_exec_check),
+                ("buildPath", server),
                 ("migrationHead", migration), ("serverLogBytes", size),
                 ("serverLogCapBytes", cap), ("pairingFileAgeSeconds", age)]
         for key, value in rows:

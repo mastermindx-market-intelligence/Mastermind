@@ -78,8 +78,11 @@ Worked prints: `STOPPED label=com.mastermind.t3-team port=3780 free`.
 ```
 chmod 700 ~/.mastermind/t3-team
 ```
-Worked prints nothing. (Required by the hardened installer, and a real
-hardening: the root holds `fabric.env`, logs and thread state.)
+Worked prints nothing. (Required by the hardened installer and by
+`team_server.sh install`, and a real hardening: the root holds `fabric.env`,
+logs and thread state.) The root's existing subdirs (`home/ run/ bin/ config/`
+…) do not need manual chmods: the tools tighten the ones they own to 0700, and
+`install` refuses any symlinked subdir before writing through it.
 
 ```
 /opt/homebrew/bin/python3.12 tools/mmos_team_server/node_install.py install \
@@ -132,8 +135,19 @@ tools/mmos_team_server/team_server.sh doctor --root ~/.mastermind/t3-team --labe
 ```
 Worked prints `loaded=yes`, a pid, `port=3780`, `answeringPort=3780`,
 `nodePath=…/runtime/node-v24.22.2-darwin-arm64/bin/node`,
-`nodeVersion=v24.22.2`, `buildPath=…/runtime/t3team-0.1.7-pin0770446/dist/bin.mjs`,
+`nodeVersion=v24.22.2`, `nodeExecCheck=skipped-receipt-attested`,
+`buildPath=…/runtime/t3team-0.1.7-pin0770446/dist/bin.mjs`,
 `migrationHead=80`, log size vs cap, pairing file age — and exits 0.
+`doctor` deliberately never executes the installed Node (attesting provenance
+must not run the bytes under inspection): the version line is receipt-attested,
+and the receipt's `treeSha256` bound the published tree to the verified
+official archive at install time. For one live check after migrating:
+
+```
+~/.mastermind/t3-team/runtime/node-v24.22.2-darwin-arm64/bin/node --version
+```
+
+Worked prints `v24.22.2`.
 
 #### Going back (part a)
 
@@ -184,7 +198,14 @@ mutation — no thread is deleted).
 ## What this lane changed in the repo
 
 `tools/mmos_team_server/node_install.py` (rewritten installer, F1–F8),
-`pack_server.mjs` (unchanged this session, verified end-to-end),
-`team_server.sh` (live-root probe now precedes packed-runtime resolution),
-`server_runner.sh` (unchanged this session), `attack_tsh_node_install.py`
-(unchanged), both test files, this document.
+`pack_server.mjs` (containment scope check; corrected `stateDbPath` in the
+receipt), `team_server.sh` (live-root probe before packed-runtime resolution;
+label validation on every command; fixed-string plist scan; byte-offset
+pairing capture with fatal chmod; symlinked-subdir refusal and owned-subdir
+tightening; 0700 root requirement; private umask),
+`server_runner.sh` (no default binary — unconfigured fails loudly instead of
+reaching into `~/.t3`), `attack_tsh_node_install.py` (unchanged), both test
+files, this document. A second attack round (14 findings, all in-scope ones
+fixed with tests here) also drove: receipt-bound `treeSha256` tree
+verification on the installer's repair branch, no-`~/.t3`-creation on a scope
+refusal, and a doctor that never executes the installed Node.

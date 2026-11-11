@@ -17,6 +17,11 @@
 # <root>/fabric.env (0600, written by seed_dev_home.py), sourced by the runner —
 # never from the plist text.
 set -u
+# Everything this tool creates (root subdirs, port file, server.log,
+# access.txt) is private state or credential-bearing: create it 0700/0600
+# from the start instead of chmod-racing after a world-readable write
+# (attack findings 8 and 9).
+umask 077
 
 SELFTEST_ONLY=0
 
@@ -30,6 +35,9 @@ T3_DEV_LIB_ONLY=1
 # shellcheck disable=SC1090
 . "$T3_DEV"
 T3_DEV_LIB_ONLY=0
+# t3_dev.sh redefines die() with its own prefix; re-assert ours so this
+# tool's refusals are attributed correctly (attack finding 14).
+die() { echo "team_server: $1" >&2; exit 1; }
 # t3_dev.sh guards reused below: realpath_of, check_home_safe (HOME_DIR),
 # port_forbidden, port_busy. Its own DEV_ROOT/HOME_DIR are re-pointed per call.
 
@@ -109,6 +117,11 @@ cmd_selftest() {
 require_root_label() {
   [ -n "$ROOT" ] || die "missing --root"
   [ -n "$LABEL" ] || die "missing --label"
+  # Every command that builds a plist path from $LABEL must go through this
+  # check: an unvalidated label reaches rm -f, launchctl bootstrap and the
+  # plist heredoc write (attack finding 2).
+  label_valid "$LABEL" || die "invalid label: $LABEL"
+  [ -L "$ROOT" ] && die "refusing symlinked root: $ROOT"
   ROOT=$(root_is_safe "$ROOT") || die "refusing unsafe root: $ROOT (at/inside/resolves into $HOME/.t3)"
 }
 
@@ -124,19 +137,25 @@ wait_http() {
 
 # Capture the LAST complete pairing banner (never print it) into
 # <root>/run/access.txt 0600. Each server start mints a fresh one-time token
-# and launchd appends banners across restarts, so stale blocks must not win.
+# and launchd APPENDS banners across restarts, so only bytes appended after
+# this call began may be captured: the previous banner in the log is a dead
+# token (attack finding 1). The banner is read from the byte offset the log
+# had when capture started.
 capture_access() {
   _log="$ROOT/run/server.log"; _acc="$ROOT/run/access.txt"
+  _off=$(stat -f%z "$_log" 2>/dev/null || echo 0)
   _i=0
   while [ "$_i" -lt 20 ]; do
-    awk '/^(Connection string|Token|Pairing URL):/ {
+    tail -c +"$((_off + 1))" "$_log" 2>/dev/null | awk '/^(Connection string|Token|Pairing URL):/ {
       blk = blk $0 "\n"
       if ($0 ~ /^Pairing URL:/) { last = blk; blk = "" }
-    } END { printf "%s", last }' "$_log" > "$_acc" 2>/dev/null || true
+    } END { printf "%s", last }' > "$_acc" 2>/dev/null || true
     grep -q '^Pairing URL:' "$_acc" 2>/dev/null && break
     _i=$((_i + 1)); sleep 1
   done
-  chmod 600 "$_acc" 2>/dev/null || true
+  # umask 077 made the redirect create it 0600; a chmod failure here is a
+  # live credential sitting world-readable — fatal, never swallowed.
+  chmod 600 "$_acc" 2>/dev/null || die "cannot secure $_acc"
 }
 
 cmd_install() {
@@ -165,7 +184,9 @@ cmd_install() {
     [ -d "$_d" ] || return 0
     for _p in "$_d"/*.plist; do
       [ -f "$_p" ] || continue
-      grep -q "<string>$ROOT/bin/server_runner.sh</string>" "$_p" 2>/dev/null || continue
+      # -F: $ROOT is data, never a regex. A root containing `[` made grep exit
+      # 2 (skip the plist); `.*` false-matched a different root (attack finding 3).
+      grep -qF "<string>$ROOT/bin/server_runner.sh</string>" "$_p" 2>/dev/null || continue
       _pl=$(basename "$_p" .plist)
       [ "$_pl" = "$LABEL" ] || die "root already used by label $_pl ($_p); one label per root"
     done
@@ -216,6 +237,29 @@ PYLOCK
       || die "pinned Node receipt or executable is incomplete"
   fi
   [ -f "$SERVER_BIN" ] || die "server entrypoint does not exist: $SERVER_BIN"
+  # install (including the --server-bin rollback path, which skips the Python
+  # installer's own validation) applies the same root rule the installer does:
+  # an existing root must be a real 0700 directory we own (attack finding 11).
+  if [ -e "$ROOT" ]; then
+    [ -d "$ROOT" ] || die "root is not a directory: $ROOT"
+    [ "$(stat -f '%Lp' "$ROOT")" = "700" ] \
+      || die "root must be mode 0700 (chmod 700 $ROOT); it holds fabric.env, logs and thread state"
+  fi
+  # mkdir -p follows symlinked subdirs; a pre-planted home -> /tmp/victim link
+  # would let the copy/port-write below land outside the root (attack finding
+  # 10). Refuse any symlink among the subdirs we create or write through.
+  for _d in home home/userdata run bin config scratch-project claude-home; do
+    [ -L "$ROOT/$_d" ] && die "refusing symlinked subdir: $ROOT/$_d"
+  done
+  [ -L "$ROOT/fabric.env" ] && die "refusing symlinked fabric.env: $ROOT/fabric.env"
+  # Pre-existing owned subdirs (a legacy root's 0755 home/ run/ bin/) are
+  # tightened to 0700, mirroring the installer's owned-subdir rule; the ROOT
+  # itself is never auto-tightened — that stays the operator's explicit act.
+  for _d in home home/userdata run bin config scratch-project claude-home; do
+    if [ -d "$ROOT/$_d" ]; then
+      chmod 700 "$ROOT/$_d" || die "cannot tighten $ROOT/$_d to 0700"
+    fi
+  done
   mkdir -p "$ROOT/home/userdata" "$ROOT/run" "$ROOT/bin" "$ROOT/config" "$ROOT/scratch-project" "$ROOT/claude-home"
   cp "$REPO_DIR/tools/mmos_team_server/server_runner.sh" "$ROOT/bin/server_runner.sh"
   cp "$REPO_DIR/tools/mmos_team_server/node_install.py" "$ROOT/bin/node_install.py"

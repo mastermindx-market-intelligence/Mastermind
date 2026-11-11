@@ -165,6 +165,55 @@ class TestInstall:
             node_install.install_node(str(link / "server"),
                                       str(archive), str(checksum))
 
+    def test_scope_refusal_creates_no_t3_directory(self, inputs, tmp_path, monkeypatch):
+        # Attack finding 4: the ~/.t3 scope check runs on the lexical realpath
+        # BEFORE makedirs, so a refused root never leaves a created ~/.t3/<x>
+        # behind.
+        root, archive, checksum = inputs
+        fake_home = tmp_path / "fresh-home"
+        fake_home.mkdir(mode=0o700)
+        monkeypatch.setenv("HOME", str(fake_home))
+        with pytest.raises(node_install.InstallError, match="out of scope"):
+            node_install.install_node(str(fake_home / ".t3" / "team"),
+                                      str(archive), str(checksum))
+        assert not (fake_home / ".t3").exists()
+
+    def test_retry_repair_refuses_tampered_tree(self, inputs):
+        # Attack finding 5: a receipt planted over a DIFFERENT tree must not be
+        # blessed by the repair branch; the treeSha256 in the receipt is
+        # verified against the tree actually on disk.
+        root, archive, checksum = inputs
+        node_install.install_node(str(root), str(archive), str(checksum))
+        target = root / "runtime" / PREFIX / "bin" / "node"
+        target.write_text("replaced-by-attacker\n")
+        target.chmod(0o700)
+        with pytest.raises(node_install.InstallError, match="tree no longer matches"):
+            node_install.install_node(str(root), str(archive), str(checksum))
+        # a receipt with wrong fixed fields is refused as not-this-receipt
+        planted = root / "runtime" / PREFIX / "INSTALL_RECEIPT.json"
+        original = json.loads(planted.read_text())
+        original["version"] = "v0.0.0"
+        planted.write_text(json.dumps(original, indent=2) + "\n")
+        with pytest.raises(node_install.InstallError, match="without this exact receipt"):
+            node_install.install_node(str(root), str(archive), str(checksum))
+        # even a FULLY forged receipt — correct fields plus a treeSha256
+        # recomputed over the tampered tree — refuses: the published tree must
+        # still be byte-identical to a fresh extraction of the official archive.
+        forged = json.loads(planted.read_text())
+        forged["version"] = "v" + node_install.VERSION
+        forged["treeSha256"] = node_install.tree_sha256(root / "runtime" / PREFIX)
+        planted.write_text(json.dumps(forged, indent=2) + "\n")
+        with pytest.raises(node_install.InstallError, match="fresh extraction"):
+            node_install.install_node(str(root), str(archive), str(checksum))
+
+    def test_retry_repair_verifies_and_reports_tree(self, inputs, capsys):
+        # The honest repair path names what it verified (attack finding 5).
+        root, archive, checksum = inputs
+        node_install.install_node(str(root), str(archive), str(checksum))
+        (root / "config" / "node-runtime.json").unlink()
+        node_install.install_node(str(root), str(archive), str(checksum))
+        assert "activation repaired; tree verified" in capsys.readouterr().out
+
     def test_foreign_uid_input_rejected(self, inputs, monkeypatch):
         root, archive, checksum = inputs
         real_stat = os.stat
@@ -402,6 +451,23 @@ class TestDoctor:
                           side_effect=node_install.InstallError("missing packed runtime")):
             assert node_install.doctor(str(root), "com.mastermind.t3-team-dev-tsh") == 1
         assert "run/access.txt" not in str(node_install.doctor.__code__.co_consts)
+
+    def test_doctor_never_executes_the_installed_node(self, tmp_path, capsys):
+        # Attack finding 6: doctor attests provenance and must never execute
+        # the binary under inspection; the version is receipt-attested.
+        # launchctl probing is allowed; running the node path is not.
+        from unittest.mock import Mock, patch
+        root, node, _ = fake_runtime(tmp_path)
+        (root / "run").mkdir()
+        (root / "run" / "port").write_text("50809\n")
+        def guard(argv, **kwargs):
+            assert list(argv)[0] != node, f"doctor executed the installed binary: {argv}"
+            return Mock(returncode=1, stdout="")
+        with patch.object(node_install.subprocess, "run", side_effect=guard):
+            node_install.doctor(str(root), "com.mastermind.t3-team-dev-tsh")
+        out = capsys.readouterr().out
+        assert "nodeExecCheck=skipped-receipt-attested" in out
+        assert f"nodeVersion=v{node_install.VERSION}" in out
 
     def test_attack_reproducer_exists(self):
         attack = (REPO / "tools/mmos_team_server/attack_tsh_node_install.py").read_text()

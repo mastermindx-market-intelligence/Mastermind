@@ -27,7 +27,10 @@ function privateDir(dir) {
   }
 }
 privateDir(root);
-if (root === fs.realpathSync(path.join(os.homedir(), ".t3"))) throw new Error("~/.t3 is out of scope");
+// Scope is containment, not equality: a server root nested INSIDE ~/.t3 is as
+// out of scope as ~/.t3 itself (attack finding 7).
+const realT3 = fs.realpathSync(path.join(os.homedir(), ".t3"));
+if (root === realT3 || root.startsWith(realT3 + path.sep)) throw new Error("~/.t3 is out of scope");
 for (const name of ["apps/server/dist/bin.mjs", "apps/server/dist/claude-history-worker.mjs",
   "apps/server/dist/client/index.html", "apps/server/package.json", "package.json",
   "pnpm-workspace.yaml", "scripts/build-desktop-artifact.ts", "scripts/lib/cli-external-packages.ts"]) {
@@ -154,7 +157,7 @@ try {
     sourceAtBuild: source, buildCommand: "vp run --filter t3 build",
     productionDependencyCommand: STAGE_INSTALL_ARGS.join(" "),
     productionDependencies: dependencies,
-    buildDir: finalDist, serverBin: path.join(finalDist, "bin.mjs"), stateDbPath: path.join(root, "home/state/statev2.sqlite"),
+    buildDir: finalDist, serverBin: path.join(finalDist, "bin.mjs"), stateDbPath: path.join(root, "home/userdata/statev2.sqlite"),
     platform: "darwin", architecture: "arm64",
     runtimeAssets: "bundled server, web client, workers, production externals, optional native monitor",
   };

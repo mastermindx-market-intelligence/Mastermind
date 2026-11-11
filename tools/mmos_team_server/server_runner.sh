@@ -53,9 +53,19 @@ fi
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 PYTHON3=$(command -v python3 || echo /usr/bin/python3)
 # Read the server binary setting only after the pinned-runtime validation.
-SERVER_BIN="$HOME/.t3/bin/t3"
+# There is deliberately NO default binary: absent an explicit config/server-bin
+# (legacy rollback) or a complete packed runtime, guessing one would exec an
+# unvalidated binary outside this root — the pre-lane default reached into the
+# Chairman's ~/.t3 (attack finding 12). Fail loudly instead.
+SERVER_BIN=""
 if [ -s "$BIN_CONF" ]; then
   SERVER_BIN=$(cat "$BIN_CONF")
+elif [ -s "$ROOT/config/server-runtime.json" ] && [ -s "$ROOT/config/node-runtime.json" ]; then
+  SERVER_BIN="$($ROOT/bin/node_install.py resolve --root "$ROOT" --command serve)" || {
+    echo "server_runner: packed runtime incomplete (resolve failed)" >&2; exit 69; }
+else
+  echo "server_runner: no server binary configured ($BIN_CONF missing and no packed runtime); refusing to guess a default" >&2
+  exit 78
 fi
 [ -f "$SERVER_BIN" ] || { echo "server_runner: server entrypoint missing: $SERVER_BIN" >&2; exit 69; }
 
