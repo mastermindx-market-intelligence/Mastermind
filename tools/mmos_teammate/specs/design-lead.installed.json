@@ -23,5 +23,6 @@
   "teammates": {
     "Assurance": "5565c810-ded7-48ca-964e-8c9a5e0be15c",
     "Design Lead": "ca4929d5-a725-4f62-a9c5-d3c66a281e30"
-  }
+  },
+  "thread_url_template": "http://127.0.0.1:3780/043d9de9-6b15-4588-9c63-2a3166813dd5/{thread}"
 }

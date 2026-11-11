@@ -1076,30 +1076,390 @@ def test_revision_carries_the_task_when_the_thread_never_had_it():
     assert "Write a three-line summary." not in t3b.sends[0]
 
 
-def test_nothing_is_sent_while_a_question_waits_and_the_note_is_said_once():
-    # Seen on the installed app (MAS-9): a turn waiting for a person held the
-    # thread, so each wake queued the same revision again and added the same
-    # "waiting" line to the issue.
+# --- a question in the teammate's conversation (MAS-9, 2026-11-10) ----------
+#
+# Three faults seen on the installed app: nobody woke the task after the
+# person answered; half-finished text of a run that had not ended was
+# delivered as the answer; the waiting line told the reader nothing to do.
+# The carrier now stays with a waiting question in the same run, a run that
+# has not ended is never a reply, and the waiting line says what to do.
+
+
+class Clock:
+    """A fake clock: nap(seconds) advances it. No real sleeping anywhere."""
+
+    def __init__(self, start=0.0):
+        self.now = float(start)
+
+    def time(self):
+        return self.now
+
+    def nap(self, seconds):
+        self.now += seconds
+
+
+def th(active=None, latest=None, pending=0):
+    """A T3 thread dict shaped like `t3 thread show --json`: activeRunId and
+    latestRunId are null when no turn is live."""
+    return {"threadId": "th-1", "activeRunId": active, "latestRunId": latest,
+            "pendingRequestCount": pending}
+
+
+class ScriptedT3(FakeT3):
+    """A thread whose state advances one step per sleep and per send. Each
+    state is a (thread dict, messages) snapshot served to every read until
+    the next advance; the last state persists. ask_on_send makes send() stop
+    on a question exactly like `t3 thread send --wait` exiting 2 after the
+    message went in."""
+
+    def __init__(self, states, replies=None, ask_on_send=False):
+        super().__init__(replies=replies)
+        assert states, "a scripted thread needs at least one state"
+        self.states = list(states)
+        self.step = 0
+        self.ask_on_send = ask_on_send
+        self.thread_id = "th-1"
+
+    def _state(self):
+        return self.states[min(self.step, len(self.states) - 1)]
+
+    def messages(self, count=60):
+        thread, msgs = self._state()
+        return dict(thread), [tuple(m) for m in msgs]
+
+    def nap(self, seconds):
+        self.step += 1
+
+    def send(self, message):
+        self.step += 1  # a send is a turn: the thread moves on
+        if self.ask_on_send:
+            self.sends.append(message)
+            raise wc.NeedsHuman("th-1")
+        return FakeT3.send(self, message)
+
+
+def wait_opts(clock, t3, **over):
+    """Opts for the question wait: an injected clock and sleep (each sleep
+    advances both), so a test scripts time and thread state together."""
+    def nap(seconds):
+        clock.nap(seconds)
+        t3.nap(seconds)
+    opts = {"clock": clock.time, "sleep": nap,
+            "question_wait_sec": 300, "question_poll_interval_sec": 10,
+            "roster": {"Assurance": "ag-1"}}
+    opts.update(over)
+    return opts
+
+
+def test_scan_marker_run_not_ended_is_never_a_reply():
+    # Rule A (fault 2, MAS-9): assistant text of a run that has not ended is
+    # mid-turn prose, never the answer.
+    op = "pc-is-1-abc"
+    msgs = [("user", "r1", f"[{op}] the task"),
+            ("assistant", "r1", "I've exhausted every reachable source")]
+    # the marker's run is still the thread's active run -> pending
+    assert wc.scan_marker(msgs, op, th(active="r1", latest="r1")) == \
+        ("pending", None)
+    # a question waits and the marker's run is the latest -> pending
+    assert wc.scan_marker(msgs, op, th(latest="r1", pending=1)) == \
+        ("pending", None)
+    # the run ended (no active run, no question) -> the text is the reply
+    assert wc.scan_marker(msgs, op, th(latest="r1", pending=0)) == \
+        ("reply", "I've exhausted every reachable source")
+    assert wc.scan_marker(msgs, op, th(active="r2", latest="r1", pending=0)) == \
+        ("reply", "I've exhausted every reachable source")
+    # a thread dict without the fields behaves as before
+    assert wc.scan_marker(msgs, op, {"threadId": "th-1"}) == \
+        ("reply", "I've exhausted every reachable source")
+    assert wc.scan_marker([("user", "r1", f"[{op}] t")], op,
+                          th(active="r1")) == ("pending", None)
+    # no thread dict at all (old call shape) behaves as before
+    assert wc.scan_marker(msgs, op) == ("reply", "I've exhausted every reachable source")
+
+
+def test_question_during_turn_carrier_stays_and_finishes():
+    # Rule B, entry 1: the send itself stops on a question. One waiting line,
+    # the question answered on the third poll, the final reply delivered
+    # once, exactly one send.
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    asked = [("user", "r1", f"[{op}] the task"),
+             ("assistant", "r1", "I've exhausted every reachable source")]
+    answered = asked + [("assistant", "r1", "the final answer")]
+    t3 = ScriptedT3(states=[
+        (th(pending=0), []),                                  # before the send
+        (th(active="r1", latest="r1", pending=1), asked),     # mid-turn question
+        (th(active="r1", latest="r1", pending=1), asked),     # poll 1
+        (th(active="r1", latest="r1", pending=1), asked),     # poll 2
+        (th(latest="r1", pending=0), answered),               # poll 3: done
+    ], ask_on_send=True)
     pc = FakePaperclip(issues=one_issue())
-    t3 = FakeT3(pending_requests=1)
-    for _ in range(3):
-        with pytest.raises(wc.NeedsHuman):
-            run(pc, t3)
+    opts = wait_opts(Clock(), t3)
+    assert run(pc, t3, opts) == 0
+    assert len(t3.sends) == 1                       # exactly one send
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"]
+    assert bodies[0] == wc.waiting_note(opts, "th-1")   # one waiting line
+    assert bodies[1:] == ["the final answer"]       # delivered once
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_question_waiting_before_send_clears_then_sends_once():
+    # Rule B, entry 3: a question was already waiting, so send_once raised
+    # before sending. The carrier waits for the clear, then sends exactly once.
+    t3 = ScriptedT3(states=[
+        (th(active="r0", latest="r0", pending=1),
+         [("user", "r0", "an older question")]),
+        (th(latest="r0", pending=0),
+         [("user", "r0", "an older question"),
+          ("assistant", "r0", "older answer")]),
+    ], replies=["fresh answer"])
+    pc = FakePaperclip(issues=one_issue())
+    opts = wait_opts(Clock(), t3)
+    assert run(pc, t3, opts) == 0
+    assert len(t3.sends) == 1          # sent only after the question cleared
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"]
+    assert bodies[0] == wc.waiting_note(opts, "th-1")
+    assert bodies[1:] == ["fresh answer"]
+
+
+def test_marker_sent_by_another_wake_means_zero_sends():
+    # Rule B, entry 3, the other half: the question cleared and another wake
+    # had already sent the marker meanwhile, so this run sends nothing.
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    other = [("user", "r1", f"[{op}] the task"),
+             ("assistant", "r1", "done by the other wake")]
+    t3 = ScriptedT3(states=[
+        (th(active="r0", latest="r0", pending=1),
+         [("user", "r0", "an older question")]),
+        (th(latest="r1", pending=0), other),
+    ], replies=["SHOULD NOT SEND"])
+    pc = FakePaperclip(issues=one_issue())
+    opts = wait_opts(Clock(), t3)
+    assert run(pc, t3, opts) == 0
+    assert t3.sends == []              # nothing sent; the marker rule holds
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"]
+    assert bodies[1:] == ["done by the other wake"]
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_question_wait_deadline_is_needs_human_and_releases_nothing():
+    # Rule C: question_wait_sec ends the wait with NeedsHuman; the issue is
+    # NOT released (no release note, status stays in_progress) and the
+    # waiting line was said exactly once.
+    t3 = ScriptedT3(states=[(th(active="r0", latest="r0", pending=1),
+                             [("user", "r0", "waiting on a person")])])
+    pc = FakePaperclip(issues=one_issue())
+    opts = wait_opts(Clock(), t3, question_wait_sec=30)
+    with pytest.raises(wc.NeedsHuman):
+        run(pc, t3, opts)
     assert t3.sends == []
     notes = [c for c in pc.calls if c[0] == "comment"]
-    assert [c[2] for c in notes] == [wc.WAITING_NOTE]
+    assert len(notes) == 1 and notes[0][2] == wc.waiting_note(opts, "th-1")
+    assert "did not complete" not in notes[0][2]
+    assert pc.issues["is-1"]["status"] == "in_progress"  # not released
+
+
+def test_run_budget_is_the_nearer_question_deadline():
+    # Rule C: run_budget_sec from process start caps the wait even when
+    # question_wait_sec would allow much longer.
+    t3 = ScriptedT3(states=[(th(active="r0", latest="r0", pending=1),
+                             [("user", "r0", "waiting on a person")])])
+    pc = FakePaperclip(issues=one_issue())
+    opts = wait_opts(Clock(1000.0), t3, question_wait_sec=900,
+                     run_budget_sec=50, run_start=1000.0)
+    with pytest.raises(wc.NeedsHuman):
+        run(pc, t3, opts)
+    assert t3.sends == []
+    notes = [c for c in pc.calls if c[0] == "comment"]
+    assert len(notes) == 1 and notes[0][2] == wc.waiting_note(opts, "th-1")
+    assert pc.issues["is-1"]["status"] == "in_progress"
+
+
+def test_wait_for_reply_deadline_with_question_is_needs_human():
+    # Rule C: a pending marker whose turn is simply slow stays CarrierError
+    # at the deadline; a question waiting at that deadline is NeedsHuman.
+    op = "pc-is-1-wait"
+    msgs = [("user", "r1", f"[{op}] the task")]
+    t3 = ScriptedT3(states=[
+        (th(latest="r1", pending=0), msgs),                  # slow, no question
+        (th(active="r1", latest="r1", pending=1), msgs),     # then it asked
+    ])
+    clock = Clock()
+
+    def nap(seconds):
+        clock.nap(seconds)
+        t3.nap(seconds)
+    opts = {"clock": clock.time, "sleep": nap,
+            "pending_timeout_sec": 20, "poll_interval_sec": 10}
+    with pytest.raises(wc.NeedsHuman):
+        wc.wait_for_reply(t3, op, opts)
+
+
+def test_wait_for_reply_deadline_without_question_is_carrier_error():
+    op = "pc-is-1-wait"
+    t3 = ScriptedT3(states=[(th(latest="r1", pending=0),
+                             [("user", "r1", f"[{op}] the task")])])
+    clock = Clock()
+
+    def nap(seconds):
+        clock.nap(seconds)
+        t3.nap(seconds)
+    opts = {"clock": clock.time, "sleep": nap,
+            "pending_timeout_sec": 20, "poll_interval_sec": 10}
+    with pytest.raises(wc.CarrierError):
+        wc.wait_for_reply(t3, op, opts)
+
+
+def test_waiting_note_with_template_and_without():
+    # Rule D: the line names the teammate, links the conversation when a
+    # loopback template is configured, and says what to do and for how long.
+    os.environ["PAPERCLIP_AGENT_ID"] = "ag-1"
+    tpl = "http://127.0.0.1:3774/thread/{thread}"
+    note = wc.waiting_note({"roster": {"Assurance": "ag-1", "Design Lead": "ag-2"},
+                            "question_wait_sec": 900,
+                            "thread_url_template": tpl}, "mcp:a-1")
+    assert note == (
+        "[t2-carrier] Assurance asked a question in its conversation and is "
+        "waiting for your answer: http://127.0.0.1:3774/thread/mcp%3Aa-1. "
+        "Answer it there. This task continues by itself if the answer "
+        "arrives within 15 minutes. After that, add a comment here to wake "
+        "it.")
+    plain = wc.waiting_note({"roster": {"Assurance": "ag-1"},
+                             "question_wait_sec": 900}, "mcp:a-1")
+    assert plain == (
+        "[t2-carrier] Assurance asked a question in its conversation and is "
+        "waiting for your answer in its team conversation. Answer it there. "
+        "This task continues by itself if the answer arrives within 15 "
+        "minutes. After that, add a comment here to wake it.")
+    # a non-loopback template is ignored, never followed
+    bad = wc.waiting_note({"roster": {"Assurance": "ag-1"},
+                           "question_wait_sec": 900,
+                           "thread_url_template": "https://chat.example/t/{thread}"},
+                          "mcp:a-1")
+    assert bad == plain
+    # no roster entry for this agent -> the generic name; minutes follow the key
+    generic = wc.waiting_note({"roster": {}, "question_wait_sec": 1200}, "t-1")
+    assert generic.startswith("[t2-carrier] The teammate asked a question")
+    assert "within 20 minutes" in generic and "http" not in generic
+
+
+def test_thread_url_template_law():
+    tpl = "http://localhost:3939/team/{thread}"
+    assert wc.thread_url(tpl, "run:th:1") == \
+        "http://localhost:3939/team/run%3Ath%3A1"
+    assert wc.thread_url(None, "t") is None
+    assert wc.thread_url(tpl, None) is None
+    assert wc.thread_url("https://127.0.0.1:80/{thread}", "t") is None
+    assert wc.thread_url("http://127.0.0.1.evil.test:80/{thread}", "t") is None
+    assert wc.thread_url("http://127.0.0.1:3774/thread/", "t") is None
+    assert wc.thread_url("http://127.0.0.1:3774/{thread}/{thread}", "t") is None
+
+
+def test_feedback_round_waits_with_the_question_too():
+    # Rule B on the board-feedback path, including the bound in_review route
+    # that runs before run_carrier's try block: the waiting line is posted
+    # there too.
+    op = fb_op()
+    pc = FakePaperclip(issues=feedback_issue())
+    pc.comment_rows["is-1"] = [
+        {"body": "answer v1", "authorType": "agent"},
+        {"body": "the numbers were wrong", "authorType": "user"}]
+    pc.interaction_rows = [
+        {"kind": "request_confirmation", "status": "rejected",
+         "result": {"reason": "line count is off"}}]
+    asked = [("user", "r1", f"[{op}-rev1] board declined")]
+    answered = asked + [("assistant", "r1", "answer v2, now correct")]
+    t3 = ScriptedT3(states=[
+        (th(pending=0), [("user", "r0", f"[{op}] the task"),
+                         ("assistant", "r0", "answer v1")]),
+        (th(active="r1", latest="r1", pending=1), asked),
+        (th(latest="r1", pending=0), answered),
+    ], ask_on_send=True)
+    opts = wait_opts(Clock(), t3)
+    assert run_bound(pc, t3, opts) == 0
+    assert len(t3.sends) == 1 and f"[{op}-rev1]" in t3.sends[0]
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"]
+    assert bodies[0] == wc.waiting_note(opts, "th-1")
+    assert bodies[1:] == ["answer v2, now correct"]
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_return_wake_waits_with_the_question_too():
+    # Rule B on the issue_blockers_resolved return path.
+    issues, ask_op, child = blocked_parent_with_done_child()
+    ret_op = f"{ask_op}-ret"
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [dict(child)]
+    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines"}]
+    asked = [("user", "r1", f"[{ret_op}] the ask came back")]
+    answered = asked + [("assistant", "r1", "FINAL: the file has 12 lines")]
+    t3 = ScriptedT3(states=[
+        (th(pending=0), []),
+        (th(active="r1", latest="r1", pending=1), asked),
+        (th(latest="r1", pending=0), answered),
+    ], ask_on_send=True)
+    opts = wait_opts(Clock(), t3)
+    assert run_with_roster(pc, t3, {}, opts) == 0
+    assert len(t3.sends) == 1 and f"[{ret_op}]" in t3.sends[0]
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"]
+    assert bodies[0] == wc.waiting_note(opts, "th-1")
+    assert bodies[1:] == ["FINAL: the file has 12 lines"]
+
+
+def test_mid_turn_text_is_never_delivered_mas9():
+    # Fault 2 exactly as it happened (MAS-9): assistant text of the marker's
+    # run exists, the run is still active with a question waiting. Nothing is
+    # delivered; the run stays with the question to its deadline.
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    msgs = [("user", "r1", f"[{op}] the task"),
+            ("assistant", "r1", "I've exhausted every reachable source")]
+    t3 = ScriptedT3(states=[(th(active="r1", latest="r1", pending=1), msgs)])
+    pc = FakePaperclip(issues={
+        "is-1": {"identifier": "MMO-1", "status": "in_progress",
+                 "title": "Summarize file X",
+                 "description": "Write a three-line summary."}})
+    opts = wait_opts(Clock(), t3, question_wait_sec=30)
+    with pytest.raises(wc.NeedsHuman):
+        run(pc, t3, opts)
+    assert t3.sends == []
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"]
+    assert len(bodies) == 1 and bodies[0] == wc.waiting_note(opts, "th-1")
+    assert "exhausted every reachable source" not in "".join(bodies)
+    assert pc.issues["is-1"]["status"] == "in_progress"
+
+
+def test_nothing_is_sent_while_a_question_waits_and_the_note_is_said_once():
+    # Faults 1 and 3 (MAS-9): while a question waits nothing is sent, the
+    # waiting line is said once, and the deadline leaves the issue in_progress.
+    # The carrier used to exit at once; it now stays with the question, so
+    # the clock and sleep are injected and the wait is bounded by
+    # question_wait_sec.
+    pc = FakePaperclip(issues=one_issue())
+    t3 = ScriptedT3(states=[(th(active="r0", latest="r0", pending=1),
+                             [("user", "r0", "an older question")])])
+    opts = wait_opts(Clock(), t3, question_wait_sec=60)
+    for _ in range(3):
+        with pytest.raises(wc.NeedsHuman):
+            run(pc, t3, opts)
+    assert t3.sends == []
+    notes = [c for c in pc.calls if c[0] == "comment"]
+    assert len(notes) == 1 and notes[0][2] == wc.waiting_note(opts, "th-1")
     # once the question is answered the task goes out exactly once
-    t3.pending_requests = 0
-    assert run(pc, t3) == 0
+    t3.states.append((th(latest="r0", pending=0),
+                      [("user", "r0", "an older question"),
+                       ("assistant", "r0", "asked and answered")]))
+    assert run(pc, t3, opts) == 0
     assert len(t3.sends) == 1
 
 
 def test_waiting_note_is_repeated_after_the_board_writes():
     pc = FakePaperclip(issues=one_issue())
-    t3 = FakeT3(pending_requests=1)
+    t3 = ScriptedT3(states=[(th(active="r0", latest="r0", pending=1),
+                             [("user", "r0", "an older question")])])
+    opts = wait_opts(Clock(), t3, question_wait_sec=60)
     with pytest.raises(wc.NeedsHuman):
-        run(pc, t3)
+        run(pc, t3, opts)
     pc.comment_rows["is-1"].append({"body": "any news?", "authorType": "user"})
     with pytest.raises(wc.NeedsHuman):
-        run(pc, t3)
-    assert [c[2] for c in pc.calls if c[0] == "comment"] == [wc.WAITING_NOTE] * 2
+        run(pc, t3, opts)
+    assert [c[2] for c in pc.calls if c[0] == "comment"] == \
+        [wc.waiting_note(opts, "th-1")] * 2

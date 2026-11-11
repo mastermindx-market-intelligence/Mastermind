@@ -22,10 +22,19 @@ pending marker is waited on (the turn may still be running server-side), a
 completed marker's reply is reconciled onto the issue, and the task is never
 sent twice. The marker's user turn and its answer share a T3 runId, so the
 reply is bound to that run — a later unrelated turn in the thread can never
-replace it (adversarial finding 2026-11-10). Delivery is idempotent across
-runs: an already-posted comment body and an already-created confirmation are
-both detected and skipped (this build answers a re-POSTed confirmation key
-from another run with 409, not a dedupe).
+replace it (adversarial finding 2026-11-10), and a run that has not ended is
+never a reply even when it already shows assistant text (MAS-9, 2026-11-10:
+half-finished text was delivered as the answer). Delivery is idempotent
+across runs: an already-posted comment body and an already-created
+confirmation are both detected and skipped (this build answers a re-POSTed
+confirmation key from another run with 409, not a dedupe).
+
+When the teammate stops on a question for a person, this same carrier run
+stays with it (MAS-9: nothing used to wake the task after the answer): it
+posts one line that says where to answer and for how long, then polls the
+thread until the marker's turn ends, bounded by question_wait_sec and the
+carrier's own run budget. An unanswered question ends the run with the issue
+left in_progress — a board comment on the issue wakes it again.
 See T2_TEAMMATE_BINDING_AND_DISPATCH.md.
 """
 import hashlib
@@ -444,14 +453,31 @@ def choose_issue(rows, my_run_id=None):
                                  r.get("updatedAt") or ""))
 
 
-def scan_marker(messages, op):
+def _marker_run_open(marker_run, thread):
+    """True when the marker's turn has not ended (rule A). A run that has not
+    ended is never a reply, whatever assistant text it already shows: on
+    MAS-9 half-finished text of a run still waiting on its question was
+    delivered as the answer. The turn is open when it is the thread's active
+    run, or when a human question waits and it is the latest run. A thread
+    dict without these fields says nothing (behave as before)."""
+    if not isinstance(thread, dict) or not marker_run:
+        return False
+    if thread.get("activeRunId") == marker_run:
+        return True
+    return _pending_requests(thread) > 0 and \
+        thread.get("latestRunId") == marker_run
+
+
+def scan_marker(messages, op, thread=None):
     """('reply', text) | ('pending', None) | (None, None) for `op` in a thread.
 
-    `messages` is oldest-first [(role, run_id, text)] as returned by
-    T3Thread.messages(). The marker's user message and its answer share a T3
-    runId; only assistant messages of THAT run are the answer (a later turn —
-    a human poke, an operator side message — has a different runId and must
-    never replace it). A marker whose run has not answered yet is pending.
+    `messages` is oldest-first [(role, run_id, text)] and `thread` the same
+    read's thread dict, both as returned by T3Thread.messages(). The marker's
+    user message and its answer share a T3 runId; only assistant messages of
+    THAT run are the answer (a later turn — a human poke, an operator side
+    message — has a different runId and must never replace it). A marker
+    whose run has not answered yet is pending — including when its run is
+    still open by rule A, even if assistant text of that run exists.
     """
     tag = f"[{op}]"
     marker_run = None
@@ -466,7 +492,7 @@ def scan_marker(messages, op):
     for role, run_id, text in messages[seen_at:]:
         if role == "assistant" and run_id == marker_run and (text or "").strip():
             reply = text
-    if reply is None:
+    if reply is None or _marker_run_open(marker_run, thread):
         return "pending", None
     return "reply", reply
 
@@ -681,10 +707,6 @@ class T3Thread:
         return data.get("thread") or {}, out
 
 
-WAITING_NOTE = ("[t2-carrier] teammate is waiting for an answer in its T3 "
-                "thread; issue left in_progress")
-
-
 def send_once(t3, message):
     """Send `message` unless a question is already waiting in the thread.
 
@@ -692,14 +714,268 @@ def send_once(t3, message):
     queued behind it, is not in what `messages()` returns, and so would be
     sent again by every later wake (seen on the installed app: one revision
     queued three times). Nothing is sent until the question is answered."""
-    thread = t3.messages(1)[0] or {}
-    try:
-        waiting = int(thread.get("pendingRequestCount") or 0)
-    except (TypeError, ValueError):
-        waiting = 0
-    if waiting > 0:
-        raise NeedsHuman(getattr(t3, "thread_id", None) or thread.get("threadId"))
+    thread = t3.messages(1)[0]
+    if _pending_requests(thread) > 0:
+        raise NeedsHuman(_thread_id(t3, thread))
     return t3.send(message)
+
+
+def _pending_requests(thread):
+    """The thread's pendingRequestCount as an int; 0 when absent or odd."""
+    try:
+        return int((thread or {}).get("pendingRequestCount") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _thread_id(t3, thread=None):
+    return getattr(t3, "thread_id", None) or (thread or {}).get("threadId")
+
+
+def _now(opts):
+    """The clock: time.time(), or the injected clock a test provides."""
+    clock = opts.get("clock")
+    return clock() if clock else time.time()
+
+
+def _doze(opts, seconds):
+    """Sleep between polls: time.sleep(), or the injected sleep a test
+    provides (which also never really sleeps)."""
+    sleeper = opts.get("sleep")
+    if sleeper:
+        sleeper(seconds)
+    else:
+        time.sleep(seconds)
+
+
+def run_budget_end(opts):
+    """The end of the carrier's own budget — run_budget_sec from process
+    start, recorded once in main(). None when the start time is not known
+    (a test, or an old config): no wait is capped then, as before."""
+    start, budget = opts.get("run_start"), opts.get("run_budget_sec")
+    if start is None or not budget:
+        return None
+    return float(start) + float(budget)
+
+
+def question_wait_deadline(opts):
+    """The earlier of question_wait_sec from now and the run budget's end:
+    no question wait may outlive the carrier's own process limit."""
+    end = _now(opts) + float(opts.get("question_wait_sec", 900) or 0)
+    budget = run_budget_end(opts)
+    if budget is not None:
+        end = min(end, budget)
+    return end
+
+
+def question_waiting(t3):
+    """True when a human question waits in the thread right now."""
+    thread = t3.messages(1)[0]
+    return _pending_requests(thread) > 0
+
+
+def thread_url(template, thread_id):
+    """The conversation URL for the waiting line, or None. Same law as
+    issue_url_template: carrier config only, a loopback http address only,
+    never anything from issue text. `{thread}` becomes the thread id with
+    `:` written as %3A."""
+    if not template or not thread_id:
+        return None
+    if not re.match(r"http://(127\.0\.0\.1|localhost):[0-9]{2,5}", template):
+        return None
+    if template.count("{thread}") != 1:
+        return None
+    return template.replace("{thread}", str(thread_id).replace(":", "%3A"))
+
+
+def waiting_note(opts, thread_id):
+    """The line that tells the reader exactly what to do (rule D; it replaced
+    a fixed line that said nothing actionable). <Name> is the roster entry
+    whose agent id is PAPERCLIP_AGENT_ID ("The teammate" without one), <N>
+    minutes is question_wait_sec // 60, and the link comes from
+    thread_url_template only when it is configured and loopback."""
+    name = "The teammate"
+    my_id = os.environ.get("PAPERCLIP_AGENT_ID")
+    for display, agent_id in (opts.get("roster") or {}).items():
+        if my_id and agent_id == my_id and (display or "").strip():
+            name = display
+            break
+    minutes = int(opts.get("question_wait_sec", 900) or 0) // 60
+    head = (f"[t2-carrier] {name} asked a question in its conversation and "
+            f"is waiting for your answer")
+    tail = (f". Answer it there. This task continues by itself if the answer "
+            f"arrives within {minutes} minutes. After that, add a comment "
+            f"here to wake it.")
+    url = thread_url(opts.get("thread_url_template"), thread_id)
+    if url:
+        return f"{head}: {url}{tail}"
+    return f"{head} in its team conversation{tail}"
+
+
+def post_waiting_note_once(pc, issue, opts, thread_id):
+    """Say the waiting line at most once in a row: when the newest comment on
+    the issue already is this exact line, do not post it again. The newest
+    comment is found with comment_rows, read first, as the old fixed line
+    was. A Paperclip failure here must not end the wait behind it."""
+    note = waiting_note(opts, thread_id)
+    try:
+        rows = comment_rows(pc, issue)
+        if not rows or (rows[-1].get("body") or "") != note:
+            pc.add_comment(issue["id"], note)
+    except CarrierError:
+        pass
+
+
+def _read_thread_tolerant(t3, opts, deadline, interval):
+    """One thread read that tolerates transient failures while a question
+    wait is running: a read that fails once must not end the wait, but the
+    third failure in a row does. None once the deadline has passed."""
+    misses = 0
+    while _now(opts) < deadline:
+        try:
+            return t3.messages()
+        except CarrierError:
+            misses += 1
+            if misses >= 3:
+                raise
+            _doze(opts, interval)
+    return None
+
+
+def _poll_marker(t3, op, opts, deadline, interval):
+    """Poll until marker `op` is a reply by rule A. Returns the reply text,
+    or None at the deadline. Three failed thread reads in a row raise
+    CarrierError; one or two do not end the wait."""
+    misses = 0
+    while _now(opts) < deadline:
+        _doze(opts, interval)
+        try:
+            thread, msgs = t3.messages()
+        except CarrierError:
+            misses += 1
+            if misses >= 3:
+                raise
+            continue
+        misses = 0
+        state, reply = scan_marker(msgs, op, thread)
+        if state == "reply":
+            return reply
+    return None
+
+
+def _poll_question_clear(t3, opts, deadline, interval):
+    """Poll until no question waits in the thread: True once clear, False at
+    the deadline. Three failed thread reads in a row raise CarrierError."""
+    misses = 0
+    while _now(opts) < deadline:
+        _doze(opts, interval)
+        try:
+            thread = t3.messages(1)[0] or {}
+            waiting = int(thread.get("pendingRequestCount") or 0)
+        except CarrierError:
+            misses += 1
+            if misses >= 3:
+                raise
+            continue
+        except (TypeError, ValueError):
+            waiting = 0
+        misses = 0
+        if waiting <= 0:
+            return True
+    return False
+
+
+def stay_with_question(pc, t3, issue, op, opts, message=None):
+    """Stay with a waiting question, then finish in this same carrier run
+    (rule B — fault 1 of MAS-9: nothing used to wake the task after the
+    person answered).
+
+    Three entries, one behaviour. With `message=None` the marker is already
+    in the thread and pending on a question: post the waiting line once and
+    poll until rule A calls the marker's run a reply. With `message` given,
+    send_once has just raised NeedsHuman: either the message landed and its
+    own turn stopped on a question (the marker is in the thread — same
+    poll), or a question was already waiting and nothing was sent — poll
+    until the question clears, scan the marker again (another wake may have
+    sent it meanwhile) and only send when it is still absent. The thread
+    itself tells the two apart, so nothing is ever sent twice.
+
+    Returns the reply text. Raises NeedsHuman when the question wait
+    deadline (rule C) passes without an answer — the issue stays in_progress
+    and nothing is released — and CarrierError after three failed thread
+    reads in a row."""
+    post_waiting_note_once(pc, issue, opts, _thread_id(t3))
+    deadline = question_wait_deadline(opts)
+    interval = opts.get("question_poll_interval_sec", 10)
+    log(f"staying with a waiting question on {issue.get('identifier')} "
+        f"until {deadline:.0f}")
+    if message is None:
+        reply = _poll_marker(t3, op, opts, deadline, interval)
+        if reply is None:
+            raise NeedsHuman(_thread_id(t3))
+        return reply
+    sent_here = False
+    while True:
+        read = _read_thread_tolerant(t3, opts, deadline, interval)
+        if read is None:
+            raise NeedsHuman(_thread_id(t3))
+        state, existing = scan_marker(read[1], op, read[0])
+        if state == "reply":
+            log(f"{op} answered after its question; continuing in this run")
+            return existing
+        if state == "pending":
+            reply = _poll_marker(t3, op, opts, deadline, interval)
+            if reply is None:
+                raise NeedsHuman(_thread_id(t3))
+            return reply
+        if sent_here:
+            # This stay already sent once and the marker still does not show:
+            # the thread's story is inconsistent, so nothing is sent again —
+            # wait on the marker to the deadline instead.
+            log(f"{op} sent in this stay but not visible in the thread; "
+                "waiting, no resend")
+            reply = _poll_marker(t3, op, opts, deadline, interval)
+            if reply is None:
+                raise NeedsHuman(_thread_id(t3))
+            return reply
+        # The marker is absent: a question was already waiting before this
+        # message. Stay until it clears, then send only if the marker is
+        # still absent (another wake may have sent it meanwhile).
+        if not _poll_question_clear(t3, opts, deadline, interval):
+            raise NeedsHuman(_thread_id(t3))
+        read = _read_thread_tolerant(t3, opts, deadline, interval)
+        if read is None:
+            raise NeedsHuman(_thread_id(t3))
+        state, existing = scan_marker(read[1], op, read[0])
+        if state == "reply":
+            log(f"{op} was sent by another wake and answered; no send here")
+            return existing
+        if state == "pending":
+            reply = _poll_marker(t3, op, opts, deadline, interval)
+            if reply is None:
+                raise NeedsHuman(_thread_id(t3))
+            return reply
+        try:
+            log(f"question answered; sending {op} now")
+            sent_here = True  # even a send that stops on a question landed
+            result = send_once(t3, message)
+            return result.get("reply") or ""
+        except NeedsHuman:
+            continue  # this fresh turn stopped on a question too: stay again
+
+
+def send_and_stay(pc, t3, issue, message, op, opts):
+    """Send `message`, staying with a question that comes up (rule B).
+
+    A plain send returns its reply. When send_once raises NeedsHuman — a
+    question was already waiting (nothing sent) or this very turn stopped on
+    one (the message is in the thread) — stay_with_question sorts the two
+    apart from the thread itself and finishes in this same run."""
+    try:
+        result = send_once(t3, message)
+        return result.get("reply") or ""
+    except NeedsHuman:
+        return stay_with_question(pc, t3, issue, op, opts, message=message)
 
 
 def binding_of(agent_record):
@@ -798,7 +1074,8 @@ def handle_return(pc, t3, issue, ask_op, opts):
         return 0
     result_text = last_result_comment(pc, child["id"])
     ret_op = f"{ask_op}-ret"
-    state, existing = scan_marker(t3.messages()[1], ret_op)
+    thread, msgs = t3.messages()
+    state, existing = scan_marker(msgs, ret_op, thread)
     if state is None:
         message = (
             f"[{ret_op}]\n\n"
@@ -809,11 +1086,14 @@ def handle_return(pc, t3, issue, ask_op, opts):
             "is posted as the issue comment and completes the issue."
         )
         log(f"sending {ret_op} to the asker's thread")
-        result = send_once(t3, message)
-        reply = result.get("reply") or ""
+        reply = send_and_stay(pc, t3, issue, message, ret_op, opts)
     elif state == "pending":
-        log(f"{ret_op} already in the thread and still pending; waiting, no resend")
-        reply = wait_for_reply(t3, ret_op, opts)
+        if _pending_requests(thread) > 0:
+            log(f"{ret_op} is pending on a waiting question; staying with it")
+            reply = stay_with_question(pc, t3, issue, ret_op, opts)
+        else:
+            log(f"{ret_op} already in the thread and still pending; waiting, no resend")
+            reply = wait_for_reply(t3, ret_op, opts)
     else:
         log(f"{ret_op} already answered in the thread; reconciling, no resend")
         reply = existing
@@ -979,21 +1259,21 @@ def handle_feedback(pc, t3, issue, opts):
     reason, comment = feedback
     content = (issue.get("title") or "") + "\n" + (issue.get("description") or "")
     op = op_id(issue["id"], content)
-    messages = t3.messages()[1]
+    thread, messages = t3.messages()
     # A round is closed once its delivery created its confirmation; the live
     # round is the highest numbered one whose marker exists but whose
     # delivery never completed (crash between the thread turn and deliver).
     rounds = 0
     while True:
         candidate = f"{op}-rev{rounds + 1}"
-        if scan_marker(messages, candidate)[0] is None:
+        if scan_marker(messages, candidate, thread)[0] is None:
             break
         if confirmation_already_present(pc, issue["id"], candidate):
             rounds += 1  # that round delivered; the next feedback is n + 1
             continue
         break  # started but undelivered: reconcile THIS round, no new round
     rev_op = f"{op}-rev{rounds + 1}"
-    state, existing = scan_marker(messages, rev_op)
+    state, existing = scan_marker(messages, rev_op, thread)
     if state is None:
         message = (f"[{rev_op}]\n\n"
                    f"The board declined the current answer on "
@@ -1002,7 +1282,7 @@ def handle_feedback(pc, t3, issue, opts):
             message += f"\nDecline reason: \"{reason}\"\n"
         if comment:
             message += f"\nThe board wrote on the issue:\n\n{comment}\n"
-        if scan_marker(messages, op)[0] is None:
+        if scan_marker(messages, op, thread)[0] is None:
             # The task itself is not in the thread the teammate can see (it
             # was never sent here, or it has scrolled out of what the server
             # returns): a revision without the task cannot be answered.
@@ -1013,12 +1293,15 @@ def handle_feedback(pc, t3, issue, opts):
                     "review.")
         log(f"sending {rev_op} (board feedback round {rounds + 1}) to the "
             "thread")
-        result = send_once(t3, message)
-        reply = result.get("reply") or ""
+        reply = send_and_stay(pc, t3, issue, message, rev_op, opts)
     elif state == "pending":
-        log(f"{rev_op} already in the thread and still pending; waiting, no "
-            "resend")
-        reply = wait_for_reply(t3, rev_op, opts)
+        if _pending_requests(thread) > 0:
+            log(f"{rev_op} is pending on a waiting question; staying with it")
+            reply = stay_with_question(pc, t3, issue, rev_op, opts)
+        else:
+            log(f"{rev_op} already in the thread and still pending; waiting, "
+                "no resend")
+            reply = wait_for_reply(t3, rev_op, opts)
     else:
         log(f"{rev_op} already answered in the thread; reconciling, no resend")
         reply = existing
@@ -1133,7 +1416,8 @@ def run_carrier(pc, t3_factory, opts):
             log(f"board accepted the answer on {issue.get('identifier')}; "
                 "issue done")
             return 0
-        state, existing = scan_marker(t3.messages()[1], op)
+        thread, msgs = t3.messages()
+        state, existing = scan_marker(msgs, op, thread)
         if state is None:
             message = build_message(
                 issue.get("identifier"), issue.get("title"),
@@ -1147,11 +1431,14 @@ def run_carrier(pc, t3_factory, opts):
                 job_help=coding_job_help(opts.get("coding_job_door")),
                 notes=board_notes(pc, issue))
             log(f"sending {op} to thread {thread_id}")
-            result = send_once(t3, message)
-            reply = result.get("reply") or ""
+            reply = send_and_stay(pc, t3, issue, message, op, opts)
         elif state == "pending":
-            log(f"{op} already in the thread and still pending; waiting, no resend")
-            reply = wait_for_reply(t3, op, opts)
+            if _pending_requests(thread) > 0:
+                log(f"{op} is pending on a waiting question; staying with it")
+                reply = stay_with_question(pc, t3, issue, op, opts)
+            else:
+                log(f"{op} already in the thread and still pending; waiting, no resend")
+                reply = wait_for_reply(t3, op, opts)
         else:
             log(f"{op} already answered in the thread; reconciling, no resend")
             reply = existing
@@ -1170,10 +1457,9 @@ def run_carrier(pc, t3_factory, opts):
     except NeedsHuman:
         try:
             # Say it once: Paperclip retries the wake, and each retry would
-            # otherwise add the same line to the issue.
-            rows = comment_rows(pc, issue)
-            if not rows or (rows[-1].get("body") or "") != WAITING_NOTE:
-                pc.add_comment(issue["id"], WAITING_NOTE)
+            # otherwise add the same line to the issue. stay_with_question
+            # has usually said it already; this covers every other exit.
+            post_waiting_note_once(pc, issue, opts, thread_id)
         except CarrierError:
             pass
         raise
@@ -1183,13 +1469,26 @@ def run_carrier(pc, t3_factory, opts):
 
 
 def wait_for_reply(t3, op, opts):
-    """A marker exists but its turn has not answered yet: poll, never resend."""
-    deadline = time.time() + opts.get("pending_timeout_sec", 600)
-    while time.time() < deadline:
-        time.sleep(opts.get("poll_interval_sec", 5))
-        state, reply = scan_marker(t3.messages()[1], op)
+    """A marker exists but its turn has not answered yet: poll, never resend.
+
+    This is the slow-turn wait — no question is involved. Its own deadline is
+    pending_timeout_sec, capped by the carrier's run budget, and a
+    CarrierError at that deadline still releases the issue for a person, as
+    before. When a question is waiting at the deadline the teammate is
+    blocked on a person, not slow: NeedsHuman, so nothing is released (rule
+    C)."""
+    deadline = _now(opts) + opts.get("pending_timeout_sec", 600)
+    budget = run_budget_end(opts)
+    if budget is not None:
+        deadline = min(deadline, budget)
+    while _now(opts) < deadline:
+        _doze(opts, opts.get("poll_interval_sec", 5))
+        thread, msgs = t3.messages()
+        state, reply = scan_marker(msgs, op, thread)
         if state == "reply":
             return reply
+    if question_waiting(t3):
+        raise NeedsHuman(_thread_id(t3))
     raise CarrierError(f"{op} still pending after wait; left checked out for a person")
 
 
@@ -1243,11 +1542,22 @@ def main() -> int:
         "crash_after": os.environ.get("MMOS_T2_CARRIER_CRASH_AFTER"),
         "pending_timeout_sec": cfg.get("pending_timeout_sec", 600),
         "poll_interval_sec": cfg.get("poll_interval_sec", 5),
+        # The question wait (rule C): how long one carrier run stays with a
+        # waiting question, the carrier's own budget from process start (the
+        # process adapter allows 1500s; no wait may outlive it), and the poll
+        # interval. Tests may inject a clock, a sleep and a start time.
+        "question_wait_sec": cfg.get("question_wait_sec", 900),
+        "run_budget_sec": cfg.get("run_budget_sec", 1320),
+        "question_poll_interval_sec": cfg.get("question_poll_interval_sec", 10),
         # Same-company teammate roster: display name -> agent id. An ask block
         # naming anyone else resolves to nothing (plain reply, no child issue).
         "roster": cfg.get("teammates") or {},
         # Optional: "http://127.0.0.1:<port>/<PREFIX>/issues/{identifier}".
         "issue_url_template": cfg.get("issue_url_template"),
+        # Optional, same law: "http://127.0.0.1:<port>/<PREFIX>/{thread}".
+        "thread_url_template": cfg.get("thread_url_template"),
+        # The budget clock starts once, at process start.
+        "run_start": time.time(),
     }
     pc = PaperclipClient(os.environ["PAPERCLIP_API_URL"],
                          os.environ["PAPERCLIP_API_KEY"],

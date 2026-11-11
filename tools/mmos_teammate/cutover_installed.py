@@ -83,10 +83,20 @@ def carrier_config(spec):
         "t3_cwd": expand(t3["cwd"]),
         "pending_timeout_sec": int(spec.get("pending_timeout_sec", 600)),
         "poll_interval_sec": int(spec.get("poll_interval_sec", 5)),
+        # The question wait: one carrier run stays with a waiting question
+        # for question_wait_sec, never past run_budget_sec from process start
+        # (the process adapter allows 1500s), polling every
+        # question_poll_interval_sec.
+        "question_wait_sec": int(spec.get("question_wait_sec", 900)),
+        "run_budget_sec": int(spec.get("run_budget_sec", 1320)),
+        "question_poll_interval_sec": int(
+            spec.get("question_poll_interval_sec", 10)),
         "teammates": dict(spec.get("teammates") or {}),
     }
     if spec.get("issue_url_template"):
         cfg["issue_url_template"] = spec["issue_url_template"]
+    if spec.get("thread_url_template"):
+        cfg["thread_url_template"] = spec["thread_url_template"]
     return cfg
 
 
