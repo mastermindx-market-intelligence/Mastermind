@@ -795,18 +795,72 @@ def write_urls_file(spec, threads):
     return path
 
 
+def session_processes(home):
+    """Session processes of the teammate whose home is ``home``.
+
+    A teammate session is one long-lived process the server starts per
+    thread; it reads tool-limits.json and CHARTER.md only when it starts, so
+    a limits change binds on the next process start, never mid-session.
+    Detection matches the home path in the process list and returns pid and
+    start time only — a command line can carry values that are not ours to
+    show, so it is read for the match and never returned or printed.
+    """
+    home = os.path.abspath(home)
+    try:
+        proc = subprocess.run(["ps", "-axo", "pid,lstart,command"],
+                              capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0:
+        return []
+    out = []
+    for line in proc.stdout.splitlines()[1:]:
+        parts = line.strip().split(None, 6)
+        if len(parts) < 7 or home not in parts[6]:
+            continue
+        try:
+            pid = int(parts[0])
+        except ValueError:
+            continue
+        if pid == os.getpid():
+            continue
+        out.append({"pid": pid, "started": " ".join(parts[1:6])})
+    return out
+
+
 def cmd_apply(spec):
     project_id = ensure_project(spec)
+    pending = {}
     for mate in spec["teammates"]:
         wrote = write_file_assets(spec, mate)
         home = teammate_home(spec, mate)
         log(f"{mate['name']}: home {home} "
             + (f"(wrote {', '.join(wrote)})" if wrote else "(unchanged)"))
+        # tool-limits.json and CHARTER.md are read when the session process
+        # starts, so a running session keeps the old limits until it restarts
+        pending[mate["name"]] = [name for name in
+                                 ("tool-limits.json", "CHARTER.md")
+                                 if name in wrote]
     ensure_instances(spec)
     threads, _ = ensure_threads(spec, project_id)
     renames, rename_failures = rename_threads(spec, threads)
     urls_path = write_urls_file(spec, threads)
     log(f"thread URLs written: {urls_path} (0600, no credentials)")
+    for mate in spec["teammates"]:
+        changed = pending[mate["name"]]
+        if not changed:
+            continue
+        sessions = session_processes(teammate_home(spec, mate))
+        if sessions:
+            live = "; ".join(f"pid {s['pid']} started {s['started']}"
+                             for s in sessions)
+            log(f"{mate['name']}: new limits ({', '.join(changed)}) are "
+                f"NOT IN FORCE until that teammate's session process "
+                f"restarts; running now: {live}")
+        else:
+            log(f"{mate['name']}: new limits ({', '.join(changed)}) are "
+                f"NOT IN FORCE until that teammate's session process starts; "
+                f"none is running now")
     report = {
         "projectId": project_id,
         "teammates": [
@@ -815,7 +869,8 @@ def cmd_apply(spec):
              "threadId": threads[mate["name"]]["threadId"],
              "threadTitle": threads[mate["name"]]["title"],
              "threadCreated": threads[mate["name"]]["created"],
-             "renamed": renames[mate["name"]]}
+             "renamed": renames[mate["name"]],
+             "limitsPendingRestart": pending[mate["name"]]}
             for mate in spec["teammates"]],
         "pin": "not applied by this tool; pin via roster_browser.js pin "
                "(web-client-only action)",

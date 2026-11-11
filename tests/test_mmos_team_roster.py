@@ -582,6 +582,148 @@ class TestPaperclipBinding:
         assert fake_t3.calls == []
 
 
+class TestLimitsPendingRestart:
+    """A teammate session is one long-lived process that reads
+    tool-limits.json and CHARTER.md only when it starts. When apply changes
+    either file, the report must say so per teammate and print one plain
+    line that the new limits are not in force until that session process
+    restarts (principal, 2026-11-11)."""
+
+    def fake_apply(self, tmp_path, monkeypatch, wrote_by_name,
+                   sessions_by_home=None):
+        spec = load(tmp_path, make_spec(tmp_path))
+        homes = {m["name"]: team_roster.teammate_home(spec, m)
+                 for m in spec["teammates"]}
+        monkeypatch.setattr(team_roster, "ensure_project", lambda s: "proj-1")
+        monkeypatch.setattr(
+            team_roster, "write_file_assets",
+            lambda s, m: wrote_by_name.get(m["name"], []))
+        monkeypatch.setattr(team_roster, "ensure_instances", lambda s: [])
+        threads = {m["name"]: {"threadId": f"t-{m['slug']}", "title": "x",
+                               "created": False} for m in spec["teammates"]}
+        monkeypatch.setattr(team_roster, "ensure_threads",
+                            lambda s, p: (threads, "/tmp/state.json"))
+        monkeypatch.setattr(team_roster, "rename_threads",
+                            lambda s, t: ({n: False for n in t}, []))
+        monkeypatch.setattr(team_roster, "write_urls_file",
+                            lambda s, t: "/tmp/urls.json")
+        if sessions_by_home is not None:
+            if callable(sessions_by_home):
+                monkeypatch.setattr(team_roster, "session_processes",
+                                    sessions_by_home)
+            else:
+                monkeypatch.setattr(
+                    team_roster, "session_processes",
+                    lambda home: sessions_by_home.get(home, []))
+        return team_roster.cmd_apply(spec)
+
+    def test_changed_limits_reported_with_plain_line(self, tmp_path,
+                                                     monkeypatch, capsys):
+        code = self.fake_apply(tmp_path, monkeypatch,
+                               {"A": ["tool-limits.json"]},
+                               sessions_by_home={})
+        assert code == 0
+        out = capsys.readouterr().out
+        report = json.loads(out[out.index("{"):])
+        by_name = {r["name"]: r for r in report["teammates"]}
+        assert by_name["A"]["limitsPendingRestart"] == ["tool-limits.json"]
+        assert by_name["B"]["limitsPendingRestart"] == []
+        assert "not in force" in out.lower()
+
+    def test_line_names_the_running_session_pid(self, tmp_path, monkeypatch,
+                                                capsys):
+        def sessions(home):
+            if home.endswith("/a"):
+                return [{"pid": 4242, "started": "Tue Nov 10 19:34:11 2026"}]
+            return []
+
+        self.fake_apply(tmp_path, monkeypatch,
+                        {"A": ["tool-limits.json", "CHARTER.md"],
+                         "B": ["CHARTER.md"]},
+                        sessions_by_home=sessions)
+        out = capsys.readouterr().out
+        a_lines = [l for l in out.splitlines() if l.startswith("[team_roster] A:")]
+        assert any("4242" in l and "restart" in l for l in a_lines), out
+        assert any("[team_roster] B:" in l and "none is running" in l
+                   for l in out.splitlines()), out
+
+    def test_no_change_no_pending_line(self, tmp_path, monkeypatch, capsys):
+        self.fake_apply(tmp_path, monkeypatch, {})
+        out = capsys.readouterr().out
+        assert "not in force" not in out.lower()
+        report = json.loads(out[out.index("{"):])
+        assert all(r["limitsPendingRestart"] == []
+                   for r in report["teammates"])
+
+
+class TestSessionProcesses:
+    PS_SAMPLE = """  PID   LSTART  TIME COMMAND
+    1   Tue Nov 10 09:00:00 2026 /sbin/launchd
+ 4242   Tue Nov 10 19:34:11 2026 claude --resume=abc --settings {home}/tool-limits.json
+ 4243   Tue Nov 10 20:01:02 2026 claude --resume=def --settings {other}/tool-limits.json
+"""
+
+    def test_returns_pid_and_start_only(self, tmp_path, monkeypatch):
+        home = str(tmp_path / "t3-team" / "teammates" / "a")
+        other = str(tmp_path / "t3-team" / "teammates" / "b")
+
+        class Proc:
+            returncode = 0
+            stdout = self.PS_SAMPLE.format(home=home, other=other)
+            stderr = ""
+
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            return Proc()
+
+        monkeypatch.setattr(team_roster.subprocess, "run", run)
+        found = team_roster.session_processes(home)
+        assert calls == [["ps", "-axo", "pid,lstart,command"]]
+        assert found == [{"pid": 4242, "started": "Tue Nov 10 19:34:11 2026"}]
+
+    def test_never_returns_or_prints_command_text(self, tmp_path, monkeypatch,
+                                                  capsys):
+        home = str(tmp_path / "t3-team" / "teammates" / "a")
+
+        class Proc:
+            returncode = 0
+            stdout = self.PS_SAMPLE.format(home=home, other="/x")
+            stderr = ""
+
+        monkeypatch.setattr(team_roster.subprocess, "run",
+                            lambda a, **k: Proc())
+        found = team_roster.session_processes(home)
+        blob = json.dumps(found) + capsys.readouterr().out + \
+            capsys.readouterr().err
+        assert "resume=abc" not in blob
+        assert "--settings" not in blob
+
+    def test_own_pid_excluded_and_ps_failure_is_empty(self, tmp_path,
+                                                      monkeypatch):
+        home = str(tmp_path / "t3-team" / "teammates" / "a")
+        mine = f"{os.getpid()}   Tue Nov 10 19:34:11 2026 grep {home}"
+
+        class Proc:
+            returncode = 0
+            stdout = "  PID   LSTART  TIME COMMAND\n" + mine + "\n"
+            stderr = ""
+
+        monkeypatch.setattr(team_roster.subprocess, "run",
+                            lambda a, **k: Proc())
+        assert team_roster.session_processes(home) == []
+
+        class Bad:
+            returncode = 1
+            stdout = ""
+            stderr = "ps: error"
+
+        monkeypatch.setattr(team_roster.subprocess, "run",
+                            lambda a, **k: Bad())
+        assert team_roster.session_processes(home) == []
+
+
 class TestFileAssets:
     def test_write_and_rewrite_home(self, tmp_path):
         spec = load(tmp_path, make_spec(tmp_path))
