@@ -1334,7 +1334,10 @@ def handle_return(pc, t3, issue, ask_op, opts):
         reply = existing
     if not reply.strip():
         raise CarrierError("thread reply was empty")
-    deliver(pc, issue, reply, ret_op)
+    # R2a finding 5: when the asker is ITSELF an ask child, this delivery
+    # completes with done like any asked child — no board gate above it.
+    deliver(pc, issue, reply, ret_op,
+            ask_child=asked_child_of(pc, issue) is not None)
     return 0
 
 
@@ -1618,7 +1621,10 @@ def handle_feedback(pc, t3, issue, opts):
         reply = existing
     if not reply.strip():
         raise CarrierError("thread reply was empty")
-    deliver(pc, issue, reply, rev_op)
+    # R2a finding 5: a revision on an ask CHILD completes with done like any
+    # asked child — re-entering review would strand the asker above it.
+    deliver(pc, issue, reply, rev_op,
+            ask_child=asked_child_of(pc, issue) is not None)
     return 0
 
 

@@ -2349,3 +2349,78 @@ def test_base_is_pinned_by_the_config_and_loopback_only():
     # no pinned base in the config: nothing to compare, as before
     assert wc.base_pin_error({}, {"PAPERCLIP_API_URL":
                                   "http://127.0.0.1:3100"}) is None
+
+
+def test_return_edge_on_an_ask_child_completes_done():
+    # R2a finding 5: the asker here is ITSELF an ask child (of gp-1). Its
+    # return-edge delivery must carry the ask-child flag: done, no board
+    # confirmation — so the grandparent's blocker resolves. Without the flag
+    # the child goes in_review and the asker above stays blocked until the
+    # board accepts.
+    gp_marker = wc.op_id("gp-1", "Top task\nAsk someone mid-level.") + "-ask"
+    par_desc = ("Ask an engineer for the count.\n\n"
+                f"Asked by Mira on MMO-0\n[{gp_marker}]")
+    ask_op = wc.op_id("is-1", "Report the line count\n" + par_desc) + "-ask"
+    pc = FakePaperclip(issues={
+        # the grandparent is itself blocked on is-1 (not ready, not this run's)
+        "gp-1": {"identifier": "MMO-0", "status": "blocked",
+                 "dependencyReady": False,
+                 "title": "Top task",
+                 "description": "Ask someone mid-level."},
+        "is-1": {"identifier": "MMO-1", "status": "blocked",
+                 "dependencyReady": True, "parentId": "gp-1",
+                 "title": "Report the line count",
+                 "description": par_desc,
+                 "unblockDescriptor": {"owner": {"agentId": "ag-1"},
+                                       "action": "Atlas completes MMO-2"}}})
+    pc.child_rows["is-1"] = [{
+        "id": "ch-1", "identifier": "MMO-2", "parentId": "is-1",
+        "assigneeAgentId": "ag-atlas", "title": "Count lines",
+        "status": "done",
+        "description": f"Asked by Mira on MMO-1 [{ask_op}]"}]
+    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines"}]
+    ret_op = f"{ask_op}-ret"
+    asked = [("user", "r1", f"[{ret_op}]\n\nthe ask came back")]
+    answered = asked + [("assistant", "r1", "FINAL: the file has 12 lines")]
+    t3 = ScriptedT3(states=[
+        (th(pending=0), []),
+        (th(latest="r1", pending=0), answered),
+    ], ask_on_send=True)
+    assert run_with_roster(pc, t3, {}, wait_opts(Clock(), t3)) == 0
+    assert pc.issues["is-1"]["status"] == "done"          # not in_review
+    assert [c for c in pc.calls if c[0] == "interaction"] == []  # no board gate
+
+
+def test_feedback_edge_on_an_ask_child_completes_done():
+    # R2a finding 5, feedback path: an ask child whose (pre-fix) answer sits
+    # in in_review and was rejected. The revision delivery must carry the
+    # ask-child flag: done, and no NEW confirmation — otherwise the child
+    # re-enters review and the asker stays blocked on it.
+    gp_marker = wc.op_id("gp-1", "Top task\nAsk someone mid-level.") + "-ask"
+    child_desc = f"Run wc -l.\n\nAsked by Mira on MMO-0\n[{gp_marker}]"
+    op = wc.op_id("is-1", "Count lines\n" + child_desc)
+    pc = FakePaperclip(issues={
+        "gp-1": {"identifier": "MMO-0", "status": "blocked",
+                 "dependencyReady": False,
+                 "title": "Top task", "description": "Ask someone mid-level."},
+        "is-1": {"identifier": "MMO-2", "status": "in_review",
+                 "parentId": "gp-1", "title": "Count lines",
+                 "description": child_desc}})
+    pc.interaction_rows = [
+        {"id": "ix-1", "kind": "request_confirmation", "status": "rejected",
+         "idempotencyKey": f"{op}-confirm",
+         "result": {"reason": "the count is wrong"}}]
+    pc.comment_rows["is-1"] = [
+        {"body": "the count is 10", "authorType": "agent", "createdAt": "1"},
+        {"body": "No: it is 12.", "authorType": "user", "createdAt": "2"}]
+    rev = f"{op}-rev1"
+    asked = [("user", "r1", f"[{rev}]\n\nboard sent it back")]
+    answered = asked + [("assistant", "r1", "FINAL: 12 lines")]
+    t3 = ScriptedT3(states=[
+        (th(pending=0), []),
+        (th(latest="r1", pending=0), answered),
+    ], ask_on_send=True)
+    assert run_bound(pc, t3, wait_opts(Clock(), t3)) == 0
+    assert pc.issues["is-1"]["status"] == "done"   # re-done, not back in_review
+    keys = [row["idempotencyKey"] for row in pc.interaction_rows]
+    assert keys == [f"{op}-confirm"]        # no new confirmation for the round
