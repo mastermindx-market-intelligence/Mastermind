@@ -265,3 +265,76 @@ class TestFileAssets:
         wrote = team_roster.write_file_assets(spec, mate)
         assert "CLAUDE.md" not in wrote
         assert open(memory).read() == remembered
+
+
+class TestMcpToolSwitch:
+    """Per-teammate tool switch (browser_use / computer_use), default off."""
+
+    def test_default_off_writes_no_mcp_file_and_no_flag(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        wrote = team_roster.write_file_assets(spec, mate)
+        home = team_roster.teammate_home(spec, mate)
+        assert "mcp-servers.json" not in wrote
+        assert not os.path.exists(os.path.join(home, "mcp-servers.json"))
+        inst = team_roster.instance_for(spec, mate)
+        assert "--mcp-config" not in inst["config"]["launchArgs"]
+
+    def test_switch_on_writes_locked_file_and_flag(self, tmp_path):
+        raw = make_spec(tmp_path)
+        raw["teammates"][0]["tools"] = {"browser_use": True,
+                                        "computer_use": True}
+        spec = load(tmp_path, raw)
+        mate = spec["teammates"][0]
+        wrote = team_roster.write_file_assets(spec, mate)
+        home = team_roster.teammate_home(spec, mate)
+        path = os.path.join(home, "mcp-servers.json")
+        assert "mcp-servers.json" in wrote
+        assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+        entries = json.load(open(path))
+        assert set(entries) == {"mmx-browser", "mmos-computer-use"}
+        assert entries["mmos-computer-use"]["command"] == "/usr/bin/python3"
+        inst = team_roster.instance_for(spec, mate)
+        assert inst["config"]["launchArgs"].endswith("mcp-servers.json")
+        assert "--mcp-config" in inst["config"]["launchArgs"]
+
+    def test_one_flag_writes_only_that_entry(self, tmp_path):
+        raw = make_spec(tmp_path)
+        raw["teammates"][1]["tools"] = {"browser_use": True}
+        spec = load(tmp_path, raw)
+        mate = spec["teammates"][1]
+        team_roster.write_file_assets(spec, mate)
+        entries = json.load(open(os.path.join(
+            team_roster.teammate_home(spec, mate), "mcp-servers.json")))
+        assert set(entries) == {"mmx-browser"}
+
+    def test_switch_off_removes_stale_file(self, tmp_path):
+        raw = make_spec(tmp_path)
+        raw["teammates"][0]["tools"] = {"browser_use": True}
+        spec = load(tmp_path, raw)
+        mate = spec["teammates"][0]
+        team_roster.write_file_assets(spec, mate)
+        path = os.path.join(team_roster.teammate_home(spec, mate),
+                            "mcp-servers.json")
+        assert os.path.exists(path)
+        mate["tools"] = {}
+        wrote = team_roster.write_file_assets(spec, mate)
+        assert "mcp-servers.json" not in wrote
+        assert not os.path.exists(path)
+        inst = team_roster.instance_for(spec, mate)
+        assert "--mcp-config" not in inst["config"]["launchArgs"]
+
+    def test_mcp_file_is_home_locked(self):
+        assert "mcp-servers.json" in team_roster.HOME_LOCKED
+
+    def test_bad_tools_shape_refused(self, tmp_path):
+        raw = make_spec(tmp_path)
+        raw["teammates"][0]["tools"] = {"browser_use": "yes"}
+        with pytest.raises(SystemExit):
+            load(tmp_path, raw)
+
+    def test_unknown_tool_key_refused(self, tmp_path):
+        raw = make_spec(tmp_path)
+        raw["teammates"][0]["tools"] = {"shell": True}
+        with pytest.raises(SystemExit):
+            load(tmp_path, raw)

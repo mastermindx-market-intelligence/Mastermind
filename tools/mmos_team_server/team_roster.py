@@ -124,6 +124,15 @@ def load_spec(path):
             die(f"duplicate slug {mate['slug']!r}")
         if mate["accent_color"].lower() in colors:
             die(f"duplicate accent_color {mate['accent_color']!r}")
+        tools = mate.get("tools", {})
+        if not isinstance(tools, dict):
+            die(f"{where}.tools must be an object")
+        for key, value in tools.items():
+            if key not in ("browser_use", "computer_use"):
+                die(f"{where}.tools has unknown key {key!r}")
+            if not isinstance(value, bool):
+                die(f"{where}.tools.{key} must be a boolean")
+        # Default off: any tool flag the spec does not set is False.
         if "—" in mate["name"] or mate["name"] != mate["name"].strip():
             die(f"{where}.name must not contain an em dash or outer spaces")
         allow_long = spec.get("allow_long_titles") is True
@@ -276,7 +285,8 @@ SERVER_PRIVATE = ("run", "home", "config", "claude-home", "fabric.env")
 # Files in a teammate's own home that are config or credentials, not memory.
 # The teammate may not change them; the preimage it may not even read.
 HOME_LOCKED = ("tool-limits.json", "CHARTER.md", "carrier.json",
-               "cutover-preimage.json", "cutover-result.json")
+               "cutover-preimage.json", "cutover-result.json",
+               "mcp-servers.json")
 HOME_UNREADABLE = ("cutover-preimage.json",)
 
 # A teammate's home is also its Claude configuration folder. A settings file
@@ -361,11 +371,14 @@ def tool_limits(spec, mate):
 
 
 def write_file_assets(spec, mate):
-    """Home dir, CLAUDE.md seed, CHARTER.md, tool-limits.json.
+    """Home dir, CLAUDE.md seed, CHARTER.md, tool-limits.json,
+    and (only when the spec switches tools on) mcp-servers.json.
 
     CLAUDE.md is the teammate's live long-term memory: created only when
     missing, never rewritten by apply (a rewrite would erase remembered
     facts). CHARTER.md and tool-limits.json are config and follow the spec.
+    mcp-servers.json names commands to run, so it is written by the runtime
+    only, joins HOME_LOCKED, and exists only for switched-on teammates.
     """
     home = teammate_home(spec, mate)
     os.makedirs(home, exist_ok=True)
@@ -385,7 +398,45 @@ def write_file_assets(spec, mate):
     if write_if_changed(limits, json.dumps(tool_limits(spec, mate), indent=2) + "\n",
                         0o600):
         wrote.append("tool-limits.json")
+    mcp_path = os.path.join(home, "mcp-servers.json")
+    entries = mcp_entries_for(mate)
+    if entries:
+        if write_if_changed(mcp_path,
+                            json.dumps(entries, indent=2) + "\n", 0o600):
+            wrote.append("mcp-servers.json")
+    elif os.path.exists(mcp_path):
+        # Switched off after being on: remove the runtime-written file so a
+        # stale registration can never outlive its spec entry.
+        os.unlink(mcp_path)
     return wrote
+
+
+# Tool access is decided by the roster spec, never by the teammate. Entries
+# reference the installed adapter files; absolute paths, no environment
+# secrets (the session's own environment carries the fabric route).
+MCP_TOOL_ENTRIES = {
+    "browser_use": ("mmx-browser", {
+        "type": "stdio",
+        "command": "/Users/chriswong/.local/share/mastermind-runtime/node/bin/node",
+        "args": ["/Users/chriswong/.t3/mcp/mmx-browser/server.js"],
+    }),
+    "computer_use": ("mmos-computer-use", {
+        "type": "stdio",
+        "command": "/usr/bin/python3",
+        "args": ["/Users/chriswong/.t3/mcp/mmos-computer-use/server.py"],
+    }),
+}
+
+
+def mcp_entries_for(mate):
+    """mcpServers entries for a teammate, or {} when no tool is switched on."""
+    tools = mate.get("tools") or {}
+    entries = {}
+    for flag in sorted(MCP_TOOL_ENTRIES):
+        if tools.get(flag) is True:
+            name, entry = MCP_TOOL_ENTRIES[flag]
+            entries[name] = entry
+    return entries
 
 
 def settings_path(spec):
@@ -405,6 +456,9 @@ def instance_for(spec, mate):
         "--append-system-prompt-file", os.path.join(home, "CHARTER.md"),
         "--settings", os.path.join(home, "tool-limits.json"),
     ]
+    if mcp_entries_for(mate):
+        launch_args += ["--mcp-config",
+                        os.path.join(home, "mcp-servers.json")]
     return {
         "driver": "claudeAgent",
         "displayName": mate["name"],
