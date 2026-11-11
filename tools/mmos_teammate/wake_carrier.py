@@ -538,6 +538,31 @@ def _marker_run_open(marker_run, thread):
         thread.get("latestRunId") == marker_run
 
 
+# R2a finding 16: the stated lookback bound before a first send. The thread
+# read serves the latest `count` messages; 61 newer ones hide an older
+# marker, and a second wake would send the task again. Four reads deep.
+MARKER_LOOKBACK_STEPS = (60, 180, 540, 1620)
+
+
+def scan_marker_deep(t3, op):
+    """(state, reply, thread) with the bounded lookback of finding 16.
+
+    Walks MARKER_LOOKBACK_STEPS. A found marker returns its state; a SHORT
+    read means the whole thread was seen, so None is proven absence; a page
+    that stays full to the bound returns "window_exhausted" — absence cannot
+    be proven and the caller must guard its send another way (the send
+    record on the issue)."""
+    thread = None
+    for count in MARKER_LOOKBACK_STEPS:
+        thread, msgs = t3.messages(count)
+        state, existing = scan_marker(msgs, op, thread)
+        if state is not None:
+            return state, existing, thread
+        if len(msgs) < count:
+            return None, None, thread
+    return "window_exhausted", None, thread
+
+
 def scan_marker(messages, op, thread=None):
     """('reply', text) | ('pending', None) | (None, None) for `op` in a thread.
 
@@ -1327,8 +1352,8 @@ def handle_return(pc, t3, issue, ask_op, opts):
         return 0
     result_text = last_result_comment(pc, child["id"])
     ret_op = f"{ask_op}-ret"
-    thread, msgs = t3.messages()
-    state, existing = scan_marker(msgs, ret_op, thread)
+    # R2a finding 16: the bounded lookback applies to the return marker too.
+    state, existing, thread = scan_marker_deep(t3, ret_op)
     if state is None:
         message = (
             f"[{ret_op}]\n\n"
@@ -1591,7 +1616,9 @@ def handle_feedback(pc, t3, issue, opts):
     reason, comment = feedback
     content = (issue.get("title") or "") + "\n" + (issue.get("description") or "")
     op = op_id(issue["id"], content)
-    thread, messages = t3.messages()
+    # R2a finding 16: read the deepest window for the revision scan, so a
+    # round marker hidden under newer messages is still found.
+    thread, messages = t3.messages(MARKER_LOOKBACK_STEPS[-1])
     # A round is closed once its delivery created its confirmation; the live
     # round is the highest numbered one whose marker exists but whose
     # delivery never completed (crash between the thread turn and deliver).
@@ -1774,12 +1801,29 @@ def run_carrier(pc, t3_factory, opts):
             log(f"board accepted the answer on {issue.get('identifier')}; "
                 "issue done")
             return 0
-        thread, msgs = t3.messages()
         # The structural test (R2a finding 3): one parent read settles
         # whether THIS issue is an ask child — used by the message build,
         # the depth-one ask rule and delivery below.
         ask_parent = asked_child_of(pc, issue)
-        state, existing = scan_marker(msgs, op, thread)
+        # R2a finding 16: the bounded lookback walks back past the latest-60
+        # window before any first send, so a marker hidden under newer
+        # messages cannot cause a second send of the task.
+        state, existing, thread = scan_marker_deep(t3, op)
+        if state == "window_exhausted":
+            record = (f"[t2-carrier] sent task {op} to the teammate thread; "
+                      "the thread window cannot show this turn, this line is "
+                      "the record of the send")
+            if comment_already_present(pc, issue["id"], record):
+                log(f"{op} recorded as sent on the issue but beyond the "
+                    "lookback bound; not sending again")
+                reply = wait_for_reply(t3, op, opts)
+                if not reply.strip():
+                    raise CarrierError("thread reply was empty")
+                deliver(pc, issue, reply, op,
+                        ask_child=ask_parent is not None)
+                return 0
+            machine_note_once(pc, issue["id"], record)
+            state = None  # send now, under the record
         if state is None:
             asked_child = ask_parent is not None
             message = build_message(

@@ -2511,3 +2511,101 @@ def test_release_moves_only_in_progress_to_todo():
                  "title": "T", "description": "D"}})
     wc.release_issue(pc2, "is-1", "CarrierError: x")
     assert pc2.issues["is-1"]["status"] == "todo"
+
+
+class WindowedT3(FakeT3):
+    """Serves only the latest `count` messages, like the real thread read."""
+
+    def messages(self, count=60):
+        thread, msgs = super().messages(count)
+        return thread, (list(msgs[-count:]) if count else [])
+
+
+class BottomlessT3(FakeT3):
+    """Never returns a short page: the lookback cannot prove absence."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self._pad = 0
+
+    def messages(self, count=60):
+        thread, msgs = super().messages(count)
+        while len(msgs) < count:
+            self._pad += 1
+            msgs = [("user", f"pad-{self._pad}",
+                     f"older side message {self._pad}")] + list(msgs)
+        return thread, list(msgs[-count:])
+
+
+def test_marker_beyond_the_window_is_found_by_looking_back():
+    # R2a finding 16: the thread read returns the latest 60 messages. Here
+    # the task turn sits under 61 newer ones: a second wake used to miss the
+    # marker and send the task again. The lookback walks back in steps, sees
+    # the whole thread, finds the answered marker — no second send.
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    answer = "line1\nline2\nline3"
+    msgs = [("user", "r1", f"[{op}]\n\nthe task"),
+            ("assistant", "r1", answer)]
+    side = [("user", f"s{i}", f"side message {i}") for i in range(61)]
+    t3 = WindowedT3(messages=msgs + side)
+    pc = FakePaperclip(
+        issues=one_issue(), comments={"is-1": [{"body": answer}]},
+        interactions=[{"id": "ix-1", "kind": "request_confirmation",
+                       "status": "pending",
+                       "idempotencyKey": f"{op}-confirm"}])
+    assert run(pc, t3) == 0
+    assert t3.sends == []                     # exactly no second send
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_window_exhausted_send_is_recorded_and_never_repeated():
+    # R2a finding 16, the bound: t3 never serves a short page, so absence
+    # cannot be proven. The first send is recorded on the issue; a second
+    # wake sees the record and does not send again.
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    answer = "the answer"
+    t3 = BottomlessT3()
+    pc = FakePaperclip(issues=one_issue())
+    assert run(pc, t3) == 0
+    assert len(t3.sends) == 1
+    records = [c for c in pc.calls if c[0] == "comment"
+               and "sent task" in c[2]]
+    assert len(records) == 1                  # the send record was posted
+
+    # second wake: the answer is on the issue, the record names the send
+    pc2 = FakePaperclip(
+        issues={"is-1": {"identifier": "MMO-1", "status": "in_progress",
+                         "title": "Summarize file X",
+                         "description": "Write a three-line summary."}},
+        comments={"is-1": [{"body": answer}]},
+        interactions=[{"id": "ix-1", "kind": "request_confirmation",
+                       "status": "pending",
+                       "idempotencyKey": f"{op}-confirm"}])
+    pc2.comment_rows["is-1"].append({"body": records[0][2]})
+    t3_second = BottomlessT3(messages=[("user", "r1", t3.sends[0]),
+                                       ("assistant", "r1", answer)])
+    assert run(pc2, t3_second) == 0
+    assert t3_second.sends == []              # the record stopped the resend
+
+
+def test_return_marker_beyond_the_window_is_found_by_looking_back():
+    # R2a finding 16 on the return edge: the return turn sits under 61 newer
+    # messages. The wake reconciles the asker's answer instead of sending
+    # the return message a second time.
+    issues, ask_op, child = blocked_parent_with_done_child()
+    ret_op = f"{ask_op}-ret"
+    final = "FINAL: the file has 12 lines"
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [dict(child)]
+    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines"}]
+    pc.comment_rows["is-1"] = [{"body": final}]
+    pc.interaction_rows = [{"id": "ix-1", "kind": "request_confirmation",
+                            "status": "pending",
+                            "idempotencyKey": f"{ret_op}-confirm"}]
+    msgs = [("user", "r1", f"[{ret_op}]\n\nthe ask came back"),
+            ("assistant", "r1", final)]
+    side = [("user", f"s{i}", f"side message {i}") for i in range(61)]
+    t3 = WindowedT3(messages=msgs + side)
+    assert run_with_roster(pc, t3, {}) == 0
+    assert t3.sends == []
+    assert pc.issues["is-1"]["status"] == "in_review"
