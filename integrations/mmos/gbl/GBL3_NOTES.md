@@ -120,3 +120,60 @@ per-thread allowlist**, as pure typed functions over an immutable table:
   edge calls `admit_rate` with a count provider (default 0) so the table's
   ceiling is enforced at the door and the bridge re-enforces it
   authoritatively on every create.
+
+## Test evidence (all green, this lane's checkout)
+
+`TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q -p
+no:cacheprovider <file>`:
+
+- `tests/test_gbl_admission.py` — **20/20**: ships-empty; the fixed order
+  (principal→target→kind→rate via `admit_ask`); each gate's typed code; the
+  contract-global and row rate ceilings; row validation (digest shape,
+  kinds ⊆ contract, ceiling ≤ 20, non-empty targets/kinds, well-formed
+  allowlist rows); message allowlist (empty / unlisted thread / unlisted
+  environment / listed pass).
+- `tests/test_gbl_mcp_server.py` — **22/22**, TEST issuer = a local RSA
+  keypair with an in-process `Keys` JWKS fake (no network, no real tenant):
+  - census exactly five, snapshot sorted by name, digest equal to the
+    pinned literal
+    `b9e66d2e79804cdac5b165f6be1caa9342b7ed0938a1f792fc7baafb802d1092`,
+    closed object schemas (`additionalProperties: false`);
+  - token refusals before dispatch: wrong scope → 403 `scope_refused` with
+    an `error="insufficient_scope"` challenge; wrong audience → 401
+    `resource_refused`; revoked principal → 401 `subject_refused`; missing
+    token → 401 `authorization_missing` + Bearer `resource_metadata`
+    challenge; `X-API-Key` header variant → `authorization_missing`; a
+    Bearer API key → `authorization_malformed`; a valid token lists 5;
+  - edge admission: empty table → `ADMISSION_EMPTY` with the bridge
+    untouched; a table for another subject → `PRINCIPAL_NOT_ADMITTED`; a
+    smuggled `principal` argument → `INVALID_ARGUMENTS` with the bridge
+    untouched; happy delegate → bridge op `ask` with `principal` from the
+    admission row, never from arguments; `TARGET_NOT_ALLOWED`;
+  - bounded wire: payload over `MAX_FRAME_BYTES` → `FRAME_TOO_LARGE`
+    before any bridge call; `team.admin` → `TOOL_NOT_AVAILABLE` (no
+    dynamic registration — dispatch refuses every non-census name);
+  - `team.message`: empty allowlist → `ALLOWLIST_EMPTY` with the runner
+    untouched; unlisted thread → `THREAD_NOT_ALLOWED`; redelivery → the
+    scan read-back sees the `[gb-gbm-…]` marker and answers
+    `ALREADY_SENT` with exactly one send ever, whose stdin is the marker
+    line then the quoted-data wrapper ("GBL message from outside party …");
+  - the real socket: a real `GblBridge` + `BridgeServer` on a temp AF_UNIX
+    socket (peer-uid admission) + the real `BridgeClient` — `team.delegate`
+    returns `CREATED` with a `gb-` ask id and the store holds the record;
+  - a real listener: uvicorn bound to 127.0.0.1 on an ephemeral port
+    (stopped in the test) serves the exact RFC 9728 document
+    `{resource, authorization_servers, scopes_supported}`, refuses
+    unauthenticated `tools/list` with 401 + challenge, and answers an
+    authenticated `tools/list` with the five tools.
+- Regressions (same interpreter, one invocation per file):
+  `tests/common/gbl_contract_test.py` 72/72, `tests/test_gbl_bridge_service.py`
+  35/35, `tests/test_gbl_nudge.py` 10/10, `tests/test_gbl_message_send.py`
+  19/19, and all 19 `tests/test_business_mcp_auth_*.py` suites green
+  (the package was imported only, never edited).
+
+Two small harness fixes landed with the implementation commit (the tests
+were committed failing-first at 4079187c2): a missing `Path` import and the
+FakeRunner's `CommandResult` missing the required `exit_code=0` kwarg; a
+dead helper line was also removed from `tests/test_gbl_admission.py`. No
+production-code behavior was changed by these fixes.
+

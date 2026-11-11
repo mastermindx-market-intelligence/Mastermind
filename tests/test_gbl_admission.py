@@ -43,10 +43,6 @@ def row(**over) -> PrincipalAdmission:
     return PrincipalAdmission(**base)
 
 
-def typed(expect):
-    return pytest.raises(GblAdmissionError) as err
-
-
 # ── The table ships EMPTY ────────────────────────────────────────────────────
 
 
