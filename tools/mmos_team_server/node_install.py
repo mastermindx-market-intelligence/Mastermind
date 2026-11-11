@@ -523,7 +523,13 @@ def validated_provider_cli(cli, root=None):
     _require_teammate_safe_dir(folder, "provider CLI folder")
     _require_teammate_safe_dir(os.path.dirname(os.path.realpath(path)),
                                "provider CLI resolution target")
-    if root and realpath_inside(folder, root):
+    # F-MED-A (micro-fix round): containment covers the naming folder AND
+    # the resolution-target folder — a safe outside folder symlinking a
+    # binary that actually lives inside the root would otherwise pass, and
+    # uninstall would delete the executed binary.
+    if root and (realpath_inside(folder, root) or
+                 realpath_inside(os.path.dirname(os.path.realpath(path)),
+                                 root)):
         raise InstallError(
             f"provider CLI must not live inside the server root: {folder}")
     return os.path.realpath(folder)
@@ -535,6 +541,15 @@ def record_provider_cli(root, cli):
     root = validated_root(root)
     folder = validated_provider_cli(cli, root=root)
     config_dir = private_dir(os.path.join(root, "config"), create=True)
+    # F-MED-B (micro-fix round): a killed earlier run can leave this
+    # writer's temp behind and O_EXCL then refuses every retry — clean_dead_
+    # leftovers removes it on the node_install install path, but this
+    # subcommand also runs alone. A symlink is refused, never followed.
+    temp = os.path.join(config_dir, "provider-cli-dir.tmp")
+    if os.path.lexists(temp):
+        if os.path.islink(temp) or not os.path.isfile(temp):
+            raise InstallError(f"symlinked or non-regular temp refused: {temp}")
+        os.unlink(temp)
     private_write(os.path.join(config_dir, "provider-cli-dir"), folder + "\n")
     return folder
 
@@ -573,9 +588,12 @@ def clean_dead_leftovers(root, runtime_dir, staging_parent, config_dir):
             shutil.rmtree(target)
     # Attack finding 2: python3-path.tmp is this installer's temp too; a kill
     # during private_write left it behind and O_EXCL refused every later run.
+    # provider-cli-dir.tmp (F-MED-B, micro-fix round): same failure class —
+    # a leftover wedged every later install at record-provider.
     for temp in (os.path.join(runtime_dir, "install-receipt.json.tmp"),
                  os.path.join(config_dir, "node-runtime.json.tmp"),
-                 os.path.join(config_dir, "python3-path.tmp")):
+                 os.path.join(config_dir, "python3-path.tmp"),
+                 os.path.join(config_dir, "provider-cli-dir.tmp")):
         if os.path.lexists(temp):
             if os.path.islink(temp):
                 raise InstallError(f"symlinked temp refused: {temp}")

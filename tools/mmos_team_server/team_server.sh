@@ -566,8 +566,9 @@ cmd_install() {
   [ -L "$ROOT/fabric.env" ] && die "refusing symlinked fabric.env: $ROOT/fabric.env"
   # LOW10 (panel): sibling files got symlink checks; these in-run files did
   # not — a planted link at run/server.log would send the truncate/chmod and
-  # the banner reads through it, run/port likewise the port reads/writes.
-  for _f in run/server.log run/port run/access.txt run/home.lock; do
+  # the banner reads through it, run/port likewise the port reads/writes,
+  # run/boot.status (micro-fix round) the runner's stage heartbeats.
+  for _f in run/server.log run/port run/access.txt run/home.lock run/boot.status; do
     [ -L "$ROOT/$_f" ] && die "refusing symlinked $ROOT/$_f (planted link would redirect a write/read through it)"
   done
   # Item F: the provider CLI. Since the switch the live server has reported
@@ -774,7 +775,7 @@ cmd_stop() {
   if label_loaded "$LABEL"; then
     _job_pid=$(job_pid "$LABEL")
     "$LAUNCHCTL" bootout "gui/$(id -u)/$LABEL" 2>/dev/null \
-      || "$LAUNCHCTL" unload -w "$PLIST" 2>/dev/null
+      || env -i "$LAUNCHCTL" unload -w "$PLIST" 2>/dev/null
   fi
   # F14: report one of exactly three truthful states. The old code ignored
   # bootout's own failure, sampled the port once, and printed

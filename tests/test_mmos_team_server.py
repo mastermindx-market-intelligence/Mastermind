@@ -237,6 +237,17 @@ class TestInstallHygiene:
         assert len(probes) == 3, probes
         assert all("--max-time 5" in line for line in probes), probes
 
+    def test_every_unload_fallback_is_env_i_clean(self):
+        # Micro-fix round (FU1 completion): every launchd mutation runs
+        # env -i'd so a hostile environment cannot steer it — except stop's
+        # unload fallback, the one path still bare. It must match the other
+        # three sites (bootstrap/load at install, start and cleanup).
+        text = TOOL.read_text()
+        unloads = [line.strip() for line in text.splitlines()
+                   if "unload -w" in line]
+        assert unloads, "no unload fallback found"
+        assert all("env -i" in line for line in unloads), unloads
+
 
 class TestAttackRoundFixes:
     """Regression tests for the 2026-11-10 attack-round findings (writer:

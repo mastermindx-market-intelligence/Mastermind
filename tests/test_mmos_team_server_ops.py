@@ -1253,6 +1253,66 @@ def test_mfh1_write_bits_checked_through_a_symlink_too(h):
     assert not (h.root / "config" / "provider-cli-dir").exists()
 
 
+def test_mf6_symlinked_boot_status_refused(h, tmp_path):
+    # LOW10 completion: the runner appends its stage heartbeats through
+    # run/boot.status on every boot — a planted link there would send those
+    # writes (and the installer's stage reads) through it, like server.log
+    # and port before it. Refuse it by name, before anything is booted.
+    h.seed_root()
+    (h.root / "run").mkdir(exist_ok=True)
+    os.chmod(h.root, 0o700)   # created above at default mode; install requires 0700
+    victim = tmp_path / "victim.status"
+    victim.write_text("stage=pwned\n")
+    os.symlink(victim, h.root / "run" / "boot.status")
+    proc = h.run_install("--server-bin", h.fake_server(), "--replace")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "boot.status" in out, out
+    assert "symlink" in out, out
+    assert not h.loaded()
+
+
+def test_mf6a_provider_cli_resolving_into_the_root_refused(h):
+    # F-MED-A: root-containment covered the NAMING folder only — a safe
+    # outside folder symlinking a claude that actually lives INSIDE the
+    # server root passed, and uninstall would delete the executed binary
+    # (the docstring's own rationale). The resolution-target folder must be
+    # inside-root-checked too.
+    inside = h.root / "provider"
+    inside.mkdir(parents=True)
+    os.chmod(h.root, 0o700)   # created above at default mode; install requires 0700
+    cli = inside / "claude"
+    cli.write_text("#!/bin/sh\necho rooted\n")
+    os.chmod(cli, 0o755)
+    link = h.bindir / "claude-rooted"
+    link.symlink_to(cli)
+    h.seed_root()
+    proc = h.run_install("--server-bin", h.fake_server(),
+                         "--provider-cli", link)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "inside the server root" in out, out
+    assert not (h.root / "config" / "provider-cli-dir").exists()
+
+
+def test_mf6b_provider_cli_dir_tmp_leftover_is_cleaned(h):
+    # F-MED-B: a kill inside private_write during record-provider leaves
+    # config/provider-cli-dir.tmp behind; O_EXCL then refuses every later
+    # install with a write conflict — and the retry boots the healthy
+    # server out first. clean_dead_leftovers must remove this temp like the
+    # other receipt temps, so the prescribed retry actually succeeds.
+    h.seed_root()
+    server = h.fake_server()
+    assert h.run_install("--server-bin", server).returncode == 0
+    leftover = h.root / "config" / "provider-cli-dir.tmp"
+    leftover.write_text("/stale/provider\n")
+    proc = h.run_install("--server-bin", server, "--replace")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out          # the retry succeeds, not wedged
+    assert not leftover.exists()
+    assert (h.root / "config" / "provider-cli-dir").exists()
+
+
 def test_f4_runner_puts_the_recorded_folder_on_the_server_path(h):
     # The packed boot REBUILDS PATH in the exec handoff — the exact line the
     # defect lived in. The stub server records the environment it was exec'd
