@@ -256,3 +256,95 @@ No server was started, no port 3773 bound, and the patched tree was never run as
 - Admission-block failures surface through each service's existing typed error channel, wrapping `MastermindAdmissionBlockedError` as the cause exactly once (the six error channels are closed unions upstream; adding members would have required touching the service modules, which the patch forbids). The `ThreadLaunchError.operation` label for launch admission blocks is approximated as `"resolve-project"` (the first launch operation) since the literals list is closed; the structured cause carries the real admission reason and phase.
 - The endpoint wire protocol (`POST {endpoint}/v1/admit`) is the minimal contract implied by the env config; it is implemented with plain `fetch` and an explicit payload parser rather than schema validation to avoid adding new platform dependencies to upstream's layer graph. An unreachable endpoint or malformed payload fails closed (blocks new execution only), and since A6 every consult is bounded (`AbortSignal.timeout`, see above) — a hung endpoint can no longer stall the launch funnel. The timeout and unreachable paths are proven both by the fetch doubles and live (r2 receipt scenarios B4/B3); the malformed-payload path is exercised through the fetch double only, not a live endpoint.
 - Verification covered `apps/server` typecheck + the colocated admission suite + the upstream ThreadLaunchService suite. The desktop/e2e suites and the full repo-wide vitest run were NOT executed (out of assigned scope; heavy).
+
+## Pinned upstream patch: cross-project delegated child (lane XP, 2026-11-10)
+
+Same donor and pin. Lets a thread in registered project A start a delegated child in
+registered project B on the same server with one `delegate_task` call carrying
+`target.projectId`, with the child bound to B (own worktree cut from B's remote default
+head after a fetch, B's project/instruction context) while the task stays on the parent
+(`task_status`/`task_cancel`, completion wake-up, parent-child lineage).
+
+- **Patch file:** `cross_project_child_0770446.patch`
+- **Patch sha256:** `9038b359c1a3b7f13d23d4cdb13c789e6072ae36754eb835465cc39f36aabbba`
+- **Diff stat:** 10 files changed, 1144 insertions(+), 14 deletions(-)
+  - `packages/contracts/src/orchestrationV2.ts` — worktree strategy gains optional
+    `requireRemoteBase` (refuse rather than fall back to the local branch);
+    `delegated_task.request` gains optional `projectId`.
+  - `packages/contracts/src/orchestratorMcp.ts` — `OrchestratorMcpTarget.projectId`
+    description documents the cross-project case.
+  - `apps/server/src/mcp/OrchestratorMcpService.ts` — the whole cross-project admission
+    block in `delegate_task`: cross-project requires `isolation: "worktree"`; target must
+    be a registered, non-archived, non-deleted project (`requireProject`); the chosen
+    provider instance must be enabled in the TARGET project; the remote default branch is
+    resolved strictly (new `resolveRemoteDefaultBaseRef`, never guesses, never falls back
+    to a local branch) and the worktree strategy is forced to that remote base with
+    `requireRemoteBase: true`; dispatch passes the target `projectId` through; retry of an
+    accepted delegation with the same `clientRequestId` reuses the recorded task (no
+    second child/worktree) and skips the parent-project enablement filter.
+  - `apps/server/src/orchestration-v2/ThreadManagementService.ts` — the single dispatch
+    chokepoint widens to `command.projectId ?? parent.thread.projectId`.
+  - `apps/server/src/orchestration-v2/Orchestrator.ts` — the spawned child thread record
+    carries the command's `projectId` when set.
+  - `apps/server/src/orchestration-v2/ThreadLaunchService.ts` — `requireRemoteBase` fail
+    path: if the fetch could not produce the remote base, the launch fails BEFORE any
+    worktree is created (never silently cuts from the local branch).
+  - `apps/server/src/mcp/toolkits/orchestrator/tools.ts` — `delegate_task` tool
+    description documents `target.projectId`.
+  - Tests colocated in the T3 tree's own suites: `CrossProjectDelegation.test.ts` (new,
+    +251), `OrchestratorMcpService.test.ts` (+695 incl. 7 new cross-project tests),
+    `ThreadLaunchService.test.ts` (+88, 3 new strict-remote-base tests).
+- **Applies cleanly (`git apply --check` exit 0, then applied for real exit 0):** on the
+  pin `0770446869d247a8b28c27d7ed93f47f8ff0c1e4` with BOTH prior patches
+  (`mastermind_admission_0770446.patch`, `claude_text_delta_0770446.patch`) applied first —
+  14 modified files afterwards, i.e. these 10 plus the 4 files the earlier patches touch.
+  Receipt: `~/.mastermind/mmos_evidence/xp-20261111/patch_applies_on_pin_plus_two.log`.
+- **Runtime-mode clamp:** unchanged from upstream — delegated children already inherit the
+  clamped mode; the cross-project path re-checks provider enablement in the target project
+  and refuses `ThreadManagementProviderInstanceDisabledError` when the parent's instance
+  is disabled there.
+
+### Verification actually run (2026-11-10, SSD clone `/Volumes/Mastermind/build-cache/xp-t3code` at the pin with both prior patches and this patch applied)
+
+Red first (new tests against the unpatched pin; `red_*.log` in the evidence dir):
+
+```
+$ node ".../vitest.mjs" run src/orchestration-v2/CrossProjectDelegation.test.ts
+      Tests  3 failed | 1 passed (4)      # red_cross_project_delegation.log
+$ node ".../vitest.mjs" run src/mcp/OrchestratorMcpService.test.ts
+      Tests  10 failed | 59 skipped (69)  # red_mcp_cross_project.log
+$ node ".../vitest.mjs" run src/orchestration-v2/ThreadLaunchService.test.ts
+      Tests  2 failed | 47 skipped (49)   # red_thread_launch_strict.log
+```
+
+Green after the patch (all from `apps/server`, vitest from the pnpm store as above):
+
+```
+$ node "$(ls -d ../../node_modules/.pnpm/vitest@5.0.5*/node_modules/vitest | head -1)/vitest.mjs" \
+    run src/orchestration-v2/CrossProjectDelegation.test.ts
+      Tests  4 passed (4)                 # green_cross_project_delegation.log
+$ node ".../vitest.mjs" run src/orchestration-v2/ThreadLaunchService.test.ts
+      Tests  49 passed (49)               # green_thread_launch.log
+$ node ".../vitest.mjs" run src/orchestration-v2/CrossProjectDelegation.test.ts \
+    src/orchestration-v2/ThreadLaunchService.test.ts src/mcp/OrchestratorMcpService.test.ts \
+    src/orchestration-v2/DelegatedTaskSupervisor.test.ts \
+    src/orchestration-v2/DelegatedTaskQuestionReactor.test.ts \
+    src/orchestration-v2/DelegatedTaskCompletionReactor.test.ts
+      Tests  234 passed (234)             # green_affected_suites.log
+$ cd apps/server && npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit; echo exit=$?
+$ cd packages/contracts && npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit; echo exit=$?
+      # both exit 0 — typecheck_apps_server.log / typecheck_packages_contracts.log
+```
+
+The pinned behaviors: cross-project dispatch binds the child to the target project (not
+the parent's); non-worktree isolation is refused with one plain sentence; archived,
+deleted and unregistered project ids are refused with one plain sentence each; a provider
+instance disabled in the target project is refused; runtime mode escalations are clamped
+to the parent's; the worktree base is the resolved remote default (strict, no local
+fallback) and a failed fetch fails the launch before any worktree exists; retry with the
+same `clientRequestId` returns the SAME task/thread without creating a second worktree;
+cancel of the parent task interrupts the cross-project child; a child question reaches the
+parent thread. A live proof on a throwaway dev server (own home, own port, free probe
+agent, two throwaway projects with bare origins where B's local checkout is deliberately
+one commit behind its origin) is recorded in
+`integrations/mmos/XP_CROSS_PROJECT_CHILD.md` with its receipt JSON.
