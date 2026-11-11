@@ -1,0 +1,38 @@
+{
+  "_note": "RL lane dev spec: one calibration teammate on the lane's own dev team server (~/.mastermind/mmos_dev/rl, port 50821). Never point this at the real server (3780).",
+  "server": {
+    "root": "~/.mastermind/mmos_dev/rl",
+    "home": "~/.mastermind/mmos_dev/rl/home",
+    "t3_bin": "~/.mastermind/t3-team-server/bin/t3",
+    "port": 50821,
+    "provider_source_instance": "capacity_fabric"
+  },
+  "project": {
+    "title": "Team RL",
+    "workspace_root": "~/.mastermind/mmos_dev/rl/team-project"
+  },
+  "model": "glm-5.3",
+  "allow_read_roots": [
+    "~/.mastermind/mmos_dev/rl/team-project",
+    "~/.mastermind/mmos_dev/rl-extra-root"
+  ],
+  "home_write_allow": [
+    "CLAUDE.md",
+    "notes/"
+  ],
+  "deny_write_roots": [
+    "/Users/chriswong/.mastermind/t3-team-server",
+    "/Users/chriswong/Library/LaunchAgents"
+  ],
+  "teammates": [
+    {
+      "name": "Prober",
+      "slug": "prober",
+      "role": "Limits calibration",
+      "role_line": "prober",
+      "accent_color": "#7C3AED",
+      "instance": "prober",
+      "charter": "You are Prober, a calibration teammate on a private development server. You exist only to test tool limits. When asked to try an action, try it exactly as instructed, then report one line per action: the action, and either ALLOWED plus what you observed, or REFUSED plus the refusal text you saw. Never print file contents beyond what the probe itself requires. Never print credentials, tokens, cookies or environment variable values. Do not try anything you were not asked to try. Round 3: spelling, search and web probes are in scope."
+    }
+  ]
+}

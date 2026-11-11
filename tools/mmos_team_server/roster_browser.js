@@ -2,9 +2,12 @@
 // Lane T7 — headless Chromium driver for the Team roster on the team T3
 // server (127.0.0.1:3780). Reuses the mmos-dev playwright-core install.
 // Modes:
-//   pair <accessFile> <profileDir> <outJson>
+//   pair <accessFile> <profileDir> <expectedPort> <outJson>
 //       One-time-token pairing (token read from the 0600 file in-process,
-//       never printed or recorded). No screenshot of the pairing page.
+//       never printed or recorded). The pairing URL is parsed and must be
+//       exactly the loopback team server (http, host 127.0.0.1 or
+//       localhost, port == expectedPort); anything else is refused before
+//       a browser is launched. No screenshot of the pairing page.
 //   rename <profileDir> <threadUrl> <threadId> <currentTitle> <newTitle>
 //            <outJson>
 //       Rename exactly that thread through its web-client menu; verify its
@@ -23,23 +26,51 @@
 //       messages first.
 const fs = require("fs");
 const path = require("path");
-const { chromium } = require(path.join(
-  process.env.HOME,
-  ".mastermind/mmos-dev/t3/tooling/node_modules/playwright-core",
-));
 
 const EXECUTABLE = path.join(
   process.env.HOME,
   "Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
 );
 
+// Loaded lazily so `require` of this file (unit tests of checkPairingUrl)
+// works on machines without the playwright install.
+function chromium() {
+  return require(path.join(
+    process.env.HOME,
+    ".mastermind/mmos-dev/t3/tooling/node_modules/playwright-core",
+  )).chromium;
+}
+
 async function launch(profileDir) {
-  return chromium.launchPersistentContext(profileDir, {
+  return chromium().launchPersistentContext(profileDir, {
     headless: true,
     executablePath: EXECUTABLE,
     viewport: { width: 1280, height: 800 },
     args: ["--no-first-run", "--no-default-browser-check"],
   });
+}
+
+// The pairing URL must be the loopback team server itself. Parsed with the
+// URL parser, never compared as a prefix: `http://127.0.0.1:3780@example.com/`
+// parses with host example.com, and `http://127.0.0.1.example.com:3780/` has
+// a different hostname. The refusal reason never quotes the URL — the
+// pairing URL can carry the one-time token (review R2a, finding 14).
+function checkPairingUrl(raw, expectedPort) {
+  const bad = (reason) => ({ ok: false, reason });
+  if (typeof raw !== "string" || !raw.trim()) return bad("empty");
+  if (!/^[0-9]+$/.test(String(expectedPort))) return bad("bad-expected-port");
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return bad("unparseable");
+  }
+  if (url.protocol !== "http:") return bad("scheme");
+  if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") {
+    return bad("host");
+  }
+  if (url.port !== String(expectedPort)) return bad("port");
+  return { ok: true, url: url.toString() };
 }
 
 function safeUrl(u) {
@@ -136,13 +167,21 @@ async function writeOut(outPath, payload) {
   fs.renameSync(tmp, outPath);
 }
 
-async function modePair(accessFile, profileDir, outJson) {
+async function modePair(accessFile, profileDir, expectedPort, outJson) {
   const lines = fs.readFileSync(accessFile, "utf8").split("\n");
   const pairingLine = lines.find((l) => l.startsWith("Pairing URL:"));
   const tokenLine = lines.find((l) => l.startsWith("Token:"));
   if (!pairingLine || !tokenLine) throw new Error("no pairing data in access file");
   const pairingUrl = pairingLine.slice("Pairing URL:".length).trim();
   const token = tokenLine.slice("Token:".length).trim();
+  // Refused before any browser is launched, and the message never echoes
+  // the URL or the token.
+  const verdict = checkPairingUrl(pairingUrl, expectedPort);
+  if (!verdict.ok) {
+    throw new Error(
+      `pairing URL refused (${verdict.reason}): expected the loopback team ` +
+      `server, http on 127.0.0.1 or localhost, port ${expectedPort}`);
+  }
   const context = await launch(profileDir);
   const page = context.pages()[0] || (await context.newPage());
   await page.goto(pairingUrl, { waitUntil: "domcontentloaded", timeout: 45000 });
@@ -420,16 +459,20 @@ async function modeAnswer(profileDir, threadUrl, answerFile, outJson, shotPng,
   console.log(`ANSWER_DONE removed=${removed} needsInputAfter=${after.needsInput}`);
 }
 
-(async () => {
-  const [mode, ...args] = process.argv.slice(2);
-  if (mode === "answer") return modeAnswer(...args);
-  if (mode === "pair") return modePair(...args);
-  if (mode === "pin") return modePin(...args);
-  if (mode === "rename") return modeRename(...args);
-  if (mode === "snapshot") return modeSnapshot(...args);
-  if (mode === "livetext") return modeLivetext(...args);
-  throw new Error(`unknown mode ${mode}`);
-})().catch((e) => {
-  console.error("ROSTER_BROWSER_FAILED", e.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  (async () => {
+    const [mode, ...args] = process.argv.slice(2);
+    if (mode === "answer") return modeAnswer(...args);
+    if (mode === "pair") return modePair(...args);
+    if (mode === "pin") return modePin(...args);
+    if (mode === "rename") return modeRename(...args);
+    if (mode === "snapshot") return modeSnapshot(...args);
+    if (mode === "livetext") return modeLivetext(...args);
+    throw new Error(`unknown mode ${mode}`);
+  })().catch((e) => {
+    console.error("ROSTER_BROWSER_FAILED", e.message);
+    process.exit(1);
+  });
+}
+
+module.exports = { checkPairingUrl };
