@@ -661,18 +661,23 @@ def gate_config(spec, mate):
     write_names mirrors home_write_allow (None = default home-wide write
     minus protected names).
     """
-    home = os.path.realpath(teammate_home(spec, mate))
-    workspace = os.path.realpath(expand(spec["project"]["workspace_root"]))
+    # M-R1 (panel 3): every config path passes the gate's canonical()
+    # (firmlink alias + true case) — a spec spelled in the
+    # /System/Volumes/Data form emits the same canonical config as the
+    # primary spelling, and the dedupe below is normalization-aware because
+    # both spellings of one root canonicalize to one string
+    home = _gate.canonical(teammate_home(spec, mate))
+    workspace = _gate.canonical(expand(spec["project"]["workspace_root"]))
     read_roots = [workspace]
     for r in spec.get("allow_read_roots") or []:
-        candidate = os.path.realpath(expand(r))
+        candidate = _gate.canonical(expand(r))
         if candidate not in read_roots and candidate != home:
             read_roots.append(candidate)
     def under(path, root):
         return path == root or path.startswith(root.rstrip("/") + "/")
     deny_reads = []
     for r in spec.get("deny_read_roots") or []:
-        candidate = os.path.realpath(expand(r))
+        candidate = _gate.canonical(expand(r))
         if under(candidate, home) or any(under(candidate, root)
                                          for root in read_roots):
             deny_reads.append(candidate)

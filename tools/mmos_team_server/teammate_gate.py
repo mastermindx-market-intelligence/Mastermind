@@ -135,6 +135,36 @@ def canon_case(path):
     return "/" + "/".join(real) if real else "/"
 
 
+def canonical(path):
+    """One spelling per file (M-R1, panel 3): the Data-volume firmlink
+    alias folded back to its primary spelling, then realpath and the true
+    case of every component. Tool paths AND config paths (home,
+    read_roots, deny_reads) pass through here, so a config spelled in the
+    /System/Volumes/Data form cannot skip a comparison made in the /Users
+    (or /private) form — the panel's MIXED probe had settings.json,
+    cutover-preimage.json and .credentials.json readable exactly that way
+    (live-proved 2026-11-11: realpath KEEPS the /System/Volumes/Data
+    spelling while naming the same file). The fold happens BEFORE realpath
+    and also for paths that do not exist yet (a home apply has not
+    created): realpath does not resolve primary-space symlinks like
+    /var -> /private/var through the Data prefix, and a not-yet-created
+    home must canonicalize to the spelling it will have."""
+    data_prefix = "/System/Volumes/Data"
+    candidate = path
+    if candidate.startswith(data_prefix + "/"):
+        stripped = candidate[len(data_prefix):]
+        if os.path.exists(stripped) or not os.path.exists(candidate):
+            candidate = stripped
+    return canon_case(os.path.realpath(candidate))
+
+
+def canonical_entry(entry):
+    """Canonicalize a deny-family entry, preserving a trailing ``*``."""
+    if isinstance(entry, str) and entry.endswith("*"):
+        return canonical(entry[:-1]) + "*"
+    return canonical(entry)
+
+
 def resolve(path, cwd):
     if not isinstance(path, str) or not path or "\x00" in path:
         return None
@@ -142,16 +172,7 @@ def resolve(path, cwd):
     if not expanded.startswith("/"):
         expanded = os.path.join(cwd if isinstance(cwd, str) and
                                 cwd.startswith("/") else "/", expanded)
-    real = os.path.realpath(expanded)
-    # firmlink canonicalization (live-proved 2026-11-11: realpath keeps the
-    # /System/Volumes/Data spelling while naming the SAME file): prefer the
-    # firmlink-root spelling so every comparison sees one form
-    data_prefix = "/System/Volumes/Data"
-    if real.startswith(data_prefix + "/"):
-        alias = real[len(data_prefix):]
-        if os.path.exists(alias):
-            real = alias
-    return canon_case(real)
+    return canonical(expanded)
 
 
 def under(path, root):
@@ -193,6 +214,23 @@ def load_config(argv):
         value = config.get(key)
         if value is not None and not isinstance(value, list):
             refuse(f"gate config '{key}' is not a list; refusing")
+    # M-R1 (panel 3): config-side paths get the SAME firmlink/case
+    # canonicalization tool paths get, so a config spelled in the
+    # /System/Volumes/Data form cannot dodge the home-relative checks (a
+    # hand-edited config is covered here even though the roster emits
+    # canonical paths itself)
+    config["home"] = canonical(config["home"])
+    for key in ("read_roots", "deny_reads"):
+        value = config.get(key)
+        if value is None:
+            continue
+        entries = []
+        for entry in value:
+            if not isinstance(entry, str) or not entry:
+                refuse(f"gate config '{key}' has a non-string entry; "
+                       "refusing")
+            entries.append(canonical_entry(entry))
+        config[key] = entries
     return config
 
 

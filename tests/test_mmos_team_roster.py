@@ -1982,10 +1982,14 @@ class TestRepairRound3:
         assert home.startswith("/System/Volumes/Data")  # the mixed shape
         cfg = team_roster.gate_config(spec, mate)
         # canonical: the /System/Volumes/Data prefix is stripped to the
-        # primary spelling so rel_first_component can never miss the home
+        # primary spelling so rel_first_component can never miss the home —
+        # and it is exactly what the primary-spelled spec would emit
         assert not cfg["home"].startswith("/System/Volumes/Data"), cfg["home"]
-        assert cfg["home"].rstrip("/").endswith(
-            os.path.basename(root))  # still the same tree
+        primary_spec = load(tmp_path, make_spec(tmp_path, root=root))
+        assert cfg["home"] == team_roster.gate_config(
+            primary_spec, primary_spec["teammates"][0])["home"]
+        assert cfg["read_roots"] == team_roster.gate_config(
+            primary_spec, primary_spec["teammates"][0])["read_roots"]
 
     def test_mr1_gate_config_dedupe_is_normalization_aware(self, tmp_path):
         # the same root in both firmlink spellings is ONE entry, not two
