@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 from test_native_current_source import (
+    APPLICATION_MEMBERS,
     BASELINE_INVENTORY_SHA,
     BASELINE_MANIFEST_SHA,
     canonical,

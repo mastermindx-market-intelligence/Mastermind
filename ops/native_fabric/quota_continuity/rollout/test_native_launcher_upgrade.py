@@ -119,12 +119,12 @@ APPLICATION_PREIMAGES = {
 
 
 def verify_current_stage(output):
-    """Qualify all current107 busy-epoch bytes before restoring historical fixtures."""
+    """Qualify all current107 bytes before restoring historical fixtures."""
     import test_native_current_source as current_source
     native = Path(builder.__file__).parent.parent
     if set(APPLICATION_PREIMAGES) != current_source.APPLICATION_MEMBERS:
         raise AssertionError("current application source binding differs")
-    return current_source.verify_broker_busy_stage(
+    return current_source.verify_current_stage(
         output, native,
         {"ext/" + name for name in builder.BASE_FILES | builder.ADDITIONS} | {"pool"})
 
@@ -668,6 +668,23 @@ class PairedLauncherUpgrade(unittest.TestCase):
         finally:
             _expected = False
 
+
+def verify_broker_busy_stage(output):
+    """Qualify all current107 busy-epoch bytes before restoring historical fixtures."""
+    import test_native_broker_busy_source as busy_source
+    native = Path(builder.__file__).parent.parent
+    if set(APPLICATION_PREIMAGES) != busy_source.APPLICATION_MEMBERS:
+        raise AssertionError("current application source binding differs")
+    return busy_source.verify_broker_busy_stage(
+        output, native,
+        {"ext/" + name for name in builder.BASE_FILES | builder.ADDITIONS} | {"pool"})
+
+
+# Converge 2121 rebind (probe-law additive override): this module's paired
+# upgrade stages the broker-busy epoch, so its current-stage verification
+# resolves to the busy closure above. Master's default verifier keeps its
+# exact bytes and every other caller is unaffected.
+verify_current_stage = verify_broker_busy_stage
 
 if __name__ == '__main__':
     unittest.main()
