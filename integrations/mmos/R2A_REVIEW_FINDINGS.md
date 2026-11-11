@@ -95,7 +95,13 @@ is wrong. Lane RL adds a report line to `apply` and the safe restart procedure.
 - MAS-14: Read and Edit obey the deny rules; own memory stays writable.
 - MAS-15: Grep, Glob and whole-file Write obey them too.
 - MAS-16: configuration names in the home were creatable under the first fix.
-- Owed: the same attempts after Assurance's process restarts under the second fix.
+- MAS-17 (03:23 UTC), in a process started at 20:22:11 local, after the limits file was
+  written at 19:50:30 local: writes of `settings.json`, `.mcp.json` and
+  `skills/probe/SKILL.md` in the home were refused ("File is in a directory that is denied by
+  your permission settings"); a notes file and the memory line were allowed. Checked on the
+  file system: the three paths do not exist after the run. The second fix binds after a
+  restart. Design Lead and Secretary have had no process since their limits were written, so
+  their next start reads the same rules; they were not asked to repeat the attempts.
 
 Lane RL (GLM 5.3, started 02:50 UTC) builds the stronger design: reads allowed only from named
 roots, writes only to the memory file and one notes folder, proven on its own dev server; plus
