@@ -492,6 +492,38 @@ GO_ORIGINAL_COLLECTION_COLLECTOR_SHA256 = "44dcbb648bfdd0d0c4b6d5866529aec934177
 GO_ORIGINAL_COLLECTION_SUCCESSOR_SHA256 = "5219fb35f940831752638d348feefd92d02ad00ba9394fa9d66cf1d281091a9d"
 
 
+
+# Approved successor to the exact #2060 native stage; retain its preimages
+# for historical installer fixtures and Go's original base normalization.
+# Forward digests pin the converged 2121 candidate bytes: pick/quota_circuit/
+# fabric_continuation are the PR's composed blobs; fabric_task, remote_sub.sh
+# and lease_broker.py carry the master-side sparse-cwd/refusal-task lines that
+# survived the converge, so their forward pins are re-derived from the tree.
+BROKER_BUSY_STAGE_PREIMAGES = {
+    "fabric_continuation.py": "7a4050051378fcacada2f2fe6d056649fb514077aacfb02751d61d6e67dfe405",
+    "fabric_task.py": "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a6c2d12e41cd",
+    "remote_sub.sh": "0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c"
+}
+BROKER_BUSY_STAGE_DIGESTS = {
+    "fabric_continuation.py": "8b3ab69abc6e61bdae98dea026c4dc5075ab7bc0b062624cb205df4a27a98030",
+    "fabric_task.py": "0e85036189cc074c3b1a463304f1ccadba82038beadff3b51255c1ef2ec68d66",
+    "remote_sub.sh": "e140eb481c8c61f70eea6e8b8bcba175c18ba31bb3423f1ec182384cb54db449"
+}
+BROKER_BUSY_PICKER_PREIMAGE = "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892"
+BROKER_BUSY_QUOTA_PREIMAGE = "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303"
+BROKER_BUSY_PREIMAGES = {
+    **BROKER_BUSY_STAGE_PREIMAGES,
+    "lease_broker.py": "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a",
+    "pick.py": BROKER_BUSY_PICKER_PREIMAGE,
+    "quota_circuit.py": BROKER_BUSY_QUOTA_PREIMAGE,
+}
+BROKER_BUSY_DIGESTS = {
+    **BROKER_BUSY_STAGE_DIGESTS,
+    "lease_broker.py": "3e5517157b0de972c9f05d689757304ef15950a108a351e254d083f2a9056550",
+    "pick.py": "c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057",
+    "quota_circuit.py": "ba1f2582505a0350260d0bdc4a00f6374a2e1140bc4b6cead84368b606f9970e",
+}
+
 GO_ORIGINAL_ARTIFACT_ADDITIONS = {
     "original_advertised_artifact.py": "46a06945d0e640794cb52945a5caece440abee6da1c0ba13eaff371d9dc6e3c0",
 }
@@ -1741,6 +1773,15 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         for name in GO_PARTICIPANT_ADDITIONS:
             del normalized["ext/" + name]
         normalized["ext/fabric_operator_owner.py"] = GO_PARTICIPANT_OPERATOR_PREIMAGE
+    # Only the full published six-member busy epoch can be normalized. The
+    # original broker/selector and all pre-lease denial fences stay in force.
+    busy = {name: manifest["ext/" + name] for name in BROKER_BUSY_PREIMAGES}
+    if current_diagnostics and any(
+            busy[name] == digest for name, digest in BROKER_BUSY_DIGESTS.items()):
+        if busy != BROKER_BUSY_DIGESTS:
+            raise ValueError("native broker busy cohort differs")
+        normalized.update({"ext/" + name: digest
+                           for name, digest in BROKER_BUSY_STAGE_PREIMAGES.items()})
     ubuntu4 = {name: normalized["ext/" + name] for name in GO_UBUNTU4_DIGESTS}
     if any(ubuntu4[name] == digest for name, digest in GO_UBUNTU4_DIGESTS.items()):
         if not current_diagnostics or ubuntu4 != GO_UBUNTU4_DIGESTS:
@@ -1772,7 +1813,9 @@ def validate_go_base_manifest(manifest, dependency_hashes):
             raise ValueError("native Go base differs from captured application dependency")
         historical["ext/" + name] = original
     if manifest["ext/pick.py"] not in {
-            GO_BASE_PICKER_SHA256, GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]}:
+            GO_BASE_PICKER_SHA256, BROKER_BUSY_PICKER_PREIMAGE,
+            BROKER_BUSY_DIGESTS["pick.py"],
+            GROK47_CANDIDATE_COMPOSITION_DIGESTS["pick.py"]}:
         raise ValueError("native Go base picker is not the exact composed source")
     historical["ext/pick.py"] = GO_BASE_PICKER_SHA256
     # The new advice epoch was already qualified against its full107 parent.
@@ -1782,7 +1825,13 @@ def validate_go_base_manifest(manifest, dependency_hashes):
         raise ValueError("native Go executor is not the exact composed source")
     historical["ext/remote_sub_exec.py"] = GO_BASE_EXECUTOR_SHA256
     for name, original in GO_SELECTION_SUPPORT_PREIMAGES.items():
-        if manifest["ext/" + name] not in {original, GO_SELECTION_SUPPORT_DIGESTS[name]}:
+        allowed = {original, GO_SELECTION_SUPPORT_DIGESTS[name]}
+        if name == "quota_circuit.py":
+            # The complete six-member pre-busy epoch retains the exact
+            # already-published quota-circuit preimage. The busy cohort
+            # guard above rejects any partial/mixed fallback source.
+            allowed.add(BROKER_BUSY_QUOTA_PREIMAGE)
+        if manifest["ext/" + name] not in allowed:
             raise ValueError("native Go selection support is not the exact composed source")
         historical["ext/" + name] = original
     if manifest["ext/provider_outcome.py"] not in {
