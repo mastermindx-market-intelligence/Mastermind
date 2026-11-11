@@ -431,6 +431,33 @@ class TestToolLimitsNewKeys:
         deny = team_roster.tool_limits(spec, other)["permissions"]["deny"]
         assert f"Read(/{assets}/**)" in deny
 
+    def test_session_processes_match_assets_paths(self, tmp_path,
+                                                  monkeypatch):
+        """With assets_dir the command line carries the limits/charter
+        paths, not the home (that becomes an env var): process detection
+        must be given those paths or apply under-reports pending restarts."""
+        raw = make_spec(tmp_path)
+        raw["assets_dir"] = str(tmp_path / "assets")
+        spec = load(tmp_path, raw)
+        mate = spec["teammates"][0]
+        limits_path, charter_path = team_roster.limits_paths(spec, mate)
+        home = team_roster.teammate_home(spec, mate)
+        line = (f" 4242   Tue Nov 10 19:34:11 2026 t3-claude --settings "
+                f"{limits_path} --append-system-prompt-file {charter_path}")
+
+        class Proc:
+            returncode = 0
+            stdout = "  PID   LSTART  TIME COMMAND\n" + line + "\n"
+            stderr = ""
+
+        monkeypatch.setattr(team_roster.subprocess, "run",
+                            lambda a, **k: Proc())
+        found = team_roster.session_processes(home, limits_path,
+                                              charter_path)
+        assert found == [{"pid": 4242, "started": "Tue Nov 10 19:34:11 2026"}]
+        # home alone no longer matches: apply must pass all three paths
+        assert team_roster.session_processes(home) == []
+
 
 class TestAtomicWrites:
     """Review R2a finding 11: the server watches settings.json and reloads it
@@ -824,7 +851,7 @@ class TestLimitsPendingRestart:
             else:
                 monkeypatch.setattr(
                     team_roster, "session_processes",
-                    lambda home: sessions_by_home.get(home, []))
+                    lambda *paths: sessions_by_home.get(paths[0], []))
         return team_roster.cmd_apply(spec)
 
     def test_changed_limits_reported_with_plain_line(self, tmp_path,
@@ -842,8 +869,8 @@ class TestLimitsPendingRestart:
 
     def test_line_names_the_running_session_pid(self, tmp_path, monkeypatch,
                                                 capsys):
-        def sessions(home):
-            if home.endswith("/a"):
+        def sessions(*paths):
+            if paths[0].endswith("/a"):
                 return [{"pid": 4242, "started": "Tue Nov 10 19:34:11 2026"}]
             return []
 

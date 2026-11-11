@@ -1001,17 +1001,20 @@ def write_urls_file(spec, threads):
     return path
 
 
-def session_processes(home):
-    """Session processes of the teammate whose home is ``home``.
+def session_processes(*paths):
+    """Session processes of the teammate identified by ``paths`` (its home
+    plus, when assets_dir is set, the limits/charter paths its launch args
+    carry — with assets_dir those, not the home, appear in the command
+    line; the home is then only an env var).
 
     A teammate session is one long-lived process the server starts per
     thread; it reads tool-limits.json and CHARTER.md only when it starts, so
     a limits change binds on the next process start, never mid-session.
-    Detection matches the home path in the process list and returns pid and
+    Detection matches any given path in the process list and returns pid and
     start time only — a command line can carry values that are not ours to
     show, so it is read for the match and never returned or printed.
     """
-    home = os.path.abspath(home)
+    paths = [os.path.abspath(p) for p in paths if p]
     try:
         proc = subprocess.run(["ps", "-axo", "pid,lstart,command"],
                               capture_output=True, text=True, timeout=30)
@@ -1022,7 +1025,7 @@ def session_processes(home):
     out = []
     for line in proc.stdout.splitlines()[1:]:
         parts = line.strip().split(None, 6)
-        if len(parts) < 7 or home not in parts[6]:
+        if len(parts) < 7 or not any(p in parts[6] for p in paths):
             continue
         try:
             pid = int(parts[0])
@@ -1056,7 +1059,8 @@ def cmd_apply(spec):
         changed = pending[mate["name"]]
         if not changed:
             continue
-        sessions = session_processes(teammate_home(spec, mate))
+        sessions = session_processes(teammate_home(spec, mate),
+                                     *limits_paths(spec, mate))
         if sessions:
             live = "; ".join(f"pid {s['pid']} started {s['started']}"
                              for s in sessions)
