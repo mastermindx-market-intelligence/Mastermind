@@ -566,3 +566,77 @@ work and are not touched.
 | 5, 6, 7, 8 | Done on the installed app (MAS-5 to MAS-9) |
 | 9 | Checked: transport works, the agent failed the task |
 | 10 | Lane T4b |
+
+
+## 17. Amendment, 2026-11-11 00:20 UTC: the governed coding job is accepted on dev, not installed
+
+**Lane T4b is accepted** and merged into trunk at `4ec9e58dd`. Checked before reading its
+report: the commit exists, the remote head matches, the evidence folder is there, its checkout
+is clean, its dev servers and door are stopped, its own test sweep and the wider Executive
+supervisor, runtime and T3-native tests pass on its head. I read the control-plane diff myself.
+Runbook: `T4B_CODING_JOB.md`. Decisions: `T4B_DECISIONS.md`. Attack round:
+`T4B_ATTACK_FINDINGS.md`. Evidence: `~/.mastermind/mmos_evidence/t4b-20261110/LEDGER.md`.
+
+**What it proves, and where.** On a dev Paperclip (3190), a dev T3 server and a scratch
+Executive store, a teammate's reply that asks for code becomes one governed coding job through
+the socket door and the L1 engine. The lane reports four journeys; I did not run them again.
+
+| Journey | Native launches | Result |
+| --- | --- | --- |
+| default | 1 | result returned to the task as a comment with the job identity |
+| crash (door killed after launch) | 1 | a fresh door recovered the same attempt; no second job |
+| wait (fleet full) | 0 | the task shows one blocker comment with the reason |
+| undeliverable (unknown origin) | 1 | the task shows the refusal code |
+
+The crash journey needed one engine change: a claim that lost its identity is adopted from its
+durable provider receipt (`adopt_attempt` with a reattach id, read through
+`provider_receipt_reader`). It is a change on a critical surface and goes into the bundle
+review below.
+
+**A boundary was crossed, and it is recorded.** During bring-up the door's proof helper ran
+`t3 auth pairing create` against the Chairman's own T3 Code app (port 3773) instead of the dev
+server: 13 codes labelled `t4b-door-worker` and one labelled `probe-dryrun`, each valid 15
+minutes or less, between 21:47 and 21:53 UTC on 2026-11-10. The command line tool picks its
+server from its home directory and port settings, not from the helper's address. The lane
+reports every code expired unused: its own `pairing list` at 21:59 UTC showed 13 rows, each
+never used. It did not delete them, since that would be a second write to the app. After I told
+the lane not to touch that app again, it ran one more read-only `pairing list` there. I cannot
+check any of this without reading the app's credential store, which stays off-limits; the
+Chairman can see paired clients in the app's own settings. The fix is in the code: the door
+refuses to start without a dev home and a dev port (3790 to 3810), and no pairing command runs
+until the dev server answers. Test: `test_config_requires_the_dev_server_pin`.
+
+**Decisions**
+
+1. DONE_WHEN 10 is split. The recovery half ("an interrupted job is recovered as the same
+   job") and the admission half are proven on dev. Neither is on the installed app.
+2. The installed carrier may run trunk's carrier file, because the coding-job block does
+   nothing without a `coding_job_door` entry in a teammate's config (read at
+   `handle_coding_job` and `coding_job_help`). No real teammate gets that entry before the
+   bundle review.
+3. One CRITICAL bundle review stays at the release tail, read-only, by a model that wrote none
+   of it. Scope: the engine reattach (`executive_runtime.py`, `executive_supervisor.py`,
+   `t3_native_composition.py`), `paperclip_result_delivery.py`, the door, the socket door for
+   local admission, the shell-URL loader, the cut-over tool, the carrier, and T8's pairing
+   path.
+4. New lane T4c, after that review: the coding job on the installed app. It owes the real
+   door composition with a reconcile cadence (attack finding F8, reported and not fixed), a
+   Paperclip writer credential for the return transport, and its own local Executive store.
+   The production Executive is not that store and is not touched without the Chairman's word.
+5. New lane CQ, running now: the carrier stays with a teammate's waiting question for up to 15
+   minutes and finishes in the same run; text from a turn that has not ended is never
+   delivered as the answer (seen once on MAS-9); the waiting line on the issue says where to
+   answer. I test it on the installed app before it stays.
+6. The eleven `t3/mmos-t4b-job-*` branches on origin are the journeys' evidence. They stay
+   until the release tail, then go in one cleanup.
+
+**DONE_WHEN, honestly**
+
+| # | State |
+| --- | --- |
+| 1, 2 | Lane T8 |
+| 3 | Not done; the Chairman's switch |
+| 4 | Rotation on real teammates still owed |
+| 5, 6, 7, 8 | Done on the installed app (MAS-5 to MAS-9) |
+| 9 | Checked: transport works, the agent failed the task |
+| 10 | Coding job and crash recovery proven on dev instances; installed app is lane T4c. The improvement loop has not run |
