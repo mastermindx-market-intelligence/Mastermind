@@ -19,6 +19,27 @@
     "/private/tmp",
     "/private/var/folders"
   ],
+  "deny_read_roots": [
+    "~/.paperclip",
+    "~/.t3",
+    "~/.hermes",
+    "~/.ssh",
+    "~/.aws",
+    "~/.gnupg",
+    "~/.config",
+    "~/.claude",
+    "~/.codex",
+    "~/.docker",
+    "~/.kube",
+    "~/.netrc",
+    "~/.npmrc",
+    "~/.zsh_history",
+    "~/.local/share/mastermind",
+    "~/Library/Keychains",
+    "~/Library/Cookies",
+    "~/Library/Application Support"
+  ],
+  "deny_read_root_siblings": true,
   "teammates": [
     {
       "name": "Assurance",

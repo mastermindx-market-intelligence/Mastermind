@@ -268,6 +268,57 @@ def write_if_changed(path, text, mode):
     return changed
 
 
+# Entries of the server root a teammate never needs to read. `run` holds the
+# pairing file, the server log and the paired browser profile; `home` is the
+# T3 server's own state (sessions, secrets, settings).
+SERVER_PRIVATE = ("run", "home", "config", "claude-home", "fabric.env")
+
+# Files in a teammate's own home that are config or credentials, not memory.
+# The teammate may not change them; the preimage it may not even read.
+HOME_LOCKED = ("tool-limits.json", "CHARTER.md", "carrier.json",
+               "cutover-preimage.json", "cutover-result.json")
+HOME_UNREADABLE = ("cutover-preimage.json",)
+
+
+def _read_deny(path):
+    """Deny rules for one path: a directory denies its whole tree."""
+    if os.path.isdir(path):
+        return [f"Read(/{path}/**)"]
+    if os.path.exists(path):
+        return [f"Read(/{path})"]
+    return [f"Read(/{path})", f"Read(/{path}/**)"]
+
+
+def deny_read_paths(spec, mate):
+    """What a teammate must not read (review R2a, finding 1).
+
+    A teammate runs as the same user as everything else on this Mac, so file
+    modes do not protect a credential from it. Text in an issue can ask it to
+    read a file and quote it back, and the carrier posts its reply. Deny
+    rules win over the plain `Read` allow.
+    """
+    root = expand(spec["server"]["root"])
+    paths = [os.path.join(root, name) for name in SERVER_PRIVATE]
+    for other in spec["teammates"]:
+        if other["slug"] != mate["slug"]:
+            paths.append(teammate_home(spec, other))
+    home = teammate_home(spec, mate)
+    paths += [os.path.join(home, name) for name in HOME_UNREADABLE]
+    paths += [expand(r) for r in spec.get("deny_read_roots", [])]
+    if spec.get("deny_read_root_siblings"):
+        parent = os.path.dirname(root)
+        if os.path.isdir(parent):
+            for name in sorted(os.listdir(parent)):
+                if name != os.path.basename(root):
+                    paths.append(os.path.join(parent, name))
+    seen, out = set(), []
+    for path in paths:
+        if path not in seen:
+            seen.add(path)
+            out.append(path)
+    return out
+
+
 def tool_limits(spec, mate):
     home = teammate_home(spec, mate)
     deny_roots = [expand(spec["project"]["workspace_root"])]
@@ -275,6 +326,11 @@ def tool_limits(spec, mate):
     deny = ["Bash", "Agent", "NotebookEdit"]
     for root in deny_roots:
         deny += [f"Write(/{root}/**)", f"Edit(/{root}/**)"]
+    for name in HOME_LOCKED:
+        locked = os.path.join(home, name)
+        deny += [f"Write(/{locked})", f"Edit(/{locked})"]
+    for path in deny_read_paths(spec, mate):
+        deny += _read_deny(path)
     allow = [
         "Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite",
         f"Write(/{home}/**)", f"Edit(/{home}/**)",
@@ -282,8 +338,8 @@ def tool_limits(spec, mate):
     return {
         "permissions": {"allow": allow, "deny": deny},
         "_note": ("allow/deny enumerations in Claude Code permission syntax; "
-                  "an unlisted outside-home write raises an approval request "
-                  "rather than silently writing"),
+                  "deny wins over allow; an unlisted outside-home write raises "
+                  "an approval request rather than silently writing"),
     }
 
 

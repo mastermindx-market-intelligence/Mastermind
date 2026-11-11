@@ -52,8 +52,19 @@ node tools/mmos_team_server/roster_browser.js pair \
 It prints `PAIR_DONE`. The pairing token is read in-process and never
 printed. If pairing fails because the token in `access.txt` has expired
 (tokens rotate on every server start), the current one is at the end of
-`~/.mastermind/t3-team/run/server.log` — grep for `Pairing URL:`, never cat
-the whole log.
+`~/.mastermind/t3-team/run/server.log`. Do not grep or cat that log to a
+terminal: the pairing line is the token (review R2a, finding 14). Copy the
+two lines into a 0600 file without showing them, pair from that file, then
+delete it:
+
+```
+umask 077
+grep -E '^(Pairing URL|Token):' ~/.mastermind/t3-team/run/server.log \
+  | tail -2 > /tmp/team_pair_lines.txt
+node tools/mmos_team_server/roster_browser.js pair /tmp/team_pair_lines.txt \
+  ~/.mastermind/t3-team/run/browser-profile /tmp/tsr_pair_out.json
+rm -f /tmp/team_pair_lines.txt
+```
 
 ## 2. Apply the short names
 

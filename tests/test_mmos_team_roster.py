@@ -176,6 +176,52 @@ class TestToolLimits:
         assert "Write(//tmp/**)" in joined
 
 
+class TestToolLimitsCredentials:
+    """Review R2a finding 1: a teammate cannot read credentials or other
+    teammates' homes, and cannot rewrite its own limits or charter."""
+
+    def test_server_private_and_other_homes_unreadable(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate, other = spec["teammates"][0], spec["teammates"][1]
+        root = team_roster.expand(spec["server"]["root"])
+        os.makedirs(os.path.join(root, "run"), exist_ok=True)
+        os.makedirs(team_roster.teammate_home(spec, other), exist_ok=True)
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        assert f"Read(/{root}/run/**)" in deny
+        assert f"Read(/{team_roster.teammate_home(spec, other)}/**)" in deny
+        home = team_roster.teammate_home(spec, mate)
+        assert not any(d.startswith(f"Read(/{home}/**") for d in deny)
+        assert f"Read(/{home}/cutover-preimage.json)" in deny
+
+    def test_own_limits_and_charter_not_writable(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        home = team_roster.teammate_home(spec, mate)
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        for name in ("tool-limits.json", "CHARTER.md", "carrier.json",
+                     "cutover-preimage.json"):
+            assert f"Write(/{home}/{name})" in deny
+            assert f"Edit(/{home}/{name})" in deny
+        assert not any("CLAUDE.md" in d for d in deny)
+
+    def test_spec_roots_and_siblings(self, tmp_path):
+        raw = make_spec(tmp_path)
+        secret_dir = tmp_path / "elsewhere" / "secrets"
+        secret_dir.mkdir(parents=True)
+        raw["deny_read_roots"] = [str(secret_dir)]
+        raw["deny_read_root_siblings"] = True
+        spec = load(tmp_path, raw)
+        root = team_roster.expand(spec["server"]["root"])
+        os.makedirs(root, exist_ok=True)
+        sibling = os.path.join(os.path.dirname(root), "sibling-proofs")
+        os.makedirs(sibling, exist_ok=True)
+        mate = spec["teammates"][0]
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        assert f"Read(/{secret_dir}/**)" in deny
+        assert f"Read(/{sibling}/**)" in deny
+        assert not any(d.startswith(f"Read(/{root}/**") for d in deny)
+
+
 class TestFileAssets:
     def test_write_and_rewrite_home(self, tmp_path):
         spec = load(tmp_path, make_spec(tmp_path))
