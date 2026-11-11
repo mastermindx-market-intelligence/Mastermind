@@ -1,5 +1,5 @@
 diff --git a/apps/server/src/mcp/OrchestratorMcpService.test.ts b/apps/server/src/mcp/OrchestratorMcpService.test.ts
-index f52ac951..cc6a090b 100644
+index f52ac951..0d77d886 100644
 --- a/apps/server/src/mcp/OrchestratorMcpService.test.ts
 +++ b/apps/server/src/mcp/OrchestratorMcpService.test.ts
 @@ -33,6 +33,7 @@ import * as Deferred from "effect/Deferred";
@@ -10,7 +10,7 @@ index f52ac951..cc6a090b 100644
  import * as Queue from "effect/Queue";
  import * as Ref from "effect/Ref";
  import * as Schema from "effect/Schema";
-@@ -2059,6 +2060,700 @@ describe("OrchestratorMcpService provider resolution", () => {
+@@ -2059,6 +2060,1135 @@ describe("OrchestratorMcpService provider resolution", () => {
        }),
    );
  
@@ -160,9 +160,11 @@ index f52ac951..cc6a090b 100644
 +      sentence: "archived",
 +    },
 +    {
++      // The project lookup hides deleted projects the way the real store
++      // does (deleted_at IS NULL), so the caller is told "was not found".
 +      name: "a deleted project",
 +      project: { archivedAt: null, deletedAt: "2026-11-01T00:00:00.000Z" },
-+      sentence: "deleted",
++      sentence: "was not found",
 +    },
 +  ])("refuses a cross-project task for $name", ({ project, sentence }) =>
 +    Effect.gen(function* () {
@@ -191,7 +193,7 @@ index f52ac951..cc6a090b 100644
 +        Layer.mock(ProjectService.ProjectService)({
 +          getById: (requested) =>
 +            Effect.succeed(
-+              requested === projectBId && project !== null
++              requested === projectBId && project !== null && project.deletedAt === null
 +                ? Option.some(
 +                    {
 +                      id: projectBId,
@@ -626,6 +628,439 @@ index f52ac951..cc6a090b 100644
 +      }),
 +  );
 +
++  it.effect("resolves a cross-project driver-kind target by the target project's enablement", () =>
++    Effect.gen(function* () {
++      const projectBId = ProjectId.make("project:mcp-providers-b");
++      const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
++      const task = {
++        id: taskId,
++        threadId: parentThreadId,
++        runId: parentRunId,
++        parentNodeId,
++        origin: "app_owned",
++        createdBy: "agent",
++        driver: ProviderDriverKind.make("antigravity"),
++        providerInstanceId: antigravityInstanceId,
++        providerThreadId: null,
++        childThreadId,
++        nativeTaskRef: null,
++        prompt: "Summarize the diff.",
++        title: null,
++        model: "gpt-5.4",
++        status: "running",
++        result: null,
++        startedAt: null,
++        completedAt: null,
++      };
++      const layerDependencies = Layer.mergeAll(
++        NodeServices.layer,
++        NodeCrypto.layer,
++        Layer.mock(ThreadManagementService.ThreadManagementService)({
++          hasReceipt: () => Effect.succeed(false),
++          getThreadRecords: (threadId) =>
++            Ref.get(dispatched).pipe(
++              Effect.map((commands) =>
++                threadId === parentThreadId
++                  ? parentProjection(commands.length > 0 ? [task] : [])
++                  : childProjection,
++              ),
++            ),
++          // Project A enables only the codex instance; project B enables
++          // only the antigravity instance.
++          isProviderInstanceEnabledForProject: ({ projectId: target, instanceId }) =>
++            Effect.succeed(
++              target === projectId
++                ? instanceId === codexInstanceId
++                : instanceId === antigravityInstanceId,
++            ),
++          dispatch: (command) =>
++            Ref.update(dispatched, (commands) => [...commands, command]).pipe(
++              Effect.as({
++                sequence: 1,
++                storedEvents: [
++                  {
++                    sequence: 1,
++                    commandId: null,
++                    event: { type: "subagent.updated", payload: task },
++                  },
++                ],
++              } as never),
++            ),
++        }),
++        ServerSettings.layerTest(),
++        providerRegistryLayer([
++          providerSnapshot({
++            instanceId: codexInstanceId,
++            driver: ProviderDriverKind.make("codex"),
++            model: "gpt-5.4",
++          }),
++          providerSnapshot({
++            instanceId: antigravityInstanceId,
++            driver: ProviderDriverKind.make("antigravity"),
++            model: "gpt-5.4",
++          }),
++        ]),
++        adapterRegistryLayer([codexInstanceId, antigravityInstanceId]),
++        Layer.mock(ProjectService.ProjectService)({
++          getById: (requested) =>
++            Effect.succeed(
++              requested === projectBId
++                ? Option.some({
++                    id: projectBId,
++                    title: "Project B",
++                    workspaceRoot: "/repos/mcp-providers-b",
++                    archivedAt: null,
++                    deletedAt: null,
++                  } as never)
++                : requested === projectId
++                  ? Option.some({
++                      id: projectId,
++                      title: "Project A",
++                      workspaceRoot: "/repos/mcp-providers-a",
++                      archivedAt: null,
++                      deletedAt: null,
++                    } as never)
++                  : Option.none(),
++            ),
++        }),
++        Layer.mock(SecretRequests.SecretRequests)({}),
++        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
++        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
++      );
++
++      yield* Effect.gen(function* () {
++        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
++        const result = yield* service.delegateTask(scope, {
++          task: "Summarize the diff.",
++          target: { driverKind: ProviderDriverKind.make("antigravity"), projectId: projectBId },
++          isolation: "worktree",
++          mode: "async",
++          clientRequestId: "delegate-cross-project-driver-kind-1",
++        });
++        assert.equal(result.status, "running");
++        const commands = yield* Ref.get(dispatched);
++        assert.equal(commands.length, 1);
++        assert.equal(
++          (commands[0] as { modelSelection: { instanceId: string } }).modelSelection.instanceId,
++          antigravityInstanceId,
++        );
++      }).pipe(
++        Effect.provide(
++          OrchestratorMcpService.layer.pipe(
++            Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
++            Layer.provide(
++              Layer.mock(GitVcsDriver.GitVcsDriver)({
++                resolvePrimaryRemoteName: () => Effect.succeed("origin"),
++                resolveDefaultBranchName: () => Effect.succeed("main"),
++              }),
++            ),
++            Layer.provide(layerDependencies),
++          ),
++        ),
++      );
++    }),
++  );
++
++  it.effect("refuses a retry that names a different target project", () =>
++    Effect.gen(function* () {
++      const projectBId = ProjectId.make("project:mcp-providers-b");
++      const projectUnknownId = ProjectId.make("project:mcp-providers-unknown");
++      const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
++      const accepted = yield* Ref.make(false);
++      const task = {
++        id: taskId,
++        threadId: parentThreadId,
++        runId: parentRunId,
++        parentNodeId,
++        origin: "app_owned",
++        createdBy: "agent",
++        driver: ProviderDriverKind.make("codex"),
++        providerInstanceId: codexInstanceId,
++        providerThreadId: null,
++        childThreadId,
++        nativeTaskRef: null,
++        prompt: "Summarize the diff.",
++        title: null,
++        model: "gpt-5.4",
++        status: "running",
++        result: null,
++        startedAt: null,
++        completedAt: null,
++      };
++      const replayedEvents = [
++        {
++          sequence: 1,
++          commandId: null,
++          event: {
++            type: "thread.created",
++            threadId: childThreadId,
++            payload: { id: childThreadId, projectId: projectBId },
++          },
++        },
++        {
++          sequence: 2,
++          commandId: null,
++          event: { type: "subagent.updated", payload: task },
++        },
++      ];
++      const layerDependencies = Layer.mergeAll(
++        NodeServices.layer,
++        NodeCrypto.layer,
++        Layer.mock(ThreadManagementService.ThreadManagementService)({
++          getThreadRecords: (threadId) =>
++            Ref.get(accepted).pipe(
++              Effect.map((isAccepted) =>
++                threadId === parentThreadId
++                  ? parentProjection(isAccepted ? [task] : [])
++                  : childProjection,
++              ),
++            ),
++          hasReceipt: () => Ref.get(accepted),
++          isProviderInstanceEnabledForProject: () => Effect.succeed(true),
++          // A replay returns the recorded command's events without running it.
++          dispatch: (command) =>
++            Ref.update(dispatched, (commands) => [...commands, command]).pipe(
++              Effect.andThen(Ref.set(accepted, true)),
++              Effect.flatMap(() => Ref.get(dispatched)),
++              Effect.map((commands) =>
++                commands.length > 1
++                  ? ({ sequence: 1, replayed: true, storedEvents: replayedEvents } as never)
++                  : ({ sequence: 1, storedEvents: replayedEvents } as never),
++              ),
++            ),
++        }),
++        ServerSettings.layerTest(),
++        providerRegistryLayer([
++          providerSnapshot({
++            instanceId: codexInstanceId,
++            driver: ProviderDriverKind.make("codex"),
++            model: "gpt-5.4",
++          }),
++        ]),
++        adapterRegistryLayer([codexInstanceId]),
++        Layer.mock(ProjectService.ProjectService)({
++          getById: (requested) =>
++            Effect.succeed(
++              requested === projectBId
++                ? Option.some({
++                    id: projectBId,
++                    title: "Project B",
++                    workspaceRoot: "/repos/mcp-providers-b",
++                    archivedAt: null,
++                    deletedAt: null,
++                  } as never)
++                : requested === projectId
++                  ? Option.some({
++                      id: projectId,
++                      title: "Project A",
++                      workspaceRoot: "/repos/mcp-providers-a",
++                      archivedAt: null,
++                      deletedAt: null,
++                    } as never)
++                  : Option.none(),
++            ),
++        }),
++        Layer.mock(SecretRequests.SecretRequests)({}),
++        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
++        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
++      );
++
++      yield* Effect.gen(function* () {
++        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
++        const first = yield* service.delegateTask(scope, {
++          task: "Summarize the diff.",
++          target: { providerInstanceId: codexInstanceId, projectId: projectBId },
++          isolation: "worktree",
++          mode: "async",
++          clientRequestId: "delegate-cross-project-retry-mismatch-1",
++        });
++        assert.equal(first.status, "running");
++
++        // The new target is not even a registered project: a refusal that
++        // mentions the request id proves no admission ran against it.
++        const refusal = yield* service
++          .delegateTask(scope, {
++            task: "Summarize the diff.",
++            target: { providerInstanceId: codexInstanceId, projectId: projectUnknownId },
++            isolation: "worktree",
++            mode: "async",
++            clientRequestId: "delegate-cross-project-retry-mismatch-1",
++          })
++          .pipe(Effect.flip);
++        assert.equal(refusal.code, "invalid_request");
++        assert.include(refusal.message, "already used");
++        assert.include(refusal.message, projectBId);
++        const commands = yield* Ref.get(dispatched);
++        assert.equal(commands.length, 2);
++        assert.equal(
++          (commands[0] as { commandId: string }).commandId,
++          (commands[1] as { commandId: string }).commandId,
++        );
++      }).pipe(
++        Effect.provide(
++          OrchestratorMcpService.layer.pipe(
++            Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
++            Layer.provide(
++              Layer.mock(GitVcsDriver.GitVcsDriver)({
++                resolvePrimaryRemoteName: () => Effect.succeed("origin"),
++                resolveDefaultBranchName: () => Effect.succeed("main"),
++              }),
++            ),
++            Layer.provide(layerDependencies),
++          ),
++        ),
++      );
++    }),
++  );
++
++  it.effect("refuses a retry that drops the target project", () =>
++    Effect.gen(function* () {
++      const projectBId = ProjectId.make("project:mcp-providers-b");
++      const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
++      const accepted = yield* Ref.make(false);
++      const task = {
++        id: taskId,
++        threadId: parentThreadId,
++        runId: parentRunId,
++        parentNodeId,
++        origin: "app_owned",
++        createdBy: "agent",
++        driver: ProviderDriverKind.make("codex"),
++        providerInstanceId: codexInstanceId,
++        providerThreadId: null,
++        childThreadId,
++        nativeTaskRef: null,
++        prompt: "Summarize the diff.",
++        title: null,
++        model: "gpt-5.4",
++        status: "running",
++        result: null,
++        startedAt: null,
++        completedAt: null,
++      };
++      const replayedEvents = [
++        {
++          sequence: 1,
++          commandId: null,
++          event: {
++            type: "thread.created",
++            threadId: childThreadId,
++            payload: { id: childThreadId, projectId: projectBId },
++          },
++        },
++        {
++          sequence: 2,
++          commandId: null,
++          event: { type: "subagent.updated", payload: task },
++        },
++      ];
++      const layerDependencies = Layer.mergeAll(
++        NodeServices.layer,
++        NodeCrypto.layer,
++        Layer.mock(ThreadManagementService.ThreadManagementService)({
++          getThreadRecords: (threadId) =>
++            Ref.get(accepted).pipe(
++              Effect.map((isAccepted) =>
++                threadId === parentThreadId
++                  ? parentProjection(isAccepted ? [task] : [])
++                  : childProjection,
++              ),
++            ),
++          hasReceipt: () => Ref.get(accepted),
++          isProviderInstanceEnabledForProject: () => Effect.succeed(true),
++          // A replay returns the recorded command's events without running it.
++          dispatch: (command) =>
++            Ref.update(dispatched, (commands) => [...commands, command]).pipe(
++              Effect.andThen(Ref.set(accepted, true)),
++              Effect.flatMap(() => Ref.get(dispatched)),
++              Effect.map((commands) =>
++                commands.length > 1
++                  ? ({ sequence: 1, replayed: true, storedEvents: replayedEvents } as never)
++                  : ({ sequence: 1, storedEvents: replayedEvents } as never),
++              ),
++            ),
++        }),
++        ServerSettings.layerTest(),
++        providerRegistryLayer([
++          providerSnapshot({
++            instanceId: codexInstanceId,
++            driver: ProviderDriverKind.make("codex"),
++            model: "gpt-5.4",
++          }),
++        ]),
++        adapterRegistryLayer([codexInstanceId]),
++        Layer.mock(ProjectService.ProjectService)({
++          getById: (requested) =>
++            Effect.succeed(
++              requested === projectBId
++                ? Option.some({
++                    id: projectBId,
++                    title: "Project B",
++                    workspaceRoot: "/repos/mcp-providers-b",
++                    archivedAt: null,
++                    deletedAt: null,
++                  } as never)
++                : requested === projectId
++                  ? Option.some({
++                      id: projectId,
++                      title: "Project A",
++                      workspaceRoot: "/repos/mcp-providers-a",
++                      archivedAt: null,
++                      deletedAt: null,
++                    } as never)
++                  : Option.none(),
++            ),
++        }),
++        Layer.mock(SecretRequests.SecretRequests)({}),
++        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
++        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
++      );
++
++      yield* Effect.gen(function* () {
++        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
++        const first = yield* service.delegateTask(scope, {
++          task: "Summarize the diff.",
++          target: { providerInstanceId: codexInstanceId, projectId: projectBId },
++          isolation: "worktree",
++          mode: "async",
++          clientRequestId: "delegate-cross-project-retry-drop-target-1",
++        });
++        assert.equal(first.status, "running");
++
++        const refusal = yield* service
++          .delegateTask(scope, {
++            task: "Summarize the diff.",
++            target: { providerInstanceId: codexInstanceId },
++            mode: "async",
++            clientRequestId: "delegate-cross-project-retry-drop-target-1",
++          })
++          .pipe(Effect.flip);
++        assert.equal(refusal.code, "invalid_request");
++        assert.include(refusal.message, "already used");
++        assert.include(refusal.message, projectBId);
++        const commands = yield* Ref.get(dispatched);
++        assert.equal(commands.length, 2);
++        assert.equal(
++          (commands[0] as { commandId: string }).commandId,
++          (commands[1] as { commandId: string }).commandId,
++        );
++      }).pipe(
++        Effect.provide(
++          OrchestratorMcpService.layer.pipe(
++            Layer.provide(Layer.mock(ThreadLaunchService.ThreadLaunchService)({})),
++            Layer.provide(
++              Layer.mock(GitVcsDriver.GitVcsDriver)({
++                resolvePrimaryRemoteName: () => Effect.succeed("origin"),
++                resolveDefaultBranchName: () => Effect.succeed("main"),
++              }),
++            ),
++            Layer.provide(layerDependencies),
++          ),
++        ),
++      );
++    }),
++  );
++
 +  it.effect("clamps a cross-project task's runtime mode to the parent's", () =>
 +    Effect.gen(function* () {
 +      const projectBId = ProjectId.make("project:mcp-providers-b");
@@ -712,10 +1147,28 @@ index f52ac951..cc6a090b 100644
      { name: "parent instance", parentEnabled: true, model: "gpt-5.4" },
      { name: "alternate instance", parentEnabled: false, model: "gpt-5.5" },
 diff --git a/apps/server/src/mcp/OrchestratorMcpService.ts b/apps/server/src/mcp/OrchestratorMcpService.ts
-index 98bc6326..955aeeb7 100644
+index 98bc6326..20058ce4 100644
 --- a/apps/server/src/mcp/OrchestratorMcpService.ts
 +++ b/apps/server/src/mcp/OrchestratorMcpService.ts
-@@ -1905,6 +1905,23 @@ const make = Effect.gen(function* () {
+@@ -1335,6 +1335,8 @@ const make = Effect.gen(function* () {
+     readonly providers: ReadonlyArray<ServerProvider>;
+     /** Receipt replays bypass current settings because they start no work. Dispatch must reuse the checked command ID. */
+     readonly skipProjectEnablementFilter?: boolean;
++    /** Driver-kind candidates are filtered by enablement in this project; a cross-project request passes the target's. */
++    readonly enablementProjectId?: ProjectId;
+   }): Effect.fn.Return<ResolvedTarget, OrchestratorMcpFailure> {
+     const requestedInstanceId = input.target?.providerInstanceId;
+     const requestedDriver = input.target?.driverKind;
+@@ -1367,7 +1369,7 @@ const make = Effect.gen(function* () {
+         const enabledForProject =
+           input.skipProjectEnablementFilter === true ||
+           (yield* threadManagement.isProviderInstanceEnabledForProject({
+-            projectId: input.parent.thread.projectId,
++            projectId: input.enablementProjectId ?? input.parent.thread.projectId,
+             instanceId: candidate.instanceId,
+           }));
+         if (enabledForProject) {
+@@ -1905,6 +1907,23 @@ const make = Effect.gen(function* () {
      };
    });
  
@@ -739,7 +1192,7 @@ index 98bc6326..955aeeb7 100644
    const scheduledTaskRunModes = Effect.fn("OrchestratorMcpService.scheduledTaskRunModes")(
      function* (task: ScheduledTask) {
        const modes = [{ runtimeMode: task.runtimeMode, interactionMode: task.interactionMode }];
-@@ -2411,15 +2428,13 @@ const make = Effect.gen(function* () {
+@@ -2411,15 +2430,13 @@ const make = Effect.gen(function* () {
            : readTask(scope, taskId, false, true);
        }
        const { scope, parent } = yield* loadThreadCaller(callerScope, "delegate_task");
@@ -762,7 +1215,15 @@ index 98bc6326..955aeeb7 100644
        const parentRun = parent.runs
          .filter(ThreadManagementService.isActiveRun)
          .toSorted((left, right) => right.ordinal - left.ordinal)[0];
-@@ -2457,7 +2472,60 @@ const make = Effect.gen(function* () {
+@@ -2446,6 +2463,7 @@ const make = Effect.gen(function* () {
+         target: input.target,
+         providers,
+         skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
++        ...(crossProjectId === null ? {} : { enablementProjectId: crossProjectId }),
+       });
+       const runtimeMode = yield* resolveRuntimeMode(
+         parent.thread.runtimeMode,
+@@ -2457,7 +2475,54 @@ const make = Effect.gen(function* () {
          input.interactionMode,
        );
        let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;
@@ -783,12 +1244,6 @@ index 98bc6326..955aeeb7 100644
 +            return yield* failure(
 +              "invalid_request",
 +              `Project ${crossProjectId} is archived, so it cannot run delegated tasks.`,
-+            );
-+          }
-+          if (targetProject.deletedAt !== null) {
-+            return yield* failure(
-+              "invalid_request",
-+              `Project ${crossProjectId} is deleted, so it cannot run delegated tasks.`,
 +            );
 +          }
 +          const enabledInTarget = yield* threadManagement.isProviderInstanceEnabledForProject({
@@ -824,7 +1279,7 @@ index 98bc6326..955aeeb7 100644
          const project = yield* requireProject(parent.thread.projectId);
          const base = yield* gitDriver
            .resolveCommit({
-@@ -2500,6 +2568,7 @@ const make = Effect.gen(function* () {
+@@ -2500,6 +2565,7 @@ const make = Effect.gen(function* () {
            parentNodeId: parentRun.rootNodeId,
            task: taskPrompt(input),
            ...(input.title === undefined ? {} : { title: input.title }),
@@ -832,6 +1287,33 @@ index 98bc6326..955aeeb7 100644
            modelSelection: target.modelSelection,
            runtimeMode,
            interactionMode,
+@@ -2519,6 +2585,26 @@ const make = Effect.gen(function* () {
+                 ),
+           ),
+         );
++      // A replay hands back the child the recorded command created. That
++      // child belongs to the project of the first request, so a retry that
++      // now names another project — or none — is refused instead of
++      // silently returning a child from a different target.
++      if (result.replayed === true) {
++        const requestedProjectId = crossProjectId ?? parent.thread.projectId;
++        const childThreadEvent = result.storedEvents.find(
++          (stored) => stored.event.type === "thread.created",
++        );
++        const childProjectId =
++          childThreadEvent?.event.type === "thread.created"
++            ? childThreadEvent.event.payload.projectId
++            : undefined;
++        if (childProjectId !== undefined && childProjectId !== requestedProjectId) {
++          return yield* failure(
++            "invalid_request",
++            `This request id was already used for a task in project ${childProjectId}, not ${requestedProjectId}.`,
++          );
++        }
++      }
+       const taskEvent = result.storedEvents.find(
+         (stored) =>
+           stored.event.type === "subagent.updated" && stored.event.payload.origin === "app_owned",
 diff --git a/apps/server/src/mcp/toolkits/orchestrator/tools.ts b/apps/server/src/mcp/toolkits/orchestrator/tools.ts
 index f0affbf6..109049cf 100644
 --- a/apps/server/src/mcp/toolkits/orchestrator/tools.ts
@@ -847,12 +1329,13 @@ index f0affbf6..109049cf 100644
    failure: OrchestratorMcpFailure,
 diff --git a/apps/server/src/orchestration-v2/CrossProjectDelegation.test.ts b/apps/server/src/orchestration-v2/CrossProjectDelegation.test.ts
 new file mode 100644
-index 00000000..3cfe95e5
+index 00000000..160a6571
 --- /dev/null
 +++ b/apps/server/src/orchestration-v2/CrossProjectDelegation.test.ts
-@@ -0,0 +1,251 @@
+@@ -0,0 +1,372 @@
 +import { assert, it } from "@effect/vitest";
 +import {
++  type ApplicationProjectEvent,
 +  CommandId,
 +  EventId,
 +  MessageId,
@@ -881,6 +1364,7 @@ index 00000000..3cfe95e5
 +import * as EventStore from "./EventStore.ts";
 +import * as Orchestrator from "./Orchestrator.ts";
 +import * as ProjectionStore from "./ProjectionStore.ts";
++import * as ProjectStore from "./ProjectStore.ts";
 +import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 +import * as ThreadManagementService from "./ThreadManagementService.ts";
 +import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
@@ -908,6 +1392,9 @@ index 00000000..3cfe95e5
 +  ProjectionStore.layer.pipe(Layer.provide(layerDatabase)),
 +  EventStore.layer.pipe(Layer.provide(layerDatabase)),
 +  EffectOutbox.layer.pipe(Layer.provide(layerDatabase)),
++  // A separate store instance over the same database the harness's
++  // orchestrator reads, so tests can seed project rows.
++  ProjectStore.layer.pipe(Layer.provide(layerDatabase)),
 +  layerHarness,
 +);
 +const layerTest = ThreadManagementService.layer.pipe(
@@ -952,10 +1439,50 @@ index 00000000..3cfe95e5
 +    });
 +  });
 +
++const seedProject = (projectId: ProjectId, title: string, archivedAt: string | null = null) =>
++  Effect.gen(function* () {
++    const projects = yield* ProjectStore.ProjectStoreV2;
++    const occurredAt = "2026-11-11T00:00:00.000Z";
++    const envelope = {
++      sequence: 1,
++      eventId: EventId.make(`event:${projectId}`),
++      aggregateKind: "project",
++      aggregateId: projectId,
++      occurredAt,
++      commandId: null,
++      causationEventId: null,
++      correlationId: null,
++      metadata: {},
++    };
++    yield* projects.apply({
++      ...envelope,
++      type: "project.created",
++      payload: {
++        projectId,
++        title,
++        workspaceRoot: `/repos/${title.toLowerCase().replace(/\s+/g, "-")}`,
++        defaultModelSelection: null,
++        scripts: [],
++        createdAt: occurredAt,
++        updatedAt: occurredAt,
++      },
++    } as ApplicationProjectEvent);
++    if (archivedAt !== null) {
++      yield* projects.apply({
++        ...envelope,
++        type: "project.meta-updated",
++        payload: { projectId, archivedAt, updatedAt: archivedAt },
++      } as ApplicationProjectEvent);
++    }
++  });
++
 +const delegateCrossProject = (parentThreadId: ThreadId, task: string) =>
 +  Effect.gen(function* () {
 +    const threads = yield* ThreadManagementService.ThreadManagementService;
 +    const orchestrator = yield* Orchestrator.OrchestratorV2;
++    // The MCP layer admits only registered projects, so the dispatch this
++    // helper models must find its target in the project store.
++    yield* seedProject(projectBId, "Cross Project B");
 +    const parentRun = (yield* orchestrator.getThreadProjection(parentThreadId)).runs.at(-1)!;
 +    yield* threads.dispatch({
 +      type: "delegated_task.request",
@@ -1102,25 +1629,247 @@ index 00000000..3cfe95e5
 +    assert.equal(parent.thread.projectId, projectAId);
 +  }).pipe(Effect.provide(Layer.mergeAll(layerTest, layerReactor))),
 +);
++
++it.effect("refuses a raw cross-project command without a strict worktree strategy", () =>
++  Effect.gen(function* () {
++    const threads = yield* ThreadManagementService.ThreadManagementService;
++    const orchestrator = yield* Orchestrator.OrchestratorV2;
++    yield* seedProject(projectBId, "Cross Project B");
++    const parentThreadId = ThreadId.make("thread:cross-project:raw-no-strategy");
++    yield* createThread(parentThreadId, projectAId);
++    yield* send(parentThreadId, "Parent work");
++    const parentRun = (yield* orchestrator.getThreadProjection(parentThreadId)).runs.at(-1)!;
++
++    const refusal = yield* threads
++      .dispatch({
++        type: "delegated_task.request",
++        commandId: CommandId.make("delegate:raw-no-strategy"),
++        parentThreadId,
++        parentRunId: parentRun.id,
++        parentNodeId: parentRun.rootNodeId!,
++        task: "Raw cross-project task.",
++        modelSelection,
++        runtimeMode: "full-access",
++        interactionMode: "default",
++        completionWake: "always",
++        createdBy: "agent",
++        creationSource: "mcp",
++        projectId: projectBId,
++        // No workspace strategy: the raw-command door must not stamp the
++        // target project on a child that would run in the parent's checkout.
++      } as Parameters<typeof threads.dispatch>[0])
++      .pipe(Effect.flip);
++
++    assert.include(String(refusal.cause), "needs a worktree cut from");
++    const parent = yield* orchestrator.getThreadProjection(parentThreadId);
++    assert.lengthOf(parent.subagents, 0);
++  }).pipe(Effect.provide(layerTest)),
++);
++
++it.effect("refuses a raw cross-project command for an archived target project", () =>
++  Effect.gen(function* () {
++    const threads = yield* ThreadManagementService.ThreadManagementService;
++    const orchestrator = yield* Orchestrator.OrchestratorV2;
++    yield* seedProject(projectBId, "Cross Project B", "2026-11-11T00:00:00.000Z");
++    const parentThreadId = ThreadId.make("thread:cross-project:raw-archived");
++    yield* createThread(parentThreadId, projectAId);
++    yield* send(parentThreadId, "Parent work");
++    const parentRun = (yield* orchestrator.getThreadProjection(parentThreadId)).runs.at(-1)!;
++
++    const refusal = yield* threads
++      .dispatch({
++        type: "delegated_task.request",
++        commandId: CommandId.make("delegate:raw-archived"),
++        parentThreadId,
++        parentRunId: parentRun.id,
++        parentNodeId: parentRun.rootNodeId!,
++        task: "Archived target task.",
++        modelSelection,
++        runtimeMode: "full-access",
++        interactionMode: "default",
++        completionWake: "always",
++        createdBy: "agent",
++        creationSource: "mcp",
++        projectId: projectBId,
++        workspaceStrategy: {
++          type: "worktree",
++          baseRef: "origin/main",
++          startFromOrigin: true,
++          requireRemoteBase: true,
++        },
++      } as Parameters<typeof threads.dispatch>[0])
++      .pipe(Effect.flip);
++
++    assert.include(String(refusal.cause), "is not available for delegated tasks");
++    const parent = yield* orchestrator.getThreadProjection(parentThreadId);
++    assert.lengthOf(parent.subagents, 0);
++  }).pipe(Effect.provide(layerTest)),
++);
 diff --git a/apps/server/src/orchestration-v2/Orchestrator.ts b/apps/server/src/orchestration-v2/Orchestrator.ts
-index 27186e49..90a23ed9 100644
+index 27186e49..ecd63ba7 100644
 --- a/apps/server/src/orchestration-v2/Orchestrator.ts
 +++ b/apps/server/src/orchestration-v2/Orchestrator.ts
-@@ -8127,6 +8127,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
+@@ -8081,6 +8081,40 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
+           cause: `Parent node ${command.parentNodeId} is not part of active run ${parentRun.id}.`,
+         });
+       }
++      // A cross-project request moves the child to another project, so the
++      // child must work in its own worktree cut from that project's remote
++      // head; anything less would label the child as the target project
++      // while it runs in this thread's checkout. Every dispatch of this
++      // command type passes here, whatever door sent it.
++      const crossProject =
++        command.projectId !== undefined && command.projectId !== parentProjection.thread.projectId;
++      if (crossProject) {
++        const strategy = command.workspaceStrategy;
++        if (
++          strategy?.type !== "worktree" ||
++          strategy.startFromOrigin !== true ||
++          strategy.requireRemoteBase !== true
++        ) {
++          return yield* new OrchestratorDispatchError({
++            commandId: command.commandId,
++            commandType: command.type,
++            cause: `A delegated task in project ${command.projectId} needs a worktree cut from that project's remote head (isolation "worktree" with startFromOrigin and requireRemoteBase).`,
++          });
++        }
++        // Admission read the project before dispatch; re-read it here so a
++        // project unregistered, deleted, or archived in between cannot take
++        // a worker. The lookup hides deleted projects.
++        const targetProject = yield* projects
++          .get(command.projectId)
++          .pipe(mapDispatchError(command));
++        if (Option.isNone(targetProject) || targetProject.value.archivedAt !== null) {
++          return yield* new OrchestratorDispatchError({
++            commandId: command.commandId,
++            commandType: command.type,
++            cause: `Project ${command.projectId} is not available for delegated tasks.`,
++          });
++        }
++      }
+ 
+       const targetAdapter = yield* providerAdapters.get(command.modelSelection.instanceId).pipe(
+         Effect.mapError(
+@@ -8127,7 +8161,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
          }),
          runtimeMode: command.runtimeMode,
          interactionMode: command.interactionMode,
+-        ...(command.workspaceStrategy === undefined ? {} : { branch: null, worktreePath: null }),
 +        // A cross-project request moves the child to that project; its
-+        // instructions, hooks, and worktree then come from the target.
++        // instructions, hooks, and worktree then come from the target, so it
++        // never keeps the parent checkout's branch or worktree path.
 +        ...(command.projectId === undefined ? {} : { projectId: command.projectId }),
-         ...(command.workspaceStrategy === undefined ? {} : { branch: null, worktreePath: null }),
++        ...(command.workspaceStrategy === undefined && !crossProject
++          ? {}
++          : { branch: null, worktreePath: null }),
        };
        const task: OrchestrationV2Subagent = {
+         id: taskNodeId,
 diff --git a/apps/server/src/orchestration-v2/ThreadLaunchService.test.ts b/apps/server/src/orchestration-v2/ThreadLaunchService.test.ts
-index fb7a2ffc..dd0b64cf 100644
+index fb7a2ffc..369528a7 100644
 --- a/apps/server/src/orchestration-v2/ThreadLaunchService.test.ts
 +++ b/apps/server/src/orchestration-v2/ThreadLaunchService.test.ts
-@@ -1226,6 +1226,94 @@ it.effect("shows the fetch diagnosis when preparing a worktree from origin fails
+@@ -1154,6 +1154,99 @@ it.effect.each(["stable", "upstream/release"])(
+     ),
+ );
+ 
++it.effect(
++  "launches from origin/main with the remote's current head past a stale tracking ref",
++  () =>
++    Effect.gen(function* () {
++      const fs = yield* FileSystem.FileSystem;
++      const git = yield* GitVcsDriver.GitVcsDriver;
++      const directory = yield* fs.makeTempDirectoryScoped({ prefix: "launch-stale-base-" });
++      const cwd = `${directory}/repo`;
++      const remote = `${directory}/remote.git`;
++      const secondClone = `${directory}/second`;
++      const worktreePath = `${directory}/worktree`;
++      yield* fs.makeDirectory(cwd);
++      const command = (at: string, args: string[]) =>
++        git.execute({ operation: "launch-test", cwd: at, args });
++      // The project's checkout fetches once, so its tracking ref remembers
++      // the first head.
++      yield* command(cwd, ["init", "-b", "main"]);
++      yield* command(cwd, ["config", "user.name", "Test"]);
++      yield* command(cwd, ["config", "user.email", "test@example.test"]);
++      yield* command(cwd, ["commit", "--allow-empty", "-m", "initial"]);
++      const firstHead = (yield* command(cwd, ["rev-parse", "HEAD"])).stdout.trim();
++      yield* command(cwd, ["init", "--bare", "-b", "main", remote]);
++      yield* command(cwd, ["remote", "add", "origin", remote]);
++      yield* command(cwd, ["push", "-u", "origin", "main"]);
++      // The remote's default branch then advances from a second clone, so
++      // this checkout's refs/remotes/origin/main stays one commit behind.
++      yield* command(directory, ["clone", remote, secondClone]);
++      yield* command(secondClone, ["config", "user.name", "Test"]);
++      yield* command(secondClone, ["config", "user.email", "test@example.test"]);
++      yield* command(secondClone, ["commit", "--allow-empty", "-m", "remote advance"]);
++      yield* command(secondClone, ["push", "origin", "main"]);
++      const remoteHead = (yield* command(secondClone, ["rev-parse", "HEAD"])).stdout.trim();
++      const staleTrackingRef = (
++        yield* command(cwd, ["rev-parse", "refs/remotes/origin/main"])
++      ).stdout.trim();
++      assert.equal(staleTrackingRef, firstHead);
++      assert.notEqual(remoteHead, firstHead);
++
++      const setupStarted = yield* Deferred.make<void>();
++      const harness = makeHarness({
++        hasCommit: ({ refName }) =>
++          command(cwd, ["rev-parse", "--verify", `${refName}^{commit}`]).pipe(
++            Effect.as(true),
++            Effect.orElseSucceed(() => false),
++          ),
++        git: {
++          resolveWorktreeBaseRemote: (input) => git.resolveWorktreeBaseRemote({ ...input, cwd }),
++          hasRefNamed: () => Effect.succeed(false),
++        },
++        fetchWorktreeBaseCommit: (input) => git.fetchWorktreeBaseCommit({ ...input, cwd }),
++        createWorktree: (input, options) =>
++          git.createWorktree({ ...input, cwd, path: worktreePath }, options),
++        runSetup: () =>
++          Deferred.succeed(setupStarted, undefined).pipe(
++            Effect.as({ status: "no-script" as const }),
++          ),
++      });
++      yield* Effect.gen(function* () {
++        const launches = yield* ThreadLaunch.ThreadLaunchService;
++        const threads = yield* ThreadManagement.ThreadManagementService;
++        // The strict strategy a cross-project delegated child must use.
++        const workspace = {
++          type: "worktree" as const,
++          baseRef: "origin/main",
++          branch: "feature",
++          startFromOrigin: true,
++          requireRemoteBase: true,
++        };
++        yield* launches.checkWorktreeBase({ projectId, workspaceStrategy: workspace });
++        const launched = yield* launches.launch(
++          launchInput({
++            command: "command:launch:stale-base",
++            thread: "thread:launch:stale-base",
++            workspace,
++          }),
++        );
++        yield* Deferred.await(setupStarted);
++        const projection = yield* threads.getThreadProjection(launched.threadId);
++        assert.equal(projection.thread.worktreePath, worktreePath);
++        const worktreeHead = (yield* command(worktreePath, ["rev-parse", "HEAD"])).stdout.trim();
++        assert.equal(worktreeHead, remoteHead);
++        assert.notEqual(worktreeHead, firstHead);
++      }).pipe(Effect.provide(harness.layer));
++    }).pipe(
++      Effect.provide(
++        GitVcsDriver.layer.pipe(
++          Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "launch-stale-git-" })),
++          Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
++        ),
++      ),
++    ),
++);
++
+ it.effect("fetches the origin base from the remote it already resolved", () => {
+   let fetchInput: Deferred.Deferred<unknown> | null = null;
+   const harness = makeHarness({
+@@ -1226,6 +1319,94 @@ it.effect("shows the fetch diagnosis when preparing a worktree from origin fails
    }).pipe(Effect.provide(harness.layer));
  });
  

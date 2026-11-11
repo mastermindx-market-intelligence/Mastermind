@@ -1,12 +1,17 @@
 # Lane XP — cross-project delegated child (pin 0770446 + our two patches)
 
-Status: DONE (implementation, tests, live proof, attack round — see the evidence ledger).
-Driver model: glm-5.3. Branch `t3/mmos-v4-xp`. Patch:
-`integrations/t3/upstream_patches/cross_project_child_0770446.patch` (10 files, 1144
-insertions; sha256 `9038b359c1a3b7f13d23d4cdb13c789e6072ae36754eb835465cc39f36aabbba`;
+Status: DONE (implementation, tests, live proof, attack round, panel repairs — see the
+evidence ledger and "Panel repairs" below).
+Driver model: glm-5.3. Branches `t3/mmos-v4-xp` (feature), `t3/mmos-v4-xpb` (panel
+repairs). Patch:
+`integrations/t3/upstream_patches/cross_project_child_0770446.patch` (10 files, 1849
+insertions, 16 deletions; sha256 `a5cfa90eba615daffdad358b4fa5177ca3077a84740084bbd1906be02544101d`
+— includes the four panel repairs and the stale-tracking-ref proof test; the pre-repair
+bytes were `9038b359…abbba`, 1144 insertions;
 MANIFEST entry with exact commands beside it). Source clone:
 `/Volumes/Mastermind/build-cache/xp-t3code` (external volume, pin `0770446`, both prior
-patches applied). Evidence: `~/.mastermind/mmos_evidence/xp-20261111/`.
+patches applied). Evidence: `~/.mastermind/mmos_evidence/xp-20261111/` (feature round) and
+`~/.mastermind/mmos_evidence/xpb-20261111/` (panel repairs round).
 
 ## The goal, restated as what shipped
 
@@ -72,7 +77,10 @@ Why not the alternatives, in one line each:
 | --- | --- |
 | `target.projectId` names no registered project | `Project project:does-not-exist was not found.` (code `invalid_request`; observed live) |
 | Target project archived | `Project <id> is archived, so it cannot run delegated tasks.` |
-| Target project deleted | `Project <id> is deleted, so it cannot run delegated tasks.` |
+| Target project deleted | `Project <id> was not found.` — the project lookup hides deleted projects, so deleted and unregistered read identically (panel repair XPb-4 removed an unreachable separate sentence) |
+| Raw `delegated_task.request` command with `projectId` set and no strict strategy (any door that bypasses MCP admission) | `A delegated task in project <id> needs a worktree cut from that project's remote head (isolation "worktree" with startFromOrigin and requireRemoteBase).` |
+| Target unregistered/archived between admission and dispatch (re-read in the orchestrator) | `Project <id> is not available for delegated tasks.` |
+| Retry with the same `clientRequestId` naming a different target project (or none) | `This request id was already used for a task in project <firstProjectId>, not <requestedProjectId>.` (`invalid_request`; no admission check runs against the new project) |
 | Cross-project without `isolation: "worktree"` (incl. omitted) | `A task in project <id> needs isolation "worktree"; any other isolation would work directly in that project's checkout.` (observed live) |
 | Provider instance enabled in A but disabled in B | `Provider instance "<instanceId>" is disabled for project <B>.` (`ThreadManagementProviderInstanceDisabledError` → `invalid_request`) |
 | Remote default branch unresolvable (unborn HEAD, no remote, symbolic-ref games) | `Unable to resolve a remote default branch for project "<title>" (<workspaceRoot>), so a worktree cannot be cut from its remote head.` |
@@ -117,10 +125,11 @@ Unchanged but now cross-project-covering:
    (`thread_credential_required` for external OAuth clients) — verified live: the driver's
    own external client cannot call `task_cancel`; only the in-thread parent agent can.
 
-Known asymmetry (documented, not changed): `resolveTarget`'s driverKind CANDIDATE filtering
-still filters by enablement in the PARENT's project; the cross-project block then re-checks
-enablement in B and refuses if not enabled there. An explicit `providerInstanceId` bypasses
-candidate filtering and is fully re-checked against B — the fully-controlled path.
+Formerly a known asymmetry, closed by panel repair XPb-3: `resolveTarget`'s driverKind
+CANDIDATE filtering now uses the TARGET project's enablement for cross-project requests
+(`enablementProjectId`, `OrchestratorMcpService.ts:1338-1372`); same-project filtering is
+unchanged. An explicit `providerInstanceId` bypasses candidate filtering and is re-checked
+against B as before.
 
 ## Restart behavior (census4, answered)
 
@@ -263,6 +272,140 @@ hold. Three adjacent observations adjudicated and recorded, none requiring a fix
    add a network round-trip inside shared VCS driver code used far beyond delegation).
 No patch change; sha256 remains `9038b359…abbba`.
 
+## Panel repairs (branch `t3/mmos-v4-xpb`, 2026-11-11)
+
+A five-reviewer panel (`~/.mastermind/mmos_evidence/xp-20261111/panel/SCORE.md`, 45
+findings) returned four repairs; all four are implemented, red/green logged, and folded
+into the regenerated patch (sha `a5cfa90e…0101d`). Evidence round:
+`~/.mastermind/mmos_evidence/xpb-20261111/`.
+
+1. **XPb-5 — orchestrator guard on raw cross-project commands**
+   (`Orchestrator.ts:8084-8120`, child-record clearing at `:8164-8172`). The guard sits
+   in `dispatchDelegatedTaskRequest`, the command body itself, because every executing
+   sender of `delegated_task.request` passes through `orchestrator.dispatch →
+   dispatchWithReceiptEffect → dispatchOnce` — both proven doors: the MCP `delegateTask`
+   handler and the WS `dispatchCommand` door (`ws.ts` → `ThreadMessageIntake` →
+   `threads.dispatch`) that admits raw commands. When `command.projectId` is set and
+   differs from the parent thread's project, the command is refused unless the strategy
+   is a worktree with `startFromOrigin: true` AND `requireRemoteBase: true`; the target
+   project is re-read there (the orchestrator reads the same `projection_projects` store
+   `ProjectService.getById` reads — cheap) and an unregistered or archived target is
+   refused; and whenever the child's project differs from the parent's, `branch` and
+   `worktreePath` are cleared. Retry choice, stated: the guard lives in the command body,
+   so a receipt replay — which is how an MCP retry with `projectId` but no strategy
+   behaves — returns the recorded events and never runs the guard
+   ("replaying an accepted cross-project request creates no second child" still passes);
+   no second door needs the strategy re-sent. Tests: "refuses a raw cross-project command
+   without a strict worktree strategy", "refuses a raw cross-project command for an
+   archived target project" (`CrossProjectDelegation.test.ts:298,334`).
+2. **XPb-2 — retry naming a different target project** (`OrchestratorMcpService.ts:
+   2588-2606`). On a replayed receipt whose child thread exists, the child's project is
+   compared with the requested project (`target.projectId` when it differs from the
+   parent's, else the parent's); a mismatch is refused `invalid_request` with the
+   sentence in the table above, before any admission check runs against the new project.
+   Rejected receipts keep their upstream replay behaviour; a replay with no child thread
+   in its events is left alone (comparison skipped, no crash). Tests: "refuses a retry
+   that names a different target project" (second call names an unregistered project, so
+   the request-id sentence proves no admission ran), "refuses a retry that drops the
+   target project" (`OrchestratorMcpService.test.ts:2810,2962`).
+3. **XPb-3 — driver-kind filter uses the target project** (`OrchestratorMcpService.ts:
+   1338-1339, 1372, call site 2466`). Test: "resolves a cross-project driver-kind target
+   by the target project's enablement" (A enables only driver X, B only driver Y; from A,
+   `target: {projectId: B, driverKind: Y}` with `isolation: "worktree"` resolves to B's
+   instance).
+4. **XPb-4 — unreachable deleted-project refusal removed** (formerly
+   `OrchestratorMcpService.ts:~2492`). The project lookup hides deleted projects
+   (`deleted_at IS NULL`), so "deleted" always surfaced as "was not found" and the
+   `deletedAt !== null` branch was dead code. The mock-based test now asserts the real
+   behaviour ("was not found"); no red run exists for this repair because the branch was
+   unreachable — re-adding it and re-running kept the suite green, which is the finding.
+
+Checks after the repairs: five suites 173 passed / 173 (baseline 167 + 6 new), both
+typechecks exit 0 with zero `error TS` (one intermediate apps/server typecheck exit 2
+from two mock-typing errors in the XPb-2 tests was fixed before these numbers; logs in
+the evidence dir). Patch regenerated (`git diff` over the same 10 files, new test
+intent-to-added) and proven on the pin with both prior patches applied first:
+`git apply --check` exit 0, applied for real exit 0, all 10 patched files byte-identical
+to the live clone (`~/.mastermind/mmos_evidence/xpb-20261111/patch_applies_on_pin_plus_two.log`).
+
+Live re-check (same five scenarios as the feature round, re-run against the repaired
+clone on a throwaway dev server, port 3915, free probe agent): all five pass — child in
+B with subagent lineage, worktree HEAD equal to origin's current head with the marker
+present and B's instructions only, retry same thread/task, cancel interrupts, and the
+three refusal sentences verbatim; the completion wake reached the parent as its
+completed ordinal-2 run (`receipt.wake.parentItems[2]`; the driver's wake-message text
+counter reads 0 by a detection-format quirk, not a regression). Receipt:
+`~/.mastermind/mmos_evidence/xpb-20261111/live_proof_receipt.json`, port free after
+stop.
+
+### Limits, in plain words (feature round)
+
+- Projects are not a permission boundary on one T3 server: `t3_thread_launch` already
+  lets a user start a thread in any project, so `target.projectId` grants no reach a
+  user did not already have.
+- A project with no remote cannot take cross-project workers: the worktree must be cut
+  from the project's remote head, and a project whose remote cannot be resolved or
+  fetched is refused.
+- The worker never sees the target's unpushed commits: the worktree starts from the
+  remote's head, not anyone's local checkout.
+- Finished worktrees stay in the target repository until someone removes them; nothing
+  reaps them automatically.
+- Do not roll the server back while a cross-project worker is still preparing.
+- With a linked machine, the project id is that machine's.
+
+### Limits, in plain words (panel + steer 1)
+
+- If the server restarts while a worker is still being prepared, that worker is
+  cancelled. Calling again with the same request id returns that cancelled task, not a
+  new worker. Use a new request id after a restart. (Upstream behaviour for every
+  worktree worker: `ProviderRuntimeRecoveryService.ts:83-90, 531-540`;
+  `ThreadLaunchService.ts:1116`.)
+- If the server is killed between creating the worktree and releasing the run, the
+  worktree and its branch stay in the target repository; nothing cleans them up on
+  restart (`ThreadLaunchService.ts:694-748` is the only removal). Runbook clean-up
+  step: `git worktree list` in the target repository.
+- After a rollback to a build without this change, a parent that remembers the new tool
+  description gets a plain `invalid_request` for `target.projectId`.
+- `resolveRemoteDefaultBaseRef` gives one message for every git failure (no remote, no
+  network, not a repository). It fails closed; accepted as is.
+
+### Steer 2 — the "one commit behind the remote" field report
+
+A field report said a worker started with `startFromOrigin: true` got a checkout one
+commit behind the remote, twice. Proof test written first
+(`ThreadLaunchService.test.ts:1157`, "launches from origin/main with the remote's current
+head past a stale tracking ref"): the remote's default branch is advanced from a second
+clone after the target repository's last fetch, so the target's
+`refs/remotes/origin/main` is verifiably stale (asserted before launch); a launch with
+the strict cross-project strategy then produces a worktree whose HEAD equals the
+remote's CURRENT head, not the stale tracking ref. **The test passes unmodified** — no
+fix was needed, and the test is included in the regenerated patch as a pinned proof.
+
+How it passes: `ThreadLaunchService.ts:416-422` calls `GitVcsDriverCore.
+fetchWorktreeBaseCommit` (`GitVcsDriverCore.ts:4690-4706`) BEFORE the base is resolved;
+that helper runs `fetchRemote` with a forced scoped refspec
+`+refs/heads/<branch>:refs/remotes/<remote>/<branch>` (`:4606-4613`) and only then
+`rev-parse refs/remotes/<remote>/<branch>^{commit}` — so the base is always the
+just-fetched commit, never the pre-existing tracking ref (the helper's own comment:
+"A missing remote branch can leave a stale tracking ref; never resolve it"). A failed
+fetch returns null, and with `requireRemoteBase: true` the launch refuses
+(`ThreadLaunchService.ts:429-441`) instead of falling back.
+
+What else could explain the field report's "one commit behind": (a) a push that landed
+on the remote AFTER the launch's fetch — the worktree head equals the remote head at
+fetch time, not at read time, so a report made minutes later can look one behind; (b)
+the silent stale-local fallback for launches WITHOUT `requireRemoteBase` — the upstream
+limit below; (c) a conventional local-branch base (no `startFromOrigin`), e.g. the
+`schedule_task` door, which never fetches.
+
+Same-project `startFromOrigin` path, read and compared: it is the SAME code
+(`ThreadLaunchService.ts:401-427` — one `resolveWorktreeBaseRemote`/`fetchWorktreeBaseCommit`
+pair serves both), so it has no separate defect. The upstream limit it keeps: with
+`startFromOrigin: true` but `requireRemoteBase` unset, a failed fetch silently falls
+back to the local `baseRef` (`ThreadLaunchService.ts:423-427`, the fallback the comment
+at `:434-435` names; null return at `GitVcsDriverCore.ts:4695-4698`) — recorded here,
+not changed, per the steer.
+
 ## Ledger of what changed (chronological)
 
 1. Census (4 × deepseek-v4.1-flash): completion/question path, worktree+fetch semantics,
@@ -281,3 +424,17 @@ No patch change; sha256 remains `9038b359…abbba`.
 5. Attack round (deepseek-v4.1-flash, different model from the author): 31 vectors,
    0 confirmed bypasses on the `delegate_task` path; three adjacent observations adjudicated
    and recorded (see "Attack round"); no fixes required, patch unchanged.
+6. Panel repairs (lane XPb, glm-5.3): four repairs — orchestrator guard on raw
+   cross-project commands (XPb-5), retry-must-name-the-same-project (XPb-2), driver-kind
+   filter by target project (XPb-3), unreachable deleted-project refusal removed (XPb-4).
+   Red/green logs per repair in `~/.mastermind/mmos_evidence/xpb-20261111/`; five suites
+   173 passed (baseline 167), both typechecks exit 0; patch regenerated and proven on
+   pin+two (`patch_applies_on_pin_plus_two.log`).
+7. Steer 1: no code change; four restart/rollback limits added to "Panel repairs" above
+   from the closed panel score (`xp-20261111/panel/SCORE.md`).
+8. Steer 2: stale-tracking-ref freshness proof written test-first and passing unmodified
+   (no fix needed); mechanism and alternative explanations recorded above; same-project
+   `startFromOrigin` shares the mechanism, its `requireRemoteBase`-less fallback recorded
+   as an upstream limit. Test included in the regenerated patch.
+9. Live re-check of the feature round's five scenarios against the repaired clone:
+   all pass (see "Panel repairs"); receipt and run log in the XPb evidence dir.

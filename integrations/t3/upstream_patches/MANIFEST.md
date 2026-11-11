@@ -266,8 +266,29 @@ head after a fetch, B's project/instruction context) while the task stays on the
 (`task_status`/`task_cancel`, completion wake-up, parent-child lineage).
 
 - **Patch file:** `cross_project_child_0770446.patch`
-- **Patch sha256:** `9038b359c1a3b7f13d23d4cdb13c789e6072ae36754eb835465cc39f36aabbba`
-- **Diff stat:** 10 files changed, 1144 insertions(+), 14 deletions(-)
+- **Patch sha256:** `a5cfa90eba615daffdad358b4fa5177ca3077a84740084bbd1906be02544101d`
+  (panel-repair regeneration 2026-11-11, lane XPb, branch `t3/mmos-v4-xpb`; supersedes
+  the feature-round bytes `9038b359c1a3b7f13d23d4cdb13c789e6072ae36754eb835465cc39f36aabbba`)
+- **Diff stat:** 10 files changed, 1849 insertions(+), 16 deletions(-) — same 10 files as
+  the feature round plus, inside four of them, the four panel repairs and one
+  stale-tracking-ref proof test:
+  - XPb-5 `Orchestrator.ts:8084-8120,8164-8172` — guard in `dispatchDelegatedTaskRequest`
+    (the command body): a `projectId` differing from the parent's requires a worktree
+    strategy with `startFromOrigin` and `requireRemoteBase`, re-reads the target project
+    (refuses unregistered/archived), and clears `branch`/`worktreePath` on the child
+    record; receipt replay never runs the body, so an MCP retry keeps working.
+  - XPb-2 `OrchestratorMcpService.ts:2588-2606` — a replayed request id whose child
+    belongs to a different project than the request now names is refused
+    `invalid_request` ("already used for a task in project X, not Y"), no admission
+    against the new project.
+  - XPb-3 `OrchestratorMcpService.ts:1338-1339,1372,2466` — driver-kind candidate
+    filtering uses the TARGET project for cross-project requests.
+  - XPb-4 `OrchestratorMcpService.ts` — unreachable `deletedAt !== null` refusal
+    removed; a deleted project reads "was not found" (the lookup hides deleted rows).
+  - Steer-2 `ThreadLaunchService.test.ts:1157` — "launches from origin/main with the
+    remote's current head past a stale tracking ref": remote advanced from a second
+    clone, stale tracking ref asserted first, worktree HEAD must equal the remote's
+    current head. Passes unmodified; see the note's "Steer 2" section.
   - `packages/contracts/src/orchestrationV2.ts` — worktree strategy gains optional
     `requireRemoteBase` (refuse rather than fall back to the local branch);
     `delegated_task.request` gains optional `projectId`.
@@ -298,7 +319,10 @@ head after a fetch, B's project/instruction context) while the task stays on the
   pin `0770446869d247a8b28c27d7ed93f47f8ff0c1e4` with BOTH prior patches
   (`mastermind_admission_0770446.patch`, `claude_text_delta_0770446.patch`) applied first —
   14 modified files afterwards, i.e. these 10 plus the 4 files the earlier patches touch.
-  Receipt: `~/.mastermind/mmos_evidence/xp-20261111/patch_applies_on_pin_plus_two.log`.
+  Feature-round receipt: `~/.mastermind/mmos_evidence/xp-20261111/patch_applies_on_pin_plus_two.log`;
+  panel-repair regeneration receipt (same method, plus a 10/10 byte-compare of the patched
+  files against the live clone):
+  `~/.mastermind/mmos_evidence/xpb-20261111/patch_applies_on_pin_plus_two.log`.
 - **Runtime-mode clamp:** unchanged from upstream — delegated children already inherit the
   clamped mode; the cross-project path re-checks provider enablement in the target project
   and refuses `ThreadManagementProviderInstanceDisabledError` when the parent's instance
@@ -347,3 +371,32 @@ parent thread. A live proof on a throwaway dev server (own home, own port, free 
 agent, two throwaway projects with bare origins where B's local checkout is deliberately
 one commit behind its origin) is recorded in
 `integrations/mmos/XP_CROSS_PROJECT_CHILD.md` with its receipt JSON.
+
+### Panel-repair verification actually run (2026-11-11, same clone, four repairs applied)
+
+Red first per repair (`red_*.log`, `green_*.log` in `~/.mastermind/mmos_evidence/xpb-20261111/`;
+XPb-4 has no red log — the removed branch was unreachable, which is the finding):
+
+```
+$ node ".../vitest.mjs" run src/orchestration-v2/CrossProjectDelegation.test.ts
+      Tests  2 failed | 4 passed (6)      # red_xpb5_raw_command.log -> green: 6 passed
+$ node ".../vitest.mjs" run src/mcp/OrchestratorMcpService.test.ts -t "refuses a retry"
+      Tests  2 failed | 69 skipped        # red_xpb2_retry_mismatch.log -> green: 2 passed
+$ node ".../vitest.mjs" run src/mcp/OrchestratorMcpService.test.ts -t "driver-kind"
+      Tests  1 failed                    # red_xpb3_driver_kind.log -> green: 1 passed
+$ node ".../vitest.mjs" run src/mcp/OrchestratorMcpService.test.ts \
+    -t "refuses a cross-project task for"   # unknown/archived/deleted table
+      Tests  3 passed | 69 skipped (72)  # green_xpb4_deleted_refusal.log (deleted row now
+                                        #   asserts "was not found"; re-run with the old
+                                        #   branch re-added also 3 passed — it was dead code)
+$ node ".../vitest.mjs" run src/orchestration-v2/ThreadLaunchService.test.ts \
+    -t "stale tracking ref"              # steer-2 proof, written test-first
+      Tests  1 passed                    # green_steer2_stale_tracking_ref.log
+$ node ".../vitest.mjs" run <all five suites as above>
+      Tests  173 passed (173)            # final_five_suites.log (+ final_mcp_suite.log 72
+                                        #   re-run after a mock-typing cast fix)
+$ cd apps/server && npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit; echo exit=$?
+      # exit 0, zero "error TS"          # typecheck_server.log
+$ cd packages/contracts && npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit; echo exit=$?
+      # exit 0, zero "error TS"          # typecheck_contracts.log
+```
