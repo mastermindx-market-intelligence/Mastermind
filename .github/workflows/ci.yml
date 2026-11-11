@@ -668,23 +668,6 @@ jobs:
       # execute; only a previously green, same-SHA native merge-group proof
       # may avoid re-executing the identical pytest module suite on a push.
       # If proof is absent or uncertain, every shard executes normally.
-      - name: Diagnostic traversal-ancestor xattrs
-        run: |
-          python - <<'EOF'
-          import os, stat
-          for p in ("/", "/home", "/home/runner", "/home/runner/work",
-                    "/home/runner/work/_temp", "/tmp"):
-              try:
-                  i = os.stat(p)
-                  print("XDIAG", p, oct(stat.S_IMODE(i.st_mode)),
-                        i.st_uid, i.st_gid, sorted(os.listxattr(p)), flush=True)
-              except Exception as exc:
-                  print("XDIAG", p, "ERR", repr(exc), flush=True)
-          probe = os.path.join(os.environ["HOME"], "mmx", "diag-probe")
-          os.makedirs(probe, exist_ok=True)
-          print("XDIAG", probe, sorted(os.listxattr(probe)), flush=True)
-          EOF
-
       - name: Verify exact prior merge-group CI
         id: previous_ci
         env:
