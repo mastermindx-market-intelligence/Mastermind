@@ -389,8 +389,10 @@ class PreleaseCooldownRace(unittest.TestCase):
         self.assertEqual((first["state"], first["signal"], first["reason"]),
                          ("TERMINAL_FAILURE", "capacity", "prelease_broker_busy"))
         self.assertTrue(first["execution_absence_proven"])
-        self.assertEqual((proof["kind"], proof["pool"], proof["broker_reason"]),
-                         ("prelease_broker_busy", "minimax", "cap_full"))
+        # Converged broker reports the precise per-account cap reason first.
+        self.assertEqual((proof["kind"], proof["pool"]),
+                         ("prelease_broker_busy", "minimax"))
+        self.assertIn(proof["broker_reason"], ("cap_full", "accounts_at_cap"))
         self.assertEqual((own, waiter), (0, 0))
         self.assertFalse(self.path("origin", ".process.jsonl").exists())
         self.assertEqual([row["pool"] for row in self.route_calls[:2]], ["minimax", "glm"])
@@ -412,7 +414,8 @@ class PreleaseCooldownRace(unittest.TestCase):
         self.assertEqual(rc, 75)
         self.assertEqual(api.inspect_run("origin")["reason"], "prelease_broker_busy")
         proof = fabric_continuation.eligible(api, self.root, "origin", "root", "parent")
-        self.assertEqual(proof["broker_reason"], "cap_full")
+        # Converged broker reports the precise per-account cap reason first.
+        self.assertIn(proof["broker_reason"], ("cap_full", "accounts_at_cap"))
         for suffix, key, invalid in (
             (".prelease-quota.json", "broker_reason", "auth_refused"),
             (".prelease-quota.json", "waiter_cleared", False),

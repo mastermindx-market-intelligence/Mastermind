@@ -2563,7 +2563,7 @@ class Broker:
                 waiter_id = self._register_demand(
                     conn, waiter_id, orch, pool, account, task_class, host
                 )
-                return (
+            return (
                 AcquireResult(ok=False, reason="lending_blocked", pool=pool, orchestrator_id=orch),
                 waiter_id,
                 "lending_blocked",
@@ -2573,7 +2573,7 @@ class Broker:
                 waiter_id = self._register_demand(
                     conn, waiter_id, orch, pool, account, task_class, host
                 )
-                return (
+            return (
                 AcquireResult(ok=False, reason="cap_full", pool=pool, orchestrator_id=orch),
                 waiter_id,
                 "cap_full",
@@ -2583,7 +2583,7 @@ class Broker:
                 waiter_id = self._register_demand(
                     conn, waiter_id, orch, pool, account, task_class, host
                 )
-                return (
+            return (
                 AcquireResult(ok=False, reason="priority_wait", pool=pool, orchestrator_id=orch),
                 waiter_id,
                 "priority_wait",

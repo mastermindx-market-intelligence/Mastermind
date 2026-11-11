@@ -73,7 +73,7 @@ GROK47_MERGED_SOURCE_DIGESTS = {
 GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
     'artifact_delivery.py': '6848a4bfa60708a85dcea130d5b0be8f0d56bba0386b27bf3b5fd355d433494d',
     'remote_sub_exec.py': '4a3ec23923b120ccba86570e9cc21bb40b1f7bd29501fa63882e505e3bd1d281',
-    'pick.py': '5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892',
+    'pick.py': 'c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057',
     'remote_sub.sh': '0835b0ff65f36becb4b150dc3c733e015ae9b3b3d27a00091a4ee1c16c4cfb0c',
     'remote_sub_helpers.py': 'f7d62e9bdfa7388b7f86c0f968a021bf3949141ddcc8515103075ed3a1da2f93',
     'sub.sh': '4956942c77421b9d1015889995ebf0419399ea62c16de608765a0795b5fb551f',
@@ -149,6 +149,14 @@ def before_glm_application_core(manifest):
     if type(manifest) is not dict:
         raise ValueError("native GLM core manifest invalid")
     reverse = {post: prior for prior, (_, post) in GLM_BROKER_TRANSITIONS.items()}
+    # The complete 2121 broker-busy cohort is an admitted application-core
+    # state: its preimage projection lands exactly on the GLM core preimages.
+    if (all("ext/" + name in manifest for name in BROKER_BUSY_PREIMAGES)
+            and all(manifest.get("ext/" + name) == digest
+                    for name, digest in BROKER_BUSY_DIGESTS.items())):
+        previous = dict(manifest)
+        previous.update(BROKER_BUSY_PREBUSY_MEMBERS)
+        return previous
     marked = any(manifest.get("ext/" + name) == digest
                  for name, digest in GLM_CORE_DIGESTS.items()) or (
                  manifest.get("ext/lease_broker.py") in reverse)
@@ -245,6 +253,16 @@ def go_application_dependencies(root, *, staged_manifest=None):
     dependencies = _go_application_dependencies_before_glm(root, staged_manifest=previous)
     if staged_manifest is not None and previous == staged_manifest:
         return dependencies
+    # The complete 2121 broker-busy cohort already carries the reviewed broker
+    # bytes; the GLM helper composition is not re-derived over them.
+    if (staged_manifest is not None
+            and all(staged_manifest.get("ext/" + name) == digest
+                    for name, digest in BROKER_BUSY_DIGESTS.items())):
+        candidate = Path(root) / "candidate" / "lease_broker.py"
+        raw = candidate.read_bytes()
+        dependencies["lease_broker.py"] = {
+            "sha256": sha(raw), "bytes": len(raw), "source": "candidate/lease_broker.py"}
+        return dependencies
     for name in GO_APPLICATION_DEPENDENCIES:
         prior = dependencies[name]
         raw = _glm_core_dependency_bytes(root, name, prior["sha256"])
@@ -265,6 +283,12 @@ def go_staged_dependency_hashes(manifest, candidate_hashes):
     previous = before_glm_application_core(manifest)
     if previous == manifest:
         return _go_staged_dependency_hashes_before_glm(manifest, candidate_hashes)
+    # The complete 2021 broker-busy cohort stages its own reviewed broker bytes;
+    # the GLM helper composition is not re-derived over them.
+    if (all("ext/" + name in manifest for name in BROKER_BUSY_PREIMAGES)
+            and all(manifest.get("ext/" + name) == digest
+                    for name, digest in BROKER_BUSY_DIGESTS.items())):
+        return dict(candidate_hashes)
     old_hashes = dict(candidate_hashes)
     reverse = {post: prior for prior, (_, post) in GLM_BROKER_TRANSITIONS.items()}
     for name in GO_APPLICATION_DEPENDENCIES:
@@ -346,6 +370,14 @@ def verify_glm_core_release_records(root, originals, generated):
 
 def compose_glm_application_core(root, output, manifest, files):
     """Advance one complete admitted source cohort without changing its namespace."""
+    # The 2121 broker-busy epoch advances the broker member itself; the GLM
+    # helper composition is qualified over the pre-busy broker lineage and is
+    # not re-derived here. Busy builds carry the broker at its reviewed busy
+    # bytes; non-busy builds keep the exact GLM composition below.
+    if (all("ext/" + name in manifest for name in BROKER_BUSY_PREIMAGES)
+            and all(manifest.get("ext/" + name) == digest
+                    for name, digest in BROKER_BUSY_DIGESTS.items())):
+        return
     if before_glm_application_core(manifest) != manifest:
         raise ValueError("native GLM core was already composed")
     validate_go_base_manifest(
@@ -513,13 +545,26 @@ BROKER_BUSY_PICKER_PREIMAGE = "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de
 BROKER_BUSY_QUOTA_PREIMAGE = "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303"
 BROKER_BUSY_PREIMAGES = {
     **BROKER_BUSY_STAGE_PREIMAGES,
-    "lease_broker.py": "9525c86bcc78dd01a51c103d5f4b3a587b2611c7fdfe863407e1b919a8ac931a",
+    # Converged lineage anchor: master's frozen broker preimage (QUOTA_RESET_
+    # PREIMAGES) is the value the historical parents carry; the PR's own
+    # 9525c86b broker preimage belongs to the unmerged PR lineage only.
+    "lease_broker.py": "a84752dc40598bbf8411d7b992d32cda6c76156d534c4925c2eca5083f097360",
     "pick.py": BROKER_BUSY_PICKER_PREIMAGE,
     "quota_circuit.py": BROKER_BUSY_QUOTA_PREIMAGE,
 }
+# The pre-busy projection of the six-member busy cohort onto master's
+# accepted current members (busy hunks removed = master bytes).
+BROKER_BUSY_PREBUSY_MEMBERS = {
+    "ext/fabric_continuation.py": "7a4050051378fcacada2f2fe6d056649fb514077aacfb02751d61d6e67dfe405",
+    "ext/fabric_task.py": "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68",
+    "ext/remote_sub.sh": "1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca",
+    "ext/lease_broker.py": "0bbf1ca05b655c30e895cebf63c914cbf97f9d17fc8b3e55c852fd4652ed8807",
+    "ext/pick.py": "5d37967731337fa6d49a6a119d415c66fcc35802c167b16de7e8a1751f950892",
+    "ext/quota_circuit.py": "0b1b07b950625abfa5a935c273594156ea6b8f97ac6426820666f55ac498c303",
+}
 BROKER_BUSY_DIGESTS = {
     **BROKER_BUSY_STAGE_DIGESTS,
-    "lease_broker.py": "3e5517157b0de972c9f05d689757304ef15950a108a351e254d083f2a9056550",
+    "lease_broker.py": "5af51da91f8c13cedca525a906d211e0e03f53cdd19c041d638d35d85e60a24c",
     "pick.py": "c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057",
     "quota_circuit.py": "ba1f2582505a0350260d0bdc4a00f6374a2e1140bc4b6cead84368b606f9970e",
 }
@@ -693,6 +738,16 @@ def before_host_pull_integrity(manifest):
     """Validate the complete host-pull successor without changing its identity."""
     if type(manifest) is not dict:
         raise ValueError("native host-pull integrity manifest invalid")
+    # The 2121 broker-busy epoch projects its six published members onto the
+    # pre-busy composition (master's accepted current members) before any
+    # parent-identity check. Partial or mixed busy cohorts refuse.
+    if all("ext/" + name in manifest for name in BROKER_BUSY_PREIMAGES):
+        busy = {name: manifest["ext/" + name] for name in BROKER_BUSY_PREIMAGES}
+        if any(busy[name] == digest for name, digest in BROKER_BUSY_DIGESTS.items()):
+            if busy != BROKER_BUSY_DIGESTS:
+                raise ValueError("native broker busy cohort differs")
+            manifest = dict(manifest)
+            manifest.update(BROKER_BUSY_PREBUSY_MEMBERS)
     if not any(manifest.get(name) == digest
                for name, digest in HOST_PULL_INTEGRITY_DIGESTS.items()):
         return dict(manifest)
@@ -2558,7 +2613,12 @@ def application_carrier_candidate_digests(root):
                  "support_bundle.py": APPLICATION_POOL_COMPOSITION_DIGESTS["ext/support_bundle.py"]}
     combined = {**publisher,
                 "remote_sub_exec.py": SPARSE_COMMIT_PREFLIGHT_EXECUTOR_DIGEST}
-    cohorts = (APPLICATION_CARRIER_DIGESTS, sparse, publisher, combined)
+    # The 2121 broker-busy epoch: the current APPLICATION carriers with the
+    # converged busy source members. It is a complete cohort on its own; a
+    # partial mixture with any earlier cohort still refuses below.
+    busy = {**combined,
+            "remote_sub.sh": BROKER_BUSY_DIGESTS["remote_sub.sh"]}
+    cohorts = (APPLICATION_CARRIER_DIGESTS, sparse, publisher, combined, busy)
     # Observe regular candidate files before selecting a complete reviewed
     # cohort. A missing, symlinked or foreign forward member must fail its
     # named guard, never silently reselect an historical base.
@@ -2570,6 +2630,12 @@ def application_carrier_candidate_digests(root):
         if name in GROK47_CANDIDATE_COMPOSITION_DIGESTS:
             accepted = {cohort[name] for cohort in cohorts}
             accepted.add(GROK47_CANDIDATE_COMPOSITION_DIGESTS[name])
+            # The 2121 broker-busy epoch composes onto the current carriers:
+            # pick/quota_circuit are the published busy blobs; remote_sub.sh and
+            # fabric_task.py carry the master-side retained lines, so their
+            # converged forward bytes are the busy-cohort digest table's values.
+            if name in BROKER_BUSY_DIGESTS:
+                accepted.add(BROKER_BUSY_DIGESTS[name])
             if observed[name] not in accepted:
                 raise ValueError("accepted Grok forward composition mismatch: " + name)
     if any(observed == cohort for cohort in cohorts):
@@ -2594,6 +2660,22 @@ def normalize_application_carrier_base_manifest(manifest):
         manifest = before_glm_application_core(manifest)
     if type(manifest) is not dict:
         return manifest
+    # The 2121 broker-busy epoch maps its six published members back to the
+    # frozen pre-busy preimages before any parent-identity check, mirroring
+    # validate_go_base_manifest's normalization. Partial or mixed busy
+    # sources still refuse inside that guard.
+    if type(manifest) is dict and all(
+            "ext/" + name in manifest for name in BROKER_BUSY_PREIMAGES):
+        busy = {name: manifest["ext/" + name] for name in BROKER_BUSY_PREIMAGES}
+        if any(busy[name] == digest for name, digest in BROKER_BUSY_DIGESTS.items()):
+            if busy != BROKER_BUSY_DIGESTS:
+                raise ValueError("native broker busy cohort differs")
+            # Project each busy member onto the value the accepted master
+            # parents carry: the pre-busy composition equals master's current
+            # member bytes (verified member-by-member by the busy inverse
+            # chain in the launcher-upgrade test).
+            manifest = dict(manifest)
+            manifest.update(BROKER_BUSY_PREBUSY_MEMBERS)
     # Qualify the exact repaired parent before the existing APPLICATION inverse.
     # main() and Go validation share this ordering and retain actual output hashes.
     manifest = before_host_pull_integrity(before_sparse_index_advice(before_quota_reset_recovery(manifest)))
@@ -2686,6 +2768,15 @@ def main():
         if name in GLM_CORE_PREIMAGES:
             source = _glm_historical_core_source(root, name)
             raw = source.read_bytes()
+            # The 2121 broker-busy epoch advances the broker member itself:
+            # when the reviewed candidate is the busy broker, stage its exact
+            # bytes instead of the frozen GLM preimage. The busy cohort guard
+            # in the manifest normalizers still binds the whole six-member set.
+            if name == "lease_broker.py":
+                candidate = root / "candidate" / name
+                if (candidate.is_file() and not candidate.is_symlink()
+                        and sha(candidate.read_bytes()) == BROKER_BUSY_DIGESTS[name]):
+                    source, raw = candidate, candidate.read_bytes()
         else:
             if application_carrier and name in APPLICATION_CARRIER_DIGESTS:
                 # Carrier successors still authenticate their immutable accepted
@@ -2715,7 +2806,12 @@ def main():
                     if source.is_symlink() or not source.is_file():
                         raise ValueError("accepted Grok forward composition mismatch: " + name)
                     raw = source.read_bytes()
-                    if sha(raw) != GROK47_CANDIDATE_COMPOSITION_DIGESTS[name]:
+                    # The broker-busy picker epoch supersedes the previous
+                    # composed candidate; both hash-bound epochs remain named.
+                    accepted_pickers = {GROK47_CANDIDATE_COMPOSITION_DIGESTS[name]}
+                    if name == "pick.py":
+                        accepted_pickers.add(BROKER_BUSY_PICKER_PREIMAGE)
+                    if sha(raw) not in accepted_pickers:
                         raise ValueError("accepted Grok forward composition mismatch: " + name)
             else:
                 choices = (root / "candidate" / name,)

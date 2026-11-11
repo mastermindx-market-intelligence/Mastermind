@@ -29,6 +29,11 @@ PRE_REMOTE_CWD_TASK_SHA = "a653f55fb41fc26cd2efd6e18cb4747025bc85e00ad1ebf11898a
 PRE_REFUSAL_DIAGNOSTICS_TASK_SHA = "72f6b0d70d4596c1d059cf57504ff7fd39ca6d3464d96e9f9c6c8172b1a69037"
 PRE_ADMISSION_TASK_SHA = "2d66d51376b4bfd9740947988777809ee53c0314d7155ad2bd73c9a9ec44b7e4"
 CURRENT_TASK_SHA = "1bdec660216cd3218d46c5740eee7d4f24a74c3f2dc23b61083dfc503c9d1d68"
+# The 2121 converge composes the AUTO prelease busy fallback onto the exact
+# current epoch: applying the busy inverses below to the busy source must land
+# on CURRENT_TASK_SHA. The busy task is the converged candidate fabric_task.
+BUSY_TASK_SHA = "0e85036189cc074c3b1a463304f1ccadba82038beadff3b51255c1ef2ec68d66"
+BUSY_PICK_SHA = "c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057"
 SOURCE = {
     "ext/fabric_task.py": ("fabric_task.py", "3ceba9777a475fb1cfc568f13035b4c23ae15c7bd54316c4cb006335557a545b"),
     "ext/pick.py": ("pick.py", "a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee"),
@@ -116,6 +121,101 @@ def _pre_refusal_diagnostics_task(value: bytes) -> bytes:
     assert hashlib.sha256(value).hexdigest() == PRE_REFUSAL_DIAGNOSTICS_TASK_SHA
     return value
 
+
+
+def _pre_busy_task(value: bytes) -> bytes:
+    """Undo only the hash-pinned prelease capacity additions in a copy.
+
+    Retain the exact current native source for the frozen F1/Poll255 inverse.
+    Never rewrite the candidate, runtime or historical fixture.
+    """
+    assert hashlib.sha256(value).hexdigest() == BUSY_TASK_SHA
+    inverses = (
+        (
+            b'            proof = quota_circuit.validate_prelease_refusal(here, rid, root, parent,\n'
+            b'                                                           packet_limit=MAX_RESULT_BYTES)\n'
+            b'            busy = proof["kind"] == "prelease_broker_busy"\n',
+            b'            quota_circuit.validate_prelease_refusal(here, rid, root, parent,\n'
+            b'                                                   packet_limit=MAX_RESULT_BYTES)\n',
+        ),
+        (
+            b'                "state": "TERMINAL_FAILURE", "rc": 75,\n'
+            b'                "signal": "capacity" if busy else "quota",\n'
+            b'                "reason": proof["kind"], "root_id": root, "parent_run_id": parent,\n',
+            b'                "state": "TERMINAL_FAILURE", "rc": 75, "signal": "quota",\n'
+            b'                "reason": "prelease_quota_cooldown", "root_id": root, "parent_run_id": parent,\n',
+        ),
+        (b'    capacity_excluded_pools: list[str] | None = None,\n', b''),
+        (
+            b'    if capacity_excluded_pools is not None:\n'
+            b'        if (type(capacity_excluded_pools) is not list\n'
+            b'                or not 1 <= len(capacity_excluded_pools) < 3\n'
+            b'                or any(type(p) is not str or p not in pick._HOST_POOL_MODES\n'
+            b'                       for p in capacity_excluded_pools)\n'
+            b'                or len(set(capacity_excluded_pools)) != len(capacity_excluded_pools)\n'
+            b'                or request_capacity_preflight is not True\n'
+            b'                or pool is not None or requested_model is not None\n'
+            b'                or prefer is not None or strict_manual_pin):\n'
+            b'            raise FabricTaskError("CAPACITY_EXCLUSION_NOT_QUALIFIED")\n',
+            b'',
+        ),
+        (
+            b'                **({"excluded_pools": capacity_excluded_pools} if capacity_excluded_pools else {}),\n',
+            b'',
+        ),
+    )
+    for newer, older in inverses:
+        assert value.count(newer) == 1
+        value = value.replace(newer, older, 1)
+    assert hashlib.sha256(value).hexdigest() == CURRENT_TASK_SHA
+    return value
+
+
+def _inverse_busy_picker(value: bytes) -> bytes:
+    """Undo only the hash-pinned pool-exclusion selector additions in a copy."""
+    assert hashlib.sha256(value).hexdigest() == BUSY_PICK_SHA
+    inverses = (
+        (
+            b'                excluded_hosts: Optional[List[str]] = None,\n'
+            b'                excluded_pools: Optional[List[str]] = None) -> str:\n'
+            b'    """Select a new request, preserving Grok model affinity on quota exhaustion."""\n',
+            b'                excluded_hosts: Optional[List[str]] = None) -> str:\n'
+            b'    """Select a new request, preserving Grok model affinity on quota exhaustion."""\n',
+        ),
+        (
+            b'    if excluded_pools is not None:\n'
+            b'        common["excluded_pools"] = excluded_pools\n',
+            b'',
+        ),
+        (
+            b'                excluded_hosts: Optional[List[str]] = None,\n'
+            b'                excluded_pools: Optional[List[str]] = None) -> str:\n'
+            b'    """Read-only selection; host name or auto also requires placement eligibility."""\n'
+            b'    if excluded_pools is not None:\n'
+            b'        if (not host or pool is not None or requested_model is not None\n'
+            b'                or type(excluded_pools) is not list\n'
+            b'                or not 1 <= len(excluded_pools) < 3\n'
+            b'                or any(type(item) is not str or item not in _HOST_POOL_MODES\n'
+            b'                       for item in excluded_pools)\n'
+            b'                or len(set(excluded_pools)) != len(excluded_pools)):\n'
+            b'            return "NONE reason=invalid excluded_pools or manual pin"\n',
+            b'                excluded_hosts: Optional[List[str]] = None) -> str:\n'
+            b'    """Read-only selection; host name or auto also requires placement eligibility."""\n',
+        ),
+        (
+            b'            # Only candidates excluded by an already-proven pre-task broker\n'
+            b'            # refusal are removed. Normal economics/quality/independence and\n'
+            b'            # host admission continue in the incumbent single picker.\n'
+            b'            for excluded_pool in excluded_pools or ():\n'
+            b'                routes.pop(excluded_pool, None)\n',
+            b'',
+        ),
+    )
+    for newer, older in inverses:
+        assert value.count(newer) == 1, newer[:70]
+        value = value.replace(newer, older, 1)
+    assert hashlib.sha256(value).hexdigest() == COMPOSED_PICK
+    return value
 
 def _pre_ubuntu4_task(value: bytes) -> bytes:
     """Undo only the three Ubuntu4 hunks before the frozen F1 inverse."""
@@ -216,10 +316,20 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
         current = source.read_bytes()
         assert (stage / relative).read_bytes() == current
         if relative == "ext/pick.py":
-            assert sha(source) == COMPOSED_PICK
+            # The converged candidate picker is the busy-fallback composition;
+            # its pre-busy predecessor is the exact composed pick above.
+            assert sha(source) == BUSY_PICK_SHA
+            pre_busy = _inverse_busy_picker(current)
+            assert hashlib.sha256(pre_busy).hexdigest() == COMPOSED_PICK
             current = _inverse_judgment(_preobserver_picker())
         elif relative == "ext/fabric_task.py":
-            assert sha(source) == CURRENT_TASK_SHA
+            # Undo only the exact busy fallback additions in disposable bytes
+            # before the older epoch inverses; the staged copy keeps the
+            # historical hashes frozen.
+            assert sha(source) == BUSY_TASK_SHA
+            current = _pre_busy_task(current)
+            assert hashlib.sha256(current).hexdigest() == CURRENT_TASK_SHA
+            (stage / relative).write_bytes(current)
             # Undo only the exact forward repair in this private stage, then
             # retain every historical inverse and fixture at its original hash.
             admission_patch = ROOT / "tests/fixtures/fabric-native-admission-integrity-20261107.patch"
@@ -291,8 +401,8 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
     # The historical F1 regression is preserved; independently verify R28
     # judgment routing stays present in the CURRENT composed native source.
     assert all(sha(stage / name) == digest for name, digest in AFTER.items())
-    assert sha(NATIVE / "candidate/pick.py") == COMPOSED_PICK
-    assert sha(NATIVE / "candidate/fabric_task.py") == CURRENT_TASK_SHA
+    assert sha(NATIVE / "candidate/pick.py") == BUSY_PICK_SHA
+    assert sha(NATIVE / "candidate/fabric_task.py") == BUSY_TASK_SHA
     assert b'if tc not in {"review", "audit"}' in (
         NATIVE / "candidate/pick.py").read_bytes()
     # Neither stage nor source is published/selected by this test.
