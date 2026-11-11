@@ -1,0 +1,351 @@
+"""GBL-4 ask CLI tests (lane GBL, BUILD_PLAN "Tests first" row GBL-4).
+
+BUILD_PLAN: the CLI ``--wait`` returns the answer or "not yet"; the asker
+identity is recorded; token hygiene (no secret in argv/prompts/logs);
+``EXPIRED`` on a stale fetch.  The CLI talks ONLY to the bridge's AF_UNIX
+socket (peer-uid admission) — never TCP, never Paperclip, and it holds no
+token, secret or credential at all.  The bridge side is GBL-2's real
+``GblBridge``/``BridgeServer`` on a temp socket, imported unmodified.  All
+strings are harmless fixture words.
+"""
+from __future__ import annotations
+
+import os
+import socket
+import threading
+import time
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
+import pytest
+
+from common.gbl_contract import build_ask
+from integrations.gbl.bridge_service import (
+    BridgeServer,
+    BridgeServiceConfig,
+    GblBridge,
+    PrincipalAdmission,
+)
+from tools.gbl import gbl_ask
+
+BOT = "grok-account-fixture"
+QUESTION = "A harmless fixture question about standing priorities."
+ANSWER = "A harmless fixture answer."
+ASK_ID_LEN = 35
+
+
+class MemoryStore:
+    """The GblAskStore interface, in-memory (the reference fake's shape)."""
+
+    def __init__(self):
+        self.asks = {}
+        self.created = []
+        self.create_calls = 0
+
+    def create_ask(self, ask):
+        self.create_calls += 1
+        if ask["ask_id"] not in self.asks:
+            self.asks[ask["ask_id"]] = {**ask, "events": []}
+            self.created.append(
+                (ask["principal"], datetime.now(timezone.utc).isoformat()))
+
+    def read_ask(self, ask_id):
+        record = self.asks.get(ask_id)
+        return dict(record) if record else None
+
+    def append_ask_event(self, ask_id, event):
+        record = self.asks[ask_id]
+        if event not in record["events"]:
+            record["events"].append(dict(event))
+
+    def count_asks(self, principal, since_iso):
+        return sum(1 for p, at in self.created
+                   if p == principal and at >= since_iso)
+
+
+@pytest.fixture()
+def service(tmp_path):
+    store = MemoryStore()
+    core = GblBridge(
+        store,
+        admission_table=(PrincipalAdmission(
+            principal=BOT,
+            targets=frozenset({BOT}),
+            kinds=frozenset({"question"}),
+            max_asks_per_hour=20,
+        ),),
+        now=lambda: datetime.now(timezone.utc),
+    )
+    config = BridgeServiceConfig(
+        socket_path=tmp_path / "bridge.sock",
+        allowed_peer_uids=(os.getuid(),),
+    )
+    server = BridgeServer(config, core).open()
+    try:
+        yield SimpleNamespace(store=store, core=core, server=server,
+                              socket=str(config.socket_path))
+    finally:
+        server.close()
+
+
+def run_cli(capsys, service, *args) -> tuple[int, str]:
+    rc = gbl_ask.main(["--socket", service.socket, "--bot", BOT, *args])
+    captured = capsys.readouterr()
+    return rc, captured.out + captured.err
+
+
+def ask_id_from(output: str) -> str:
+    for line in output.splitlines():
+        for field in line.split():
+            if field.startswith("ask_id="):
+                return field[len("ask_id="):]
+    raise AssertionError(f"no ask_id in output: {output!r}")
+
+
+# ── The CLI talks only to the bridge's Unix socket ──────────────────────────
+
+
+class TestUnixSocketOnly:
+    def test_ask_and_fetch_work_with_tcp_sockets_forbidden(
+            self, service, capsys, monkeypatch):
+        real_socket = socket.socket
+
+        def guarded(family=socket.AF_UNSPEC, *args, **kwargs):
+            if family in (socket.AF_INET, socket.AF_INET6):
+                raise AssertionError("the CLI opened a TCP socket")
+            return real_socket(family, *args, **kwargs)
+
+        monkeypatch.setattr(socket, "socket", guarded)
+        rc, out = run_cli(capsys, service, "ask", "--question", QUESTION)
+        assert rc == 0
+        ask_id = ask_id_from(out)
+        rc, out = run_cli(capsys, service, "fetch", "--id", ask_id)
+        assert rc == 3          # NOT_YET — the socket door answered
+
+
+# ── ask: record, identity, idempotency ──────────────────────────────────────
+
+
+class TestAsk:
+    def test_ask_creates_a_question_record_for_the_bot(self, service, capsys):
+        rc, out = run_cli(capsys, service, "ask", "--question", QUESTION)
+        assert rc == 0
+        ask_id = ask_id_from(out)
+        assert ask_id.startswith("gb-") and len(ask_id) == ASK_ID_LEN
+        assert "status=CREATED" in out
+        record = service.store.read_ask(ask_id)
+        assert record["kind"] == "question"
+        assert record["principal"] == BOT
+        assert record["target"] == BOT
+        assert record["body"] == QUESTION
+
+    def test_asker_identity_is_recorded_verbatim(self, service, capsys):
+        rc, out = run_cli(
+            capsys, service, "ask", "--question", QUESTION,
+            "--asker-environment-id", "env-fixture",
+            "--asker-thread-id", "thread-fixture",
+            "--asker-session-label", "session-fixture")
+        assert rc == 0
+        record = service.store.read_ask(ask_id_from(out))
+        assert record["asker"] == {
+            "side": "t3_thread",
+            "environment_id": "env-fixture",
+            "thread_id": "thread-fixture",
+            "session_label": "session-fixture",
+        }
+
+    def test_partial_asker_identity_is_refused(self, service, capsys):
+        rc, out = run_cli(capsys, service, "ask", "--question", QUESTION,
+                          "--asker-environment-id", "env-fixture")
+        assert rc == 2
+        assert service.store.create_calls == 0
+
+    def test_asker_identity_from_environment(self, service, capsys,
+                                             monkeypatch):
+        monkeypatch.setenv("GBL_ASKER_ENVIRONMENT_ID", "env-fixture")
+        monkeypatch.setenv("GBL_ASKER_THREAD_ID", "thread-fixture")
+        monkeypatch.setenv("GBL_ASKER_SESSION_LABEL", "session-fixture")
+        rc, out = run_cli(capsys, service, "ask", "--question", QUESTION)
+        assert rc == 0
+        record = service.store.read_ask(ask_id_from(out))
+        assert record["asker"]["thread_id"] == "thread-fixture"
+
+    def test_same_idempotency_key_replays_idempotent_one_record(
+            self, service, capsys):
+        args = ("ask", "--question", QUESTION, "--idempotency-key", "k-1")
+        assert run_cli(capsys, service, *args)[0] == 0
+        rc, out = run_cli(capsys, service, *args)
+        assert rc == 0
+        assert "status=IDEMPOTENT" in out
+        assert service.store.create_calls == 1
+        assert len(service.store.asks) == 1
+
+    def test_socket_required(self, monkeypatch, capsys):
+        monkeypatch.delenv("GBL_BRIDGE_SOCKET", raising=False)
+        rc = gbl_ask.main(["ask", "--bot", BOT, "--question", QUESTION])
+        captured = capsys.readouterr()
+        assert rc == 2
+        assert service_like_refusal(captured.out + captured.err)
+
+    def test_socket_from_environment(self, service, capsys, monkeypatch):
+        monkeypatch.setenv("GBL_BRIDGE_SOCKET", service.socket)
+        rc = gbl_ask.main(["ask", "--bot", BOT, "--question", QUESTION])
+        capsys.readouterr()
+        assert rc == 0
+
+    def test_unreachable_socket_is_a_clean_error(self, tmp_path, capsys):
+        rc = gbl_ask.main([
+            "--socket", str(tmp_path / "absent.sock"),
+            "--bot", BOT, "status", "--id", "gb-" + "0" * 32])
+        out = capsys.readouterr()
+        assert rc == 2
+        assert "BRIDGE_UNREACHABLE" in out.out + out.err
+
+
+def service_like_refusal(text: str) -> bool:
+    return "--socket" in text or "socket" in text.lower()
+
+
+# ── --wait: the answer, or "not yet" ────────────────────────────────────────
+
+
+class TestWait:
+    def test_wait_returns_the_answer(self, service, capsys):
+        rc, out = run_cli(capsys, service, "ask", "--question", QUESTION,
+                          "--idempotency-key", "k-w")
+        ask_id = ask_id_from(out)
+
+        def answer_later():
+            time.sleep(0.4)
+            service.core.post_answer(
+                principal=BOT, ask_id=ask_id, answer=ANSWER,
+                idempotency_key="ans-1")
+
+        worker = threading.Thread(target=answer_later)
+        worker.start()
+        try:
+            rc, out = run_cli(
+                capsys, service, "ask", "--question", QUESTION,
+                "--idempotency-key", "k-w", "--wait",
+                "--poll-seconds", "0.1", "--deadline-seconds", "10")
+        finally:
+            worker.join()
+        assert rc == 0
+        assert ANSWER in out
+
+    def test_wait_returns_not_yet_without_an_answer(self, service, capsys):
+        rc, out = run_cli(
+            capsys, service, "ask", "--question", QUESTION,
+            "--idempotency-key", "k-ny", "--wait",
+            "--poll-seconds", "0.1", "--deadline-seconds", "0.5")
+        assert rc == 3
+        assert "NOT_YET" in out
+
+    def test_wait_flag_on_fetch_is_accepted(self, service, capsys):
+        rc, out = run_cli(capsys, service, "ask", "--question", QUESTION,
+                          "--idempotency-key", "k-f")
+        ask_id = ask_id_from(out)
+        rc, out = run_cli(capsys, service, "fetch", "--id", ask_id, "--wait",
+                          "--poll-seconds", "0.1", "--deadline-seconds", "0.4")
+        assert rc == 3
+
+
+# ── fetch / status / expiry ─────────────────────────────────────────────────
+
+
+class TestFetchStatusExpiry:
+    def test_fetch_returns_the_answer_once(self, service, capsys):
+        rc, out = run_cli(capsys, service, "ask", "--question", QUESTION,
+                          "--idempotency-key", "k-x")
+        ask_id = ask_id_from(out)
+        service.core.post_answer(principal=BOT, ask_id=ask_id,
+                                 answer=ANSWER, idempotency_key="ans-x")
+
+        rc, out = run_cli(capsys, service, "fetch", "--id", ask_id)
+        assert rc == 0
+        assert ANSWER in out
+        consumed = lambda record: [                       # noqa: E731
+            e for e in record["events"]
+            if e.get("type") == "state" and e.get("state") == "CONSUMED"]
+        assert len(consumed(service.store.read_ask(ask_id))) == 1
+
+        rc, out = run_cli(capsys, service, "fetch", "--id", ask_id)
+        assert rc == 0                 # repeatable read of the same answer
+        assert len(consumed(service.store.read_ask(ask_id))) == 1
+
+    def test_fetch_not_yet(self, service, capsys):
+        rc, out = run_cli(capsys, service, "ask", "--question", QUESTION,
+                          "--idempotency-key", "k-n")
+        ask_id = ask_id_from(out)
+        rc, out = run_cli(capsys, service, "fetch", "--id", ask_id)
+        assert rc == 3
+        assert "NOT_YET" in out
+
+    def test_expired_on_stale_fetch(self, service, capsys):
+        envelope = build_ask(kind="question", principal=BOT, target=BOT,
+                             idempotency_key="k-exp",
+                             title="Expiry fixture",
+                             body="An ask that expires immediately.",
+                             ttl_seconds=1, now=datetime.now(timezone.utc))
+        service.store.create_ask(envelope)
+        time.sleep(1.2)
+        rc, out = run_cli(capsys, service, "fetch", "--id",
+                          envelope["ask_id"])
+        assert rc == 4
+        assert "EXPIRED" in out
+
+    def test_status_reports_state(self, service, capsys):
+        rc, out = run_cli(capsys, service, "ask", "--question", QUESTION,
+                          "--idempotency-key", "k-s")
+        ask_id = ask_id_from(out)
+        rc, out = run_cli(capsys, service, "status", "--id", ask_id)
+        assert rc == 0
+        assert "state=OPEN" in out
+
+    def test_unknown_ask_is_a_typed_error(self, service, capsys):
+        rc, out = run_cli(capsys, service, "status", "--id",
+                          "gb-" + "0" * 32)
+        assert rc == 5
+        assert "ASK_NOT_FOUND" in out
+
+
+# ── Token hygiene: no secret in argv, prompts or logs ───────────────────────
+
+
+BANNED = ("token", "secret", "password", "bearer", "authorization",
+          "credential", "api_key", "api-key")
+
+
+class TestTokenHygiene:
+    def test_help_offers_no_credential_option(self):
+        help_text = gbl_ask.build_parser().format_help().lower()
+        for word in BANNED:
+            assert word not in help_text, f"help mentions {word!r}"
+
+    def test_wire_bytes_carry_no_credential(self, service, capsys,
+                                            monkeypatch):
+        sent: list[bytes] = []
+        real_socket = socket.socket
+
+        class RecordingSocket(real_socket):
+            def sendall(self, data):
+                sent.append(bytes(data))
+                return super().sendall(data)
+
+        monkeypatch.setattr(socket, "socket", RecordingSocket)
+        rc, _ = run_cli(capsys, service, "ask", "--question", QUESTION,
+                        "--idempotency-key", "k-h")
+        assert rc == 0
+        assert sent, "no bytes were sent over the socket"
+        wire = b"\n".join(sent).lower()
+        for word in BANNED:
+            assert word.encode() not in wire, f"wire mentions {word!r}"
+
+    def test_output_carries_no_credential(self, service, capsys):
+        run_cli(capsys, service, "ask", "--question", QUESTION,
+                "--idempotency-key", "k-o")
+        rc, out = run_cli(capsys, service, "ask", "--question", QUESTION,
+                          "--idempotency-key", "k-o")
+        assert rc == 0
+        for word in BANNED:
+            assert word not in out.lower(), f"output mentions {word!r}"
