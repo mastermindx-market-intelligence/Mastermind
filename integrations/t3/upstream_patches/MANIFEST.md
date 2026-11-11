@@ -473,3 +473,37 @@ than the parent's" (A1 scope proof), "refuses a raw cross-project command whose 
 is not the target's remote default" (A2), "refuses a raw cross-project command that
 chooses a branch" (A2); the "Retry with a new request id." sentence (A3) is asserted in
 four of the five.
+
+## Pinned upstream patch: delegated child stop return line (lane T10, 2026-11-11)
+
+File: `silent_stop_return_0770446.patch`, sha256 `26dbd715f0b9c44890c9aa24b69945c2aad77734b45dca1cc1cd68787562fac2`.
+Upstream pin `0770446869d247a8b28c27d7ed93f47f8ff0c1e4`. Lane note: `integrations/mmos/T10_SILENT_STOPS.md`.
+
+Files (3; 679 insertions, 5 deletions):
+- `apps/server/src/orchestration-v2/Orchestrator.ts` (54 lines changed) — `finalizeAppOwnedSubagentTask` names the cause when a restart cut a started child and no resume finished it (not resumed, or resume failed with its error); the restart recovery paths pass `afterRestart`. Task status and delivery are unchanged: the existing `planDelegatedCompletionDelivery`/`offerDelegatedCompletionDelivery` path wakes the parent once.
+- `apps/server/src/orchestration-v2/RestartBackgroundNote.ts` (+17) — `latestRestartContinuation` helper.
+- `apps/server/src/mcp/DelegatedChildStop.integration.test.ts` (+613, new, colocated) — six tests: stream end without terminal, HTTP 400 terminal, normal child, restart resumed, restart not resumed, restart with resume failing (bounded 60 s / 180 s retry, then reported).
+
+### Apply order (must apply after the final cross-project patch)
+
+```
+$ git clone <pin source> applycheck && cd applycheck && git checkout 0770446869d247a8b28c27d7ed93f47f8ff0c1e4
+$ git apply --check mastermind_admission_0770446.patch && git apply mastermind_admission_0770446.patch     # ok
+$ git apply --check claude_text_delta_0770446.patch && git apply claude_text_delta_0770446.patch         # ok
+$ git apply --check cross_project_child_0770446.patch && git apply cross_project_child_0770446.patch     # ok, sha256 41d968be…490e0
+$ git apply --check silent_stop_return_0770446.patch && git apply silent_stop_return_0770446.patch       # ok
+```
+Re-checked 2026-11-11 against `origin/t3/mmos-v4-xpb` cross-project sha256 `41d968be3fdf4174b56103cf343e0be38270e9785cce15d5778caece693490e0` (same as trunk `a6d207454`). Built first on the earlier cross-project version, then rebased onto 41d968be before the final check.
+
+### Verification actually run (2026-11-11, SSD clone `/Volumes/Mastermind/build-cache/t10-t3code`, pin + three base patches + this patch)
+
+```
+$ cd apps/server && node <vitest 5.0.5>/vitest.mjs run src/mcp/DelegatedChildStop.integration.test.ts --testTimeout 200000
+# BEFORE patch (red, base 41d968be): Tests  2 failed | 4 passed (6)   -> red_base41d9_all_six.log
+#   (the 4 passing are paths upstream already closes: stream end, HTTP 400, normal, restart resumed)
+# AFTER patch (green):              Tests  6 passed (6)              -> green_new_suite_6.log
+$ node <vitest> run <12 affected suites: orchestration-v2 + mcp delegated/restart suites> --testTimeout 200000
+#                                    Test Files 12 passed; Tests 330 passed (330) -> green_affected_12_suites_330.log
+$ npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit   (apps/server, packages/contracts)   # exit 0 both -> tsc_server_rc0.log, tsc_contracts_rc0.log
+```
+Live proof on a private dev server (port 3810, home `~/.mastermind/mmos_dev/t10/`, ACP probe agent): 4 of 4 scenarios, receipt `live_proof_receipt_073325.json`. Evidence: `~/.mastermind/mmos_evidence/t10-20261111/`.
