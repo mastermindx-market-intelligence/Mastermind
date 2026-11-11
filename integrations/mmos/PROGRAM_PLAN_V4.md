@@ -642,3 +642,39 @@ until the dev server answers. Test: `test_config_requires_the_dev_server_pin`.
 | 5, 6, 7, 8 | Done on the installed app (MAS-5 to MAS-9) |
 | 9 | Checked: transport works, the agent failed the task |
 | 10 | Coding job and crash recovery proven on dev instances; installed app is lane T4c. The improvement loop has not run |
+
+
+## 18. Amendment, 2026-11-11 01:00 UTC: the review says the coding job is not safe to build on
+
+**R4b returned**: `R4B_REVIEW_FINDINGS.md` (15 findings, my decision on each, the reviewer's
+reproductions). I re-ran the reproductions on trunk; all five reproduce. The reviewer found no
+path to a second native launch. It did find that the new engine reattach strands the attempt it
+adopts, that a reconcile pass during a live launch would cancel the only native thread, that a
+crash at the wrong moment makes the door report a successful job as failed, and that a
+worker's text can reach a teammate as the board's words. T4b's own attack round missed all four.
+
+**What changes**
+
+1. T4b's acceptance in section 17 stands as "works on the happy paths on dev". It is withdrawn
+   as "ready to install". Nothing from it is installed, so nothing is rolled back.
+2. Lane T4c is now the repair, on dev only: the engine findings first, then the door, then one
+   owner for recovery (the door composes the real supervisor and runs a real reconcile, which
+   also closes attack finding F8), then the journeys again plus four new ones, then an attack by
+   a model that wrote none of it. Its first step is the pairing guard, before any server runs.
+3. The carrier halves of findings 4, 5 and 12 go to lane CQ's thread when it returns, because
+   it holds that file. The agreed line: every comment the door or the transport writes starts
+   with `[coding-job]`; every carrier note starts with `[t2-carrier]`; the carrier never treats
+   either as a board note, board feedback or an answer.
+4. The coding job on the installed app becomes lane T4d, after T4c and after a review of T4c's
+   diff. It still owes a Paperclip writer identity that is not the board, a decision on real
+   task text as a worker prompt, and its own local Executive store.
+5. Two things stay open on purpose: workers run as the same operating-system user as the door
+   (so admission by user id cannot tell them apart; the door now also requires the request to
+   be visible on the task itself), and the installed Paperclip treats anything on loopback as
+   the board. Neither is this program's to change today.
+
+**What this says about method.** An attack round by a cheap model on its own lane's diff found
+twelve things and missed the four that mattered. For a critical surface the independent review
+goes before acceptance, not at the release tail. The other half of that review (socket door,
+shell-URL loader, cut-over tool, the rest of the carrier, T8's pairing path) therefore runs as
+soon as T8, TSH and CQ are merged, before any of it is switched on for the Chairman.
