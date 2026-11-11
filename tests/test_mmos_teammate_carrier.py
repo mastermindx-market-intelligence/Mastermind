@@ -36,6 +36,10 @@ class FakePaperclip:
         self.calls = []
         self.fail = set(fail)
         self.metadata = metadata
+        self._comment_seq = 0   # every comment the real board serves carries a
+        # createdAt (captured comments.json); this fake stamps one, newest
+        # last, on any row built without one — cached on the row so slices
+        # and appends keep their timeline (delta-3 N3 realism)
 
     def _guard(self, name):
         if name in self.fail:
@@ -68,16 +72,24 @@ class FakePaperclip:
         if row["status"] != "blocked":
             row["status"] = "in_progress"
 
+    def _stamp(self, row):
+        if not row.get("createdAt"):
+            self._comment_seq += 1
+            row["createdAt"] = (f"2026-11-11T12:{self._comment_seq // 60:02d}"
+                                f":{self._comment_seq % 60:02d}.000Z")
+        return row
+
     def comments(self, issue_id):
         self._guard("comments")
-        return self.comment_rows.get(issue_id, [])
+        return [self._stamp(row)
+                for row in self.comment_rows.get(issue_id, [])]
 
     def add_comment(self, issue_id, body):
         self._guard("comment")
         self.calls.append(("comment", issue_id, body))
-        self.comment_rows.setdefault(issue_id, []).append(
+        self.comment_rows.setdefault(issue_id, []).append(self._stamp(
             {"body": body, "authorType": "agent",
-             "authorAgentId": self.agent_id})
+             "authorAgentId": self.agent_id}))
 
     def interactions(self, issue_id):
         self._guard("interactions")
@@ -4168,6 +4180,26 @@ def test_an_unknown_comment_shape_raises_everywhere_it_is_read():
                                     "assigneeAgentId": "ag-atlas"})
     with pytest.raises(wc.CarrierError):
         wc.board_feedback(pc, pc.issue("is-1"))
+
+
+def test_rows_without_a_timestamp_are_refused_not_left_newest_first():
+    # Delta-3 N3: ordered_oldest_first SKIPPED sorting whenever any row
+    # lacked createdAt — and the board's list order is newest-first (fixture
+    # comments.json), so every oldest-first consumer (the last-result pick,
+    # board feedback, board notes, the waiting-note dedupe) silently got the
+    # NEWEST-first order instead. A row without a timestamp has no place in
+    # a total order this code can defend: with two or more rows where any
+    # lacks createdAt the read is refused loudly; fewer than two rows have
+    # no order to get wrong and pass through as they came.
+    newest = board.served_comment("newest word", author_agent_id="ag-atlas")
+    oldest = board.served_comment("oldest word", author_agent_id="ag-atlas")
+    oldest.pop("createdAt")
+    with pytest.raises(wc.CarrierError):
+        wc.ordered_oldest_first([newest, oldest])
+    with pytest.raises(wc.CarrierError):
+        wc.ordered_oldest_first([oldest, newest])
+    assert wc.ordered_oldest_first([oldest]) == [oldest]  # no order to lose
+    assert wc.ordered_oldest_first([]) == []
 
 
 def test_an_unknown_interaction_shape_raises_where_it_decides():

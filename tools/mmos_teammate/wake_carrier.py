@@ -2064,8 +2064,9 @@ def untruncated_children(pc, issue_id):
 
 def comment_rows(pc, issue):
     """An issue's comments, oldest first. Paperclip lists them newest first,
-    so they are ordered here by their own timestamps; rows without one keep
-    the order they came in. A failed READ is the caller's [] (wake-replay
+    so they are ordered here by their own timestamps; a set of rows where
+    any lacks a timestamp is REFUSED (delta-3 N3 — see
+    ordered_oldest_first). A failed READ is the caller's [] (wake-replay
     tolerance); an unknown 200 SHAPE raises (panel-2 M5) — it is not
     emptiness."""
     try:
@@ -2078,11 +2079,23 @@ def comment_rows(pc, issue):
 def ordered_oldest_first(rows):
     """Comment rows ordered oldest-first by their own ``createdAt`` — the
     board's list order is newest-first (fixture comments.json), so position
-    alone is never the timeline. Rows without timestamps keep the order they
-    came in."""
+    alone is never the timeline. Delta-3 N3: the sort needs a total key; the
+    old fallback — keep the served order when any row lacks createdAt —
+    handed every oldest-first consumer the NEWEST-first order. With two or
+    more rows where any lacks the timestamp the read is refused
+    (CarrierError): an order this code cannot derive fails loudly, it never
+    flows silently newest-first. Fewer than two rows have no order to get
+    wrong and pass through unchanged."""
     rows = list(rows)
-    if rows and all(row.get("createdAt") for row in rows):
-        rows.sort(key=lambda row: row["createdAt"])
+    if len(rows) < 2:
+        return rows
+    missing = sum(1 for row in rows if not row.get("createdAt"))
+    if missing:
+        raise CarrierError(
+            f"{missing} of {len(rows)} rows carry no createdAt; the served "
+            "newest-first order cannot be corrected to oldest-first, "
+            "refusing the read")
+    rows.sort(key=lambda row: row["createdAt"])
     return rows
 
 
