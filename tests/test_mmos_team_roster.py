@@ -239,6 +239,55 @@ class TestToolLimitsCredentials:
         assert not any(d.startswith(f"Read(/{root}/**") for d in deny)
 
 
+class TestToolLimitsNewKeys:
+    """Part B Q2/Q3: allow_read_roots and home_write_allow compile to deny
+    rules; a spec WITHOUT the keys must generate exactly today's rules."""
+
+    @staticmethod
+    def today_rules(spec, mate):
+        """Today's generation, reconstructed from the module's own tuples so
+        the absent-key test fails if the output changes in any way."""
+        root = team_roster.expand(spec["server"]["root"])
+        home = team_roster.teammate_home(spec, mate)
+        deny_roots = [team_roster.expand(spec["project"]["workspace_root"])]
+        deny_roots += [os.path.abspath(r)
+                       for r in spec.get("deny_write_roots", [])]
+        deny = ["Bash", "Agent", "NotebookEdit"]
+        for r in deny_roots:
+            deny += [f"Write(/{r}/**)", f"Edit(/{r}/**)"]
+        for name in team_roster.HOME_LOCKED:
+            locked = os.path.join(home, name)
+            deny += [f"Write(/{locked})", f"Edit(/{locked})"]
+        for name in team_roster.HOME_CONFIG:
+            config = os.path.join(home, name)
+            for tool in ("Write", "Edit"):
+                deny += [f"{tool}(/{config})", f"{tool}(/{config}/**)"]
+        for path in team_roster.deny_read_paths(spec, mate):
+            deny += team_roster._read_deny(path)
+        allow = ["Read", "Glob", "Grep", "WebFetch", "WebSearch", "TodoWrite",
+                 f"Write(/{home}/**)", f"Edit(/{home}/**)"]
+        return {"permissions": {"allow": allow, "deny": deny}}
+
+    def test_absent_keys_give_exactly_today_rules(self, tmp_path):
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        os.makedirs(team_roster.teammate_home(spec, spec["teammates"][1]))
+        assert team_roster.tool_limits(spec, mate)["permissions"] == \
+            self.today_rules(spec, mate)["permissions"]
+
+    def test_absent_keys_despite_empty_values(self, tmp_path):
+        """Empty lists are not the new regime either: only present-and-set
+        keys turn the rooted rules on, so [] must equal absent."""
+        raw = make_spec(tmp_path)
+        raw["allow_read_roots"] = []
+        raw["home_write_allow"] = []
+        spec = load(tmp_path, raw)
+        mate = spec["teammates"][0]
+        os.makedirs(team_roster.teammate_home(spec, spec["teammates"][1]))
+        assert team_roster.tool_limits(spec, mate)["permissions"] == \
+            self.today_rules(spec, mate)["permissions"]
+
+
 class TestAtomicWrites:
     """Review R2a finding 11: the server watches settings.json and reloads it
     about 100 ms after a change, and a teammate process reads tool-limits.json
