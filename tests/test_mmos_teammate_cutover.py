@@ -627,3 +627,33 @@ def test_read_state_walks_past_the_first_page_of_open_issues():
                                                     "agent_id": AID})
     assert len(open_issues) == 53
     assert any(offset > 0 for _, offset, _ in walked)
+
+
+def test_the_live_config_write_is_atomic_and_private(wired, monkeypatch):
+    # The config the next wake reads was written with a bare in-place
+    # truncate: a write that died halfway left corrupt bytes in place, and
+    # the file's mode was whatever the umask allowed. Same law as the
+    # settings write: staged, 0600 from creation, renamed over, no
+    # leftovers, live bytes untouched on failure.
+    spec, http = wired
+    assert co.cmd_apply(spec) == 0
+    config = os.path.join(spec["agent_dir"], "carrier.json")
+    before = open(config, "rb").read()
+
+    real_dump = json.dump
+
+    def exploding_dump(obj, fh, *args, **kwargs):
+        fh.write("{ partial")  # the write dies halfway
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(co.json, "dump", exploding_dump)
+    with pytest.raises(RuntimeError):
+        co.cmd_apply(spec)
+    assert open(config, "rb").read() == before   # never truncated in place
+    assert not [p for p in os.listdir(os.path.dirname(config))
+                if ".new-" in p]                # failed staging cleaned up
+
+    monkeypatch.setattr(co.json, "dump", real_dump)
+    assert co.cmd_apply(spec) == 0
+    assert stat.S_IMODE(os.stat(config).st_mode) == 0o600
+    assert json.loads(open(config).read())      # valid JSON at rest

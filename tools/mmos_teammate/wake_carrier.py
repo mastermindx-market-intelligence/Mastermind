@@ -591,11 +591,16 @@ def coding_job_help(door_socket):
 
 
 def active_run_id(row):
-    """The run id an inbox row names as its active run (str or {id: …})."""
+    """The run id a row names as holding its issue. The inbox projection
+    serves `activeRun` (str or {id: …}); a GET /api/issues/:id serves
+    `checkoutRunId` instead — both are read, so a fresh issue read decides
+    the 409 recheck on a field that GET actually serves."""
     active = row.get("activeRun")
     if isinstance(active, dict):
-        return active.get("id")
-    return active or None
+        active = active.get("id")
+    if active:
+        return active
+    return row.get("checkoutRunId") or None
 
 
 def choose_issue(rows, my_run_id=None):
@@ -921,8 +926,17 @@ class PaperclipClient:
                 f"/api/companies/{company_id}/issues?parentId={issue_id}"
                 f"&limit={limit}&offset={offset}")
             if isinstance(batch, dict):
-                batch = batch.get("issues") or batch.get("children") \
-                    or batch.get("rows") or []
+                # An unrecognised shape is NOT an empty result: a board
+                # answering {"data": …} or {"error": …} must not read as
+                # "no children" (the return edge would see no done child
+                # and the asker would never hear back, exit 0).
+                batch = next((batch[key] for key in ("issues", "children",
+                                                     "rows")
+                              if isinstance(batch.get(key), list)), None)
+            if not isinstance(batch, list):
+                raise CarrierError(
+                    f"children list for {issue_id} came back in an "
+                    "unrecognised shape")
             for row in batch:
                 row = dict(row)
                 row.setdefault("parentId", issue_id)
@@ -1190,6 +1204,11 @@ def thread_url(template, thread_id):
     through — never anything from issue text. `{thread}` becomes the thread
     id with `:` written as %3A."""
     if not template or not thread_id:
+        return None
+    # The template is trusted config, but the id substituted into it is
+    # data — same law as the issue link's identifier check: a value with
+    # path pieces, spaces or absurd length never becomes a link.
+    if not re.fullmatch(r"[A-Za-z0-9:_-]{1,128}", str(thread_id)):
         return None
     if not re.match(r"http://(127\.0\.0\.1|localhost):[0-9]{2,5}/", template):
         return None
@@ -1559,10 +1578,11 @@ def last_result_comment(pc, child):
     no comment at all."""
     issue_id = child["id"] if isinstance(child, dict) else child
     assignee = child.get("assigneeAgentId") if isinstance(child, dict) else None
-    try:
-        rows = pc.comments(issue_id)
-    except CarrierError:
-        rows = []
+    # An unreadable comments read is NOT "no answer": the swallow below
+    # turned a failed read into "(no answer comment…)" delivered to the
+    # asker as the teammate's answer. The read failure fails the run; the
+    # answer stays unsent and the next wake retries.
+    rows = pc.comments(issue_id)
     if isinstance(rows, dict):
         rows = rows.get("comments") or rows.get("rows") or []
     if assignee:
@@ -1902,15 +1922,18 @@ def comment_rows(pc, issue):
 
 # The lane line with T4c (R4b findings 4/5): every comment the door or the
 # result transport writes starts with `[coding-job]`, every note this carrier
-# writes with `[t2-carrier]`. The installed Paperclip records loopback writes
-# as authorType "user", so the prefix — not authorType — marks machine words.
+# writes with `[t2-carrier]`. The installed Paperclip records agent-token
+# loopback writes as authorType "agent" (live capture 2026-11-11), so
+# authorType would separate them today — but the prefix, not authorType,
+# stays the mark: it holds whatever authorType a row carries, for any
+# transport that writes differently.
 MACHINE_COMMENT_PREFIXES = ("[coding-job]", "[t2-carrier]")
 
 
 def is_machine_comment(body):
     """True when a comment body was written by a machine, not a person: after
     leading whitespace it starts with a lane prefix. Applied whatever
-    authorType the row carries (R4b 4/5: machine writes come back as "user")."""
+    authorType the row carries (R4b 4/5) — the prefix is the durable mark."""
     return (body or "").lstrip().startswith(MACHINE_COMMENT_PREFIXES)
 
 
@@ -1976,7 +1999,9 @@ def board_notes(pc, issue, limit=5, max_chars=2000):
     its user comments, oldest first, newest `limit` kept. They go into the
     first task message so a note left while assigning is not lost. Machine
     comments (is_machine_comment) are never board notes, whatever their
-    authorType: the installed Paperclip records loopback writes as "user"."""
+    authorType: the installed Paperclip records agent-token loopback writes
+    as "agent" (live capture 2026-11-11), and the prefix is the durable
+    mark either way."""
     mine = [row for row in comment_rows(pc, issue)
             if row.get("authorType") == "user"
             and (row.get("body") or "").strip()
@@ -2415,9 +2440,20 @@ def wait_for_reply(t3, op, opts):
         # the budget is the delivery reserve, not more waiting.
         deadline = min(deadline, budget - float(
             opts.get("delivery_reserve_sec", DELIVERY_RESERVE_SEC) or 0))
+    misses = 0
     while _now(opts) < deadline:
         _doze(opts, opts.get("poll_interval_sec", 5))
-        thread, msgs = t3.messages()
+        try:
+            thread, msgs = t3.messages()
+            misses = 0
+        except CarrierError:
+            # Same law as the question wait (_read_thread_tolerant): one or
+            # two failed reads in a row do not end the wait — the answer
+            # may be one poll away — but the third miss in a row fails it.
+            misses += 1
+            if misses >= 3:
+                raise
+            continue
         state, reply = scan_marker(msgs, op, thread)
         if state == "reply":
             return reply

@@ -69,6 +69,7 @@ class FakePaperclip:
             row["status"] = "in_progress"
 
     def comments(self, issue_id):
+        self._guard("comments")
         return self.comment_rows.get(issue_id, [])
 
     def add_comment(self, issue_id, body):
@@ -3672,3 +3673,109 @@ def test_a_run_with_no_thread_lock_dir_behaves_as_before():
     assert run_with_roster(pc, t3, {}) == 0
     assert len(t3.sends) == 1
     assert pc.issues["is-1"]["status"] == "in_review"
+
+
+# --- reads that fail are not facts that are absent -------------------------
+
+def test_an_unreadable_comments_read_fails_the_return_not_a_blank_one():
+    # The return edge's answer fetch swallowed a failed comments read and
+    # delivered "(no answer comment on the child issue)" to the asker's
+    # thread as the teammate's answer — "cannot read" became a published
+    # claim about what the teammate said. An unreadable board fails the
+    # run: the answer stays unsent and the next wake retries.
+    issues, ask_op, child = blocked_parent_with_done_child()
+    pc = FakePaperclip(issues=issues, fail={"comments"})
+    pc.child_rows["is-1"] = [dict(child)]
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    t3 = FakeT3(replies=["FINAL: the file has 12 lines"])
+    with pytest.raises(wc.CarrierError):
+        run_with_roster(pc, t3, {})
+    assert t3.sends == []   # nothing was delivered as an answer
+
+
+def test_wait_for_reply_tolerates_transient_read_failures():
+    # The slow-turn wait polled with a bare read: one failed thread read
+    # released the issue for a person even though the answer was one poll
+    # away. Same law as the question wait (_read_thread_tolerant): one or
+    # two misses in a row do not end the wait; the third does.
+    op = "pc-is-1-wait"
+    msgs = [("user", "r1", f"[{op}]\n\nthe task"),
+            ("assistant", "r1", "the answer arrived")]
+
+    class BlipT3(ScriptedT3):
+        reads = 0
+
+        def messages(self, count=60):
+            type(self).reads += 1
+            if type(self).reads <= 2:
+                raise wc.CarrierError("read failed (fake)")
+            return super().messages(count)
+
+    t3 = BlipT3(states=[(th(latest="r1", pending=0), msgs)])
+    clock = Clock()
+
+    def nap(seconds):
+        clock.nap(seconds)
+        t3.nap(seconds)
+    opts = {"clock": clock.time, "sleep": nap,
+            "pending_timeout_sec": 200, "poll_interval_sec": 10}
+    assert wc.wait_for_reply(t3, op, opts) == "the answer arrived"
+
+    # three misses in a row still fail the wait honestly
+    class DeadT3(ScriptedT3):
+        def messages(self, count=60):
+            raise wc.CarrierError("read failed (fake)")
+
+    with pytest.raises(wc.CarrierError):
+        wc.wait_for_reply(DeadT3(states=[(th(), [])]), op, opts)
+
+
+def test_thread_url_rejects_a_thread_id_that_is_not_one():
+    # Same law as the issue link's identifier check: the template is
+    # trusted config, but the id substituted into it is data — a value
+    # carrying path pieces must not become a link a person clicks.
+    tpl = "http://127.0.0.1:3100/thread/{thread}"
+    assert wc.thread_url(tpl, "node:thread:abc-123") == \
+        "http://127.0.0.1:3100/thread/node%3Athread%3Aabc-123"
+    for bad in ("../../etc", "a b", "a/b", "x" * 200):
+        assert wc.thread_url(tpl, bad) is None
+
+
+def test_an_unrecognised_children_shape_is_an_error_not_an_empty_list():
+    # The children walk coerced a dict of unknown shape to [] — a board
+    # answering {"data": …} or {"error": …} read as "no children": the
+    # return edge saw no done child and the asker never heard back, with
+    # exit 0 and nothing saying the read was nonsense. Same law as rows_of:
+    # an unrecognised shape is not an empty result.
+    class OddShapeClient(wc.PaperclipClient):
+        def __init__(self, payload):
+            super().__init__("http://127.0.0.1:1", "tok", "run-1")
+            self.payload = payload
+
+        def _request(self, method, path, body=None):
+            return self.payload
+
+    for payload in ({"data": []}, {"error": {"message": "boom"}}, {}):
+        with pytest.raises(wc.CarrierError):
+            OddShapeClient(payload).children("is-1")
+
+
+def test_a_409_recheck_reads_the_run_field_the_issue_get_serves():
+    # The inbox projection serves activeRun, but GET /api/issues/:id serves
+    # checkoutRunId (fixture issue_by_id). The 409 reconciliation re-read
+    # the issue through active_run_id — a field the GET never serves — so a
+    # checkout this run already held read as "held by run unknown" and the
+    # issue was skipped for a person.
+    issues = {"is-1": {"identifier": "MMO-1", "status": "todo",
+                       "title": "Summarize file X",
+                       "description": "Write a three-line summary.",
+                       "checkoutRunId": "run-9"}}
+    pc = FakePaperclip(issues=issues)
+
+    def checkout409(issue_id, agent_id, allow_blocked=False):
+        raise wc.CarrierError("checkout failed: HTTP 409 (fake)")
+
+    pc.checkout = checkout409
+    t3 = FakeT3(replies=["FINAL: three lines"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert len(t3.sends) == 1   # the issue was worked, not skipped

@@ -265,9 +265,20 @@ def cmd_apply(spec):
     if found:
         die("not moving, state changed while preparing: " + "; ".join(found))
     # R13: the live config is written only AFTER the final gate — an apply
-    # that dies here must leave what the next wake reads untouched.
-    with open(config_path, "w") as fh:
-        json.dump(carrier_config(spec), fh, indent=2)
+    # that dies here must leave what the next wake reads untouched. The
+    # write itself is staged and renamed, 0600 from creation: a halfway
+    # death never truncates the live bytes in place (same law as the
+    # settings write).
+    staged_cfg = f"{config_path}.new-{os.getpid()}"
+    try:
+        fd = os.open(staged_cfg,
+                     os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            json.dump(carrier_config(spec), fh, indent=2)
+        os.replace(staged_cfg, config_path)
+    finally:
+        if os.path.exists(staged_cfg):
+            os.unlink(staged_cfg)
     try:
         patch = adapter_patch(spec, carrier_path, config_path)
         http.patch(f"/api/agents/{spec['agent_id']}", patch)
