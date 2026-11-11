@@ -20,6 +20,14 @@ ROOT = (Path.home() / ".claude/projects/-Users-chriswong-Documents-Cluade-Macro-
         / "handoff_kits/meta-ceo-b-2026-09-08")
 POOLS = ROOT / "orch/fabric/pools.yaml"
 FABRIC = ROOT / "ext/fabric_task.py"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+#: Shared routing-law lane per canonical complexity (the stdio caller states
+#: a fabric task class/complexity; the law's option ladder is derived from
+#: the complexity, per the OQ-10 re-point of this tool onto route_preview).
+ROUTE_OPTION_BY_COMPLEXITY = {
+    "C0_MECHANICAL": "mechanical", "C1_ROUTINE_BOUNDED": "routine",
+    "C2_COMPLEX_BOUNDED": "hard", "C3_FRONTIER_JUDGMENT": "frontier",
+}
 CLASSES = frozenset(("execute", "fix_build", "mechanical", "review", "census",
                      "audit", "verify", "build", "high_level", "architecture",
                      "integration", "domain_orchestration", "orchestration"))
@@ -98,12 +106,35 @@ def _preview_refusal_code(returncode: int, diagnostic: str) -> str:
     return "FABRIC_PREVIEW_NO_ELIGIBLE_REMOTE_HOST"
 
 
+def shared_route_preview(task: str, complexity: str) -> dict:
+    """The shared Mastermind routing-law preview (WO-07 ``route_preview``).
+
+    Re-pointed per OQ-10: this stdio tool's routing answer now comes from the
+    Executive host's read-only ``route_preview`` composition, not from a
+    second independent preview. Still no reservation, dispatch or spend; if
+    the shared law is unavailable or refuses, the whole preview refuses.
+    """
+    root = str(REPO_ROOT)
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        from integrations.executive_mcp.route_preview import compose
+        return compose({"route_option": ROUTE_OPTION_BY_COMPLEXITY[complexity],
+                        "goal": task})
+    except Exception:
+        raise ValueError("ROUTE_PREVIEW_SOURCE_UNAVAILABLE") from None
+
+
 def preview(arguments: dict) -> dict:
     task = arguments.get("task_class")
     complexity = arguments.get("complexity", "C1_ROUTINE_BOUNDED")
     pool = arguments.get("pool")
     if task not in CLASSES or complexity not in COMPLEXITIES:
         raise ValueError("FABRIC_PREVIEW_ARGUMENTS_INVALID")
+    composition = shared_route_preview(task, complexity)
+    effective_complexity = composition.get("effective_complexity") if isinstance(composition, dict) else None
+    if not isinstance(effective_complexity, str) or effective_complexity not in COMPLEXITIES:
+        raise ValueError("FABRIC_PREVIEW_EFFECTIVE_COMPLEXITY_INVALID")
     allowed = {row["pool"] for row in catalog()["pools"]}
     if pool is not None and pool not in allowed:
         raise ValueError("FABRIC_PREVIEW_POOL_NOT_CONFIGURED")
@@ -111,7 +142,7 @@ def preview(arguments: dict) -> dict:
         raise ValueError("FABRIC_OWNER_UNAVAILABLE")
     args = ["/opt/homebrew/bin/python3", str(FABRIC), "preview",
             "--id", "hermes-ro-" + uuid.uuid4().hex,
-            "--class", task, "--task-complexity", complexity]
+            "--class", task, "--task-complexity", effective_complexity]
     if pool is not None:
         args += ["--pool", pool]
     try:
@@ -135,7 +166,12 @@ def preview(arguments: dict) -> dict:
         raise ValueError("FABRIC_PREVIEW_INVALID_RESPONSE")
     result = {key: val for key, val in result.items() if key in FIELDS
               and isinstance(val, (str, int, bool, float, type(None)))}
-    result["proof"] = "PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH"
+    result = {**result, "proof": "PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH",
+              # OQ-10 re-point: the routing answer is the shared law's
+              # RoutePreview.v1; the owner's placement columns stay the
+              # existing Fabric owner's.
+              "authority": composition["authority"],
+              "route_preview": composition}
     return result
 
 
@@ -144,7 +180,7 @@ TOOLS = [
      "description": "Read-only metadata of Mastermind Subagent Fabric pools and model names. Does not establish live availability, authenticate models or start work.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "fabric_route_preview",
-     "description": "Ask the existing Subagent Fabric owner for one NON-RESERVING capacity/model preview; never submits, dispatches or spends.",
+     "description": "Ask the shared Mastermind routing law (route_preview) and the existing Subagent Fabric owner for one NON-RESERVING route/capacity preview; never submits, dispatches or spends.",
      "inputSchema": {"type": "object", "properties": {
          "task_class": {"type": "string", "enum": sorted(CLASSES)},
          "complexity": {"type": "string", "enum": sorted(COMPLEXITIES),
@@ -177,7 +213,7 @@ def handle(message):
         return reply(identity, {"protocolVersion": version,
                                 "capabilities": {"tools": {"listChanged": False}},
                                 "serverInfo": {"name": "mmx-fabric-capacity-readonly",
-                                               "version": "1.0.1"}})
+                                               "version": "1.1.0"}})
     if method == "ping":
         return reply(identity, {})
     if method == "tools/list":

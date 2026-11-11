@@ -923,3 +923,451 @@ def test_private_authority_cannot_be_model_role_or_async_guard(tmp_path, short_s
             finally:
                 clear_selected_child_composition()
     asyncio.run(exercise())
+
+
+# ---------------------------------------------------------------------------
+# WO-13: idempotent ChildExecutionRequest.v1 admission + bounded ready queue
+# ---------------------------------------------------------------------------
+
+
+def _child_request_envelope(root_ref, parent_ref, key, *, complexity="C2_COMPLEX_BOUNDED",
+                            task_kind="research", brief_digest="a" * 64):
+    """One wire-shaped ChildExecutionRequest.v1 with its verified digest."""
+
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+
+    request = ChildExecutionRequest(
+        root_ref=root_ref, immediate_parent_run_ref=parent_ref,
+        logical_child_key=key, task_kind=task_kind,
+        requested_complexity=complexity, brief_digest=brief_digest,
+    )
+    return request.to_dict()
+
+
+def _child_request_events(runtime, command_id: str) -> list[Any]:
+    with runtime.store.read() as connection:
+        return list(connection.execute(
+            "SELECT * FROM events WHERE command_id=? ORDER BY event_id",
+            (command_id,),
+        ).fetchall())
+
+
+def _child_request_job_count(runtime) -> int:
+    with runtime.store.read() as connection:
+        return int(connection.execute(
+            "SELECT COUNT(*) FROM events e JOIN jobs j ON j.job_id=e.job_id "
+            "WHERE e.event_type='JOB_CREATED' AND json_extract(e.payload_json,"
+            " '$.provenance.child_request.schema') = 'ChildExecutionRequest.v1'"
+        ).fetchone()[0])
+
+
+def test_child_request_duplicate_key_replay_returns_the_same_job(
+        tmp_path, short_socket_root):
+    async def exercise() -> None:
+        async with _selected_child_service(
+            tmp_path, short_socket_root, name="child-request-replay",
+        ) as (service, _supervisor, root, _received, _gate):
+            runtime = service.runtime
+            envelope = _child_request_envelope(
+                root.job_id, root.job_id, "reconcile-digest-0001")
+
+            first = await service.admit_child_execution_request(envelope)
+            assert first["schema"] == "mastermind.child_request_admission/v1"
+            assert first["state"] == "ADMITTED", first
+            assert isinstance(first["job_id"], str) and first["job_id"]
+            command_id = first["command_id"]
+            assert command_id.startswith("child-request:")
+
+            job = runtime.jobs.get_job(first["job_id"])
+            assert job.status.value == "QUEUED"
+            assert job.attempt_count == 0
+            # Admission selects nothing (OQ-9): no worker, provider or
+            # placement decision rides on the admitted Job.
+            constraints = job.constraints or {}
+            assert "provider" not in constraints and "worker" not in constraints
+
+            # A duplicate delivery of the same key + digest replays to the
+            # SAME Job — exactly one durable admission, not two.
+            replay = await service.admit_child_execution_request(envelope)
+            assert replay["state"] == "REPLAY", replay
+            assert replay["job_id"] == first["job_id"]
+            assert replay["command_id"] == command_id
+            assert replay["request_digest"] == first["request_digest"]
+            events = _child_request_events(runtime, command_id)
+            assert len(events) == 1
+            assert events[0]["event_type"] == "JOB_CREATED"
+            assert events[0]["job_id"] == first["job_id"]
+            assert _child_request_job_count(runtime) == 1
+
+    asyncio.run(exercise())
+
+
+def test_child_request_key_with_different_digest_is_a_conflict(
+        tmp_path, short_socket_root):
+    async def exercise() -> None:
+        from control_plane.executive_runtime import StateConflict
+
+        async with _selected_child_service(
+            tmp_path, short_socket_root, name="child-request-conflict",
+        ) as (service, _supervisor, root, _received, _gate):
+            runtime = service.runtime
+            admitted = await service.admit_child_execution_request(
+                _child_request_envelope(
+                    root.job_id, root.job_id, "conflicting-key-001"))
+            assert admitted["state"] == "ADMITTED", admitted
+
+            # Same idempotency triple, different goal digest: a conflict,
+            # never a second Job and never a silent re-admission.
+            with pytest.raises(StateConflict, match="CHILD_REQUEST_DIGEST_CONFLICT"):
+                await service.admit_child_execution_request(
+                    _child_request_envelope(
+                        root.job_id, root.job_id, "conflicting-key-001",
+                        brief_digest="b" * 64))
+            assert _child_request_job_count(runtime) == 1
+
+            # A genuinely different key is ordinary new work.
+            other = await service.admit_child_execution_request(
+                _child_request_envelope(
+                    root.job_id, root.job_id, "conflicting-key-002"))
+            assert other["state"] == "ADMITTED", other
+            assert other["job_id"] != admitted["job_id"]
+            assert _child_request_job_count(runtime) == 2
+
+    asyncio.run(exercise())
+
+
+def test_child_request_root_cap_32_returns_precise_wait_reason(
+        tmp_path, short_socket_root):
+    async def exercise() -> None:
+        async with _selected_child_service(
+            tmp_path, short_socket_root, name="child-request-root-cap",
+        ) as (service, _supervisor, root, _received, _gate):
+            runtime = service.runtime
+            for index in range(32):
+                outcome = await service.admit_child_execution_request(
+                    _child_request_envelope(
+                        root.job_id, root.job_id, f"root-cap-key-{index:03d}"))
+                assert outcome["state"] == "ADMITTED", (index, outcome)
+
+            # The 33rd distinct key hits the durable per-root cap and is
+            # returned to the parent planner with a precise wait reason.
+            # One synchronous decision: no job, no retry.
+            wait = await service.admit_child_execution_request(
+                _child_request_envelope(
+                    root.job_id, root.job_id, "root-cap-key-032"))
+            assert wait["state"] == "WAIT", wait
+            assert wait["wait_reason"] == "CHILD_QUEUE_ROOT_READY_FULL", wait
+            assert wait["job_id"] is None
+            assert wait["wait_detail"]["root_ready"] == 32
+            assert wait["wait_detail"]["root_limit"] == 32
+            assert wait["wait_detail"]["root_ref"] == root.job_id
+            assert _child_request_job_count(runtime) == 32
+
+            # A replay still outranks the caps: a lost-response retry of
+            # an admitted key recovers its handle even with a full queue.
+            replay = await service.admit_child_execution_request(
+                _child_request_envelope(
+                    root.job_id, root.job_id, "root-cap-key-000"))
+            assert replay["state"] == "REPLAY", replay
+            assert _child_request_job_count(runtime) == 32
+
+    asyncio.run(exercise())
+
+
+def test_child_request_fleet_cap_is_configurable_backpressure(
+        tmp_path, short_socket_root, monkeypatch):
+    async def exercise() -> None:
+        monkeypatch.setenv("MMOS_CHILD_FLEET_READY_LIMIT", "2")
+        monkeypatch.setenv("MMOS_CHILD_ROOT_READY_LIMIT", "32")
+        async with _selected_child_service(
+            tmp_path, short_socket_root, name="child-request-fleet-cap",
+        ) as (service, _supervisor, root, _received, _gate):
+            runtime = service.runtime
+            other_root = "ROOT-OTHER-0001"
+            first = await service.admit_child_execution_request(
+                _child_request_envelope(root.job_id, root.job_id, "fleet-key-001"))
+            second = await service.admit_child_execution_request(
+                _child_request_envelope(other_root, other_root, "fleet-key-002"))
+            assert first["state"] == "ADMITTED" and second["state"] == "ADMITTED"
+
+            # The fleet cap is configured at two: a third request from a
+            # third root is backpressured with the fleet reason, even
+            # though neither root has reached its per-root cap.
+            wait = await service.admit_child_execution_request(
+                _child_request_envelope("ROOT-THIRD-0001", "ROOT-THIRD-0001",
+                                        "fleet-key-003"))
+            assert wait["state"] == "WAIT", wait
+            assert wait["wait_reason"] == "CHILD_QUEUE_FLEET_READY_FULL", wait
+            assert wait["wait_detail"]["fleet_ready"] == 2
+            assert wait["wait_detail"]["fleet_limit"] == 2
+            assert wait["wait_detail"]["root_ready"] == 0
+            assert _child_request_job_count(runtime) == 2
+
+            # The durable queue orders by priority, then bounded aging,
+            # with root fairness and skip-ineligible behaviour.
+            ordered, skipped = runtime.jobs.child_request_ready_queue(
+                now_ms=int(runtime.store.now_ms()))
+            assert [item.job_id for item in ordered] == [
+                first["job_id"], second["job_id"]]
+            assert skipped == ()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("lane", ["root", "fleet", "replay"])
+def test_child_request_last_slot_is_atomic_across_runtime_instances(
+        tmp_path, monkeypatch, lane):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+    from control_plane.child_request_admission import ReadyQueuePolicy
+
+    runtimes = [Runtime.at(tmp_path / "atomic-admission") for _ in range(2)]
+    boundary = Barrier(2)
+    for runtime in runtimes:
+        original_create = runtime.jobs.create_job
+
+        def after_both_observed(*args, _create=original_create, **kwargs):
+            boundary.wait(timeout=10)
+            return _create(*args, **kwargs)
+
+        monkeypatch.setattr(runtime.jobs, "create_job", after_both_observed)
+    policy = ReadyQueuePolicy(
+        root_limit=1 if lane != "fleet" else 10,
+        fleet_limit=1 if lane == "fleet" else 10)
+    requests = [
+        ChildExecutionRequest.from_dict(_child_request_envelope(
+            "R" if lane != "fleet" else f"R-{index}", "P",
+            "same" if lane == "replay" else f"key-{index}"))
+        for index in range(2)
+    ]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pending = [pool.submit(runtime.jobs.admit_child_execution_request,
+                               request, policy=policy)
+                   for runtime, request in zip(runtimes, requests)]
+        outcomes = [future.result(timeout=20) for future in pending]
+    assert sorted(outcome.state for outcome in outcomes) == (
+        ["ADMITTED", "REPLAY"] if lane == "replay" else ["ADMITTED", "WAIT"])
+    assert _child_request_job_count(runtimes[0]) == 1
+    if lane == "replay":
+        assert outcomes[0].job_id == outcomes[1].job_id
+    else:
+        wait = next(outcome for outcome in outcomes if outcome.state == "WAIT")
+        assert wait.job_id is None
+        assert wait.wait_reason == (
+            "CHILD_QUEUE_ROOT_READY_FULL" if lane == "root"
+            else "CHILD_QUEUE_FLEET_READY_FULL")
+
+
+def test_child_request_distinct_collision_tuples_admit_independently(tmp_path):
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+
+    runtime = Runtime.at(tmp_path / "tuple-boundaries")
+    first = ChildExecutionRequest.from_dict(
+        _child_request_envelope("R", "P\x1fX", "K"))
+    second = ChildExecutionRequest.from_dict(
+        _child_request_envelope("R", "P", "X\x1fK"))
+    admitted = [runtime.jobs.admit_child_execution_request(request)
+                for request in (first, second)]
+    assert [outcome.state for outcome in admitted] == ["ADMITTED", "ADMITTED"]
+    assert admitted[0].job_id != admitted[1].job_id
+    assert _child_request_job_count(runtime) == 2
+    for request, outcome in zip((first, second), admitted):
+        replay = runtime.jobs.admit_child_execution_request(request)
+        assert replay.state == "REPLAY"
+        assert replay.job_id == outcome.job_id
+
+
+def _seed_legacy_child_admission(runtime, request, *, command_id=None, mutate=None):
+    """An actual creation receipt with the previously published wire shape."""
+    from hashlib import sha256
+
+    original = "child-request:" + sha256(
+        "\x1f".join(request.idempotency_key()).encode("utf-8")).hexdigest()
+    command = command_id or original
+    material = {
+        "schema": "ChildExecutionRequest.v1",
+        "root_ref": request.root_ref,
+        "immediate_parent_run_ref": request.immediate_parent_run_ref,
+        "logical_child_key": request.logical_child_key,
+        "request_digest": request.request_digest,
+        "policy_revision": request.policy_revision,
+        "requested_complexity": request.requested_complexity,
+        "fallback_mode": request.fallback_mode,
+        "command_id": command,
+    }
+    if mutate is not None:
+        mutate(material)
+    job = runtime.jobs.create_job(
+        "retained child-request fixture", priority=2,
+        constraints={"required_capabilities": ["read"]}, attempt_limit=1,
+        command_id=command, provenance={"child_request": material})
+    return job, command
+
+
+@pytest.mark.parametrize("receiver", ["internal", "canonical", "legacy"])
+@pytest.mark.parametrize("changed_digest", [False, True])
+def test_child_request_legacy_receipt_keeps_original_command_and_job(
+        tmp_path, receiver, changed_digest):
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+    from control_plane.child_request_admission import admission_command_id
+
+    runtime = Runtime.at(tmp_path / "legacy-replay")
+    original = ChildExecutionRequest.from_dict(
+        _child_request_envelope("R", "P\x1fX", "K"))
+    job, legacy = _seed_legacy_child_admission(runtime, original)
+    before = _child_request_events(runtime, legacy)[0]["payload_json"]
+    request = ChildExecutionRequest.from_dict(_child_request_envelope(
+        "R", "P\x1fX", "K", brief_digest=("b" if changed_digest else "a") * 64))
+    canonical = admission_command_id(request)
+    assert canonical != legacy
+    receiving = {"internal": None, "canonical": canonical, "legacy": legacy}[receiver]
+    if changed_digest:
+        with pytest.raises(StateConflict, match="CHILD_REQUEST_DIGEST_CONFLICT"):
+            runtime.jobs.admit_child_execution_request(
+                request, _receiving_command_id=receiving)
+    else:
+        outcome = runtime.jobs.admit_child_execution_request(
+            request, _receiving_command_id=receiving)
+        assert (outcome.state, outcome.job_id, outcome.command_id) == (
+            "REPLAY", job.job_id, legacy)
+    assert _child_request_job_count(runtime) == 1
+    assert _child_request_events(runtime, canonical) == []
+    assert _child_request_events(runtime, legacy)[0]["payload_json"] == before
+
+
+@pytest.mark.parametrize("receiver", ["canonical", "legacy"])
+def test_child_request_proven_legacy_collision_is_not_another_operations_receipt(
+        tmp_path, receiver):
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+    from control_plane.child_request_admission import admission_command_id
+
+    runtime = Runtime.at(tmp_path / "legacy-collision")
+    first = ChildExecutionRequest.from_dict(
+        _child_request_envelope("R", "P\x1fX", "K"))
+    second = ChildExecutionRequest.from_dict(
+        _child_request_envelope("R", "P", "X\x1fK"))
+    original, legacy = _seed_legacy_child_admission(runtime, first)
+    before = _child_request_events(runtime, legacy)[0]["payload_json"]
+    canonical = admission_command_id(second)
+    if receiver == "legacy":
+        with pytest.raises(StateConflict, match="cannot create fresh work"):
+            runtime.jobs.admit_child_execution_request(
+                second, _receiving_command_id=legacy)
+        assert _child_request_job_count(runtime) == 1
+    else:
+        admitted = runtime.jobs.admit_child_execution_request(
+            second, _receiving_command_id=canonical)
+        assert admitted.state == "ADMITTED"
+        assert admitted.job_id != original.job_id
+        assert admitted.command_id == canonical
+        assert _child_request_job_count(runtime) == 2
+    assert _child_request_events(runtime, legacy)[0]["payload_json"] == before
+
+
+@pytest.mark.parametrize("fault", ["missing_tuple", "command", "digest", "duplicate"])
+def test_child_request_uncertain_legacy_identity_refuses_without_repair(tmp_path, fault):
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+    from control_plane.child_request_admission import admission_command_id
+
+    runtime = Runtime.at(tmp_path / "legacy-uncertain")
+    request = ChildExecutionRequest.from_dict(
+        _child_request_envelope("R", "P\x1fX", "K"))
+
+    def corrupt(material):
+        if fault == "missing_tuple":
+            material.pop("root_ref")
+        elif fault == "command":
+            material["command_id"] = "child-request:foreign"
+        elif fault == "digest":
+            material["request_digest"] = "not-a-digest"
+
+    _seed_legacy_child_admission(runtime, request, mutate=corrupt)
+    if fault == "duplicate":
+        _seed_legacy_child_admission(
+            runtime, request, command_id=admission_command_id(request))
+    with runtime.store.read() as connection:
+        before = [tuple(row) for row in connection.execute(
+            "SELECT event_id, command_id, payload_json FROM events ORDER BY event_id")]
+    with pytest.raises(StateConflict, match="child-request"):
+        runtime.jobs.admit_child_execution_request(request)
+    with runtime.store.read() as connection:
+        after = [tuple(row) for row in connection.execute(
+            "SELECT event_id, command_id, payload_json FROM events ORDER BY event_id")]
+    assert after == before
+    assert len(runtime.jobs.list_jobs()) == (2 if fault == "duplicate" else 1)
+
+
+def test_child_request_legacy_commit_during_wait_precedes_fresh_disarm(
+        tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+
+    original_owner = Runtime.at(tmp_path / "legacy-lock-wait", busy_timeout_ms=10_000)
+    current_owner = Runtime.at(tmp_path / "legacy-lock-wait", busy_timeout_ms=10_000)
+    request = ChildExecutionRequest.from_dict(
+        _child_request_envelope("R", "P\x1fX", "K"))
+    inserted, release, waiting = Event(), Event(), Event()
+    original_insert = original_owner.jobs._create_job_in_transaction
+    original_create = current_owner.jobs.create_job
+    fresh = {"armed": True}
+    guard_calls = []
+
+    def hold_original(*args, **kwargs):
+        result = original_insert(*args, **kwargs)
+        inserted.set()
+        assert release.wait(timeout=10)
+        return result
+
+    def enter_current(*args, **kwargs):
+        waiting.set()
+        return original_create(*args, **kwargs)
+
+    def fresh_guard():
+        guard_calls.append(True)
+        if not fresh["armed"]:
+            raise StateConflict("fresh admission disarmed")
+
+    monkeypatch.setattr(
+        original_owner.jobs, "_create_job_in_transaction", hold_original)
+    monkeypatch.setattr(current_owner.jobs, "create_job", enter_current)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        original = pool.submit(_seed_legacy_child_admission, original_owner, request)
+        try:
+            assert inserted.wait(timeout=10)
+            pending = pool.submit(
+                current_owner.jobs.admit_child_execution_request, request,
+                _principal_commit_guard=fresh_guard)
+            assert waiting.wait(timeout=10)
+            fresh["armed"] = False
+        finally:
+            release.set()
+        job, command = original.result(timeout=15)
+        replay = pending.result(timeout=15)
+    assert (replay.state, replay.job_id, replay.command_id) == (
+        "REPLAY", job.job_id, command)
+    assert guard_calls == []
+    assert _child_request_job_count(current_owner) == 1
+
+
+@pytest.mark.parametrize("fault", ["async", "non_none", "non_callable"])
+def test_child_request_guard_preserves_incumbent_synchronous_contract(
+        tmp_path, fault, recwarn):
+    import gc
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+
+    runtime = Runtime.at(tmp_path / "guard-contract")
+    request = ChildExecutionRequest.from_dict(_child_request_envelope("R", "P", "K"))
+
+    async def async_guard():
+        return None
+
+    guard = {"async": async_guard, "non_none": lambda: False,
+             "non_callable": object()}[fault]
+    with pytest.raises(StateConflict, match="principal commit guard"):
+        runtime.jobs.admit_child_execution_request(
+            request, _principal_commit_guard=guard)
+    gc.collect()
+    assert _child_request_job_count(runtime) == 0
+    assert not any("never awaited" in str(warning.message) for warning in recwarn)

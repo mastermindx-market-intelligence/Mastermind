@@ -18,6 +18,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: hermes-harness-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   harness-offline:
     name: Hermes harness offline stack
