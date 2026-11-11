@@ -266,12 +266,18 @@ head after a fetch, B's project/instruction context) while the task stays on the
 (`task_status`/`task_cancel`, completion wake-up, parent-child lineage).
 
 - **Patch file:** `cross_project_child_0770446.patch`
-- **Patch sha256:** `a5cfa90eba615daffdad358b4fa5177ca3077a84740084bbd1906be02544101d`
-  (panel-repair regeneration 2026-11-11, lane XPb, branch `t3/mmos-v4-xpb`; supersedes
+- **Patch sha256:** `41d968be3fdf4174b56103cf343e0be38270e9785cce15d5778caece693490e0`
+  (round-2b regeneration 2026-11-11, lane XPb, branch `t3/mmos-v4-xpb`, adds the
+  `RemoteDelegation.test.ts` fixture repair; supersedes the round-2 bytes
+  `64b5c87f1bb7af8324cc178ccc48c4fcdd3995bf599dd6c5ae45879345bb598c`, which superseded
+  the round-1 panel-repair bytes
+  `a5cfa90eba615daffdad358b4fa5177ca3077a84740084bbd1906be02544101d`, which superseded
   the feature-round bytes `9038b359c1a3b7f13d23d4cdb13c789e6072ae36754eb835465cc39f36aabbba`)
-- **Diff stat:** 10 files changed, 1849 insertions(+), 16 deletions(-) — same 10 files as
-  the feature round plus, inside four of them, the four panel repairs and one
-  stale-tracking-ref proof test:
+- **Diff stat:** 13 files changed, 2169 insertions(+), 18 deletions(-) — the round-1 ten
+  files plus `runtimeLayer.ts` and `testkit/ProviderReplayHarness.ts` (GitVcsDriver
+  wiring for the round-2 baseRef guard) and `peer/RemoteDelegation.test.ts` (fixture
+  repair; see the last bullet), carrying the four round-1 panel repairs, the
+  stale-tracking-ref proof test, and the three round-2 repairs (A1–A3):
   - XPb-5 `Orchestrator.ts:8084-8120,8164-8172` — guard in `dispatchDelegatedTaskRequest`
     (the command body): a `projectId` differing from the parent's requires a worktree
     strategy with `startFromOrigin` and `requireRemoteBase`, re-reads the target project
@@ -289,6 +295,31 @@ head after a fetch, B's project/instruction context) while the task stays on the
     remote's current head past a stale tracking ref": remote advanced from a second
     clone, stale tracking ref asserted first, worktree HEAD must equal the remote's
     current head. Passes unmodified; see the note's "Steer 2" section.
+  - A1 (round 2) `Orchestrator.ts` `dispatchDelegatedTaskRequest` guard — a delegated
+    child's `runtimeMode`/`interactionMode` may never be broader than the parent's,
+    on BOTH doors (the MCP door already refused at admission; the raw command door
+    now refuses too), same-project included; refusal sentences match the MCP door's
+    plus "Retry with a new request id."
+  - A2 (round 2) `Orchestrator.ts` + `runtimeLayer.ts` + `testkit/ProviderReplayHarness.ts`
+    — the guard resolves the target project's remote default base ref itself (the same
+    two read-only GitVcsDriver calls the MCP door makes) and refuses a cross-project
+    command naming any other `baseRef` or any `branch`; the orchestrator declares
+    `GitVcsDriver` as a required service (server: the same driver layer the
+    provider-event ingestor uses; testkit: deterministic `origin`/`main` mock).
+  - A3 (round 2) `Orchestrator.ts` — every guard refusal sentence ends with "Retry with
+    a new request id." (guard refusals burn the command id via the rejected receipt;
+    receipt semantics unchanged).
+  - Round-2b `peer/RemoteDelegation.test.ts` — fixture repair for an upstream suite the
+    feature round had already broken (found by the blast-radius re-run; the file was in
+    no earlier suite set): at the pin `delegate_task` refused a target naming another
+    project outright and the test asserted that refusal; the feature made such a target
+    a resolvable cross-project request, and the laptop fixture's empty
+    `ProviderRegistry` mock died at provider loading (scrubbed to "internal server
+    error"). The fixture now lists the parent's provider and adapter so the door reaches
+    the feature's own `invalid_request` isolation refusal; the test's assertion passes
+    unchanged (red `isolated_remote_delegation_round2.log` /
+    `bisect_round1_remote_delegation.log` → green 28 passed
+    `green_round2_remote_delegation_full.log`).
   - `packages/contracts/src/orchestrationV2.ts` — worktree strategy gains optional
     `requireRemoteBase` (refuse rather than fall back to the local branch);
     `delegated_task.request` gains optional `projectId`.
@@ -317,16 +348,21 @@ head after a fetch, B's project/instruction context) while the task stays on the
     `ThreadLaunchService.test.ts` (+88, 3 new strict-remote-base tests).
 - **Applies cleanly (`git apply --check` exit 0, then applied for real exit 0):** on the
   pin `0770446869d247a8b28c27d7ed93f47f8ff0c1e4` with BOTH prior patches
-  (`mastermind_admission_0770446.patch`, `claude_text_delta_0770446.patch`) applied first —
-  14 modified files afterwards, i.e. these 10 plus the 4 files the earlier patches touch.
+  (`mastermind_admission_0770446.patch`, `claude_text_delta_0770446.patch`) applied first.
   Feature-round receipt: `~/.mastermind/mmos_evidence/xp-20261111/patch_applies_on_pin_plus_two.log`;
-  panel-repair regeneration receipt (same method, plus a 10/10 byte-compare of the patched
-  files against the live clone):
-  `~/.mastermind/mmos_evidence/xpb-20261111/patch_applies_on_pin_plus_two.log`.
-- **Runtime-mode clamp:** unchanged from upstream — delegated children already inherit the
-  clamped mode; the cross-project path re-checks provider enablement in the target project
-  and refuses `ThreadManagementProviderInstanceDisabledError` when the parent's instance
-  is disabled there.
+  round-1 receipt: `~/.mastermind/mmos_evidence/xpb-20261111/patch_applies_on_pin_plus_two.log`;
+  round-2 receipt (same method; superseded by the round-2b bytes):
+  `~/.mastermind/mmos_evidence/xpb-20261111/patch_applies_round2.log`; round-2b receipt
+  (same method, plus a 13/13 byte-compare of the patched files against the live clone;
+  16 dirty paths afterwards — this patch's tracked files plus the 2 `ClaudeAdapterV2`
+  files the text-delta patch touches; the new test file and the two new `mastermind/`
+  files land untracked): `~/.mastermind/mmos_evidence/xpb-20261111/patch_applies_round2b.log`.
+- **Runtime-mode ceiling for delegated children:** the MCP door refuses an explicitly
+  broader mode at admission (upstream behavior, `runtime_mode_escalation_denied`); since
+  round 2 the raw command door refuses the same escalation inside the dispatch guard
+  (A1), same-project included. The cross-project path re-checks provider enablement in
+  the target project and refuses `ThreadManagementProviderInstanceDisabledError` when
+  the parent's instance is disabled there.
 
 ### Verification actually run (2026-11-10, SSD clone `/Volumes/Mastermind/build-cache/xp-t3code` at the pin with both prior patches and this patch applied)
 
@@ -400,3 +436,40 @@ $ cd apps/server && npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit; echo exi
 $ cd packages/contracts && npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit; echo exit=$?
       # exit 0, zero "error TS"          # typecheck_contracts.log
 ```
+
+### Round-2 repair verification actually run (2026-11-11, same clone, A1–A3 applied)
+
+Red first (the five new tests against the pre-round-2 tree; `red_round2_guard.log` —
+5 failed | 6 passed), then green (`green_round2_guard.log` — 11 passed):
+
+```
+$ node ".../vitest.mjs" run src/orchestration-v2/CrossProjectDelegation.test.ts
+      Tests  5 failed | 6 passed (11)    # red_round2_guard.log
+      Tests  11 passed (11)              # green_round2_guard.log
+$ node ".../vitest.mjs" run src/peer/RemoteDelegation.test.ts -t "a local task runs"
+      Tests  1 failed | 27 skipped       # isolated_remote_delegation_round2.log
+                                        #   (round-1 patch tree fails identically:
+                                        #   bisect_round1_remote_delegation.log)
+      Tests  1 passed | 27 skipped       # green_round2_remote_delegation_single.log
+$ node ".../vitest.mjs" run src/peer/RemoteDelegation.test.ts
+      Tests  28 passed (28)              # green_round2_remote_delegation_full.log
+$ node ".../vitest.mjs" run <the same five suites as round 1>
+      Tests  178 passed (178)            # final_round2_five_suites.log, re-run after the
+                                        #   fixture repair: final_round2_five_suites_v3.log
+$ node ".../vitest.mjs" run <the other 31 harness-consuming suites + ThreadStop>
+      Tests  858 passed (858)            # blast_radius_round2b.log — 32 files, exit 0
+$ cd apps/server && npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit; echo exit=$?
+      # exit 0, zero "error TS"          # typecheck_round2_server.log (re-run after the
+                                        #   fixture repair: typecheck_round2_server_v2.log)
+$ cd packages/contracts && npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit; echo exit=$?
+      # exit 0, zero "error TS"          # typecheck_round2_contracts.log
+```
+
+Round-2 test names (all in `CrossProjectDelegation.test.ts`): "refuses a raw
+cross-project command whose runtime mode is broader than the parent's" (A1),
+"refuses a raw cross-project command whose interaction mode is broader than the
+parent's" (A1), "refuses a same-project delegated command whose runtime mode is broader
+than the parent's" (A1 scope proof), "refuses a raw cross-project command whose baseRef
+is not the target's remote default" (A2), "refuses a raw cross-project command that
+chooses a branch" (A2); the "Retry with a new request id." sentence (A3) is asserted in
+four of the five.

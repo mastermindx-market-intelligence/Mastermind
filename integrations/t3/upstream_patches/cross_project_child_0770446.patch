@@ -1329,10 +1329,10 @@ index f0affbf6..109049cf 100644
    failure: OrchestratorMcpFailure,
 diff --git a/apps/server/src/orchestration-v2/CrossProjectDelegation.test.ts b/apps/server/src/orchestration-v2/CrossProjectDelegation.test.ts
 new file mode 100644
-index 00000000..160a6571
+index 00000000..c82072a1
 --- /dev/null
 +++ b/apps/server/src/orchestration-v2/CrossProjectDelegation.test.ts
-@@ -0,0 +1,372 @@
+@@ -0,0 +1,596 @@
 +import { assert, it } from "@effect/vitest";
 +import {
 +  type ApplicationProjectEvent,
@@ -1345,7 +1345,9 @@ index 00000000..160a6571
 +  ProjectId,
 +  ProviderDriverKind,
 +  ProviderInstanceId,
++  type ProviderInteractionMode,
 +  RuntimeRequestId,
++  type RuntimeMode,
 +  ThreadId,
 +} from "@t3tools/contracts";
 +import * as DateTime from "effect/DateTime";
@@ -1404,7 +1406,11 @@ index 00000000..160a6571
 +);
 +const layerReactor = layerQuestionReactor.pipe(Layer.provideMerge(layerCore));
 +
-+const createThread = (threadId: ThreadId, projectId: ProjectId) =>
++const createThread = (
++  threadId: ThreadId,
++  projectId: ProjectId,
++  modes: { runtimeMode?: RuntimeMode; interactionMode?: ProviderInteractionMode } = {},
++) =>
 +  Effect.gen(function* () {
 +    const orchestrator = yield* Orchestrator.OrchestratorV2;
 +    yield* orchestrator.dispatch({
@@ -1414,8 +1420,8 @@ index 00000000..160a6571
 +      projectId,
 +      title: threadId,
 +      modelSelection,
-+      runtimeMode: "full-access",
-+      interactionMode: "default",
++      runtimeMode: modes.runtimeMode ?? "full-access",
++      interactionMode: modes.interactionMode ?? "default",
 +      branch: null,
 +      worktreePath: null,
 +      createdBy: "user",
@@ -1705,11 +1711,247 @@ index 00000000..160a6571
 +    assert.lengthOf(parent.subagents, 0);
 +  }).pipe(Effect.provide(layerTest)),
 +);
++
++it.effect(
++  "refuses a raw cross-project command whose runtime mode is broader than the parent's",
++  () =>
++    Effect.gen(function* () {
++      const threads = yield* ThreadManagementService.ThreadManagementService;
++      const orchestrator = yield* Orchestrator.OrchestratorV2;
++      yield* seedProject(projectBId, "Cross Project B");
++      const parentThreadId = ThreadId.make("thread:cross-project:raw-mode-runtime");
++      yield* createThread(parentThreadId, projectAId, { runtimeMode: "approval-required" });
++      yield* send(parentThreadId, "Parent work");
++      const parentRun = (yield* orchestrator.getThreadProjection(parentThreadId)).runs.at(-1)!;
++
++      const refusal = yield* threads
++        .dispatch({
++          type: "delegated_task.request",
++          commandId: CommandId.make("delegate:raw-mode-runtime"),
++          parentThreadId,
++          parentRunId: parentRun.id,
++          parentNodeId: parentRun.rootNodeId!,
++          task: "Broader runtime mode task.",
++          modelSelection,
++          runtimeMode: "full-access",
++          interactionMode: "default",
++          completionWake: "always",
++          createdBy: "agent",
++          creationSource: "mcp",
++          projectId: projectBId,
++          workspaceStrategy: {
++            type: "worktree",
++            baseRef: "origin/main",
++            startFromOrigin: true,
++            requireRemoteBase: true,
++          },
++        } as Parameters<typeof threads.dispatch>[0])
++        .pipe(Effect.flip);
++
++      assert.include(
++        String(refusal.cause),
++        "Child runtime mode full-access is broader than parent mode approval-required.",
++      );
++      assert.include(String(refusal.cause), "Retry with a new request id.");
++      const parent = yield* orchestrator.getThreadProjection(parentThreadId);
++      assert.lengthOf(parent.subagents, 0);
++    }).pipe(Effect.provide(layerTest)),
++);
++
++it.effect(
++  "refuses a raw cross-project command whose interaction mode is broader than the parent's",
++  () =>
++    Effect.gen(function* () {
++      const threads = yield* ThreadManagementService.ThreadManagementService;
++      const orchestrator = yield* Orchestrator.OrchestratorV2;
++      yield* seedProject(projectBId, "Cross Project B");
++      const parentThreadId = ThreadId.make("thread:cross-project:raw-mode-interaction");
++      yield* createThread(parentThreadId, projectAId, { interactionMode: "plan" });
++      yield* send(parentThreadId, "Parent work");
++      const parentRun = (yield* orchestrator.getThreadProjection(parentThreadId)).runs.at(-1)!;
++
++      const refusal = yield* threads
++        .dispatch({
++          type: "delegated_task.request",
++          commandId: CommandId.make("delegate:raw-mode-interaction"),
++          parentThreadId,
++          parentRunId: parentRun.id,
++          parentNodeId: parentRun.rootNodeId!,
++          task: "Broader interaction mode task.",
++          modelSelection,
++          runtimeMode: "full-access",
++          interactionMode: "default",
++          completionWake: "always",
++          createdBy: "agent",
++          creationSource: "mcp",
++          projectId: projectBId,
++          workspaceStrategy: {
++            type: "worktree",
++            baseRef: "origin/main",
++            startFromOrigin: true,
++            requireRemoteBase: true,
++          },
++        } as Parameters<typeof threads.dispatch>[0])
++        .pipe(Effect.flip);
++
++      assert.include(
++        String(refusal.cause),
++        "Child interaction mode default is broader than parent mode plan.",
++      );
++      assert.include(String(refusal.cause), "Retry with a new request id.");
++      const parent = yield* orchestrator.getThreadProjection(parentThreadId);
++      assert.lengthOf(parent.subagents, 0);
++    }).pipe(Effect.provide(layerTest)),
++);
++
++it.effect(
++  "refuses a same-project delegated command whose runtime mode is broader than the parent's",
++  () =>
++    Effect.gen(function* () {
++      const threads = yield* ThreadManagementService.ThreadManagementService;
++      const orchestrator = yield* Orchestrator.OrchestratorV2;
++      const parentThreadId = ThreadId.make("thread:cross-project:same-project-mode");
++      yield* createThread(parentThreadId, projectAId, { runtimeMode: "approval-required" });
++      yield* send(parentThreadId, "Parent work");
++      const parentRun = (yield* orchestrator.getThreadProjection(parentThreadId)).runs.at(-1)!;
++
++      const refusal = yield* threads
++        .dispatch({
++          type: "delegated_task.request",
++          commandId: CommandId.make("delegate:same-project-mode"),
++          parentThreadId,
++          parentRunId: parentRun.id,
++          parentNodeId: parentRun.rootNodeId!,
++          task: "Same project, broader mode.",
++          modelSelection,
++          runtimeMode: "full-access",
++          interactionMode: "default",
++          completionWake: "always",
++          createdBy: "agent",
++          creationSource: "mcp",
++          // Same project, no strategy: only the mode rule can refuse this.
++        } as Parameters<typeof threads.dispatch>[0])
++        .pipe(Effect.flip);
++
++      assert.include(
++        String(refusal.cause),
++        "Child runtime mode full-access is broader than parent mode approval-required.",
++      );
++      const parent = yield* orchestrator.getThreadProjection(parentThreadId);
++      assert.lengthOf(parent.subagents, 0);
++    }).pipe(Effect.provide(layerTest)),
++);
++
++it.effect(
++  "refuses a raw cross-project command whose baseRef is not the target's remote default",
++  () =>
++    Effect.gen(function* () {
++      const threads = yield* ThreadManagementService.ThreadManagementService;
++      const orchestrator = yield* Orchestrator.OrchestratorV2;
++      yield* seedProject(projectBId, "Cross Project B");
++      const parentThreadId = ThreadId.make("thread:cross-project:raw-baseref");
++      yield* createThread(parentThreadId, projectAId);
++      yield* send(parentThreadId, "Parent work");
++      const parentRun = (yield* orchestrator.getThreadProjection(parentThreadId)).runs.at(-1)!;
++
++      const refusal = yield* threads
++        .dispatch({
++          type: "delegated_task.request",
++          commandId: CommandId.make("delegate:raw-baseref"),
++          parentThreadId,
++          parentRunId: parentRun.id,
++          parentNodeId: parentRun.rootNodeId!,
++          task: "Non-default base ref task.",
++          modelSelection,
++          runtimeMode: "full-access",
++          interactionMode: "default",
++          completionWake: "always",
++          createdBy: "agent",
++          creationSource: "mcp",
++          projectId: projectBId,
++          workspaceStrategy: {
++            type: "worktree",
++            baseRef: "origin/release",
++            startFromOrigin: true,
++            requireRemoteBase: true,
++          },
++        } as Parameters<typeof threads.dispatch>[0])
++        .pipe(Effect.flip);
++
++      assert.include(
++        String(refusal.cause),
++        "must be based on that project's remote default branch (origin/main)",
++      );
++      assert.include(String(refusal.cause), "Retry with a new request id.");
++      const parent = yield* orchestrator.getThreadProjection(parentThreadId);
++      assert.lengthOf(parent.subagents, 0);
++    }).pipe(Effect.provide(layerTest)),
++);
++
++it.effect("refuses a raw cross-project command that chooses a branch", () =>
++  Effect.gen(function* () {
++    const threads = yield* ThreadManagementService.ThreadManagementService;
++    const orchestrator = yield* Orchestrator.OrchestratorV2;
++    yield* seedProject(projectBId, "Cross Project B");
++    const parentThreadId = ThreadId.make("thread:cross-project:raw-branch");
++    yield* createThread(parentThreadId, projectAId);
++    yield* send(parentThreadId, "Parent work");
++    const parentRun = (yield* orchestrator.getThreadProjection(parentThreadId)).runs.at(-1)!;
++
++    const refusal = yield* threads
++      .dispatch({
++        type: "delegated_task.request",
++        commandId: CommandId.make("delegate:raw-branch"),
++        parentThreadId,
++        parentRunId: parentRun.id,
++        parentNodeId: parentRun.rootNodeId!,
++        task: "Chosen branch task.",
++        modelSelection,
++        runtimeMode: "full-access",
++        interactionMode: "default",
++        completionWake: "always",
++        createdBy: "agent",
++        creationSource: "mcp",
++        projectId: projectBId,
++        workspaceStrategy: {
++          type: "worktree",
++          baseRef: "origin/main",
++          startFromOrigin: true,
++          requireRemoteBase: true,
++          branch: "squat-name",
++        },
++      } as Parameters<typeof threads.dispatch>[0])
++      .pipe(Effect.flip);
++
++    assert.include(String(refusal.cause), "cannot choose its branch");
++    assert.include(String(refusal.cause), "Retry with a new request id.");
++    const parent = yield* orchestrator.getThreadProjection(parentThreadId);
++    assert.lengthOf(parent.subagents, 0);
++  }).pipe(Effect.provide(layerTest)),
++);
 diff --git a/apps/server/src/orchestration-v2/Orchestrator.ts b/apps/server/src/orchestration-v2/Orchestrator.ts
-index 27186e49..ecd63ba7 100644
+index 27186e49..38bda698 100644
 --- a/apps/server/src/orchestration-v2/Orchestrator.ts
 +++ b/apps/server/src/orchestration-v2/Orchestrator.ts
-@@ -8081,6 +8081,40 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
+@@ -144,6 +144,7 @@ import * as EffectOutbox from "./EffectOutbox.ts";
+ import { withCommandMetrics } from "../observability/Metrics.ts";
+ import type { OrchestrationEffectRequestV2, PendingOrchestrationEffectV2 } from "./EffectOutbox.ts";
+ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
++import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+ import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
+ import {
+   DispatchModeLimit,
+@@ -1134,6 +1135,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
+   const runtimePolicy = yield* RuntimePolicyV2;
+   const threadForkService = yield* ThreadForkServiceV2;
+   const threadDispatch = yield* ThreadCommandExecutor.ThreadCommandExecutor;
++  // Read-only git facts (remote name, default branch) for the delegated-task
++  // guard; worktree creation itself stays with ThreadLaunchService.
++  const git = yield* GitVcsDriver.GitVcsDriver;
+   // Read once: the policy is fixed for the server's life, and dispatch takes it as an input.
+   const { managedPolicy } = serverSettings;
+   const runtimeModeCeiling: RuntimeModeCeiling | undefined =
+@@ -8081,6 +8085,90 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
            cause: `Parent node ${command.parentNodeId} is not part of active run ${parentRun.id}.`,
          });
        }
@@ -1720,6 +1962,27 @@ index 27186e49..ecd63ba7 100644
 +      // command type passes here, whatever door sent it.
 +      const crossProject =
 +        command.projectId !== undefined && command.projectId !== parentProjection.thread.projectId;
++      // A child never runs broader than its parent, whatever door sent the
++      // command: the MCP door refuses escalations at admission
++      // (runtime_mode_escalation_denied), and this guard holds the same line
++      // for raw commands, same-project and cross-project alike.
++      if (isRuntimeModeAbove(command.runtimeMode, parentProjection.thread.runtimeMode)) {
++        return yield* new OrchestratorDispatchError({
++          commandId: command.commandId,
++          commandType: command.type,
++          cause: `Child runtime mode ${command.runtimeMode} is broader than parent mode ${parentProjection.thread.runtimeMode}. Retry with a new request id.`,
++        });
++      }
++      if (
++        command.interactionMode === "default" &&
++        parentProjection.thread.interactionMode === "plan"
++      ) {
++        return yield* new OrchestratorDispatchError({
++          commandId: command.commandId,
++          commandType: command.type,
++          cause: `Child interaction mode ${command.interactionMode} is broader than parent mode ${parentProjection.thread.interactionMode}. Retry with a new request id.`,
++        });
++      }
 +      if (crossProject) {
 +        const strategy = command.workspaceStrategy;
 +        if (
@@ -1730,7 +1993,7 @@ index 27186e49..ecd63ba7 100644
 +          return yield* new OrchestratorDispatchError({
 +            commandId: command.commandId,
 +            commandType: command.type,
-+            cause: `A delegated task in project ${command.projectId} needs a worktree cut from that project's remote head (isolation "worktree" with startFromOrigin and requireRemoteBase).`,
++            cause: `A delegated task in project ${command.projectId} needs a worktree cut from that project's remote head (isolation "worktree" with startFromOrigin and requireRemoteBase). Retry with a new request id.`,
 +          });
 +        }
 +        // Admission read the project before dispatch; re-read it here so a
@@ -1743,14 +2006,43 @@ index 27186e49..ecd63ba7 100644
 +          return yield* new OrchestratorDispatchError({
 +            commandId: command.commandId,
 +            commandType: command.type,
-+            cause: `Project ${command.projectId} is not available for delegated tasks.`,
++            cause: `Project ${command.projectId} is not available for delegated tasks. Retry with a new request id.`,
++          });
++        }
++        // The base is not the caller's to choose: the MCP door pins the
++        // base to the target's remote default branch, and this guard holds
++        // the same line for raw commands, so a caller cannot cut the child
++        // from another ref of the target or squat a branch name in it.
++        if (strategy.branch !== undefined) {
++          return yield* new OrchestratorDispatchError({
++            commandId: command.commandId,
++            commandType: command.type,
++            cause: `A delegated task in project ${command.projectId} cannot choose its branch; it is cut from that project's remote default branch. Retry with a new request id.`,
++          });
++        }
++        const remoteName = yield* git
++          .resolvePrimaryRemoteName(targetProject.value.workspaceRoot)
++          .pipe(Effect.orElseSucceed(() => null));
++        const remoteDefault =
++          remoteName === null
++            ? null
++            : yield* git
++                .resolveDefaultBranchName(targetProject.value.workspaceRoot, remoteName)
++                .pipe(Effect.orElseSucceed(() => null));
++        const remoteDefaultBaseRef =
++          remoteName === null || remoteDefault === null ? null : `${remoteName}/${remoteDefault}`;
++        if (remoteDefaultBaseRef === null || strategy.baseRef !== remoteDefaultBaseRef) {
++          return yield* new OrchestratorDispatchError({
++            commandId: command.commandId,
++            commandType: command.type,
++            cause: `A delegated task in project ${command.projectId} must be based on that project's remote default branch (${remoteDefaultBaseRef ?? "unresolvable"}), not ${strategy.baseRef}. Retry with a new request id.`,
 +          });
 +        }
 +      }
  
        const targetAdapter = yield* providerAdapters.get(command.modelSelection.instanceId).pipe(
          Effect.mapError(
-@@ -8127,7 +8161,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
+@@ -8127,7 +8215,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
          }),
          runtimeMode: command.runtimeMode,
          interactionMode: command.interactionMode,
@@ -1765,6 +2057,14 @@ index 27186e49..ecd63ba7 100644
        };
        const task: OrchestrationV2Subagent = {
          id: taskNodeId,
+@@ -14652,6 +14746,7 @@ export const layer: Layer.Layer<
+   never,
+   | CheckpointServiceV2
+   | FileSystem.FileSystem
++  | GitVcsDriver.GitVcsDriver
+   | Path.Path
+   | CommandPolicyV2
+   | CommandReceiptStoreV2
 diff --git a/apps/server/src/orchestration-v2/ThreadLaunchService.test.ts b/apps/server/src/orchestration-v2/ThreadLaunchService.test.ts
 index fb7a2ffc..369528a7 100644
 --- a/apps/server/src/orchestration-v2/ThreadLaunchService.test.ts
@@ -2023,6 +2323,96 @@ index 085be554..aad9e845 100644
                commandId: command.commandId,
                instanceId: command.modelSelection.instanceId,
              }),
+diff --git a/apps/server/src/orchestration-v2/runtimeLayer.ts b/apps/server/src/orchestration-v2/runtimeLayer.ts
+index ff3246b1..dec38d6e 100644
+--- a/apps/server/src/orchestration-v2/runtimeLayer.ts
++++ b/apps/server/src/orchestration-v2/runtimeLayer.ts
+@@ -230,6 +230,9 @@ const layerOrchestratorProvided = Orchestrator.layer.pipe(
+       layerEventSink,
+       layerCommandReceiptStoreProvided,
+       layerContextHandoffServiceProvided,
++      // Read-only git facts for the delegated-task guard; the same driver
++      // the provider-event ingestor uses above.
++      GitVcsDriver.layer,
+       IdAllocator.layer,
+       ProjectStore.layer,
+       ProviderAdapterRegistry.layerFromProviderInstanceRegistry,
+diff --git a/apps/server/src/orchestration-v2/testkit/ProviderReplayHarness.ts b/apps/server/src/orchestration-v2/testkit/ProviderReplayHarness.ts
+index ae0d5ef3..8005ad11 100644
+--- a/apps/server/src/orchestration-v2/testkit/ProviderReplayHarness.ts
++++ b/apps/server/src/orchestration-v2/testkit/ProviderReplayHarness.ts
+@@ -481,6 +481,13 @@ export function layerWithRegistry<Error>(
+         CommandPolicy.layer,
+         layerContextHandoffServiceProvided,
+         layerPersistence,
++        // The orchestrator's delegated-task guard reads only the remote name
++        // and default branch; the testkit answers deterministically so
++        // cross-project tests need no real repository.
++        Layer.mock(GitVcsDriver.GitVcsDriver)({
++          resolvePrimaryRemoteName: () => Effect.succeed("origin"),
++          resolveDefaultBranchName: () => Effect.succeed("main"),
++        }),
+         layerProvidedRegistry,
+         layerContinuationRequests,
+         layerRuntime,
+diff --git a/apps/server/src/peer/RemoteDelegation.test.ts b/apps/server/src/peer/RemoteDelegation.test.ts
+index b487c349..9f5733a0 100644
+--- a/apps/server/src/peer/RemoteDelegation.test.ts
++++ b/apps/server/src/peer/RemoteDelegation.test.ts
+@@ -15,6 +15,7 @@ import {
+   type Project,
+   type RepositoryIdentity,
+   RunId,
++  type ServerProvider,
+   ThreadId,
+   TurnItemId,
+ } from "@t3tools/contracts";
+@@ -78,6 +79,23 @@ const instanceId = ProviderInstanceId.make("codex");
+ const driver = ProviderDriverKind.make("codex");
+ const modelSelection = { instanceId, model: "gpt-5.4" };
+ 
++/** The laptop's own provider, as the MCP door's registry would list it. */
++const laptopProvider: ServerProvider = {
++  instanceId,
++  driver,
++  enabled: true,
++  installed: true,
++  version: "test",
++  status: "ready",
++  auth: { status: "authenticated" },
++  checkedAt: "2026-09-13T00:00:00.000Z",
++  models: [
++    { slug: modelSelection.model, name: modelSelection.model, isCustom: false, capabilities: null },
++  ],
++  slashCommands: [],
++  skills: [],
++};
++
+ type LaunchedWith = Pick<
+   ThreadLaunch.ThreadLaunchInput,
+   "modelSelection" | "runtimeMode" | "interactionMode"
+@@ -595,8 +613,19 @@ const makeLaptop = (
+       Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
+       Layer.provide(NodeCrypto.layer),
+       Layer.provideMerge(layerThreads),
+-      Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
+-      Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
++      // delegate_task loads providers before admission, and a target naming
++      // another project resolves against the parent's provider, so the laptop's
++      // registry lists it instead of dying as an empty mock.
++      Layer.provide(
++        Layer.mock(ProviderRegistry.ProviderRegistry)({
++          getProviders: Effect.succeed([laptopProvider]),
++        }),
++      ),
++      Layer.provide(
++        Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
++          list: () => Effect.succeed([instanceId]),
++        }),
++      ),
+       Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
+       Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+       Layer.provide(Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({})),
 diff --git a/packages/contracts/src/orchestrationV2.ts b/packages/contracts/src/orchestrationV2.ts
 index 881ad7e4..61b298bf 100644
 --- a/packages/contracts/src/orchestrationV2.ts

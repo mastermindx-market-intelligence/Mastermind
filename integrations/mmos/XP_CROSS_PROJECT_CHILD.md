@@ -78,14 +78,18 @@ Why not the alternatives, in one line each:
 | `target.projectId` names no registered project | `Project project:does-not-exist was not found.` (code `invalid_request`; observed live) |
 | Target project archived | `Project <id> is archived, so it cannot run delegated tasks.` |
 | Target project deleted | `Project <id> was not found.` — the project lookup hides deleted projects, so deleted and unregistered read identically (panel repair XPb-4 removed an unreachable separate sentence) |
-| Raw `delegated_task.request` command with `projectId` set and no strict strategy (any door that bypasses MCP admission) | `A delegated task in project <id> needs a worktree cut from that project's remote head (isolation "worktree" with startFromOrigin and requireRemoteBase).` |
-| Target unregistered/archived between admission and dispatch (re-read in the orchestrator) | `Project <id> is not available for delegated tasks.` |
+| Raw `delegated_task.request` command with `projectId` set and no strict strategy (any door that bypasses MCP admission) | `A delegated task in project <id> needs a worktree cut from that project's remote head (isolation "worktree" with startFromOrigin and requireRemoteBase). Retry with a new request id.` |
+| Target unregistered/archived between admission and dispatch (re-read in the orchestrator) | `Project <id> is not available for delegated tasks. Retry with a new request id.` |
 | Retry with the same `clientRequestId` naming a different target project (or none) | `This request id was already used for a task in project <firstProjectId>, not <requestedProjectId>.` (`invalid_request`; no admission check runs against the new project) |
 | Cross-project without `isolation: "worktree"` (incl. omitted) | `A task in project <id> needs isolation "worktree"; any other isolation would work directly in that project's checkout.` (observed live) |
 | Provider instance enabled in A but disabled in B | `Provider instance "<instanceId>" is disabled for project <B>.` (`ThreadManagementProviderInstanceDisabledError` → `invalid_request`) |
 | Remote default branch unresolvable (unborn HEAD, no remote, symbolic-ref games) | `Unable to resolve a remote default branch for project "<title>" (<workspaceRoot>), so a worktree cannot be cut from its remote head.` |
 | Fetch cannot produce the remote base (with `requireRemoteBase`) | `Unable to fetch <baseRef> from the remote, so no worktree was created. This launch requires the remote base rather than the local branch.` — fails before any worktree is created |
 | Runtime-mode escalation (`runtimeMode: "full-access"` from an `auto` parent) | `Child runtime mode full-access is broader than parent mode auto.` (code `runtime_mode_escalation_denied`; observed live) |
+| Raw command child `runtimeMode` above the parent's, either door, same- or cross-project (round 2, A1) | `Child runtime mode <mode> is broader than parent mode <parentMode>. Retry with a new request id.` — the same sentence the MCP door refuses with |
+| Raw command child `interactionMode: "default"` under a `plan` parent (round 2, A1) | `Child interaction mode default is broader than parent mode plan. Retry with a new request id.` |
+| Raw cross-project `baseRef` that is not the target's remote default (round 2, A2) | `A delegated task in project <id> must be based on that project's remote default branch (<remote>/<default>), not <baseRef>. Retry with a new request id.` |
+| Raw cross-project command that names a `branch` (round 2, A2) | `A delegated task in project <id> cannot choose its branch; it is cut from that project's remote default branch. Retry with a new request id.` |
 
 Upstream's pre-patch behavior at the same spot refused ANY cross-project `target.projectId`
 (`A local task runs in this thread's project. Omit target.projectId, or pass
@@ -337,6 +341,112 @@ completed ordinal-2 run (`receipt.wake.parentItems[2]`; the driver's wake-messag
 counter reads 0 by a detection-format quirk, not a regression). Receipt:
 `~/.mastermind/mmos_evidence/xpb-20261111/live_proof_receipt.json`, port free after
 stop.
+
+### Repair round 2 (panel A1–A3, same branch, 2026-11-11)
+
+The second panel score (`~/.mastermind/mmos_evidence/xpb-20261111/panel/SCORE.md`)
+verified all four round-1 repairs and required A1 before install; A2 and A3 rode along.
+
+1. **A1 — a child never runs broader than its parent, on both doors.** The raw
+   `delegated_task.request` door wrote `command.runtimeMode`/`interactionMode` into the
+   child verbatim; the MCP door already refused escalations at admission
+   (`runtime_mode_escalation_denied` / `interaction_mode_escalation_denied`), so the
+   doors disagreed. Decision: **refuse**, not clamp — same behavior as the MCP door, and
+   a silent clamp would let a caller believe it got what it asked for. The guard now
+   refuses, before any project logic, a child `runtimeMode` above the parent's (reusing
+   `isRuntimeModeAbove` from contracts) and a child `interactionMode: "default"` under a
+   `plan` parent, with the MCP door's exact sentences plus the round-2 retry-id advice.
+   Scope: **all delegated children, same-project included** — the check is four lines
+   outside the cross-project block; every existing same-project dispatcher in the tree
+   uses parent-equal modes, so no upstream behavior changes for compliant callers. Tests:
+   "refuses a raw cross-project command whose runtime mode is broader than the parent's",
+   "refuses a raw cross-project command whose interaction mode is broader than the
+   parent's", "refuses a same-project delegated command whose runtime mode is broader
+   than the parent's" (`CrossProjectDelegation.test.ts`).
+2. **A2 — the base is not the caller's to choose on the raw door.** The round-1 guard
+   pinned `type`/`startFromOrigin`/`requireRemoteBase` but left `baseRef`/`branch`
+   client-chosen, while the MCP door pins the base to the target's remote default
+   (`resolveRemoteDefaultBaseRef`). The guard now refuses a cross-project command that
+   names a `branch`, and resolves the target project's remote default itself (primary
+   remote name + symbolic-ref of `<remote>/HEAD`, the same two driver calls the MCP door
+   makes, both fail-closed to a refusal) and refuses any other `baseRef`. Wiring: the
+   orchestrator now requires the read-only `GitVcsDriver` service (`Orchestrator.layer`
+   requirement; server side reuses the same `GitVcsDriver.layer` the provider-event
+   ingestor uses in `runtimeLayer.ts`; the replay testkit answers `origin`/`main`
+   deterministically so unit tests need no real repository). Tests: "refuses a raw
+   cross-project command whose baseRef is not the target's remote default", "refuses a
+   raw cross-project command that chooses a branch" (`CrossProjectDelegation.test.ts`).
+   Known edge, accepted: if the remote's default branch changes between MCP admission
+   and dispatch, the guard refuses and burns the id — retry with a new id.
+3. **A3 — guard refusals say to use a new request id.** A dispatch refusal records a
+   permanent `rejected` receipt, so the id is burned (upstream mechanism; the round-1
+   guard added refusal sources). Receipt semantics are unchanged; every guard refusal
+   sentence now ends with "Retry with a new request id." — tested by the four new
+   refusal tests above.
+
+Checks: the five affected suites 178 passed (173 + 5 new), exit 0
+(`final_round2_five_suites_v3.log`, re-run after the `RemoteDelegation.test.ts` repair
+below); both typechecks exit 0 with zero `error TS` (`typecheck_round2_server_v2.log`,
+`typecheck_round2_contracts.log`). Patch regenerated over the now-13 files (adding the
+`RemoteDelegation.test.ts` fixture repair) and proven on the pin with both prior patches
+applied first: `git apply --check` exit 0, applied exit 0, all 13 files byte-identical
+to the live clone; sha256
+`41d968be3fdf4174b56103cf343e0be38270e9785cce15d5778caece693490e0`
+(`patch_applies_round2b.log`). Live re-check re-run below.
+
+4. **Blast-radius finding — an upstream suite the feature round had already broken.**
+   Re-running the other harness-consuming suites surfaced one deterministic failure
+   outside the patch's own suites: `peer/RemoteDelegation.test.ts` "a local task runs in
+   this thread's project" (a file no earlier suite run had executed). Root cause, proven:
+   at the pin, `delegate_task` refused a target naming another project outright
+   ("A local task runs in this thread's project. Omit target.projectId…"), and that test
+   asserted the refusal; the feature round removed the refusal, so the same call now
+   proceeds into provider loading, where the laptop fixture's empty
+   `Layer.mock(ProviderRegistry.ProviderRegistry)({})` dies and the MCP wrapper scrubs
+   the defect to "internal server error". The round-1 patch tree fails identically
+   (`bisect_round1_remote_delegation.log`) — the break predates round 2. Repair (in the
+   patch): the fixture's registry now lists the parent's provider and the adapter list
+   names its instance, so the door reaches the feature's own cross-project admission,
+   which refuses the call with `invalid_request` ("needs isolation \"worktree\"") — the
+   test's assertion passes unchanged. Red (isolated) → green: single test
+   `green_round2_remote_delegation_single.log`, full file 28 passed
+   (`green_round2_remote_delegation_full.log`). The full blast-radius re-run after the
+   repair — the 32 files (31 harness-consuming consumers + `ThreadStop`, including the
+   repaired `RemoteDelegation.test.ts`) — passed clean: 32 files, 858 tests, exit 0
+   (`blast_radius_round2b.log`; the first attempt was killed at a run-time cap and one
+   load flake timed out at 120s under parallel typechecks — that test passes in the
+   blast run).
+
+### Repair round 2 live re-check (ran, passed)
+
+Same five-scenario driver re-run against the round-2b clone
+(`~/.mastermind/mmos_dev/xp/xpb_live_driver.py`, evidence redirected here):
+`live_proof_receipt.json` ok=True, portFreeAfterStop=True, free port 3915 (the live
+servers on 3773/3774/3780 untouched), run log `live_reecheck_round2b_run.log`
+(driver-exit=0, well inside the 15-minute cap). Stale-tracking-ref precondition
+re-verified (`project_b_local` `01d6422…` ≠ `origin_b_main` `ebcf330…`). Child bound to
+project B with `subagent` lineage; completion wake reached the parent (child run
+`completed`, parent has the delegated-task run; `wakeMessages` 0 is the same
+detection-format note as round 1). Refusals verbatim: `Project project:does-not-exist
+was not found.` / `needs isolation "worktree"` / `runtime_mode_escalation_denied: Child
+runtime mode full-access is broader than parent mode auto.`
+
+### Upstream limits, not changed (round-2 panel E1–E4)
+
+- **E1 (HIGH, upstream):** if the server restarts while a child is still preparing, the
+  run returns silently from `prepareRun` and a same-id replay calls `prepareRun` again
+  and reports the cancelled task as fine (`ThreadLaunchService.ts:821`; replay at
+  `OrchestratorMcpService.ts:2628-2633`). Advice: **after a server restart during
+  preparation, retry with a new request id.**
+- **E2 (HIGH, upstream):** a crash between worktree creation and run release orphans the
+  worktree/branch in the target repository; cleanup is in-process only (predicate
+  `(cancelled && !runReleased) || !workspaceRecorded`, new tree `:709` = pin `:692`;
+  startup reconciliation removes nothing). Runbook: `git worktree list` in the target.
+- **E3 (MED, upstream):** a provider-start failure after release also leaves the
+  worktree/branch (same predicate lines as E2).
+- **E4 (MED, upstream):** archiving or deleting the parent disposes completion delivery
+  while the child in the target project keeps running (dispose guards verbatim at pin
+  `pin_orch.ts:12640, 2968`).
 
 ### Limits, in plain words (feature round)
 
