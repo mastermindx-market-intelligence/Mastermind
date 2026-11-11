@@ -61,10 +61,26 @@ directory your brief names, each on a port you pick and state in your return.
 
 ## Children
 
-- A driver may start at most two children, each with a model named explicitly:
+- Every child gets a model named explicitly:
   `target: {providerInstanceId: "capacity_fabric", model: <id>}`. Allowed: `glm-5.3`,
   `glm-5.3-flash`, `kimi-k3.1-pro`, `deepseek-v4.1-flash`, `minimax-m3`. Not allowed:
   `gemini-4-argon`, `grok-4.7`, any Claude or GPT model.
+- What each model costs us (Chairman, 2026-11-11), and so what to use it for:
+  - `deepseek-v4.1-flash` is as good as unlimited. Use it freely and in parallel for work
+    with a mechanical check: reading a file and reporting facts with line numbers, writing a
+    failing test for a stated defect, running a test sweep and returning the output, one
+    bounded edit with its test. Up to four at once per driver.
+  - `kimi-k3.1-pro` is free but slow and shared by every lane (one pool, about 150 tokens a
+    second). Use it for the hardest part of your lane: the design question, the attack on
+    your diff, the bug you failed at twice. One Kimi child per lane at a time. If it fails
+    with `FABRIC_ALL_ROUTES_COOLING`, the pool is full: wait five minutes and restart the
+    same thread once.
+  - `glm-5.3` is cheap. It is the default for a child that owns a slice of implementation.
+    At most two of these (or Kimi) at once per driver.
+- You are a driver, and your own attention is the scarce thing in your lane. If a step is a
+  lookup, a census, a test run or a mechanical edit, give it to a DeepSeek child with the
+  exact check that proves it, and verify that check's output yourself. Do not hand a child a
+  conclusion to confirm; hand it the question.
 - An attack on a diff goes to a different model from the one that wrote it. The attacker gets
   this file's git rules word for word and the commit to read; it has no reason to fetch.
 - An attack round is evidence about the defects it found, not about the ones it missed. A

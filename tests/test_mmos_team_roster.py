@@ -204,6 +204,23 @@ class TestToolLimitsCredentials:
             assert f"Edit(/{home}/{name})" in deny
         assert not any("CLAUDE.md" in d for d in deny)
 
+    def test_own_claude_configuration_not_writable(self, tmp_path):
+        """The home is the teammate's Claude configuration folder: a settings
+        file, an MCP entry, a skill or a plugin written there would run."""
+        spec = load(tmp_path, make_spec(tmp_path))
+        mate = spec["teammates"][0]
+        home = team_roster.teammate_home(spec, mate)
+        deny = team_roster.tool_limits(spec, mate)["permissions"]["deny"]
+        for name in ("settings.json", "settings.local.json", ".claude.json",
+                     ".mcp.json", "plugins", "skills", "agents", "commands",
+                     "hooks", "rules", ".claude"):
+            for tool in ("Write", "Edit"):
+                assert f"{tool}(/{home}/{name})" in deny
+                assert f"{tool}(/{home}/{name}/**)" in deny
+        assert not any("CLAUDE.md" in d for d in deny)
+        allow = team_roster.tool_limits(spec, mate)["permissions"]["allow"]
+        assert f"Write(/{home}/**)" in allow
+
     def test_spec_roots_and_siblings(self, tmp_path):
         raw = make_spec(tmp_path)
         secret_dir = tmp_path / "elsewhere" / "secrets"

@@ -70,3 +70,33 @@ Recorded as open; none is fixed in this program.
 The real spec names the credential folders of this Mac. Applied to all three teammates with
 no run live; titles, threads and pins unchanged. This diff is on the credentials surface and
 was written by the principal, so it goes into the next independent review with lane RF's diff.
+
+## Finding 1, second part: the home is the configuration folder (principal, 02:50 UTC)
+
+Found by the principal's own live checks, not by the review. A teammate's home is also its
+Claude configuration folder, and its limits allowed creating any new file there. Assurance,
+asked to try, created `settings.json`, `.mcp.json` and `skills/probe/SKILL.md` in its home
+(MAS-16). A settings file can carry a hook command and an MCP entry can name a program, so a
+steered teammate could give itself a shell on its next start, which the `Bash` deny is meant
+to prevent. Whether the runtime loads those files from the home is being established on a dev
+server by lane RL; the fix does not wait for the answer.
+
+`team_roster.py` `HOME_CONFIG`: write and edit denies for the configuration file and folder
+names in the home (`settings.json`, `.mcp.json`, `.claude.json`, `skills`, `agents`,
+`commands`, `hooks`, `rules`, `plugins` and the rest). Applied to all three teammates.
+
+**Limits bind at process start, not on file change.** A teammate session is one long-lived
+process per thread. MAS-16 ran in a process started before the new file was written, so the
+new denies did not bind there; the first fix bound in MAS-14 only because that process started
+after the file was written. The earlier sentence in the plan that tightening needs no restart
+is wrong. Lane RL adds a report line to `apply` and the safe restart procedure.
+
+**Live checks so far** (`~/.mastermind/mmos_evidence/r2a-20261111/LEDGER.md`):
+- MAS-14: Read and Edit obey the deny rules; own memory stays writable.
+- MAS-15: Grep, Glob and whole-file Write obey them too.
+- MAS-16: configuration names in the home were creatable under the first fix.
+- Owed: the same attempts after Assurance's process restarts under the second fix.
+
+Lane RL (GLM 5.3, started 02:50 UTC) builds the stronger design: reads allowed only from named
+roots, writes only to the memory file and one notes folder, proven on its own dev server; plus
+the roster side of findings 11, 12 and 14.

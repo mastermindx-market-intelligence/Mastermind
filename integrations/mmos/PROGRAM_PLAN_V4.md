@@ -927,3 +927,57 @@ at 01:00 UTC and MAS-7 is done.
 **Running now, at the width cap of four:** T8, T4c, TSHb, RF.
 
 Evidence: `~/.mastermind/mmos_evidence/r2a-20261111/LEDGER.md`.
+
+## 25. Amendment, 2026-11-11 03:05 UTC: cheap models carry the work; a hole in my own fix; six lanes
+
+**New economics (Chairman).** DeepSeek Flash is as good as unlimited (a shared pool of about
+2,000 tokens a second). Kimi is free but slow and shared (about 150 tokens a second across
+everything we run). GLM is cheap on the direct subscription. Opus and Fable are expensive and
+are for mission-critical or extremely hard work the open models cannot do. This changes how
+the program runs, in four ways:
+
+1. **Width is no longer capped by cost.** The old cap (four drivers, two children each) was
+   set when GLM quota ran out and Kimi rate-limited. The limits that remain are real ones: my
+   capacity to check returns, one writer per file, and the Kimi pool. New rule: up to six lanes
+   when their files do not overlap; each driver may run up to four DeepSeek children for work
+   with a mechanical check, two GLM children, and one Kimi child at a time. Read-only helpers
+   that write only to a scratch folder do not count as lanes.
+2. **Drivers stop doing lookups themselves.** `LANE_RULES_V4.md` now says what each model is
+   for. A census, a test run, a failing test for a stated defect or one bounded edit goes to a
+   DeepSeek child with the check that proves it.
+3. **I stop doing them too.** Small fixes on a file I am already holding stay with me (they
+   cost less than a brief). Anything that needs a dev server, more than one file, or a design
+   answer goes to a lane.
+4. **Opus reviews have to earn their place.** Review R2a (Opus) found 15 defects and is the
+   only measured reference we have. Before the next critical review I am measuring whether the
+   open models find the same ones: four blind reviewers (one GLM over the whole scope, three
+   DeepSeek each on one question) are reading the same commit R2a read, without its findings.
+   If together they find the four high findings and most of the mediums, critical reviews move
+   to a GLM plus Kimi plus DeepSeek panel and Opus is kept for the few surfaces where a miss
+   cannot be undone. If they do not, Opus stays for critical surfaces and I say so with the
+   numbers. An attack round or a panel that finds nothing still proves nothing by itself.
+
+**A hole in my own fix, found by asking the teammate.** A teammate's home is also its Claude
+configuration folder, and the limits let it create any new file there. Assurance created a
+settings file, an MCP file and a skill in its home when asked (MAS-16). A settings file can
+carry a command to run, so a steered teammate could give itself the shell its limits deny.
+I added write denies for the configuration names and applied them to all three.
+
+**A wrong sentence in section 24.** Limits are read when a teammate's process starts, not when
+the file changes. The first fix bound in MAS-14 only because that process started after the
+file was written. MAS-16 ran in a process that predated the second fix, which is why the
+second fix did not bind there. Design Lead and Secretary had no process and start under the
+new file. Assurance gets it when its idle process exits and restarts; I check again then.
+
+**What the three checks proved (MAS-14, 15, 16):** Read, Edit, Write, Grep and Glob all obey
+deny rules for the server's private folder, other teammates' homes and the teammate's own
+charter. Not yet proven: the configuration denies on a restarted process.
+
+**Lane RL (new, GLM 5.3).** The roster side of findings 11, 12 and 14, and the stronger
+design for limits: reads allowed only from named roots, writes only to the memory file and
+one notes folder, proven on its own dev server with process start times stated. It also
+establishes whether the runtime loads a settings file from the home, and adds a line to
+`apply` saying when new limits are not yet in force.
+
+**Running now, six lanes:** T8, T4c, TSHb, RF, RL, and the calibration panel (four read-only
+reviewers, scratch only).
