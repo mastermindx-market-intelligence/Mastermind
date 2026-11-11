@@ -1,4 +1,4 @@
-"""Real ten-job regression and adversarial auxiliary-proof cases.
+"""Real eleven-job regression and adversarial auxiliary-proof cases.
 
 The fixture projects values captured from GitHub; the API reader is replaced,
 not the public verifier. These checks do not qualify a live protected push.
@@ -13,6 +13,12 @@ import yaml
 from scripts import ci_postmerge_proof as proof
 
 FIXTURE = Path(__file__).with_name("fixtures") / "ci_postmerge_full_nine_jobs.json"
+# Real capture of the scoped four-job shape that certified #2365's tree
+# (group 42606700720 for master 9e6659c4a4; the same shape as 42592403849):
+# PR fast checks succeeded, the pytest shard matrix was skipped as one
+# unexpanded job, and no shard executed — while master's full pytest failed
+# the frozen identity-review pins. The proof must refuse this group.
+SCOPED_FIXTURE = Path(__file__).with_name("fixtures") / "ci_postmerge_scoped_group.json"
 
 
 def test_proof_inventory_matches_the_actual_workflow():
@@ -21,12 +27,12 @@ def test_proof_inventory_matches_the_actual_workflow():
     jobs = yaml.safe_load(workflow.read_text())["jobs"]
     # Expand only the current, explicitly qualified matrix; no generic workflow
     # interpreter or permissive support for future qualification lanes.
-    assert set(jobs) == {"pr_scope", "pr_fast", "pin_guards", "pytest_shards", "test"}
+    assert set(jobs) == {"pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards", "test"}
     matrix = jobs["pytest_shards"]["strategy"]["matrix"]
     assert matrix == {"index": [0, 1, 2, 3, 4, 5]}
     assert jobs["pytest_shards"]["name"] == "pytest shard ${{ matrix.index }}"
     names = [f"pytest shard {index}" for index in matrix["index"]]
-    for key in ("pr_scope", "pr_fast", "pin_guards", "test"):
+    for key in ("pr_scope", "pr_fast", "pin_guards", "qualification", "test"):
         assert "strategy" not in jobs[key]
         names.append(jobs[key]["name"])
     assert len(names) == len(set(names))
@@ -36,6 +42,10 @@ def test_proof_inventory_matches_the_actual_workflow():
 
 def subject():
     return json.loads(FIXTURE.read_text())
+
+
+def scoped_subject():
+    return json.loads(SCOPED_FIXTURE.read_text())
 
 
 def evaluate(data):
@@ -78,14 +88,14 @@ def auxiliary(data, name="PR fast checks"):
     return next(job for job in data["jobs"]["jobs"] if job["name"] == name)
 
 
-def test_captured_full_ten_job_run_qualifies():
+def test_captured_full_eleven_job_run_qualifies():
     data = subject()
     result, reads = evaluate(data)
     assert result == 42548210214
     assert len(reads) == 5
 
 
-@pytest.mark.parametrize("name", [f"pytest shard {i}" for i in range(6)] + ["test", "PR test scope", "Pin and identity guards", "PR fast checks"])
+@pytest.mark.parametrize("name", [f"pytest shard {i}" for i in range(6)] + ["test", "PR test scope", "Pin and identity guards", "Non-pytest qualification gates", "PR fast checks"])
 def test_every_job_is_required_even_when_total_count_matches_the_missing_inventory(name):
     data = subject()
     data["jobs"]["jobs"] = [job for job in data["jobs"]["jobs"] if job["name"] != name]
@@ -197,3 +207,33 @@ def test_real_failed_aggregate_still_rejects():
     data = subject()
     auxiliary(data, "test")["conclusion"] = "failure"
     assert evaluate(data)[0] is None
+
+
+def test_captured_scoped_merge_group_never_qualifies():
+    """A green scoped group executed no shard; it can never prove full CI."""
+    result, reads = evaluate(scoped_subject())
+    assert result is None
+    # Rejection happens at the job-inventory read itself: the push identity,
+    # actor, single-group listing and group source fences all passed on the
+    # real captured values, and only the four-job scoped shape refused reuse.
+    assert len(reads) == 3
+    assert reads[-1].endswith("/jobs?per_page=100")
+
+
+def test_scoped_capture_documents_the_unexecuted_shard_evidence():
+    data = scoped_subject()
+    conclusions = {job["name"]: job["conclusion"] for job in data["jobs"]["jobs"]}
+    assert conclusions == {
+        "PR test scope": "success",
+        "PR fast checks": "success",
+        'pytest shard ${{ matrix.index }}': "skipped",
+        "test": "success",
+    }
+    skipped = next(job for job in data["jobs"]["jobs"]
+                   if "matrix.index" in job["name"])
+    assert skipped["steps"] == []
+    # The unexpanded template name can never be part of the proof inventory:
+    # accepting it would certify a group that executed zero pytest shards.
+    assert 'pytest shard ${{ matrix.index }}' not in proof._JOB_NAMES
+    for index in range(6):
+        assert f"pytest shard {index}" in proof._JOB_NAMES

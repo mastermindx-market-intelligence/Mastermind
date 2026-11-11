@@ -14,7 +14,7 @@ def main():
     root = Path(__file__).resolve().parents[2]
     suites = ["tests/test_application_tunnel_entry.py", "tests/test_application_tunnel_control.py",
               "tests/test_application_tunnel_lifecycle.py", "tests/test_os_tunnel_entry.py",
-              "tests/test_hermes_primary_application_tunnel.py"]
+              "tests/test_hermes_primary_application_tunnel.py", "tests/test_application_tunnel_home.py"]
     with tempfile.TemporaryDirectory(prefix="application-transport-proof-") as directory:
         report = Path(directory) / "proof.xml"
         result = subprocess.run([sys.executable, "-B", "-m", "pytest", "-q", "-o", "addopts=",
@@ -25,7 +25,11 @@ def main():
         document = ET.parse(report).getroot()
         totals = {key: sum(int(node.get(key, "0")) for node in document.iter("testsuite"))
                   for key in ("tests", "failures", "errors", "skipped")}
-        required = {"test_role_successor_preserves_credential_inode_and_original_journals",
+        required = {"test_home_successor_reuses_existing_unit_credential_and_reverse_journals",
+                    "test_home_server_lost_ack_reconciles_without_rewriting",
+                    "test_home_restart_lost_ack_uses_original_observation_without_second_command",
+                    "test_home_active_ssh_stream_refuses_transition_without_restart_intent",
+                    "test_role_successor_preserves_credential_inode_and_original_journals",
                     "test_role_server_lost_ack_reconciles_original_acl_once",
                     "test_role_partial_client_publication_recovers_from_original_v2_intent",
                     "test_role_client_stage_requires_no_server_filesystem",

@@ -127,6 +127,13 @@ _FIELDS = {
     "executions": ("id", "status", "agentId", "adapterType", "startedAt", "finishedAt", "createdAt", "invocationSource", "errorCode"),
 }
 
+_RELATION_FIELDS = {
+    "people": ("reportsTo",),
+    "projects": ("goalId", "leadAgentId"),
+    "goals": ("parentId", "ownerAgentId"),
+    "work": ("parentId", "projectId", "goalId", "assigneeAgentId"),
+}
+
 
 def project_record(kind: str, row: object, company_id: str, *, allow_scoped_id: bool = False) -> dict:
     if type(row) is not dict or row.get("locked") is True:
@@ -144,6 +151,15 @@ def project_record(kind: str, row: object, company_id: str, *, allow_scoped_id: 
             raise PaperclipError("SOURCE_RECORD_INVALID")
     else:
         identifier(raw_id)
+    # A malformed relationship must not silently disappear as an absent parent.
+    # Collection handling turns this into explicit source unavailability. Null
+    # and absence remain legitimate, and no referenced record is fetched here.
+    for key in _RELATION_FIELDS.get(kind, ()):
+        if row.get(key) is not None:
+            try:
+                identifier(row[key])
+            except PaperclipError:
+                raise PaperclipError("SOURCE_RECORD_INVALID") from None
     if kind == "artifacts":
         # Pinned CompanyArtifact uses nested source summaries, not flat task IDs.
         row = dict(row, sourceKind=row.get("source"), url=row.get("href"))

@@ -50,7 +50,7 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                                   456,
                                                   '0o710'))},
  '_handle_ceo_ingress_connection': {'node_type': 'AsyncFunctionDef',
-                                    'source_sha256': '16d5759d83027a65edc6e98a683ce3c0e26a0a6c6d2ebd84bed8f33574caa9d0',
+                                    'source_sha256': '3e66f910db92dd12461c2fddc562ec1e1cd518483aa9374633b90b866e23ba8e',
                                     'ast_sha256': 'c7c7e2f7305e392fb45919e09cac26297f0a83776de64f4428579bce422608ae',
                                     'sites': ((('body',
                                                 3,
@@ -153,3 +153,8 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
 # The Company method and all three Fabric error operands, including their
 # complete AST paths and token spans, remain unchanged. Only the exact whole
 # source and enclosing ingress-method digests change for this composition.
+
+# WO13 admission repair: the complete Company listener and ingress ASTs,
+# all six original operands and their AST paths remain exact to accepted e4cd.
+# Only this qualified whole-source hash and mapped catalog positions change.
+# No new identity exemption or installed/runtime acceptance is granted.

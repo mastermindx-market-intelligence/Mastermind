@@ -7,6 +7,8 @@ pub mod control_room_read;
 pub mod company_priorities;
 mod draft_continuity;
 mod transport_diagnostics;
+mod renewal;
+use renewal::{Renewal, RenewalTicket};
 use transport_diagnostics::{ExecutiveObservation, ExecutiveReason, ProgramsRead};
 pub mod native_draft_identity;
 pub mod authorization_continuation;
@@ -112,6 +114,20 @@ struct Pending {
     generation: u64,
     continuation: Option<authorization_continuation::ContentContinuation>,
     intent: SignInIntent,
+    initial_reservation: Option<crate::native_refresh::InitialReservation>,
+}
+/// Constructed only after initial credential custody has qualified. Test-only
+/// memory fixtures do not provide a production bypass around that publication.
+struct InitialGrant {
+    token: Token,
+    renewal: Renewal,
+    content_reservation: Option<crate::native_refresh::InitialReservation>,
+}
+impl InitialGrant {
+    #[cfg(test)]
+    fn fixture(token: Token) -> Self {
+        Self { token, renewal: Renewal::AccessOnly, content_reservation: None }
+    }
 }
 struct Inner {
     draft_continuity: draft_continuity::DraftContinuity,
@@ -128,8 +144,11 @@ struct Inner {
     exchanging: bool,
     acquisition: Option<Token>,
     content: Option<Token>,
+    acquisition_renewal: Renewal,
+    content_renewal: Renewal,
     reason: Option<&'static str>,
     restoring: bool,
+    restore_started: bool,
     content_timeout: Option<authorization_continuation::ContentTimeout>,
 }
 impl Inner {
@@ -155,8 +174,11 @@ impl Inner {
             exchanging: false,
             acquisition: None,
             content: None,
+            acquisition_renewal: Renewal::Unadmitted,
+            content_renewal: Renewal::Unadmitted,
             reason: None,
             restoring: false,
+            restore_started: false,
             content_timeout: None,
         }
     }
@@ -271,6 +293,8 @@ impl Inner {
         self.restoring = false;
         self.acquisition = None;
         self.content = None;
+        self.acquisition_renewal = Renewal::Unadmitted;
+        self.content_renewal = Renewal::Unadmitted;
         self.reason = None;
         self.content_timeout = None;
     }
@@ -305,6 +329,7 @@ impl Inner {
             generation: self.generation,
             continuation: None,
             intent,
+            initial_reservation: None,
         });
         Ok(url)
     }
@@ -369,7 +394,7 @@ impl Inner {
     fn finish_exchange(
         &mut self,
         pending: &Pending,
-        token: Result<Token>,
+        token: Result<InitialGrant>,
     ) -> Option<String> {
         let resource = pending.resource;
         if self.generation != pending.generation || !self.exchanging {
@@ -384,22 +409,28 @@ impl Inner {
             return None;
         }
         match token {
-            Ok(token) if resource == Resource::Acquisition => {
-                self.acquisition = Some(token);
+            Ok(grant) if resource == Resource::Acquisition => {
+                self.acquisition = Some(grant.token);
+                self.acquisition_renewal = grant.renewal;
                 self.draft_continuity.unqualified();
                 self.reason = None;
-                self.transaction_for(Resource::Content, pending.intent).ok()
+                let next = self.transaction_for(Resource::Content, pending.intent).ok();
+                if let Some(content) = self.pending.as_mut() {
+                    content.initial_reservation = grant.content_reservation;
+                }
+                next
             }
-            Ok(token) if resource == Resource::Content => {
-                self.content = Some(token);
+            Ok(grant) if resource == Resource::Content => {
+                self.content = Some(grant.token);
+                self.content_renewal = grant.renewal;
                 self.reason = None;
                 if pending.intent == SignInIntent::LegacyFull && self.executive_resource.is_some() {
                     self.transaction_for(Resource::Executive, pending.intent).ok()
                 } else { None }
             }
-            Ok(token) => {
+            Ok(grant) => {
                 if self.executive_resource.is_some() && self.advance_executive() {
-                    self.executive = Some(token);
+                    self.executive = Some(grant.token);
                     self.executive_reason = ExecutiveReason::Available;
                 }
                 None
@@ -712,6 +743,19 @@ fn parse_token(value: Value, resource: Resource) -> Result<Token> {
         executive_send,
     })
 }
+// An API that has not opted in to offline access may return a valid access
+// token without issuing refresh credentials. Keep that grant in memory only;
+// reject an explicitly present but malformed refresh credential.
+fn initial_refresh_token(value: &Value) -> Result<Option<&str>> {
+    match value.get("refresh_token") {
+        None => Ok(None),
+        Some(Value::String(value)) if crate::native_refresh::valid_refresh(value) => {
+            Ok(Some(value.as_str()))
+        }
+        Some(_) => Err("REFRESH_TOKEN_INVALID".into()),
+    }
+}
+
 pub async fn callback(app: AppHandle, raw: String) {
     let state = app.state::<NativeAuth>();
     let transaction = match state.lock().and_then(|mut inner| inner.consume(&raw)) {
@@ -721,7 +765,7 @@ pub async fn callback(app: AppHandle, raw: String) {
             return;
         }
     };
-    let (pending, code, client) = transaction;
+    let (mut pending, code, client) = transaction;
     // A continuation cannot exchange a fresh code against an expired or
     // replaced retained Acquisition grant. Rejoin again immediately before
     // constructing the request, after consume's own continuation fence.
@@ -753,30 +797,46 @@ pub async fn callback(app: AppHandle, raw: String) {
                 state.lock()?.primary_exchange_current(&pending, &client)?;
             }
             let access = parse_token(v.clone(), pending.resource)?;
+            let mut renewal = Renewal::AccessOnly;
+            let mut content_reservation = None;
             if pending.continuation.is_none() && pending.resource.persistent() {
-                let refresh = v.get("refresh_token").and_then(Value::as_str)
-                    .filter(|s| crate::native_refresh::valid_refresh(s))
-                    .ok_or("REFRESH_TOKEN_NOT_ISSUED")?;
+                // Validate a present refresh before any reservation mutation.
+                let refresh = initial_refresh_token(&v)?;
                 let _keychain = state.keychain_lock.lock()
                     .map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
                 let mut inner = state.lock()?;
                 if pending.intent == SignInIntent::PrimaryAccount {
                     inner.primary_exchange_current(&pending, &client)?;
                 }
-                if inner.generation != pending.generation || !inner.exchanging {
+                if inner.generation != pending.generation || !inner.exchanging
+                    || inner.client_id.as_deref() != Some(client.as_str())
+                    || pending.expires <= Instant::now() {
                     return Err("AUTHENTICATION_CHANGED".into());
                 }
-                crate::native_refresh::save(&client, pending.resource.audience(), refresh)?;
+                let owned = match pending.resource {
+                    Resource::Acquisition => {
+                        let [a, c] = crate::native_refresh::reserve_initial_pair(&client,
+                            [Resource::Acquisition.audience(), Resource::Content.audience()])?;
+                        content_reservation = Some(c);
+                        a
+                    }
+                    Resource::Content => pending.initial_reservation.take()
+                        .ok_or("INITIAL_RESERVATION_CHANGED")?,
+                    Resource::Executive => return Err("AUTHENTICATION_REQUIRED".into()),
+                };
+                crate::native_refresh::publish_initial(&client, pending.resource.audience(), owned, refresh)?;
+                renewal = refresh.map(|value| Renewal::Bound(crate::native_refresh::fingerprint(
+                    &client, pending.resource.audience(), value))).unwrap_or(Renewal::AccessOnly);
             }
-            Ok(access)
+            Ok(InitialGrant { token: access, renewal, content_reservation })
         }),
         Err(_) => Err("TOKEN_EXCHANGE_FAILED".into()),
     };
     if let Some(witness) = pending.continuation.as_ref() {
-        authorization_continuation::finish_callback(&app, &pending, witness, token).await;
+        authorization_continuation::finish_callback(&app, &pending, witness, token.map(|grant| grant.token)).await;
         return;
     }
-    let expiry = token.as_ref().ok().map(|token| (token.expires, token.wall_expires));
+    let expiry = token.as_ref().ok().map(|grant| (grant.token.expires, grant.token.wall_expires));
     let mut inner = match state.lock() {
         Ok(i) => i,
         Err(_) => return,
@@ -805,6 +865,25 @@ fn terminal_invalid_grant(status: u16, body: &Value) -> bool {
 /// concurrent replay, including timer expiry racing with a workspace read.
 async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
     if !resource.persistent() { return Err("AUTHENTICATION_REQUIRED".into()); }
+    // Capture before waiting: a queued old caller cannot adopt a later login
+    // or a different resource's stored credential after acquiring the mutex.
+    let ticket = app.state::<NativeAuth>().lock()?.renewal_ticket(resource)?;
+    refresh_admitted(app, resource, ticket).await
+}
+
+async fn refresh_admitted(app: &AppHandle, resource: Resource, ticket: RenewalTicket) -> Result<()> {
+    let result = refresh_captured(app, resource, &ticket).await;
+    if result.as_ref().err().is_some_and(|error| error != "NETWORK_UNAVAILABLE") {
+        if let Ok(mut inner) = app.state::<NativeAuth>().lock() {
+            // A stale queued caller must not retire a successful successor.
+            inner.retire_renewal(resource, &ticket);
+        }
+    }
+    result
+}
+
+async fn refresh_captured(app: &AppHandle, resource: Resource, ticket: &RenewalTicket) -> Result<()> {
+    if !resource.persistent() { return Err("AUTHENTICATION_REQUIRED".into()); }
     let state = app.state::<NativeAuth>();
     let slot = match resource {
         Resource::Acquisition => 0,
@@ -812,24 +891,20 @@ async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
         Resource::Executive => return Err("AUTHENTICATION_REQUIRED".into()),
     };
     let _singleflight = state.refresh_locks[slot].lock().await;
-    let (client, generation) = {
+    let (client, generation) = (ticket.client.clone(), ticket.generation);
+    {
         let inner = state.lock()?;
+        if !inner.renewal_current(resource, ticket) { return Err("AUTHENTICATION_CHANGED".into()); }
         if inner.token(resource).is_some_and(|t|
             t.expires > Instant::now() + Duration::from_secs(45) &&
             t.wall_expires > SystemTime::now() + Duration::from_secs(45)) { return Ok(()); }
-        (inner.client_id.clone().ok_or("NATIVE_CLIENT_ID_MISSING")?, inner.generation)
-    };
+    }
     let old = {
         let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
-        crate::native_refresh::load(&client, resource.audience())?
-            .ok_or("AUTHENTICATION_REQUIRED")?
-    };
-    {
-        let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
         let inner = state.lock()?;
-        if inner.generation != generation { return Err("AUTHENTICATION_CHANGED".into()); }
-        crate::native_refresh::begin_rotation(&client, resource.audience(), &old)?;
-    }
+        if !inner.renewal_current(resource, ticket) { return Err("AUTHENTICATION_CHANGED".into()); }
+        crate::native_refresh::claim_bound(&client, resource.audience(), &ticket.predecessor)?
+    };
     // Once begin_rotation succeeds, the outcome must be assumed ambiguous if the
     // response fails. The Keychain marker prohibits replay on the next restart.
     let response = state.http.post(format!("{ISSUER}oauth/token"))
@@ -847,7 +922,7 @@ async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
             // but only after deleting our *exact* Keychain pending item.
             let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
             let inner = state.lock()?;
-            if inner.generation != generation { return Err("AUTHENTICATION_CHANGED".into()); }
+            if !inner.renewal_current(resource, ticket) { return Err("AUTHENTICATION_CHANGED".into()); }
             crate::native_refresh::rollback_untransmitted(&client, resource.audience(), &old)?;
             return Err("NETWORK_UNAVAILABLE".into());
         }
@@ -862,7 +937,7 @@ async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
         if invalid_grant {
             let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
             let mut inner = state.lock()?;
-            if inner.generation != generation { return Err("AUTHENTICATION_CHANGED".into()); }
+            if !inner.renewal_current(resource, ticket) { return Err("AUTHENTICATION_CHANGED".into()); }
             // This response is terminal only for the exact grant this process
             // sent. The generation fence above is process-local: another
             // instance's explicit sign-out or fresh sign-in may have replaced
@@ -902,8 +977,10 @@ async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
     {
         let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
         let mut inner = state.lock()?;
-        if inner.generation != generation { return Err("AUTHENTICATION_CHANGED".into()); }
+        if !inner.renewal_current(resource, ticket) { return Err("AUTHENTICATION_CHANGED".into()); }
         crate::native_refresh::finish_rotation(&client, resource.audience(), &old, next)?;
+        inner.set_renewal(resource, Renewal::Bound(crate::native_refresh::fingerprint(
+            &client, resource.audience(), next)));
         match resource {
             Resource::Acquisition => {
                 inner.acquisition = Some(access);
@@ -919,13 +996,13 @@ async fn refresh_one(app: &AppHandle, resource: Resource) -> Result<()> {
     Ok(())
 }
 
-/// Resource read paths may transparently restore a previously authorized
-/// native grant, but cannot bootstrap a new user identity or widen scopes.
+/// Resource reads can renew only their already-admitted predecessor. An absent
+/// or expired access token never grants permission to adopt stored credentials.
 async fn ensure_native_token(app: &AppHandle, resource: Resource) -> Result<(String, u64)> {
     let state = app.state::<NativeAuth>();
     let needs_refresh = {
         let inner = state.lock()?;
-        inner.token(resource).is_none()
+        inner.token(resource).is_none() && inner.renewal_ticket(resource).is_ok()
     };
     if needs_refresh && resource.persistent() {
         refresh_one(app, resource).await?;
@@ -955,10 +1032,13 @@ fn original_expiry_due(inner: &Inner, resource: Resource, expires: Instant,
 }
 fn schedule_expiration(app: AppHandle, resource: Resource, expires: Instant, wall_expires: SystemTime, generation: u64) {
     tauri::async_runtime::spawn(async move {
-        let target = if resource.persistent() {
+        let renew = resource.persistent() && app.state::<NativeAuth>().lock().is_ok_and(|inner|
+            original_expiry_current(&inner, resource, expires, wall_expires, generation)
+                && inner.renewal_ticket(resource).is_ok());
+        let target = if renew {
             native_refresh_deadline(expires, Instant::now())
         } else { expires };
-        let wall_target = if resource.persistent() {
+        let wall_target = if renew {
             wall_expires.checked_sub(Duration::from_secs(35)).unwrap_or(wall_expires)
         } else { wall_expires };
         // Wake/sleep-safe periodic deadline observation. Monotonic-only Tokio
@@ -969,9 +1049,9 @@ fn schedule_expiration(app: AppHandle, resource: Resource, expires: Instant, wal
             tokio::time::sleep((target - now).min(Duration::from_secs(30))).await;
         }
         let unchanged = app.state::<NativeAuth>().lock().is_ok_and(|inner|
-            inner.generation == generation);
+            original_expiry_current(&inner, resource, expires, wall_expires, generation));
         if !unchanged { return; }
-        if resource.persistent() {
+        if renew {
             // A network/rotation failure does not replay an ambiguous token;
             // a later explicit sign-in remains available.
             let _ = refresh_one(&app, resource).await;
@@ -1001,19 +1081,31 @@ fn schedule_expiration(app: AppHandle, resource: Resource, expires: Instant, wal
 /// sees a signing_in state, not any refresh/access credentials.
 pub fn start_restore(app: AppHandle) {
     if !crate::native_refresh::enabled() { return; }
-    if let Ok(mut inner) = app.state::<NativeAuth>().lock() {
-        if inner.client_id.is_none() { return; }
-        inner.restoring = true;
-    } else { return; }
+    let ticket = match app.state::<NativeAuth>().lock().ok().and_then(|mut inner| inner.begin_restore()) {
+        Some(ticket) => ticket,
+        None => return,
+    };
     emit(&app);
     tauri::async_runtime::spawn(async move {
         for resource in [Resource::Acquisition, Resource::Content] {
-            let _ = refresh_one(&app, resource).await;
+            let state = app.state::<NativeAuth>();
+            if !state.lock().is_ok_and(|inner| inner.restore_current(&ticket)) { break; }
+            let admitted = (|| -> Result<Option<RenewalTicket>> {
+                let _keychain = state.keychain_lock.lock().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
+                let mut inner = state.lock()?;
+                if !inner.restore_current(&ticket) { return Err("AUTHENTICATION_CHANGED".into()); }
+                let Some(old) = crate::native_refresh::load(&ticket.client, resource.audience())? else {
+                    return Ok(None);
+                };
+                let predecessor = crate::native_refresh::fingerprint(&ticket.client, resource.audience(), &old);
+                inner.admit_restored(resource, &ticket, predecessor).map(Some)
+            })();
+            if let Ok(Some(renewal)) = admitted {
+                let _ = refresh_admitted(&app, resource, renewal).await;
+            }
         }
-        if let Ok(mut inner) = app.state::<NativeAuth>().lock() {
-            inner.restoring = false;
-        }
-        emit(&app);
+        let finished = app.state::<NativeAuth>().lock().is_ok_and(|mut inner| inner.finish_restore(&ticket));
+        if finished { emit(&app); }
     });
 }
 
@@ -3264,7 +3356,7 @@ mod tests {
         let s = i.pending.as_ref().unwrap().state.clone();
         let (p, _, _) = i.consume(&callback_url(&s)).unwrap();
         let next = i
-            .finish_exchange(&p, Ok(token("acquisition")))
+            .finish_exchange(&p, Ok(InitialGrant::fixture(token("acquisition"))))
             .unwrap();
         assert!(next.contains("mastermind.workspace.content.read"));
         assert!(i.status().acquisition);
@@ -3272,7 +3364,7 @@ mod tests {
         let s = i.pending.as_ref().unwrap().state.clone();
         let (p, _, _) = i.consume(&callback_url(&s)).unwrap();
         assert!(i
-            .finish_exchange(&p, Ok(token("content")))
+            .finish_exchange(&p, Ok(InitialGrant::fixture(token("content"))))
             .is_none());
         assert_eq!(i.token(Resource::Acquisition).unwrap().value, "acquisition");
         assert_eq!(i.token(Resource::Content).unwrap().value, "content");
@@ -3290,7 +3382,7 @@ mod tests {
             let state = pending.state.clone();
             let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
             assert_eq!(pending.resource, resource);
-            i.finish_exchange(&pending, Ok(token("grant")));
+            i.finish_exchange(&pending, Ok(InitialGrant::fixture(token("grant"))));
         }
         let generation = i.generation;
         let executive_generation = i.executive_generation;
@@ -3316,7 +3408,7 @@ mod tests {
         assert!(!i.expire_transaction(pending.generation, pending.expires, pending.expires));
         assert!(i.exchanging);
         assert!(i.reason.is_none());
-        assert!(i.finish_exchange(&pending, Ok(token("grant"))).is_some());
+        assert!(i.finish_exchange(&pending, Ok(InitialGrant::fixture(token("grant")))).is_some());
         assert!(i.status().acquisition);
     }
 
@@ -3378,7 +3470,7 @@ mod tests {
         let (p, _, _) = i.consume(&callback_url(&s)).unwrap();
         i.invalidate();
         assert!(i
-            .finish_exchange(&p, Ok(token("late")))
+            .finish_exchange(&p, Ok(InitialGrant::fixture(token("late"))))
             .is_none());
         assert!(!i.status().acquisition);
         assert!(i.pending.is_none());
@@ -3474,7 +3566,7 @@ mod tests {
             let state = i.pending.as_ref().unwrap().state.clone();
             let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
             assert_eq!(pending.resource, completed);
-            let raw = i.finish_exchange(&pending, Ok(token("grant"))).unwrap();
+            let raw = i.finish_exchange(&pending, Ok(InitialGrant::fixture(token("grant")))).unwrap();
             let url = Url::parse(&raw).unwrap();
             let pairs: std::collections::BTreeMap<_, _> = url.query_pairs().collect();
             assert!(!pairs.contains_key("prompt"));
@@ -3488,7 +3580,7 @@ mod tests {
         }
         let state = i.pending.as_ref().unwrap().state.clone();
         let (pending, _, _) = i.consume(&callback_url(&state)).unwrap();
-        assert!(i.finish_exchange(&pending, Ok(token("grant"))).is_none());
+        assert!(i.finish_exchange(&pending, Ok(InitialGrant::fixture(token("grant")))).is_none());
         assert!(i.token(Resource::Executive).is_some());
     }
     #[test]
@@ -3702,7 +3794,7 @@ mod tests {
         assert_eq!(pending.resource, resource);
         let raw = callback_url(&pending.state);
         let (p, _, _) = i.consume(&raw).unwrap();
-        i.finish_exchange(&p, Ok(token("fixture-private-token")))
+        i.finish_exchange(&p, Ok(InitialGrant::fixture(token("fixture-private-token"))))
     }
     fn at_executive_pending() -> Inner {
         let mut i = executive_inner();
@@ -3822,7 +3914,7 @@ mod tests {
             i.invalidate();
             assert!(i.executive_generation > old);
             if let Some(p) = consumed {
-                assert!(i.finish_exchange(&p, Ok(token("late"))).is_none());
+                assert!(i.finish_exchange(&p, Ok(InitialGrant::fixture(token("late")))).is_none());
             } else { assert!(i.consume(&callback_url(&state)).is_err()); }
             assert!(!i.executive_status().available);
             assert_eq!(i.status().status, "signed_out");
@@ -3903,7 +3995,7 @@ mod tests {
     fn install_native_executive_token(inner: &mut Inner, scope: &str) {
         let pending_state = inner.pending.as_ref().unwrap().state.clone();
         let (pending, _, _) = inner.consume(&callback_url(&pending_state)).unwrap();
-        inner.finish_exchange(&pending, Ok(parsed_native_executive_token(scope)));
+        inner.finish_exchange(&pending, Ok(InitialGrant::fixture(parsed_native_executive_token(scope))));
     }
 
     fn native_executive_state(scope: &str) -> NativeAuth {
@@ -5008,6 +5100,52 @@ mod retained_activity_selection_tests {
         inner.invalidate();
         assert!(!inner.restoring);
         assert_eq!(inner.status().status, "signed_out");
+    }
+
+    #[test]
+    fn missing_initial_refresh_token_keeps_valid_access_in_memory() {
+        let response = serde_json::json!({
+            "access_token": "synthetic-access-only",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "scope": "mastermind.workspace.read",
+        });
+        assert_eq!(initial_refresh_token(&response).unwrap(), None);
+        let access = parse_token(response, Resource::Acquisition).unwrap();
+        let mut inner = Inner::with_executive_resource(Some("native-client"), None);
+        inner.transaction(Resource::Acquisition).unwrap();
+        let state = inner.pending.as_ref().unwrap().state.clone();
+        let (pending, _, _) = inner.consume(&format!("{CALLBACK}?state={state}&code=test-code")).unwrap();
+        assert!(inner.finish_exchange(&pending, Ok(InitialGrant::fixture(access))).is_some());
+        assert!(inner.status().acquisition);
+        let content_response = serde_json::json!({
+            "access_token": "synthetic-content-only",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "scope": "mastermind.workspace.content.read",
+        });
+        assert_eq!(initial_refresh_token(&content_response).unwrap(), None);
+        let content = parse_token(content_response, Resource::Content).unwrap();
+        let content_state = inner.pending.as_ref().unwrap().state.clone();
+        let (content_pending, _, _) = inner.consume(&format!("{CALLBACK}?state={content_state}&code=test-code")).unwrap();
+        assert!(inner.finish_exchange(&content_pending, Ok(InitialGrant::fixture(content))).is_none());
+        assert_eq!(inner.status().status, "signed_in");
+        assert!(inner.status().acquisition && inner.status().content);
+    }
+
+    #[test]
+    fn initial_refresh_token_rejects_present_malformed_credentials() {
+        let synthetic = "synthetic-refresh-credential-not-real";
+        let present = serde_json::json!({"refresh_token": synthetic});
+        assert_eq!(initial_refresh_token(&present).unwrap(), Some(synthetic));
+        for malformed in [
+            serde_json::json!({"refresh_token": null}),
+            serde_json::json!({"refresh_token": 123}),
+            serde_json::json!({"refresh_token": "short"}),
+            serde_json::json!({"refresh_token": "x".repeat(4097)}),
+        ] {
+            assert_eq!(initial_refresh_token(&malformed).unwrap_err(), "REFRESH_TOKEN_INVALID");
+        }
     }
 
     #[test]
