@@ -185,20 +185,12 @@ cmd_install() {
   fi
   [ -f "$ROOT/fabric.env" ] || die "missing $ROOT/fabric.env; run tools/mmos_dev/t3/seed_dev_home.py with MMOS_T3_DEV_ROOT=$ROOT first"
   [ "$(stat -f '%Lp' "$ROOT/fabric.env")" = "600" ] || die "$ROOT/fabric.env must be mode 600"
-  # A self-contained packed runtime is the default. An explicit --server-bin
-  # is the emergency legacy rollback, not a second default source-tree path.
-  if [ -z "$SERVER_BIN" ]; then
-    SERVER_BIN=$("$PYTHON3_BIN" "$REPO_DIR/tools/mmos_team_server/node_install.py" resolve --root "$ROOT" --command serve) \
-      || die "packed runtime unavailable; install node_install.py and pack_server.mjs, or explicitly supply --server-bin for rollback"
-    "$PYTHON3_BIN" "$REPO_DIR/tools/mmos_team_server/node_install.py" resolve --root "$ROOT" --command node >/dev/null \
-      || die "pinned Node receipt or executable is incomplete"
-  fi
-  [ -f "$SERVER_BIN" ] || die "server entrypoint does not exist: $SERVER_BIN"
   # Never mutate a root that is being served RIGHT NOW: its runner holds
   # <root>/run/home.lock across exec for the whole server lifetime. A second
   # install under any label (even with plists hidden from the scan above)
-  # must die here, BEFORE the mkdir/cp/port-write below (attack a4 finding:
-  # a hidden-plist install rewrote run/port on a live root).
+  # must die here, BEFORE runtime selection and the mkdir/cp/port-write below
+  # (attack a4 finding: a hidden-plist install rewrote run/port on a live
+  # root; a refused packed-runtime resolution must not mask this refusal).
   if ! "$PYTHON3_BIN" - "$ROOT" <<'PYLOCK'
 import fcntl, os, sys
 root = sys.argv[1]
@@ -215,6 +207,15 @@ PYLOCK
   then
     die "root $ROOT is live under a running server (home.lock held); stop or uninstall it first"
   fi
+  # A self-contained packed runtime is the default. An explicit --server-bin
+  # is the emergency legacy rollback, not a second default source-tree path.
+  if [ -z "$SERVER_BIN" ]; then
+    SERVER_BIN=$("$PYTHON3_BIN" "$REPO_DIR/tools/mmos_team_server/node_install.py" resolve --root "$ROOT" --command serve) \
+      || die "packed runtime unavailable; run node_install.py install and pack_server.mjs first, or explicitly supply --server-bin for rollback"
+    "$PYTHON3_BIN" "$REPO_DIR/tools/mmos_team_server/node_install.py" resolve --root "$ROOT" --command node >/dev/null \
+      || die "pinned Node receipt or executable is incomplete"
+  fi
+  [ -f "$SERVER_BIN" ] || die "server entrypoint does not exist: $SERVER_BIN"
   mkdir -p "$ROOT/home/userdata" "$ROOT/run" "$ROOT/bin" "$ROOT/config" "$ROOT/scratch-project" "$ROOT/claude-home"
   cp "$REPO_DIR/tools/mmos_team_server/server_runner.sh" "$ROOT/bin/server_runner.sh"
   cp "$REPO_DIR/tools/mmos_team_server/node_install.py" "$ROOT/bin/node_install.py"
