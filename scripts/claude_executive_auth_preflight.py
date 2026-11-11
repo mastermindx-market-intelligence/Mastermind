@@ -13,6 +13,7 @@ from pathlib import Path
 import sys
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 
 COO_SCOPE = "mastermind.executive.coo.act"
 READ_SCOPE = "mastermind.executive.read"
@@ -50,11 +51,16 @@ def _read_adapter(path: Path) -> str | None:
         return None
 
 
+class _DenyRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def _loopback_probe(url: str, *, post: bool = False) -> dict:
     """Fixed loopback-only, unauthenticated request; no proxy or credential use."""
     if url not in (COO_URL, RESOURCE_URL, AUTH_URL):
         raise ValueError("probe URL not in fixed loopback allowlist")
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _DenyRedirect())
     headers = {"Accept": "application/json, text/event-stream"}
     data = MCP_INITIALIZE if post else None
     if post:
@@ -166,8 +172,15 @@ def evaluate(installed: dict | None, claude: dict | None,
         problems.append("LOCAL_OAUTH_DISCOVERY_UNAVAILABLE")
     else:
         endpoint = as_metadata.get("authorization_endpoint")
-        if type(endpoint) is not str or not endpoint.startswith("https://"):
+        if type(endpoint) is not str or urlsplit(endpoint).scheme != "https":
             problems.append("BROWSER_AUTHORIZATION_ENDPOINT_NOT_HTTPS")
+        else:
+            read = installed.get("policies", {}).get("read", {}) if type(installed) is dict else {}
+            issuer = read.get("issuer") if type(read) is dict else None
+            approved = urlsplit(issuer).hostname if type(issuer) is str else None
+            endpoint_host = urlsplit(endpoint).hostname
+            if not approved or endpoint_host not in {approved, "localhost", "127.0.0.1"}:
+                problems.append("BROWSER_AUTHORIZATION_ENDPOINT_UNTRUSTED_HOST")
 
     return {
         "schema": "mastermind.claude_executive_auth_preflight.v1",
