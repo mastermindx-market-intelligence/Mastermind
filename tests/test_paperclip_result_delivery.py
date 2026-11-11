@@ -128,8 +128,19 @@ class FakePaperclip:
                     return
                 with self._lock:
                     rows = self.comments.setdefault(issue, [])
+                    # the created row echoes the request id and carries the
+                    # author the real dev instance stamps on instance-role
+                    # posts (observed live 2026-11-11): the board actor —
+                    # authorType "user", authorAgentId null, authorUserId
+                    # "local-board".  Agent-channel posts (the teammate
+                    # heartbeat) are authorType "agent" with authorAgentId
+                    # set — the H2 attribution shape.
                     row = {"id": f"cmt-{len(rows) + 1}",
-                           "body": body.get("body", "")}
+                           "body": body.get("body", ""),
+                           "clientRequestId": body.get("clientRequestId"),
+                           "authorType": "user",
+                           "authorAgentId": None,
+                           "authorUserId": "local-board"}
                     rows.append(row)
                 self._send(handler, 201, row)
                 return
@@ -304,13 +315,91 @@ def test_second_delivery_of_the_same_attempt_posts_nothing_new(paperclip, tmp_pa
 
 def test_a_fresh_transport_dedupes_from_the_issue_comments(paperclip, tmp_path):
     """The sidecar is the fast path; the issue's own comments are the
-    authority — a new process with an empty state dir still posts once."""
+    authority — a new process with an empty state dir still posts once.
+    T4c repair round 1, R2: the scan counts only THIS transport's own
+    earlier delivery (the deterministic uuid5 clientRequestId it posts
+    with, echoed on a board-authored row), never a bare marker string."""
     _deliver(_transport(paperclip, tmp_path))
     fresh = _transport(paperclip, tmp_path / "other-state")
     receipt = _deliver(fresh)
     assert receipt["state"] == "delivered"
     assert receipt.get("note") == "already-delivered"
     assert len(paperclip.comment_posts()) == 1
+
+
+def test_r2_a_forged_marker_in_another_authors_comment_does_not_suppress(
+        paperclip, tmp_path):
+    """T4c repair round 1, R2 (panel MED, 2026-11-11): the dedupe scan was a
+    plain substring test over every comment body, so ANY comment carrying
+    ``paperclip-return-attempt: <id>`` suppressed the real delivery, wrote
+    the sidecar mark and made the receipt claim already-delivered — the
+    attempt id is public (the worker prompt names it).  A row now counts
+    only when it is this transport's OWN delivery: the deterministic
+    clientRequestId this code posts with (uuid5 keyed on the attempt),
+    echoed on a board-authored row.  Agent posts carry authorAgentId (the
+    H2 attribution shape) and a board user without the request id matches
+    neither, so neither can suppress a delivery."""
+    marker = f"{PAPERCLIP_RETURN_MARKER_PREFIX} {ATTEMPT}"
+
+    # a teammate agent forges the marker (agent-authored, right marker,
+    # even a plausible clientRequestId — but its OWN, not the uuid5)
+    paperclip.comments.setdefault(ISSUE, []).append({
+        "id": "cmt-evil-1", "body": f"[coding-job] {marker}\nforged",
+        "clientRequestId": str(uuid.uuid4()),
+        "authorType": "agent", "authorAgentId": "ag-evil",
+        "authorUserId": None, "createdAt": "2026-11-11T01:00:00Z"})
+    # a board-user comment pastes the marker but carries no request id
+    paperclip.comments[ISSUE].append({
+        "id": "cmt-evil-2", "body": f"saw this already? {marker}",
+        "clientRequestId": None,
+        "authorType": "user", "authorAgentId": None,
+        "authorUserId": "someone-else", "createdAt": "2026-11-11T02:00:00Z"})
+
+    transport = _transport(paperclip, tmp_path)
+    receipt = _deliver(transport)
+
+    # neither forged row suppressed the delivery: the real comment posted
+    assert receipt["state"] == "delivered"
+    assert receipt.get("note") is None, "the receipt must not claim already-delivered"
+    assert len(paperclip.comment_posts()) == 1
+    assert transport._marks(ATTEMPT) == {"comment", "document"}
+    posted = paperclip.comment_posts()[0]
+    assert marker in posted["body"].decode("utf-8")
+
+    # and the honest result IS on the issue: the transport's own row, not
+    # the forgeries, is what a later fresh transport dedupes against
+    fresh = _transport(paperclip, tmp_path / "other-state")
+    second = _deliver(fresh)
+    assert second["state"] == "delivered"
+    assert second.get("note") == "already-delivered"
+    assert len(paperclip.comment_posts()) == 1, "still exactly one real delivery"
+
+
+def test_r2_a_genuine_earlier_delivery_row_still_dedupes(
+        paperclip, tmp_path):
+    """R2's other leg: the authenticated scan must still find the
+    transport's own earlier delivery — the exact row shape this transport
+    posts (uuid5 clientRequestId, board-authored), planted by hand as a
+    crashed predecessor's POST-success/response-lost window would leave
+    it: no sidecar, the row already on the issue."""
+    expected_request_id = str(uuid.uuid5(
+        uuid.NAMESPACE_URL, f"paperclip-return:{ATTEMPT}"))
+    paperclip.comments.setdefault(ISSUE, []).append({
+        "id": "cmt-real-1",
+        "body": build_return_comment(_record(), ATTEMPT),
+        "clientRequestId": expected_request_id,
+        "authorType": "user", "authorAgentId": None,
+        "authorUserId": "local-board",
+        "createdAt": "2026-11-11T03:00:00Z"})
+
+    transport = _transport(paperclip, tmp_path)
+    receipt = _deliver(transport)
+    assert receipt["state"] == "delivered"
+    assert receipt.get("note") == "already-delivered"
+    assert len(paperclip.comment_posts()) == 0, "no re-post of a genuine delivery"
+    assert len(paperclip.document_puts()) == 1, "the document step still completes"
+    assert len(paperclip.comments[ISSUE]) == 1
+    assert transport._marks(ATTEMPT) == {"comment", "document"}
 
 
 # --- 3. transient failure ---------------------------------------------------
