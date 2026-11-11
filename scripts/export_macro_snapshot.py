@@ -160,7 +160,10 @@ def _commit_and_push(root: Path) -> bool:
         return False
 
     # Stage only the snapshot file (-f: site/ subtrees are partly gitignored in the macro repo).
-    _git(root, "add", "-f", _REL_PATH)
+    stage = _git(root, "add", "-f", _REL_PATH)
+    if stage.returncode != 0:
+        print(f"[export_macro_snapshot] could not stage dashboard snapshot (git exit {stage.returncode}).")
+        return False
     # Stage nw_feedback.json alongside — best-effort: absent/error must never abort the snapshot push.
     try:
         nw_path = root / _NW_REL_PATH
