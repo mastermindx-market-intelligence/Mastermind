@@ -307,9 +307,11 @@ def parse_output_block(reply):
     if start is None:
         return None
     key, title, body_lines, closed = None, None, [], False
-    for line in lines[start + 1:]:
+    close_at = None
+    for off, line in enumerate(lines[start + 1:]):
         if line.strip().startswith("```"):
             closed = True
+            close_at = start + 1 + off
             break
         if key is None and line.strip().startswith("key:"):
             key = line.split(":", 1)[1].strip()
@@ -319,6 +321,12 @@ def parse_output_block(reply):
             continue
         body_lines.append(line)
     if not closed or not key:
+        return None
+    # R2a finding 27 (the F9 guard, as the ask block got it): the output
+    # block must END the reply. Words after the closing fence mean the
+    # teammate kept talking — the block is not written as a document; the
+    # reply is still delivered as a plain comment. Whitespace is fine.
+    if any(line.strip() for line in lines[close_at + 1:]):
         return None
     # R2a finding 22: ASCII only — str.isalnum accepts accented letters,
     # and a document key is a filename-shaped identifier.

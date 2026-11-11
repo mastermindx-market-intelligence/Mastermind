@@ -2520,6 +2520,18 @@ def test_after_delivery_failure_never_changes_status():
                    for c in pc.calls)
 
 
+def test_output_block_with_words_after_the_fence_is_ignored():
+    # R2a finding 27: an output block counts only when it ends the reply.
+    # Words after the closing fence mean the teammate kept talking — the
+    # block is not written as an issue document; the reply is still
+    # delivered as a plain comment.
+    block = "```paperclip-output\nkey: summary\ntitle: T\nline one\n```"
+    assert wc.parse_output_block(
+        block + "\nwait, that summary is wrong, ignore it") is None
+    assert wc.parse_output_block(block)["key"] == "summary"
+    assert wc.parse_output_block(block + "\n\n")["key"] == "summary"
+
+
 def test_output_doc_key_is_ascii_identifier_only():
     # R2a finding 22: str.isalnum accepts accented letters ("café"); a
     # document key must be ASCII letters, digits, hyphen and underscore.
