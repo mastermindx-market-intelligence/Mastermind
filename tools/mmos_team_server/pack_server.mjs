@@ -44,12 +44,77 @@ fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
 privateDir(configDir);
 const target = path.join(runtime, id);
 const configPath = path.join(configDir, "server-runtime.json");
-if (fs.existsSync(target) || fs.existsSync(configPath)) {
-  throw new Error("packed runtime or its receipt already exists; inspect before retrying");
+const configTmp = configPath + ".new";
+// F25: one packer at a time per root. A wx lock file holding the pid; a
+// lock left by a KILLED run is recognized (pid gone) and taken over, a lock
+// held by a LIVE process refuses in one line.
+const lockPath = path.join(runtime, ".packing.lock");
+function packLockHeldByLiveProcess() {
+  let holder = 0;
+  try { holder = parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10); } catch { /* unreadable */ }
+  if (!Number.isInteger(holder) || holder <= 0) return false;
+  try { process.kill(holder, 0); return true; } // alive and ours
+  catch (err) { if (err.code === "EPERM") return true; /* ESRCH: dead */ return false; }
 }
-const stage = fs.mkdtempSync(path.join(runtime, ".packing-"));
+function acquirePackLock() {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = fs.openSync(lockPath, "wx", 0o600);
+      fs.writeFileSync(fd, String(process.pid) + "\n");
+      fs.closeSync(fd);
+      return;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+      if (packLockHeldByLiveProcess()) {
+        throw new Error("another pack is already running for this root; let it finish before retrying");
+      }
+      try { fs.unlinkSync(lockPath); } catch (e) { if (e.code !== "ENOENT") throw e; }
+    }
+  }
+  throw new Error(`could not acquire the packing lock: ${lockPath}`);
+}
+acquirePackLock();
+// Everything from here on runs under the lock; the finally releases it no
+// matter which refusal fires, so a refused run leaves no lock debris.
+let stage = "";
 let activated = false;
 try {
+  // Leftovers with this packer's own prefix are debris from a killed run (we
+  // hold the lock, so no live packer owns them) — remove before working.
+  for (const name of fs.readdirSync(runtime)) {
+    if (name.startsWith(".packing-")) {
+      const leftover = path.join(runtime, name);
+      if (!fs.lstatSync(leftover).isDirectory()) {
+        throw new Error(`unexpected runtime leftover (not a directory): ${leftover}`);
+      }
+      fs.rmSync(leftover, { recursive: true, force: true });
+    }
+  }
+  function refuseExisting() {
+    let hint = "inspect before retrying";
+    if (fs.existsSync(target) && !fs.existsSync(configPath) && fs.existsSync(configTmp)) {
+      hint = `a previous pack published ${target} but could not install its config receipt; ` +
+        `finish by hand: mv ${configTmp} ${configPath}`;
+    }
+    throw new Error(`packed runtime or its receipt already exists; ${hint}`);
+  }
+  if (fs.existsSync(target) || fs.existsSync(configPath)) refuseExisting();
+  // F24: a failed install must leave its log AND name it — the old `wx` write
+  // failed with EEXIST on the second failure, masking the install error itself.
+  function writeFailureLog(base, content) {
+    const candidates = [base];
+    for (let n = 2; n <= 100; n++) candidates.push(base.replace(/\.log$/, `-${n}.log`));
+    for (const candidate of candidates) {
+      try {
+        fs.writeFileSync(candidate, content, { mode: 0o600, flag: "wx" });
+        return candidate;
+      } catch (err) {
+        if (err.code !== "EEXIST") throw err;
+      }
+    }
+    throw new Error(`cannot write a unique failure log beside ${base}`);
+  }
+  stage = fs.mkdtempSync(path.join(runtime, ".packing-"));
   const dist = path.join(stage, "dist");
   const deps = path.join(stage, "production");
   fs.cpSync(path.join(source, "apps/server/dist"), dist, { recursive: true });
@@ -102,8 +167,8 @@ try {
   });
   if (install.error) throw install.error;
   if (install.status !== 0) {
-    const where = path.join(runtime, `${id}-install-failure.log`);
-    fs.writeFileSync(where, install.stdout + install.stderr, { mode: 0o600, flag: "wx" });
+    const where = writeFailureLog(path.join(runtime, `${id}-install-failure.log`),
+      install.stdout + install.stderr);
     throw new Error(`production dependency install failed (exit ${install.status}): ${where}`);
   }
   const nm = path.join(deps, "node_modules");
@@ -152,7 +217,7 @@ try {
   hashes(dist);
   const finalDist = path.join(target, "dist");
   const receipt = {
-    schemaVersion: 1, kind: "t3-packed-server-runtime",
+    schemaVersion: 2, kind: "t3-packed-server-runtime",
     version: serverPackage.version, sourceRevision: "0770446 + text-delta patch",
     sourceAtBuild: source, buildCommand: "vp run --filter t3 build",
     productionDependencyCommand: STAGE_INSTALL_ARGS.join(" "),
@@ -163,12 +228,25 @@ try {
   };
   fs.writeFileSync(path.join(dist, "BUILD_RECEIPT.json"), JSON.stringify(receipt, null, 2) + "\n", { mode: 0o600 });
   fs.writeFileSync(path.join(stage, "file-digests.json"), JSON.stringify(files, null, 2) + "\n", { mode: 0o600 });
+  // F12: everything that can fail while writing is done BEFORE the single
+  // publishing rename, so a refusal publishes nothing. The config receipt
+  // (the file the resolver reads) is staged first and moved into place with a
+  // rename after the tree lands; a crash between the two renames leaves the
+  // tree published, the config receipt one `mv` away, and the next run's
+  // refusal says exactly that.
+  try { fs.unlinkSync(configTmp); } catch (e) { if (e.code !== "ENOENT") throw e; }
+  fs.writeFileSync(configTmp, JSON.stringify(receipt, null, 2) + "\n", { mode: 0o600 });
   fs.renameSync(stage, target);
   activated = true;
-  fs.writeFileSync(configPath, JSON.stringify(receipt, null, 2) + "\n", { mode: 0o600, flag: "wx" });
+  try {
+    fs.renameSync(configTmp, configPath);
+  } catch (err) {
+    throw new Error(`packed runtime published at ${target} but its config receipt could not be installed: ${err.message}; finish by hand: mv ${configTmp} ${configPath}`);
+  }
   console.log(`PACKED version=${serverPackage.version} server=${receipt.serverBin} files=${files.length}`);
 } finally {
-  if (!activated) fs.rmSync(stage, { recursive: true, force: true });
+  if (!activated && stage) fs.rmSync(stage, { recursive: true, force: true });
+  try { fs.unlinkSync(lockPath); } catch { /* holder handover */ }
 }
 
 // Rename has no symlink traversal semantics and all stages remain in private
