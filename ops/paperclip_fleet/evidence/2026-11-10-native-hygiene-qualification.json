@@ -1,0 +1,248 @@
+{
+  "schema": "paperclip.hermes.native-hygiene-qualification.v1",
+  "operation_id": "paperclip-fleet-readiness-20261109",
+  "observed_at": "2026-11-10T07:03:27.264915+00:00",
+  "source_adoption_predecessor": "c1a8c0ae061a917db52abe988c1cea0f0478efb9",
+  "result": "COMPOSED_NATIVE_CHECKS_PASSED_LIVE_ACTIVATION_OPEN",
+  "original_artifact": "7f1d-v11",
+  "original_preparation_state": "prepared",
+  "original_test_and_check_exit_codes": [
+    0,
+    0
+  ],
+  "installed_head": "ba4ddf9945a213ede9dda016602a86591ed634f9",
+  "baseline_commit": "80cd0e781a9b9ca3ed5657243a7f961dada8e149",
+  "credential_candidate_commit": "5de1c0104d42eb406dcad6e3adf8dcacf8d5e968",
+  "private_composed_commit": "ea2cbbbe7ab1aef0aa8211e47d29238a12f4855a",
+  "qualified_tree": "08ffdd48f5e0ed105fb628b137485073e8939b05",
+  "source_publication_commit": false,
+  "hygiene_patch": {
+    "repository_path": "integrations/paperclip_hermes/native-baseline-hygiene.patch",
+    "sha256": "2610c739ad692ba774d3b7ff83716e5f58d1f3d8ae86a70b1e3dac5002a0c663",
+    "files": 8,
+    "before_sha256": {
+      "cron/scheduler.py": "2ab6b65f8eb07a121d00d6913db339efbf65c4e25a57f225b2ac87fa28cd0767",
+      "cron/scheduler_tick.py": "b3218cad433fb36ca70225a92d376d200901a53bd04527fe66a0af95b4a5bb05",
+      "agent/steer_text.py": "0837a3a4fc27d8699382a4f57492a088ee2a78036d1fe5ef418f3d32abd43f98",
+      "hermes_cli/config.py": "04b0ec7de32e1176ad3b5d6cefc64045e6b6287664d8a84487d75801745d8b68",
+      "tests/cron/test_tick_lock_staleness.py": "3850ed499212e4a7716ad3c9978ace3ca8c1e359f29b9cef1061a33dddca1aba",
+      "tests/gateway/test_drain_marker_status.py": "bc66c5248128cab7cc848cf200a9f5254c59be6d2b263f68ca8ab98e37f135ac",
+      "tests/test_fallback_family_first.py": "5d93dac235f2b9ce7f6e7759f3955d6b4ec4f77beb9e62652d58e37c2109e456",
+      "tests/tools/test_browser_real_profile.py": "4ceb8fba81beb99f7f190bf0b320e52fee820ee396603c896225f147321be2b5"
+    },
+    "after_sha256": {
+      "cron/scheduler.py": "e70bf6f3bfef3cd3619e8f9e65d1f7422283c60e1c2a1003391b3d86c86bac71",
+      "cron/scheduler_tick.py": "82df4812d388bb987987804b6df4bd853d27be4d114155d0911df82923385adc",
+      "agent/steer_text.py": "106f1cbbfcc60dc21b271cf0fbe957087a86081d8f180f4b3838e2dea0a8cc7b",
+      "hermes_cli/config.py": "b83f279bc7f31c03a19654cec74d74cfb2b1c6741ab4b658ce08ff11d90aa94e",
+      "tests/cron/test_tick_lock_staleness.py": "e2a4ac9597f9c27cebc2227fdc3fcbf6c331e0a250816bbc5f964c162eee1403",
+      "tests/gateway/test_drain_marker_status.py": "0efe2028022b32b714fc9649a495d1a109767ff38569659a135deb0df26d7e20",
+      "tests/test_fallback_family_first.py": "292922fea637ac254358a88779921d848b90891eb9c726dd456e7bf76f992d8a",
+      "tests/tools/test_browser_real_profile.py": "de08c9f275ed2c95898609eedc3e1b7bb957314ad49abcda962c84a208b9577e"
+    },
+    "repository_representation": {
+      "original_sha256": "fe2f3f9d5a5dc8c6360b5c2facdc622f39c6cf61aaca880bf50fdaa29d5145d3",
+      "normalized_empty_context_lines": 16,
+      "format": "Full-context unified diff; native Git accepts bare empty context lines",
+      "application_options": [],
+      "roundtrip_receipt_sha256": "bfe4db779d2aeb59fe655efd4e25ccf160f72d251ff13b8b4acdbd94ee1952e0",
+      "verified_preimages": 8,
+      "verified_qualified_postimages": 8,
+      "apply_check_exit": 0,
+      "apply_exit": 0,
+      "installed_source_changed": false
+    }
+  },
+  "composition": {
+    "credential_postimages_unchanged": true,
+    "credential_targets": 25,
+    "total_install_targets": 33,
+    "production_and_generated_targets": 29,
+    "existing_test_targets": 4,
+    "qualification_only_credential_fixture_count": 3,
+    "captured_source_count": 85,
+    "captured_credential_targets": 3,
+    "captured_hygiene_targets": 8,
+    "other_captured_source_bytes_preserved": 74,
+    "postimage_directory": "/Volumes/Mastermind 2/agent-workspaces/web/paperclip-hermes-installed-composition-xlnk184e/postimage-composed-v11",
+    "before_after_sha256": {
+      "agent/launch_credential_binding.py": {
+        "after_sha256": "f7b2afe6fb6d14ca607e99f3fe1d54afab2c36dc2e08db1c81412da9c869b679",
+        "before_sha256": null
+      },
+      "agent/redact.py": {
+        "after_sha256": "b0e01bad3faedb420625c3678c059c05f13a48c54f93d23eb27b884916e7fae2",
+        "before_sha256": "b853178208878eec7e9c392e6c5694d9cb171593386b70be887e1542032acc74"
+      },
+      "agent/tool_executor.py": {
+        "after_sha256": "1ac4536e08d826a432ab04f5b83670914c93f3e1003cf4191628e3a744d71284",
+        "before_sha256": "c85e239d1d56ad415902db2371e9e28c2216f6fd72e29860cff7f97b2e05a0c2"
+      },
+      "gateway/session_controls.py": {
+        "after_sha256": "f5a5d69fb191c212c0deae4eb3e1f07e7f5863337a1211e97907cd5e29255f48",
+        "before_sha256": "3e6797de16ee375f21221a5da1c589756c6d0c31f21cd342a16a020eba891b71"
+      },
+      "gateway/session_finite.py": {
+        "after_sha256": "87dfa65b978f858f87b3ada20898e7f176eccf3b453727e93705bb7a110aa2d2",
+        "before_sha256": "c04334e10c200ac4a1955a1876bdcca94ebb7271b1eada4c6433226220bca99c"
+      },
+      "gateway/session_launch_credentials.py": {
+        "after_sha256": "c6ec1fb3409254ff390238949a0b969b6cd48a8abfbfce31a96bed7996ad5bee",
+        "before_sha256": null
+      },
+      "gateway/session_local.py": {
+        "after_sha256": "62415a91f93b21d4f98790196a2417c675a519e6010abf1a2d4ee26c91d88320",
+        "before_sha256": "b417164aaf12599f139119dceef592e4f6e0cee6255e070c47ee3f392cacf8a6"
+      },
+      "gateway/session_policy.py": {
+        "after_sha256": "000a58abeef3eba537771d32b52299075d5f87eb60407470f0f7b3219d506d34",
+        "before_sha256": "2fd143cfa7be04a2c3cea181dbe39d32945cfc9d8449e499f4aa2766213dd878"
+      },
+      "hermes_cli/gateway_chat.py": {
+        "after_sha256": "32608841b9eb2e185056e65df40440fda418f08ea9e697956d3dfa307232a1a6",
+        "before_sha256": "f689d2471c2020e2b884375f45dc850332af934f958d2a633ec1275cf6ebdb02"
+      },
+      "hermes_cli/gateway_runtime_start.py": {
+        "after_sha256": "706418ffcd384f9218c5f028aa538f57a52278b3eac0f50755a03e5f74422a36",
+        "before_sha256": "30c0a8fcbb2ebadd119ddbf54f21712818a2f68a26125d64eddbdb6916df2f15"
+      },
+      "hermes_cli/gateway_session_store.py": {
+        "after_sha256": "9b22b3c9d5265191360bb3296156c244457468cb8b7784fe69b1765a96dff847",
+        "before_sha256": "a1801c7e3908b018bac9ba0b662558028a93db0567a40e866d80102c9cac95c7"
+      },
+      "hermes_cli/plugin_host.py": {
+        "after_sha256": "d98cedb5abf913720374468358e2b905c12f79942df7f205cf0b960834f11d20",
+        "before_sha256": "c1b64e49fcdedbb42a6567c20cb0118c131711dbe1953322d85d3b455bdaa66f"
+      },
+      "hermes_cli/plugins_capability_ctx.py": {
+        "after_sha256": "d77aec862889583ebb13d3b233c02b8ee0bed3b55d52b93945db7406497f74d9",
+        "before_sha256": "62cae94191ffebc47294031e3ee26184df9db823a1861bf84b407e84cd76ae83"
+      },
+      "hermes_cli/plugins_launch_credentials.py": {
+        "after_sha256": "f8cc907e595480a747aca165cfa1d2dd0ccb889d2c942b34cfbbb037c8f6d30c",
+        "before_sha256": null
+      },
+      "hermes_cli/plugins_manifest.py": {
+        "after_sha256": "52c32f27c462c415ad233b91a9d1f47018a6f2bf3cec208e59aad68a7deb7856",
+        "before_sha256": "89b30e679247a628c7dad93c573afa9f3f22529015b26397de24f5067ff7fc06"
+      },
+      "hermes_logging.py": {
+        "after_sha256": "46ef41de5c341629fc9edb8c63b347d91ce150f9e4643e351bc8eafb2f3dc957",
+        "before_sha256": "f273bd3eb2c77027c16a2bbfb041e28a379f7135a514cb80971e09a22d96e908"
+      },
+      "hermes_state_local.py": {
+        "after_sha256": "1d9e6c7c217e18e0eea5180cc60a044e955795c8671d98f650f5e53cdd609a08",
+        "before_sha256": "359a03844bab07242c47748e9771fcc5d16a5144d4d099aeff483dc6f0efd1d2"
+      },
+      "model_tools.py": {
+        "after_sha256": "3a57b7e9880a19c71f24457783a31424cd5c29b8dc7c505647b0512ef155dee6",
+        "before_sha256": "24850d5ce74f7bcf17e58638fc787d6b955bfb89f4980e74b361d7927de74581"
+      },
+      "tools/environments/base.py": {
+        "after_sha256": "e963b063828b3663ac6a305984f65554bc908e48568825d4b78704f646fbaf4b",
+        "before_sha256": "aa081d39e706ee6e9ae2fd97b16e68af838307e613846c8c4d281b8677c76384"
+      },
+      "tools/environments/local.py": {
+        "after_sha256": "30fee71486c9e376c05204d2c39bfb681dc06222bd413fa68bf3670a4934157d",
+        "before_sha256": "fe0222c27ad5343379ba21c349bf5444ff7a645392c90be3e3046b75832cd763"
+      },
+      "tui_gateway/contracts/canonical_sessions.py": {
+        "after_sha256": "a5f7d8e0b62e508481235688ed7f8c0b3a0728e9642be9333bad9f0ef7016f40",
+        "before_sha256": "5f5e841c1fae7e975b8531682495010c278938805feb45e63240f7560386ea65"
+      },
+      "tui_gateway/contracts/registry.py": {
+        "after_sha256": "5272ef5fc93aa0e2ef5eff7639b5548193ce145212c09e883a50315cd621df5c",
+        "before_sha256": "49d98a155794e0caec36c572326c8ed7a1bd95d2fec259c1704dae94dd27743f"
+      },
+      "tui_gateway/ws.py": {
+        "after_sha256": "8c5704eb95bf724bf5760b70e75b9565959996d118ab282ed4a8b67f8acc60af",
+        "before_sha256": "e0724c36018b9dac129a2e93f279436c13a373903e7a36e4104187c2e47f8d2b"
+      },
+      "apps/shared/src/gateway-contract.generated.ts": {
+        "after_sha256": "a348aa44ba9ce1d205489412b10873760d24e4b776dd321d300799a900a492ed",
+        "before_sha256": "4d22f8815c73b628519683eee6c2c413812624890a7431a03056e79ac5a38a6c"
+      },
+      "apps/shared/src/gateway-contract.openrpc.json": {
+        "after_sha256": "adfe6e2ecb4dffa8c44305d56c6851578938d1332947063f24474229fa825ea1",
+        "before_sha256": "37e14b736bb24c8ac7b0d565971229d6f718de68456df84297461d969fdb605d"
+      },
+      "cron/scheduler.py": {
+        "before_sha256": "2ab6b65f8eb07a121d00d6913db339efbf65c4e25a57f225b2ac87fa28cd0767",
+        "after_sha256": "e70bf6f3bfef3cd3619e8f9e65d1f7422283c60e1c2a1003391b3d86c86bac71"
+      },
+      "cron/scheduler_tick.py": {
+        "before_sha256": "b3218cad433fb36ca70225a92d376d200901a53bd04527fe66a0af95b4a5bb05",
+        "after_sha256": "82df4812d388bb987987804b6df4bd853d27be4d114155d0911df82923385adc"
+      },
+      "agent/steer_text.py": {
+        "before_sha256": "0837a3a4fc27d8699382a4f57492a088ee2a78036d1fe5ef418f3d32abd43f98",
+        "after_sha256": "106f1cbbfcc60dc21b271cf0fbe957087a86081d8f180f4b3838e2dea0a8cc7b"
+      },
+      "hermes_cli/config.py": {
+        "before_sha256": "04b0ec7de32e1176ad3b5d6cefc64045e6b6287664d8a84487d75801745d8b68",
+        "after_sha256": "b83f279bc7f31c03a19654cec74d74cfb2b1c6741ab4b658ce08ff11d90aa94e"
+      },
+      "tests/cron/test_tick_lock_staleness.py": {
+        "before_sha256": "3850ed499212e4a7716ad3c9978ace3ca8c1e359f29b9cef1061a33dddca1aba",
+        "after_sha256": "e2a4ac9597f9c27cebc2227fdc3fcbf6c331e0a250816bbc5f964c162eee1403"
+      },
+      "tests/gateway/test_drain_marker_status.py": {
+        "before_sha256": "bc66c5248128cab7cc848cf200a9f5254c59be6d2b263f68ca8ab98e37f135ac",
+        "after_sha256": "0efe2028022b32b714fc9649a495d1a109767ff38569659a135deb0df26d7e20"
+      },
+      "tests/test_fallback_family_first.py": {
+        "before_sha256": "5d93dac235f2b9ce7f6e7759f3955d6b4ec4f77beb9e62652d58e37c2109e456",
+        "after_sha256": "292922fea637ac254358a88779921d848b90891eb9c726dd456e7bf76f992d8a"
+      },
+      "tests/tools/test_browser_real_profile.py": {
+        "before_sha256": "4ceb8fba81beb99f7f190bf0b320e52fee820ee396603c896225f147321be2b5",
+        "after_sha256": "de08c9f275ed2c95898609eedc3e1b7bb957314ad49abcda962c84a208b9577e"
+      }
+    },
+    "combined_patch": "/Volumes/Mastermind 2/agent-workspaces/web/paperclip-hermes-installed-composition-xlnk184e/finite-launch-credentials-with-hygiene-v11.patch",
+    "combined_patch_sha256": "4489a7f96400db0a9919b155a270c4dfbc93a82e01fc7693b0952d553d3d9c86",
+    "git_apply_check_exit": 0
+  },
+  "native_source_checks": {
+    "total": 14,
+    "passed": 14,
+    "exit_code": 0,
+    "health_blocking": 0,
+    "health_advisory": 0,
+    "log": "native-checks-hygiene-7f1d-v11.log",
+    "log_sha256": "dce2968c165aeea55f3523179a0c8db36d239cc0af44355ebe14d60323ccf2b2"
+  },
+  "native_tests": {
+    "passed": 91,
+    "failed": 0,
+    "credential_cases_already_counted": 62,
+    "original_credential_compatibility_total": 128,
+    "distinct_totals_not_added": true,
+    "files": [
+      "tests/agent/test_launch_credential_binding.py",
+      "tests/gateway/test_launch_credential_gateway.py",
+      "tests/tools/test_launch_credential_tools.py",
+      "tests/cron/test_tick_lock_staleness.py",
+      "tests/hermes_cli/test_config_observational.py"
+    ],
+    "log": "native-tests-hygiene-7f1d-v11.log",
+    "log_sha256": "c82db6aa84b582221f84d65562df8b18e9d81f73ee2bb8de88e85a49530ad0cf"
+  },
+  "historical_baseline_result": {
+    "source_record": "ops/paperclip_fleet/evidence/2026-11-10-credential-qualification.json",
+    "passed_checks": 12,
+    "total_checks": 14,
+    "status": "historical failing v8 composition; retained unmodified"
+  },
+  "runtime_changed": false,
+  "installed_writer_custody_acquired": false,
+  "live_acceptance_complete": false,
+  "remaining_requirements": [
+    "protected source release and current required CI",
+    "fresh exclusive installed-source custody and native safe cutover",
+    "running finite-launch credential capability, plugin and required-binding readback",
+    "original MAS-2 authenticated task and runtime MCP proof",
+    "actual Fabric route and observed usage",
+    "admitted OMH and skill learning with later retrieval"
+  ]
+}

@@ -1431,9 +1431,12 @@ def provider_fleet_launch_repair_files(root=None):
 
 
 def before_provider_fleet_launch_repair(manifest):
-    """Invert only the complete qualified APPLICATION/fleet119 source tuple."""
+    """Invert only qualified fleet119, including its exact selected43 Go view."""
     if type(manifest) is not dict:
         raise ValueError("provider fleet launch repair APPLICATION closure differs")
+    # The Go dependency view retains five selected43 sources. Only the complete,
+    # SHA-bound 119-member parent is projected; caller/installed bytes stay intact.
+    manifest = _project_native43_go_dependency_parent(manifest)
     marked = any(manifest.get(name) == digest for markers in (
         PROVIDER_FLEET_LAUNCH_REPAIR_MARKERS,
         PROVIDER_FLEET_LAUNCH_REPAIR_NATIVE_MARKERS,
@@ -1526,6 +1529,31 @@ def _before_memory_support_with_carriers(manifest):
 NATIVE43_RETAINED_CLOSED_SHA256 = "2ab4ed6362693a2638e761ffb74b63e6c061ddd4481b759dde3051180420cd28"
 NATIVE43_RETAINED_COMPOSED_SHA256 = "565828df12e4b0ebcb5009a865906ef58bff176b628a3aa7d9f85b4ea908d550"
 NATIVE43_RETAINED_MEMBERS = {'ext/experiential_bridge.py': ('288471efc8b10e1471102b34096d77d725ab935cc6574e4c943909f68cb346de', '1e364feec281b731293f1dcc05ed4f71ab4221433e0ba2dd8c5684f0098ad36e'), 'ext/experiential_host_context.py': ('ad157e490bdd949ca19c64897db0257434c3a0a0b45c69361dd57a3db223c276', '129f2fa556499fac57b4388dfd1ab8edfc0c127c67e3047a81bd9accd5a824c7'), 'ext/experiential_plan_policy.py': ('4c0927912ffb247d4ba4bda41143471e31322ea7c9bf4541573ba0f6ca013ae8', 'f7242f6bcfe0227fc6a7374430c101a845903c8ff4e2da9a9fa42b43d75d81cc'), 'ext/experiential_transport.py': ('499663819213645acb10e3948c29185abdbbad781660adcc47bca3c0c8786639', '47bb544363435c5bfe6f4773a856ee20cd016c34ba1dac4840952bc078c3b291'), 'ext/native_plan_worker.py': ('9e450c6aab4c4a82b8f78b5706c7eaa7236241dba030a762b6257d3b0f8d11dc', '2df8947c446e143d46bbf979e30dd11965080922839e2e37c3d8c0289ef2af7b')}
+
+
+# Closed Go dependency view only: protected native43 retained-five source after
+# exact quota-reset inversion. This is NOT a general fleet119 input override.
+NATIVE43_GO_DEPENDENCY_PARENT_SHA256 = "a8cae6fc64df7fdc4b958aad4e2d0425979ac7dacb2ee074d5c78b25f40fc24f"
+NATIVE43_GO_DEPENDENCY_HISTORICAL_SHA256 = "ed5de7829d0aef3e6a306a93ba8779cf80164e5b96e6faf2d083ed7b584099d0"
+
+
+def _project_native43_go_dependency_parent(manifest):
+    """Bind the entire retained-five parent before historical fleet119 inverse.
+
+    Return a new validator-only map. Never substitute predecessor source in the
+    generated generation, Go component, inventory, native CURRENT or caller map.
+    """
+    if (type(manifest) is not dict or len(manifest) != 119
+            or _manifest_digest(manifest) != NATIVE43_GO_DEPENDENCY_PARENT_SHA256):
+        return manifest
+    projected = dict(manifest)
+    for name, (original, selected) in NATIVE43_RETAINED_MEMBERS.items():
+        if manifest.get(name) != selected:
+            raise ValueError("native43 Go retained-five dependency source differs")
+        projected[name] = original
+    if _manifest_digest(projected) != NATIVE43_GO_DEPENDENCY_HISTORICAL_SHA256:
+        raise ValueError("native43 Go retained-five dependency parent differs")
+    return projected
 
 
 def _normalize_native43_retained_successor(before, after):

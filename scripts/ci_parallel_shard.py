@@ -43,13 +43,22 @@ _EXPECTED_PIN_GUARDS_STEPS = [
 # zero into a parallel job. The exact-step list below preserves each gate's
 # trusted working directory and command surface; a green job that silently
 # cut a command can no longer pass the workflow validator.
+# Sixth gate: the web application typecheck. pr_fast owns it for fast/smoke
+# candidates and is skipped in full mode, so the qualification job is the
+# only place a full merge group, push or manual run can typecheck
+# app/mastermind_os. It is unconditional: pr_scope never runs on
+# push/dispatch and every fail-closed HOLD decision reports
+# needs_node=false, so that output cannot be its condition.
+_TYPECHECK_GATE_NAME = "Typecheck web application"
+_TYPECHECK_COMMAND = "npm --prefix app/mastermind_os run typecheck"
 _EXPECTED_QUALIFICATION_STEPS = [
     {'uses': 'actions/checkout@v4',
      'with': {'fetch-depth': 0, 'persist-credentials': False}},
     {'uses': 'actions/setup-node@v4',
      'with': {'node-version': '22.14.0',
               'cache': 'npm',
-              'cache-dependency-path': 'integrations/studio_direct_mcp/package-lock.json'}},
+              'cache-dependency-path': 'integrations/studio_direct_mcp/package-lock.json\n'
+                                       'app/mastermind_os/package-lock.json\n'}},
     {'uses': 'actions/setup-python@v5', 'with': {'python-version': '3.12', 'cache': 'pip'}},
     {'name': 'Install project',
      'run': 'python -m pip install --upgrade pip\npython -m pip install -e ".[dev]"'},
@@ -80,7 +89,19 @@ _EXPECTED_QUALIFICATION_STEPS = [
     {'name': 'Validate shell scripts',
      'run': "find scripts ops/executive_os -type f -name '*.sh' -print0 |\n"
             '  xargs -0 -n1 bash -n\n'},
+    {'name': _TYPECHECK_GATE_NAME,
+     'run': 'npm ci --prefix app/mastermind_os --ignore-scripts --no-audit --no-fund\n'
+            + _TYPECHECK_COMMAND + '\n'},
 ]
+
+
+# Only positively identified title/body edits are irrelevant to source CI.
+# A base change (even an incomplete one) or unknown edited payload stays checked.
+_METADATA_EDIT = "github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)"
+_REQUIRED_PR_SCOPE_IF = "${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) }}"
+_REQUIRED_GATE_IF = "${{ always() && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) }}"
+_REQUIRED_GATE_NAME = "${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) && 'PR metadata edit' || 'test' }}"
+_REQUIRED_CONCURRENCY = {"group": "ci-${{ github.workflow }}-${{ github.ref }}${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) && '-metadata' || '' }}", "cancel-in-progress": True}
 
 _EXPECTED_SHARD_SOURCE_STEPS = [
     {"name": "Acquire immutable corpus fixture anchor", "uses": "actions/checkout@v4",
@@ -92,6 +113,17 @@ _EXPECTED_SHARD_SOURCE_STEPS = [
      "run": "set -euo pipefail\n"
             'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"\n'
             "git cat-file -e 'edd30b4686d3aaf358b4ca6ebd9485b04d15751d^{commit}'\n"},
+]
+
+
+# The fan-in job runs no suite, but its gate revalidates the canonical plan
+# with repository code. Pin every step before the gate so nothing can replace
+# that code or redirect the gate's working directory.
+_EXPECTED_GATE_SETUP_STEPS = [
+    {"uses": "actions/checkout@v4"},
+    {"uses": "actions/setup-python@v5", "with": {"python-version": "3.12"}},
+    {"name": "Install gate parser",
+     "run": "python -m pip install --disable-pip-version-check PyYAML==6.0.2"},
 ]
 
 
@@ -110,11 +142,17 @@ _EXPECTED_SCOPE_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth':
          'if [ -n "$trusted_base" ] &&\n'
          '   git cat-file -e "${trusted_base}:scripts/__init__.py" 2>/dev/null &&\n'
          '   git cat-file -e "${trusted_base}:scripts/ci_pr_scope.py" 2>/dev/null &&\n'
-         '   git cat-file -e "${trusted_base}:scripts/ci_pr_smoke.py" 2>/dev/null &&\n'
          '   git cat-file -e "${trusted_base}:control_plane/__init__.py" 2>/dev/null &&\n'
          '   git cat-file -e "${trusted_base}:control_plane/github_review_risk_policy.py" 2>/dev/null; then\n'
-         '  git archive "$trusted_base" scripts/__init__.py scripts/ci_pr_scope.py scripts/ci_pr_smoke.py control_plane/__init__.py control_plane/github_review_risk_policy.py |\n'
+         '  git archive "$trusted_base" scripts/__init__.py scripts/ci_pr_scope.py control_plane/__init__.py control_plane/github_review_risk_policy.py |\n'
          '    tar -x -C "$trusted"\n'
+         "  # The current classifier's closure is the four files above. A PR\n"
+         '  # whose recorded base predates #2439 still classifies with a\n'
+         '  # protected classifier that imports the smoke selector; only that\n'
+         '  # legacy classifier receives its own protected-base copy.\n'
+         '  if grep -q \'^from scripts\\.ci_pr_smoke import \' "$trusted/scripts/ci_pr_scope.py"; then\n'
+         '    git archive "$trusted_base" scripts/ci_pr_smoke.py | tar -x -C "$trusted"\n'
+         '  fi\n'
          '  if grep -q \'^def classify_merge_group(\' "$trusted/scripts/ci_pr_scope.py"; then\n'
          '    PYTHONPATH="$trusted" python "$trusted/scripts/ci_pr_scope.py" \\\n'
          '      --repo "$GITHUB_WORKSPACE" --event "$GITHUB_EVENT_PATH" \\\n'
@@ -176,6 +214,31 @@ _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 
 # independently of the change under test. No self-hosted runner carries this
 # label. Scope classification and the `test` fan-in run no suite.
 HOSTED_TEST_RUNNER = "ubuntu-24.04"
+# The workflow root may declare exactly the released keys. A workflow-level
+# `defaults:` (e.g. defaults.run.shell injection) or `env:` (e.g.
+# npm_config_dry_run) applies to every job and could neuter all steps while
+# every per-job check still passes, so unknown root keys are drift.
+# ci_pytest._WorkflowYAMLLoader keeps the bare `on:` trigger key a string
+# (never a YAML 1.1 boolean), so this set comparison matches the real file.
+_WORKFLOW_ROOT_KEYS = frozenset(
+    {"name", "on", "permissions", "concurrency", "jobs"})
+# Root content that is pinned beside the key set: renaming the workflow
+# re-splits the concurrency group and turning cancel-in-progress off lets
+# superseded runs keep consuming the hosted queue.
+_WORKFLOW_NAME = "CI"
+# Exact keys for every job, as for pin_guards and qualification below: a
+# job-level defaults/env/container/services (e.g. defaults.run.shell on `test`
+# makes the fan-in gate exit 0 without reading any shard result) changes what
+# the pinned step text executes while every per-step check still passes.
+_PR_SCOPE_JOB_KEYS = frozenset(
+    {"name", "if", "permissions", "runs-on", "timeout-minutes", "outputs", "steps"})
+_PR_FAST_JOB_KEYS = frozenset(
+    {"name", "needs", "if", "permissions", "runs-on", "timeout-minutes", "steps"})
+_PYTEST_SHARDS_JOB_KEYS = frozenset(
+    {"name", "needs", "if", "permissions", "runs-on", "timeout-minutes",
+     "strategy", "steps"})
+_TEST_GATE_JOB_KEYS = frozenset(
+    {"name", "needs", "if", "runs-on", "timeout-minutes", "steps"})
 _PIN_GUARDS_JOB_KEYS = frozenset(
     {"name", "if", "permissions", "runs-on", "timeout-minutes", "steps"})
 _QUALIFICATION_JOB_KEYS = frozenset(
@@ -246,6 +309,21 @@ def _validate_qualification_lane(jobs: dict) -> None:
     if type(timeout) is not int or not 5 <= timeout <= 20:
         raise ci_pytest.PolicyError("qualification timeout must be finite and bounded")
     steps = qual.get("steps")
+    # The typecheck is required here by name and command, exactly once: it
+    # is the only typecheck a full merge group, push or manual run gets.
+    typecheck = [
+        step for step in steps
+        if isinstance(step, dict) and step.get("name") == _TYPECHECK_GATE_NAME
+    ] if isinstance(steps, list) else []
+    if (
+        len(typecheck) != 1
+        or typecheck[0].get("if") is not None
+        or typecheck[0].get("continue-on-error") is not None
+        or _TYPECHECK_COMMAND not in str(typecheck[0].get("run", "")).splitlines()
+    ):
+        raise ci_pytest.PolicyError(
+            "qualification job must typecheck the web application unconditionally"
+        )
     if not isinstance(steps, list) or len(steps) != len(_EXPECTED_QUALIFICATION_STEPS):
         raise ci_pytest.PolicyError("qualification steps missing or duplicated")
     if steps != _EXPECTED_QUALIFICATION_STEPS:
@@ -273,7 +351,7 @@ def _validate_pr_fast_lane(jobs: dict) -> None:
         raise ci_pytest.PolicyError("PR scope and fast CI jobs must be mappings")
     if (
         scope.get("name") != "PR test scope"
-        or scope.get("if") != "${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}"
+        or scope.get("if") != _REQUIRED_PR_SCOPE_IF
         or scope.get("needs") is not None
         or scope.get("permissions") != {"contents": "read"}
         or scope.get("runs-on") != "ubuntu-latest"
@@ -293,6 +371,8 @@ def _validate_pr_fast_lane(jobs: dict) -> None:
         or fast.get("continue-on-error") is not None
     ):
         raise ci_pytest.PolicyError("PR scope must be trusted and PR fast lane must be bounded")
+    if set(scope) != _PR_SCOPE_JOB_KEYS or set(fast) != _PR_FAST_JOB_KEYS:
+        raise ci_pytest.PolicyError("PR scope or PR fast job keys drifted")
     scope_steps, fast_steps = scope.get("steps"), fast.get("steps")
     if not isinstance(scope_steps, list) or len(scope_steps) != 3 or not isinstance(fast_steps, list) or len(fast_steps) != 8:
         raise ci_pytest.PolicyError("PR scope/fast steps missing or duplicated")
@@ -413,8 +493,18 @@ def validate_parallel_workflow(text: str) -> None:
 
     ci_pytest.validate_workflow(text)
     payload = yaml.load(text, Loader=ci_pytest._WorkflowYAMLLoader)
+    # validate_workflow already refused non-string root keys (a coerced
+    # boolean `on` among them), so the set comparison below is exact.
+    if set(payload) != _WORKFLOW_ROOT_KEYS:
+        raise ci_pytest.PolicyError(
+            "CI workflow root keys must be exactly name, on, permissions, concurrency, jobs"
+        )
     if payload.get("permissions") != {"contents": "read"}:
         raise ci_pytest.PolicyError("CI workflow root may only read source")
+    if payload.get("name") != _WORKFLOW_NAME:
+        raise ci_pytest.PolicyError("CI workflow name must stay the released value")
+    if payload.get("concurrency") != _REQUIRED_CONCURRENCY:
+        raise ci_pytest.PolicyError("metadata edits must not cancel source/base qualification")
     jobs = payload.get("jobs")
     if not isinstance(jobs, dict) or set(jobs) != {"pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards", "test"}:
         raise ci_pytest.PolicyError("parallel CI requires one trusted scope, PR fast check, pin guards, qualification gates, shards, and test gate")
@@ -447,12 +537,14 @@ def validate_parallel_workflow(text: str) -> None:
     if shards.get("runs-on") != HOSTED_TEST_RUNNER:
         raise ci_pytest.PolicyError("pytest shards must run on the GitHub-hosted test image")
     if (
-        gate.get("name") != "test"
+        gate.get("name") != _REQUIRED_GATE_NAME
         or gate.get("needs") != ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards"]
-        or gate.get("if") != "${{ always() }}"
+        or gate.get("if") != _REQUIRED_GATE_IF
         or gate.get("continue-on-error") is not None
     ):
         raise ci_pytest.PolicyError("required test job must always aggregate all shards")
+    if set(shards) != _PYTEST_SHARDS_JOB_KEYS or set(gate) != _TEST_GATE_JOB_KEYS:
+        raise ci_pytest.PolicyError("pytest shard or test gate job keys drifted")
 
     # Guard each hosted job's total wall-clock budget, not just pytest time.
     # Preserve the existing <=100-minute shard+fan-in source contract (the
@@ -562,7 +654,8 @@ def validate_parallel_workflow(text: str) -> None:
         or set(runner) != {"name", "if", "run", "timeout-minutes"}
         or type(runner.get("timeout-minutes")) is not int
         or runner.get("timeout-minutes") != 45
-        or runner.get("run") != "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}"
+        or runner.get("run") != ("umask 022\n"
+                                 "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}\n")
         or runner.get("if") != "${{ steps.previous_ci.outputs.reuse != 'true' }}"
     ):
         raise ci_pytest.PolicyError("prior merged CI proof must fail closed before every shard")
@@ -578,12 +671,13 @@ def validate_parallel_workflow(text: str) -> None:
     # bodies are pinned by _EXPECTED_QUALIFICATION_STEPS). They must not
     # linger inside a shard: a second copy would re-serialize the same
     # minutes the split removed, and the qualification lane is the only
-    # allowed owner of these command surfaces.
+    # allowed owner of these command surfaces. The same holds for the
+    # web application typecheck added to that job.
     for name in (
         "Verify Paper direct pinned MCP SDK",
         "Verify Paper Studio prepare guard",
         "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
-        "Compile source", "Validate shell scripts",
+        "Compile source", "Validate shell scripts", _TYPECHECK_GATE_NAME,
     ):
         if any(isinstance(step, dict) and step.get("name") == name
                for step in shard_steps):
@@ -609,6 +703,11 @@ def validate_parallel_workflow(text: str) -> None:
     if len(test_steps) != 1:
         raise ci_pytest.PolicyError("required fan-in gate step is missing")
     final = test_steps[0]
+    if (gate_steps[:-1] != _EXPECTED_GATE_SETUP_STEPS or gate_steps[-1] is not final
+            or set(final) != {"name", "env", "run"}):
+        raise ci_pytest.PolicyError(
+            "required fan-in job steps must be exactly the pinned setup and gate"
+        )
     code = final.get("run")
     # Exact gate source is tested as a whole, not by searching for "exit 1"
     # text in comments or after a branch that already accepted fast PR mode.

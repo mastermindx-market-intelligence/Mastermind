@@ -21,7 +21,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
 
     data = yaml.load(text, Loader=cip._WorkflowYAMLLoader)
     assert data["on"] == {
-        "pull_request": None,
+        "pull_request": {"types": ["opened", "synchronize", "reopened", "edited"]},
         "merge_group": {"types": ["checks_requested"]},
         "push": {"branches": ["master"]},
         "workflow_dispatch": None,
@@ -36,7 +36,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
     assert 45 <= shards["timeout-minutes"] <= 75
     assert type(data["jobs"]["test"]["timeout-minutes"]) is int
     assert shards["timeout-minutes"] + data["jobs"]["test"]["timeout-minutes"] <= 100
-    assert data["jobs"]["test"]["name"] == "test"
+    assert data["jobs"]["test"]["name"] == fan._REQUIRED_GATE_NAME
     assert data["jobs"]["test"]["needs"] == ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards"]
 
 
@@ -144,7 +144,7 @@ def test_smoke_dependency_checkout_cannot_drift_or_bypass_its_boundary(mutation)
             "index: [0, 1, 2, 3, 4, 5]\n        python: [3.12]",
         ),
         ("needs: [pr_scope, pr_fast, pin_guards, qualification, pytest_shards]", "needs: []"),
-        ("if: ${{ always() }}", "if: false"),
+        ("if: " + fan._REQUIRED_GATE_IF, "if: false"),
         ("SHARDS_STATUS: ${{ needs.pytest_shards.result }}", "SHARDS_STATUS: wrong"),
         ('if [ "$PR_SCOPE_STATUS" != success ]; then', "if [ \"$PR_SCOPE_STATUS\" = failure ]; then"),
         ("exit 1", "exit 0"),
@@ -224,6 +224,118 @@ def test_unsafe_matrix_or_required_fanin_regression_is_refused(
     baseline = _WORKFLOW.read_text(encoding="utf-8")
     assert preimage in baseline
     changed = baseline.replace(preimage, mutation, 1)
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(changed)
+
+
+def test_workflow_root_key_set_is_pinned() -> None:
+    import yaml
+
+    text = _WORKFLOW.read_text(encoding="utf-8")
+    # The released workflow still passes with the exact root key pin active.
+    fan.validate_parallel_workflow(text)
+    payload = yaml.load(text, Loader=cip._WorkflowYAMLLoader)
+    assert set(payload) == fan._WORKFLOW_ROOT_KEYS == {
+        "name", "on", "permissions", "concurrency", "jobs",
+    }
+    # The loader must keep the bare `on:` trigger a string, never a YAML 1.1
+    # boolean, or the root key pin could never match the real file.
+    assert "on" in payload and True not in payload
+
+
+@pytest.mark.parametrize(
+    ("preimage", "mutation"),
+    [
+        # A workflow-level defaults.run.shell applies to every job's run step:
+        # injected shell text could exit 0 ahead of each real command while
+        # every per-job structure check still passes.
+        (
+            "permissions:\n  contents: read\n",
+            'defaults:\n  run:\n    shell: "bash -c \'exit 0\' #"\n'
+            "permissions:\n  contents: read\n",
+        ),
+        # A workflow-level env entry reaches every step (npm_config_dry_run
+        # neuters install/typecheck lanes); the root key pin must refuse it.
+        (
+            "permissions:\n  contents: read\n",
+            'env:\n  npm_config_dry_run: "true"\n'
+            "permissions:\n  contents: read\n",
+        ),
+    ],
+)
+def test_workflow_level_defaults_or_env_injection_is_refused(
+    preimage: str, mutation: str
+) -> None:
+    baseline = _WORKFLOW.read_text(encoding="utf-8")
+    assert baseline.count(preimage) == 1
+    with pytest.raises(cip.PolicyError, match="root keys"):
+        fan.validate_parallel_workflow(baseline.replace(preimage, mutation, 1))
+
+
+_EXIT0_DEFAULTS = (
+    "    defaults:\n      run:\n        shell: \"bash -c 'exit 0' #\"\n")
+
+
+@pytest.mark.parametrize(
+    ("header", "injected", "message"),
+    [
+        # defaults.run.shell on the fan-in gate: its run step names no shell,
+        # so the job default would make it exit 0 without reading any shard.
+        ("  test:\n    # Metadata-only edits publish no required test result, even a skipped one.\n", _EXIT0_DEFAULTS, "test gate job keys"),
+        ("  test:\n    # Metadata-only edits publish no required test result, even a skipped one.\n",
+         '    env:\n      CI_PYTEST_SKIP: "1"\n', "test gate job keys"),
+        ("  pytest_shards:\n    name: pytest shard ${{ matrix.index }}\n",
+         _EXIT0_DEFAULTS, "test gate job keys"),
+        ("  pytest_shards:\n    name: pytest shard ${{ matrix.index }}\n",
+         "    services:\n      cache:\n        image: redis\n", "test gate job keys"),
+        # The scope job decides the mode; a job default could force mode=fast.
+        ("  pr_scope:\n    name: PR test scope\n", _EXIT0_DEFAULTS,
+         "PR fast job keys"),
+        ("  pr_scope:\n    name: PR test scope\n",
+         "    container: ubuntu:24.04\n", "PR fast job keys"),
+        ("  pr_fast:\n    name: PR fast checks\n",
+         '    env:\n      npm_config_dry_run: "true"\n', "PR fast job keys"),
+    ],
+)
+def test_job_level_defaults_env_or_runtime_injection_is_refused(
+    header: str, injected: str, message: str
+) -> None:
+    baseline = _WORKFLOW.read_text(encoding="utf-8")
+    assert baseline.count(header) == 1
+    job_line, name_line = header.splitlines(keepends=True)
+    changed = baseline.replace(header, job_line + injected + name_line, 1)
+    with pytest.raises(cip.PolicyError, match=message):
+        fan.validate_parallel_workflow(changed)
+
+
+@pytest.mark.parametrize(
+    ("preimage", "mutation"),
+    [
+        ("name: CI\n", "name: Evil CI\n"),
+        ("  cancel-in-progress: true\n", "  cancel-in-progress: false\n"),
+        ("  group: ci-${{ github.workflow }}-${{ github.ref }}",
+         "  group: ci-${{ github.run_id }}"),
+    ],
+)
+def test_workflow_name_and_concurrency_are_pinned(
+    preimage: str, mutation: str
+) -> None:
+    baseline = _WORKFLOW.read_text(encoding="utf-8")
+    assert baseline.startswith("name: CI\n")
+    assert baseline.count(preimage) == 1
+    with pytest.raises(cip.PolicyError, match="name must stay|metadata edits"):
+        fan.validate_parallel_workflow(baseline.replace(preimage, mutation, 1))
+
+
+def test_yaml_merge_keys_stay_unconstructible() -> None:
+    baseline = _WORKFLOW.read_text(encoding="utf-8")
+    root_permissions = "permissions:\n  contents: read\n"
+    gate_header = "  test:\n    # Metadata-only edits publish no required test result, even a skipped one.\n"
+    assert baseline.count(root_permissions) == 1
+    assert baseline.count(gate_header) == 1
+    changed = baseline.replace(
+        root_permissions, "permissions: &perm\n  contents: read\n", 1
+    ).replace(gate_header, "  test:\n    <<: *perm\n", 1)
     with pytest.raises(cip.PolicyError):
         fan.validate_parallel_workflow(changed)
 
@@ -348,10 +460,10 @@ def test_same_sha_reuse_is_step_scoped_and_required_fanin_stays_unconditional() 
         "name": "Run repository test shard",
         "if": "${{ steps.previous_ci.outputs.reuse != 'true' }}",
         "timeout-minutes": 45,
-        "run": "python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}",
+        "run": "umask 022\npython -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}\n",
     }
     assert "env" not in shard_step  # Do not expose the Actions token to pytest.
-    assert data["jobs"]["test"]["if"] == "${{ always() }}"
+    assert data["jobs"]["test"]["if"] == fan._REQUIRED_GATE_IF
     fan.validate_parallel_workflow(_WORKFLOW.read_text())
 
 
@@ -504,6 +616,32 @@ def test_released_paper_prepare_gate_cannot_be_omitted_or_weakened(mutation):
         fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
 
 
+@pytest.mark.parametrize("mutation", ["gate-working-directory", "gate-shell", "gate-id", "step-before-gate", "step-after-gate", "setup-changed", "checkout-removed"])
+def test_fan_in_job_steps_are_pinned_exactly(mutation):
+    # The gate's last command re-runs repository plan code; an extra key or
+    # step could point it at a different (stub) copy of that code.
+    import yaml
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["test"]["steps"]
+    gate = steps[-1]
+    if mutation == "gate-working-directory":
+        gate["working-directory"] = "integrations/studio_direct_mcp"
+    elif mutation == "gate-shell":
+        gate["shell"] = "bash"
+    elif mutation == "gate-id":
+        gate["id"] = "gate"
+    elif mutation == "step-before-gate":
+        steps.insert(len(steps) - 1, {"name": "x", "run": "echo 'import sys' > scripts/ci_pytest.py"})
+    elif mutation == "step-after-gate":
+        steps.append({"name": "x", "run": "true"})
+    elif mutation == "setup-changed":
+        steps[2]["run"] = "python -m pip install PyYAML"
+    else:
+        del steps[0]
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
 def test_primary_checkout_never_persists_expanded_proof_credentials():
     import yaml
     workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
@@ -630,16 +768,93 @@ def test_new_ci_selector_first_install_fallback_is_real_full_mode(tmp_path):
 # Only canonical plan execution is replaced with a recording stub; separate
 # tests above prove the real discovery plan's exact six-shard coverage.
 # states: (PR_SCOPE, PR_FAST, SHARDS, GUARDS, QUAL)
+# Every case is a path the trusted classifier can actually produce. There is
+# no merge_group smoke case: since #2439 a STANDARD merge group is full, so
+# that path is unreachable (see the never-smoke test below).
 _GATE_PASS_CASES = [
     ("pull_request", "full", ("success", "skipped", "success", "success", "success")),
     ("pull_request", "fast", ("success", "success", "skipped", "success", "skipped")),
     ("pull_request", "smoke", ("success", "success", "skipped", "success", "skipped")),
     ("merge_group", "full", ("success", "skipped", "success", "success", "success")),
     ("merge_group", "fast", ("success", "success", "skipped", "success", "skipped")),
-    ("merge_group", "smoke", ("success", "success", "skipped", "success", "skipped")),
     ("push", "", ("skipped", "skipped", "success", "success", "success")),
     ("workflow_dispatch", "", ("skipped", "skipped", "success", "success", "success")),
 ]
+
+
+@pytest.mark.parametrize("tier", ["FAST", "STANDARD", "CRITICAL", "HOLD"])
+def test_merge_group_scope_is_never_smoke_for_any_review_tier(
+    tmp_path, monkeypatch, tier,
+):
+    """A merge group reaches the fan-in as fast (FAST) or full, never smoke.
+
+    The risk tier is forced so the mapping is covered for every tier the
+    shared policy can return, through the real classifier entry point the
+    workflow calls. The same diff as a pull request does reach smoke, so the
+    assertion is not vacuous.
+    """
+    import json
+    import types
+
+    from control_plane.github_review_risk_policy import ReviewTier
+    from scripts import ci_pr_scope as scope
+
+    repository = "mastermindx-market-intelligence/Mastermind"
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(root), *args], check=True, capture_output=True,
+            text=True, timeout=8,
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "example@example.test")
+    git("config", "user.name", "Test")
+    (root / "app").mkdir()
+    (root / "app" / "customer.py").write_text("value = 1\n")
+    git("add", ".")
+    git("commit", "-qm", "protected base")
+    base = git("rev-parse", "HEAD")
+    (root / "app" / "customer.py").write_text("value = 2\n")
+    git("add", ".")
+    git("commit", "-qm", "queued change")
+    head = git("rev-parse", "HEAD")
+    git("update-ref", "refs/remotes/origin/master", base)
+    monkeypatch.setattr(
+        scope, "assess_review_risk",
+        lambda facts: types.SimpleNamespace(tier=ReviewTier(tier)),
+    )
+
+    group = tmp_path / "merge-group.json"
+    group.write_text(json.dumps({
+        "repository": {"full_name": repository},
+        "merge_group": {
+            "base_sha": base, "head_sha": head, "base_ref": "refs/heads/master",
+            "head_ref": "refs/heads/gh-readonly-queue/master/pr-42-verified",
+        },
+    }))
+    queued = scope.select_scope(
+        root, group, expected_repository=repository,
+        event_type="merge_group", protected_base_sha=base,
+    )
+    assert queued.tier == tier
+    assert queued.mode == ("fast" if tier == "FAST" else "full")
+    assert queued.mode != "smoke"
+
+    pull = tmp_path / "pull-request.json"
+    pull.write_text(json.dumps({
+        "repository": {"full_name": repository},
+        "pull_request": {
+            "number": 42,
+            "head": {"sha": head, "repo": {"full_name": repository}},
+            "base": {"sha": base, "repo": {"full_name": repository}},
+        },
+    }))
+    as_pull_request = scope.select_scope(root, pull, expected_repository=repository)
+    assert (as_pull_request.mode == "smoke") is (tier == "STANDARD")
+    assert not [case for case in _GATE_PASS_CASES if case[:2] == ("merge_group", "smoke")]
 
 
 def _run_exact_workflow_gate(tmp_path, event, mode, states, *, plan_exit=0):
@@ -766,3 +981,154 @@ def test_test_executing_jobs_cannot_leave_the_hosted_image(job: str, runner) -> 
     workflow["jobs"][job]["runs-on"] = runner
     with pytest.raises(cip.PolicyError):
         fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+@pytest.mark.parametrize("job_name", ["pr_scope", "pr_fast"])
+def test_declared_python_precedes_the_first_actual_python_consumer(job_name):
+    """The hosted exit-127 boundary must not depend on a runner's ambient PATH."""
+    import re
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"][job_name]["steps"]
+    setup = [
+        (index, step) for index, step in enumerate(steps)
+        if str(step.get("uses", "")).startswith("actions/setup-python@")
+    ]
+    consumers = [
+        index for index, step in enumerate(steps)
+        if re.search(r"\bpython(?:\s|$)", step.get("run", ""))
+    ]
+    assert len(setup) == 1 and consumers
+    index, step = setup[0]
+    assert index < min(consumers)
+    assert step["uses"] == "actions/setup-python@v5"
+    assert step["with"]["python-version"] == "3.12"
+    # Both fast and smoke consumers execute Python. Neither setup may be
+    # conditional or error tolerant, even when the optional smoke suite skips.
+    assert "if" not in step and "continue-on-error" not in step
+    if job_name == "pr_fast":
+        smoke_names = {
+            "Checkout pinned Macro engine for source-proximate tests",
+            "Install focused Python test dependencies",
+            "Bounded source-proximate PR tests",
+        }
+        smoke = [step for step in steps if step.get("name") in smoke_names]
+        assert len(smoke) == 3
+        assert all(step["if"] == "${{ needs.pr_scope.outputs.mode == 'smoke' }}"
+                   for step in smoke)
+    fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+@pytest.mark.parametrize("job_name", ["pr_scope", "pr_fast"])
+@pytest.mark.parametrize("mutation", [
+    "missing", "late", "duplicate", "smoke-only", "wrong-action",
+    "wrong-version", "continue-on-error", "path-override", "early-consumer",
+])
+def test_python_bootstrap_cannot_be_removed_delayed_or_bypassed(job_name, mutation):
+    """Reject configurations that recreate the observed missing-interpreter risk."""
+    import copy
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+    steps = workflow["jobs"][job_name]["steps"]
+    index = next(i for i, step in enumerate(steps)
+                 if step.get("uses") == "actions/setup-python@v5")
+    setup = steps[index]
+    if mutation == "missing":
+        steps.pop(index)
+    elif mutation == "late":
+        steps.append(steps.pop(index))
+    elif mutation == "duplicate":
+        steps.insert(index, copy.deepcopy(setup))
+    elif mutation == "smoke-only":
+        setup["if"] = "${{ needs.pr_scope.outputs.mode == 'smoke' }}"
+    elif mutation == "wrong-action":
+        setup["uses"] = "actions/setup-python@v4"
+    elif mutation == "wrong-version":
+        setup["with"]["python-version"] = "3.13"
+    elif mutation == "continue-on-error":
+        setup["continue-on-error"] = True
+    elif mutation == "path-override":
+        setup["env"] = {"PATH": "/missing"}
+    elif mutation == "early-consumer":
+        steps.insert(index, {"run": "python -m compileall -q scripts/ci_pr_scope.py"})
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+@pytest.mark.parametrize("mutation", ["missing", "group-write", "overrestrict", "late"])
+def test_shard_fixture_mode_defaults_cannot_be_removed_or_delayed(mutation):
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+    step = next(s for s in workflow["jobs"]["pytest_shards"]["steps"]
+                if s.get("name") == "Run repository test shard")
+    command = step["run"]
+    assert command.splitlines()[0] == "umask 022"
+    if mutation == "missing":
+        step["run"] = command.removeprefix("umask 022\n")
+    elif mutation == "group-write":
+        step["run"] = command.replace("umask 022", "umask 002")
+    elif mutation == "overrestrict":
+        step["run"] = command.replace("umask 022", "umask 077")
+    else:
+        step["run"] = command.removeprefix("umask 022\n") + "umask 022\n"
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+@pytest.mark.parametrize("runner_exit", [0, 17])
+def test_actual_shard_shell_preserves_requested_modes_and_runner_exit(tmp_path, runner_exit):
+    """Exercise the real prelude, including modes that an overstrict mask destroys."""
+    import os
+    import stat
+    import sys
+    import yaml
+
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    step = next(s for s in workflow["jobs"]["pytest_shards"]["steps"]
+                if s.get("name") == "Run repository test shard")
+    command = step["run"].replace("${{ matrix.index }}", "3")
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    python = binary / "python"
+    python.write_text(
+        "#!/bin/sh\n"
+        "umask > \"$PROBE_ROOT/observed-mask\"\n"
+        "printf '%s\\n' \"$*\" > \"$PROBE_ROOT/observed-argv\"\n"
+        "mkdir \"$PROBE_ROOT/created-directory\"\n"
+        "printf probe > \"$PROBE_ROOT/created-file\"\n"
+        "\"$PROBE_PYTHON\" -I -B - <<'MODE_PROBE'\n"
+        "import os\n"
+        "from pathlib import Path\n"
+        "root = Path(os.environ['PROBE_ROOT'])\n"
+        "for name, mode in (('private-directory', 0o700), ('shared-read-directory', 0o750), ('public-read-directory', 0o755)):\n"
+        "    os.mkdir(root / name, mode)\n"
+        "for name, mode in (('private-file', 0o600), ('executable-file', 0o755)):\n"
+        "    fd = os.open(root / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)\n"
+        "    os.close(fd)\n"
+        "MODE_PROBE\n"
+        "exit \"$RUNNER_EXIT\"\n"
+    )
+    python.chmod(0o700)
+    env = {**os.environ, "PATH": str(binary) + os.pathsep + os.environ["PATH"],
+           "PROBE_ROOT": str(tmp_path), "PROBE_PYTHON": sys.executable,
+           "RUNNER_EXIT": str(runner_exit)}
+    result = subprocess.run(["bash", "-e", "-c", "umask 0002\n" + command],
+                            env=env, capture_output=True, text=True, timeout=10)
+    assert result.returncode == runner_exit, result.stderr
+    for name, mode in (
+        ("private-directory", 0o700), ("shared-read-directory", 0o750),
+        ("public-read-directory", 0o755), ("private-file", 0o600),
+        ("executable-file", 0o755),
+    ):
+        assert stat.S_IMODE((tmp_path / name).stat().st_mode) == mode, name
+    assert int((tmp_path / "observed-mask").read_text().strip(), 8) == 0o22
+    assert (tmp_path / "observed-argv").read_text().strip() == (
+        "-m scripts.ci_parallel_shard --jobs 6 --index 3"
+    )
+    assert stat.S_IMODE((tmp_path / "created-directory").stat().st_mode) == 0o755
+    assert stat.S_IMODE((tmp_path / "created-file").stat().st_mode) == 0o644

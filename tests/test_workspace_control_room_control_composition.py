@@ -196,6 +196,25 @@ def test_production_binds_exactly_one_injected_workspace_bindings_path(
         assert not selected.exists()
 
 
+@pytest.mark.parametrize("inject", [False, True])
+def test_production_factory_carries_exact_capacity_source_without_reading(
+        tmp_path, monkeypatch, inject):
+    from control_plane.workspace_capacity_fabric import ExistingCapacityFabricSource
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("service construction invoked a capacity observation")
+
+    source = ExistingCapacityFabricSource(tmp_path / "not-created-preview.json",
+        current_revision=forbidden, account_views=forbidden, consumer_views=forbidden) if inject else None
+    fx = capture_composition(tmp_path, monkeypatch)
+    cli._service_from_config(fx.raw, workspace_acquisition_loader=fx.loader,
+                             capacity_fabric_source=source)
+    assert fx.arguments["capacity_fabric_source"] is source
+    assert callable(fx.captured["ceo_ingress_app_binding"].workspace_read_provider_factory)
+    assert fx.captured["workspace_control_room"].current_owner() is None
+    assert fx.calls == []
+
+
 @pytest.mark.parametrize("topology", [
     {"port": 8787},
     {"port": 0},

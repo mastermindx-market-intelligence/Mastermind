@@ -286,7 +286,8 @@ const context = {
   fetch: url => {
     requests.push(url);
     if (url !== '/api/desk/watchlist?book=flagship') {
-      const value = url === '/api/scheduler' ? {source: url, jobs: []} : {source: url};
+      if (!Object.prototype.hasOwnProperty.call(scenario.siblings, url)) throw Error('unexpected sibling request');
+      const value = scenario.siblings[url];
       return Promise.resolve({ok: true, json: () => Promise.resolve(value)});
     }
     if (scenario.mode === 'reject') return Promise.reject(Error('controlled read failure'));
@@ -316,13 +317,25 @@ vm.runInContext(escape + '\n' + empty + '\n' + loader + '\n' + renderer, context
 """
 
 
+_SIBLING_PAYLOADS = {
+    "strategist": {"source": "/api/desk/strategist", "status": "building"},
+    "decisions": {"source": "/api/desk/decisions", "status": "building", "decisions": []},
+    "scorecard": {"source": "/api/desk/scorecard", "status": "building", "seats": []},
+    "firm": {"source": "/api/desk/firm-exposure", "books": []},
+    "macroRisk": {"source": "/api/desk/macro-risk", "status": "building"},
+    "scheduler": {"source": "/api/scheduler", "jobs": []},
+}
+
+
 def _read_watchlist_ui(mode, value, *, initial=None, lang="en"):
     node = shutil.which("node")
     assert node is not None, "Watchlist JavaScript regression requires Node.js"
     path = Path(__file__).parents[1] / "app" / "static" / "index.html"
     result = subprocess.run(
         [node, "-e", _JS_WATCHLIST_READ,
-         json.dumps({"mode": mode, "value": value, "initial": initial, "lang": lang}), str(path)],
+         json.dumps({"mode": mode, "value": value, "initial": initial, "lang": lang,
+                     "siblings": {row["source"]: row for row in _SIBLING_PAYLOADS.values()}}),
+         str(path)],
         capture_output=True, text=True, timeout=10, check=False,
     )
     assert result.returncode == 0, result.stderr
@@ -358,15 +371,9 @@ def test_watchlist_actual_loader_and_renderer_preserve_read_truth(mode, value, e
     assert observed["renders"] == 2
     assert observed["requests"].count("/api/desk/watchlist?book=flagship") == 1
     assert len(observed["requests"]) == 7
-    for key, url in {
-        "strategist": "/api/desk/strategist",
-        "decisions": "/api/desk/decisions",
-        "scorecard": "/api/desk/scorecard",
-        "firm": "/api/desk/firm-exposure",
-        "macroRisk": "/api/desk/macro-risk",
-    }.items():
-        assert observed["data"][key] == {"source": url}
-    assert observed["data"]["scheduler"] == {"source": "/api/scheduler", "jobs": []}
+    # Compose valid independent panels through the actual Desk normalizer.
+    for key, payload in _SIBLING_PAYLOADS.items():
+        assert observed["data"][key] == payload
 
     rendered = observed["html"]
     if expected == "unavailable":

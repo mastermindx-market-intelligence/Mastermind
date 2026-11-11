@@ -41,6 +41,7 @@ WORKFLOW_RELATIVE = Path(".github") / "workflows" / "ci.yml"
 AUTHORITATIVE_STEP_NAME = "Run repository test gate"
 AUTHORITATIVE_RUNNER = "scripts/ci_pytest.py"
 REQUIRED_WORKFLOW_EVENTS = ("pull_request", "merge_group", "push", "workflow_dispatch")
+REQUIRED_PR_TRIGGER = {"types": ["opened", "synchronize", "reopened", "edited"]}
 REQUIRED_MERGE_GROUP_TRIGGER = {"types": ["checks_requested"]}
 REQUIRED_PUSH_TRIGGER = {"branches": ["master"]}
 PROTECTED_EXACT = frozenset(
@@ -635,6 +636,11 @@ _WorkflowYAMLLoader.yaml_implicit_resolvers = {
 _WorkflowYAMLLoader.add_implicit_resolver(
     "tag:yaml.org,2002:bool", _TRUE_FALSE_BOOL_PATTERN, list("tTfF")
 )
+# YAML merge keys (`<<: *anchor`) must stay unconstructible: replacing the
+# stock map constructor leaves tag:yaml.org,2002:merge without a constructor,
+# so a merge makes the workflow invalid. If this constructor ever flattens
+# merges, an alias could splice keys into a job or the root that the exact
+# key pins in ci_parallel_shard.py would then have to be re-proven against.
 _WorkflowYAMLLoader.add_constructor(
     "tag:yaml.org,2002:map", _reject_duplicate_mapping_keys
 )
@@ -696,8 +702,8 @@ def validate_workflow_events(payload: Mapping[str, Any]) -> None:
         # come straight from untrusted workflow content and must never be
         # interpolated in.
         raise PolicyError("workflow 'on' has unexpected event(s)")
-    if events["pull_request"] is not None:
-        raise PolicyError("workflow 'pull_request' trigger must have no filters")
+    if events["pull_request"] != REQUIRED_PR_TRIGGER:
+        raise PolicyError("workflow 'pull_request' trigger must retain source updates and base edits")
     if events["workflow_dispatch"] is not None:
         raise PolicyError("workflow 'workflow_dispatch' trigger must have no filters")
     if events["merge_group"] != REQUIRED_MERGE_GROUP_TRIGGER:

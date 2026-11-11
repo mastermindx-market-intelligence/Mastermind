@@ -663,7 +663,7 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # Content identity GET registration reviewed6eb650a8; the existing control_room_action AST is exact.
 # Paperclip mounting preserves the complete control_room_action source and AST;
 # its five configuration lines move only these same eight complete status tokens.
-REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'a4f813c91b3b23d93cced25b1dc8f6468493b0b9002239511b9845fcebbc0e97', 'sites': ((931, 71, 74, 'int', '400'), (942, 71, 74, 'int', '403'), (950, 71, 74, 'int', '400'), (956, 79, 82, 'int', '400'), (965, 71, 74, 'int', '400'), (975, 71, 74, 'int', '403'), (980, 76, 79, 'int', '503'), (986, 71, 74, 'int', '403'))}
+REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': 'd170b4ed7fe514f72736f1b4c2d1b282c09a537333d9aa53117e203d10717537', 'sites': ((932, 71, 74, 'int', '400'), (943, 71, 74, 'int', '403'), (951, 71, 74, 'int', '400'), (957, 79, 82, 'int', '400'), (966, 71, 74, 'int', '400'), (976, 71, 74, 'int', '403'), (981, 76, 79, 'int', '503'), (987, 71, 74, 'int', '403'))}
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -727,7 +727,7 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # never an OS identity. Exact whole-source hash and token sites only.
 # Selected-child capture changes the enclosing source only; the permission
 # handler AST and all four HTTP denial token positions remain unchanged.
-REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '3c2cac6101f754ff5f6c52aee1ebe14d2f247bf212a0317f6970732cade6fb17', 'sites': ((715, 93, 96, 'int', '403'), (717, 56, 59, 'int', '403'), (724, 46, 49, 'int', '403'), (725, 56, 59, 'int', '403'))}
+REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': 'ecac40b3e1bc54ad965a2dfa900378bc24a363c134bcbc9723d8d393870ef724', 'sites': ((719, 93, 96, 'int', '403'), (721, 56, 59, 'int', '403'), (728, 46, 49, 'int', '403'), (729, 56, 59, 'int', '403'))}
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -781,7 +781,7 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # Primary/work-entry composition preserves these three complete fixture calls.
 # Root re-reviewed the material auth diff; only exact existing tokens qualify.
 # The accepted Paperclip module insertion moves these same tokens by one line.
-REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': 'ff9b7c6cf80ea253e99e712dd02dcedbd0f26daed79a59e07f330b8c6d8bf806', 'sites': ((3875, 68, 71, 'int', '503'), (3880, 69, 72, 'int', '503'), (3884, 67, 70, 'int', '503'))}
+REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '6b14ecd37c44feefbe52bab40616abe74ffebdc80f61144441fda0e1f568d46d', 'sites': ((3905, 68, 71, 'int', '503'), (3910, 69, 72, 'int', '503'), (3914, 67, 70, 'int', '503'))}
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
@@ -1244,6 +1244,25 @@ REVIEWED_FILES['ops/native_fabric/provider_plans/memory118/native_owner/provider
 # Exact reviewed helper-buffer bounds (512 KiB), no identity/permission grant.
 # Complete source hash plus typed spans; any byte drift restores the guard.
 REVIEWED_FILES['ops/native_fabric/support_policy_status/reader.py'] = {'sha256': '463bca4c06fc8cbb07f2e87fce8efac0a4ff2ca1c47db08e32f3b7f17c1b0058', 'sites': ((385, 66, 69, 'int', '512'), (404, 54, 57, 'int', '512'))}
+
+# Paperclip finite launch origin comparison: standard HTTPS port only, no OS
+# principal or fleet topology change. Exact source/token self-reviewed under the
+# attended Web waiver; any byte, path or context drift restores ordinary D8.
+REVIEWED_FILES["integrations/paperclip_hermes/core_overlay/agent/launch_credential_binding.py"] = {
+    "sha256": "f7b2afe6fb6d14ca607e99f3fe1d54afab2c36dc2e08db1c81412da9c869b679",
+    "sites": ((150, 19, 22, "int", "443"),),
+}
+
+# Paperclip qualification metadata observes the already installed UID at three
+# exact sites: disposable restore target and existing key/storage ownership.
+# It grants no identity, permission or runtime authority. Full record drift or
+# any added identity restores the existing D8 guard.
+REVIEWED_FILES["ops/paperclip_fleet/evidence/2026-11-10-credential-qualification.json"] = {
+    "sha256": "a38fbcfe551c322dfc88d618b328ad9ab1438200493bdd2fe61aaeebe00f6554",
+    "sites": ((604, 17, 20, "int", "501"),
+              (684, 15, 18, "int", "501"),
+              (690, 15, 18, "int", "501")),
+}
 
 # Passive Paperclip asset document pagination: exact row-count bounds only.
 # No identity, permission or runtime topology change; any source drift restores D8.
