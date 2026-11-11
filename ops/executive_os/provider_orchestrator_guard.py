@@ -18,16 +18,31 @@ headers, xargs/parallel/find -exec, brace groups, brace- and paren-bodied
 function definitions, quote-aware trap programs, watch/timeout repeaters)
 are refused as unaccounted descendants. When a wrapper name is present,
 every interpreter invocation (the python/pypy/perl/ruby/node/php/Rscript/
-tclsh/lua/deno/bun/julia/pwsh/osascript/awk/jq families — flags, script
-files, stdin programmes and versioned/hyphenated spellings alike),
-eval/source/. and every computed ($/backtick) or shell-EXPANDED word
-outside an assignment (a glob, a brace expansion) are refused as
-unobservable: the word, and therefore the wrapper, its mode and its
-identity, become readable only at expansion time. With no wrapper token
-in the text, an expanded word in COMMAND position — the head itself or a
-transparent runner's payload (env poo[l] …) — is refused for the same
-reason. POSIX line-continuation splits are canonicalised so no
-constructed path escapes the gate.
+R/sqlite3/tclsh/lua/deno/bun/julia/pwsh/jshell/java/osascript/awk/jq
+families — flags, script files, stdin programmes and versioned/hyphenated
+spellings alike), eval/source/. and every computed ($/backtick) or
+shell-EXPANDED word outside an assignment (a glob, a brace expansion, an
+extglob pattern) are refused as unobservable: the word, and therefore the
+wrapper, its mode and its identity, become readable only at expansion
+time. With no wrapper token in the text, an expanded word in COMMAND
+position — the head itself or a transparent runner's payload
+(env poo[l] …) — is refused for the same reason. POSIX
+line-continuation splits are canonicalised so no constructed path escapes
+the gate.
+WO-11 r7 FAIL-CLOSED POSTURE (REVIEW_2329 r5, orchestrator-endorsed): an
+ARMED command that carries a wrapper token — literal, or a shell-expanded
+WRAPPER-SHAPED word at a position the guard cannot reduce to a plain data
+argument — is admitted only when it fully reduces to a known-safe shape:
+every word canonical, every command head recognized (wrapper, transparent
+runner, shell keyword/builtin, data-only utility, shell), every span
+parseable. Anything ambiguous is refused with a precise reason — an
+unlisted runner (timeout/watch/strace/… or any word never enumerated), a
+shell program (bash -c 'poo* run …'), an attached --flag=value, an
+unlisted interpreter (R/sqlite3/jshell/groovy/…), a function call, a
+do/done pair inside a loop condition, a concatenated trap program.
+Refusing the irreducible replaces enumerating escape spellings: five
+review rounds showed the shell surface always outruns a vocabulary, so
+correctness no longer depends on the runner/interpreter lists' completeness.
 There is no independent signing authority — the binding is only an assignment
 of opaque references, trusted exactly as far as it matches the owner's current
 lease. The gate fences every lexically observed launch in the commands it is
@@ -263,12 +278,19 @@ _WRAPPER_NAME_RE = re.compile(
 #: trailing boundary also excludes ``/`` so a PATH-shaped word
 #: (``node_modules/.bin/pool``, ``python3.12/bin``) is not an interpreter
 #: word: only the final path segment can name the interpreter.
+#: r5 M-3 extends the families with the probed spellings (``R``,
+#: ``sqlite3``/``.read``, ``jshell``/``java``) so they get the precise
+#: interpreter reason; closure no longer depends on this list — an
+#: unlisted interpreter (groovy/scala/octave/gnuplot/dotnet/mono/erl/make)
+#: is an UNRECOGNIZED HEAD under the r7 posture and is refused by
+#: :func:`_unrecognized_head_word`.
 _INTERPRETER_WORD_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
     r"(?:python[23]?(?:[.-]\d+)*[a-z]?|pypy[23]?(?:[.-]\d+)*[a-z]?"
     r"|perl(?:[-0-9.]+)?|ruby(?:[-0-9.]+)?|node(?:js)?(?:[-0-9.]+)?"
     r"|php(?:[-0-9.]+)?|Rscript|tclsh(?:[0-9.]+)?|lua(?:[0-9.]+)?"
-    r"|deno|bun|julia|pwsh|osascript|awk|gawk|mawk|nawk|jq)"
+    r"|deno|bun|julia|pwsh|osascript|awk|gawk|mawk|nawk|jq"
+    r"|R|sqlite3|jshell|java|groovy|scala|octave|gnuplot|dotnet|mono|erl)"
     r"(?![A-Za-z0-9_./-])"
 )
 #: A command word the SHELL expands before executing it: a glob (``pool*``,
@@ -280,6 +302,12 @@ _INTERPRETER_WORD_RE = re.compile(
 #: only rewrites the path, so the wrapper basename stays literal and the
 #: launch is still observed by :data:`_WRAPPER_RE`.
 _GLOB_CHARS = "*?["
+#: Extglob openers (``?(…)``/``*(…)``/``+(…)``/``!(…)``/``@(…)``): an extglob
+#: word (``po+(o)l`` — REVIEW_2329 r5 m-1) is expansion-dependent. Extglob
+#: needs a prior ``shopt -s extglob``, but persistent sessions are inside
+#: this gate's threat model, so the word is treated as expanded (conservative
+#: in the refusing direction).
+_EXTGLOB_OPENER_RE = re.compile(r"[?*+!@]\(")
 _BRACE_EXPANSION_RE = re.compile(r"\{[^{}]*,[^{}]*\}|\{[^{}]*\.\.[^{}]*\}")
 #: Transparent runners: the payload after the runner chain is the command
 #: the shell executes, so that payload is a COMMAND position for the
@@ -292,6 +320,17 @@ _BRACE_EXPANSION_RE = re.compile(r"\{[^{}]*,[^{}]*\}|\{[^{}]*\.\.[^{}]*\}")
 _TRANSPARENT_RUNNERS = frozenset(
     {"env", "sudo", "nice", "nohup", "exec", "time", "command", "xargs"}
 )
+#: r7 note (REVIEW_2329 r5 B-1a): this list is an OPTIMIZATION, not the
+#: boundary. Runners whose argument grammar is NOT modeled here (``timeout``
+#: takes a bare duration before its payload, ``watch``/``strace``/
+#: ``setsid``/``stdbuf``/``arch``/``script`` take flags the tables do not
+#: know) are deliberately NOT added: modeling each grammar is the
+#: enumeration that five review rounds showed always loses to the shell
+#: surface. Instead such a head is UNCLASSIFIABLE and every word after it
+#: sits at an unprovable position — :func:`_unprovable_position_word`
+#: refuses a wrapper-shaped expanded word there, with or without a wrapper
+#: token in the text. Correctness does not depend on this list's
+#: completeness.
 #: Runner flags that CONSUME the following word as their own argument
 #: (``sudo -u root …``, ``nice -n 5 …``): without this the consumed
 #: argument would be mistaken for the runner's payload command.
@@ -316,23 +355,94 @@ _RUNNER_ARG_FLAGS: dict[str, frozenset[str]] = {
         }
     ),
 }
-#: Loop headers: a launch in the CONDITION of while/until runs once per
-#: iteration but sits BEFORE ``do``, outside the do…done span (REVIEW_2329
-#: r4 M-A2).
-_LOOP_HEADER_RE = re.compile(r"(?<![A-Za-z0-9_.-])(?:while|until)(?![A-Za-z0-9_.-])")
-_DO_WORD_RE = re.compile(r"(?<![A-Za-z0-9_.-])do(?![A-Za-z0-9_.-])")
-#: Paren-bodied function definitions ``name() ( … )`` / ``function f () ( … )``:
-#: the body runs zero-or-many times but carries no brace, so the brace span
-#: never covered it (REVIEW_2329 r4 M-A2). Only a FUNCTION body matches: a
-#: plain subshell group ``( launch )`` runs exactly once and stays allowed.
-_FUNCTION_PAREN_BODY_RE = re.compile(r"\([ \t]*\)[ \t]*\(")
+#: r7 FAIL-CLOSED posture (REVIEW_2329 r5, orchestrator-endorsed): for an
+#: ARMED session, a command that contains a wrapper token — a literal
+#: wrapper name anywhere, or a shell-expanded WRAPPER-SHAPED word at a
+#: position the guard cannot reduce to a plain data argument — is admitted
+#: only if it fully reduces: every word canonical, every command head
+#: recognized, every span parseable. Anything ambiguous is refused with a
+#: precise reason instead of enumerating escape spellings. The vocabularies
+#: below are optimizations (precise reasons, precise flag grammar):
+#: correctness no longer depends on their completeness, because an
+#: unclassifiable head makes every word after it unprovable and the command
+#: is refused.
+_WRAPPER_BASENAMES = frozenset({"pool", "sub.sh", "remote_sub.sh", "slot.py"})
+#: Shell keywords that can head a simple-command segment.
+_SHELL_KEYWORDS = frozenset({
+    "if", "then", "elif", "else", "fi", "for", "while", "until", "do",
+    "done", "case", "esac", "in", "function", "select", "coproc", "time",
+    "{", "}", "!", "[[", "]]",
+})
+#: Shell builtins that never execute a program argument. ``eval``/``source``/
+#: ``.`` are DELIBERATELY absent: with a wrapper token present they are
+#: refused earlier as unobservable (``_UNOBSERVABLE_ANYWHERE_RE``), and if
+#: an unusual spelling ever reached the head scan it is refused as
+#: unrecognized — fail-closed either way.
+_SHELL_BUILTINS = frozenset({
+    ":", "echo", "printf", "true", "false", "test", "[", "cd", "pwd",
+    "pushd", "popd", "dirs", "export", "unset", "local", "declare",
+    "typeset", "readonly", "shift", "umask", "read", "wait", "trap", "set",
+    "shopt", "hash", "type", "builtin", "let", "getopts", "break",
+    "continue", "exit", "return", "kill", "jobs", "fg", "bg", "disown",
+    "times", "ulimit", "history", "alias", "unalias", "enable", "mapfile",
+    "readarray", "caller",
+})
+#: Data-only utilities: their arguments are never executed as programs.
+#: ``sed`` (``e``/``r`` commands execute), ``find``/``xargs``/``parallel``
+#: (``-exec``/payload), ``awk`` (an interpreter family) and every
+#: interpreter are deliberately NOT here. ``trap`` is handled specially:
+#: its program argument RUNS on signal delivery, so it is executed
+#: position, not data.
+_SAFE_DATA_HEADS = frozenset(
+    _INSPECTORS | {
+        "cp", "mv", "rm", "ln", "mkdir", "rmdir", "touch", "chmod",
+        "chown", "chgrp", "install", "date", "du", "df", "ps", "id",
+        "uname", "hostname", "whoami", "groups", "basename", "dirname",
+        "realpath", "readlink", "sort", "uniq", "cut", "tr", "tee",
+        "split", "seq", "sleep", "yes", "pkill", "killall", "cksum",
+        "base64", "git", "gh", "curl", "wget", "tar", "zip", "unzip",
+        "gzip", "gunzip", "xz",
+    }
+)
+#: Shells: a recognized HEAD when a wrapper token is present (their program
+#: text is canon-visible — quotes stripped — so a literal launch inside is
+#: observed and judged by every other rule), but deliberately NOT a
+#: safe-data head for the token-free position classifier: a ``-c``/``-s``
+#: program is executed by the child shell, so every word after a shell
+#: head is at an unprovable position (REVIEW_2329 r5 B-1c).
+_SHELL_HEADS = frozenset({"bash", "sh", "dash", "ksh", "zsh", "ash"})
+#: Every head the wrapper-present posture admits.
+_RECOGNIZED_HEADS = frozenset(
+    _WRAPPER_BASENAMES | _TRANSPARENT_RUNNERS | _SAFE_DATA_HEADS
+    | _SHELL_BUILTINS | _SHELL_KEYWORDS | _SHELL_HEADS
+)
+#: Loop structure words, recognised only at COMMAND position (the head of a
+#: simple command). ``do``/``done`` as ARGUMENTS (``echo do``, ``grep -q do
+#: f``, ``"$x" = "do"``) are data; a ``do``/``done`` PAIR inside a while
+#: condition (``while echo do echo done; L; do :; done``) used to truncate
+#: BOTH the condition span (which ended at the first ``do`` word, an
+#: argument of ``echo``) and the body span (first ``do`` to first
+#: ``done``, both arguments), leaving the launch outside every span while
+#: the loop live-ran it once per iteration (REVIEW_2329 r5 M-1, live 3
+#: launches). :func:`_loop_spans` walks the command-position structure with
+#: a do/done stack instead of pattern-matching words anywhere.
+_LOOP_STRUCT_KEYWORDS = frozenset(
+    {"while", "until", "do", "done", "for", "select"}
+)
+#: Paren-bodied function definitions ``name() ( … )`` / ``function f () (
+#: … )``: the body runs zero-or-many times but carries no brace, so the
+#: brace span never covered it (REVIEW_2329 r4 M-A2). Only a FUNCTION body
+#: matches: a plain subshell group ``( launch )`` runs exactly once and
+#: stays allowed. r5 M-1: the definition is matched on the RAW text —
+#: newlines and comments between ``()`` and the body are legal bash
+#: (``f()\n( L )``, ``f() # c\n( L )``), and a quoted ``")"`` inside the
+#: body must not close the span early — canon, which deletes the quotes,
+#: got all three wrong. :func:`_paren_body_spans_raw` walks the raw body
+#: quote-aware and maps the span into canon coordinates via
+#: :func:`_canonical_command_map`.
+_FUNCTION_DEF_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*[ \t]*\([ \t]*\)")
 _TRAP_WORD_RE = re.compile(r"(?<![A-Za-z0-9_.-])trap(?=\s)")
 _STATEMENT_END_RE = re.compile(r"[;&|\n]")
-#: Loop bodies (for/while/until) execute their contents N times: one lexical
-#: launch inside one is N paid children under one binding's single attempt
-#: (REVIEW_2329 r3 M-A extends this to brace-body loops, function
-#: definitions, trap programs and repeaters, below).
-_LOOP_BODY_RE = re.compile(r"\bdo\b.*?\bdone\b", re.S)
 #: Batch executors that run their argument command once per input item
 #: (REVIEW_2329 r2 N-2/C2-C3, find -exec).
 _BATCH_EXECUTOR_RE = re.compile(
@@ -690,9 +800,17 @@ def _canonical_command_map(command: str) -> tuple[str, list[int]]:
 
 def _expansion_dependent(word: str) -> bool:
     """True when the shell expands ``word`` before it becomes a command word:
-    a glob (``*``, ``?``, ``[...]``) or a brace expansion (``{a,b}``,
-    ``{1..2}``) (REVIEW_2329 r4 B-2)."""
+    a glob (``*``, ``?``, ``[...]``), a brace expansion (``{a,b}``,
+    ``{1..2}``) (REVIEW_2329 r4 B-2), or an extglob pattern (``po+(o)l``,
+    ``su@(b).sh`` — REVIEW_2329 r5 m-1: the paren split in the word scanners
+    used to dismember ``po+(o)l`` into ``po+``/``o``/``l``, none of which
+    looked expanded). Extglob needs a prior ``shopt -s extglob``, but
+    persistent sessions are inside this gate's threat model, so an
+    extglob-shaped word is treated as expanded — conservative in the
+    refusing direction."""
     if any(char in word for char in _GLOB_CHARS):
+        return True
+    if _EXTGLOB_OPENER_RE.search(word):
         return True
     return bool(_BRACE_EXPANSION_RE.search(word))
 
@@ -701,11 +819,18 @@ def _scan_command_words(canon: str) -> list[tuple[str, bool]]:
     """Every non-assignment, non-redirection word with its head flag.
 
     ``is_head`` marks the first such word of a simple command — the position
-    where the shell would execute it as a command name."""
+    where the shell would execute it as a command name. Segments split on
+    ``;&|`` and newlines ONLY, and bare ``(``/``)``/``{``/``}`` grouping
+    tokens are skipped: splitting on parentheses used to dismember extglob
+    words (``po+(o)l`` → ``po+``/``o``/``l``, none of which looked expanded
+    — REVIEW_2329 r5 m-1), so a word's parentheses now stay glued to it and
+    a subshell- or brace-wrapped head is still found."""
     scan: list[tuple[str, bool]] = []
-    for segment in re.split(r"[;&|\n()]", canon):
+    for segment in re.split(r"[;&|\n]", canon):
         head_seen = False
         for word in segment.split():
+            if word in ("(", ")", "{", "}"):
+                continue  # grouping tokens, not words
             if re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
                 continue  # an assignment: its value is not a command word
             if word[0] in "<>" or re.match(r"\d*[<>]", word):
@@ -739,7 +864,8 @@ def _computed_command_word(canon: str) -> str | None:
 
 
 def _expanded_command_word(canon: str) -> str | None:
-    """The first glob/brace-expanded word in COMMAND position — or None.
+    """The first glob/brace/extglob-expanded word in COMMAND position — or
+    None.
 
     This is the only class refused when NO wrapper token is in the text:
     ``su?.sh`` and ``poo*`` are wrapper names that exist only after
@@ -749,18 +875,34 @@ def _expanded_command_word(canon: str) -> str | None:
 
     COMMAND position includes the payload of a transparent runner chain
     (``env``, ``sudo``, ``nice``, ``exec``, ``time``, ``command``, ``xargs``,
-    ``nohup`` and their path spellings): ``env poo[l] run grok`` and
-    ``sudo -u root poo? run grok`` were ALLOW because the expanded wrapper
-    sat at argument position behind the runner, where neither this head-only
-    scan nor the wrapper-token scan looked (REVIEW_2329 r6 re-review B-3,
+    ``nohup`` and their path spellings): ``env poo[l] run grok`` and ``sudo
+    -u root poo? run grok`` were ALLOW because the expanded wrapper sat at
+    argument position behind the runner (REVIEW_2329 r6 re-review B-3,
     live-confirmed against the real wrapper). Runner flags that consume an
     argument (``sudo -u root``, ``nice -n 5``) skip theirs so the payload,
-    not the flag's argument, is the word judged."""
-    for segment in re.split(r"[;&|\n()]", canon):
+    not the flag's argument, is the word judged; a flag with an ATTACHED
+    ``=value`` consumes no further word — ``sudo --user=root poo[l] …`` used
+    to feed the payload to the flag and escape (REVIEW_2329 r5 B-1b, a
+    two-line bug).
+
+    r5 B-1a/r7: the runner list above is an OPTIMIZATION, not the boundary.
+    This function still returns None behind runners it does not know
+    (``timeout 5 poo[l] …``, ``nohup timeout 5 poo[l] …``); the fail-closed
+    classifier :func:`_unprovable_position_word` then refuses the
+    wrapper-shaped word at the unclassifiable position. Segments split on
+    ``;&|`` and newlines ONLY (r5 m-1: splitting on parentheses used to
+    dismember extglob heads like ``po+(o)l``); bare ``(``/``)``/``{``/``}``
+    grouping tokens are skipped when hunting the head, so a subshell- or
+    brace-wrapped glob head (``( poo* run … )``, ``{ poo* run …; }``) is
+    still a command position.
+    """
+    for segment in re.split(r"[;&|\n]", canon):
         runner: str | None = None
         expect_arg = False
         command_seen = False
         for word in segment.split():
+            if word in ("(", ")", "{", "}"):
+                continue  # a subshell/brace grouping token, not a word
             if re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
                 continue  # an assignment (prefix or env NAME=value)
             if word[0] in "<>" or re.match(r"\d*[<>]", word):
@@ -773,6 +915,7 @@ def _expanded_command_word(canon: str) -> str | None:
                 if (
                     runner is not None
                     and flag in _RUNNER_ARG_FLAGS.get(runner, frozenset())
+                    and "=" not in word  # an attached =value consumes none
                 ):
                     expect_arg = True
                 continue  # a flag: never a command word
@@ -784,6 +927,296 @@ def _expanded_command_word(canon: str) -> str | None:
                 return word  # a head, or a runner chain's payload command
             command_seen = True  # this segment's command word is now fixed
             runner = None
+    return None
+
+
+def _read_pattern_group(pattern: str, open_index: int) -> tuple[str, int]:
+    """The text inside the parenthesised group starting at ``open_index``
+    and the index just past its closing paren (nested groups counted;
+    running to the end of the pattern when unterminated)."""
+    depth = 0
+    index = open_index
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return pattern[open_index + 1 : index], index + 1
+        index += 1
+    return pattern[open_index + 1 :], len(pattern)
+
+
+def _split_pattern(text: str, separator: str) -> list[str]:
+    """Split ``text`` on ``separator`` at group depth zero."""
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for char in text:
+        if char in "({":
+            depth += 1
+        elif char in ")}":
+            depth -= 1
+        if char == separator and depth <= 0:
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    parts.append("".join(current))
+    return parts
+
+
+def _matching_pattern_brace(pattern: str, open_index: int) -> int:
+    """The index of the ``}`` matching the ``{`` at ``open_index``, or -1."""
+    depth = 0
+    for index in range(open_index, len(pattern)):
+        char = pattern[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index
+    return -1
+
+
+def _translate_shell_pattern(pattern: str) -> str:
+    """Translate a shell pattern (glob, brace expansion, extglob) into a
+    regular-expression source matching exactly the words it can expand to.
+
+    ``*`` does not cross ``/``; ``[...]`` classes, ``{a,b}`` alternations and
+    single-character ``{x..y}`` ranges are translated; extglob groups
+    ``?(…)``/``*(…)``/``+(…)``/``@(…)`` become optional / star / plus /
+    exactly-one groups. Constructs that cannot be translated precisely
+    (``!(…)`` negation, unparseable classes, wide ranges) over-approximate
+    to ``.*`` or ``.`` so the can-match test stays conservative in the
+    REFUSING direction."""
+    out: list[str] = []
+    index = 0
+    length = len(pattern)
+    while index < length:
+        char = pattern[index]
+        if char in "?*+!@" and index + 1 < length and pattern[index + 1] == "(":
+            body, index = _read_pattern_group(pattern, index + 1)
+            subs = "|".join(
+                _translate_shell_pattern(part)
+                for part in _split_pattern(body, "|")
+            )
+            if char == "?":
+                out.append(f"(?:{subs})?")
+            elif char == "*":
+                out.append(f"(?:{subs})*")
+            elif char == "+":
+                out.append(f"(?:{subs})+")
+            elif char == "@":
+                out.append(f"(?:{subs})")
+            else:  # !(…): a negative pattern — over-approximate to any text
+                out.append("(?:.*)")
+            continue
+        if char == "*":
+            out.append("[^/]*")
+            index += 1
+        elif char == "?":
+            out.append(".")
+            index += 1
+        elif char == "[":
+            close = pattern.find("]", index + 1)
+            if close < 0:
+                out.append(re.escape(char))
+                index += 1
+                continue
+            body = pattern[index + 1 : close]
+            negative = body[:1] in ("!", "^")
+            if negative:
+                body = body[1:]
+            if not body or "\\" in body or "[" in body:
+                out.append(".")  # unparseable class: any single char
+            else:
+                if not negative and body[0] == "^":
+                    body = "\\" + body
+                out.append(("[^" if negative else "[") + body + "]")
+            index = close + 1
+        elif char == "{":
+            close = _matching_pattern_brace(pattern, index)
+            if close < 0:
+                out.append(re.escape(char))
+                index += 1
+                continue
+            inner = pattern[index + 1 : close]
+            if ".." in inner:
+                low, _, high = inner.partition("..")
+                if (
+                    len(low) == 1
+                    and len(high) == 1
+                    and ("a" <= low <= high or "0" <= low <= high or low == high)
+                ):
+                    out.append(f"[{low}-{high}]")
+                else:
+                    out.append("(?:.*)")  # untranslatable range: any text
+            else:
+                subs = "|".join(
+                    _translate_shell_pattern(part)
+                    for part in _split_pattern(inner, ",")
+                )
+                out.append(f"(?:{subs})")
+            index = close + 1
+        else:
+            out.append(re.escape(char))
+            index += 1
+    return "".join(out)
+
+
+def _pattern_can_match(pattern: str, target: str) -> bool:
+    """True when the shell ``pattern`` can expand to exactly ``target``."""
+    try:
+        regex = re.compile(_translate_shell_pattern(pattern))
+    except re.error:
+        return True  # untranslatable: assume it can (fail closed)
+    return regex.fullmatch(target) is not None
+
+
+def _wrapper_shaped(word: str) -> bool:
+    """True when ``word``, read as a shell pattern, can expand to a wrapper
+    basename (``pool``, ``sub.sh``, ``remote_sub.sh``, ``slot.py``) — the
+    word may BE the paid wrapper after expansion, wherever it sits. The
+    basename (final ``/`` segment) is the unit because a glob never crosses
+    ``/`` and every launch shape admits any path prefix. Glued fragments
+    (``system(poo*``, ``--flag=po*``) are tested too: inside a program
+    string or attached flag value the CHILD shell re-expands them
+    (REVIEW_2329 r5 B-1c)."""
+    candidates = [word] + [
+        fragment for fragment in re.split(r"[()\[\]\"',=]", word) if fragment
+    ]
+    for candidate in candidates:
+        if not _expansion_dependent(candidate):
+            if candidate in _WRAPPER_BASENAMES:
+                return True
+            continue
+        base = candidate.rsplit("/", 1)[-1]
+        if any(_pattern_can_match(base, name) for name in _WRAPPER_BASENAMES):
+            return True
+    return False
+
+
+def _unprovable_position_word(canon: str) -> tuple[str, str] | None:
+    """``(wrapper-shaped word, governing head)`` for the first shell-expanded
+    word at a position the guard cannot reduce to a plain data argument —
+    or None.
+
+    Fires only when NO literal wrapper token is in the text (the
+    wrapper-present branch refuses every expanded word in any position
+    already). A word after a head the guard cannot classify — an
+    unrecognized runner (``timeout``, ``watch``, ``strace``, ``setsid``,
+    ``stdbuf``, ``arch``, ``script`` or ANY word never listed: the list is
+    not the boundary), a shell/interpreter/ssh program carrier (``bash -c
+    'poo* run …'``, ``ssh h 'poo* …'``), or an unclassifiable payload
+    inside a recognized runner chain (``nohup timeout 5 poo[l] …``) — may
+    be executed as a command word by that head or a child it spawns, so a
+    WRAPPER-SHAPED expanded word there is refused (REVIEW_2329 r5
+    B-1a/B-1c; the r7 fail-closed posture). Data-only utilities and
+    builtins reduce their arguments to data; a ``trap`` program is
+    executed position (it runs on signal delivery); recognized transparent
+    runners reduce their payload through the flag tables."""
+    for segment in re.split(r"[;&|\n]", canon):
+        head: str | None = None
+        rest: list[str] = []
+        for word in segment.split():
+            if word in ("(", ")", "{", "}"):
+                continue
+            if re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
+                continue  # an assignment
+            if word[0] in "<>" or re.match(r"\d*[<>]", word):
+                continue  # a redirection
+            if head is None:
+                base = word.rsplit("/", 1)[-1].lower()
+                if base in _COMMAND_PREFIX_WORDS or base in _SHELL_KEYWORDS:
+                    continue  # a keyword: the command word follows it
+                head = word
+                continue
+            rest.append(word)
+        if head is None:
+            continue
+        head_base = head.rsplit("/", 1)[-1].lower()
+        if head_base == "trap":
+            for word in rest:  # the program runs on signal delivery
+                if _expansion_dependent(word) and _wrapper_shaped(word):
+                    return word, head_base
+            continue
+        if head_base in _TRANSPARENT_RUNNERS:
+            payload: str | None = None
+            index = 0
+            while index < len(rest):
+                word = rest[index]
+                if re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word) or (
+                    word[0] in "<>" or re.match(r"\d*[<>]", word)
+                ):
+                    index += 1
+                    continue
+                if word.startswith("-") and word != "-":
+                    flag = word.split("=", 1)[0]
+                    if (
+                        flag in _RUNNER_ARG_FLAGS.get(head_base, frozenset())
+                        and "=" not in word
+                    ):
+                        index += 2  # the flag and its separate argument
+                        continue
+                    index += 1
+                    continue
+                payload = word
+                break
+            if payload is None:
+                continue
+            payload_base = payload.rsplit("/", 1)[-1].lower()
+            if (
+                payload_base in _SAFE_DATA_HEADS
+                or payload_base in _SHELL_BUILTINS
+                or payload_base in _SHELL_KEYWORDS
+                or payload_base in _WRAPPER_BASENAMES
+            ):
+                continue  # the payload reduces: its own arguments are data
+            for word in rest[index:]:  # the payload included: unclassifiable
+                if _expansion_dependent(word) and _wrapper_shaped(word):
+                    return word, payload_base
+            continue
+        if (
+            head_base in _SAFE_DATA_HEADS
+            or head_base in _SHELL_BUILTINS
+            or head_base in _WRAPPER_BASENAMES
+        ):
+            continue  # a data-only utility/builtin/wrapper: args are data
+        for word in rest:  # unrecognized head: every tail position unknown
+            if _expansion_dependent(word) and _wrapper_shaped(word):
+                return word, head_base
+    return None
+
+
+def _unrecognized_head_word(canon: str) -> str | None:
+    """The first simple-command HEAD that is not in the recognized vocabulary
+    (wrapper, transparent runner, shell keyword/builtin, data-only utility,
+    shell) — or None.
+
+    With a wrapper token in the text such a head makes the command
+    irreducible: the program or payload behind it is unreadable, so a paid
+    launch beside it cannot be attributed (REVIEW_2329 r5 M-3 —
+    ``R``/``sqlite3 .read``/``jshell`` were merely the probed spellings;
+    every unlisted interpreter or tool — groovy, scala, octave, gnuplot,
+    ``make -f``, a renamed ``./p`` — is refused by this same rule, which is
+    why closure no longer depends on the family list)."""
+    for segment in re.split(r"[;&|\n]", canon):
+        for word in segment.split():
+            if word in ("(", ")", "{", "}"):
+                continue
+            if re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
+                continue
+            if word[0] in "<>" or re.match(r"\d*[<>]", word):
+                continue
+            base = word.rsplit("/", 1)[-1].lower()
+            if base in _COMMAND_PREFIX_WORDS or base in _SHELL_KEYWORDS:
+                continue
+            if base in _RECOGNIZED_HEADS:
+                break  # this segment's head is recognized
+            return word  # an unrecognized command head
     return None
 
 
@@ -808,50 +1241,63 @@ def _brace_group_spans(canon: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _deny_computed_launch(canon: str) -> None:
-    """Refuse launch-shaped text no lexically observed wrapper invocation
-    can cover, structurally (REVIEW_2329 r3 B-1 / M-B).
+def _deny_computed_launch(canon: str, raw: str | None = None) -> None:
+    """Refuse launch-shaped text no lexically observed wrapper invocation can
+    cover — structurally, and since r7 FAIL-CLOSED (REVIEW_2329 r5, the
+    orchestrator-endorsed posture): an ARMED command is admitted only when
+    it fully reduces to a known-safe shape; anything ambiguous is refused
+    with a precise reason instead of enumerating escape spellings.
 
-    Fires only when a wrapper NAME appears in the text: without one the
-    command is the documented arbitrary-process limit, not this gate's
-    fence. Given that token, the guard refuses
+    * WRAPPER TOKEN PRESENT (a literal wrapper name anywhere, including
+      inside quoted program text after canonicalisation): every word must
+      be canonical — an interpreter invocation (the families in
+      :data:`_INTERPRETER_WORD_RE`), ``eval``/``source``/``.``, or any
+      computed (``$``/backtick) or shell-expanded word (glob, brace,
+      extglob) outside an assignment is refused — AND every simple-command
+      head must be recognized (wrapper, transparent runner, shell
+      keyword/builtin, data-only utility, shell). An unrecognized head (an
+      unlisted interpreter, ``ssh``, a renamed ``./p``, a function call)
+      makes the command irreducible: the program or payload behind it is
+      unreadable, so a paid launch beside it cannot be attributed.
+    * NO WRAPPER TOKEN: an expanded word in COMMAND position — the head
+      itself or a transparent runner's payload — is refused as before, and
+      (r7) a WRAPPER-SHAPED expanded word at any position the guard cannot
+      reduce to a plain data argument is refused: behind an unrecognized
+      runner (``timeout 5 poo[l] …``, ANY word never listed), inside a
+      shell/ssh program (``bash -c 'poo* run …'``), or in an unclassifiable
+      runner-chain payload (``nohup timeout 5 poo[l] …``). Correctness does
+      not depend on the runner/interpreter vocabularies: an unclassifiable
+      head itself triggers the refusal.
 
-    * EVERY interpreter invocation — the python/pypy/perl/ruby/node/php/
-      Rscript/tclsh/lua/deno/bun/julia/pwsh/osascript/awk/jq families,
-      versioned and hyphenated spellings included — regardless of
-      flags, including a script file and a program fed on stdin
-      (``<<``, ``|``, bare ``-``) — the program text is unreadable, so
-      provider substitution, the identity projection and the one-attempt
-      law cannot be checked;
-    * ``eval``/``source``/``.`` as a word anywhere in the text (a nested
-      shell re-writes the environment outside lexical observation); and
-    * any computed (``$``/backtick) word in a non-assignment position.
-
-    With NO wrapper token the same refusal covers an expansion-dependent
-    word in COMMAND position — a head glob (``poo* run grok``) or a
-    transparent runner's payload (``env poo[l] run grok``) — because the
-    expanded word may BE the wrapper (REVIEW_2329 r4 B-2, r6 re-review
-    B-3).
+    The head vocabulary is judged on the heredoc-stripped text so a staged
+    body's words (and its delimiter line) are not command heads; the
+    word-level rules stay on the full canon, heredoc bodies included.
 
     Conservative over-refusal is accepted under armed placement; it is
     documented in ``validate_execution_binding``."""
 
-    wrapper_present = bool(_WRAPPER_NAME_RE.search(canon))
-    word = (
-        _computed_command_word(canon)
-        if wrapper_present
-        else _expanded_command_word(canon)
-    )
-    if not wrapper_present and word is None:
-        return
+    wrapper_present = _WRAPPER_NAME_RE.search(canon) is not None
+    posture_word: str | None = None
+    posture_head = ""
+    unrecognized: str | None = None
+    if wrapper_present:
+        scan = canon if raw is None else _canonical_command(strip_heredocs(raw))
+        unrecognized = _unrecognized_head_word(scan)
+    else:
+        if _expanded_command_word(canon) is None:
+            found = _unprovable_position_word(canon)
+            if found is None:
+                return
+            posture_word, posture_head = found
     if _INTERPRETER_WORD_RE.search(canon):
         deny(
             "Mastermind shared-placement guard: unobservable launch — an "
-            "interpreter (python/pypy/perl/ruby/node/php/Rscript/tclsh/"
-            "lua/deno/bun/julia/pwsh/osascript/awk/jq) runs a "
-            "program the guard cannot read, whether from a flag, a script "
-            "file or stdin, so a wrapper launch inside it cannot be checked "
-            "against the binding. Run the paid launch as a plain command."
+            "interpreter (python/pypy/perl/ruby/node/php/Rscript/R/sqlite3/"
+            "tclsh/lua/deno/bun/julia/pwsh/jshell/java/osascript/awk/jq …) "
+            "runs a program the guard cannot read, whether from a flag, a "
+            "script file or stdin, so a wrapper launch inside it cannot be "
+            "checked against the binding. Run the paid launch as a plain "
+            "command."
         )
     if _UNOBSERVABLE_ANYWHERE_RE.search(canon):
         deny(
@@ -860,53 +1306,172 @@ def _deny_computed_launch(canon: str) -> None:
             "identity and command text at runtime (including inside a "
             "nested shell). Run the paid launch as a plain command."
         )
+    if posture_word is not None:
+        deny(
+            "Mastermind shared-placement guard: unobservable launch — the "
+            f"wrapper-shaped word {posture_word!r} is shell-expanded at "
+            f"runtime and sits behind {posture_head!r}, a command word "
+            "whose argument grammar the guard cannot reduce to a plain "
+            "data argument, so the guard cannot prove it is not the paid "
+            "wrapper (fail-closed posture, REVIEW_2329 r5 B-1). Invoke the "
+            "wrapper by its literal name."
+        )
     word = _computed_command_word(canon)
     if word is not None:
         deny(
             "Mastermind shared-placement guard: unobservable launch — the "
             f"word {word!r} is computed or shell-expanded at runtime (a "
-            "$/backtick word, a glob or a brace expansion), so the command it "
-            "becomes, the wrapper invocation and any identity assignment "
-            "around it cannot be observed. Invoke the wrapper by its "
-            "literal name."
+            "$/backtick word, a glob, a brace or an extglob expansion), so "
+            "the command it becomes, the wrapper invocation and any "
+            "identity assignment around it cannot be observed. Invoke the "
+            "wrapper by its literal name."
+        )
+    if unrecognized is not None:
+        deny(
+            "Mastermind shared-placement guard: unobservable launch — the "
+            f"command word {unrecognized!r} is not a recognized wrapper, "
+            "transparent runner, shell keyword/builtin or data-only "
+            "utility, so with a paid launch in the same command this text "
+            "cannot be reduced to an observable launch shape: the program "
+            "or payload behind it is unreadable (fail-closed posture, "
+            "REVIEW_2329 r5 M-3). Run the paid launch as a plain command."
         )
 
 
-def _paren_body_spans(canon: str) -> list[tuple[int, int]]:
-    """``( … )`` body spans of paren-bodied function definitions.
+def _paren_body_spans_raw(
+    raw: str, raw_index: list[int]
+) -> list[tuple[int, int]]:
+    """CANON-coordinate spans of paren-bodied function definitions, measured
+    on the RAW text (REVIEW_2329 r5 M-1).
 
     ``f() ( … )`` and ``function f () ( … )`` define a function whose body is
     a subshell: no brace span covers it, so one lexical launch inside it ran
-    N paid children under one binding (REVIEW_2329 r4 M-A2). A plain subshell
-    group ``( launch )`` runs its launch exactly once and is NOT spanned.
-    """
+    N paid children under one binding (REVIEW_2329 r4 M-A2). A plain
+    subshell group ``( launch )`` runs its launch exactly once and is NOT
+    spanned. RAW measurement makes the span quote- and layout-aware:
+    newlines and comments between ``()`` and the body are legal bash
+    (``f()\\n( L )``, ``f() # c\\n( L )``), and a quoted ``")"`` inside the
+    body must not close the span early — canon, which deletes the quotes,
+    got all three wrong. The walk is quote-aware (a ``"``/``'`` section
+    hides parens; backslash escapes; a ``#`` comment runs to end of line),
+    and an unterminated body spans to the end of the text: its multiplicity
+    is unknown, so the fail-closed posture refuses any launch after it.
+    ``raw_index`` is :func:`_canonical_command_map`'s offset map."""
     spans: list[tuple[int, int]] = []
-    for match in _FUNCTION_PAREN_BODY_RE.finditer(canon):
-        start = match.end() - 1
+    for match in _FUNCTION_DEF_RE.finditer(raw):
+        index = match.end()
+        while index < len(raw):
+            char = raw[index]
+            if char in " \t\r\n":
+                index += 1
+                continue
+            if char == "#":
+                newline = raw.find("\n", index)
+                index = len(raw) if newline < 0 else newline + 1
+                continue
+            break
+        if index >= len(raw) or raw[index] != "(":
+            continue  # a brace body (brace spans cover it): not ours
         depth = 0
-        for index in range(start, len(canon)):
-            if canon[index] == "(":
+        quote: str | None = None
+        cursor = index
+        end: int | None = None
+        while cursor < len(raw):
+            char = raw[cursor]
+            if quote is not None:
+                if quote == '"' and char == "\\" and cursor + 1 < len(raw):
+                    cursor += 2
+                    continue
+                if char == quote:
+                    quote = None
+                cursor += 1
+                continue
+            if char in "\"'":
+                quote = char
+                cursor += 1
+                continue
+            if char == "\\" and cursor + 1 < len(raw):
+                cursor += 2
+                continue
+            if char == "#":
+                newline = raw.find("\n", cursor)
+                cursor = len(raw) if newline < 0 else newline + 1
+                continue
+            if char == "(":
                 depth += 1
-            elif canon[index] == ")":
+            elif char == ")":
                 depth -= 1
                 if depth == 0:
-                    spans.append((match.start(), index + 1))
+                    end = cursor + 1
                     break
-        else:
-            spans.append((match.start(), len(canon)))
+            cursor += 1
+        if end is None:
+            end = len(raw)  # unterminated: multiplicity unknown → cover all
+        spans.append(
+            (
+                bisect.bisect_left(raw_index, match.start()),
+                bisect.bisect_left(raw_index, end),
+            )
+        )
     return spans
 
 
-def _loop_condition_spans(canon: str) -> list[tuple[int, int]]:
-    """``while``/``until`` header spans: the keyword up to its ``do``.
+def _loop_spans(canon: str) -> list[tuple[int, int]]:
+    """Spans of every loop's CONDITION header and BODY, command-position
+    aware (REVIEW_2329 r5 M-1).
 
-    A launch in the CONDITION runs once per iteration but sits BEFORE ``do``,
-    so the do…done span never covered it (REVIEW_2329 r4 M-A2).
-    """
+    The r6 scanners pattern-matched words anywhere: a ``do``/``done`` PAIR
+    inside a while condition (``while echo do echo done; L; do :; done``,
+    live 3 launches) truncated BOTH the condition span (which ended at the
+    first ``do`` word — an argument of ``echo``) and the body span (first
+    ``do`` to first ``done``, both arguments), leaving the launch outside
+    every span. This walk splits the canon into simple-command segments and
+    recognises ``while``/``until``/``do``/``done`` only at a segment's
+    command position: argument-position ``do``/``done`` words are data.
+    Each command-position ``do`` closes the innermost pending
+    ``while``/``until`` header (its CONDITION span) and opens a BODY span
+    that the matching command-position ``done`` closes (nesting via a
+    stack). A header or body left unmatched spans to the end of the text:
+    its multiplicity is unknown, so the fail-closed posture refuses any
+    launch after it."""
     spans: list[tuple[int, int]] = []
-    for match in _LOOP_HEADER_RE.finditer(canon):
-        do_word = _DO_WORD_RE.search(canon, match.end())
-        spans.append((match.start(), do_word.start() if do_word else len(canon)))
+    open_bodies: list[int] = []
+    pending_headers: list[int] = []
+    segments: list[tuple[int, str]] = []
+    prev = 0
+    for sep in re.finditer(r"[;&|\n()]", canon):
+        segments.append((prev, canon[prev : sep.start()]))
+        prev = sep.end()
+    segments.append((prev, canon[prev:]))
+    for start, text in segments:
+        for word_match in re.finditer(r"\S+", text):
+            word = word_match.group(0)
+            if re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
+                continue
+            if word[0] in "<>" or re.match(r"\d*[<>]", word):
+                continue
+            lowered = word.lower()
+            if (
+                lowered not in _LOOP_STRUCT_KEYWORDS
+                and lowered not in _COMMAND_PREFIX_WORDS
+            ):
+                break  # a real command word: no loop structure here
+            absolute = start + word_match.start()
+            if lowered in ("while", "until"):
+                pending_headers.append(absolute)
+            elif lowered == "do":
+                if pending_headers:
+                    spans.append((pending_headers.pop(), absolute))
+                open_bodies.append(absolute)
+            elif lowered == "done":
+                if open_bodies:
+                    spans.append(
+                        (open_bodies.pop(), start + word_match.end())
+                    )
+            # for/select/!/in: nothing yet — their `do` arrives as a plain
+            # command-position do with no pending header.
+    spans.extend((start, len(canon)) for start in open_bodies)
+    spans.extend((start, len(canon)) for start in pending_headers)
     return spans
 
 
@@ -914,36 +1479,54 @@ def _trap_program_spans(raw: str) -> list[tuple[int, int]]:
     """RAW-text spans of ``trap`` programs, quote-aware.
 
     The span used to end at the first ``;`` even when that ``;`` was INSIDE
-    the quoted program, so a launch after an earlier statement in the same
-    program fell outside it (REVIEW_2329 r4 n-2). Measured on the raw text
-    because :func:`_canonical_command` deletes the quotes that delimit the
-    program; :func:`_runtime_multiplexed` maps the span back to canon
-    coordinates.
-    """
+    the quoted program (REVIEW_2329 r4 n-2), so it is measured on the raw
+    text where the quotes still stand; :func:`_runtime_multiplexed` maps
+    the span back into canon coordinates. r5 M-2: the program is not
+    always one pure quoted string — concatenated sections (``'a'\\;'b'``,
+    ``'a'\\'''b'`` splices, ``"a""b"``) and a leading ``--`` option
+    end-marker (``trap -- '…' USR1``) defeated the scanner and the launch
+    fell outside the span. The scan now skips a leading ``--`` and keeps
+    extending the program word while the next character is directly a
+    quote or a backslash escape (concatenation); an unterminated quote
+    runs to the end of the text — the multiplicity is unknown, so the span
+    covers conservatively."""
     spans: list[tuple[int, int]] = []
     for match in _TRAP_WORD_RE.finditer(raw):
         index = match.end()
         while index < len(raw) and raw[index] in " \t":
             index += 1
+        if raw.startswith("--", index):  # bash accepts the option end-marker
+            index += 2
+            while index < len(raw) and raw[index] in " \t":
+                index += 1
         if index >= len(raw) or raw[index] not in "\"'":
             end = _STATEMENT_END_RE.search(raw, index)
             spans.append((match.start(), end.start() if end else len(raw)))
             continue
-        quote = raw[index]
-        index += 1
-        while index < len(raw):
-            char = raw[index]
-            if quote == "'":
-                index += 1
-                if char == "'":
-                    break
-                continue
-            if char == "\\" and index + 1 < len(raw):
-                index += 2
-                continue
+        while True:
+            quote = raw[index]
             index += 1
-            if char == '"':
-                break
+            while index < len(raw):
+                char = raw[index]
+                if quote == "'":
+                    index += 1
+                    if char == "'":
+                        break
+                    continue
+                if char == "\\" and index + 1 < len(raw):
+                    index += 2
+                    continue
+                index += 1
+                if char == '"':
+                    break
+            else:
+                break  # unterminated quote: span to the end of the text
+            if index < len(raw) and raw[index] == "\\":
+                index += 2  # a glued escape extends the word ('a'\;'b')
+                continue
+            if index < len(raw) and raw[index] in "\"'":
+                continue  # a glued quoted section ("a""b", '\'' splices)
+            break
         spans.append((match.start(), index))
     return spans
 
@@ -952,22 +1535,22 @@ def _runtime_multiplexed(
     canon: str, offsets: list[int], raw: str | None = None
 ) -> bool:
     """True when a wrapper invocation sits inside a construct that executes
-    it zero-or-many times at runtime: a for/while/until body (``do … done``)
-    or CONDITION header, an xargs/parallel/find -exec executor's argument
-    tail, any ``{ … }`` group or function body (brace- or paren-bodied), a
-    ``trap`` program, or a repeater (``watch``, ``timeout --foreground``)
-    (REVIEW_2329 r2 N-2, r3 M-A, r4 M-A2). One binding covers exactly one
-    attempt, so N runtime children under one lexical launch are refused as
-    unaccounted descendants.
-    """
-    spans = [match.span() for match in _LOOP_BODY_RE.finditer(canon)]
-    spans += _loop_condition_spans(canon)
+    it zero-or-many times at runtime: a for/while/until loop body or
+    CONDITION header (command-position matched), an xargs/parallel/find
+    -exec executor's argument tail, any ``{ … }`` group or function body
+    (brace- or paren-bodied, the paren body measured quote- and
+    layout-aware on the raw text), a ``trap`` program (concatenated
+    sections included), or a repeater (``watch``, ``timeout --foreground``)
+    (REVIEW_2329 r2 N-2, r3 M-A, r4 M-A2, r5 M-1/M-2). One binding covers
+    exactly one attempt, so N runtime children under one lexical launch
+    are refused as unaccounted descendants."""
+    spans = _loop_spans(canon)
     spans += [match.span() for match in _BATCH_EXECUTOR_RE.finditer(canon)]
     spans += [match.span() for match in _REPEATER_RE.finditer(canon)]
     spans += _brace_group_spans(canon)
-    spans += _paren_body_spans(canon)
     if raw is not None:
         raw_index = _canonical_command_map(raw)[1]
+        spans += _paren_body_spans_raw(raw, raw_index)
         spans += [
             (
                 bisect.bisect_left(raw_index, start),
@@ -976,6 +1559,9 @@ def _runtime_multiplexed(
             for start, end in _trap_program_spans(raw)
         ]
     else:
+        identity = list(range(len(canon)))
+        identity.append(len(canon))
+        spans += _paren_body_spans_raw(canon, identity)
         for match in _TRAP_WORD_RE.finditer(canon):
             end = _STATEMENT_END_RE.search(canon, match.end())
             spans.append((match.start(), end.start() if end else len(canon)))
@@ -1210,15 +1796,24 @@ def validate_execution_binding(command: str) -> None:
     repeated, heredoc bodies included, off-list modes refused) and every
     identity assignment form, with backslash-newline canonicalised as a
     POSIX join (empty string). Runtime-multiplexed launches (for/while/
-    until bodies, xargs/parallel/find -exec executors, any ``{ … }`` group
-    or function body, ``trap`` programs, ``watch``/``timeout
-    --foreground`` repeaters) are refused as unaccounted descendants.
-    Given a wrapper name in the text, EVERY interpreter invocation is
-    refused as unobservable regardless of flags or input channel (a script
-    file or a program on stdin counts), as are ``eval``/``source``/``.``
-    anywhere and any computed (``$``/backtick) word outside an assignment —
-    conservative over-refusal, documented here, preferred to a bypass.
-    Scripts staged in an EARLIER command or a
+    until bodies and condition headers, xargs/parallel/find -exec
+    executors, any ``{ … }`` group or function body, ``trap`` programs,
+    ``watch``/``timeout --foreground`` repeaters) are refused as
+    unaccounted descendants. Given a wrapper name in the text, EVERY
+    interpreter invocation is refused as unobservable regardless of flags
+    or input channel (a script file or a program on stdin counts), as are
+    ``eval``/``source``/``.`` anywhere and any computed (``$``/backtick)
+    or shell-expanded word outside an assignment — conservative
+    over-refusal, documented here, preferred to a bypass. Since r7 the
+    armed gate is FAIL-CLOSED (REVIEW_2329 r5): with a wrapper token
+    present every command head must be recognized (wrapper, transparent
+    runner, shell keyword/builtin, data-only utility, shell) and every
+    span parseable — an unclassifiable head, an unterminated construct or
+    an ambiguous shape is refused rather than admitted by blindness; with
+    no wrapper token, a wrapper-shaped expanded word at a position that
+    cannot be reduced to a plain data argument is refused for the same
+    reason. Unarmed/legacy sessions keep the pre-posture behavior
+    exactly. Scripts staged in an EARLIER command or a
     file and executed later, and environment injected by provider-side
     mechanisms outside the command, are not observed; eval/source/
     computed-name assignments in a launch command are refused as
@@ -1459,12 +2054,14 @@ def guard_fabric_launch(command: str, raw_command: str | None = None) -> None:
             canon, [offset for offset, _, _, _ in span_launches], raw
         ):
             _deny_runtime_multiplexed()
-        # REVIEW_2329 r3 B-1 / M-B: interpreter programs, eval/source/.
-        # anywhere and computed words carrying a wrapper token never reach
-        # the wrapper scan, so they are refused here — BEFORE the no-launch
-        # early return that used to let an armed session launch with zero
-        # binding validation.
-        _deny_computed_launch(canon)
+        # REVIEW_2329 r3 B-1 / M-B and r5 (the r7 fail-closed posture):
+        # interpreter programs, eval/source/. anywhere, computed or expanded
+        # words carrying a wrapper token, unrecognized command heads beside
+        # a launch, and wrapper-shaped expanded words at unprovable
+        # positions never reach the wrapper scan, so they are refused here
+        # — BEFORE the no-launch early return that used to let an armed
+        # session launch with zero binding validation.
+        _deny_computed_launch(canon, raw)
     if not launches and not invocations:
         return
 

@@ -3110,3 +3110,438 @@ def test_r6_unarmed_sessions_keep_the_legacy_glob_behavior(
     ):
         guard.guard_bash(_payload(cwd, command), {"command": command})
         assert capsys.readouterr().out == ""
+
+
+# --- r7: REVIEW_2329 r5 closure (B-1 / M-1 / M-2 / M-3 / m-1) — the armed ---
+# --- fail-closed posture -------------------------------------------------------
+#
+# The r5 final-gate review's standing lesson, endorsed by the orchestrator:
+# five rounds of enumerating escape spellings always lost to the shell
+# surface (a runner word, a --flag=value, a quoted program, an unlisted
+# interpreter restored the bypass each time). The armed gate is therefore
+# FAIL-CLOSED now: a command that carries a wrapper token — literal, or a
+# shell-expanded WRAPPER-SHAPED word at a position the guard cannot reduce
+# to a plain data argument — is admitted only if it fully reduces (every
+# word canonical, every command head recognized, every span parseable);
+# anything ambiguous is refused with a precise reason. The runner and
+# interpreter vocabularies stay as optimizations: correctness no longer
+# depends on their completeness. Unarmed/legacy legs keep the pre-posture
+# behavior exactly (pinned by the unarmed test below).
+
+_R7_FAITH = _IDENTITY_PREFIX + 'pool run glm "bounded task" /tmp glm-5.3'
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # B-1(a): runners absent from _TRANSPARENT_RUNNERS carried the
+        # expanded wrapper at unscanned argument position (live-confirmed
+        # by the r5 reviewer; `watch` multiplied it without bound).
+        "timeout 5 poo[l] run grok a /tmp grok-4.6",
+        "watch poo* run grok a /tmp grok-4.6",
+        "watch -n 0.2 ./poo* run grok a /tmp grok-4.6",
+        "strace -o /dev/null poo* run grok a /tmp grok-4.6",
+        "setsid poo* run grok a /tmp grok-4.6",
+        "stdbuf -o0 poo* run grok a /tmp grok-4.6",
+        "arch -x86_64 poo* run grok a /tmp grok-4.6",
+        "script -q /dev/null poo* run grok a /tmp grok-4.6",
+        # The runner CHAIN: nohup is recognized, but its payload `timeout`
+        # is unclassifiable, so the chain's tail is unprovable.
+        "nohup timeout 5 poo[l] run grok a /tmp grok-4.6",
+    ],
+    ids=[
+        "timeout", "watch", "watch-interval", "strace", "setsid", "stdbuf",
+        "arch", "script", "nohup-timeout-chain",
+    ],
+)
+def test_r7_b1_unlisted_runner_payloads_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # THE POSTURE: runners that appear in NO vocabulary — the reviewer
+        # will invent one more — are refused because their tail positions
+        # cannot be reduced, not because they were enumerated.
+        "faketime 5s poo* run grok a /tmp grok-4.6",
+        "vrfy --mode x poo* run grok a /tmp grok-4.6",
+        "unbuffer poo[l] run grok a /tmp grok-4.6",
+        "valgrind -q poo? run grok a /tmp grok-4.6",
+        "chroot / poo[l] run grok a /tmp grok-4.6",
+        "zzz --flag=1 poo* run grok a /tmp grok-4.6",
+        # An attached flag VALUE carrying the pattern is just as unprovable.
+        "faketime --when=po* poo* run grok a /tmp grok-4.6",
+        # A glob hidden behind a glued prefix inside a program string is
+        # re-expanded by the child shell.
+        "R -e 'system(\"poo* run grok x /tmp grok-4.6\")'",
+    ],
+    ids=[
+        "faketime", "vrfy", "unbuffer", "valgrind", "chroot", "zzz",
+        "attached-value", "program-string-glob",
+    ],
+)
+def test_r7_posture_refuses_never_enumerated_runners(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # B-1(b): an ATTACHED =value consumed no further word, so the flag
+        # swallowed the payload word and the expanded wrapper passed as a
+        # flag argument (live-confirmed; the split forms already refused).
+        "sudo --user=root poo[l] run grok a /tmp grok-4.6",
+        "env --unset=FOO poo[l] run grok a /tmp grok-4.6",
+        "nice --adjustment=5 poo* run grok a /tmp grok-4.6",
+        "xargs --max-args=2 poo* </dev/null",
+    ],
+    ids=["sudo-user-eq", "env-unset-eq", "nice-adjust-eq", "xargs-max-eq"],
+)
+def test_r7_b1_attached_value_flags_do_not_swallow_the_payload(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # B-1(c): the glob sits inside a shell/ssh program string; the CHILD
+        # shell expands it as its own command word (live-confirmed on macOS).
+        "bash -c 'poo* run grok x /tmp grok-4.6'",
+        "sh -c 'poo* run grok x /tmp grok-4.6'",
+        "ssh h 'poo* run grok x /tmp grok-4.6'",
+    ],
+    ids=["bash-c", "sh-c", "ssh"],
+)
+def test_r7_b1_shell_program_payloads_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # M-1: a do/done PAIR inside the condition truncated both the
+        # condition span and the body span (live: 3 launches).
+        _IDENTITY_PREFIX
+        + "while echo do echo done; pool run glm a /tmp glm-5.3; do :; done",
+        _IDENTITY_PREFIX
+        + "until echo do echo done; pool run glm a /tmp glm-5.3; do :; done",
+        # Precision pins (r5: these single-`do` shapes already refused):
+        # the argument `do` must not be mistaken for the loop's `do`.
+        _IDENTITY_PREFIX + "while echo do; pool run glm a /tmp glm-5.3; do :; done",
+        _IDENTITY_PREFIX
+        + "while grep -q do notes.txt; pool run glm a /tmp glm-5.3; do :; done",
+        _IDENTITY_PREFIX
+        + 'while [ "$x" = "do" ]; pool run glm a /tmp glm-5.3; do :; done',
+    ],
+    ids=["while-do-done-pair", "until-do-done-pair", "while-bare-do",
+         "while-grep-do", "while-quoted-do"],
+)
+def test_r7_m1_do_done_pair_in_a_loop_condition_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "runtime-multiplexed" in reason
+    assert "exactly one attempt" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # M-1: the paren-body scanner allowed only [ \t] between () and the
+        # body and measured quote-blind canon. Newlines, comments and a
+        # quoted ")" are all legal bash (live: 2 launches each).
+        _IDENTITY_PREFIX + "f()\n( pool run glm a /tmp glm-5.3 )\nf\nf",
+        _IDENTITY_PREFIX + "f() # c\n( pool run glm a /tmp glm-5.3 ); f; f",
+        _IDENTITY_PREFIX + 'f() ( echo ")"; pool run glm a /tmp glm-5.3 ); f; f',
+    ],
+    ids=["next-line", "behind-comment", "quoted-close-paren"],
+)
+def test_r7_m1_paren_body_edge_spans_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "runtime-multiplexed" in reason
+    assert "exactly one attempt" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # M-2: the trap scanner assumed one pure quoted string. Concatenated
+        # sections, '\'' splices, "a""b" and a leading -- defeated it
+        # (live: 2 launches via literal kill).
+        _IDENTITY_PREFIX
+        + "trap 'echo hi'\\;'pool run glm a /tmp glm-5.3' USR1; kill -USR1 4242",
+        _IDENTITY_PREFIX
+        + "trap 'echo '\\''hi'\\''; pool run glm a /tmp glm-5.3 ' USR1"
+        + "; kill -USR1 4242",
+        _IDENTITY_PREFIX
+        + 'trap "echo hi""; pool run glm a /tmp glm-5.3" USR1; kill -USR1 4242',
+        _IDENTITY_PREFIX
+        + "trap -- 'echo hi; pool run glm a /tmp glm-5.3' USR1; kill -USR1 4242",
+    ],
+    ids=["backslash-concat", "quote-splice", "double-quote-concat", "dash-dash"],
+)
+def test_r7_m2_trap_program_concatenations_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "runtime-multiplexed" in reason
+    assert "exactly one attempt" in reason
+
+
+def test_r7_m2_launch_free_trap_program_still_spans_precisely(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Precision control: `trap --` with a launch-free program must not span
+    # the faithful launch that follows it (the span stops at the program).
+    _install(monkeypatch, tmp_path, _binding())
+    _guard_launch(
+        shared_placement,
+        _IDENTITY_PREFIX
+        + "trap -- 'echo hi; echo bye' USR1; pool run glm a /tmp glm-5.3",
+    )
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # M-3: the interpreter families were a closed list. The probed
+        # spellings (R, sqlite3 .read, jshell) get the precise interpreter
+        # reason now — and every UNLISTED program carrier is refused by the
+        # posture as an unrecognized head, so closure no longer depends on
+        # the family list.
+        _IDENTITY_PREFIX + "R -e 'system(\"pool run grok x /tmp grok-4.6\")'",
+        _IDENTITY_PREFIX
+        + "R -e 'system(paste0(\"po\",\"ol run grok x\"))'; "
+        + 'pool run glm "bounded task" /tmp glm-5.3',
+        _IDENTITY_PREFIX
+        + "R --file tools/snip.R; " + 'pool run glm "bounded task" /tmp glm-5.3',
+        _IDENTITY_PREFIX
+        + "sqlite3 db '.read e.sql'; "
+        + 'pool run glm "bounded task" /tmp glm-5.3',
+        _IDENTITY_PREFIX
+        + "jshell -s tools/snip.jsh; " + 'pool run glm "bounded task" /tmp glm-5.3',
+        _IDENTITY_PREFIX
+        + "java -jar tools/App.jar; "
+        + 'pool run glm "bounded task" /tmp glm-5.3',
+    ],
+    ids=["R-system", "R-paste0", "R-file", "sqlite3-read", "jshell", "java-jar"],
+)
+def test_r7_m3_unlisted_interpreters_beside_a_launch_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "unobservable launch" in reason
+    assert "interpreter" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Same class, deliberately NOT in the family list — the posture
+        # (unrecognized head beside a launch) refuses them anyway.
+        _IDENTITY_PREFIX
+        + "groovy -e 'println 1'; " + 'pool run glm "bounded task" /tmp glm-5.3',
+        _IDENTITY_PREFIX
+        + "make -f x.mk; " + 'pool run glm "bounded task" /tmp glm-5.3',
+        _IDENTITY_PREFIX
+        + "octave --eval 1; " + 'pool run glm "bounded task" /tmp glm-5.3',
+        # A renamed wrapper: `./p` -> pool is an unrecognized head beside
+        # the wrapper name carried in the symlink target.
+        _IDENTITY_PREFIX + "ln -s /usr/local/bin/pool p && ./p run glm a /tmp glm-5.3",
+        # An invented tool beside a faithful launch.
+        _IDENTITY_PREFIX + "zzz --mode x; " + 'pool run glm "bounded task" /tmp glm-5.3',
+    ],
+    ids=["groovy", "make", "octave", "renamed-wrapper", "unknown-tool"],
+)
+def test_r7_m3_unrecognized_heads_beside_a_launch_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # m-1: extglob words are expansion-dependent; the paren split used
+        # to dismember them (`po+(o)l` -> `po+`/`o`/`l`).
+        "po+(o)l run grok 'x' /tmp grok-4.6",
+        "po?(o)l run grok 'x' /tmp grok-4.6",
+        "su@(b).sh grok 'x'",
+    ],
+    ids=["plus-extglob", "question-extglob", "at-extglob"],
+)
+def test_r7_m1_extglob_words_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+def test_r7_posture_stays_scoped_to_wrapper_shaped_patterns(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Precision controls: an expanded word that CANNOT be a wrapper, at the
+    # same unprovable positions, is the documented arbitrary-process limit
+    # — the posture refuses the irreducible wrapper shape, not every mark.
+    _install(monkeypatch, tmp_path, _binding())
+    for command in (
+        "faketime 5s a+(b) run x",  # extglob, not wrapper-shaped
+        "git add docs/*.md",  # data-only utility: argument globs are data
+        "ls -1 tests/*.py",  # re-pinned r6 control under the posture
+    ):
+        _guard_launch(shared_placement, command)
+        assert capsys.readouterr().out == "", command
+
+
+def test_r7_posture_unparsed_runner_grammar_is_refused_even_literal(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Documented over-refusal, pinned deliberately: `timeout`'s duration
+    # argument is grammar the guard does not model, so even a LITERAL
+    # wrapper behind it is irreducible and refused. Runners whose grammar
+    # IS modeled (time/nice/env, above) stay allowed.
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(
+            shared_placement,
+            "timeout 5 " + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3",
+        )
+    assert "unobservable launch" in _emitted(capsys)["permissionDecisionReason"]
+
+
+def test_r7_unarmed_sessions_keep_the_legacy_posture_behavior(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Scoped arming (OQ-7): every r7 refusal class is shared-placement
+    # only — an unarmed session keeps the legacy freedom exactly.
+    home = tmp_path / "home"
+    cwd = home / "lanes" / "work"
+    cwd.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("MASTERMIND_CI_POLL_STATE_DIR", str(tmp_path / "poll-state"))
+    for name in (
+        "MASTERMIND_SHARED_PLACEMENT",
+        "POOL_EXECUTION_BINDING",
+        "MASTERMIND_PLACEMENT_RECEIPT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    for command in (
+        "timeout 5 poo[l] run grok bounded /tmp grok-4.6",
+        "bash -c 'poo* run grok x /tmp grok-4.6'",
+        "faketime 5s poo* run grok bounded /tmp grok-4.6",
+        "po+(o)l run grok bounded /tmp grok-4.6",
+    ):
+        guard.guard_bash(_payload(cwd, command), {"command": command})
+        assert capsys.readouterr().out == "", command
