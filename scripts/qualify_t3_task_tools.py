@@ -22,6 +22,17 @@ MODEL = "claude-fable-5.2:free"
 SANDBOX = "(version 1)(allow default)(deny network*)(allow network-outbound (remote ip \"localhost:*\"))"
 
 
+def observed_catalog(records: list[dict]) -> list[str] | None:
+    """Return the catalog only when the CLI emitted one unambiguous init record."""
+    initial = [row for row in records if row.get("type") == "system" and row.get("subtype") == "init"]
+    if len(initial) != 1:
+        return None
+    tools = initial[0].get("tools")
+    if not isinstance(tools, list) or not all(isinstance(name, str) and name for name in tools):
+        return None
+    return tools
+
+
 def run_variant(cli: Path, variant: str) -> dict:
     requests = []
     with tempfile.TemporaryDirectory(prefix="mmx-task-tools-") as temporary:
@@ -125,19 +136,22 @@ def run_variant(cli: Path, variant: str) -> dict:
         records = []
         for line in result.stdout.splitlines():
             try:
-                records.append(json.loads(line))
+                row = json.loads(line)
+                if isinstance(row, dict):
+                    records.append(row)
             except json.JSONDecodeError:
                 pass
-        initial = [row for row in records if row.get("type") == "system"
-                   and row.get("subtype") == "init"]
-        catalog = initial[-1].get("tools", []) if initial else []
-        present = sorted(TASK_TOOLS.intersection(catalog))
+        catalog = observed_catalog(records)
+        present = sorted(TASK_TOOLS.intersection(catalog or []))
+        results = [row for row in records if row.get("type") == "result"]
+        completed = (len(results) == 1 and results[0].get("subtype") == "success"
+                     and results[0].get("is_error") is False)
         wire_present = sorted(TASK_TOOLS.intersection(
             requests[-1]["tool_names"] if requests else []))
         expected = sorted(TASK_TOOLS) if not variant.startswith("baseline") else []
         passed = (result.returncode == 0 and len(requests) == 1
                   and requests[0]["model"] == MODEL and requests[0]["fixture_auth"]
-                  and present == expected
+                  and catalog is not None and completed and present == expected
                   and (not eager or wire_present == expected))
         return {"variant": variant, "passed": passed, "exit_code": result.returncode,
                 "messages_requests": len(requests), "model": MODEL,
@@ -145,7 +159,7 @@ def run_variant(cli: Path, variant: str) -> dict:
                 "init_task_tools": present, "wire_task_tools": wire_present,
                 "advertised_task_tools": requests[-1]["advertised_task_tools"] if requests else [],
                 "wire_tool_names": requests[-1]["tool_names"] if requests else [],
-                "init_tool_count": len(catalog), "wire_tool_count": len(
+                "init_tool_count": len(catalog) if catalog is not None else None, "wire_tool_count": len(
                     requests[-1]["tool_names"] if requests else []),
                 "stderr_sha256": hashlib.sha256(result.stderr.encode()).hexdigest(),
                 "stderr_tail": result.stderr[-1600:] if not passed else "",
