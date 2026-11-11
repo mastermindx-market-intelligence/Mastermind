@@ -412,16 +412,42 @@ def _sanitize_messages(payload: dict) -> None:
     messages = payload.get("messages")
     if not isinstance(messages, list):
         return
+    kept: list = []
+    directives: list = []
     for index, message in enumerate(messages):
         if not isinstance(message, dict):
+            kept.append(message)
+            continue
+        if message.get("role") == "system":
+            # The Messages API only accepts a system-role entry that precedes an
+            # assistant turn or ends the array; T3 emits one mid-conversation and
+            # the whole request 400s. Fold it into the top-level system param,
+            # which is always valid, instead of discarding the instructions.
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                directives.append({"type": "text", "text": content})
+            elif isinstance(content, list):
+                directives.extend(block for block in content
+                                  if isinstance(block, dict) and block.get("type") == "text")
+            _log.warning("fabric sanitized messages.%d folded role=system model=%s",
+                         index, payload.get("model"))
             continue
         extra = [key for key in message if key not in ("role", "content")]
-        if not extra:
-            continue
-        for key in extra:
-            del message[key]
-        _log.warning("fabric sanitized messages.%d dropped=%s model=%s",
-                     index, ",".join(sorted(extra)), payload.get("model"))
+        if extra:
+            for key in extra:
+                del message[key]
+            _log.warning("fabric sanitized messages.%d dropped=%s model=%s",
+                         index, ",".join(sorted(extra)), payload.get("model"))
+        kept.append(message)
+    if directives:
+        system = payload.get("system")
+        if isinstance(system, str):
+            system = [{"type": "text", "text": system}] if system else []
+        if not isinstance(system, list):
+            system = []
+        payload["system"] = directives + system
+    if len(kept) != len(messages):
+        payload["messages"] = kept
 
 
 _ALLOWED_TOP_LEVEL = frozenset({
