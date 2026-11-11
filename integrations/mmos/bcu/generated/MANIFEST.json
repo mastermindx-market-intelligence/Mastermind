@@ -1,0 +1,42 @@
+{
+  "generated_at": "2026-11-11T10:09:57Z",
+  "generator": "tools/mmos_browser_use/generate_staging.py",
+  "targets": {
+    "experiential-claude": {
+      "claude_json": "/Users/chriswong/.t3/providers/experiential-claude/.claude.json",
+      "sha256": "67f8773efdcd8cae106592f8f655b889ba8b6d104943370fa28418f2e6ce3ee4",
+      "entries": [
+        "mmos-computer-use"
+      ]
+    },
+    "fabric-anthropic-oauth": {
+      "claude_json": "/Users/chriswong/.t3/providers/fabric-anthropic-oauth/.claude.json",
+      "sha256": "b4618ce1cb8b8832da50b450c3d257a83b2f66b01385d45de6453d4c95521a4b",
+      "entries": [
+        "mmos-computer-use"
+      ]
+    },
+    "fabric-experiential": {
+      "claude_json": "/Users/chriswong/.t3/providers/fabric-experiential/.claude.json",
+      "sha256": "bf4849a4e99ddbcd7c881ec97a997fda1ad72f3a7a7ad26409275436793f901e",
+      "entries": [
+        "mmos-computer-use"
+      ]
+    },
+    "fabric-unified-router": {
+      "claude_json": "/Users/chriswong/.t3/providers/fabric-unified-router/.claude.json",
+      "sha256": "14dfe4ebc4c2196523d8cacb5b3e3450c2c26ed816825ed6fb3481bce647dec9",
+      "entries": [
+        "mmos-computer-use"
+      ]
+    },
+    "fabric-unified-router-worker": {
+      "claude_json": "/Users/chriswong/.t3/providers/fabric-unified-router-worker/.claude.json",
+      "sha256": "6b209296964005114716078e315f24ea02768ec65affc9fce9024eb8835bbf05",
+      "entries": [
+        "mmos-computer-use",
+        "mmx-browser"
+      ]
+    }
+  }
+}

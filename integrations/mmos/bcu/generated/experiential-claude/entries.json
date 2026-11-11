@@ -1,0 +1,9 @@
+{
+  "mmos-computer-use": {
+    "command": "python3",
+    "args": [
+      "/Users/chriswong/.t3/mcp/mmos-computer-use/server.py"
+    ],
+    "type": "stdio"
+  }
+}
