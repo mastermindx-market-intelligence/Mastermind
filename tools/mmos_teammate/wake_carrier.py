@@ -1859,10 +1859,27 @@ def run_carrier(pc, t3_factory, opts):
                 log(f"blocked issue {issue.get('identifier')} unreadable "
                     f"thread ({exc}); leaving it for a person")
                 return 0
-            if scan_marker(probe_msgs, probe_op, probe_thread)[0] is None:
+            probe_state = scan_marker(probe_msgs, probe_op, probe_thread)[0]
+            if probe_state is None:
                 log(f"blocked issue {issue.get('identifier')} has no ask "
                     "child and no marker in the thread; leaving it for a "
                     "person")
+                return 0
+            # R2a finding 15: a blocked issue with no ask child was blocked
+            # by a person or the board. An ANSWERED marker alone is not
+            # permission to deliver — the block is a review hold. Delivery
+            # from blocked needs the carrier's own waiting line on the issue
+            # (this task stopped on a question of ours; the MAS-11 journey).
+            # A still-pending marker continues the normal path either way:
+            # a question stay posts the waiting line itself, and the
+            # slow-turn wait ends in a release for a person.
+            if probe_state == "reply" and not any(
+                    (row.get("body") or "").strip()
+                    == waiting_note(opts, thread_id)
+                    for row in comment_rows(pc, issue)):
+                log(f"blocked issue {issue.get('identifier')} has an "
+                    "answered marker but no carrier waiting line; a person "
+                    "blocked it — leaving it for the board")
                 return 0
             log(f"blocked issue {issue.get('identifier')} has its marker in "
                 "the thread; continuing the normal path")

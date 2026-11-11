@@ -869,16 +869,36 @@ def blocked_issue():
                      "description": "Waiting on a deploy"}}
 
 
-def test_blocked_task_with_answered_marker_finishes():
-    # Item 5, scan state "reply": the issue was blocked while the teammate's
-    # turn ran; the blockers_resolved wake finds the marker answered and the
-    # normal path delivers it — comment, confirmation, in_review — with no
-    # second send.
+def test_blocked_task_with_answered_marker_but_no_carrier_line_is_held():
+    # R2a finding 15: a person blocked the task and the carrier's marker is
+    # answered in the thread. That alone is not permission to deliver — the
+    # block is a review hold. No waiting line and no ask child: the issue is
+    # left for the board, nothing sent, nothing delivered, no status change.
     op = wc.op_id("is-1", "Wait on infra\nWaiting on a deploy")
     pc = FakePaperclip(issues=blocked_issue())
     t3 = FakeT3(messages=[("user", "r1", f"[{op}]\n\nthe task"),
                           ("assistant", "r1", "deploy done, answer ready")])
     assert run_with_roster(pc, t3, {}) == 0
+    assert t3.sends == []
+    assert [c for c in pc.calls if c[0] == "comment"] == []
+    assert "interaction" not in [c[0] for c in pc.calls]
+    assert pc.issues["is-1"]["status"] == "blocked"  # the hold stands
+
+
+def test_blocked_task_with_answered_marker_finishes():
+    # Item 5, scan state "reply", now in its R2a finding 15 shape: the task
+    # stopped on a question of ours — the carrier's waiting line is on the
+    # issue — and the answer came. The wake delivers it: comment,
+    # confirmation, in_review, no second send. (The MAS-11 unanswered-
+    # question journey.)
+    op = wc.op_id("is-1", "Wait on infra\nWaiting on a deploy")
+    opts = {"roster": {}}
+    pc = FakePaperclip(issues=blocked_issue())
+    pc.comment_rows["is-1"] = [{"body": wc.waiting_note(opts, "th-1"),
+                                "authorType": "user"}]
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}]\n\nthe task"),
+                          ("assistant", "r1", "deploy done, answer ready")])
+    assert run_with_roster(pc, t3, {}, opts) == 0
     assert t3.sends == []
     bodies = [c[2] for c in pc.calls if c[0] == "comment"]
     assert bodies == ["deploy done, answer ready"]
@@ -931,13 +951,17 @@ def test_blocked_task_with_slow_marker_waits_then_releases():
 
 def test_blocked_issue_with_board_feedback_and_marker_revises():
     # Item 5: board feedback on a blocked issue is handled the same way — the
-    # marker gate admits it, and the normal feedback round runs.
+    # marker gate admits it, and the normal feedback round runs. R2a finding
+    # 15 shape: the carrier's waiting line is on the issue (the task stopped
+    # on a question of ours before the board rejected the answer).
     op = fb_op()
+    opts = {"roster": {}}
     issues = {"is-1": {"identifier": "MMO-1", "status": "blocked",
                        "dependencyReady": True, "title": "Summarize file X",
                        "description": "Write a three-line summary."}}
     pc = FakePaperclip(issues=issues)
     pc.comment_rows["is-1"] = [
+        {"body": wc.waiting_note(opts, "th-1"), "authorType": "user"},
         {"body": "answer v1", "authorType": "agent"},
         {"body": "the numbers were wrong", "authorType": "user"}]
     pc.interaction_rows = [
@@ -946,7 +970,7 @@ def test_blocked_issue_with_board_feedback_and_marker_revises():
     t3 = FakeT3(messages=[("user", "r1", f"[{op}]\n\ntask"),
                           ("assistant", "r1", "answer v1")],
                 replies=["answer v2, now correct"])
-    assert run_with_roster(pc, t3, {}) == 0
+    assert run_with_roster(pc, t3, {}, opts) == 0
     assert len(t3.sends) == 1 and f"[{op}-rev1]" in t3.sends[0]
     assert pc.issues["is-1"]["status"] == "in_review"
 
