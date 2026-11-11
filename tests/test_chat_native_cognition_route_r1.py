@@ -475,8 +475,9 @@ def test_pro_duration_cannot_turn_mechanical_work_into_executive_judgment(
         task_class=ProModeTaskClass.HARD_DEBUGGING,
         expected_duration_minutes=duration,
     )
-    with pytest.raises(RoutingPolicyError, match="never eligible for Pro mode"):
-        ModelRouter.load().route(
+    router = ModelRouter.load()
+    with pytest.raises(RoutingPolicyError, match="^PRO_MODE_REFUSED / USE_NON_PRO_MODE:"):
+        router.route(
             WorkRequest(task_kind, risk="critical"),
             chat_reasoning_mode=ChatReasoningMode.PRO_MODE_EXCEPTION,
             pro_mode_receipt=receipt,
