@@ -2570,3 +2570,543 @@ def test_r5_computed_assignment_does_not_refuse_a_faithful_launch(
         "LABEL=$RANDOM; " + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3",
     )
     assert capsys.readouterr().out == ""
+
+
+# --- r6: REVIEW_2329 r4 closure (B-2 / M-A2 / m-2 / n-2) ---------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # B-2/G1: `pool*` expands to the wrapper at runtime. No invocation
+        # regex matches the glob word, so the armed session reached the
+        # no-launch early return before validate_execution_binding: a
+        # substituted paid launch (grok) with zero binding validation.
+        _IDENTITY_PREFIX + "pool* run grok a /tmp grok-4.6",
+        # B-2/G2: a shorter glob prefix behaves identically.
+        _IDENTITY_PREFIX + "poo* run grok a /tmp grok-4.6",
+        # B-2/G7: glob character class spelling.
+        _IDENTITY_PREFIX + "poo[l] run grok a /tmp grok-4.6",
+        # A leading glob expands onto a wrapper-looking command word.
+        _IDENTITY_PREFIX + "*ool run grok a /tmp grok-4.6",
+        # B-2/G3: no literal wrapper token survives at all — the glob IS
+        # the wrapper name (`su?.sh` matches `sub.sh`).
+        _IDENTITY_PREFIX + "su?.sh grok",
+        # B-2/G4: the faithful shape is refused too: a glob in command
+        # position makes the command word unreadable whatever it expands to.
+        _IDENTITY_PREFIX + "pool* run glm a /tmp glm-5.3",
+        # B-2/G5: faithful launch first, substituted glob launch second —
+        # one lexical launch observed, a second paid child unaccounted.
+        _IDENTITY_PREFIX
+        + "pool run glm a /tmp glm-5.3 ; poo* run grok a /tmp grok-4.6",
+        # Brace-expanded command word: `po{o,}l` expands to `pool`.
+        _IDENTITY_PREFIX + "po{o,}l run grok a /tmp grok-4.6",
+        # Argument-position glob with the wrapper token present (the
+        # computed-word rule is scoped to non-assignment words, not to the
+        # head alone, once a wrapper name is in the text).
+        "sudo " + _IDENTITY_PREFIX + "pool* run grok a /tmp grok-4.6",
+        # A quoted literal followed by a glob canonicalises to the glob word.
+        _IDENTITY_PREFIX + '"pool"* run grok a /tmp grok-4.6',
+        # Single-character class `[o]` inside the wrapper name.
+        _IDENTITY_PREFIX + "po[o]l run grok a /tmp grok-4.6",
+        # A bare glob command word with no wrapper letters at all: it can
+        # expand onto ANY name in the PATH, wrapper included.
+        _IDENTITY_PREFIX + "* run grok a /tmp grok-4.6",
+    ],
+    ids=[
+        "glob-pool-star",
+        "glob-poo-star",
+        "glob-poo-class",
+        "glob-leading-star",
+        "glob-sub-question",
+        "glob-faithful-pool-star",
+        "glob-second-launch",
+        "brace-expansion-head",
+        "glob-argument-with-wrapper-token",
+        "glob-quoted-literal-star",
+        "glob-inner-class",
+        "glob-bare-head",
+    ],
+)
+def test_r6_b2_glob_expanded_command_words_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "unobservable launch" in reason
+
+
+def test_r6_b2_glob_outside_command_position_is_not_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # The glob refusal is structural, not "any asterisk": with no wrapper
+    # name in the text an argument glob is none of this gate's business.
+    _install(monkeypatch, tmp_path, _binding())
+    _guard_launch(shared_placement, "ls -1 tests/*.py")
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # M-A2/G8: a paren-bodied function has no brace span, so one
+        # lexical launch became N paid children under one attempt.
+        _IDENTITY_PREFIX + "f() ( pool run glm a /tmp glm-5.3 ); f; f",
+        # M-A2/G9: recursion through the same paren body.
+        _IDENTITY_PREFIX + "f() ( pool run glm a /tmp glm-5.3; f ); f",
+        # The `function` keyword spelling of the same body.
+        _IDENTITY_PREFIX + "function f () ( pool run glm a /tmp glm-5.3 ); f",
+        # Space between the name and the empty parameter list.
+        _IDENTITY_PREFIX + "f () ( pool run glm a /tmp glm-5.3 ); f",
+        # M-A2/G11: the launch sits in a while CONDITION, before `do`, so
+        # the do…done span never covered it.
+        _IDENTITY_PREFIX + "while pool run glm a /tmp glm-5.3; do :; done",
+        # M-A2/G12: the until mirror.
+        _IDENTITY_PREFIX + "until pool run glm a /tmp glm-5.3; do :; done",
+    ],
+    ids=[
+        "paren-function-twice",
+        "paren-function-recursive",
+        "paren-function-keyword",
+        "paren-function-spaced",
+        "while-condition",
+        "until-condition",
+    ],
+)
+def test_r6_ma2_paren_function_bodies_and_loop_conditions_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "runtime-multiplexed" in reason
+    assert "exactly one attempt" in reason
+
+
+def test_r6_ma2_single_subshell_group_is_still_allowed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Control (r4 G10): a plain subshell group is not a function body and
+    # runs the launch exactly once, so it stays a legitimate faithful launch.
+    _install(monkeypatch, tmp_path, _binding())
+    _guard_launch(
+        shared_placement, _IDENTITY_PREFIX + "( pool run glm a /tmp glm-5.3 )"
+    )
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    "word",
+    ["python3-3.12", "python-3.12", "perl-5.38"],
+    ids=["python3-3.12", "python-3.12", "perl-5.38"],
+)
+def test_r6_m2_hyphenated_interpreter_spellings_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    word: str,
+) -> None:
+    # m-2/G16: `python3-3.12` was not an interpreter word, so the identical
+    # command was allowed while `python3` was refused wholesale.
+    _install(monkeypatch, tmp_path, _binding())
+    command = (
+        _IDENTITY_PREFIX
+        + f"{word} -c 'print(1)' ; pool run glm a /tmp glm-5.3"
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "unobservable launch" in reason
+    assert "interpreter" in reason
+
+
+def test_r6_n2_trap_program_span_covers_the_whole_quoted_program(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # n-2: the trap span ended at the first `;` INSIDE the quoted program,
+    # so a launch after an earlier statement in the same program was
+    # classified as a computed word (the `$$` in the firing kill) instead
+    # of runtime-multiplexed. The span is now quote-aware.
+    _install(monkeypatch, tmp_path, _binding())
+    command = (
+        _IDENTITY_PREFIX
+        + "trap 'echo hi; pool run glm a /tmp glm-5.3' USR1; kill -USR1 $$"
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "runtime-multiplexed" in reason
+    assert "exactly one attempt" in reason
+
+
+def test_r6_n2_trap_span_stops_at_the_program_end(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Precision control: a trap program that carries no launch must not
+    # span the faithful launch that follows it.
+    _install(monkeypatch, tmp_path, _binding())
+    _guard_launch(
+        shared_placement,
+        _IDENTITY_PREFIX
+        + "trap 'echo hi; echo bye' USR1; pool run glm a /tmp glm-5.3",
+    )
+    assert capsys.readouterr().out == ""
+
+
+# --- r6 (continued): r4 residual case coverage + interpreter families,
+# --- transparent-runner payloads (REVIEW_2329 r6 re-review B-3) ---------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # B-2/GN: a single `?` after the full wrapper name.
+        _IDENTITY_PREFIX + "pool? run grok a /tmp grok-4.6",
+        # B-2/GN2: `sub.sh?` keeps a literal `sub.sh` token but the word
+        # still only becomes the wrapper after expansion.
+        _IDENTITY_PREFIX + "sub.sh? grok a /tmp grok-4.6",
+    ],
+    ids=["glob-pool-question", "glob-sub-sh-question"],
+)
+def test_r6_b2_wrapper_glob_suffixes_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    ("word", "program"),
+    [
+        # B-3/N2: `pypy3` is an unlisted spelling of the python family —
+        # the closed list let its programs launch with zero validation
+        # while `python3` was refused wholesale.
+        ("pypy3", "-c 'print(1)'"),
+        ("pypy3.10", "-c 'print(1)'"),
+        ("Rscript", "-e '1'"),
+        ("tclsh8.6", "script.tcl"),
+        ("lua5.4", "script.lua"),
+        ("node-20", "-e '1'"),
+        ("deno", "run -A script.ts"),
+        ("bun", "run script.ts"),
+        ("julia", "script.jl"),
+        ("pwsh", "-Command '1'"),
+    ],
+    ids=[
+        "pypy3",
+        "pypy3.10",
+        "Rscript",
+        "tclsh8.6",
+        "lua5.4",
+        "node-20",
+        "deno",
+        "bun",
+        "julia",
+        "pwsh",
+    ],
+)
+def test_r6_b3_interpreter_families_are_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    word: str,
+    program: str,
+) -> None:
+    # B-3: with a wrapper token present, interpreter FAMILIES are refused,
+    # not a closed spelling list.
+    _install(monkeypatch, tmp_path, _binding())
+    command = f"{_IDENTITY_PREFIX}{word} {program} ; pool run glm a /tmp glm-5.3"
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "unobservable launch" in reason
+    assert "interpreter" in reason
+
+
+def test_r6_b3_pypy3_argv_list_substituted_launch_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # B-3/N2 exact shape: the argv-list program forms no literal
+    # `pool run` sequence, so only the interpreter-word refusal covers it.
+    _install(monkeypatch, tmp_path, _binding())
+    command = (
+        _IDENTITY_PREFIX
+        + "pypy3 -c 'subprocess.run([\"pool\",\"run\",\"grok\",\"a\","
+        + "\"/tmp\",\"grok-4.6\"])'"
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "unobservable launch" in reason
+    assert "interpreter" in reason
+
+
+def test_r6_b3_symlink_veil_through_glob_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # B-3/N4: the glob in the symlink target is an expansion-dependent
+    # word, so the B-2 rule kills the veil before `./p` ever runs.
+    _install(monkeypatch, tmp_path, _binding())
+    command = (
+        _IDENTITY_PREFIX
+        + "ln -s /usr/bin/pyth* p && ./p -c "
+        + "'subprocess.run([\"pool\",\"run\",\"grok\",\"a\",\"/tmp\",\"grok-4.6\"])'"
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+def test_r6_b3_spelled_symlink_veil_stays_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # B-3/N5 control: the spelled-out symlink target is an interpreter
+    # word and must keep being refused (only the veil was the hole).
+    _install(monkeypatch, tmp_path, _binding())
+    command = (
+        _IDENTITY_PREFIX
+        + "ln -s /usr/bin/python3 p && ./p -c "
+        + "'subprocess.run([\"pool\",\"run\",\"grok\",\"a\",\"/tmp\",\"grok-4.6\"])'"
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "unobservable launch" in reason
+    assert "interpreter" in reason
+
+
+@pytest.mark.parametrize(
+    "firing",
+    [
+        # M-A3/T1: no computed word anywhere — the firing is literal text.
+        "pkill -USR1 -f lane9x7.sh",
+        # M-A3/T1b: a literal pid discovered in a persistent session.
+        "kill -USR1 4242",
+    ],
+    ids=["pkill-literal-text", "kill-literal-pid"],
+)
+def test_r6_ma3_trap_fired_by_literal_text_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    firing: str,
+) -> None:
+    # M-A3: the quote-aware trap span covers the whole quoted program, so
+    # the launch after `echo hi;` is runtime-multiplexed no matter how the
+    # signal is later fired.
+    _install(monkeypatch, tmp_path, _binding())
+    command = (
+        _IDENTITY_PREFIX
+        + "trap 'echo hi; pool run glm a /tmp glm-5.3' USR1; "
+        + firing
+    )
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    reason = output["permissionDecisionReason"]
+    assert "runtime-multiplexed" in reason
+    assert "exactly one attempt" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # REVIEW_2329 r6 re-review B-3: the expansion-dependent wrapper sat
+        # at argument position behind a transparent runner, outside both
+        # the head-only scan and the wrapper-token scan (live-confirmed
+        # against the real wrapper).
+        _IDENTITY_PREFIX + "env poo[l] run grok a /tmp grok-4.6",
+        _IDENTITY_PREFIX + "sudo poo? run grok a /tmp grok-4.6",
+        # A runner flag that consumes an argument must not be mistaken for
+        # the payload.
+        _IDENTITY_PREFIX + "sudo -u root poo[l] run grok a /tmp grok-4.6",
+        _IDENTITY_PREFIX + "nice -n 5 poo? run grok a /tmp grok-4.6",
+        _IDENTITY_PREFIX + "exec po{o,}l run grok a /tmp grok-4.6",
+        _IDENTITY_PREFIX + "/usr/bin/env poo? run grok a /tmp grok-4.6",
+        _IDENTITY_PREFIX + "command poo[l] run grok a /tmp grok-4.6",
+        _IDENTITY_PREFIX + "nohup poo? run grok a /tmp grok-4.6",
+        _IDENTITY_PREFIX + "time poo? run grok a /tmp grok-4.6",
+        _IDENTITY_PREFIX + "env -u POOL_TASK_CLASS poo[l] run grok a /tmp grok-4.6",
+        "printf '%s\\n' a b | xargs -n 1 poo? run grok a /tmp grok-4.6",
+    ],
+    ids=[
+        "env-class-glob",
+        "sudo-glob",
+        "sudo-user-arg-glob",
+        "nice-adjust-glob",
+        "exec-brace",
+        "usr-bin-env-glob",
+        "command-builtin-glob",
+        "nohup-glob",
+        "time-glob",
+        "env-unset-arg-glob",
+        "xargs-pipe-glob",
+    ],
+)
+def test_r6_b2_expanded_wrapper_behind_transparent_runner_is_refused(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, command)
+    output = _emitted(capsys)
+    assert output["permissionDecision"] == "deny"
+    assert "unobservable launch" in output["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # A literal wrapper behind the same runners is a faithful launch:
+        # the identity is readable and exactly one attempt runs.
+        "time " + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3",
+        "nice -n 5 " + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3",
+        "env POOL_ORCHESTRATOR_ID=root-orch-1 "
+        "POOL_PARENT_RUN_ID=hermes-run-7 POOL_TASK_CLASS=code "
+        "pool run glm a /tmp glm-5.3",
+    ],
+    ids=["time-faithful", "nice-faithful", "env-assignments-faithful"],
+)
+def test_r6_b2_transparent_runner_with_literal_wrapper_is_allowed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    _guard_launch(shared_placement, command)
+    assert capsys.readouterr().out == ""
+
+
+def test_r6_ma2_single_exec_if_condition_is_still_allowed(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Control (r4 Gif): an if-condition runs its launch exactly once, so
+    # it stays a legitimate faithful launch.
+    _install(monkeypatch, tmp_path, _binding())
+    _guard_launch(
+        shared_placement,
+        _IDENTITY_PREFIX + "if pool run glm a /tmp glm-5.3; then :; fi",
+    )
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        # The interpreter families match by final path segment only: a
+        # PATH-shaped word is not an interpreter invocation.
+        "cp -r node_modules/.bin/pool vendor; ",
+        "ls python3.12/bin; ",
+    ],
+    ids=["node-modules-path", "versioned-dir-path"],
+)
+def test_r6_b3_path_shaped_words_are_not_interpreter_words(
+    shared_placement: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    prefix: str,
+) -> None:
+    _install(monkeypatch, tmp_path, _binding())
+    _guard_launch(
+        shared_placement,
+        prefix + _IDENTITY_PREFIX + "pool run glm a /tmp glm-5.3",
+    )
+    assert capsys.readouterr().out == ""
+
+
+def test_r6_unarmed_sessions_keep_the_legacy_glob_behavior(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Operator-first control: a session the owner did NOT arm keeps the
+    # legacy behavior for every new refusal class — none of them applies
+    # outside the shared-placement fence.
+    home = tmp_path / "home"
+    cwd = home / "lanes" / "work"
+    cwd.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("MASTERMIND_CI_POLL_STATE_DIR", str(tmp_path / "poll-state"))
+    for name in (
+        "MASTERMIND_SHARED_PLACEMENT",
+        "POOL_EXECUTION_BINDING",
+        "MASTERMIND_PLACEMENT_RECEIPT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    for command in (
+        "env poo[l] run grok bounded /tmp grok-4.6",
+        "pypy3 -c 'print(1)'",
+        "ls -1 tests/*.py",
+    ):
+        guard.guard_bash(_payload(cwd, command), {"command": command})
+        assert capsys.readouterr().out == ""

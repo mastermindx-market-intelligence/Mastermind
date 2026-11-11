@@ -13,13 +13,20 @@ by the CURRENT broker-issued ExecutionBinding.v1, validated against the
 owner-issued placement receipt, accepted only from a path the fenced session
 cannot write (owner service-account channel). Refusal classes: missing binding,
 stale fence, provider substitution after reservation, unaccounted descendant.
-Runtime-multiplexed launches (for/while/until bodies, xargs/parallel/
-find -exec, brace groups and function bodies, trap programs, watch/timeout
-repeaters) are refused as unaccounted descendants. When a wrapper name is
-present, every interpreter invocation (python/perl/ruby/node/php/osascript/
-awk/jq — flags, script files and stdin programs alike), eval/source/. and
-every computed ($/backtick) word outside an assignment are refused as
-unobservable. POSIX line-continuation splits are canonicalised so no
+Runtime-multiplexed launches (for/while/until bodies AND their condition
+headers, xargs/parallel/find -exec, brace groups, brace- and paren-bodied
+function definitions, quote-aware trap programs, watch/timeout repeaters)
+are refused as unaccounted descendants. When a wrapper name is present,
+every interpreter invocation (the python/pypy/perl/ruby/node/php/Rscript/
+tclsh/lua/deno/bun/julia/pwsh/osascript/awk/jq families — flags, script
+files, stdin programmes and versioned/hyphenated spellings alike),
+eval/source/. and every computed ($/backtick) or shell-EXPANDED word
+outside an assignment (a glob, a brace expansion) are refused as
+unobservable: the word, and therefore the wrapper, its mode and its
+identity, become readable only at expansion time. With no wrapper token
+in the text, an expanded word in COMMAND position — the head itself or a
+transparent runner's payload (env poo[l] …) — is refused for the same
+reason. POSIX line-continuation splits are canonicalised so no
 constructed path escapes the gate.
 There is no independent signing authority — the binding is only an assignment
 of opaque references, trusted exactly as far as it matches the owner's current
@@ -28,6 +35,7 @@ shown through this provider hook; it does not claim to fence arbitrary processes
 """
 from __future__ import annotations
 
+import bisect
 import hashlib
 import json
 import os
@@ -247,12 +255,79 @@ _WRAPPER_NAME_RE = re.compile(
 #: unobservable — flag-independent by design (REVIEW_2329 r3 B-1): the r4
 #: allowlist missed ``-Sc``/``-we``/``-E``/``-p``/``--eval``/``-ne``/``-nr``
 #: and stdin-fed programs, each of which launched with zero binding checks.
+#: r4 B-3: the list is FAMILIES with versioned/hyphenated tails
+#: (``python3-3.12``, ``pypy3.10``, ``perl-5.38``, ``node-20``,
+#: ``tclsh8.6``), not a closed spelling list — an unlisted spelling with an
+#: argv-list program (``subprocess.run(["pool","run","grok",…])``) formed no
+#: literal ``pool run`` sequence and launched with zero validation. The
+#: trailing boundary also excludes ``/`` so a PATH-shaped word
+#: (``node_modules/.bin/pool``, ``python3.12/bin``) is not an interpreter
+#: word: only the final path segment can name the interpreter.
 _INTERPRETER_WORD_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])(?:[A-Za-z0-9_./-]+/)?"
-    r"(?:python[23]?(?:\.\d+)?[a-z]?|perl(?:[0-9.]+)?|ruby(?:[0-9.]+)?"
-    r"|node(?:js)?|php(?:[0-9.]+)?|osascript|awk|gawk|mawk|nawk|jq)"
-    r"(?![A-Za-z0-9_.-])"
+    r"(?:python[23]?(?:[.-]\d+)*[a-z]?|pypy[23]?(?:[.-]\d+)*[a-z]?"
+    r"|perl(?:[-0-9.]+)?|ruby(?:[-0-9.]+)?|node(?:js)?(?:[-0-9.]+)?"
+    r"|php(?:[-0-9.]+)?|Rscript|tclsh(?:[0-9.]+)?|lua(?:[0-9.]+)?"
+    r"|deno|bun|julia|pwsh|osascript|awk|gawk|mawk|nawk|jq)"
+    r"(?![A-Za-z0-9_./-])"
 )
+#: A command word the SHELL expands before executing it: a glob (``pool*``,
+#: ``poo[l]``, ``su?.sh``) or a brace expansion (``po{o,}l``). The word, and
+#: therefore the wrapper it becomes, its mode and its identity, are readable
+#: only at expansion time (REVIEW_2329 r4 B-2: ``pool* run grok`` reached the
+#: no-launch early return with zero binding validation and launched a
+#: substituted paid child). ``~`` is deliberately NOT here: a tilde prefix
+#: only rewrites the path, so the wrapper basename stays literal and the
+#: launch is still observed by :data:`_WRAPPER_RE`.
+_GLOB_CHARS = "*?["
+_BRACE_EXPANSION_RE = re.compile(r"\{[^{}]*,[^{}]*\}|\{[^{}]*\.\.[^{}]*\}")
+#: Transparent runners: the payload after the runner chain is the command
+#: the shell executes, so that payload is a COMMAND position for the
+#: expansion-dependent scan (REVIEW_2329 r6 re-review B-3: ``env poo[l] run
+#: grok`` was ALLOW — the expansion-dependent wrapper sat at argument
+#: position behind ``env``, where neither the head-only scan nor the
+#: wrapper-token scan looked, and live-confirmed reached the wrapper with
+#: zero binding validation). Path spellings (``/usr/bin/env``) match by
+#: basename.
+_TRANSPARENT_RUNNERS = frozenset(
+    {"env", "sudo", "nice", "nohup", "exec", "time", "command", "xargs"}
+)
+#: Runner flags that CONSUME the following word as their own argument
+#: (``sudo -u root …``, ``nice -n 5 …``): without this the consumed
+#: argument would be mistaken for the runner's payload command.
+_RUNNER_ARG_FLAGS: dict[str, frozenset[str]] = {
+    "env": frozenset({"-S", "-u", "--split-string", "--unset"}),
+    "sudo": frozenset(
+        {
+            "-C", "-U", "-g", "-p", "-u",
+            "--chdir", "--close-from", "--group", "--host",
+            "--login-user", "--other-user", "--prompt", "--role",
+            "--type", "--user",
+        }
+    ),
+    "nice": frozenset({"-n", "--adjustment"}),
+    "exec": frozenset({"-a", "--argv0"}),
+    "time": frozenset({"-f", "-o", "--format", "--output"}),
+    "xargs": frozenset(
+        {
+            "-E", "-I", "-L", "-P", "-S", "-d", "-j", "-n", "-s",
+            "--arg-file", "--max-args", "--max-chars", "--max-procs",
+            "--separator",
+        }
+    ),
+}
+#: Loop headers: a launch in the CONDITION of while/until runs once per
+#: iteration but sits BEFORE ``do``, outside the do…done span (REVIEW_2329
+#: r4 M-A2).
+_LOOP_HEADER_RE = re.compile(r"(?<![A-Za-z0-9_.-])(?:while|until)(?![A-Za-z0-9_.-])")
+_DO_WORD_RE = re.compile(r"(?<![A-Za-z0-9_.-])do(?![A-Za-z0-9_.-])")
+#: Paren-bodied function definitions ``name() ( … )`` / ``function f () ( … )``:
+#: the body runs zero-or-many times but carries no brace, so the brace span
+#: never covered it (REVIEW_2329 r4 M-A2). Only a FUNCTION body matches: a
+#: plain subshell group ``( launch )`` runs exactly once and stays allowed.
+_FUNCTION_PAREN_BODY_RE = re.compile(r"\([ \t]*\)[ \t]*\(")
+_TRAP_WORD_RE = re.compile(r"(?<![A-Za-z0-9_.-])trap(?=\s)")
+_STATEMENT_END_RE = re.compile(r"[;&|\n]")
 #: Loop bodies (for/while/until) execute their contents N times: one lexical
 #: launch inside one is N paid children under one binding's single attempt
 #: (REVIEW_2329 r3 M-A extends this to brace-body loops, function
@@ -587,9 +662,63 @@ def launch_provider_token(command: str) -> str:
     return tokens[0][1] if tokens else ""
 
 
+def _canonical_command_map(command: str) -> tuple[str, list[int]]:
+    """``_canonical_command`` plus a raw-offset index.
+
+    ``raw_index[i]`` is the offset in ``command`` that produced canon[i] and
+    ``raw_index[len(canon)] == len(command)``, so a span measured on the RAW
+    text (where quoting is still visible) can be mapped into the canon
+    coordinates every other span and wrapper offset uses."""
+    out: list[str] = []
+    raw_index: list[int] = []
+    index = 0
+    length = len(command)
+    while index < length:
+        char = command[index]
+        if char == "\\" and index + 1 < length and command[index + 1] == "\n":
+            index += 2
+            continue
+        if char in "\"'\\":
+            index += 1
+            continue
+        out.append(char)
+        raw_index.append(index)
+        index += 1
+    raw_index.append(length)
+    return "".join(out), raw_index
+
+
+def _expansion_dependent(word: str) -> bool:
+    """True when the shell expands ``word`` before it becomes a command word:
+    a glob (``*``, ``?``, ``[...]``) or a brace expansion (``{a,b}``,
+    ``{1..2}``) (REVIEW_2329 r4 B-2)."""
+    if any(char in word for char in _GLOB_CHARS):
+        return True
+    return bool(_BRACE_EXPANSION_RE.search(word))
+
+
+def _scan_command_words(canon: str) -> list[tuple[str, bool]]:
+    """Every non-assignment, non-redirection word with its head flag.
+
+    ``is_head`` marks the first such word of a simple command — the position
+    where the shell would execute it as a command name."""
+    scan: list[tuple[str, bool]] = []
+    for segment in re.split(r"[;&|\n()]", canon):
+        head_seen = False
+        for word in segment.split():
+            if re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
+                continue  # an assignment: its value is not a command word
+            if word[0] in "<>" or re.match(r"\d*[<>]", word):
+                continue  # a redirection operator
+            scan.append((word, not head_seen))
+            head_seen = True
+    return scan
+
+
 def _computed_command_word(canon: str) -> str | None:
-    """The first shell word computed at runtime (``$P``, ``${P}``, ``$(...)``,
-    a backtick word) in a non-assignment position — or None.
+    """The first shell word computed or expanded at runtime (``$P``,
+    ``${P}``, ``$(...)``, a backtick word, a glob or a brace expansion) in a
+    non-assignment position — or None.
 
     Structural, not positional (REVIEW_2329 r3 B-1): the r4 scan skipped a
     fixed runner vocabulary (``env``/``exec``/``time``/…), so any runner not
@@ -598,16 +727,63 @@ def _computed_command_word(canon: str) -> str | None:
     computed launch past the gate. The guard therefore treats EVERY
     ``$``/backtick word outside an assignment as the command word it cannot
     read. Conservative by design: with a wrapper name in the text, a computed
-    argument is refused too (documented over-refusal)."""
+    argument is refused too (documented over-refusal).
 
+    Expansion-dependent words (glob/brace) are refused the same way in any
+    position, because ``sudo pool* run grok`` reaches the wrapper only after
+    the shell expands it (REVIEW_2329 r4 B-2)."""
+    for word, _ in _scan_command_words(canon):
+        if word[0] in "$`" or _expansion_dependent(word):
+            return word
+    return None
+
+
+def _expanded_command_word(canon: str) -> str | None:
+    """The first glob/brace-expanded word in COMMAND position — or None.
+
+    This is the only class refused when NO wrapper token is in the text:
+    ``su?.sh`` and ``poo*`` are wrapper names that exist only after
+    expansion, so no literal token survives to trigger the scan above
+    (REVIEW_2329 r4 B-2/G3). It is deliberately scoped to the command word:
+    an argument glob (``ls tests/*.py``) is not this gate's business.
+
+    COMMAND position includes the payload of a transparent runner chain
+    (``env``, ``sudo``, ``nice``, ``exec``, ``time``, ``command``, ``xargs``,
+    ``nohup`` and their path spellings): ``env poo[l] run grok`` and
+    ``sudo -u root poo? run grok`` were ALLOW because the expanded wrapper
+    sat at argument position behind the runner, where neither this head-only
+    scan nor the wrapper-token scan looked (REVIEW_2329 r6 re-review B-3,
+    live-confirmed against the real wrapper). Runner flags that consume an
+    argument (``sudo -u root``, ``nice -n 5``) skip theirs so the payload,
+    not the flag's argument, is the word judged."""
     for segment in re.split(r"[;&|\n()]", canon):
+        runner: str | None = None
+        expect_arg = False
+        command_seen = False
         for word in segment.split():
             if re.match(r"[A-Za-z_][A-Za-z0-9_]*\+?=", word):
-                continue  # an assignment: its value is not a command word
-            if word[0] in "$`":
-                return word
+                continue  # an assignment (prefix or env NAME=value)
             if word[0] in "<>" or re.match(r"\d*[<>]", word):
                 continue  # a redirection operator
+            if expect_arg:
+                expect_arg = False
+                continue  # consumed as the runner flag's own argument
+            if word.startswith("-"):
+                flag = word.split("=", 1)[0]
+                if (
+                    runner is not None
+                    and flag in _RUNNER_ARG_FLAGS.get(runner, frozenset())
+                ):
+                    expect_arg = True
+                continue  # a flag: never a command word
+            base = word.rsplit("/", 1)[-1]
+            if not command_seen and base in _TRANSPARENT_RUNNERS:
+                runner = base  # transparent: its payload is the command
+                continue
+            if not command_seen and _expansion_dependent(word):
+                return word  # a head, or a runner chain's payload command
+            command_seen = True  # this segment's command word is now fixed
+            runner = None
     return None
 
 
@@ -640,8 +816,9 @@ def _deny_computed_launch(canon: str) -> None:
     command is the documented arbitrary-process limit, not this gate's
     fence. Given that token, the guard refuses
 
-    * EVERY interpreter invocation (``python*``, ``perl``, ``ruby``,
-      ``node*``, ``php``, ``osascript``, ``awk``, ``jq``) regardless of
+    * EVERY interpreter invocation — the python/pypy/perl/ruby/node/php/
+      Rscript/tclsh/lua/deno/bun/julia/pwsh/osascript/awk/jq families,
+      versioned and hyphenated spellings included — regardless of
       flags, including a script file and a program fed on stdin
       (``<<``, ``|``, bare ``-``) — the program text is unreadable, so
       provider substitution, the identity projection and the one-attempt
@@ -650,15 +827,28 @@ def _deny_computed_launch(canon: str) -> None:
       shell re-writes the environment outside lexical observation); and
     * any computed (``$``/backtick) word in a non-assignment position.
 
+    With NO wrapper token the same refusal covers an expansion-dependent
+    word in COMMAND position — a head glob (``poo* run grok``) or a
+    transparent runner's payload (``env poo[l] run grok``) — because the
+    expanded word may BE the wrapper (REVIEW_2329 r4 B-2, r6 re-review
+    B-3).
+
     Conservative over-refusal is accepted under armed placement; it is
     documented in ``validate_execution_binding``."""
 
-    if not _WRAPPER_NAME_RE.search(canon):
+    wrapper_present = bool(_WRAPPER_NAME_RE.search(canon))
+    word = (
+        _computed_command_word(canon)
+        if wrapper_present
+        else _expanded_command_word(canon)
+    )
+    if not wrapper_present and word is None:
         return
     if _INTERPRETER_WORD_RE.search(canon):
         deny(
             "Mastermind shared-placement guard: unobservable launch — an "
-            "interpreter (python/perl/ruby/node/php/osascript/awk/jq) runs a "
+            "interpreter (python/pypy/perl/ruby/node/php/Rscript/tclsh/"
+            "lua/deno/bun/julia/pwsh/osascript/awk/jq) runs a "
             "program the guard cannot read, whether from a flag, a script "
             "file or stdin, so a wrapper launch inside it cannot be checked "
             "against the binding. Run the paid launch as a plain command."
@@ -674,28 +864,121 @@ def _deny_computed_launch(canon: str) -> None:
     if word is not None:
         deny(
             "Mastermind shared-placement guard: unobservable launch — the "
-            f"word {word!r} is computed at runtime, so the command it "
+            f"word {word!r} is computed or shell-expanded at runtime (a "
+            "$/backtick word, a glob or a brace expansion), so the command it "
             "becomes, the wrapper invocation and any identity assignment "
             "around it cannot be observed. Invoke the wrapper by its "
             "literal name."
         )
 
 
-def _runtime_multiplexed(canon: str, offsets: list[int]) -> bool:
+def _paren_body_spans(canon: str) -> list[tuple[int, int]]:
+    """``( … )`` body spans of paren-bodied function definitions.
+
+    ``f() ( … )`` and ``function f () ( … )`` define a function whose body is
+    a subshell: no brace span covers it, so one lexical launch inside it ran
+    N paid children under one binding (REVIEW_2329 r4 M-A2). A plain subshell
+    group ``( launch )`` runs its launch exactly once and is NOT spanned.
+    """
+    spans: list[tuple[int, int]] = []
+    for match in _FUNCTION_PAREN_BODY_RE.finditer(canon):
+        start = match.end() - 1
+        depth = 0
+        for index in range(start, len(canon)):
+            if canon[index] == "(":
+                depth += 1
+            elif canon[index] == ")":
+                depth -= 1
+                if depth == 0:
+                    spans.append((match.start(), index + 1))
+                    break
+        else:
+            spans.append((match.start(), len(canon)))
+    return spans
+
+
+def _loop_condition_spans(canon: str) -> list[tuple[int, int]]:
+    """``while``/``until`` header spans: the keyword up to its ``do``.
+
+    A launch in the CONDITION runs once per iteration but sits BEFORE ``do``,
+    so the do…done span never covered it (REVIEW_2329 r4 M-A2).
+    """
+    spans: list[tuple[int, int]] = []
+    for match in _LOOP_HEADER_RE.finditer(canon):
+        do_word = _DO_WORD_RE.search(canon, match.end())
+        spans.append((match.start(), do_word.start() if do_word else len(canon)))
+    return spans
+
+
+def _trap_program_spans(raw: str) -> list[tuple[int, int]]:
+    """RAW-text spans of ``trap`` programs, quote-aware.
+
+    The span used to end at the first ``;`` even when that ``;`` was INSIDE
+    the quoted program, so a launch after an earlier statement in the same
+    program fell outside it (REVIEW_2329 r4 n-2). Measured on the raw text
+    because :func:`_canonical_command` deletes the quotes that delimit the
+    program; :func:`_runtime_multiplexed` maps the span back to canon
+    coordinates.
+    """
+    spans: list[tuple[int, int]] = []
+    for match in _TRAP_WORD_RE.finditer(raw):
+        index = match.end()
+        while index < len(raw) and raw[index] in " \t":
+            index += 1
+        if index >= len(raw) or raw[index] not in "\"'":
+            end = _STATEMENT_END_RE.search(raw, index)
+            spans.append((match.start(), end.start() if end else len(raw)))
+            continue
+        quote = raw[index]
+        index += 1
+        while index < len(raw):
+            char = raw[index]
+            if quote == "'":
+                index += 1
+                if char == "'":
+                    break
+                continue
+            if char == "\\" and index + 1 < len(raw):
+                index += 2
+                continue
+            index += 1
+            if char == '"':
+                break
+        spans.append((match.start(), index))
+    return spans
+
+
+def _runtime_multiplexed(
+    canon: str, offsets: list[int], raw: str | None = None
+) -> bool:
     """True when a wrapper invocation sits inside a construct that executes
-    it zero-or-many times at runtime: a for/while/until body (``do … done``),
-    an xargs/parallel/find -exec executor's argument tail, any ``{ … }``
-    group or function body, a ``trap`` program, or a repeater (``watch``,
-    ``timeout --foreground``) (REVIEW_2329 r2 N-2, r3 M-A). One binding
-    covers exactly one attempt, so N runtime children under one lexical
-    launch are refused as unaccounted descendants."""
+    it zero-or-many times at runtime: a for/while/until body (``do … done``)
+    or CONDITION header, an xargs/parallel/find -exec executor's argument
+    tail, any ``{ … }`` group or function body (brace- or paren-bodied), a
+    ``trap`` program, or a repeater (``watch``, ``timeout --foreground``)
+    (REVIEW_2329 r2 N-2, r3 M-A, r4 M-A2). One binding covers exactly one
+    attempt, so N runtime children under one lexical launch are refused as
+    unaccounted descendants.
+    """
     spans = [match.span() for match in _LOOP_BODY_RE.finditer(canon)]
+    spans += _loop_condition_spans(canon)
     spans += [match.span() for match in _BATCH_EXECUTOR_RE.finditer(canon)]
     spans += [match.span() for match in _REPEATER_RE.finditer(canon)]
     spans += _brace_group_spans(canon)
-    for match in re.finditer(r"(?<![A-Za-z0-9_.-])trap(?=\s)", canon):
-        end = re.compile(r"[;&|\n]").search(canon, match.end())
-        spans.append((match.start(), end.start() if end else len(canon)))
+    spans += _paren_body_spans(canon)
+    if raw is not None:
+        raw_index = _canonical_command_map(raw)[1]
+        spans += [
+            (
+                bisect.bisect_left(raw_index, start),
+                bisect.bisect_left(raw_index, end),
+            )
+            for start, end in _trap_program_spans(raw)
+        ]
+    else:
+        for match in _TRAP_WORD_RE.finditer(canon):
+            end = _STATEMENT_END_RE.search(canon, match.end())
+            spans.append((match.start(), end.start() if end else len(canon)))
     return any(
         start <= offset < end for start, end in spans for offset in offsets
     )
@@ -1089,6 +1372,7 @@ def validate_execution_binding(command: str) -> None:
         if launches and _runtime_multiplexed(
             canon,
             [offset for offset, _, _, _ in launches],
+            command,
         ):
             _deny_runtime_multiplexed()
 
@@ -1172,7 +1456,7 @@ def guard_fabric_launch(command: str, raw_command: str | None = None) -> None:
         # repeats the same judgement inside validate_execution_binding.
         span_launches = _wrapper_invocations(raw)
         if span_launches and _runtime_multiplexed(
-            canon, [offset for offset, _, _, _ in span_launches]
+            canon, [offset for offset, _, _, _ in span_launches], raw
         ):
             _deny_runtime_multiplexed()
         # REVIEW_2329 r3 B-1 / M-B: interpreter programs, eval/source/.
