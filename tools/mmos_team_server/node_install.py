@@ -62,7 +62,13 @@ def realpath_inside(path, root):
 
 
 def private_dir(path, create=False):
-    """A real directory, not a symlink, private and owned by this user."""
+    """A real directory, not a symlink, private and owned by this user.
+
+    With create=True an owned directory that is too loose (a legacy root's
+    0755 config/ or runtime/) is tightened to 0700 rather than refused — the
+    tool already owns it. The server ROOT itself is never chmod'd by this
+    tool; callers pass create=False for it, so an over-loose root refuses.
+    """
     if os.path.islink(path):
         raise InstallError(f"symlinked directory refused: {path}")
     if create:
@@ -76,7 +82,10 @@ def private_dir(path, create=False):
     if info.st_uid != os.getuid():
         raise InstallError(f"directory belongs to another user: {path}")
     if stat.S_IMODE(info.st_mode) & 0o077:
-        raise InstallError(f"directory must be mode 0700: {path}")
+        if create:
+            os.chmod(path, 0o700)
+        else:
+            raise InstallError(f"directory must be mode 0700: {path}")
     return path
 
 
@@ -205,9 +214,13 @@ def idempotent_receipt(path, payload):
 
 def validated_root(root, create=False):
     """F4/F8: reject a symlinked root before any realpath, then require the
-    resolved root to stay private, owned, and outside the Chairman's ~/.t3."""
+    resolved root to stay private, owned, and outside the Chairman's ~/.t3.
+    A missing root may be created 0700; an existing loose root is refused,
+    never silently tightened (that tightening is the operator's act)."""
     root = os.path.abspath(os.path.expanduser(root))
-    private_dir(root, create=create)
+    if create and not os.path.lexists(root):
+        os.makedirs(root, mode=0o700)
+    private_dir(root, create=False)
     root = os.path.realpath(root)
     private_dir(root)
     real_t3 = os.path.realpath(os.path.expanduser("~/.t3"))

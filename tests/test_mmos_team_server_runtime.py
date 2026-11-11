@@ -178,6 +178,19 @@ class TestInstall:
         with pytest.raises(node_install.InstallError, match="another user"):
             node_install.install_node(str(root), str(archive), str(checksum))
 
+    def test_owned_loose_subdir_tightened_not_refused(self, inputs):
+        # A legacy root's 0755 runtime/config subdirs are tightened to 0700 by
+        # the create path (the tool owns them); the root itself still refuses
+        # when loose — that tightening is the operator's explicit act.
+        root, archive, checksum = inputs
+        root.chmod(0o755)
+        with pytest.raises(node_install.InstallError, match="must be mode 0700"):
+            node_install.install_node(str(root), str(archive), str(checksum))
+        root.chmod(0o700)
+        (root / "config").mkdir(mode=0o755)
+        node_install.install_node(str(root), str(archive), str(checksum))
+        assert stat.S_IMODE((root / "config").stat().st_mode) == 0o700
+
     def test_half_finished_staging_rejected(self, inputs):
         root, archive, checksum = inputs
         (root / "runtime/staging/.node-install-unfinished").mkdir(parents=True, mode=0o700)
