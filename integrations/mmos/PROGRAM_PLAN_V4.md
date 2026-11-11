@@ -1037,3 +1037,12 @@ go to the panel before anything is installed.
 checked; 10's improvement loop met; 1 and 2 with lane T8; 3 needs the linked-environment
 switch in the Chairman's app; 4 owes rotation on a real teammate; 10's coding job on the
 installed app is lane T4d, after T4c and its review.
+
+### 26a. Kimi is scarce (Chairman, 2026-11-11)
+
+Kimi's provider cut our limit by 70 percent. Where sections 25 and 26 give Kimi a standing
+place (one Kimi child per driver, one attacker's pass in every panel), read this instead:
+Kimi is started only for a problem a GLM child has already failed at twice, or by the
+principal for one attacker's pass on a surface that decides what program runs or who holds a
+credential when the DeepSeek answers disagree. The panel's attacker brief goes to DeepSeek.
+`LANE_RULES_V4.md` and `REVIEW_PANEL.md` carry the rule. Running lanes were told at 03:55 UTC.
