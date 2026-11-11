@@ -1316,20 +1316,38 @@ def deliver(pc, issue, reply, op, crash_after=None, ask_child=False):
         f"status -> {final}")
 
 
-def last_result_comment(pc, issue_id):
-    """The teammate's answer on a child issue: the last comment that is not a
-    machine comment (carrier notes, coding-job results — R4b finding 5).
-    Falls back to a pointer when there is none."""
+def last_result_comment(pc, child):
+    """The asked teammate's answer on a child issue (R2a finding 17): the
+    LAST comment authored by that child's own assignee (authorType agent and
+    author id equal to the child's assigneeAgentId) that is not a machine
+    comment (carrier notes, coding-job results — R4b finding 5). A newer
+    bystander comment never displaces the assignee's answer — only who was
+    asked is being quoted to the asker. When the assignee wrote nothing
+    readable, the newest non-machine comment is returned under a prefix that
+    says it is NOT the asked teammate's own words; a pointer when there is
+    no comment at all."""
+    issue_id = child["id"] if isinstance(child, dict) else child
+    assignee = child.get("assigneeAgentId") if isinstance(child, dict) else None
     try:
         rows = pc.comments(issue_id)
     except CarrierError:
         rows = []
     if isinstance(rows, dict):
         rows = rows.get("comments") or rows.get("rows") or []
+    if assignee:
+        for row in reversed(rows):
+            body = (row.get("body") or "").strip()
+            author = row.get("author") or {}
+            if (body and row.get("authorType") == "agent"
+                    and (author.get("id") or row.get("authorId")) == assignee
+                    and not is_machine_comment(body)):
+                return body
     for row in reversed(rows):
         body = (row.get("body") or "").strip()
         if body and not is_machine_comment(body):
-            return body
+            return ("(the asked teammate's own comment was not found; this is "
+                    "the newest comment on the child issue, not their "
+                    "answer)\n\n" + body)
     return "(no answer comment on the child issue)"
 
 
@@ -1350,7 +1368,7 @@ def handle_return(pc, t3, issue, ask_op, opts):
         log(f"return wake on {issue.get('identifier')} but no done child for "
             f"{ask_op}; leaving the issue for a person")
         return 0
-    result_text = last_result_comment(pc, child["id"])
+    result_text = last_result_comment(pc, child)
     ret_op = f"{ask_op}-ret"
     # R2a finding 16: the bounded lookback applies to the return marker too.
     state, existing, thread = scan_marker_deep(t3, ret_op)

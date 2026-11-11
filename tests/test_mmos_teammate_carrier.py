@@ -701,7 +701,10 @@ def test_return_wake_sends_result_and_finishes_parent():
     issues, ask_op, child = blocked_parent_with_done_child()
     pc = FakePaperclip(issues=issues)
     pc.child_rows["is-1"] = [dict(child)]
-    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines"}]
+    # the child's answer is the assignee's own comment (R2a finding 17)
+    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines",
+                                "authorType": "agent",
+                                "author": {"id": "ag-atlas"}}]
     t3 = FakeT3(replies=["FINAL: the file has 12 lines"])
     assert run_with_roster(pc, t3, {}) == 0
     # exactly one send, carrying the child result and the return marker
@@ -908,7 +911,9 @@ def test_resumed_parent_after_children_completed_runs_return():
     issues["is-1"]["status"] = "in_progress"
     pc = FakePaperclip(issues=issues)
     pc.child_rows["is-1"] = [dict(child)]
-    pc.comment_rows["ch-1"] = [{"body": "t45_beta.txt has 30 lines"}]
+    pc.comment_rows["ch-1"] = [{"body": "t45_beta.txt has 30 lines",
+                                "authorType": "agent",
+                                "author": {"id": "ag-atlas"}}]
     t3 = FakeT3(replies=["FINAL: 30 lines"])
     assert run_with_roster(pc, t3, {}) == 0
     assert len(t3.sends) == 1 and f"[{ask_op}-ret]" in t3.sends[0]
@@ -1208,15 +1213,52 @@ def test_machine_comments_are_never_board_notes_or_feedback():
 
 
 def test_last_result_comment_skips_machine_comments():
+    # R2a finding 17: the reader takes the child row; the comment must be
+    # the assignee's own (authorType agent, author id matching).
     pc = FakePaperclip(issues=one_issue())
+    child = {"id": "is-1", "assigneeAgentId": "ag-1"}
     pc.comment_rows["is-1"] = [
-        {"body": "the real answer", "authorType": "agent"},
-        {"body": "[coding-job] result: job-42 sealed", "authorType": "user"}]
-    assert wc.last_result_comment(pc, "is-1") == "the real answer"
+        {"body": "the real answer", "authorType": "agent",
+         "author": {"id": "ag-1"}},
+        {"body": "[coding-job] result: job-42 sealed", "authorType": "user",
+         "author": {"id": "ag-1"}}]
+    assert wc.last_result_comment(pc, child) == "the real answer"
     pc.comment_rows["is-1"] = [
-        {"body": "[t2-carrier] waiting for your answer", "authorType": "user"}]
-    assert wc.last_result_comment(pc, "is-1") == \
+        {"body": "[t2-carrier] waiting for your answer", "authorType": "user",
+         "author": {"id": "ag-1"}}]
+    assert wc.last_result_comment(pc, child) == \
         "(no answer comment on the child issue)"
+
+
+def test_last_result_comment_prefers_the_asked_teammates_own_answer():
+    # R2a finding 17: a NEWER bystander comment must never displace the
+    # assignee's own answer — the child's assignee is who was asked.
+    pc = FakePaperclip(issues=one_issue())
+    child = {"id": "ch-1", "assigneeAgentId": "ag-atlas"}
+    pc.comment_rows["ch-1"] = [
+        {"body": "anyone have the count?", "authorType": "user",
+         "author": {"id": "ag-other"}},
+        {"body": "t45_alpha.txt has 12 lines", "authorType": "agent",
+         "author": {"id": "ag-atlas"}},
+        {"body": "thanks! closing this out", "authorType": "user",
+         "author": {"id": "ag-other"}},
+    ]
+    assert wc.last_result_comment(pc, child) == "t45_alpha.txt has 12 lines"
+
+
+def test_last_result_comment_fallback_says_whose_comment_it_is():
+    # R2a finding 17: with no assignee comment at all, the newest comment is
+    # returned only under a prefix that says it is not the asked teammate's
+    # own answer — the asker must know whose words these are.
+    pc = FakePaperclip(issues=one_issue())
+    child = {"id": "ch-1", "assigneeAgentId": "ag-atlas"}
+    pc.comment_rows["ch-1"] = [
+        {"body": "I poked Atlas in chat; they said 12 lines",
+         "authorType": "user", "author": {"id": "ag-other"}}]
+    got = wc.last_result_comment(pc, child)
+    assert got.startswith("(")
+    assert got.endswith("I poked Atlas in chat; they said 12 lines")
+    assert "not" in got  # the prefix states the mismatch plainly
 
 
 # --- every comment this carrier writes is a machine comment ------------------
@@ -1628,7 +1670,10 @@ def test_return_wake_waits_with_the_question_too():
     ret_op = f"{ask_op}-ret"
     pc = FakePaperclip(issues=issues)
     pc.child_rows["is-1"] = [dict(child)]
-    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines"}]
+    # the child's answer is the assignee's own comment (R2a finding 17)
+    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines",
+                                "authorType": "agent",
+                                "author": {"id": "ag-atlas"}}]
     asked = [("user", "r1", f"[{ret_op}]\n\nthe ask came back")]
     answered = asked + [("assistant", "r1", "FINAL: the file has 12 lines")]
     t3 = ScriptedT3(states=[
@@ -2381,7 +2426,10 @@ def test_return_edge_on_an_ask_child_completes_done():
         "assigneeAgentId": "ag-atlas", "title": "Count lines",
         "status": "done",
         "description": f"Asked by Mira on MMO-1 [{ask_op}]"}]
-    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines"}]
+    # the child's answer is the assignee's own comment (R2a finding 17)
+    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines",
+                                "authorType": "agent",
+                                "author": {"id": "ag-atlas"}}]
     ret_op = f"{ask_op}-ret"
     asked = [("user", "r1", f"[{ret_op}]\n\nthe ask came back")]
     answered = asked + [("assistant", "r1", "FINAL: the file has 12 lines")]
@@ -2597,7 +2645,10 @@ def test_return_marker_beyond_the_window_is_found_by_looking_back():
     final = "FINAL: the file has 12 lines"
     pc = FakePaperclip(issues=issues)
     pc.child_rows["is-1"] = [dict(child)]
-    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines"}]
+    # the child's answer is the assignee's own comment (R2a finding 17)
+    pc.comment_rows["ch-1"] = [{"body": "t45_alpha.txt has 12 lines",
+                                "authorType": "agent",
+                                "author": {"id": "ag-atlas"}}]
     pc.comment_rows["is-1"] = [{"body": final}]
     pc.interaction_rows = [{"id": "ix-1", "kind": "request_confirmation",
                             "status": "pending",
