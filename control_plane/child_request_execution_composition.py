@@ -73,12 +73,15 @@ def compose_child_execution(
     request: ChildExecutionRequest,
     spec: dict[str, Any],
     branch: str | None = None,
+    worktree: str | None = None,
 ) -> ChildExecutionComposition:
     """Admit one child request and prepare its placement Job.
 
     ``branch`` names the source branch the child works on (used by the
     post-seal GitHub evidence read); it is placement metadata, never
-    authority.
+    authority.  ``worktree`` names the caller-owned workspace the placement
+    Job's attempt runs in (restart reconciliation requires a Job to name
+    its workspace before a recovery can adopt an identity-less claim).
 
     Raises ``StateConflict(CHILD_REQUEST_DIGEST_CONFLICT...)`` unchanged
     when the triple was admitted with a different digest — the typed
@@ -106,6 +109,7 @@ def compose_child_execution(
             command_id=command_id,
             provenance=provenance,
             branch=branch,
+            worktree=worktree,
         )
         created = True
     except StateConflict:

@@ -59,8 +59,11 @@ from control_plane.worker_execution_contract import (  # noqa: E402
 )
 from pathlib import Path  # noqa: E402
 
-BASE = os.environ.get("T3_PROOF_BASE_URL", "http://127.0.0.1:3773")
-MCP = BASE + "/mcp"
+# Finding 8 (R4b review): the LIVE app (3773) is never an implicit target.
+# The mint path takes its base explicitly (required argument below); the
+# module-level BASE only reflects an explicitly-set env and has NO default.
+BASE = os.environ.get("T3_PROOF_BASE_URL")
+MCP = (BASE + "/mcp") if BASE else None
 OUT = os.environ.get(
     "T3_PROOF_RECEIPT",
     "/Users/chriswong/.hermes/profiles/engineering/cache/scratch/t3_live_proof_receipt.json",
@@ -101,13 +104,94 @@ DEFAULT_TOKEN_PATH = (
     "/Users/chriswong/.hermes/profiles/engineering/cache/scratch/t3_proof_token.txt"
 )
 
+# The live T3 app's ports are NEVER a mint target for this helper (finding 8:
+# 14 pairing codes were minted on the Chairman's own app on 2026-11-10 by a
+# helper whose CLI leg fell back to them).  A caller naming one of these
+# explicitly is refused, not trusted.
+FORBIDDEN_MINT_PORTS = frozenset({3773, 3774})
+
+
+def _pinned_pairing_target(base_url: str, home_dir: str) -> tuple[str, int]:
+    """Resolve and PIN the pairing target, or refuse the mint.
+
+    The ``t3 auth pairing create`` CLI discovers its server from the T3 home
+    (``<home>/userdata/server-runtime.json``, pid checked, origin probed) and
+    falls back to other homes — including the live app — for a stale or wrong
+    home.  So the mint is refused unless the PINNED home's OWN runtime state
+    names exactly the pinned base's port with a live pid and a matching
+    origin.  Returns ``(base, port)`` with the base normalized (no trailing
+    slash); never dials anything."""
+    parsed = urllib.parse.urlsplit(base_url or "")
+    if parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1",
+                                                          "localhost"):
+        raise RuntimeError(
+            f"pairing target must be a loopback http base, got {base_url!r}")
+    port = parsed.port
+    if port is None:
+        raise RuntimeError(
+            f"pairing target must name an explicit port, got {base_url!r}")
+    if port in FORBIDDEN_MINT_PORTS:
+        raise RuntimeError(
+            f"port {port} is the live T3 app; it is never a pairing target")
+    home = Path(home_dir)
+    state_path = home / "userdata" / "server-runtime.json"
+    try:
+        raw = state_path.read_text(encoding="utf-8")
+        state = json.loads(raw)
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"the pinned home has no server runtime state "
+            f"({state_path}); no server provably runs there — refusing to "
+            "mint a pairing code") from exc
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(
+            f"the pinned home's server runtime state is unreadable "
+            f"({state_path}: {type(exc).__name__}); refusing to mint") from exc
+    if not isinstance(state, dict):
+        raise RuntimeError(
+            f"server runtime state is not an object ({state_path})")
+    state_port = state.get("port")
+    if state_port != port:
+        raise RuntimeError(
+            f"the pinned home's server runtime state names port "
+            f"{state_port!r}, not the pinned port {port}; refusing to mint")
+    pid = state.get("pid")
+    if type(pid) is not int or pid <= 0:
+        raise RuntimeError(
+            f"server runtime state names no live pid ({state_path})")
+    try:
+        os.kill(pid, 0)
+    except (ProcessLookupError, PermissionError) as exc:
+        raise RuntimeError(
+            f"the home's server (pid {pid} in {state_path}) is not alive; "
+            "refusing to mint") from exc
+    origin = state.get("origin")
+    if isinstance(origin, str):
+        origin_parsed = urllib.parse.urlsplit(origin)
+        if (origin_parsed.hostname, origin_parsed.port) != (
+                parsed.hostname, port):
+            raise RuntimeError(
+                f"server runtime state origin {origin!r} disagrees with the "
+                f"pinned base {base_url!r}; refusing to mint")
+    return (f"{parsed.scheme}://{parsed.hostname}:{port}", port)
+
 
 def obtain_mcp_access_token(
     token_path: str = DEFAULT_TOKEN_PATH,
     label: str = "mastermind-rev5-t3-lane-proof",
+    *,
+    base_url: str,
+    home_dir: str,
 ) -> tuple[str, dict]:
     """Outside-agent OAuth: register loopback client, approve with a fresh
     short-TTL pairing code via /oauth/mcp/decision, exchange for a token.
+
+    ``base_url`` and ``home_dir`` are REQUIRED and name the exact server this
+    mint runs against (finding 8): the pairing CLI is executed only after the
+    home's own runtime state is proven to name the pinned port (see
+    ``_pinned_pairing_target``), with the CLI's environment pinned to the same
+    home and port, and every HTTP leg goes to ``base_url`` — there is no
+    default target and never a fallback to the live app (3773).
 
     The token is cached in scratch so a RERUN reuses the SAME OAuth client
     identity: the authenticated request namespace is part of T3's launch
@@ -126,10 +210,16 @@ def obtain_mcp_access_token(
             _log("oauth.token.reused", note="same client identity -> replay-safe namespace")
             return cached, {"client_id": "cached"}
 
+    base, port = _pinned_pairing_target(base_url, home_dir)
+    home = str(Path(home_dir))
+
     proc = subprocess.run(
         ["/Users/chriswong/.t3/bin/t3", "auth", "pairing", "create",
          "--ttl", "15m", "--label", label, "--json"],
         capture_output=True, text=True, timeout=60,
+        # Pinned env: the CLI leg must see exactly the pinned home and port,
+        # never an ambient T3CODE_HOME/T3CODE_PORT from another server.
+        env={**os.environ, "T3CODE_HOME": home, "T3CODE_PORT": str(port)},
     )
     if proc.returncode != 0:
         raise RuntimeError(f"pairing create failed: {proc.stderr[:300]}")
@@ -141,7 +231,7 @@ def obtain_mcp_access_token(
 
     redirect_uri = "http://localhost:51234/callback"
     status, reg = _http_json(
-        BASE + "/oauth/mcp/register",
+        base + "/oauth/mcp/register",
         {
             "client_name": label,
             "redirect_uris": [redirect_uri],
@@ -164,7 +254,7 @@ def obtain_mcp_access_token(
         "resource": MCP,
     }
     status, decision = _http_json(
-        BASE + "/oauth/mcp/decision",
+        base + "/oauth/mcp/decision",
         {
             "authorization": auth_params,
             "decision": {"_tag": "pairing-code", "access": "auto", "code": code},
@@ -178,7 +268,7 @@ def obtain_mcp_access_token(
         raise RuntimeError(f"decision redirectTo lacks code: {decision}")
 
     status, token = _http_json(
-        BASE + "/oauth/mcp/token",
+        base + "/oauth/mcp/token",
         None,
         form={
             "grant_type": "authorization_code",
@@ -214,13 +304,21 @@ def _log(event: str, **facts) -> None:
 class McpHttp:
     """Minimal streamable-HTTP MCP client (stdlib only)."""
 
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, mcp_url: str | None = None) -> None:
         self._token = token
+        # Finding 8 (R4b review): the target is named EXPLICITLY (or by an
+        # explicitly-set T3_PROOF_BASE_URL at import); there is no implicit
+        # target and never a fallback to the live app (3773).
+        self._mcp_url = mcp_url or MCP
         self._session_id: str | None = None
         self._next_id = 0
         self.protocol_version = "2025-03-26"
 
     def _post(self, payload: dict, *, expect_reply: bool = True) -> dict | None:
+        if not self._mcp_url:
+            raise RuntimeError(
+                "the MCP target must be named explicitly (mcp_url=... or "
+                "T3_PROOF_BASE_URL); no implicit target exists")
         body = json.dumps(payload).encode()
         headers = {
             "Content-Type": "application/json",
@@ -229,7 +327,7 @@ class McpHttp:
         }
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
-        req = urllib.request.Request(MCP, data=body, headers=headers, method="POST")
+        req = urllib.request.Request(self._mcp_url, data=body, headers=headers, method="POST")
         after = T3McpTransportError.AFTER_SEND
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
@@ -408,7 +506,17 @@ class ProofInspector(ProcessInspector):
 
 
 async def main() -> None:
-    token, oauth_client = obtain_mcp_access_token()
+    if not BASE or not MCP:
+        raise SystemExit(
+            "T3_PROOF_BASE_URL is required (no default; the live app on 3773 "
+            "is never an implicit target)")
+    home = os.environ.get("T3_PROOF_HOME")
+    if not home:
+        raise SystemExit(
+            "T3_PROOF_HOME is required: it names the pinned server's home "
+            "whose runtime state must name the base's port")
+    token, oauth_client = obtain_mcp_access_token(
+        base_url=BASE, home_dir=home)
     mcp = McpHttp(token)
     init = mcp.initialize()
     _log(

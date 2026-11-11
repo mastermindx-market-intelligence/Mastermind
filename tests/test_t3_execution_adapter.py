@@ -11,8 +11,10 @@ reporting, and replay-only reattach under the SAME key + namespace.
 """
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import hashlib
+import os
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -52,6 +54,7 @@ from control_plane.worker_execution_contract import (
     WorkerLaunchSpec,
     WorkerProcessRef,
     WorkerRecoveryBinding,
+    WorkerRecoveryContractError,
     WorkerRunStatus,
 )
 
@@ -468,6 +471,39 @@ class T3StartTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(ref.run_id, spec.run_id)
 
+    async def test_receipt_recovery_binding_rebuilds_from_durable_state(self) -> None:
+        # T4c findings 1/2/7: an identity-less claim (crash between the
+        # persisted receipt and record_process) recovers from durable state
+        # alone: the seam rebuilds a real binding over the retained ref,
+        # refuses a tampered prompt, and answers None without a durable
+        # launch record — the supervisor quarantines typed on None.
+        adapter, _port, _ = _t3_adapter(binding=_binding())
+        spec = _launch_spec(run_dir=_recovery_run_dir())
+        ref = await adapter.start(spec)
+        prompt_path = spec.run_dir / "input" / "worker-prompt.txt"
+        prompt_path.write_bytes(spec.prompt.encode("utf-8"))
+        os.chmod(prompt_path, 0o600)
+        binding = adapter.receipt_recovery_binding(
+            spec.run_id, prompt_path=prompt_path
+        )
+        self.assertIsNotNone(binding)
+        self.assertEqual(
+            binding.process_ref, adapter.retained_original_ref(spec.run_id)
+        )
+        self.assertEqual(binding.recover_launch_spec(), spec)
+        # a prompt that drifted from the durable spec refuses typed
+        prompt_path.write_bytes(b"tampered")
+        with self.assertRaises(WorkerRecoveryContractError):
+            adapter.receipt_recovery_binding(
+                spec.run_id, prompt_path=prompt_path
+            )
+        # no durable launch record: not recoverable through this seam
+        self.assertIsNone(
+            adapter.receipt_recovery_binding(
+                "run-never-launched", prompt_path=prompt_path
+            )
+        )
+
     async def test_lost_reply_effect_unknown_carries_client_request_id(self) -> None:
         adapter, port, _ = _t3_adapter(binding=_binding())
         port.unknown_outcome_on_launch = True
@@ -597,10 +633,11 @@ class T3CollectTests(unittest.IsolatedAsyncioTestCase):
 
         adapter._build_collection_receipt = spy_build
         receipt = await adapter.collect_result(ref)
-        # Ordering: port read -> ledger store -> receipt construction.
+        # Ordering: live status poll (L8b wait, already terminal here) ->
+        # the ONE terminal read -> ledger store -> receipt construction.
         self.assertEqual(
             [entry[0] for entry in trace],
-            ["read", "ledger-store", "build-receipt"],
+            ["read", "read", "ledger-store", "build-receipt"],
         )
         # Reading T3 is NOT company acceptance: the ledger holds the
         # canonical reference as evidence, separately from the neutral floor.
@@ -614,13 +651,38 @@ class T3CollectTests(unittest.IsolatedAsyncioTestCase):
             hashlib.sha256(entry.result_ref.encode("utf-8")).hexdigest(),
         )
 
-    async def test_collect_refuses_non_terminal_run(self) -> None:
+    async def test_collect_waits_for_the_terminal_state_before_the_terminal_read(
+        self,
+    ) -> None:
+        """L8b (lease-expiry journey round 6, 2026-11-11): the supervisor's
+        collection contract is "completes at terminal" — process adapters
+        await process exit inside collect_result, and
+        ``_collect_with_heartbeats`` relies on exactly that as its wait
+        loop.  This adapter refused a still-LIVE run outright, so the
+        service's recovered-run finisher died on its first poll and
+        quarantined the whole Executive service at startup (the recovery
+        door then died at register-worker).  collect now polls the honest
+        live status until the run is terminal and only then performs the
+        ONE terminal read (audit #13 unchanged: the result never comes
+        from the status cursor)."""
         adapter, port, _ = _t3_adapter(binding=_binding())
         ref = await adapter.start(_launch_spec())
         port.status_by_thread[ref.provider_session_id] = "running"
-        with self.assertRaises(T3ExecutionAdapterError):
-            await adapter.collect_result(ref)
+        task = asyncio.ensure_future(adapter.collect_result(ref))
+        await asyncio.sleep(0.1)
+        # a live run is WAITED ON, never refused — and nothing is ledgered
+        self.assertFalse(task.done())
         self.assertIsNone(adapter.result_ledger_entry(ref.run_id))
+        port.status_by_thread[ref.provider_session_id] = "succeeded"
+        receipt = await asyncio.wait_for(task, timeout=10.0)
+        self.assertEqual(receipt.result.status, WorkerRunStatus.SUCCEEDED)
+        self.assertEqual(receipt.result.exit_code, 0)
+        entry = adapter.result_ledger_entry(ref.run_id)
+        self.assertIsNotNone(entry)
+        self.assertEqual(
+            entry.result_ref,
+            f"t3://thread/{ref.provider_session_id}/result",
+        )
 
     async def test_collect_refuses_a_different_run_result(self) -> None:
         adapter, port, _ = _t3_adapter(binding=_binding())
@@ -648,6 +710,38 @@ class T3CollectTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(T3ExecutionAdapterError):
             await adapter.collect_result(ref)
         self.assertIsNone(adapter.result_ledger_entry(ref.run_id))
+
+    async def test_collect_maps_the_provider_verdict_to_the_engine_uniform_exit_code(
+        self,
+    ) -> None:
+        """L8 (lease-expiry journey, 2026-11-11): the engine's recovered-run
+        finisher terminalizes on ``receipt.result.exit_code``.  The paid
+        wire's reviewed law maps its provider verdict to the engine-uniform
+        exit code (SUCCEEDED -> 0); the t3 adapter's receipt hardcoded
+        ``None``, so the service's own recovered finisher refused ("recovered
+        local worker has no truthful durable OS exit code") and quarantined
+        the whole Executive service at startup — the recovery door then died
+        at ``register-worker``.  A provider-managed run has no OS process;
+        its durable terminal verdict IS the exit evidence, and the richer
+        truth stays in ``result.status``."""
+        adapter, port, _ = _t3_adapter(binding=_binding())
+        ref = await adapter.start(_launch_spec())
+        port.status_by_thread[ref.provider_session_id] = "succeeded"
+        receipt = await adapter.collect_result(ref)
+        self.assertEqual(receipt.result.status, WorkerRunStatus.SUCCEEDED)
+        self.assertEqual(receipt.result.exit_code, 0)
+        # every failure verdict is nonzero — never a success-shaped None
+        for native, expected in (
+            ("failed", WorkerRunStatus.FAILED),
+            ("cancelled", WorkerRunStatus.CANCELLED),
+        ):
+            adapter, port, _ = _t3_adapter(binding=_binding())
+            ref = await adapter.start(_launch_spec())
+            port.status_by_thread[ref.provider_session_id] = native
+            receipt = await adapter.collect_result(ref)
+            self.assertEqual(receipt.result.status, expected)
+            self.assertNotEqual(receipt.result.exit_code, 0)
+            self.assertIsNotNone(receipt.result.exit_code)
 
 
 # =============================================================================
@@ -1175,7 +1269,42 @@ class T3LivePortReworkTests(unittest.IsolatedAsyncioTestCase):
         receipt = await adapter.collect_result(ref)
         entry = adapter.result_ledger_entry("run-1")
         self.assertEqual(entry.result_ref, f"t3://thread/{thread}/run/{native_run}/item/i-2")
-        self.assertEqual(receipt.result.structured_output["text"], "FINAL-ANSWER")
+        self.assertEqual(receipt.result.structured_output["summary"], "FINAL-ANSWER")
+
+    async def test_collect_presents_the_engine_closed_completed_envelope(self) -> None:
+        """L10 (lease-expiry journey round 9, 2026-11-11): the supervisor's
+        recovered-run finisher sealed a SUCCEEDED provider run as FAILED
+        ("worker result validations must be an array") because this adapter
+        passed the provider's natural read ({"text", "item_id",
+        "text_truncated"}) straight through as WorkerResult.structured_output.
+        The engine's worker contract is the closed COMPLETED envelope every
+        other adapter presents (claude/codex workers validate against the
+        job's result schema; the commission prompt demands it); the t3
+        boundary must translate the provider's terminal read into it."""
+        transport = FakeMcpTransport()
+        adapter, _ = _live_adapter(transport)
+        ref = await adapter.start(_launch_spec())
+        native_run = adapter.launch_receipt("run-1").run_id
+        thread = ref.provider_session_id
+        transport.items[thread] = [
+            {"position": 1, "itemId": "i-1", "runId": native_run,
+             "type": "user_message", "text": "do the work"},
+            {"position": 2, "itemId": "i-2", "runId": native_run,
+             "type": "assistant_message", "text": "FINAL-ANSWER"},
+        ]
+        transport.run_status[native_run] = "completed"
+        receipt = await adapter.collect_result(ref)
+        output = receipt.result.structured_output
+        self.assertEqual(output["status"], "COMPLETED")
+        # WorkerResult freezes sequences; both empty shapes satisfy the
+        # engine's "validations must be an array" law
+        self.assertEqual(list(output["validations"]), [])
+        self.assertEqual(output["summary"], "FINAL-ANSWER")
+        self.assertEqual(list(output["artifacts"]), [])
+        # provenance of the provider read rides along; the engine's scope
+        # and payload laws ignore unknown keys
+        self.assertEqual(output["item_id"], "i-2")
+        self.assertFalse(output["text_truncated"])
 
     async def test_collect_refuses_when_the_exact_run_has_no_final_reply(self) -> None:
         transport = FakeMcpTransport()
@@ -1810,7 +1939,8 @@ class T3LiveProofHarnessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             Path(harness.REPO).resolve(), Path(__file__).resolve().parent.parent
         )
-        mcp = harness.McpHttp("unused-token")
+        mcp = harness.McpHttp(
+            "unused-token", "http://127.0.0.1:3799/mcp")  # explicit target (finding 8)
         port = harness.LiveT3McpPort(mcp, _session_token())
         self.assertEqual(port.authenticated_namespace(), f"client:{_SID}")
         cases = [
@@ -1870,7 +2000,8 @@ class A4HarnessTests(unittest.IsolatedAsyncioTestCase):
         from unittest import mock
 
         harness = _import_live_proof_harness("t3_live_proof")
-        mcp = harness.McpHttp("unused-token")
+        mcp = harness.McpHttp(
+            "unused-token", "http://127.0.0.1:3799/mcp")  # explicit target (finding 8)
         declared = {"jsonrpc": "2.0", "id": 1, "result": {"isError": True, "content": [
             {"type": "text", "text": _json.dumps({"_tag": "OrchestratorMcpFailure",
                                                  "code": "orchestration_error",

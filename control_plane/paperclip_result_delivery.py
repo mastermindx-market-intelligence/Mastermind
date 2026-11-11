@@ -118,8 +118,8 @@ def _attempt_id(payload: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _comment_bodies(value: Any) -> list[str]:
-    """Bodies from the comments endpoint, tolerating this build's shapes."""
+def _comment_rows(value: Any) -> list[Any]:
+    """Rows from the comments endpoint, tolerating this build's shapes."""
     if isinstance(value, Mapping):
         for key in ("comments", "rows", "items", "data"):
             candidate = value.get(key)
@@ -130,13 +130,36 @@ def _comment_bodies(value: Any) -> list[str]:
             return []
     if not isinstance(value, list):
         return []
-    bodies: list[str] = []
-    for row in value:
-        if isinstance(row, Mapping) and type(row.get("body")) is str:
-            bodies.append(row["body"])
-        elif type(row) is str:
-            bodies.append(row)
-    return bodies
+    return list(value)
+
+
+def _comment_row_is_own_delivery(
+    row: Any, marker: str, request_id: str,
+) -> bool:
+    """T4c repair round 1, R2 (panel MED, 2026-11-11): a comment row counts
+    as THIS transport's own earlier delivery only when the row itself says
+    so — never a bare marker substring, which any comment author could
+    forge (the attempt id is public: the worker prompt names it).
+
+    The transport posts its delivery comment through the instance-role
+    channel, which the dev instance stamps as the board actor —
+    ``authorType "user"``, ``authorAgentId`` unset (observed live
+    2026-11-11: ``authorUserId "local-board"``) — and carries the
+    deterministic ``clientRequestId`` this module computes (uuid5 keyed on
+    the attempt, so a retried delivery re-uses the same request id).  A row
+    matches only when BOTH hold: agent-channel posts always carry
+    ``authorAgentId`` (the H2 attribution shape) and a board user without
+    the exact request id matches neither.  Anything else — even with the
+    marker in its body — is another author's word and suppresses nothing.
+    """
+    if not isinstance(row, Mapping):
+        return False
+    body = row.get("body")
+    if type(body) is not str or marker not in body:
+        return False
+    if row.get("authorType") != "user" or row.get("authorAgentId"):
+        return False  # agent-authored (or unknown-shape) — not our row
+    return str(row.get("clientRequestId") or "") == request_id
 
 
 def _document_key(attempt_id: str) -> str:
@@ -145,12 +168,30 @@ def _document_key(attempt_id: str) -> str:
     return f"coding-job-return-{safe}"[:120]
 
 
+def _quoted_worker_text(text: str) -> str:
+    """F4 (R4b review): worker output rides inside a code fence longer than
+    any backtick run in it, so worker words can never pose as the board's
+    prose (the whole comment also opens with the ``[coding-job]`` line)."""
+    longest = 0
+    run = 0
+    for char in text:
+        run = run + 1 if char == "`" else 0
+        if run > longest:
+            longest = run
+    fence = "`" * max(3, longest + 1)
+    return f"{fence}\n{text}\n{fence}"
+
+
 def build_return_comment(payload: Mapping[str, Any], attempt_id: str) -> str:
     """The comment body: deterministic, built only from fields that exist.
 
     Job identity (attempt, root, idempotency key, T3 thread/run), the result
     line, artifact refs and the GitHub evidence the record actually carries.
     An unobserved GitHub fact is written as ``unknown`` — never invented.
+
+    F4 (R4b review): the first line is the ``[coding-job]`` marker — every
+    comment this transport writes opens with it, so the carrier never takes
+    it as a board note — and the worker's text is fenced as quoted output.
     """
     attempt = payload.get("attempt")
     attempt = attempt if isinstance(attempt, Mapping) else {}
@@ -162,7 +203,7 @@ def build_return_comment(payload: Mapping[str, Any], attempt_id: str) -> str:
     stage = payload.get("stage")
     stage = stage if type(stage) is str and stage else "unknown"
     lines: list[str] = [
-        f"## Coding job result — {stage}",
+        f"[coding-job] Coding job result — {stage}",
         "",
         f"{PAPERCLIP_RETURN_MARKER_PREFIX} {attempt_id}",
         "",
@@ -186,9 +227,12 @@ def build_return_comment(payload: Mapping[str, Any], attempt_id: str) -> str:
     acceptance = acceptance if type(acceptance) is str and acceptance else "not_accepted"
     lines.append(f"- acceptance: {acceptance} (delivery is not acceptance)")
 
-    lines.extend(["", "**Result**", ""])
+    lines.extend(["", "**Result** (the worker's output, quoted verbatim)",
+                  ""])
     text = result.get("text")
-    lines.append(text if type(text) is str and text else "(no result text recorded)")
+    lines.append(_quoted_worker_text(text)
+                 if type(text) is str and text else
+                 "(no result text recorded)")
     refs = result.get("artifact_refs")
     if isinstance(refs, list) and refs:
         lines.extend(["", "**Artifacts**"])
@@ -437,6 +481,12 @@ class PaperclipResultDeliveryTransport:
         marker = f"{PAPERCLIP_RETURN_MARKER_PREFIX} {attempt_id}"
         quoted_issue = urllib.parse.quote(issue, safe="")
         marks = self._marks(attempt_id)
+        # R2: the request id this transport posts its delivery comment
+        # with — deterministic per attempt, so the dedupe scan below can
+        # demand it echoed on a board-authored row (see
+        # ``_comment_row_is_own_delivery``).
+        request_id = str(uuid.uuid5(
+            uuid.NAMESPACE_URL, f"paperclip-return:{attempt_id}"))
 
         # Guard (a): the issue's own comments are the authority on what was
         # already posted; the sidecar is the fast path.
@@ -449,7 +499,8 @@ class PaperclipResultDeliveryTransport:
             except _TransportError as exc:
                 return self._refused(
                     payload, "COMMENTS_READ_FAILED", exc.reason)
-            if any(marker in body for body in _comment_bodies(listing)):
+            if any(_comment_row_is_own_delivery(row, marker, request_id)
+                   for row in _comment_rows(listing)):
                 comment_posted = True
                 already_delivered = True
                 self._mark(attempt_id, issue, "comment")
@@ -463,9 +514,7 @@ class PaperclipResultDeliveryTransport:
                     # the API requires a UUID here (invalid_format otherwise);
                     # uuid5 keyed on the attempt keeps it deterministic so a
                     # retried delivery posts the same request id
-                    {"clientRequestId": str(uuid.uuid5(
-                        uuid.NAMESPACE_URL,
-                        f"paperclip-return:{attempt_id}")),
+                    {"clientRequestId": request_id,
                      "body": body})
             except _TransportError as exc:
                 return self._refused(

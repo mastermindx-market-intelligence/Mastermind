@@ -56,7 +56,9 @@ def _make_door(scratch: Path):
     config = door_mod.DoorConfig({
         "scratch_root": str(scratch),
         "paperclip_base_url": "http://127.0.0.1:3199",  # deliberately dead
+        "paperclip_allowed": ["127.0.0.1:3199"],
         "paperclip_company_id": "cmp-test",
+        "teammates": ["ag-1"],
         "t3": {
             # A dead port INSIDE the dev range: the pairing CLI leg is pinned
             # to this same server, so no leg can reach the live T3 app.
@@ -77,7 +79,9 @@ def _config(scratch, t3_overrides=None):
     values = {
         "scratch_root": str(scratch),
         "paperclip_base_url": "http://127.0.0.1:3190",
+        "paperclip_allowed": ["127.0.0.1:3190"],
         "paperclip_company_id": "c",
+        "teammates": ["ag-1"],
         "t3": {
             "proof_base_url": "http://127.0.0.1:3800",
             "home_dir": str(scratch / "t3home"),
@@ -134,6 +138,11 @@ def test_admit_replay_conflict_wait_and_unfrozen_round_trip(scratch,
     unfrozen command refused."""
     async def exercise():
         d = _make_door(scratch)
+        # The admission LANE is under test here with a deliberately dead dev
+        # Paperclip; the F10 task-shows-request gate (which needs a live
+        # task) has its own tests in test_mmos_coding_job_door_t4c.py.
+        monkeypatch.setattr(d, "_task_request_error",
+                            lambda _cmd, _entry: None)
         await d.start()
 
         def ask(method, target, body=None):
@@ -313,9 +322,12 @@ def test_f6_entry_action_routes_every_phase_once(scratch, monkeypatch):
     # never admitted by the door (the live default-journey regression)
     assert d._entry_action({}) == "skip"
     assert d._entry_action({"admit_requested_at": "t"}) == "admit"
-    # a WAIT/refusal was already answered — the carrier owns the retry
+    # a WAIT is retried by the door itself once the retry interval elapses
+    # (R4b finding 12 — same command, so still one admission); an
+    # unageable timestamp reads as due.  A REFUSAL stays answered: the
+    # carrier owns that retry.
     assert d._entry_action(
-        {"admit_requested_at": "t", "admit_outcome": "WAIT"}) == "skip"
+        {"admit_requested_at": "t", "admit_outcome": "WAIT"}) == "admit"
     assert d._entry_action(
         {"admit_requested_at": "t", "admit_outcome": "conflict"}) == "skip"
     assert d._entry_action({"job_id": "J"}) == "execute"     # fresh claim
@@ -423,7 +435,9 @@ def test_f3_hard_readmission_refusal_parks_with_the_code(
     d._ensure_admitted(command2, entry2)
     assert entry2.get("phase") is None
     assert not entry2.get("blocker")
-    assert d._entry_action(entry2) == "skip"
+    # F12 (R4b review): the WAIT is stale (asked 2026-11-10) — the door
+    # itself now re-asks the same command when the interval elapses
+    assert d._entry_action(entry2) == "admit"
     assert len(d.paperclip.comments) == 1  # only the refusal comment
 
 
@@ -504,20 +518,35 @@ def test_f1_attempted_launch_without_receipt_parks_never_relaunches(
     assert entry["blocker"]["code"] == "LAUNCH_UNCERTAIN"
     assert d.paperclip.comments and "LAUNCH_UNCERTAIN" in (
         d.paperclip.comments[0][1])
-    # surfaced blocker = terminal for this executor: never re-executed
-    assert d._entry_action(entry) == "skip"
+    # never re-executed — but (R4b finding 13) the entry KEEPS ITS WAKE
+    # until the attempt row is reconciled terminal, because its thread
+    # slot is held; the blocker branch closes it then and only then
+    assert d._entry_action(entry) == "blocker"
 
 
-def test_f2_recovery_skips_record_process_when_identity_is_durable(
+def test_f2_durable_identity_routes_to_the_engine_owned_watch_never_adopts(
         scratch, monkeypatch, tmp_path):
-    """Crash AFTER record_process, BEFORE adopt/seal: the fresh door must
-    reattach and adopt without the StateConflict that misreported a
-    succeeded job as EXECUTOR_FAILED."""
+    """Crash AFTER the engine recorded the attempt's durable identity
+    (provider session id + recovery binding in one transaction), BEFORE the
+    finisher sealed: the fresh door must NEVER adopt, reattach, record or
+    launch — it routes the entry to the engine-owned watch and waits for
+    the terminal row (F15: one recovery owner, the engine).
+
+    The old law (T4b): the DOOR reattached and adopted under its own
+    ``t4b-door-recovery`` lease owner, which is exactly the misreporting
+    F2 originally chased — a StateConflict against the door's own partial
+    record read as EXECUTOR_FAILED for a job that had succeeded.  Step 3
+    removed the door's adoption path entirely; identity now lands in one
+    engine transaction, so this test pins the routing, not a door-side
+    reattach."""
     from types import SimpleNamespace
     from tests.test_executive_supervisor import _runtime_and_job
     runtime, job_id, _ = _runtime_and_job(tmp_path)
     lease = runtime.broker.claim(job_id, lease_owner="t4b-door-dead")
     attempt_id = lease.attempt.attempt_id
+    # the durable identity exactly as the ENGINE's adoption leaves it
+    # (identity lands in the engine's one adoption transaction — the
+    # binding is the alternate signal the watch also accepts)
     runtime.attempts.record_process(
         attempt_id, fence_generation=lease.attempt.fence_generation,
         lease_token=lease.lease_token,
@@ -531,18 +560,13 @@ def test_f2_recovery_skips_record_process_when_identity_is_durable(
                   "lease_token": lease.lease_token, "phase": "claimed"})
     d._save_frozen()
 
-    class _FakeAdapter:
-        async def reattach(self, spec, binding):
-            assert binding.process_ref is not None
-            return SimpleNamespace(
-                provider_session_id="mcp:launch:already-durable")
-
-    # a real WorkerLaunchSpec with its real prompt file — bind() verifies
-    # the recovery prompt bytes against the spec
+    # the durable adapter receipt the engine adopted under (present, so the
+    # door's own receipt read cannot fall into the F1/F13 launch windows)
     real_spec = d._launch_spec(
         run_id=attempt_id, job_id="JOB-F2",
         prompt=d._worker_prompt(attempt_id,
-                                "t3/mmos-t4b-job-deadbeef"))
+                                "t3/mmos-t4b-job-deadbeef"),
+        workspace=d.root / "run" / "jobs" / "job-f2-ws")
     fake_run = SimpleNamespace(
         spec=real_spec,
         original_ref=SimpleNamespace(provider_session_id="x", pid=None,
@@ -555,15 +579,27 @@ def test_f2_recovery_skips_record_process_when_identity_is_durable(
     import control_plane.t3_execution_adapter as adapter_module
     monkeypatch.setattr(adapter_module, "SQLiteT3AdapterStateStore",
                         lambda _path: _FakeStore())
-    monkeypatch.setattr(d, "_compose_adapter",
-                        lambda *_a, **_k: (_FakeAdapter(), {}))
-    monkeypatch.setattr(d, "_seal_and_deliver", lambda *a, **k: None)
 
-    # OLD behavior: record_process raises StateConflict here and the
-    # executor records EXECUTOR_FAILED for a job that actually succeeded.
+    def forbidden(*_a, **_k):
+        raise AssertionError("the door must not adopt, reconcile, launch "
+                             "or record an engine-owned attempt itself")
+
+    monkeypatch.setattr(d, "_compose_adapter", forbidden)
+    monkeypatch.setattr(d, "_reconcile", forbidden)
+    monkeypatch.setattr(d, "_seal_and_deliver", forbidden)
+    monkeypatch.setattr(runtime.attempts, "record_process", forbidden)
+    monkeypatch.setattr(runtime.attempts, "adopt_attempt", forbidden)
+
     d._execute(runtime, command, entry)
 
     row = runtime.attempts.get_attempt(attempt_id)
     assert row.provider_session_id == "mcp:launch:already-durable"
-    assert row.lease_owner == "t4b-door-recovery"   # the adoption happened
-    assert entry["phase"] == "reattached"
+    # the DEAD claimant still owns the lease — the door fenced nothing
+    assert row.lease_owner == "t4b-door-dead"
+    assert entry["phase"] == "engine-owned"
+    # re-executing stays in the watch (no second reconcile drive: a live
+    # finisher's lease must never be fenced by a re-ask)
+    d._execute(runtime, command, entry)
+    assert entry["phase"] == "engine-owned"
+    assert runtime.attempts.get_attempt(attempt_id).lease_owner == (
+        "t4b-door-dead")

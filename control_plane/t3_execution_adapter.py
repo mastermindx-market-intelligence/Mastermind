@@ -109,6 +109,7 @@ definitively did not take effect (clean refusal).
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import dataclasses
 import hashlib
@@ -1953,11 +1954,16 @@ class T3ExecutionAdapter:
         *,
         clock: Callable[[], datetime] | None = None,
         state_store: T3AdapterStateStore | None = None,
+        collect_poll_seconds: float = 1.0,
     ) -> None:
         self._port = port
         self._binding_source = binding_source
         self.inspector = inspector
         self._clock = clock or (lambda: datetime.now(timezone.utc))
+        # L8b: how long collect_result waits between live-status polls while
+        # the run is still executing (the supervisor's wait loop is the
+        # collect call itself — see collect_result's docstring).
+        self._collect_poll_seconds = float(collect_poll_seconds)
         # Durable adapter state per run.  Every mutation writes through the
         # store SYNCHRONOUSLY at its ordering point (intent claimed BEFORE
         # the native call; receipt + original ref BEFORE the ACK; cursor
@@ -1982,6 +1988,31 @@ class T3ExecutionAdapter:
         """The retained original neutral ref for a run, if any."""
         run = self._state.load_run(str(run_id))
         return run.original_ref if run is not None else None
+
+    def receipt_recovery_binding(
+        self, run_id: str, *, prompt_path: str | Path
+    ) -> WorkerRecoveryBinding | None:
+        """Findings 1/2/7 (T4c): the durable recovery binding for an
+        identity-less claim.
+
+        Rebuilt ONLY from durable state the adapter wrote before its ACK —
+        the persisted spec and the retained original ref — so the supervisor
+        can adopt a claim whose launcher died between the persisted receipt
+        and ``record_process`` and end with a run somebody owns, without a
+        second launch.  A run without both durable halves is not recoverable
+        through this seam (``None``); the supervisor then quarantines typed
+        instead of guessing.  ``bind`` re-verifies the prompt bytes on disk
+        against the durable spec, so a tampered or foreign prompt refuses.
+        """
+        run = self._state.load_run(str(run_id))
+        if run is None or run.spec is None or run.original_ref is None:
+            return None
+        return WorkerRecoveryBinding.bind(
+            adapter_id=self.adapter_id,
+            spec=run.spec,
+            process_ref=run.original_ref,
+            prompt_path=prompt_path,
+        )
 
     def read_cursor(self, run_id: str) -> str:
         """The persisted incremental read cursor for a run ("" when none)."""
@@ -2495,17 +2526,36 @@ class T3ExecutionAdapter:
         the bare thread id — is refused.  The canonical reference is stored
         in the WRITE-ONCE result ledger BEFORE the CollectionReceipt is
         constructed or returned.  Reading T3 is NOT company acceptance.
+
+        L8b (lease-expiry journey round 6, 2026-11-11): the supervisor's
+        collection contract is "completes at terminal" — process adapters
+        await process exit inside collect_result, and
+        ``_collect_with_heartbeats`` relies on exactly that as its wait
+        loop.  This adapter refused a still-LIVE run outright, so the
+        service's recovered-run finisher died on its first poll and
+        QUARANTINED the whole Executive service at startup (the recovery
+        door then died at register-worker).  collect_result now polls the
+        honest live status until the run is terminal and only then performs
+        the ONE terminal read — the result still never comes from the
+        status cursor, and the wait is a plain sleep so the engine loop can
+        cancel it on ownership loss with no partial state (the ledger is
+        untouched until the terminal read).
         """
         run = self._require_run_state(ref)
         original = run.original_ref
         assert original is not None
         thread_id, native_run_id = self._native_coordinates(run)
+        while True:
+            live = await self.status(ref)
+            if live in _TERMINAL_STATES:
+                break
+            await asyncio.sleep(self._collect_poll_seconds)
         read = await self._read_terminal(thread_id, native_run_id)
         state = _map_t3_status(read.native_status)
         if state not in _TERMINAL_STATES:
             raise T3ExecutionAdapterError(
-                f"run {original.run_id!r} is not terminal; no final result to "
-                "collect"
+                f"terminal read for run {original.run_id!r} observed "
+                f"non-terminal state {state.name!r}; refusing to collect"
             )
         result_ref = str(read.result_ref or "")
         if not result_ref or result_ref in {thread_id, native_run_id}:
@@ -2528,6 +2578,32 @@ class T3ExecutionAdapter:
         )
         return self._build_collection_receipt(original, read, state)
 
+    @staticmethod
+    def _worker_output(
+        state: WorkerRunStatus, result_payload: Mapping[str, Any]
+    ) -> Mapping[str, Any] | None:
+        """Present the worker's structured output in the engine's contract.
+
+        SUCCEEDED: the closed COMPLETED envelope (the supervisor's terminal
+        law validates ``validations``/``status`` before any completion; the
+        provider's final text rides ``summary``, the read's provenance keys
+        ride along and are ignored by the engine's scope/payload laws).
+        Every failure verdict keeps the natural read (the worker's own
+        failure report); failure prose must never be translated into a
+        completion envelope.
+        """
+        payload = dict(result_payload)
+        if state is not WorkerRunStatus.SUCCEEDED:
+            return payload or None
+        return {
+            "status": "COMPLETED",
+            "validations": [],
+            "summary": str(payload.get("text", "")),
+            "artifacts": [],
+            "item_id": str(payload.get("item_id", "")),
+            "text_truncated": bool(payload.get("text_truncated", False)),
+        }
+
     def _build_collection_receipt(
         self,
         original: WorkerProcessRef,
@@ -2546,12 +2622,34 @@ class T3ExecutionAdapter:
             run_id=original.run_id,
             worker_id=spec.worker_id,
             status=state,
-            structured_output=dict(read.result_payload) or None,
+            # L10 (lease-expiry journey round 9, 2026-11-11): the engine's
+            # worker contract is the closed COMPLETED envelope — every other
+            # adapter presents it (the claude/codex workers validate their
+            # structured output against the job's result schema; the
+            # commission prompt demands it) and the supervisor's terminal
+            # law rejects anything else, so passing the provider's natural
+            # read straight through made the recovered-run finisher seal a
+            # SUCCEEDED provider run as FAILED ("worker result validations
+            # must be an array").  A SUCCEEDED read is translated into the
+            # envelope; the provider's own failure prose stays in its
+            # natural shape for failure verdicts — no engine acceptance
+            # path consumes it, and the door's honest-failure seal quotes
+            # it.  The natural read remains durable in the collection
+            # receipt + write-once result ledger either way.
+            structured_output=self._worker_output(state, read.result_payload),
             artifact_manifest=(),
             git_manifest={},
             usage={},
             provider_session_id=original.provider_session_id,
-            exit_code=None,
+            # L8 (lease-expiry journey, 2026-11-11): a provider-managed run
+            # has no OS process, so there is no OS exit code to read — the
+            # durable provider verdict IS the exit evidence.  Map it to the
+            # engine-uniform exit code exactly as the paid wire's reviewed
+            # law does (SUCCEEDED -> 0, every failure verdict nonzero); the
+            # richer truth stays in ``status``.  A None here made the
+            # supervisor's recovered-run finisher refuse ("no truthful
+            # durable OS exit code") and quarantine the whole service.
+            exit_code=(0 if state is WorkerRunStatus.SUCCEEDED else 1),
             started_at=read.started_at,
             finished_at=read.finished_at or self._now_iso(),
             error=read.error,

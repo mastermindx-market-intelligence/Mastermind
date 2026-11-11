@@ -1008,6 +1008,20 @@ def test_crash_before_the_running_ack_recovers_with_zero_native_launches(tmp_pat
 
     receipts = mixed2.reconcile_restart()
 
+    # T4c attack F1(a) (15f769d6c): the crashed launcher's lease is still
+    # LIVE at restart, and a live lease's owner may be a live finisher
+    # collecting and heartbeating — reconcile defers rather than fencing;
+    # only the engine's own lease expiry proves the claimant lost its
+    # rights.  Nothing native happens while deferring.
+    assert [r.status for r in receipts] == [ReconcileStatus.AWAITING_LEASE_EXPIRY]
+    assert port2.launch_count == 0  # ZERO native launches while deferring
+    assert port2.replay_count == 0
+    assert port2.reads == []
+    assert mixed2.take_recovered_runs() == ()
+
+    runtime.store.clock.value += 61_000  # past the 60s lease
+    receipts = mixed2.reconcile_restart()
+
     assert [r.status for r in receipts] == [ReconcileStatus.TERMINAL_RECOVERED]
     assert port2.launch_count == 0  # ZERO native launches on recovery
     assert port2.replay_count == 0

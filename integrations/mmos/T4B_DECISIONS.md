@@ -95,6 +95,15 @@ UNKNOWN, and the pid/provider-NULL branch) and recovers under a new fence
 instead of expiring. Admission identity, fencing and the receipt rule are
 untouched; the adapter's launch-claim still refuses any second start.
 
+**T4c refinement of this law** (Step 1): recovery is never an immediate
+adoption of a live lease. While the crashed claimant's lease is LIVE the
+engine DEFERS (`AWAITING_LEASE_EXPIRY` — a live launcher may still record);
+at expiry the one adoption path is `adopt_attempt(..., adopt_expired_lease=
+True)` with the receipt-rebuilt binding and launch metadata written in the
+SAME transaction, and the recovered attempt is never requeued into a second
+launch. A persisted t3-native binding on the row makes any later restart's
+passes recover it through the ordinary TERMINAL_OWNED path.
+
 ## Where this runs (instances and ports)
 
 | Thing | Where |
@@ -194,10 +203,20 @@ disposition table. Decisions worth naming:
   `launch_receipt` accessor — the one-line composition change that makes the
   L1B3-5 reattach path reachable in the composed service (was: closed only
   in tests). Unreadable receipts are ignored, keeping the quarantine.
-- **F8 is reported, not fixed**: the door's `DoorSupervisor` remains the
-  ingress fixture's stub; driving periodic `reconcile_restart` inside the
-  door executor (expiry/requeue for parked uncertain attempts, quota-class
-  release) is engine-composition work beyond the door's write scope. F12
-  makes the production composition capable of exactly that.
-- Post-fix evidence: all four journey scenarios re-run PASS on the final
-  tree; full lane sweep green (see LEDGER).
+- **F8 is fixed in T4c (was: reported, not fixed)**: the door's
+  `DoorSupervisor` stub is deleted. The door now composes the REAL
+  t3-native supervisor (`compose_t3_native_supervisor` over the shared
+  adapter state store) twice — service-side (startup reconciliation on the
+  service runtime) and executor-side (reconcile at start and on a
+  `reconcile_interval_seconds` cadence, over the executor's own runtime) —
+  and recovery goes through the engine's `reconcile_restart` only: an
+  identity-less claim with a durable receipt under a live lease DEFERS
+  (AWAITING_LEASE_EXPIRY, retried on the cadence), at expiry the engine
+  adopts the SAME attempt under `adopt_expired_lease` and the door seals
+  from the engine's recovered lease/ref; a typed engine quarantine parks
+  the entry (`RECONCILE_<status>` blocker, thread slot HELD — the receipt
+  proved a live native execution). The door never calls `record_process`
+  or `adopt_attempt` itself; a wedged claim can never hold its quota class
+  silently. F12 made the composition capable of exactly this.
+- Post-fix evidence: all four journey scenarios re-run PASS on the T4b
+  final tree at that merge; full lane sweep green (see LEDGER).

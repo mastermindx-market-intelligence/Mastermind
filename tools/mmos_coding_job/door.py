@@ -39,6 +39,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
+from typing import Any
 from types import SimpleNamespace
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -87,6 +88,11 @@ REGISTRY_REVISION = "rev-t4b-door-1"
 THREAD_BUDGET = 2
 LEASE_SECONDS = 900
 REPOSITORY = "mastermindx-market-intelligence/Mastermind"
+# F3/F13 (R4b review): the attempt statuses after which the door owes
+# bookkeeping only — never an adoption (F3) — and after which a held
+# launch-uncertain thread slot returns (F13).
+TERMINAL_ATTEMPT_STATUSES = frozenset(
+    {"COMPLETED", "FAILED", "LOST", "CANCELLED"})
 
 
 def _log(message: str) -> None:
@@ -98,10 +104,25 @@ def _now() -> str:
 
 
 def loopback_only(url: str, what: str) -> str:
-    """The dev boundary law: only a loopback http base, ever."""
-    if not url.startswith("http://127.0.0.1:") and not url.startswith(
-            "http://localhost:"):
+    """The dev boundary law: only a loopback http base, ever.
+
+    F9 (R4b review): the URL is PARSED, never string-prefix-matched —
+    ``http://127.0.0.1:80@example.com`` has userinfo and the real host
+    ``example.com``, and must refuse.  No userinfo, no query, no fragment,
+    no path (a bare base), http only.
+    """
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "http":
+        raise ValueError(f"{what} must be an http url, got {url!r}")
+    if parts.username is not None or parts.password is not None:
+        raise ValueError(f"{what} must carry no userinfo, got {url!r}")
+    if parts.query or parts.fragment:
+        raise ValueError(f"{what} must be a bare base url, got {url!r}")
+    host = (parts.hostname or "").lower()
+    if host not in ("127.0.0.1", "localhost", "::1"):
         raise ValueError(f"{what} must be a loopback http url, got {url!r}")
+    if parts.path not in ("", "/"):
+        raise ValueError(f"{what} must be a bare base url, got {url!r}")
     return url.rstrip("/")
 
 
@@ -111,6 +132,15 @@ def loopback_only(url: str, what: str) -> str:
 # selects its server by T3CODE_HOME/T3CODE_PORT, NOT by the base URL —
 # so those must be configured, required, and provably the SAME server as
 # the HTTP base, or the CLI would silently mint against the live app.
+DEV_T3_PORT_FIRST = 3790
+DEV_T3_PORT_LAST = 3810
+
+# F9 (R4b review): reserved neighbour ports that are NEVER a legal
+# Paperclip target for this door, even if a config lists them — the
+# installed Paperclip (3100, 3179), the live T3 app (3773/3774) and the
+# team server (3780).
+RESERVED_NEIGHBOUR_PORTS = frozenset({3100, 3179, 3773, 3774, 3780})
+
 DEV_T3_PORT_FIRST = 3790
 DEV_T3_PORT_LAST = 3810
 
@@ -127,8 +157,52 @@ class DoorConfig:
         self.scratch_root = Path(values["scratch_root"]).expanduser()
         self.paperclip_base = loopback_only(
             values["paperclip_base_url"], "paperclip_base_url")
+        # F9 (R4b review): the Paperclip base must match an EXPLICIT
+        # host:port allowlist from the config — parsing the URL and
+        # comparing (host, port) never accepts a lookalike, and the
+        # reserved neighbour ports are refused even when listed.
+        allowed = values.get("paperclip_allowed")
+        if not isinstance(allowed, list) or not allowed:
+            raise ValueError(
+                "paperclip_allowed is required: an explicit list of the "
+                "legal host:port Paperclip targets for this door")
+        allowed_targets: set[tuple[str, int]] = set()
+        for item in allowed:
+            if type(item) is not str:
+                raise ValueError(f"paperclip_allowed entries are strings, "
+                                 f"got {item!r}")
+            parsed = urllib.parse.urlsplit(f"http://{item.strip()}")
+            try:
+                port = parsed.port
+            except ValueError as exc:
+                raise ValueError(f"paperclip_allowed entry is not a "
+                                 f"host:port pair: {item!r}") from exc
+            if not parsed.hostname or port is None:
+                raise ValueError(f"paperclip_allowed entry is not a "
+                                 f"host:port pair: {item!r}")
+            if port in RESERVED_NEIGHBOUR_PORTS:
+                raise ValueError(
+                    f"paperclip_allowed names reserved port {port} "
+                    f"(installed Paperclip / live T3 app / team server): "
+                    "never a legal target for this door")
+            allowed_targets.add((parsed.hostname.lower(), port))
+        base = urllib.parse.urlsplit(self.paperclip_base)
+        if (base.hostname or "").lower() in ("::1",):
+            base_target = ("::1", base.port)
+        else:
+            base_target = ((base.hostname or "").lower(), base.port)
+        if base_target not in allowed_targets:
+            raise ValueError(
+                f"paperclip_base_url target {base_target[0]}:{base_target[1]} "
+                "is not in the paperclip_allowed allowlist "
+                f"{sorted(allowed_targets)}")
         self.paperclip_company_id = str(values["paperclip_company_id"])
         self.paperclip_headers = dict(values.get("paperclip_headers") or {})
+        # F10 (R4b review): the enrolled-teammate roster — the door freezes
+        # only issues assigned to one of these agents, and admits only when
+        # the task itself shows the request from the assignee.
+        self.teammates = frozenset(
+            str(agent) for agent in (values.get("teammates") or ()))
         self.repository = str(values.get("repository") or REPOSITORY)
         self.t3_proof_base = loopback_only(
             values["t3"]["proof_base_url"], "t3.proof_base_url")
@@ -159,6 +233,26 @@ class DoorConfig:
         self.register_transport = bool(values.get("register_transport", True))
         self.crash_mode = values.get("crash_mode") or None
         self.intake_poll_seconds = float(values.get("intake_poll_seconds", 2.0))
+        # F12 (R4b review): a WAIT is retried by the door itself once this
+        # many seconds have passed since the last ask — the same command,
+        # so still one admission (the engine's command-id law arbitrates).
+        self.wait_retry_seconds = float(values.get("wait_retry_seconds", 30.0))
+        # F15 (R4b review) + attack F8: the composed supervisor's
+        # reconcile cadence — run at start, then at least this often.
+        self.reconcile_interval_seconds = float(
+            values.get("reconcile_interval_seconds", 30.0))
+        # The claim/adoption lease window the door's Runtime instances use
+        # (scenarios shorten it to prove the door-down-longer-than-lease
+        # recovery).
+        self.lease_seconds = int(values.get("lease_seconds", LEASE_SECONDS))
+        # Attack F3 (step 5, 2026-11-11): the door's OWN bounded wait for a
+        # native run to reach a terminal state, and its poll cadence — the
+        # wait must never become an unbounded poll (a non-terminal run
+        # parks the entry typed instead).  Scenarios shorten both.
+        self.wait_deadline_seconds = float(
+            values.get("wait_deadline_seconds", 1800.0))
+        self.poll_interval_seconds = float(
+            values.get("poll_interval_seconds", 15.0))
         self.ready_limit = values.get("child_root_ready_limit")
         self.fleet_limit = values.get("child_fleet_ready_limit")
 
@@ -199,6 +293,9 @@ class PaperclipLoopbackClient:
 
     def issue(self, issue_id):
         return self._request("GET", f"/api/issues/{issue_id}")
+
+    def comments(self, issue_id):
+        return self._request("GET", f"/api/issues/{issue_id}/comments")
 
     def company_issues(self):
         rows = self._request(
@@ -319,19 +416,6 @@ def build_target() -> ExecutiveSelectedChildTarget:
     )
 
 
-class DoorSupervisor:
-    """The service's supervisor stand-in (the ingress fixture's shape)."""
-
-    def __init__(self, runtime: Runtime):
-        self.runtime = runtime
-
-    def reconcile_restart(self, *, requeue_lost: bool = False):
-        return []
-
-    async def start_job(self, job_id: str):  # pragma: no cover - unused path
-        raise RuntimeError("the door executor owns launches, not the service")
-
-
 # ---------------------------------------------------------------------------
 # The crash hook store (the canary's MAIN-P1 window, verbatim discipline)
 # ---------------------------------------------------------------------------
@@ -367,9 +451,17 @@ class CodingJobDoor:
     def __init__(self, config: DoorConfig):
         self.config = config
         self.root = config.scratch_root
-        (self.root / "run").mkdir(parents=True, exist_ok=True)
+        run_dir = self.root / "run"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        # F11 (R4b review): frozen.json carries the lease token — its
+        # directory is owner-only, as is every file written beneath it.
+        os.chmod(run_dir, 0o700)
         self.paperclip = PaperclipLoopbackClient(config)
         self.frozen_path = self.root / "run" / "frozen.json"
+        # F6 (R4b review): ONE lock around every structural change and
+        # every save of the frozen record — intake and the executor are
+        # two threads in one process.
+        self._frozen_lock = threading.RLock()
         # command -> {"issue": {...issue fields...}, "envelope": {...}}
         self.frozen: dict[str, dict] = self._load_frozen()
         self.service: ExecutiveControlService | None = None
@@ -379,6 +471,13 @@ class CodingJobDoor:
         self._stopping = threading.Event()
         self._executor_thread: threading.Thread | None = None
         self._wake = threading.Event()
+        # F15 (R4b review) + attack F8: the composed t3-native supervisor
+        # that owns recovery on the EXECUTOR thread (the service composes
+        # its own over the service runtime in start()), the recovered
+        # ActiveRuns it handed back, and the reconcile cadence clock.
+        self._supervisor = None
+        self._recovered: dict[str, Any] = {}
+        self._last_reconcile = 0.0
         self.launch_census = self.root / "run" / "native-census.jsonl"
         self._budget = self.root / "run" / "thread-budget.json"
 
@@ -390,14 +489,46 @@ class CodingJobDoor:
         return {}
 
     def _save_frozen(self) -> None:
-        # F5 (attack review): write-temp-then-rename — a crash mid-write must
-        # never leave a truncated frozen.json, or the next door cannot start
-        # and every frozen job is lost with it.
-        tmp = self.frozen_path.with_name("frozen.json.tmp")
-        tmp.write_text(
-            json.dumps(self.frozen, indent=2, sort_keys=True),
-            encoding="utf-8")
-        os.replace(tmp, self.frozen_path)
+        """F5 + F6 + F11: one locked, atomic, private write.
+
+        F5 (attack review): write-temp-then-rename — a crash mid-write must
+        never leave a truncated frozen.json.  F6 (R4b review): a UNIQUE
+        temp name per writer, fsync of file and directory, and the lock so
+        concurrent savers serialize instead of colliding.  F11: 0600 —
+        the record carries the lease token.
+        """
+        with self._frozen_lock:
+            payload = json.dumps(self.frozen, indent=2, sort_keys=True)
+            tmp = self.frozen_path.with_name(
+                f"frozen.json.{os.getpid()}.{threading.get_ident()}.tmp")
+            try:
+                fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                             0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(payload)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                os.replace(tmp, self.frozen_path)
+            except BaseException:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+            dir_fd = os.open(self.frozen_path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+
+    @staticmethod
+    def _write_private(path: Path, text: str) -> None:
+        """F11: every durable file this door writes is owner-only."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(path.parent, 0o700)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
 
     def _reserve_thread(self, role: str) -> bool:
         budget = (json.loads(self._budget.read_text())
@@ -408,7 +539,7 @@ class CodingJobDoor:
         if len(budget["reserved"]) >= budget["limit"]:
             return False
         budget["reserved"].append(role)
-        self._budget.write_text(json.dumps(budget), encoding="utf-8")
+        self._write_private(self._budget, json.dumps(budget))
         return True
 
     def _release_thread(self, role: str) -> None:
@@ -420,11 +551,166 @@ class CodingJobDoor:
         reserved = budget.get("reserved") or []
         if role in reserved:
             budget["reserved"] = [r for r in reserved if r != role]
-            self._budget.write_text(json.dumps(budget), encoding="utf-8")
+            self._write_private(self._budget, json.dumps(budget))
 
     # ------------------------------------------------------- service setup
 
+    def _t3_port_factory(self, branch: str):
+        """A REAL census-recording port factory for a door-owned supervisor
+        composition.  The service-side supervisor may finish a run it
+        recovered at startup, so its port must be real; its launch
+        arguments name a door-owned branch that is only ever used if that
+        supervisor (which never launches) somehow tried to."""
+        from control_plane.t3_native_composition import (
+            T3McpHttpTransport,
+            T3McpToolPort,
+        )
+        launch_arguments = {
+            "projectId": self.config.t3_project_id,
+            "workspaceStrategy": {"type": "worktree", "branch": branch,
+                                  "baseRef": "master", "startFromOrigin": True},
+        }
+
+        def factory(token_value: str):
+            transport = T3McpHttpTransport(
+                self.config.t3_proof_base + "/mcp", token_value)
+
+            def call_tool(tool: str, arguments: dict):
+                self._record_census(tool, arguments)
+                return transport.call_tool(tool, arguments)
+
+            return T3McpToolPort.from_access_token(
+                call_tool, token_value,
+                launch_arguments=dict(launch_arguments))
+
+        return factory
+
+    def _reconcile_only_port_factory(self, token_value: str):
+        """The executor's supervisor RECONCILES and SEALS: status/collect
+        reads pass through to the dev server, launches are refused PRE-SEND
+        at the port's own launch seam.
+
+        The port object is built EAGERLY at composition — a factory that
+        raises kills the executor's supervisor outright and reconcile never
+        runs (caught live by the crash journey, 2026-11-11: the recovery
+        door logged "recovery must never launch" and never adopted).  The
+        per-job launch port stays the ONLY launch path (``_compose_adapter``
+        with the census wrapper and crash hooks); ``requeue_lost=False``
+        plus this refusal seam is belt and braces."""
+        from control_plane.t3_execution_adapter import T3PortRefusalError
+        from control_plane.t3_native_composition import (
+            T3McpHttpTransport,
+            T3McpToolPort,
+        )
+
+        class _ReconcileOnlyPort(T3McpToolPort):
+            def _launch(self, envelope, op):
+                raise T3PortRefusalError(
+                    f"refusing to {op} on the door's reconcile-only "
+                    "supervisor port (recovery must never launch; nothing "
+                    "was sent)")
+
+        transport = T3McpHttpTransport(
+            self.config.t3_proof_base + "/mcp", token_value)
+
+        def call_tool(tool: str, arguments: dict):
+            self._record_census(tool, arguments)
+            return transport.call_tool(tool, arguments)
+
+        return _ReconcileOnlyPort.from_access_token(
+            call_tool, token_value,
+            launch_arguments={"projectId": self.config.t3_project_id})
+
+    def _compose_supervisor(self, runtime, *, port_factory):
+        """F15 (R4b review) + attack F8: compose the REAL t3-native
+        supervisor over the shared adapter state store.
+
+        One recovery owner — the engine.  The composition shares the door's
+        durable adapter receipts (``SQLiteT3AdapterStateStore`` over the
+        door's own store path), so the wired ``provider_receipt_reader``
+        sees exactly the receipts the crashed door's adapter persisted,
+        and ``reconcile_restart`` adopts an identity-less claim through the
+        boundary seam.  ``runs_root`` is the door's run/jobs tree so the
+        recomputed launch metadata and the recovery prompt land where the
+        door's launcher put them.
+
+        Not enrolled (no token file yet — the dev server was down at start):
+        the PLAIN primary supervisor is returned.  That composition can
+        reconcile nothing it would need the t3 owner for, and a fresh
+        un-tokened scratch holds no claim rows at all; the executor's mint
+        loop composes the full owner once a token exists."""
+        from control_plane.executive_supervisor import ExecutiveSupervisor
+        from control_plane.t3_execution_adapter import SQLiteT3AdapterStateStore
+        from control_plane.t3_native_composition import (
+            T3NativeProcessController,
+            compose_t3_native_adapter,
+            compose_t3_native_supervisor,
+        )
+        composition = compose_t3_native_adapter(
+            runtime,
+            token_file=self.config.t3_token_path,
+            port_factory=port_factory,
+            state_store=SQLiteT3AdapterStateStore(self._adapter_store_path()),
+            inspector=_DoorInspector(),
+            clock=lambda: dt.datetime.now(dt.timezone.utc))
+        runs_root = self.root / "run" / "jobs"
+        isolation_roots = (self.root / "workspaces", runs_root)
+        primary = ExecutiveSupervisor(
+            runtime, composition.adapter,
+            runs_root=runs_root,
+            isolation_roots=isolation_roots,
+            require_complete_launch_attestation=False,
+            inspector=_DoorInspector(),
+            process_controller=T3NativeProcessController())
+        if not composition.composed:
+            _log(f"t3 adapter not enrolled ({composition.status}: "
+                 f"{composition.reason}); service-side reconciliation runs "
+                 "on the plain supervisor until the worker token exists")
+            return primary
+        return compose_t3_native_supervisor(
+            primary, composition,
+            runs_root=runs_root,
+            isolation_roots=isolation_roots)
+
+    async def _ensure_worker_token(self) -> None:
+        """Mint/verify the door's worker token (never printed) ONCE, before
+        the service composes — the composed adapter reads the token file
+        eagerly.  Never blocks door startup on a down dev server: the door
+        must still serve its operator socket (the degrade-honestly law), the
+        executor's own mint loop owns the retry, and without a token the
+        service-side supervisor composes plain and reconciles nothing it
+        cannot own.  The pairing CLI selects its server by the home's
+        runtime state and FALLS BACK TO THE LIVE APP for an unknown home —
+        no port flag exists — so the CLI runs only when the configured dev
+        server provably answers; a pairing code on the live app is never
+        acceptable, even unused."""
+        if not self._dev_server_ready():
+            _log("dev T3 server not answering on "
+                 f"{self.config.t3_proof_base}; pairing CLI withheld "
+                 "(it would fall back to the live app); the executor's "
+                 "mint loop retries and the service composes plain until "
+                 "a token exists")
+            return
+        from integrations.t3.live_proof import t3_live_proof as proof
+
+        try:
+            # Finding 8 (R4b review): the target is REQUIRED and pinned
+            # — the mint is refused unless the pinned home's own runtime
+            # state names the pinned dev port.
+            proof.obtain_mcp_access_token(
+                str(self.config.t3_token_path),
+                self.config.t3_token_label,
+                base_url=self.config.t3_proof_base,
+                home_dir=self.config.t3_home_dir)
+        except Exception as exc:  # noqa: BLE001 - dev server may be down
+            _log(f"worker token unavailable (dev T3 server down?): "
+                 f"{type(exc).__name__}: {exc}")
+
     async def start(self) -> None:
+        # The service's supervisor factory composes the REAL t3-native
+        # owner, which reads the token file eagerly — mint first (F15).
+        self._t3_env_backup = self._apply_t3_env()
+        await self._ensure_worker_token()
         source, base_sha = make_proof_source(self.root)
         cfg = ServiceConfig(
             runtime_root=self.root / "runtime",
@@ -448,7 +734,16 @@ class CodingJobDoor:
             child_request_material=dict(self.frozen),
         )
         self.service = ExecutiveControlService(
-            cfg, supervisor_factory=lambda runtime: DoorSupervisor(runtime),
+            cfg,
+            # F15 (R4b review) + attack F8: the service's startup
+            # reconciliation runs on the REAL composed t3-native supervisor
+            # (its own composition over the service runtime; the door
+            # executor composes a second instance over its own runtime —
+            # one owner, one writer per thread).
+            supervisor_factory=lambda runtime: self._compose_supervisor(
+                runtime,
+                port_factory=self._t3_port_factory(
+                    "t3/mmos-t4b-door-service")),
             autonomy_guard=(lambda: None),
             ceo_ingress_socket_path=self.root / "run" / "selected-child.sock",
             # The App and C1 lanes must carry distinct peer uids; the door
@@ -503,10 +798,18 @@ class CodingJobDoor:
     # --------------------------------------------------------------- intake
 
     def freeze_issue(self, issue_row: dict) -> str | None:
-        """Freeze one envelope for one task (registration, not admission)."""
+        """Freeze one envelope for one task (registration, not admission).
+
+        F10 (R4b review): only issues assigned to an ENROLLED teammate are
+        frozen — the door never holds an envelope for a task outside the
+        roster.  The structural insert rides the frozen lock (F6).
+        """
         issue_id = str(issue_row.get("id") or "")
         if not issue_id:
             return None
+        assignee = str(issue_row.get("assigneeAgentId") or "")
+        if assignee not in self.config.teammates:
+            return None  # not an enrolled teammate: never frozen
         request = build_task_request(
             issue_id=issue_id,
             agent_id=issue_row.get("assigneeAgentId") or "unknown-agent",
@@ -515,18 +818,19 @@ class CodingJobDoor:
             description=issue_row.get("description") or "",
             key=DEFAULT_JOB_KEY)
         command = task_command(request)
-        if command in self.frozen:
-            return None  # the digest is frozen at intake; edits never drift
-        self.frozen[command] = {
-            "issue": {"id": issue_id,
-                      "identifier": issue_row.get("identifier"),
-                      "title": issue_row.get("title"),
-                      "assigneeAgentId": issue_row.get("assigneeAgentId")},
-            "envelope": request.to_dict(),
-            "command": command,  # the entry's own id (a person reads it on a blocker)
-            "frozen_at": _now(),
-        }
-        self._save_frozen()
+        with self._frozen_lock:
+            if command in self.frozen:
+                return None  # the digest is frozen at intake; edits never drift
+            self.frozen[command] = {
+                "issue": {"id": issue_id,
+                          "identifier": issue_row.get("identifier"),
+                          "title": issue_row.get("title"),
+                          "assigneeAgentId": issue_row.get("assigneeAgentId")},
+                "envelope": request.to_dict(),
+                "command": command,  # the entry's own id (a person reads it on a blocker)
+                "frozen_at": _now(),
+            }
+            self._save_frozen()
         self._refreeze_binding()
         _log(f"frozen {issue_row.get('identifier')} -> {command[:24]}…")
         self._wake.set()
@@ -577,12 +881,27 @@ class CodingJobDoor:
                 "kind": "refused", "code": "invalid_input",
                 "message": "coding-job command is not frozen for any task"}}
         entry = self.frozen[command]
+        # F10 (R4b review): the FIRST admission of a command requires the
+        # task itself to show the request — the assignee is enrolled and
+        # its newest agent comment carries the job block for this entry's
+        # key.  A same-uid caller can then not admit a task that never
+        # asked for a job.  A recovery REPLAY (the request already durable,
+        # F3's crash window) skips the gate: it re-asks the same command,
+        # never a new authorization.
+        if not entry.get("admit_requested_at"):
+            gate_error = self._task_request_error(command, entry)
+            if gate_error is not None:
+                return {"ok": False, "error": {
+                    "kind": "refused", "code": gate_error[0],
+                    "message": gate_error[1]}}
         # F3 (attack review): the request (the carrier's ONE call) is durable
         # BEFORE the engine is asked, so a crash mid-call is recoverable.
         # Freezing at intake is REGISTRATION, never a request — the door
         # must not admit a task nobody asked for (the live default-journey
         # re-run caught exactly that inversion).
-        entry["admit_requested_at"] = _now()
+        entry["admit_requested_at"] = (
+            entry.get("admit_requested_at") or _now())
+        entry["admit_last_ask"] = _now()  # F12: ages the WAIT retry
         self._save_frozen()
         context = self._frame_context()
         frame = {
@@ -616,6 +935,98 @@ class CodingJobDoor:
             self._wake.set()
         return reply
 
+    # ------------------------------------------------- the F10 request gate
+
+    @staticmethod
+    def _comment_rows_oldest_first(rows) -> list[dict]:
+        """An issue's comments, oldest first (the carrier's own ordering:
+        Paperclip lists newest first; rows without timestamps keep their
+        arrival order)."""
+        if isinstance(rows, dict):
+            rows = (rows.get("comments") or rows.get("rows")
+                    or rows.get("items") or [])
+        rows = [row for row in rows if isinstance(row, dict)]
+        if rows and all(row.get("createdAt") for row in rows):
+            rows = sorted(rows, key=lambda row: str(row["createdAt"]))
+        return rows
+
+    def _task_request_error(self, command: str, entry: dict):
+        """F10 (R4b review): ``None`` when the TASK shows the request —
+        the live assignee is an enrolled teammate and its NEWEST agent
+        comment — authored by the assignee itself, ``authorAgentId`` bound
+        to the assignee (T4c repair R1) — carries the job block for this
+        entry's key (the carrier's own parser discipline: the fenced block
+        as the comment's own last word).  Otherwise a typed
+        ``(code, message)`` refusal; nothing is persisted, so a later
+        lawful admit is not burned."""
+        issue = entry.get("issue") or {}
+        issue_id = issue.get("id")
+        if not issue_id:
+            return ("invalid_input",
+                    "the frozen entry names no issue to show a request")
+        try:
+            live = self.paperclip.issue(issue_id)
+            rows = self.paperclip.comments(issue_id)
+        except Exception as exc:  # noqa: BLE001 - unreadable is a refusal
+            return ("TASK_STATE_UNREADABLE",
+                    f"the task's assignee/comments could not be read "
+                    f"({type(exc).__name__}); refusing to admit on a guess")
+        assignee = str(
+            (live or {}).get("assigneeAgentId")
+            or issue.get("assigneeAgentId") or "")
+        if assignee not in self.config.teammates:
+            return ("ASSIGNEE_NOT_ENROLLED",
+                    f"the task's assignee ({assignee or 'none'}) is not an "
+                    "enrolled teammate of this door")
+        agent_rows = [row for row in self._comment_rows_oldest_first(rows)
+                      if row.get("authorType") == "agent"]
+        if not agent_rows:
+            return ("TASK_REQUEST_MISSING",
+                    "no agent comment on the task carries the coding-job "
+                    "request block")
+        if not all(row.get("createdAt") for row in agent_rows):
+            # T4c attack F5 (step 5, 2026-11-11): with a timestamp-less
+            # agent row the "newest agent comment" degrades to arrival
+            # order — and the carrier lists newest first, so [-1] is the
+            # OLDEST agent comment: a stale request block could authorize
+            # admission.  An authorization gate refuses on degraded
+            # ordering evidence; it never admits on it.
+            return ("TASK_STATE_UNREADABLE",
+                    "an agent comment on the task carries no timestamp; "
+                    "the newest agent request cannot be established — "
+                    "refusing to admit on degraded ordering evidence")
+        # F5: order by the AGENT rows' own timestamps — a timestamp-less
+        # board row must not degrade this gate's ordering.
+        agent_rows = sorted(agent_rows,
+                            key=lambda row: str(row["createdAt"]))
+        newest = agent_rows[-1]
+        # T4c repair round 1, R1 (panel HIGH, 2026-11-11): the NEWEST agent
+        # comment is the task's current instruction state, and it must be
+        # the ASSIGNEE's own word — a block-bearing comment by any other
+        # agent (another roster teammate included) is not the assignee's
+        # request and must not authorize a run under the assignee's
+        # identity.  The gate never falls back to an OLDER assignee row
+        # when the newest agent word is foreign: that newer word is exactly
+        # the ambiguity an authorization gate refuses on (the F5 law).
+        if str(newest.get("authorAgentId") or "") != assignee:
+            return ("REQUEST_AUTHOR_NOT_ASSIGNEE",
+                    f"the newest agent comment on the task is authored by "
+                    f"{newest.get('authorAgentId') or 'an unnamed agent'}, "
+                    f"not the assignee ({assignee}); only the assignee's "
+                    "own newest agent word can request this run — refusing "
+                    "rather than acting on another agent's word")
+        # the carrier's parser (byte-pinned by its own tests): the LAST
+        # fenced paperclip-coding-job block, the comment's own last word
+        from tools.mmos_teammate.wake_carrier import parse_coding_job_block
+        block = parse_coding_job_block(newest.get("body") or "")
+        key = str((entry.get("envelope") or {}).get("logical_child_key")
+                  or DEFAULT_JOB_KEY)
+        if block is None or block.get("key") != key:
+            return ("TASK_REQUEST_MISSING",
+                    f"the assignee's newest agent comment does not request "
+                    f"a coding job for key {key}")
+        return None
+
     def job_state(self, command: str) -> dict:
         entry = self.frozen.get(command) or {}
         return {
@@ -625,15 +1036,29 @@ class CodingJobDoor:
             "attempt_id": entry.get("attempt_id"),
             "phase": entry.get("phase"),
             "delivery": entry.get("delivery"),
-            "native_launches": self._native_launch_count(),
+            "native_launches": self._native_launch_count(
+                entry.get("attempt_id")),
         }
 
-    def _native_launch_count(self) -> int:
-        if not self.launch_census.exists():
+    def _native_launch_count(self, attempt_id) -> int:
+        """L7 (wait-frees journey, 2026-11-11): count only THIS attempt's
+        tagged launches.  The census is one file per scratch; answering a
+        command's state with the whole-file count made two single-launch
+        tasks each report 2.  Untagged rows (the service-side ports) are
+        never this attempt's launch; an entry with no attempt yet has no
+        launch of its own."""
+        if not attempt_id or not self.launch_census.exists():
             return 0
-        rows = self.launch_census.read_text(encoding="utf-8").splitlines()
-        return sum(1 for line in rows if line.strip()
-                   and json.loads(line).get("tool") == "t3_thread_launch")
+        count = 0
+        for line in self.launch_census.read_text(
+                encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if (row.get("tool") == "t3_thread_launch"
+                    and row.get("attempt") == attempt_id):
+                count += 1
+        return count
 
     def _ensure_admitted(self, command: str, entry: dict) -> None:
         """F3 (attack review): a crash between the admission commit and the
@@ -655,7 +1080,8 @@ class CodingJobDoor:
             return  # healed: the orphaned admission is visible to the door
         outcome = entry.get("admit_outcome") or "UNKNOWN"
         if outcome == "WAIT":
-            return  # answered; the carrier retries on its next wake
+            return  # answered for now; F12 — this door itself re-asks the
+            # same command once the retry interval elapses
         code = outcome if outcome != "UNKNOWN" else "ADMISSION_REFUSED"
         reason = (f"the Executive refused re-admission of the frozen job "
                   f"({outcome})")
@@ -664,11 +1090,22 @@ class CodingJobDoor:
         self._save_frozen()
         self._surface_blocker(entry, code, reason[:200])
 
-    def _record_census(self, tool: str, arguments: dict) -> None:
-        with self.launch_census.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"t": _now(), "tool": tool,
-                                 "clientRequestId":
-                                     arguments.get("clientRequestId")}) + "\n")
+    def _record_census(self, tool: str, arguments: dict,
+                       attempt_id: str | None = None) -> None:
+        # F11: the census rides the owner-only run directory
+        self.launch_census.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.launch_census.parent, 0o700)
+        row = {"t": _now(), "tool": tool,
+               "clientRequestId": arguments.get("clientRequestId")}
+        if attempt_id:
+            # L7 (wait-frees journey, 2026-11-11): per-attempt attribution —
+            # the census is per-scratch, but a command's state must answer
+            # for THAT command's attempt
+            row["attempt"] = attempt_id
+        fd = os.open(self.launch_census,
+                     os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
 
     # ------------------------------------------------------------ executor
 
@@ -703,11 +1140,12 @@ class CodingJobDoor:
         """The canary's engine chain on the executor's own runtime instance
         (same scratch dir, same sqlite — the canary's one-writer-per-role
         discipline, here one dedicated thread; one job at a time)."""
-        self._t3_env_backup = self._apply_t3_env()
+        if getattr(self, "_t3_env_backup", None) is None:
+            self._t3_env_backup = self._apply_t3_env()
         from integrations.t3.live_proof import t3_live_proof as proof
 
         runtime = Runtime.at(self.root / "runtime", clock=lambda: int(
-            time.time() * 1000), lease_seconds=LEASE_SECONDS)
+            time.time() * 1000), lease_seconds=self.config.lease_seconds)
         self._register_worker(runtime)
         while not self._stopping.is_set():
             # The pairing CLI selects its server by the home's runtime state
@@ -724,18 +1162,42 @@ class CodingJobDoor:
                 continue
             try:
                 # Mint/verify the door's worker token file (never printed).
+                # start() mints it before the service; this loop only
+                # re-verifies (idempotent).  Finding 8 (R4b review): the
+                # target is REQUIRED and pinned — the mint is refused
+                # unless the pinned home's own runtime state names the
+                # pinned dev port, so the pairing CLI can never fall back
+                # to the live app (3773).
                 proof.obtain_mcp_access_token(
                     str(self.config.t3_token_path),
-                    self.config.t3_token_label)
+                    self.config.t3_token_label,
+                    base_url=self.config.t3_proof_base,
+                    home_dir=self.config.t3_home_dir)
                 break
             except Exception as exc:  # noqa: BLE001 - dev server may be down
                 _log(f"worker token unavailable (dev T3 server down?): "
                      f"{type(exc).__name__}: {exc}")
                 self._stopping.wait(timeout=10.0)
 
+        # F15 (R4b review) + attack F8: the EXECUTOR's recovery owner is
+        # the real composed supervisor over this thread's runtime.  It
+        # reconciles at start and on a cadence; the door never records a
+        # process or adopts a lease itself.
+        try:
+            self._supervisor = self._compose_supervisor(
+                runtime, port_factory=self._reconcile_only_port_factory)
+            self._reconcile(runtime)
+        except Exception as exc:  # noqa: BLE001 - honest lane failure
+            _log(f"supervisor composition/reconcile failed: "
+                 f"{type(exc).__name__}: {exc}")
+
         while not self._stopping.is_set():
             self._wake.wait(timeout=2.0)
             self._wake.clear()
+            if (self._supervisor is not None
+                    and time.monotonic() - self._last_reconcile
+                    >= self.config.reconcile_interval_seconds):
+                self._reconcile(runtime)
             for command, entry in list(self.frozen.items()):
                 action = self._entry_action(entry)
                 if action == "skip":
@@ -758,6 +1220,26 @@ class CodingJobDoor:
                 if action == "blocker":
                     # F6: execution is over (refused/failed/parked); only the
                     # blocker post may still be owed — never a re-execution.
+                    if entry.get("phase") == "launch-uncertain":
+                        # F13 (R4b review): an uncertain attempt HOLDS its
+                        # thread slot until the attempt row is reconciled
+                        # to a terminal state — only then does it return.
+                        self._close_launch_uncertainty(runtime, entry)
+                        if entry.get("uncertainty_closed"):
+                            continue  # reconciled; the slot already returned
+                        self._surface_blocker(entry, "LAUNCH_UNCERTAIN",
+                                              (entry.get("blocker")
+                                               or {}).get("reason", ""))
+                        continue  # the slot stays held
+                    if entry.get("phase") == "reconcile-quarantined":
+                        # F15: the ENGINE quarantined the recovery; the
+                        # receipt proved a live native execution, so the
+                        # slot HOLDS until an operator reconciles it.
+                        blocker = entry.get("blocker") or {}
+                        self._surface_blocker(
+                            entry, blocker.get("code") or "RECONCILE_QUARANTINED",
+                            blocker.get("reason") or "")
+                        continue  # the slot stays held
                     blocker = entry.get("blocker") or {}
                     self._surface_blocker(
                         entry, blocker.get("code") or "EXECUTOR_FAILED",
@@ -784,26 +1266,141 @@ class CodingJobDoor:
     # execution phases after which _execute must never run again: the
     # refusal/failure is the job's recorded result (F6, attack review)
     PARKED_PHASES = ("delivery-refused", "execute-failed", "launch-uncertain",
-                     "admission-refused")
+                     "admission-refused", "reconcile-quarantined")
+
+    def _wait_retry_due(self, entry: dict) -> bool:
+        """F12 (R4b review): True when a WAIT may be re-asked — the retry
+        interval elapsed since the last ask.  A timestamp that cannot be
+        aged honestly reads as due: the engine's command-id law makes the
+        re-ask of the same command safe (one admission, idempotent)."""
+        stamp = entry.get("admit_last_ask") or entry.get("admit_requested_at")
+        if type(stamp) is not str or not stamp:
+            return True
+        try:
+            asked = dt.datetime.fromisoformat(stamp)
+        except ValueError:
+            return True
+        if asked.tzinfo is None:
+            asked = asked.replace(tzinfo=dt.timezone.utc)
+        age = (dt.datetime.now(dt.timezone.utc) - asked).total_seconds()
+        return age >= self.config.wait_retry_seconds
+
+    def _reconcile_retry_due(self, entry: dict) -> bool:
+        """F15: True when a deferred recovery may drive reconcile again —
+        the same cadence as the executor's periodic reconcile.  An
+        unageable timestamp reads as due (reconcile is idempotent)."""
+        stamp = entry.get("reconcile_last_ask")
+        if type(stamp) is not str or not stamp:
+            return True
+        try:
+            asked = dt.datetime.fromisoformat(stamp)
+        except ValueError:
+            return True
+        if asked.tzinfo is None:
+            asked = asked.replace(tzinfo=dt.timezone.utc)
+        age = (dt.datetime.now(dt.timezone.utc) - asked).total_seconds()
+        return age >= self.config.reconcile_interval_seconds
+
+    def _reconcile(self, runtime, attempt_ids=None) -> list:
+        """F15 (R4b review) + attack F8: ONE recovery owner — the engine.
+
+        Drive the composed supervisor's ``reconcile_restart`` (at start and
+        on a cadence), then keep the recovered ActiveRuns for the executor
+        to finish through the door's delivery lane.  The door never records
+        a process or adopts a lease itself; a quarantine is surfaced as the
+        entry's typed blocker, a deferral is retried on the cadence."""
+        if self._supervisor is None:
+            return []
+        try:
+            outcomes = self._supervisor.reconcile_restart(
+                requeue_lost=False,
+                **({"attempt_ids": attempt_ids}
+                   if attempt_ids is not None else {}))
+            recovered = self._supervisor.take_recovered_runs()
+        except Exception as exc:  # noqa: BLE001 - honest lane failure
+            _log(f"reconcile failed: {type(exc).__name__}: {exc}")
+            return []
+        self._last_reconcile = time.monotonic()
+        for run in recovered:
+            attempt_id = run.lease.attempt.attempt_id
+            self._recovered[attempt_id] = run
+            # route the recovered lease to its frozen entry: the next
+            # executor pass seals from the ENGINE-adopted lease
+            for entry in self.frozen.values():
+                if entry.get("attempt_id") == attempt_id:
+                    entry["fence_generation"] = (
+                        run.lease.attempt.fence_generation)
+                    entry["lease_token"] = run.lease.lease_token
+                    entry["provider_session_id"] = (
+                        run.process_ref.provider_session_id)
+                    entry["phase"] = "reattached"
+                    # T4c attack F3: a re-adopted run is a NEW fact — the
+                    # parked blocker (run-timeout or an earlier deferral)
+                    # no longer stands, or the entry would strand at skip
+                    # on its surfaced-blocker record forever.
+                    entry.pop("blocker_surfaced", None)
+            self._wake.set()
+            self._save_frozen()
+        for outcome in outcomes:
+            status = getattr(outcome.status, "name", str(outcome.status))
+            if status != "AWAITING_LEASE_EXPIRY":  # routine deferral
+                _log(f"reconcile {outcome.attempt_id[:24]}… -> {status}"
+                     + (f" ({(outcome.error or '')[:140]})"
+                        if outcome.error else ""))
+        return outcomes
 
     def _entry_action(self, entry: dict) -> str:
         """One bounded routing decision per frozen entry per wake (F6).
 
         Registration is not a request: a frozen entry nobody's carrier call
-        named stays parked until its admit call arrives (and a WAIT or a
-        refusal was already answered — the carrier retries, not the door)."""
+        named stays parked until its admit call arrives.  A refusal was
+        answered (the carrier owns its retry); a WAIT is retried by THIS
+        door once the retry interval elapses (F12) — same command, so
+        still one admission."""
         phase = entry.get("phase")
         if phase == "delivered":
             return "skip"
+        if phase == "launch-uncertain" and not entry.get("uncertainty_closed"):
+            # F13: an uncertainty that has not closed keeps its wake — the
+            # blocker branch polls the attempt row and returns the held
+            # slot exactly when the row turns terminal
+            return "blocker"
+        if phase == "awaiting-lease-expiry":
+            # F15: the engine deferred adoption until the crashed claimant's
+            # lease expires; the periodic reconcile adopts when it finally
+            # can and the entry resumes from the recovered run — within the
+            # interval the deferral stands
+            return "execute" if self._reconcile_retry_due(entry) else "skip"
+        if phase == "engine-owned":
+            # F15: an engine recovery already owns this run (the service's
+            # startup reconcile or an earlier adoption); the door watches
+            # for the terminal row and finishes the delivery read
+            return "execute"
+        if phase == "run-timeout":
+            # T4c attack F3: the native run outlived the door's bounded
+            # wait and the entry parked with a typed blocker (the thread
+            # slot HOLDS — the attempt is still live engine-side).  The
+            # seal is retried when the reconcile cadence is due: the lease
+            # lapsed while parked, the engine adopts at expiry and the
+            # entry resumes from the recovered run — another bounded wait,
+            # never an unbounded poll.
+            return "execute" if self._reconcile_retry_due(entry) else "skip"
         if entry.get("blocker_surfaced"):
             # the blocker is the job's recorded result on the task; a
             # surfaced blocker is terminal for this executor
             return "skip"
+        if entry.get("uncertainty_closed"):
+            # F13: the uncertain attempt was reconciled; nothing more owed
+            return "skip"
         if not entry.get("job_id"):
             if not entry.get("admit_requested_at"):
                 return "skip"   # registered only; nobody asked for a job
+            if entry.get("admit_outcome") == "WAIT":
+                # F12: the door re-asks the SAME command when capacity may
+                # have freed; within the interval the answer stands
+                return "admit" if self._wait_retry_due(entry) else "skip"
             if entry.get("admit_outcome"):
-                return "skip"   # answered (WAIT/refusal); the carrier owns retry
+                return "skip"   # answered (refusal); the carrier owns retry
             return "admit"      # the crash window: outcome unknown
         if phase == "sealed":
             return "finish-sealed"
@@ -834,10 +1431,13 @@ class CodingJobDoor:
             if "already registered" not in str(exc):
                 raise
 
-    def _compose_adapter(self, request, branch: str, *, fresh: bool):
+    def _compose_adapter(self, request, branch: str, *, fresh: bool,
+                         attempt_id: str | None = None):
         """The canary's `_compose` per job: real transport + port with the
         job's own launch arguments, durable census wrapper, optional crash
-        hook on the fresh launch only."""
+        hook on the fresh launch only.  The census rows this port writes
+        carry the attempt it was composed for (L7: a command's state
+        counts only its own attempt's launches)."""
         from control_plane.t3_execution_adapter import SQLiteT3AdapterStateStore
         from control_plane.t3_native_composition import (
             T3McpHttpTransport,
@@ -856,7 +1456,7 @@ class CodingJobDoor:
                 self.config.t3_proof_base + "/mcp", token_value)
 
             def call_tool(tool: str, arguments: dict):
-                self._record_census(tool, arguments)
+                self._record_census(tool, arguments, attempt_id=attempt_id)
                 return transport.call_tool(tool, arguments)
 
             port = T3McpToolPort.from_access_token(
@@ -870,7 +1470,7 @@ class CodingJobDoor:
             store = CrashAfterReceiptStore(store, self.root / "run" / "crash")
         composition = compose_t3_native_adapter(
             Runtime.at(self.root / "runtime", clock=lambda: int(
-                time.time() * 1000), lease_seconds=LEASE_SECONDS),
+                time.time() * 1000), lease_seconds=self.config.lease_seconds),
             token_file=self.config.t3_token_path,
             port_factory=port_factory, state_store=store,
             inspector=_DoorInspector(),
@@ -878,8 +1478,8 @@ class CodingJobDoor:
         box["composition"] = composition
         return composition.adapter, box
 
-    def _wait_terminal(self, adapter, ref, *, deadline_s: float = 1800.0,
-                       interval_s: float = 15.0):
+    def _wait_terminal(self, adapter, ref, *, runtime=None, entry=None,
+                       deadline_s: float = 1800.0, interval_s: float = 15.0):
         from control_plane.worker_execution_contract import WorkerRunStatus
         terminal = frozenset({
             WorkerRunStatus.SUCCEEDED, WorkerRunStatus.FAILED,
@@ -891,6 +1491,13 @@ class CodingJobDoor:
             status = WorkerRunStatus.STARTING
             deadline = time.monotonic() + deadline_s
             while time.monotonic() < deadline:
+                # L5 (crash journey, 2026-11-11): a live owner extends its
+                # lease while its execution runs — a wait longer than the
+                # lease made complete_attempt refuse with the result in
+                # hand.  The renewal happens BEFORE each poll, so the lease
+                # never lapses while this door is honestly waiting.
+                if runtime is not None and entry is not None:
+                    self._heartbeat_lease(runtime, entry)
                 status = await adapter.status(ref)
                 if not statuses or statuses[-1] != status.value:
                     statuses.append(status.value)
@@ -900,6 +1507,32 @@ class CodingJobDoor:
             return statuses, status
 
         return asyncio.run(_run())
+
+    def _heartbeat_lease(self, runtime, entry) -> None:
+        """Extend the entry's lease through the runtime's typed seam.
+
+        The engine adopts a recovered attempt with a FRESH lease (the
+        canary's is short); this door then waits for the native run to
+        finish.  Renewing while the run is live keeps the seal's
+        ``complete_attempt`` on current credentials.  A refusal (the lease
+        already lapsed, or another owner fenced it) propagates: this door
+        no longer holds the attempt and must not seal it — the engine's
+        re-adoption owns the next attempt."""
+        attempt_id = entry.get("attempt_id")
+        fence = entry.get("fence_generation")
+        token = entry.get("lease_token")
+        if not attempt_id or fence is None or not token:
+            return
+        extend = max(int(self.config.lease_seconds or 0), 90)
+        try:
+            runtime.attempts.heartbeat_attempt(
+                attempt_id, fence_generation=fence, lease_token=token,
+                extend_seconds=extend)
+        except Exception as exc:
+            raise RuntimeError(
+                f"lease renewal for {attempt_id} was refused ({exc}); this "
+                "door no longer holds the attempt and must not seal it"
+            ) from exc
 
     def _execute(self, runtime, command, entry):
         request = ChildExecutionRequest.from_dict(dict(entry["envelope"]))
@@ -914,9 +1547,16 @@ class CodingJobDoor:
                 self._surface_blocker(entry, "THREAD_BUDGET_EXHAUSTED",
                                       "no T3 thread budget left for this job")
                 return
+            # F15 (R4b review): the placement Job names its workspace —
+            # restart reconciliation refuses (typed) to adopt an
+            # identity-less claim whose Job cannot name where it ran.
+            workspace = (self.root / "run" / "jobs"
+                         / f"job-{request.request_digest[:8]}-ws")
+            workspace.mkdir(parents=True, exist_ok=True)
+            os.chmod(workspace, 0o700)
             composed = compose_child_execution(
                 runtime, request=request, spec=self._spec(request),
-                branch=branch)
+                branch=branch, worktree=str(workspace))
             lease = runtime.attempts.claim_job(
                 composed.placement_job.job_id,
                 placement_observations=self._observations(),
@@ -931,10 +1571,22 @@ class CodingJobDoor:
             self._save_frozen()
             _log(f"claimed {attempt_id} on placement "
                  f"{composed.placement_job.job_id}; branch {branch}")
-            adapter, _box = self._compose_adapter(request, branch, fresh=True)
-            spec = self._launch_spec(run_id=attempt_id, job_id=job_id,
-                                     prompt=self._worker_prompt(attempt_id,
-                                                                branch))
+            adapter, _box = self._compose_adapter(
+                request, branch, fresh=True, attempt_id=attempt_id)
+            # The spec must name the job the attempt was CLAIMED on (the
+            # placement job), not the request job: the engine's
+            # receipt-adoption identity check compares spec.job_id against
+            # the attempt row's job, and a mismatch refuses the door's own
+            # durable receipt as a foreign execution (caught live by the
+            # lease-expiry journey, 2026-11-11).  L6 (same journey): the
+            # spec's paths are the placement Job's OWN — the workspace this
+            # lane just created and recorded on the Job via
+            # compose_child_execution, and the engine's canonical schema
+            # name — never an attempt-scoped path.
+            spec = self._launch_spec(
+                run_id=attempt_id, job_id=composed.placement_job.job_id,
+                prompt=self._worker_prompt(attempt_id, branch),
+                workspace=workspace)
             entry["spec"] = {
                 "run_id": spec.run_id, "job_id": spec.job_id,
                 "worker_id": spec.worker_id,
@@ -957,12 +1609,30 @@ class CodingJobDoor:
             self._save_frozen()
             _log(f"launched ONE native thread {ref.provider_session_id}")
         else:
-            # Recovery continuation.  The persisted adapter receipt proves
-            # the launch took effect: reattach with the retained ref — ZERO
-            # native calls — then record the provider-managed process (only
-            # if the identity is not already durable, F2) and adopt the
-            # lease under a new fence (the canary's MAIN-P2 path).
-            from control_plane.worker_execution_contract import WorkerRecoveryBinding
+            # F3 (R4b review): read the attempt's status FIRST.  A crash
+            # after complete_attempt committed but before phase="sealed"
+            # was saved leaves the entry "launched" over a TERMINAL
+            # attempt; adopting it raises StateConflict and misreported a
+            # succeeded job as EXECUTOR_FAILED.  A terminal attempt is
+            # finished as sealed — and the seam is re-driven inside
+            # _finish_sealed when its receipt event never landed (the
+            # receipt command id and the comment marker make that
+            # idempotent).
+            row = runtime.attempts.get_attempt(attempt_id)
+            row_status = getattr(row, "status", None) if row else None
+            row_status_value = (getattr(row_status, "value", str(row_status))
+                                if row_status is not None else "")
+            if row_status_value in TERMINAL_ATTEMPT_STATUSES:
+                entry["phase"] = "sealed"
+                self._save_frozen()
+                _log(f"attempt {attempt_id} is already terminal "
+                     f"({row_status_value}); finishing as sealed")
+                self._finish_sealed(runtime, entry)
+                return
+            # Recovery continuation.  The persisted adapter receipt decides
+            # the lane: no receipt at all falls to the launch windows (F1
+            # first launch / F13 uncertainty); a receipt hands the attempt
+            # to the ENGINE's reconcile (F15) — the door never adopts.
             from control_plane.t3_execution_adapter import (
                 SQLiteT3AdapterStateStore,
             )
@@ -975,6 +1645,9 @@ class CodingJobDoor:
                     # the launch was ATTEMPTED but left no durable receipt:
                     # whether the native thread started is unknowable here.
                     # Park the attempt honestly; never guess, never re-launch.
+                    # F13 (R4b review): the thread slot is NOT released —
+                    # the native thread may still be running; it returns
+                    # only when the attempt is reconciled terminal.
                     entry["phase"] = "launch-uncertain"
                     entry["blocker"] = {
                         "code": "LAUNCH_UNCERTAIN",
@@ -985,7 +1658,6 @@ class CodingJobDoor:
                                   "lease-expiry reconciliation, never "
                                   "re-launched from this door"}
                     self._save_frozen()
-                    self._release_thread(f"job:{job_id}")
                     self._surface_blocker(entry, "LAUNCH_UNCERTAIN",
                                           entry["blocker"]["reason"])
                     return
@@ -993,11 +1665,32 @@ class CodingJobDoor:
                 # claim's lease is still held by this door's persisted
                 # credentials, so START the claimed attempt now.  This is
                 # the attempt's first and only launch.
-                adapter, _box = self._compose_adapter(request, branch,
-                                                      fresh=False)
+                adapter, _box = self._compose_adapter(
+                    request, branch, fresh=False, attempt_id=attempt_id)
+                # Same law as the first claim: the engine's receipt-adoption
+                # check compares spec.job_id with the ATTEMPT row's job, so
+                # the relaunch names the attempt's own job (the frozen entry
+                # still carries the request job's id).  L6: the spec's
+                # workspace is the attempt's job's OWN durable worktree
+                # (read from the Job; the digest-named workspace only if
+                # the Job cannot be read), and the schema name is the
+                # engine's canonical one.
+                attempt_job_id = getattr(row, "job_id", None) or job_id
+                relaunch_workspace = None
+                try:
+                    attempt_job = runtime.jobs.get_job(attempt_job_id)
+                    relaunch_workspace = getattr(attempt_job, "worktree",
+                                                 None)
+                except Exception:  # noqa: BLE001 - typed fallback below
+                    relaunch_workspace = None
+                if not relaunch_workspace:
+                    relaunch_workspace = (
+                        self.root / "run" / "jobs"
+                        / f"job-{request.request_digest[:8]}-ws")
                 spec = self._launch_spec(
-                    run_id=attempt_id, job_id=job_id,
-                    prompt=self._worker_prompt(attempt_id, branch))
+                    run_id=attempt_id, job_id=attempt_job_id,
+                    prompt=self._worker_prompt(attempt_id, branch),
+                    workspace=relaunch_workspace)
                 launch_flag.write_text(_now(), encoding="utf-8")
                 _log(f"launch of {attempt_id} was never attempted; starting "
                      "the claimed attempt now (its first launch)")
@@ -1009,58 +1702,181 @@ class CodingJobDoor:
                 self._seal_and_deliver(runtime, entry, attempt_id, adapter,
                                        ref, branch)
                 return
-            adapter, _box = self._compose_adapter(request, branch, fresh=False)
-            ref = asyncio.run(adapter.reattach(
-                run.spec, WorkerRecoveryBinding.bind(
-                    adapter_id="t3-native", spec=run.spec,
-                    process_ref=run.original_ref,
-                    prompt_path=run.spec.run_dir / "input" / "prompt.txt")))
-            _log(f"reattached {attempt_id} -> {ref.provider_session_id} "
-                 "(zero native calls)")
-            # F2 (attack review): a crash AFTER record_process left the
-            # identity durable on the row; recording again is a hard
-            # StateConflict that would misreport a succeeded job.  Only the
-            # adoption is owed when the identity is already there.
-            row = runtime.attempts.get_attempt(attempt_id)
-            recorded_session = getattr(row, "provider_session_id", None)
-            if not recorded_session and not getattr(row, "pid", None):
-                runtime.attempts.record_process(
-                    attempt_id,
-                    fence_generation=entry["fence_generation"],
-                    lease_token=entry["lease_token"],
-                    provider_session_id=ref.provider_session_id,
-                    launch_metadata={})
-            elif (recorded_session is not None
-                    and recorded_session != ref.provider_session_id):
-                raise RuntimeError(
-                    f"attempt {attempt_id} holds provider identity "
-                    f"{recorded_session!r}, reattach read "
-                    f"{ref.provider_session_id!r}; refusing to rewrite")
-            adopted = runtime.attempts.adopt_attempt(
-                attempt_id,
-                expected_fence_generation=entry["fence_generation"],
-                lease_owner="t4b-door-recovery")
-            entry["fence_generation"] = adopted.attempt.fence_generation
-            entry["lease_token"] = adopted.lease_token
+            # F15 (R4b review) + attack F8: the ENGINE is the one recovery
+            # owner.  The door never reattaches, records or adopts itself;
+            # it drives the composed supervisor's reconcile_restart for
+            # THIS attempt and finishes from the recovered ActiveRun.
+            run = self._recovered.pop(attempt_id, None)
+            if run is None:
+                current = runtime.attempts.get_attempt(attempt_id)
+                if (getattr(current, "provider_session_id", None)
+                        or "worker_recovery_binding" in (
+                            getattr(current, "launch_metadata", None) or {})):
+                    # an engine recovery already owns this run (the
+                    # service's startup reconcile adopted it, or an earlier
+                    # executor pass did): the door watches for the terminal
+                    # row and finishes only the delivery read — re-driving
+                    # reconcile here could fence that live finisher's lease
+                    if entry.get("phase") != "engine-owned":
+                        entry["phase"] = "engine-owned"
+                        self._save_frozen()
+                        _log(f"attempt {attempt_id} is owned by an engine "
+                             "recovery; watching for the terminal row")
+                    else:
+                        entry["reconcile_last_ask"] = _now()
+                        self._save_frozen()
+                    return
+                outcomes = self._reconcile(
+                    runtime, frozenset({attempt_id}))
+                run = self._recovered.pop(attempt_id, None)
+            if run is None:
+                outcome = next(
+                    (o for o in outcomes
+                     if getattr(o, "attempt_id", None) == attempt_id), None)
+                status = (getattr(getattr(outcome, "status", None),
+                                  "name", "") if outcome is not None else "")
+                if outcome is None:
+                    # reconcile never reported this attempt (composition
+                    # unavailable or a transient failure): retry on the
+                    # cadence with the entry's wake intact
+                    entry["reconcile_last_ask"] = _now()
+                    self._save_frozen()
+                    return
+                if status == "AWAITING_LEASE_EXPIRY":
+                    # the crashed claimant's lease is still live: the
+                    # engine's own proof discipline defers adoption; the
+                    # periodic reconcile adopts at expiry and routes the
+                    # recovered run back to this entry
+                    if entry.get("phase") != "awaiting-lease-expiry":
+                        entry["phase"] = "awaiting-lease-expiry"
+                        _log(f"engine deferred {attempt_id} to lease expiry "
+                             "(a live launcher may still record)")
+                    entry["reconcile_last_ask"] = _now()
+                    self._save_frozen()
+                    return
+                if status in ("RECEIPT_RECOVERED", "LIVE_RECOVERED",
+                              "TERMINAL_RECOVERED", "ALREADY_RECOVERED"):
+                    # recovered but the ActiveRun is not in hand (a second
+                    # consumer or a fresh process): the row now carries the
+                    # identity, so the engine-owned watch below takes over
+                    entry["phase"] = "engine-owned"
+                    entry["reconcile_last_ask"] = _now()
+                    self._save_frozen()
+                    return
+                # a typed engine quarantine: the execution is preserved and
+                # the blocker is the job's honest result (the slot holds —
+                # the receipt proved a live native execution)
+                entry["phase"] = "reconcile-quarantined"
+                entry["blocker"] = {
+                    "code": f"RECONCILE_{status}" if status
+                            else "RECONCILE_REFUSED",
+                    "reason": ((outcome.error or status or
+                                "restart reconciliation refused this attempt")
+                               [:400])}
+                entry["reconcile_last_ask"] = _now()
+                self._save_frozen()
+                _log(f"engine quarantined {attempt_id}: {status}")
+                self._surface_blocker(entry, entry["blocker"]["code"],
+                                      entry["blocker"]["reason"])
+                return
+            # the engine adopted the SAME attempt under its receipt: seal
+            # from the ENGINE's lease and the engine-reattached ref.
+            entry["fence_generation"] = run.lease.attempt.fence_generation
+            entry["lease_token"] = run.lease.lease_token
+            entry["provider_session_id"] = run.process_ref.provider_session_id
             entry["phase"] = "reattached"
             self._save_frozen()
-            _log(f"adopted {attempt_id} under fence "
-                 f"{adopted.attempt.fence_generation}")
+            _log(f"engine recovered {attempt_id} under fence "
+                 f"{run.lease.attempt.fence_generation} "
+                 f"({run.process_ref.provider_session_id})")
+            adapter, _box = self._compose_adapter(
+                request, branch, fresh=False, attempt_id=attempt_id)
+            # L4 (crash journey, 2026-11-11): the recovered ActiveRun carries
+            # the supervisor-boundary TWIN ref (the runtime's provider-managed
+            # recording shape: pid/pgid/process_start_identity/boot_session_id
+            # all None), while this door's adapter is the reviewed INNER
+            # adapter whose status()/collect_result() take the DURABLE
+            # NEUTRAL ref (pid=0/pgid=0).  Sealing on the twin was refused by
+            # the adapter's retained-ref check ("ref does not match the
+            # retained original ref") and the entry froze at execute-failed
+            # while reconcile spun ALREADY_RECOVERED forever.  The seal runs
+            # on the adapter's OWN durable ref, read through its fail-closed
+            # accessor — never translated, never guessed.
+            retained_source = getattr(adapter, "retained_original_ref", None)
+            seal_ref = (retained_source(attempt_id)
+                        if callable(retained_source) else None)
+            if seal_ref is None:
+                entry["phase"] = "reconcile-quarantined"
+                entry["blocker"] = {
+                    "code": "RECOVERED_REF_UNREADABLE",
+                    "reason": "the engine recovered this attempt but the "
+                              "adapter's durable original ref is not "
+                              "readable; refusing to seal on a translated "
+                              "or guessed ref"}
+                entry["reconcile_last_ask"] = _now()
+                self._save_frozen()
+                _log(f"recovered run {attempt_id} has no durable neutral "
+                     "ref; parked without sealing")
+                self._surface_blocker(entry, entry["blocker"]["code"],
+                                      entry["blocker"]["reason"])
+                return
+            self._seal_and_deliver(runtime, entry, attempt_id, adapter,
+                                   seal_ref, branch)
+            return
 
         self._seal_and_deliver(runtime, entry, attempt_id, adapter, ref,
                                branch)
 
     def _seal_and_deliver(self, runtime, entry, attempt_id, adapter, ref,
                           branch) -> None:
-        """The shared tail: wait terminal, collect, seal through the
-        execution-return seam, then read the delivery receipt honestly."""
-        statuses, final = self._wait_terminal(adapter, ref)
+        """The shared tail: wait terminal (bounded — F3), collect, seal
+        through the execution-return seam (the native verdict governs the
+        seal — F2), then read the delivery receipt honestly."""
+        from control_plane.worker_execution_contract import WorkerRunStatus
+        statuses, final = self._wait_terminal(
+            adapter, ref, runtime=runtime, entry=entry,
+            deadline_s=self.config.wait_deadline_seconds,
+            interval_s=self.config.poll_interval_seconds)
         _log(f"attempt {attempt_id} terminal: {final.value} "
              f"({statuses})")
+        final_value = str(getattr(final, "value", final))
+        terminal_values = frozenset({
+            WorkerRunStatus.SUCCEEDED.value, WorkerRunStatus.FAILED.value,
+            WorkerRunStatus.INVALID_RESULT.value,
+            WorkerRunStatus.CANCELLED.value,
+            WorkerRunStatus.TIMED_OUT.value})
+        if final_value not in terminal_values:
+            # T4c attack F3 (step 5, 2026-11-11): the deadline expired with
+            # the run still non-terminal.  _wait_terminal RETURNS here (it
+            # does not raise), and collect_result would then poll live
+            # status FOREVER (L8b) — one orphaned native thread blocked the
+            # single executor thread indefinitely: no cadence reconcile,
+            # no other entry served, no typed blocker, the door's own lease
+            # lapsing mid-poll.  The entry parks with a typed blocker and
+            # HOLDS its thread slot (the attempt is still live engine-side
+            # — F13's law); the seal is retried on the reconcile cadence,
+            # each round another bounded wait.
+            reason = (f"the native run did not reach a terminal state "
+                      f"within {self.config.wait_deadline_seconds:.0f}s "
+                      f"(last: {final.value}); the attempt stays live "
+                      f"engine-side and the seal is retried on the "
+                      f"reconcile cadence")
+            entry["phase"] = "run-timeout"
+            entry["blocker"] = {"code": "NATIVE_RUN_TIMEOUT",
+                                "reason": reason[:200]}
+            entry["reconcile_last_ask"] = _now()
+            self._save_frozen()
+            self._surface_blocker(entry, "NATIVE_RUN_TIMEOUT", reason[:200])
+            return
 
         collected = asyncio.run(adapter.collect_result(ref))
         output = dict(collected.result.structured_output or {})
-        summary = str(output.get("text", ""))[:8000]
+        # L10 (lease-expiry journey round 9, 2026-11-11): the adapter now
+        # presents the engine's closed COMPLETED envelope on a SUCCEEDED
+        # run, so the worker's final text rides ``summary``; failure
+        # verdicts keep the natural read (``text`` is the worker's own
+        # failure report the F2 seal quotes).
+        summary = str(output.get("summary") or output.get("text") or "")[:8000]
         artifacts = list(output.get("artifacts") or []) or [
             f"branch:{branch}", f"thread:{ref.provider_session_id}"]
 
@@ -1082,10 +1898,42 @@ class CodingJobDoor:
                 repository=self.config.repository, port=GhCliEvidencePort()),
             t3_adapter=adapter)
 
-        sealed = runtime.attempts.complete_attempt(
-            attempt_id, fence_generation=entry["fence_generation"],
-            lease_token=entry["lease_token"],
-            payload={"summary": summary, "artifacts": artifacts})
+        # L5 (crash journey, 2026-11-11): the collect/seam tail can outlast
+        # the lease too — renew once more so the seal commits on current
+        # credentials (same typed seam, same refusal law as the wait loop).
+        self._heartbeat_lease(runtime, entry)
+        if final_value == WorkerRunStatus.SUCCEEDED.value:
+            sealed = runtime.attempts.complete_attempt(
+                attempt_id, fence_generation=entry["fence_generation"],
+                lease_token=entry["lease_token"],
+                payload={"summary": summary, "artifacts": artifacts})
+        else:
+            # T4c attack F2 (step 5, 2026-11-11): the native verdict
+            # governs the seal.  complete_attempt unconditionally seals
+            # COMPLETED, so a FAILED/CANCELLED/TIMED_OUT run that still
+            # carried a terminal result ref (the worker's failure text)
+            # was delivered as a completed job's Result.  The engine's own
+            # finisher branches on the verdict (_terminalize); the door's
+            # lane must agree.  fail_attempt drives the same status-aware
+            # seam, so the failure text still delivers — under an honest
+            # FAILED seal, named for the native verdict.
+            sealed = runtime.attempts.fail_attempt(
+                attempt_id, fence_generation=entry["fence_generation"],
+                lease_token=entry["lease_token"],
+                payload={"summary":
+                         f"native run ended {final_value}"
+                         + (f": {summary}" if summary else ""),
+                         "artifacts": artifacts})
+        if self.config.crash_mode == "after_seal":
+            # the second deterministic window (T4c): the seal is COMMITTED
+            # in the engine, the frozen entry still says "launched" — a
+            # FRESH door must finish it as sealed with the result comment
+            # EXACTLY once (F3's terminal-row check + the seam's single
+            # re-drive).  Same marker discipline as the after_receipt hook.
+            (self.root / "run" / "crash").write_text(json.dumps(
+                {"crashed": _now(), "window": "after_seal",
+                 "attempt_id": attempt_id}), encoding="utf-8")
+            os._exit(91)  # noqa: PLW0160 - the deterministic crash point
         entry["phase"] = "sealed"
         entry["final_status"] = getattr(sealed.status, "value",
                                         str(sealed.status))
@@ -1095,7 +1943,12 @@ class CodingJobDoor:
     def _finish_sealed(self, runtime, entry) -> None:
         """Read the seam's delivery receipt and finish the entry (F6): the
         seam fired inside complete_attempt, so this is bookkeeping only —
-        callable again after a crash between the seal and this read."""
+        callable again after a crash between the seal and this read.
+
+        F3 (R4b review): when the receipt event is MISSING (a crash inside
+        the post-commit window), the seam is re-driven ONCE from the
+        terminal rows — the receipt command id (events UNIQUE) and the
+        comment marker make a second drive impossible to double-post."""
         attempt_id = entry.get("attempt_id")
         job_role = (f"job:{entry.get('job_id')}"
                     if entry.get("job_id") else None)
@@ -1104,6 +1957,13 @@ class CodingJobDoor:
                 command_id_prefix=execution_return_receipt_command_id(
                     attempt_id))
             if e.attempt_id == attempt_id]
+        if not events:
+            self._redrive_return_seam(runtime, entry)
+            events = [
+                e for e in runtime.store.list_events(
+                    command_id_prefix=execution_return_receipt_command_id(
+                        attempt_id))
+                if e.attempt_id == attempt_id]
         receipt = dict(events[0].payload) if events else {}
         delivery = dict(receipt.get("delivery") or {})
         entry["delivery"] = {
@@ -1116,9 +1976,11 @@ class CodingJobDoor:
         else:
             entry["phase"] = "delivery-refused"
             entry["blocker"] = {
-                "code": delivery.get("refusal_code") or "DELIVERY_REFUSED",
+                "code": delivery.get("refusal_code")
+                or ("DELIVERY_RECEIPT_MISSING" if not events
+                    else "DELIVERY_REFUSED"),
                 "reason": f"return could not be delivered "
-                          f"({delivery.get('refusal_code') or delivery.get('state')})"}
+                          f"({delivery.get('refusal_code') or delivery.get('state') or 'no receipt'})"}
             self._surface_blocker(entry, entry["blocker"]["code"],
                                   entry["blocker"]["reason"])
         self._save_frozen()
@@ -1126,6 +1988,105 @@ class CodingJobDoor:
             self._release_thread(job_role)
         _log(f"sealed {attempt_id}: delivery "
              f"{entry['delivery'].get('state')}")
+        self._retire_admission_job(runtime, entry)
+
+    def _retire_admission_job(self, runtime, entry) -> None:
+        """L2 (wait-frees journey, 2026-11-11): the admission-ledger Job is
+        a record of WHO ASKED (``compose_child_execution``'s own docstring)
+        and the runtime's ready count is ``QUEUED, never claimed`` — nothing
+        took a finished request's admission Job out of that queue, so fleet
+        capacity never freed and the next task WAITed forever.  The
+        placement is terminal here; the admission Job leaves the queue
+        through the runtime's own typed cancel seam.  Idempotent: a Job
+        already out of QUEUED (a replayed finish path) is left alone."""
+        job_id = entry.get("job_id")
+        if not job_id:
+            return
+        try:
+            job = runtime.jobs.get_job(job_id)
+        except Exception:  # noqa: BLE001 - a missing runtime store ends this
+            return
+        if job is None or getattr(job, "current_attempt_id", None):
+            return
+        status = getattr(getattr(job, "status", None), "value", "")
+        if status != "QUEUED":
+            return
+        from control_plane.executive_runtime import StateConflict
+        try:
+            runtime.jobs.cancel_job(job_id)
+        except StateConflict:
+            # a concurrent finisher may have moved it first; verify the
+            # queue actually emptied before treating this as an error
+            fresh = runtime.jobs.get_job(job_id)
+            fresh_status = (getattr(getattr(fresh, "status", None), "value", "")
+                            if fresh is not None else "")
+            if fresh_status == "QUEUED":
+                raise
+            return
+        _log(f"admission job {job_id} left the ready queue "
+             "(its placement is terminal)")
+
+    def _redrive_return_seam(self, runtime, entry) -> None:
+        """F3 (R4b review): re-install the execution-return seam with THIS
+        job's transport and deliver once from the terminal rows.  Never
+        raises; a seam that can do nothing honest records its own typed
+        refusal receipt (or nothing, which _finish_sealed reports as
+        DELIVERY_RECEIPT_MISSING — never as success)."""
+        attempt_id = entry.get("attempt_id")
+        if not attempt_id:
+            return
+        row = runtime.attempts.get_attempt(attempt_id)
+        job = (runtime.jobs.get_job(row.job_id)
+               if row is not None and row.job_id else None)
+        if job is None:
+            return
+        _log(f"no delivery receipt for {attempt_id}; re-driving the seam "
+             "once from the terminal rows")
+        request = ChildExecutionRequest.from_dict(dict(entry["envelope"]))
+        branch = f"t3/mmos-t4b-job-{request.request_digest[:8]}"
+        adapter, _box = self._compose_adapter(
+            request, branch, fresh=False, attempt_id=attempt_id)
+        registry = ResultDeliveryRegistry()
+        if self.config.register_transport:
+            from control_plane.paperclip_result_delivery import (
+                PaperclipResultDeliveryTransport,
+            )
+            registry.register(CARRIER_KIND, PaperclipResultDeliveryTransport(
+                base_url=self.config.paperclip_base,
+                headers=self.config.paperclip_headers,
+                state_dir=self.root / "run" / "delivery"))
+        wiring = install_execution_return_seam(
+            runtime, registry=registry,
+            github=GitHubEvidenceSource(
+                repository=self.config.repository, port=GhCliEvidencePort()),
+            t3_adapter=adapter)
+        try:
+            wiring.deliver(job=job, status=row.status)
+        except Exception as exc:  # noqa: BLE001 - the seal is already durable
+            _log(f"return-seam re-drive failed for {attempt_id}: "
+                 f"{type(exc).__name__}: {exc}")
+
+    def _close_launch_uncertainty(self, runtime, entry) -> None:
+        """F13 (R4b review): a launch-uncertain attempt holds its thread
+        slot until the attempt is reconciled.  The engine's recovery path
+        owns that transition; the slot returns exactly when the attempt
+        row reaches a terminal status (and only once)."""
+        if entry.get("uncertainty_closed"):
+            return
+        attempt_id = entry.get("attempt_id")
+        row = runtime.attempts.get_attempt(attempt_id) if attempt_id else None
+        status = getattr(row, "status", None) if row is not None else None
+        value = getattr(status, "value", str(status)) if status else ""
+        if value not in TERMINAL_ATTEMPT_STATUSES:
+            return  # still live or unknown: the slot stays held
+        job_role = (f"job:{entry.get('job_id')}"
+                    if entry.get("job_id") else None)
+        entry["uncertainty_closed"] = _now()
+        self._save_frozen()
+        if job_role:
+            self._release_thread(job_role)
+        _log(f"launch-uncertain attempt {attempt_id} reconciled terminal "
+             f"({value}); its thread slot returned")
 
     # ------------------------------------------- engine shapes (canary's)
 
@@ -1168,17 +2129,37 @@ class CodingJobDoor:
             "preferred_host": HOST_ID,
         }
 
-    def _launch_spec(self, *, run_id: str, job_id: str, prompt: str):
+    def _launch_spec(self, *, run_id: str, job_id: str, prompt: str,
+                     workspace):
         from control_plane.worker_execution_contract import WorkerLaunchSpec
         run_dir = self.root / "run" / "jobs" / run_id
         (run_dir / "input").mkdir(parents=True, exist_ok=True)
+        # F11: the run tree is owner-only
+        os.chmod(self.root / "run" / "jobs", 0o700)
+        os.chmod(run_dir, 0o700)
+        os.chmod(run_dir / "input", 0o700)
         (run_dir / "input" / "prompt.txt").write_text(prompt, encoding="utf-8")
         os.chmod(run_dir / "input" / "prompt.txt", 0o600)
+        # F15 (R4b review): the engine's receipt-recovery path re-verifies
+        # the prompt bytes at this exact name when it rebuilds the recovery
+        # binding for an identity-less claim (supervisor law), so the
+        # canonical copy rides the engine's name too — same bytes.
+        (run_dir / "input" / "worker-prompt.txt").write_text(
+            prompt, encoding="utf-8")
+        os.chmod(run_dir / "input" / "worker-prompt.txt", 0o600)
+        # L6 (lease-expiry journey, 2026-11-11): the bound-path recovery
+        # check compares the spec's paths against the placement Job's OWN
+        # durable record — workspace_path == job.worktree and
+        # result_schema_path == the engine's canonical name — so the spec
+        # names the JOB's workspace (passed in by the caller that knows it)
+        # and the engine's schema name, never an attempt-scoped guess.
         return WorkerLaunchSpec(
             run_id=run_id, job_id=job_id, worker_id=WORKER_ID,
-            workspace_path=self.root / "run" / "jobs" / f"{run_id}-ws",
+            authorities=("READ",),
+            workspace_path=Path(workspace),
             run_dir=run_dir, prompt=prompt,
-            result_schema_path=run_dir / "input" / "schema.json",
+            result_schema_path=(run_dir / "input"
+                                / "worker-result.schema.json"),
             model=self.config.t3_model_selection)
 
     def _worker_prompt(self, attempt_id: str, branch: str) -> str:
@@ -1214,7 +2195,11 @@ class CodingJobDoor:
             return
         if entry.get("blocker_surfaced") == code:
             return  # already on the task; the executor's retry must not spam
-        body = (f"[t4b-door] coding job blocked — {code}\n\n{reason}\n\n"
+        # F4 (R4b review): every comment the door writes starts with the
+        # line `[coding-job]` — the carrier (lane CQ) filters that prefix
+        # from board notes, board feedback and answers, so door words can
+        # never reach a teammate as the board's.
+        body = (f"[coding-job] coding job blocked — {code}\n\n{reason}\n\n"
                 f"frozen command: `{(entry.get('command') or '')[:80]}`\n"
                 f"at {_now()}")
         try:
