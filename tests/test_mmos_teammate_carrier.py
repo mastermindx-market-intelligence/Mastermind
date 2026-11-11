@@ -2041,3 +2041,77 @@ def test_children_pages_past_the_first_page():
     assert len(rows) == 2500
     assert len(calls) == 3                      # 1000 + 1000 + 500
     assert "offset=1000" in calls[1] and "offset=2000" in calls[2]
+
+
+# --- R2a finding 6: no blind retries of creates; lost answers read back -------
+
+def test_http_retries_skip_posts(monkeypatch):
+    # Only GET/PUT/PATCH are retried. A POST (a create) fails fast: retrying
+    # it blind is how duplicate children and duplicate interactions happen.
+    import urllib.error
+    calls = []
+    monkeypatch.setattr(wc.time, "sleep", lambda s: None)
+
+    def flaky(req, timeout=None):
+        calls.append(req.get_method())
+        raise urllib.error.HTTPError(req.full_url, 503, "unavailable",
+                                     hdrs=None, fp=None)
+    monkeypatch.setattr(wc.urllib.request, "urlopen", flaky)
+    pc = wc.PaperclipClient("http://127.0.0.1:1", "tok", "run-1")
+    with pytest.raises(wc.CarrierError):
+        pc._request("GET", "/api/x")
+    assert calls.count("GET") == 3          # read retried
+    calls.clear()
+    with pytest.raises(wc.CarrierError):
+        pc._request("POST", "/api/x", body={})
+    assert calls.count("POST") == 1         # create fails fast
+
+
+def test_failed_ask_create_reads_children_back_before_failing():
+    # The child-issue POST executed on the server but its answer was lost.
+    # The carrier reads the children back for its marker and finishes the
+    # ask cleanly instead of failing the run.
+    roster = {"Atlas-TEST": "ag-atlas"}
+    pc = FakePaperclip(issues=one_issue())
+    real_create = pc.create_issue
+    armed = {"lost": False}
+
+    def create_lost_answer(company_id, payload):
+        row = real_create(company_id, payload)   # the server did execute
+        if not armed["lost"]:
+            armed["lost"] = True
+            raise wc.CarrierError(
+                "POST /api/companies/co-1/issues -> HTTP 503 lost")
+        return row
+    pc.create_issue = create_lost_answer
+    t3 = FakeT3(replies=[ASK_REPLY])
+    assert run_with_roster(pc, t3, roster) == 0
+    assert pc.issues["is-1"]["status"] == "blocked"   # the ask was placed
+    assert len([c for c in pc.calls if c[0] == "create_issue"]) == 1
+
+
+def test_confirmation_409_for_this_op_is_success():
+    # Another run posted this op's confirmation between our read and our
+    # POST. The 409 reads back as "already exists for THIS op": delivery
+    # continues; the issue is not released.
+    content = "Summarize file X\nWrite a three-line summary."
+    op = wc.op_id("is-1", content)
+    pc = FakePaperclip(issues={"is-1": {"identifier": "MMO-1",
+                                        "status": "in_progress",
+                                        "title": "Summarize file X",
+                                        "description": "Write a three-line summary."}})
+    pc.interaction_rows = [{"id": "ix-1", "kind": "request_confirmation",
+                            "status": "pending",
+                            "idempotencyKey": f"{op}-confirm"}]
+    reads = []
+
+    def blind_once(issue_id):
+        reads.append(1)
+        if len(reads) == 1:
+            return []                      # deliver's pre-check saw nothing
+        return [dict(r) for r in pc.interaction_rows]
+    pc.interactions = blind_once
+    wc.deliver(pc, pc.issue("is-1"), "the answer", op)
+    assert pc.issues["is-1"]["status"] == "in_review"   # delivered, not failed
+    assert not any("did not complete" in (c[2] if c[0] == "comment" else "")
+                   for c in pc.calls)

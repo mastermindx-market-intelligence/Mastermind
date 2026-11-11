@@ -592,6 +592,10 @@ class PaperclipClient:
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["content-type"] = "application/json"
+        # R2a finding 6: only reads and keyed upserts are retried. A POST
+        # (a create) fails fast — a blind retry is how duplicate children and
+        # duplicate interactions happen; the callers read back instead.
+        retryable = method in ("GET", "PUT", "PATCH")
         last = None
         for attempt in range(3):
             req = urllib.request.Request(url, data=data, method=method, headers=headers)
@@ -600,7 +604,7 @@ class PaperclipClient:
                     raw = resp.read()
                     return json.loads(raw) if raw else {}
             except urllib.error.HTTPError as exc:
-                if exc.code in RETRYABLE_HTTP and attempt < 2:
+                if retryable and exc.code in RETRYABLE_HTTP and attempt < 2:
                     last = exc.code
                     time.sleep(1.5 * (attempt + 1))
                     continue
@@ -611,7 +615,7 @@ class PaperclipClient:
                     pass
                 raise CarrierError(f"{method} {path} -> HTTP {exc.code} {detail}") from None
             except urllib.error.URLError as exc:
-                if attempt < 2:
+                if retryable and attempt < 2:
                     last = str(exc.reason)
                     time.sleep(1.5 * (attempt + 1))
                     continue
@@ -1102,12 +1106,23 @@ def deliver(pc, issue, reply, op, crash_after=None, ask_child=False):
         final = "done"
     else:
         if not confirmation_already_present(pc, issue["id"], op):
-            pc.request_confirmation(
-                issue["id"], f"{op}-confirm",
-                "The teammate answered in its T3 thread and the answer is posted as a "
-                "comment. Accept completes this issue; reject with a reason sends it "
-                "back for one revision round.",
-                target={"type": "custom", "key": "native_completion_review"})
+            try:
+                pc.request_confirmation(
+                    issue["id"], f"{op}-confirm",
+                    "The teammate answered in its T3 thread and the answer is posted as a "
+                    "comment. Accept completes this issue; reject with a reason sends it "
+                    "back for one revision round.",
+                    target={"type": "custom", "key": "native_completion_review"})
+            except CarrierError as exc:
+                # R2a finding 6: a 409 means the key exists — this build does
+                # not dedupe a re-POST. When the read-back finds THIS op's
+                # key, the confirmation is already placed: success, not a
+                # failure. Any other 409, or a key that is still absent,
+                # fails the run as before.
+                if "HTTP 409" not in str(exc) or \
+                        not confirmation_already_present(pc, issue["id"], op):
+                    raise
+                log(f"{op}-confirm answered 409 but already exists; continuing")
         final = "in_review"
     doc = parse_output_block(reply)
     if doc:
@@ -1259,15 +1274,29 @@ def handle_ask(pc, issue, reply, ask, op, opts):
         # `[pc-…` text it wrote can ride into the child description.
         title = strip_markers(ask["title"]) or ask["title"]
         description = strip_markers(ask["description"])
-        child = pc.create_issue(company_id, {
-            "title": title,
-            "description": (f"{description}\n\n"
-                            f"Asked by {me.get('name', 'a teammate')} on "
-                            f"{issue.get('identifier')}\n[{ask_op}]"),
-            "assigneeAgentId": agent_id,
-            "parentId": issue["id"],
-            "status": "todo",
-        })
+        try:
+            child = pc.create_issue(company_id, {
+                "title": title,
+                "description": (f"{description}\n\n"
+                                f"Asked by {me.get('name', 'a teammate')} on "
+                                f"{issue.get('identifier')}\n[{ask_op}]"),
+                "assigneeAgentId": agent_id,
+                "parentId": issue["id"],
+                "status": "todo",
+            })
+        except CarrierError as exc:
+            # R2a finding 6: the create is never retried, but its answer can
+            # be lost while the server executed it — read the children back
+            # for this marker before failing the run (the next wake's reuse
+            # scan would find it too; this run can then finish cleanly).
+            for row in pc.children(issue["id"]):
+                if is_ask_child_of(row, issue):
+                    log(f"ask create failed ({exc}) but child "
+                        f"{row.get('identifier')} exists; continuing")
+                    child = row
+                    break
+            if child is None:
+                raise
         log(f"child issue created for {ask['assignee']}: "
             f"{child.get('identifier')} under {issue.get('identifier')}")
     else:
