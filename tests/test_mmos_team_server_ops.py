@@ -115,10 +115,19 @@ class Harness:
         (self.bindir / "sleep").write_text(FIX.joinpath("fake_sleep").read_text())
         os.chmod(self.bindir / "sleep", 0o755)
         launchctl = self.bindir / "launchctl"
+        # --state baked into argv: the tool env -i's its load/unload
+        # fallbacks (round 3 FU1), which strips FAKE_LAUNCHCTL_STATE from
+        # the environment — argv survives env -i.
         launchctl.write_text(
             "#!/bin/sh\n"
-            f"exec {PY} {FIX / 'fake_launchctl.py'} \"$@\"\n")
+            f"exec {PY} {FIX / 'fake_launchctl.py'} "
+            f"--state {str(self.state)!r} \"$@\"\n")
         os.chmod(launchctl, 0o755)
+        # Item F: the provider CLI the way the real machine has it — `claude`
+        # nameable on PATH. install records this binary's folder.
+        claude = self.bindir / "claude"
+        claude.write_text(FIX.joinpath("fake_claude").read_text())
+        os.chmod(claude, 0o755)
 
     def env(self, **extra):
         env = {
@@ -128,8 +137,10 @@ class Harness:
             "FAKE_LAUNCHCTL_STATE": str(self.state),
             "LANG": "en_US.UTF-8",
             # Panel R8: the tools call launchctl by absolute path now; the
-            # fake launchd rides the explicit MMOS_*_BIN seam.
+            # fake launchd rides the explicit MMOS_*_BIN seam — which is
+            # TEST-ONLY since round 3 (FU4), so the harness flag sits here.
             "MMOS_LAUNCHCTL_BIN": str(self.bindir / "launchctl"),
+            "MMOS_TEST_SEAMS": "1",
         }
         env.update(extra)
         return env
@@ -378,15 +389,25 @@ def test_stop_reports_foreign_port_holder(h):
 # 5. doctor on the running fake instance
 # --------------------------------------------------------------------------
 
-def _plant_packed_runtime(harness):
-    """A synthetic but receipt-consistent packed runtime under the root."""
+def _plant_packed_runtime(harness, serving: Path | None = None):
+    """A synthetic but receipt-consistent packed runtime under the root.
+
+    With `serving` (a fake-t3 fixture path) dist/bin.mjs is a real executable
+    wrapper around it, so the runner goes through BOTH resolves and still
+    answers HTTP — the shape install uses on a packed root."""
     node_install = load_node_install()
     root = harness.root
     prefix = f"node-v{node_install.VERSION}-darwin-arm64"
     install_dir = root / "runtime" / prefix
     (install_dir / "bin").mkdir(parents=True)
     node = install_dir / "bin" / "node"
-    node.write_text("#!/bin/sh\nexit 0\n")
+    if serving is None:
+        node.write_text("#!/bin/sh\nexit 0\n")
+    else:
+        # A packed boot execs NODE_BIN with [node, server_bin, "serve"]; the
+        # stub plays that role by exec'ing the fake server directly — no
+        # real node needed, and bin.mjs's bytes never run.
+        node.write_text(f'#!/bin/sh\nexec {PY} {serving} "$@"\n')
     os.chmod(node, 0o755)
     (install_dir / "lib").mkdir()
     (install_dir / "lib" / "stamp").write_text("fake pinned tree\n")
@@ -396,8 +417,10 @@ def _plant_packed_runtime(harness):
     for name in node_install.REQUIRED_DIST_FILES:
         target = build / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("x")
         body = b"x"
+        target.write_bytes(body)
+        if name == "bin.mjs":
+            os.chmod(target, 0o755)   # install --server-bin requires -x
         recorded.append({"path": name, "bytes": len(body),
                          "sha256": hashlib.sha256(body).hexdigest()})
     # Panel R1: the packed tree carries its digest list beside dist/ and the
@@ -761,8 +784,10 @@ def test_r6_uninstall_truthful_when_bootout_fails(h):
     server = h.fake_server()
     assert h.run_install("--server-bin", server).returncode == 0
     assert h.loaded()
-    proc = h.run("uninstall", "--root", h.root, "--label", LABEL,
-                 env=h.env(FAKE_LAUNCHCTL_BOTOUT_FAIL="1"))
+    # Round 3: the state-dir marker (not the env var) — uninstall's unload
+    # fallback is env -i'd now, and env -i strips the environment.
+    (h.state / f"{LABEL}.BOTOUT_FAIL").write_text("1")
+    proc = h.run("uninstall", "--root", h.root, "--label", LABEL)
     assert proc.returncode != 0
     assert "UNINSTALLED" not in proc.stdout
     assert h.loaded()  # the job is still there and the tool said so
@@ -923,3 +948,466 @@ def test_atk7_doctor_names_a_foreign_plist(h):
     errors = [l for l in proc.stdout.splitlines()
               if l.startswith("doctor_error=")]
     assert errors and str(squat) in errors[0], proc.stdout
+
+
+# ==========================================================================
+# Repair round 3 — B: an empty server.log must never again mean "working".
+# The runner writes stage lines (stderr → server.log) plus a credential-free
+# <root>/run/boot.status (stage + heartbeat), and install distinguishes
+# "still verifying" from "dead" before it ever boots a job out.
+# ==========================================================================
+
+def test_b1_runner_stage_lines_and_status_file(h):
+    # After a successful install the runner has recorded every stage:
+    # resolve-node, resolve-server, the lock/port gate and the exec handoff
+    # — both as stderr stage lines and in run/boot.status. A slow start is
+    # therefore observable instead of a 0-byte log. The runtime is PACKED
+    # (receipts + serving dist/bin.mjs) so both resolves really run.
+    _plant_packed_runtime(h, serving=FIX / "fake_t3_server.py")
+    packed_bin = h.root / "runtime" / "packed" / "dist" / "bin.mjs"
+    assert h.run_install("--server-bin", packed_bin).returncode == 0
+    status = h.root / "run" / "boot.status"
+    assert status.exists()
+    text = status.read_text()
+    assert "stage=pre-flight" in text
+    assert "stage=resolve-node" in text
+    assert "stage=resolve-server" in text
+    assert "stage=lock-port" in text
+    assert "stage=exec-server" in text
+    log = h.log()
+    assert "server_runner: stage resolve-node" in log
+    assert "server_runner: stage exec-server" in log
+
+
+def test_b2_install_extends_through_a_slow_verify(h):
+    # Panel B: install's wait window expired mid-verify on the real switch
+    # and R7 booted a job that was still working. While boot.status shows a
+    # PRE-EXEC stage that is fresh (heartbeat) and the job pid is alive,
+    # install keeps waiting past the base window and says so on screen.
+    # The valve holds each verify stage open, modeling the loaded-machine
+    # boot that caused the outage. The runner is started by launchd with NO
+    # environment (env -i at bootstrap — FU1), so the delay travels the same
+    # way TEAM_SERVER_LOG_CAP does: a test-only file inside the root.
+    _plant_packed_runtime(h, serving=FIX / "fake_t3_slowbind.py")  # binds 6 s late
+    packed_bin = h.root / "runtime" / "packed" / "dist" / "bin.mjs"
+    (h.root / "config" / "verify-delay").write_text("4\n")
+    env = h.env(MMOS_TEST_SEAMS="1", MMOS_INSTALL_WAIT="3")
+    proc = subprocess.run(
+        ["/bin/sh", str(TOOL), "install", "--root", str(h.root),
+         "--port", str(h.port), "--label", LABEL, "--replace",
+         "--server-bin", str(packed_bin)],
+        capture_output=True, text=True, env=env, timeout=180)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    assert "INSTALLED" in proc.stdout
+    assert "still starting" in out          # the operator saw WHY it was slow
+    assert h.loaded()
+
+
+def test_b3_dead_start_is_still_booted_out_with_the_stage_named(h):
+    # The extension must not protect a dead job: a server that never answers
+    # after exec is booted out at the window exactly as before, and the
+    # failure names the last stage and its age.
+    silent = h.fake_server(FIX / "fake_t3_silent.py")
+    # The base window (200 fast iterations ≈ 2 s under the fake sleep)
+    # deliberately outlives the exec handoff, so the expiry lands while the
+    # last stage is exec-server — the post-exec state the extension must
+    # refuse to cover.
+    env = h.env(MMOS_TEST_SEAMS="1", MMOS_INSTALL_WAIT="200")
+    proc = subprocess.run(
+        ["/bin/sh", str(TOOL), "install", "--root", str(h.root),
+         "--port", str(h.port), "--label", LABEL, "--replace",
+         "--server-bin", str(silent)],
+        capture_output=True, text=True, env=env, timeout=120)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0
+    assert "INSTALLED" not in proc.stdout
+    assert "server did not answer" in out
+    assert "last stage" in out              # B: which stage, how old
+    assert not h.loaded()
+
+
+# ==========================================================================
+# Repair round 3 — follow-ups 1/4/6/9 from the delta panel.
+# ==========================================================================
+
+def test_fu1_env_i_on_the_load_fallback(h):
+    # FU1: both bootstrap fallbacks run env -i'd. The fake launchctl finds
+    # its state via a sibling marker file (env -i strips the env var), and a
+    # BOOTSTRAP_FAIL state marker forces the load -w fallback. Proof the
+    # fallback ran AND survived env -i: the fake logged the load -w call it
+    # discovered through the sibling marker, not through the environment.
+    server = h.fake_server()
+    (h.state / f"{LABEL}.BOOTSTRAP_FAIL").write_text("1")
+    proc = h.run_install("--server-bin", server)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert h.loaded()
+    invocations = (h.state / "invocations.log").read_text()
+    assert "load -w" in invocations, invocations
+
+
+def test_fu4_seams_refuse_without_the_test_flag(h):
+    # FU4: the MMOS_*/TEAM_SERVER_* env seams are test-only. Without
+    # MMOS_TEST_SEAMS=1 the tool refuses to honor them — a hostile shell
+    # cannot steer launchctl/curl/lsof or the LaunchAgents dir by env.
+    env = h.env()
+    env["MMOS_TEST_SEAMS"] = ""
+    env["TEAM_SERVER_LAUNCHAGENTS_DIR"] = str(h.base / "elsewhere")
+    proc = subprocess.run(["/bin/sh", str(TOOL), "status", "--root", str(h.root),
+                           "--label", LABEL], capture_output=True, text=True,
+                          env=env, timeout=30)
+    assert proc.returncode != 0
+    assert "MMOS_TEST_SEAMS" in proc.stderr or "TEAM_SERVER_LAUNCHAGENTS_DIR" in proc.stderr
+
+
+def test_fu6_kickstart_failure_is_truthful(h):
+    # FU6: start on an already-loaded label whose kickstart fails must not
+    # die silently OR boot out a healthy server: it names the state and the
+    # hand recovery, and the running job is untouched.
+    server = h.fake_server()
+    assert h.run_install("--server-bin", server).returncode == 0
+    assert wait_for(lambda: http_code(h.port) == "200", 15)
+    (h.state / f"{LABEL}.KICKSTART_FAIL").write_text("1")
+    proc = h.run("start", "--root", h.root, "--label", LABEL)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0
+    assert "kickstart failed" in out
+    assert "still running" in out or "untouched" in out
+    assert h.loaded()
+    assert http_code(h.port) == "200"
+
+
+def test_fu9_uninstall_verifies_the_root_is_down(h):
+    # FU9: uninstall's UNINSTALLED line is backed by a root-down check: a
+    # surviving home.lock holder (a server process that outlived bootout)
+    # is named in a warning instead of silently remaining.
+    import fcntl as _fcntl
+    server = h.fake_server()
+    assert h.run_install("--server-bin", server).returncode == 0
+    assert h.run("stop", "--root", h.root, "--label", LABEL).returncode == 0
+    lock = h.root / "run" / "home.lock"
+    holder = subprocess.Popen(
+        [PY, "-c",
+         f"import fcntl,sys,time;f=open({str(lock)!r},'a+');fcntl.flock(f,fcntl.LOCK_EX);"
+         "print('held',flush=True);time.sleep(60)"],
+        stdout=subprocess.PIPE, text=True)
+    try:
+        assert holder.stdout.readline().strip() == "held"
+        proc = h.run("uninstall", "--root", h.root, "--label", LABEL)
+        out = proc.stdout + proc.stderr
+        assert proc.returncode == 0, out
+        assert "UNINSTALLED" in proc.stdout
+        assert "home.lock" in out and ("surviving" in out or "still held" in out), out
+    finally:
+        holder.kill(); holder.wait()
+
+
+# ==========================================================================
+# Item F — the provider CLI folder. Since the switch the live server has
+# reported "Claude Agent CLI (claude) was not found on PATH": the runner's
+# PATH was node + system dirs only, and the real claude lives in
+# ~/.local/bin. install now records the provider CLI's folder (validated,
+# owner-only, teammate-unwritable) the way it records config/python3-path,
+# and the runner puts that folder on the server's PATH.
+# ==========================================================================
+
+def test_f1_install_records_the_provider_cli_folder(h):
+    # Discovery path: no flag, `claude` found on PATH (the fixture's), the
+    # record is the folder of that binary — absolute, mode 0600.
+    h.seed_root()
+    proc = h.run_install("--server-bin", h.fake_server())
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out
+    record = h.root / "config" / "provider-cli-dir"
+    assert record.exists(), out
+    assert oct(os.stat(record).st_mode & 0o777) == "0o600"
+    assert record.read_text().strip() == str(h.bindir.resolve())
+
+
+def test_f1b_provider_cli_flag_overrides_discovery(h):
+    # --provider-cli names the binary explicitly; its folder is recorded
+    # even though a different `claude` is on PATH.
+    custom = h.base / "pro-bin"
+    custom.mkdir()
+    cli = custom / "claude"
+    cli.write_text("#!/bin/sh\necho fake\n")
+    os.chmod(cli, 0o755)
+    h.seed_root()
+    proc = h.run_install("--server-bin", h.fake_server(),
+                         "--provider-cli", cli)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    record = h.root / "config" / "provider-cli-dir"
+    assert record.read_text().strip() == str(custom.resolve())
+
+
+def test_f2_install_fails_named_without_a_provider_cli(h):
+    # No claude on PATH and none given: install refuses with a named reason
+    # and the recovery flag — never silently installs a server whose
+    # teammates cannot start a Claude run. Static refusal: nothing loaded.
+    env = h.env()
+    env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+    h.seed_root()
+    proc = subprocess.run(
+        ["/bin/sh", str(TOOL), "install", "--root", str(h.root),
+         "--port", str(h.port), "--label", LABEL,
+         "--server-bin", str(h.fake_server())],
+        capture_output=True, text=True, env=env, timeout=120)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0
+    assert "provider CLI" in out
+    assert "claude" in out
+    assert "--provider-cli" in out
+    assert not h.loaded()
+
+
+def test_f3_install_refuses_a_team_writable_provider_folder(h):
+    # A folder a teammate can write into must never reach the server PATH:
+    # group-writable, other-writable and STICKY other-writable (1777 — the
+    # sticky bit pardons such an ANCESTOR, never the folder itself) are each
+    # refused by name, and the refusal fires before anything is booted out.
+    h.seed_root()
+    server = h.fake_server()
+    for bad_mode in (0o770, 0o777, 0o1777):
+        os.chmod(h.bindir, bad_mode)
+        try:
+            proc = h.run_install("--server-bin", server, "--replace")
+            out = proc.stdout + proc.stderr
+            assert proc.returncode != 0, (bad_mode, out)
+            assert "writable by group or others" in out, (bad_mode, out)
+            assert str(h.bindir) in out, (bad_mode, out)
+            assert not h.loaded()
+        finally:
+            os.chmod(h.bindir, 0o755)
+    # the folder restored to 0755 installs cleanly
+    assert h.run_install("--server-bin", server).returncode == 0
+
+
+def test_f3b_provider_cli_resolving_into_a_team_writable_tree_refused(h):
+    # The binary itself sits in a safe folder but resolves (symlink) into a
+    # tree a teammate can write: the recorded folder would let a teammate
+    # swap the resolved binary, so install refuses naming the unsafe tree.
+    target = h.base / "swaptree" / "v1"
+    target.mkdir(parents=True)
+    real_cli = target / "real-claude"
+    real_cli.write_text("#!/bin/sh\necho swapped\n")
+    os.chmod(real_cli, 0o755)
+    os.chmod(target, 0o770)  # teammate-writable resolution target
+    # MF-MED-REQ-1(b): the flag names `claude` itself (a differently named
+    # binary is now refused); the refusal under test stays the unsafe
+    # resolution TREE, so the link needs its own clean folder.
+    linkdir = h.base / "linktree"
+    linkdir.mkdir()
+    link = linkdir / "claude"
+    link.symlink_to(real_cli)
+    h.seed_root()
+    proc = h.run_install("--server-bin", h.fake_server(),
+                         "--provider-cli", link)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "writable by group or others" in out, out
+    assert str(target) in out, out
+    assert not (h.root / "config" / "provider-cli-dir").exists()
+
+
+def test_mfh1_group_writable_provider_binary_refused(h):
+    # F-HIGH-1: the executed FILE's own owner and write bits were never
+    # checked — the folder walks guard planting and swapping, but an
+    # in-place rewrite needs only the FILE's write bits (open(O_TRUNC)),
+    # no directory write at all. A group/other-writable claude in a
+    # walk-clean folder rode first-on-PATH and any local user could
+    # rewrite the executed bytes. The binary must carry no group/other
+    # write bits (the owner rule — root or this user, mirroring
+    # trusted_interpreter — cannot be cross-user-tested without root).
+    cli = h.bindir / "claude"
+    h.seed_root()
+    server = h.fake_server()
+    for bad_mode in (0o775, 0o777):
+        os.chmod(cli, bad_mode)
+        try:
+            proc = h.run_install("--server-bin", server, "--replace")
+            out = proc.stdout + proc.stderr
+            assert proc.returncode != 0, (bad_mode, out)
+            assert "writable by group or others" in out, (bad_mode, out)
+            assert str(cli) in out, (bad_mode, out)
+            assert not (h.root / "config" / "provider-cli-dir").exists()
+            assert not h.loaded()
+        finally:
+            os.chmod(cli, 0o755)
+    # the binary restored to 0755 in the same folder installs cleanly
+    assert h.run_install("--server-bin", server).returncode == 0
+
+
+def test_mfh1_write_bits_checked_through_a_symlink_too(h):
+    # Same check on the far side of a symlink: the named link sits in a
+    # clean folder, its resolved file is group-writable — rewriting the
+    # executed bytes needs no directory write anywhere on the chain.
+    target = h.base / "swaptree-file" / "v1"
+    target.mkdir(parents=True)
+    real_cli = target / "real-claude"
+    real_cli.write_text("#!/bin/sh\necho swapped\n")
+    os.chmod(real_cli, 0o775)   # group-writable FILE, clean folders everywhere
+    # MF-MED-REQ-1(b): name the link `claude` in its own clean folder so the
+    # refusal under test is the WRITE BITS through the symlink, not the name.
+    linkdir = h.base / "linktree-bits"
+    linkdir.mkdir()
+    link = linkdir / "claude"
+    link.symlink_to(real_cli)
+    h.seed_root()
+    proc = h.run_install("--server-bin", h.fake_server(),
+                         "--provider-cli", link)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "writable by group or others" in out, out
+    assert str(link) in out, out
+    assert not (h.root / "config" / "provider-cli-dir").exists()
+
+
+def test_mfreq1b_wrong_basename_refused_even_with_a_clean_shim(h):
+    # MF-MED-REQ-1(b): the record is the FOLDER and the server PATH-resolves
+    # `claude` BY NAME inside it. A binary named anything else used to
+    # validate fine while the <folder>/claude the server actually executes
+    # went unchecked — here 0777, writable by any local user. Fail closed
+    # on the name.
+    folder = h.base / "shimtree"
+    folder.mkdir()
+    shim = folder / "shim"
+    shim.write_text("#!/bin/sh\nexec nowhere\n")
+    os.chmod(shim, 0o755)
+    executed = folder / "claude"
+    executed.write_text("#!/bin/sh\necho rewritten\n")
+    os.chmod(executed, 0o777)
+    h.seed_root()
+    proc = h.run_install("--server-bin", h.fake_server(),
+                         "--provider-cli", shim)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "shim" in out, out
+    assert "must be named 'claude'" in out, out
+    assert not (h.root / "config" / "provider-cli-dir").exists()
+    assert not h.loaded()
+
+
+def test_mfreq1a_claude_symlink_to_group_writable_target_refused(h):
+    # MF-MED-REQ-1(a) leg from the ruling: <folder>/claude — the right NAME,
+    # the file the server executes — that is itself a symlink to a
+    # group-writable target must be refused: the owner/write-bits check
+    # follows to the file whose bytes actually run.
+    target = h.base / "gwtree" / "v1"
+    target.mkdir(parents=True)
+    real_cli = target / "real-claude"
+    real_cli.write_text("#!/bin/sh\necho swapped\n")
+    os.chmod(real_cli, 0o775)   # group-writable FILE, clean folders everywhere
+    folder = h.base / "linktree-exec"
+    folder.mkdir()
+    link = folder / "claude"
+    link.symlink_to(real_cli)
+    h.seed_root()
+    proc = h.run_install("--server-bin", h.fake_server(),
+                         "--provider-cli", link)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "writable by group or others" in out, out
+    assert str(link) in out, out
+    assert not (h.root / "config" / "provider-cli-dir").exists()
+
+
+def test_mf6_symlinked_boot_status_refused(h, tmp_path):
+    # LOW10 completion: the runner appends its stage heartbeats through
+    # run/boot.status on every boot — a planted link there would send those
+    # writes (and the installer's stage reads) through it, like server.log
+    # and port before it. Refuse it by name, before anything is booted.
+    h.seed_root()
+    (h.root / "run").mkdir(exist_ok=True)
+    os.chmod(h.root, 0o700)   # created above at default mode; install requires 0700
+    victim = tmp_path / "victim.status"
+    victim.write_text("stage=pwned\n")
+    os.symlink(victim, h.root / "run" / "boot.status")
+    proc = h.run_install("--server-bin", h.fake_server(), "--replace")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "boot.status" in out, out
+    assert "symlink" in out, out
+    assert not h.loaded()
+
+
+def test_mf6a_provider_cli_resolving_into_the_root_refused(h):
+    # F-MED-A: root-containment covered the NAMING folder only — a safe
+    # outside folder symlinking a claude that actually lives INSIDE the
+    # server root passed, and uninstall would delete the executed binary
+    # (the docstring's own rationale). The resolution-target folder must be
+    # inside-root-checked too.
+    inside = h.root / "provider"
+    inside.mkdir(parents=True)
+    os.chmod(h.root, 0o700)   # created above at default mode; install requires 0700
+    cli = inside / "claude"
+    cli.write_text("#!/bin/sh\necho rooted\n")
+    os.chmod(cli, 0o755)
+    # MF-MED-REQ-1(b): name the link `claude` in its own clean folder so the
+    # refusal under test is ROOT CONTAINMENT of the resolution target.
+    linkdir = h.base / "linktree-root"
+    linkdir.mkdir()
+    link = linkdir / "claude"
+    link.symlink_to(cli)
+    h.seed_root()
+    proc = h.run_install("--server-bin", h.fake_server(),
+                         "--provider-cli", link)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "inside the server root" in out, out
+    assert not (h.root / "config" / "provider-cli-dir").exists()
+
+
+def test_mf6b_provider_cli_dir_tmp_leftover_is_cleaned(h):
+    # F-MED-B: a kill inside private_write during record-provider leaves
+    # config/provider-cli-dir.tmp behind; O_EXCL then refuses every later
+    # install with a write conflict — and the retry boots the healthy
+    # server out first. clean_dead_leftovers must remove this temp like the
+    # other receipt temps, so the prescribed retry actually succeeds.
+    h.seed_root()
+    server = h.fake_server()
+    assert h.run_install("--server-bin", server).returncode == 0
+    leftover = h.root / "config" / "provider-cli-dir.tmp"
+    leftover.write_text("/stale/provider\n")
+    proc = h.run_install("--server-bin", server, "--replace")
+    out = proc.stdout + proc.stderr
+    assert proc.returncode == 0, out          # the retry succeeds, not wedged
+    assert not leftover.exists()
+    assert (h.root / "config" / "provider-cli-dir").exists()
+
+
+def test_f4_runner_puts_the_recorded_folder_on_the_server_path(h):
+    # The packed boot REBUILDS PATH in the exec handoff — the exact line the
+    # defect lived in. The stub server records the environment it was exec'd
+    # with; the recorded provider folder must be on that PATH and `claude`
+    # must resolve against it.
+    _plant_packed_runtime(h, serving=FIX / "fake_t3_envdump.py")
+    packed_bin = h.root / "runtime" / "packed" / "dist" / "bin.mjs"
+    assert h.run_install("--server-bin", packed_bin).returncode == 0
+    dump = h.root / "scratch-project" / "env-dump.json"
+    assert wait_for(lambda: dump.exists(), 15), h.log()
+    import shutil
+    data = json.loads(dump.read_text())
+    recorded = (h.root / "config" / "provider-cli-dir").read_text().strip()
+    assert recorded in data["PATH"].split(os.pathsep), data["PATH"]
+    assert shutil.which("claude", path=data["PATH"]), data["PATH"]
+
+
+def test_f5_runner_refuses_to_boot_without_the_record(h):
+    # A root whose provider record vanished (pre-item-F root, or a partial
+    # copy) must not boot a server whose PATH quietly lost the folder — the
+    # runner refuses at boot naming the recovery, exactly like python3-path.
+    # The refusal is a TERMINAL boot stage (refused-provider), so install's
+    # wait does not spend its extension window on a crash-loop it can never
+    # out-wait: the failure names the refused stage immediately.
+    server = h.fake_server()
+    assert h.run_install("--server-bin", server).returncode == 0
+    assert h.run("stop", "--root", h.root, "--label", LABEL).returncode == 0
+    (h.root / "config" / "provider-cli-dir").unlink()
+    proc = h.run("start", "--root", h.root, "--label", LABEL, timeout=120)
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0
+    assert "last stage: refused-provider" in out
+    log = h.log()
+    assert "no recorded provider CLI folder" in log
+    assert "install" in log
+    assert "not found on PATH" not in log  # never the operator's diagnosis again

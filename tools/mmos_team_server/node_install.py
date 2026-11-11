@@ -64,11 +64,26 @@ DIGESTS_NAME = "file-digests.json"
 # Written into dist AFTER hashing (pack_server.mjs:265), so it is the one file
 # the digest list deliberately does not record.
 PACK_EXCLUDED = {"BUILD_RECEIPT.json"}
-# Measured 2026-11-11 on this M2 Studio over the real 199 MB / ~4.7k-entry
-# pinned Node tree: full schema-2 digest 1.22 s cold, 0.33-0.38 s warm. That
-# is fast enough to recompute at EVERY server start, so resolve (the runner's
-# pre-execve gate) verifies the tree by default; doctor verifies too.
+# Resolve (the runner's pre-execve gate) verifies BOTH trees by default; so
+# does doctor. The pinned Node tree's full schema-2 digest measured 1.22 s
+# cold on an idle M2 Studio — but ~2 minutes under launchd's background I/O
+# band at load 25-107 (the 22-minute switch outage: two resolves per boot,
+# 199 MB each, re-hashed from scratch every time). Both trees therefore
+# verify through stat-tripwire caches (verify-stat-cache.json for the server
+# tree, node-tree-stat-cache.json for the Node tree; see round 3 A1): an
+# all-match cached verify equals the recorded digest, any mismatch falls
+# back to the full re-hash. `doctor --full` forces the full re-hash past
+# both caches. The receipts, not the caches, remain the anchors.
 VERIFY_TREE_AT_RESOLVE = True
+# Round 3 / FU4: every MMOS_*/TEAM_SERVER_* environment seam in this tool
+# is TEST-ONLY and gated behind MMOS_TEST_SEAMS=1. Outside the test harness
+# a hostile shell cannot steer lsof/ps/launchctl, the LaunchAgents location
+# or the verify valve by environment. PYTHON3_BIN (team_server.sh) is
+# deliberately NOT gated: it is an operator knob, validated absolute and
+# executable.
+TEST_SEAM_FLAG = "MMOS_TEST_SEAMS"
+TEST_SEAM_VARS = ("MMOS_LSOF_BIN", "MMOS_PS_BIN", "MMOS_LAUNCHCTL_BIN",
+                  "TEAM_SERVER_LAUNCHAGENTS_DIR", "MMOS_VERIFY_DELAY_SECONDS")
 
 
 class InstallError(Exception):
@@ -277,7 +292,8 @@ def idempotent_receipt(path, payload):
     private_write(path, payload)
 
 
-def tree_sha256(directory):
+def tree_sha256(directory, status_file=None, note_stage=None, note_every=500,
+                entries_out=None):
     """Deterministic digest of a published tree, excluding its own receipt
     (which embeds this digest and so cannot cover itself). Schema 2: every
     entry contributes — directories (including empty ones) contribute
@@ -286,25 +302,48 @@ def tree_sha256(directory):
     that is not a regular file, a directory or a symlink (a FIFO, socket or
     device) is refused WITHOUT being opened, so a planted FIFO cannot hang
     the digest. Used to verify, on a retry and in doctor, that an existing
-    destination is still the tree this exact archive produced."""
+    destination is still the tree this exact archive produced.
+
+    Micro-fix HIGH-2: with status_file AND note_stage the walk appends a
+    boot.status heartbeat every `note_every` entries — a 199 MB tree hash
+    otherwise writes one note and then goes silent long enough for
+    wait_ours's 30 s freshness rule to read a working boot as dead.
+
+    Micro-fix HIGH-3: with entries_out the walk ALSO records each entry's
+    stat triple (the _node_tree_entries schema) in the SAME per-entry visit
+    that feeds the digest, so a caller can cache exactly what it hashed —
+    never a stat snapshot of a later, different tree."""
     digest = hashlib.sha256()
+    seen = 0
 
     def feed(relative, kind, extra):
+        nonlocal seen
         digest.update(relative.encode("utf-8") + b"\0" + kind.encode("ascii") +
                       extra.encode("utf-8") + b"\0")
+        seen += 1
+        if status_file and note_stage and seen % note_every == 0:
+            _status_note(status_file, note_stage)
+
+    def remember(relative, kind, extra, info, size):
+        if entries_out is not None:
+            entries_out[relative] = [kind, extra, size, info.st_mtime_ns,
+                                     info.st_ctime_ns]
 
     for current, dirnames, filenames in os.walk(directory):
         dirnames.sort()
         for name in dirnames:
             absolute = os.path.join(current, name)
             relative = os.path.relpath(absolute, directory)
-            if os.path.islink(absolute):
+            info = os.lstat(absolute)
+            if stat.S_ISLNK(info.st_mode):
                 # os.walk does not descend into symlinked directories
                 # (followlinks=False), but they still must contribute.
                 feed(relative, "l", os.readlink(absolute))
+                remember(relative, "l", os.readlink(absolute), info, 0)
             else:
-                info = os.lstat(absolute)
                 feed(relative, "d", oct(stat.S_IMODE(info.st_mode) & 0o7777))
+                remember(relative, "d",
+                         f"{stat.S_IMODE(info.st_mode) & 0o7777:o}", info, 0)
         for name in sorted(filenames):
             absolute = os.path.join(current, name)
             relative = os.path.relpath(absolute, directory)
@@ -313,11 +352,15 @@ def tree_sha256(directory):
             info = os.lstat(absolute)
             if stat.S_ISLNK(info.st_mode):
                 feed(relative, "l", os.readlink(absolute))
+                remember(relative, "l", os.readlink(absolute), info, 0)
             elif not stat.S_ISREG(info.st_mode):
                 # FIFO, socket, device: refused before any open() can block.
                 raise InstallError(f"non-regular tree entry refused: {relative}")
             else:
                 feed(relative, "f", f"{stat.S_IMODE(info.st_mode) & 0o7777:o}:{info.st_size}")
+                remember(relative, "f",
+                         f"{stat.S_IMODE(info.st_mode) & 0o7777:o}",
+                         info, info.st_size)
                 with open(absolute, "rb") as stream:
                     for block in iter(lambda: stream.read(1024 * 1024), b""):
                         digest.update(block)
@@ -395,6 +438,140 @@ def trusted_interpreter(path, root):
     return path
 
 
+def _require_teammate_safe_dir(folder, what, strict_leaf=True):
+    """Item F: every component from / down to `folder` must be a place a
+    teammate (another local user) cannot plant or swap a binary in.
+
+    The folder itself (strict_leaf=True, the recorded folder and the
+    resolution-target folder) must have NO group/other write at all. For the
+    ANCESTORS above it, group/other write is refused unless the sticky bit
+    is set — a sticky 1777 directory (/tmp, /var/tmp) is the OS's own
+    mitigation: anyone may create entries there, but only their owner may
+    rename or remove them, so this user's subtree under it cannot have its
+    entries swapped by anyone else. The owner of every component must be
+    root or the current user (root is the OS, not a teammate — /usr, /opt
+    and friends are root-owned by design)."""
+    folder = os.path.realpath(folder).rstrip("/") or "/"
+    components = [] if folder == "/" else folder.strip("/").split("/")
+    current = ""
+    for index, part in enumerate(components):
+        current += "/" + part
+        leaf = index == len(components) - 1
+        try:
+            info = os.stat(current)
+        except OSError as exc:
+            raise InstallError(f"{what} not found: {current}") from exc
+        if info.st_uid not in (0, os.getuid()):
+            raise InstallError(
+                f"{what} is owned by another user (a teammate could control "
+                f"it): {current}")
+        if info.st_mode & 0o022 and (leaf and strict_leaf
+                                     or not info.st_mode & stat.S_ISVTX):
+            raise InstallError(
+                f"{what} is writable by group or others: {current} "
+                f"({stat.filemode(info.st_mode)}) — a teammate could plant "
+                f"or swap a provider binary there")
+
+
+def validated_provider_cli(cli, root=None):
+    """Item F: validate the provider CLI binary and return the folder install
+    records as config/provider-cli-dir.
+
+    The record is the folder the binary is NAMEABLE in (its dirname, fully
+    resolved), because the server's PATH must resolve `claude` by name. The
+    binary's RESOLUTION target tree gets the same teammate-safety walk: the
+    stock Claude install is a symlink (`~/.local/bin/claude` ->
+    `~/.local/share/claude/versions/<v>`), and the folder that names the
+    binary is only as trustworthy as the tree the symlink resolves into.
+    python3-path precedent: the folder must not live inside the server root
+    (nothing inside the root is pinned by an outside authority, and uninstall
+    would delete it)."""
+    path = os.path.expanduser(str(cli))
+    if not path or not os.path.isabs(path):
+        raise InstallError(f"provider CLI must be an absolute path: {cli!r}")
+    # MF-MED-REQ-1(b): the record is the FOLDER and the server PATH-resolves
+    # `claude` BY NAME inside it. Any other basename validates a file the
+    # server never executes while the <folder>/claude it does execute goes
+    # unchecked. Fail closed on the name.
+    if os.path.basename(path) != "claude":
+        raise InstallError(
+            f"provider CLI must be named 'claude' (the server PATH-resolves "
+            f"`claude` by name in the recorded folder; a differently named "
+            f"file is never the executed one): {path}")
+    try:
+        info = os.stat(path)
+    except OSError as exc:
+        raise InstallError(f"provider CLI not found: {path}") from exc
+    if not stat.S_ISREG(info.st_mode):
+        raise InstallError(f"provider CLI is not a regular file: {path}")
+    if not os.access(path, os.X_OK):
+        raise InstallError(f"provider CLI is not executable: {path}")
+    # F-HIGH-1 (micro-fix round): the executed FILE itself, not only its
+    # folders. The folder walks stop a teammate PLANTING or SWAPPING a
+    # binary; they do not stop an in-place rewrite — open(O_TRUNC) needs the
+    # file's own write bits, no directory write at all. Both the named path
+    # and its resolution target must be owned by root or this user (the
+    # trusted_interpreter rule) and carry no group/other write bits.
+    # MF-MED-REQ-1(a): the file the server will actually execute is
+    # <realpath of the recorded folder>/claude and its resolution target —
+    # when the naming folder is a symlink chain those can differ from what
+    # this argument named, so they get the same check, and a missing one is
+    # a clean refusal: never record a folder whose `claude` is not there.
+    folder = os.path.dirname(path)
+    executed = os.path.join(os.path.realpath(folder), "claude")
+    for what, target in (("provider CLI", path),
+                         ("provider CLI resolution target",
+                          os.path.realpath(path)),
+                         ("provider CLI the server executes", executed),
+                         ("provider CLI the server executes, resolved",
+                          os.path.realpath(executed))):
+        try:
+            finfo = os.stat(target)
+        except OSError as exc:
+            raise InstallError(f"{what} not found: {target}") from exc
+        if finfo.st_uid not in (0, os.getuid()):
+            raise InstallError(
+                f"{what} belongs to another user (a teammate could rewrite "
+                f"its executed bytes in place): {target}")
+        if finfo.st_mode & 0o022:
+            raise InstallError(
+                f"{what} is writable by group or others (any local user "
+                f"could rewrite the executed bytes in place — no directory "
+                f"write needed): {target} ({stat.filemode(finfo.st_mode)})")
+    _require_teammate_safe_dir(folder, "provider CLI folder")
+    _require_teammate_safe_dir(os.path.dirname(os.path.realpath(path)),
+                               "provider CLI resolution target")
+    # F-MED-A (micro-fix round): containment covers the naming folder AND
+    # the resolution-target folder — a safe outside folder symlinking a
+    # binary that actually lives inside the root would otherwise pass, and
+    # uninstall would delete the executed binary.
+    if root and (realpath_inside(folder, root) or
+                 realpath_inside(os.path.dirname(os.path.realpath(path)),
+                                 root)):
+        raise InstallError(
+            f"provider CLI must not live inside the server root: {folder}")
+    return os.path.realpath(folder)
+
+
+def record_provider_cli(root, cli):
+    """Item F: validate the provider CLI and record its folder the way
+    trusted_interpreter is recorded (config/, 0600, one atomic write)."""
+    root = validated_root(root)
+    folder = validated_provider_cli(cli, root=root)
+    config_dir = private_dir(os.path.join(root, "config"), create=True)
+    # F-MED-B (micro-fix round): a killed earlier run can leave this
+    # writer's temp behind and O_EXCL then refuses every retry — clean_dead_
+    # leftovers removes it on the node_install install path, but this
+    # subcommand also runs alone. A symlink is refused, never followed.
+    temp = os.path.join(config_dir, "provider-cli-dir.tmp")
+    if os.path.lexists(temp):
+        if os.path.islink(temp) or not os.path.isfile(temp):
+            raise InstallError(f"symlinked or non-regular temp refused: {temp}")
+        os.unlink(temp)
+    private_write(os.path.join(config_dir, "provider-cli-dir"), folder + "\n")
+    return folder
+
+
 def install_lock(runtime_dir):
     """F5/F6: one installer at a time per root. The lock is an flock on a
     private file inside runtime/; a second installer refuses in one line.
@@ -429,9 +606,12 @@ def clean_dead_leftovers(root, runtime_dir, staging_parent, config_dir):
             shutil.rmtree(target)
     # Attack finding 2: python3-path.tmp is this installer's temp too; a kill
     # during private_write left it behind and O_EXCL refused every later run.
+    # provider-cli-dir.tmp (F-MED-B, micro-fix round): same failure class —
+    # a leftover wedged every later install at record-provider.
     for temp in (os.path.join(runtime_dir, "install-receipt.json.tmp"),
                  os.path.join(config_dir, "node-runtime.json.tmp"),
-                 os.path.join(config_dir, "python3-path.tmp")):
+                 os.path.join(config_dir, "python3-path.tmp"),
+                 os.path.join(config_dir, "provider-cli-dir.tmp")):
         if os.path.lexists(temp):
             if os.path.islink(temp):
                 raise InstallError(f"symlinked temp refused: {temp}")
@@ -650,7 +830,183 @@ def _save_stat_cache(path, fresh):
             pass
 
 
-def verify_packed_server(build_dir):
+def _status_note(status_file, stage):
+    """Round 3 B: append `stage=<name> <epoch>` to the boot status file so a
+    slow start is observable (an empty server.log never again means
+    "working"). Credential-free; best-effort — a read-only run dir must not
+    turn observability into a refusal."""
+    if not status_file:
+        return
+    try:
+        with open(status_file, "a", encoding="utf-8") as stream:
+            stream.write(f"stage={stage} {int(time.time())}\n")
+    except OSError:
+        pass
+
+
+def _load_node_cache(path):
+    """Best-effort load of the Node tree's entry cache. Schema:
+    {"__treeSha256__": <hex>, rel: [kind, extra, size, mtime_ns, ctime_ns]}
+    with kind in {d,f,l} and mtime_ns/ctime_ns ints (extra is the octal mode
+    string, or the link target for symlinks)."""
+    try:
+        with open(path, encoding="utf-8") as stream:
+            data = json.load(stream)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    clean = {}
+    for rel, entry in data.items():
+        if rel == "__treeSha256__":
+            if isinstance(entry, str) and HEX64.fullmatch(entry):
+                clean[rel] = entry
+            continue
+        if (isinstance(rel, str) and isinstance(entry, list) and len(entry) == 5
+                and entry[0] in ("d", "f", "l")
+                and isinstance(entry[1], str)
+                and all(isinstance(v, int) and not isinstance(v, bool)
+                        for v in entry[2:])):
+            clean[rel] = entry
+    return clean
+
+
+def _verify_valve(stage, status_file, root=None):
+    """TEST-ONLY: hold a verify stage open (with a fresh status note) so
+    tests can exercise a slow boot deterministically. Two channels, because
+    launchd starts the runner with NO environment (env -i at bootstrap keeps
+    the installer's env out of the job):
+      * MMOS_VERIFY_DELAY_SECONDS in the environment — the in-process/
+        CLI-test channel, refused unless MMOS_TEST_SEAMS=1 like every other
+        env seam;
+      * <root>/config/verify-delay — the RUNNER channel (the same
+        root-config-file pattern as TEAM_SERVER_LOG_CAP's config/log-cap).
+        The file lives inside the 0700 root, so only the root's owner can
+        plant it; an absent, unreadable or non-numeric file delays nothing.
+    """
+    seconds = None
+    delay = os.environ.get("MMOS_VERIFY_DELAY_SECONDS")
+    if delay:
+        if not _test_seams_on():
+            raise InstallError(
+                f"MMOS_VERIFY_DELAY_SECONDS is set but {TEST_SEAM_FLAG} is not 1; "
+                f"test-only environment seams are refused outside the test harness")
+        try:
+            seconds = float(delay)
+        except ValueError:
+            raise InstallError("MMOS_VERIFY_DELAY_SECONDS must be a number") from None
+    elif root:
+        try:
+            with open(os.path.join(validated_root(root), "config",
+                                   "verify-delay"), encoding="ascii") as fh:
+                delay = fh.readline().strip()
+        except (OSError, UnicodeError):
+            delay = ""
+        if delay.isdigit():
+            seconds = float(delay)
+    if seconds is not None and 0 <= seconds <= 600:
+        # Micro-fix HIGH-2: note AFTER the hold, never before — a note written
+        # before sleeping is exactly the stale-note starvation a long silent
+        # walk produced. Freshness during real work comes from the walk
+        # heartbeats (every 500 entries), not from this valve.
+        time.sleep(seconds)
+        _status_note(status_file, stage)
+
+
+def _node_tree_entries(install_dir, status_file=None, note_every=500):
+    """Enumerate the Node tree exactly as tree_sha256 does (sorted os.walk,
+    INSTALL_RECEIPT.json excluded, non-regular entries refused), returning
+    {rel: [kind, extra, size, mtime_ns, ctime_ns]} for files AND directories
+    (a changed mode/owner/mtime on a directory is part of the digest too).
+    Micro-fix HIGH-2: with status_file the walk appends a boot.status
+    heartbeat every `note_every` entries, so a long stat walk stays fresh."""
+    entries = {}
+    seen = 0
+    for current, dirnames, filenames in os.walk(install_dir):
+        dirnames.sort()
+        for name in dirnames + sorted(filenames):
+            absolute = os.path.join(current, name)
+            relative = os.path.relpath(absolute, install_dir)
+            if relative == "INSTALL_RECEIPT.json":
+                continue
+            seen += 1
+            if status_file and seen % note_every == 0:
+                _status_note(status_file, "verify-node")
+            info = os.lstat(absolute)
+            if stat.S_ISLNK(info.st_mode):
+                entries[relative] = ["l", os.readlink(absolute), 0,
+                                     info.st_mtime_ns, info.st_ctime_ns]
+            elif stat.S_ISDIR(info.st_mode):
+                entries[relative] = ["d", f"{stat.S_IMODE(info.st_mode) & 0o7777:o}",
+                                     0, info.st_mtime_ns, info.st_ctime_ns]
+            elif not stat.S_ISREG(info.st_mode):
+                raise InstallError(f"non-regular tree entry refused: {relative}")
+            else:
+                entries[relative] = ["f", f"{stat.S_IMODE(info.st_mode) & 0o7777:o}",
+                                     info.st_size, info.st_mtime_ns,
+                                     info.st_ctime_ns]
+    return entries
+
+
+def _verify_node_tree(install_dir, recorded, status_file=None, force_full=False,
+                      root=None):
+    """Round 3 A1: verify the pinned Node tree against the receipt's
+    treeSha256 through a stat-tripwire cache.
+
+    Why: the runner resolves twice per boot and each resolve re-hashed the
+    whole 199 MB tree from scratch; under launchd's background I/O band at
+    load 25-107 that alone held the boot in state U for minutes (the
+    22-minute switch outage). The cache lives at
+    <root>/runtime/node-tree-stat-cache.json — beside install_dir, never
+    inside it, because the digest covers every install_dir entry except the
+    receipt itself. Semantics match the server tree's verify-stat-cache: all
+    (kind, extra, size, mtime_ns, ctime_ns) triples present and equal plus a
+    matching cached digest == verified; any difference (a same-size in-place
+    edit included — ctime is kernel-set) falls back to the full tree_sha256,
+    which refuses on mismatch and rewrites the cache on success. The receipt,
+    not the cache, is the anchor: a deleted cache can only make the next
+    verify SLOW (full re-hash) — but a FORGED cache (triples plus the
+    recorded digest, written by the root's own user) is accepted without any
+    re-hash. The cache therefore changes nothing about the tamper model: a
+    same-user writer of the root could edit the tree and the receipts alike,
+    exactly as before the cache existed (MED d2-2 — the server tree's
+    verify-stat-cache concedes the same). force_full (doctor --full) skips
+    the cache read entirely and re-hashes."""
+    cache_path = os.path.join(os.path.dirname(os.path.abspath(install_dir)),
+                              "node-tree-stat-cache.json")
+    _verify_valve("verify-node", status_file, root=root)
+    cached = _load_node_cache(cache_path) if not force_full else {}
+    if isinstance(cached.get("__treeSha256__"), str) and HEX64.fullmatch(
+            cached.get("__treeSha256__", "")):
+        _status_note(status_file, "verify-node")   # stat walk begins (warm)
+        try:
+            entries = _node_tree_entries(install_dir, status_file=status_file)
+        except (InstallError, OSError):
+            entries = None  # a non-regular entry: let the full digest refuse it
+        if (entries is not None and len(entries) + 1 == len(cached)
+                and cached.get("__treeSha256__") == recorded
+                and all(cached.get(rel) == triple
+                        for rel, triple in entries.items())):
+            _status_note(status_file, "verify-node")
+            return  # every triple matches: the tree is what we digest-recorded
+    _status_note(status_file, "verify-node")   # full digest begins (cold)
+    # Micro-fix HIGH-3: ONE walk — the triples are captured in the same
+    # per-entry visit that feeds the digest, so the cache can only bless
+    # what was actually hashed. The old second walk sampled the tree AFTER
+    # the hash; a file changed in that gap left a cache whose triples
+    # blessed the mutated file while the digest field still named the
+    # pre-change tree, and every later boot rode it without re-hashing.
+    fresh = {}
+    digest = tree_sha256(install_dir, status_file=status_file,
+                         note_stage="verify-node", entries_out=fresh)
+    if digest != recorded:
+        raise InstallError(
+            "pinned Node tree no longer matches its receipt (treeSha256 "
+            "mismatch); reinstall the runtime")
+    _save_stat_cache(cache_path, {"__treeSha256__": digest, **fresh})
+
+
+def verify_packed_server(build_dir, force_full=False, status_file=None, root=None):
     """Panel R1: verify the packed server tree against its recorded digests.
 
     file-digests.json (written by pack_server.mjs beside dist/) is the
@@ -697,9 +1053,13 @@ def verify_packed_server(build_dir):
             f"server tree no longer matches {DIGESTS_NAME} ({detail}); repack, "
             f"or roll back per the runbook")
 
-    cache = _load_stat_cache(os.path.join(release_dir, "verify-stat-cache.json"))
+    cache = {} if force_full else _load_stat_cache(
+        os.path.join(release_dir, "verify-stat-cache.json"))
+    _verify_valve("verify-server", status_file, root=root)
     verified = {}
-    for entry in recorded:
+    for index, entry in enumerate(recorded):
+        if status_file and index % 500 == 0:
+            _status_note(status_file, "verify-server")
         if not isinstance(entry, dict):
             refuse(f"{digests_path} has a malformed entry")
         rel, size, sha = entry.get("path"), entry.get("bytes"), entry.get("sha256")
@@ -745,7 +1105,7 @@ def verify_packed_server(build_dir):
     return len(verified)
 
 
-def runtime_paths(root, verify_tree=True):
+def runtime_paths(root, verify_tree=True, status_file=None):
     """Resolve the pinned node and packed server entrypoint.
 
     Item 12: installDir is not taken from the receipt's word — it must be
@@ -829,21 +1189,24 @@ def runtime_paths(root, verify_tree=True):
         recorded = node.get("treeSha256")
         if not isinstance(recorded, str) or not HEX64.fullmatch(recorded):
             raise InstallError("config receipt lacks a valid treeSha256")
-        if tree_sha256(install_dir) != recorded:
-            raise InstallError(
-                "pinned Node tree no longer matches its receipt (treeSha256 "
-                "mismatch); reinstall the runtime")
+        # Round 3 A1: the Node tree verifies through its stat-tripwire cache
+        # (full digest on any mismatch); verify_tree == "full" forces the
+        # full digest past the cache (doctor --full).
+        _verify_node_tree(install_dir, recorded, status_file=status_file,
+                          force_full=(verify_tree == "full"), root=root)
         # Panel R1: the packed SERVER tree — the code that actually executes
         # on every boot — is verified against file-digests.json too, not just
         # the Node tree that launches it.
-        verify_packed_server(build_dir)
+        verify_packed_server(build_dir, force_full=(verify_tree == "full"),
+                             status_file=status_file, root=root)
     return node_path, server_bin
 
 
-def resolve_command(root, command, verify_tree=None):
+def resolve_command(root, command, verify_tree=None, status_file=None):
     if verify_tree is None:
         verify_tree = VERIFY_TREE_AT_RESOLVE
-    node, server = runtime_paths(root, verify_tree=verify_tree)
+    node, server = runtime_paths(root, verify_tree=verify_tree,
+                                 status_file=status_file)
     return node if command == "node" else server
 
 
@@ -858,17 +1221,44 @@ def http_status(port):
 
 # Panel R8: absolute paths for the system tools attribution relies on — a
 # PATH-injected fake lsof/ps/launchctl must not be able to fake "ours" or
-# "loaded". The MMOS_*_BIN seams exist for the test harness's fake launchd.
-LSOF_BIN = os.environ.get("MMOS_LSOF_BIN", "/usr/sbin/lsof")
-PS_BIN = os.environ.get("MMOS_PS_BIN", "/bin/ps")
-LAUNCHCTL_BIN = os.environ.get("MMOS_LAUNCHCTL_BIN", "/bin/launchctl")
+# "loaded". The MMOS_*_BIN seams exist for the test harness's fake launchd,
+# and only there: _gated_seam refuses any of them set outside
+# MMOS_TEST_SEAMS=1 (round 3 / FU4).
+def _test_seams_on():
+    return os.environ.get(TEST_SEAM_FLAG) == "1"
+
+
+def _gated_seam(name, default):
+    if name not in TEST_SEAM_VARS:
+        return default
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    if not _test_seams_on():
+        raise InstallError(
+            f"{name} is set but {TEST_SEAM_FLAG} is not 1; test-only "
+            f"environment seams are refused outside the test harness")
+    return value
+
+
+def _lsof_bin():
+    return _gated_seam("MMOS_LSOF_BIN", "/usr/sbin/lsof")
+
+
+def _ps_bin():
+    return _gated_seam("MMOS_PS_BIN", "/bin/ps")
+
+
+def _launchctl_bin():
+    return _gated_seam("MMOS_LAUNCHCTL_BIN", "/bin/launchctl")
 
 
 def _listener_pids(port):
     """Pids with a LISTEN socket on port (panel R4)."""
     try:
-        probe = subprocess.run([LSOF_BIN, "-tP", f"-iTCP:{port}", "-sTCP:LISTEN"],
-                               capture_output=True, text=True, timeout=10)
+        probe = subprocess.run([_lsof_bin(), "-tP", f"-iTCP:{port}",
+                                "-sTCP:LISTEN"], capture_output=True,
+                               text=True, timeout=10)
     except subprocess.SubprocessError:
         return []
     return [int(p) for p in (probe.stdout or "").split() if p.isdigit()]
@@ -876,7 +1266,7 @@ def _listener_pids(port):
 
 def _parent_of(pid):
     try:
-        probe = subprocess.run([PS_BIN, "-o", "ppid=", "-p", str(pid)],
+        probe = subprocess.run([_ps_bin(), "-o", "ppid=", "-p", str(pid)],
                                capture_output=True, text=True, timeout=10)
     except subprocess.SubprocessError:
         return None
@@ -899,32 +1289,45 @@ def answering_process(port, job_pid):
     """Panel R4: attribute an answering port to this label's job.
 
     'ours' only when some listener pid is the job pid or one of its
-    descendants; otherwise the foreign listener is named. Never 'ours' when
-    the job has no running pid (a crash-looping job beside a foreign
-    listener)."""
+    descendants; a listener that is provably someone else's is 'foreign'.
+    Round 3 C: a lookup that identifies NO listener at all (lsof empty, slow
+    or failed under load) is UNKNOWN — never 'foreign': on the real switch
+    the first doctor called our own listener foreign because lsof returned
+    nothing at load ~100. One retry covers the slow case; a persistent empty
+    lookup says unknown and names the independent job-specific probe."""
     try:
         job_pid = int(job_pid)
     except (TypeError, ValueError):
         job_pid = None
     listeners = _listener_pids(port)
+    if not listeners:
+        time.sleep(0.5)  # lsof can be merely slow under load; retry once
+        listeners = _listener_pids(port)
+    if not listeners:
+        return (f"unknown(no listener identified by lsof; job pid "
+                f"{job_pid or 'none'} — retry doctor, or probe: lsof -a -p "
+                f"{job_pid or '<job pid>'} -tP -iTCP:{port} -sTCP:LISTEN -n)")
     if job_pid and any(p == job_pid or _pid_descendant_of(p, job_pid)
                        for p in listeners):
         return "ours"
-    named = f"pid {listeners[0]}" if listeners else "no listener identified"
-    return f"foreign({named}, job pid {job_pid or 'none'})"
+    return f"foreign(pid {listeners[0]}, job pid {job_pid or 'none'})"
 
 
-def doctor(root, label, verify_tree=True):
+def doctor(root, label, verify_tree=True, port=None):
     """Only metadata: no access token, environment, cookies or log contents.
-    F23/panel R1: both trees are recomputed against their receipts — the
-    pinned Node tree (treeSha256, ~0.3-1.2 s measured) and the packed server
-    tree (file-digests.json); treeVerified names which. --no-verify-tree
-    skips both. A rollback root (no server receipt) is reported as such, not
-    refused."""
+    F23/panel R1: both trees are verified against their receipts — the
+    pinned Node tree (treeSha256, through node-tree-stat-cache.json) and the
+    packed server tree (file-digests.json, through verify-stat-cache.json);
+    treeVerified names which. --full forces both full re-hashes past the
+    caches (the caches are a same-user-writable performance artifact; the
+    receipts remain the anchors). --no-verify-tree skips both. --port N
+    probes N when run/port is missing or unreadable. A rollback root (no
+    server receipt) is reported as such, not refused."""
     root = validated_root(root)
     try:
         try:
-            probe = subprocess.run([LAUNCHCTL_BIN, "print", f"gui/{os.getuid()}/{label}"],
+            probe = subprocess.run([_launchctl_bin(), "print",
+                                    f"gui/{os.getuid()}/{label}"],
                                    capture_output=True, text=True, timeout=10)
             loaded = probe.returncode == 0
         except subprocess.TimeoutExpired:
@@ -935,16 +1338,27 @@ def doctor(root, label, verify_tree=True):
         plist_match = re.search(r"^\s*path = (\S+)", probe.stdout or "",
                                 re.MULTILINE) if loaded else None
         job_plist = plist_match.group(1) if plist_match else "unknown"
+        # FU2: honor TEAM_SERVER_LAUNCHAGENTS_DIR only as a gated test seam;
+        # _gated_seam refuses it when MMOS_TEST_SEAMS is not 1.
         expected_plist = os.path.join(
-            os.path.expanduser("~/Library/LaunchAgents"), f"{label}.plist")
-        port = "unknown"
-        try:
-            with open(os.path.join(root, "run", "port"), encoding="ascii") as stream:
-                candidate = stream.read().strip()
-            if re.fullmatch(r"[1-9][0-9]{0,4}", candidate) and 1024 <= int(candidate) <= 65535:
-                port = candidate
-        except OSError:
-            pass
+            _gated_seam("TEAM_SERVER_LAUNCHAGENTS_DIR",
+                        os.path.expanduser("~/Library/LaunchAgents")),
+            f"{label}.plist")
+        port_unknown_hint = ""
+        port = str(port) if port else "unknown"
+        if not port.isdigit() or not 1024 <= int(port) <= 65535:
+            port = "unknown"
+        if port == "unknown":
+            try:
+                with open(os.path.join(root, "run", "port"), encoding="ascii") as stream:
+                    candidate = stream.read().strip()
+                if re.fullmatch(r"[1-9][0-9]{0,4}", candidate) and 1024 <= int(candidate) <= 65535:
+                    port = candidate
+            except OSError:
+                pass
+        if port == "unknown":
+            port_unknown_hint = (" (run/port unreadable; pass --port <port> "
+                                 "and re-run doctor to probe a port)")
         answering = port if port != "unknown" and http_status(port) == "200" else "unanswered"
         # Panel R4: loaded + HTTP-200 is not health. Attribute the responder:
         # 'ours' only when the listener pid is the job's pid or a descendant.
@@ -954,10 +1368,11 @@ def doctor(root, label, verify_tree=True):
             attributed = "none"
         # LOW-13: a printed recovery must be runnable as written, so it
         # carries the root/label/port doctor was invoked against (port only
-        # when run/port still records one), not just the subcommand.
+        # when a port is actually known — else the error names --port), not
+        # just the subcommand.
         port_arg = f" --port {port}" if port != "unknown" else ""
         base_install = (f"team_server.sh install --replace --root {root}"
-                        f" --label {label}{port_arg}")
+                        f" --label {label}{port_arg}{port_unknown_hint}")
         server_receipt = os.path.join(root, "config", "server-runtime.json")
         if os.path.isfile(server_receipt):
             # Panel R1/LOW-13: packed mode verifies BOTH trees and says
@@ -969,7 +1384,9 @@ def doctor(root, label, verify_tree=True):
             node_row, node_version = node, "v" + VERSION
             build_row = server
             if verify_tree:
-                server_files = verify_packed_server(os.path.dirname(server))
+                server_files = verify_packed_server(
+                    os.path.dirname(server),
+                    force_full=(verify_tree == "full"))
                 tree_row = "node+server"
                 node_exec_check = "skipped-receipt-attested"
             else:
@@ -982,9 +1399,14 @@ def doctor(root, label, verify_tree=True):
                 with open(regular_file(legacy_conf), encoding="utf-8") as stream:
                     legacy_bin = stream.read().strip().splitlines()[0]
             except (OSError, ValueError, IndexError) as exc:
+                # FU7: name the recovery, not a bare I/O error — the runbook's
+                # 'Going back' step 3 is what records a server binary here.
+                # (Recovery wording leads: doctor_error lines truncate at
+                # 180 chars and the long path in {exc} would eat it.)
                 raise InstallError(
-                    f"no packed server receipt and no readable {legacy_conf} "
-                    f"— doctor cannot say what boots: {exc}") from exc
+                    f"recovery: runbook 'Going back' step 3 names a server "
+                    f"binary; rollback root's config/server-bin is unreadable: "
+                    f"{exc}") from exc
             if (not legacy_bin or not legacy_bin.startswith("/") or
                     os.path.islink(legacy_bin) or not os.path.isfile(legacy_bin)):
                 raise InstallError(
@@ -1022,6 +1444,18 @@ def doctor(root, label, verify_tree=True):
             if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
                 raise InstallError("pairing file must be owned by this user and mode 0600")
             age = max(0, int(time.time() - info.st_mtime))
+        # Item F: the recorded provider CLI folder. Doctor reports the RECORD
+        # (never resolves `claude` in its own shell — that is not the server's
+        # PATH); a pre-item-F root shows the re-run-install recovery inline.
+        provider_row = "missing (pre-item-F root; re-run install to record it)"
+        try:
+            with open(os.path.join(root, "config", "provider-cli-dir"),
+                      encoding="utf-8") as stream:
+                recorded_folder = stream.read().strip().splitlines()[0]
+            if recorded_folder.startswith("/") and os.path.isdir(recorded_folder):
+                provider_row = recorded_folder
+        except (OSError, ValueError, IndexError):
+            pass
         rows = [("label", label), ("loaded", "yes" if loaded else "no"),
                 ("pid", match.group(1) if match else "none"), ("port", port),
                 ("answeringPort", answering), ("answeringProcess", attributed),
@@ -1030,6 +1464,7 @@ def doctor(root, label, verify_tree=True):
                 ("nodeVersion", node_version), ("nodeExecCheck", node_exec_check),
                 ("buildPath", build_row), ("treeVerified", tree_row),
                 ("serverTreeFiles", server_files),
+                ("providerCliFolder", provider_row),
                 ("migrationHead", migration), ("serverLogBytes", size),
                 ("serverLogCapBytes", cap), ("pairingFileAgeSeconds", age)]
         for key, value in rows:
@@ -1060,6 +1495,14 @@ def doctor(root, label, verify_tree=True):
                   f"({attributed}) — this label's job is not serving; find it: "
                   f"lsof -nP -iTCP:{port} -sTCP:LISTEN")
             return 1
+        # Round 3 C: attribution that could not identify ANY listener is
+        # unknown, not healthy and not foreign — say so and let the retry (the
+        # lookup already retried once) decide.
+        if attributed.startswith("unknown"):
+            print(f"doctor_error=port {port} answering but attribution "
+                  f"UNKNOWN ({attributed}) — re-run doctor once lsof answers; "
+                  f"health is unverified until attribution says ours")
+            return 1
         if answering != port:
             print(f"doctor_error=port {port} not answering — recovery: runbook "
                   f"step 6 ({recovery_install}), then re-run doctor")
@@ -1074,34 +1517,59 @@ def doctor(root, label, verify_tree=True):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("install", "doctor", "resolve"):
+    for name in ("install", "doctor", "resolve", "provider-folder", "record-provider"):
         p = sub.add_parser(name)
-        p.add_argument("--root", required=True)
+        if name in ("provider-folder", "record-provider"):
+            # Item F: validate (and optionally record) the provider CLI whose
+            # folder install pins as config/provider-cli-dir.
+            p.add_argument("--root", required=True)
+            p.add_argument("--cli", required=True)
+        else:
+            p.add_argument("--root", required=True)
         if name == "install":
             p.add_argument("--archive", required=True)
             p.add_argument("--checksum", required=True)
             p.add_argument("--version", default=VERSION)
-        elif name == "doctor":
+        elif name in ("doctor",):
             p.add_argument("--label", required=True)
             p.add_argument("--verify-tree", action=argparse.BooleanOptionalAction,
                            default=True,
-                           help="recompute the full pinned-Node tree digest "
-                                "against the receipt (default: yes)")
-        else:
+                           help="verify both trees against their receipts "
+                                "(default: yes; cached stat triples where valid)")
+            p.add_argument("--full", action="store_true",
+                           help="force the FULL digest of both trees, past the "
+                                "stat caches (FU3: the caches are a "
+                                "same-user-writable performance artifact)")
+            p.add_argument("--port", default=None,
+                           help="probe this port when run/port is missing or "
+                                "unreadable (FU7)")
+        elif name == "resolve":
             p.add_argument("--command", choices=("node", "serve"), default="serve")
             p.add_argument("--verify-tree", action=argparse.BooleanOptionalAction,
                            default=None,
                            help="override whether resolve recomputes the tree digest")
+            p.add_argument("--status-file", default=None,
+                           help="append stage= lines while verifying (round 3 B: "
+                                "a slow boot must be observable)")
     args = parser.parse_args(argv)
     try:
         if args.command == "install":
             install_node(args.root, args.archive, args.checksum, args.version)
         elif args.command == "doctor":
-            return doctor(args.root, args.label, verify_tree=args.verify_tree)
+            return doctor(args.root, args.label,
+                          verify_tree=("full" if args.full else args.verify_tree),
+                          port=args.port)
+        elif args.command == "provider-folder":
+            # Item F: validate only; print the folder install would record.
+            print(validated_provider_cli(args.cli, root=validated_root(args.root)))
+        elif args.command == "record-provider":
+            # Item F: validate and record (config/provider-cli-dir, 0600).
+            print(record_provider_cli(args.root, args.cli))
         else:
             # F8: resolve applies the same root validation as install/doctor.
             print(resolve_command(validated_root(args.root), args.command,
-                                  verify_tree=args.verify_tree))
+                                  verify_tree=args.verify_tree,
+                                  status_file=args.status_file))
     except (InstallError, OSError, ValueError, EOFError, tarfile.TarError) as exc:
         print(f"team_runtime: {exc}", file=sys.stderr)
         return 1

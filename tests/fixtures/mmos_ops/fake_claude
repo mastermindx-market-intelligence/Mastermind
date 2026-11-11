@@ -1,0 +1,5 @@
+#!/bin/sh
+# fake_claude — the harness provider CLI. install discovers `claude` on PATH
+# (item F) and records this binary's folder as config/provider-cli-dir; the
+# runner then puts that folder on the server's PATH.
+echo "Claude Code fake 9.9.9 (harness)"

@@ -36,6 +36,9 @@ def free_port():
 def run_tool(*args, env_extra=None, input=None):
     env = dict(os.environ)
     env.pop("MMOS_T3_DEV_ROOT", None)
+    # Round 3 (FU4): the MMOS_*/TEAM_SERVER_* seams are test-only and gated
+    # behind MMOS_TEST_SEAMS=1; this suite runs entirely under that flag.
+    env["MMOS_TEST_SEAMS"] = "1"
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
@@ -223,6 +226,47 @@ class TestInstallHygiene:
         assert r.returncode != 0
         assert "not executable" in (r.stdout + r.stderr)
 
+    def test_http_probes_carry_a_max_time(self):
+        # Micro-fix round, HIGH-1: curl has NO default timeout, so an
+        # unbounded probe against a wedged local port can hang an install,
+        # start or stop for minutes past every wait window while the operator
+        # sees nothing. Every HTTP probe the tool makes must bound itself.
+        text = TOOL.read_text()
+        probes = [line for line in text.splitlines()
+                  if '"$CURL"' in line and "%{http_code}" in line]
+        assert len(probes) == 3, probes
+        assert all("--max-time 5" in line for line in probes), probes
+
+    def test_base_wait_window_capped_on_the_wall_clock(self):
+        # MF-MED-C: the base window in wait_ours counts 1 s ITERATIONS, but a
+        # wedged-but-accepting listener stretches each one to ~6.6 s (curl
+        # --max-time 5 + sleep 1), so a count-open base window could run
+        # ~20 min of wall clock while the 900 s cap bounded extensions only.
+        # The base window must also stop on the wall clock, and the stop must
+        # name the port holder via lsof so the operator can act immediately.
+        text = TOOL.read_text()
+        m = re.search(r"^wait_ours\(\) \{.*?^\}", text, re.M | re.S)
+        assert m, "wait_ours not found"
+        body = m.group(0)
+        assert re.search(
+            r'\[ "\$_i" -lt "\$_w" \] && \[ \$\(\( _now - _start \)\) -ge 900 \]',
+            body), "base window lacks the 900s wall cap"
+        assert '"$LSOF" -tP -iTCP:"$_p" -sTCP:LISTEN' in body, \
+            "the wall cap does not name the port holder via lsof"
+        assert "wedged-but-accepting" in body, \
+            "the cap's message does not explain the stretch"
+
+    def test_every_unload_fallback_is_env_i_clean(self):
+        # Micro-fix round (FU1 completion): every launchd mutation runs
+        # env -i'd so a hostile environment cannot steer it — except stop's
+        # unload fallback, the one path still bare. It must match the other
+        # three sites (bootstrap/load at install, start and cleanup).
+        text = TOOL.read_text()
+        unloads = [line.strip() for line in text.splitlines()
+                   if "unload -w" in line]
+        assert unloads, "no unload fallback found"
+        assert all("env -i" in line for line in unloads), unloads
+
 
 class TestAttackRoundFixes:
     """Regression tests for the 2026-11-10 attack-round findings (writer:
@@ -311,6 +355,10 @@ class TestAttackRoundFixes:
         (root / "fabric.env").write_text("DUMMY=1\n")
         (root / "fabric.env").chmod(0o600)
         (cfg / "python3-path").write_text("/opt/homebrew/bin/python3.12\n")
+        # Item F: the provider record the runner now requires before it will
+        # reach the server-bin refusal this test exists to check.
+        (root / "provider-bin").mkdir()
+        (cfg / "provider-cli-dir").write_text(f"{root}/provider-bin\n")
         (run / "port").write_text(str(free_port()))
         r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
                            capture_output=True, text=True, timeout=30)
@@ -352,6 +400,10 @@ class TestAttackRoundFixes:
         (root / "fabric.env").chmod(0o600)
         (cfg / "python3-path").write_text("/opt/homebrew/bin/python3.12\n")
         (cfg / "server-bin").write_text("/usr/bin/false\n")
+        # Item F: the provider record the runner now requires before it will
+        # reach the port refusal this test exists to check.
+        (root / "provider-bin").mkdir()
+        (cfg / "provider-cli-dir").write_text(f"{root}/provider-bin\n")
         for bad in ("", "03773", "65536", "37x3"):
             (run / "port").write_text(bad + "\n")
             r = subprocess.run(["/bin/sh", str(RUNNER), str(root)],
@@ -408,6 +460,10 @@ class TestRunnerHygiene:
         (root / "fabric.env").chmod(0o600)
         (cfg / "python3-path").write_text("/opt/homebrew/bin/python3.12\n")
         (cfg / "server-bin").write_text("/usr/bin/false\n")
+        # Item F: the provider record the runner now requires before it will
+        # reach the exec whose log truncation this test exists to check.
+        (root / "provider-bin").mkdir()
+        (cfg / "provider-cli-dir").write_text(f"{root}/provider-bin\n")
         (cfg / "log-cap").write_text("1024\n")
         (run / "port").write_text(str(free_port()))
         log = run / "server.log"
@@ -451,3 +507,42 @@ class TestPlistShape:
         assert data["ProgramArguments"][0] == "/bin/sh"
         assert "EnvironmentVariables" not in data  # no env (thus no keys) in plist
         assert data["StandardOutPath"] == "/tmp/root/run/server.log"
+
+
+class TestRound3Plist:
+    def test_a2_plist_declares_process_type_interactive(self):
+        # Repair round 3 A2: a launchd agent with no ProcessType key runs in
+        # the background I/O band — under load the runner's tree verifies were
+        # starved for minutes (the 22-minute switch). Interactive is the
+        # declared scheduling class for a foreground service we wait on.
+        text = TOOL.read_text()
+        m = re.search(r"cat > \"\$PLIST_TMP\" <<EOF\n(.*?)\nEOF", text, re.S)
+        assert m, "plist heredoc not found"
+        body = (m.group(1)
+                .replace("$LABEL", "com.example.shape")
+                .replace("$ROOT", "/tmp/root"))
+        data = plistlib.loads(body.encode())
+        assert data.get("ProcessType") == "Interactive"
+
+    def test_fu8_plist_heredoc_failure_dies(self, dev_root, launchagents_dir):
+        # FU8: the plist heredoc itself was unchecked — a LaunchAgents dir we
+        # cannot write left a silent failure (or worse, a half-written temp
+        # renamed into place by a later run). A failed heredoc must die there,
+        # naming the plist path.
+        os.chmod(dev_root, 0o700)
+        ro = Path(launchagents_dir) / "ro"
+        ro.mkdir()
+        os.chmod(ro, 0o500)
+        server = tmp_bin = dev_root.parent / "true-server"
+        server.write_text("#!/bin/sh\nexec /bin/sleep 30\n")
+        os.chmod(server, 0o755)
+        try:
+            r = install(dev_root, free_port(), "com.example.t6-fu8",
+                        "--server-bin", str(server),
+                        env_extra={"TEAM_SERVER_LAUNCHAGENTS_DIR": str(ro)})
+            assert r.returncode != 0
+            out = r.stdout + r.stderr
+            assert "plist" in out.lower(), out
+            assert "cannot write" in out or "heredoc" in out.lower(), out
+        finally:
+            os.chmod(ro, 0o700)

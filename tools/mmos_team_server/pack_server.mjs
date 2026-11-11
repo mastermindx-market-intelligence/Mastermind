@@ -128,11 +128,44 @@ try {
   }
   function refuseExisting() {
     let hint = "inspect before retrying";
-    if (fs.existsSync(target) && !fs.existsSync(configPath) && fs.existsSync(configTmp)) {
-      hint = `a previous pack published ${target} but could not install its config receipt; ` +
-        `finish by hand: mv ${configTmp} ${configPath}`;
+    if (fs.existsSync(target) && !fs.existsSync(configPath)) {
+      hint = `the release is published but its config receipt is missing; ` +
+        `the next pack auto-finishes it (or by hand: cp ` +
+        `${path.join(target, "PUBLISH_RECEIPT.json")} ${configPath})`;
     }
     throw new Error(`packed runtime or its receipt already exists; ${hint}`);
+  }
+  // FU10 (P23 remainder): heal an interrupted publish BEFORE deciding. A
+  // previous pack's tree landed but its config receipt did not; the receipt
+  // to install is the packer's own PUBLISH_RECEIPT.json inside the published
+  // release (or, for a pre-FU10 interruption, the staged config tmp).
+  // Healing is one idempotent copy validated against the release it names;
+  // the release itself stays untouched and the repack refusal below still
+  // fires — no human mv, ever again.
+  if (fs.existsSync(target) && !fs.existsSync(configPath)) {
+    let healed = null;
+    const embedded = path.join(target, "PUBLISH_RECEIPT.json");
+    if (fs.existsSync(embedded)) healed = fs.readFileSync(embedded, "utf8");
+    else if (fs.existsSync(configTmp)) healed = fs.readFileSync(configTmp, "utf8");
+    if (healed !== null) {
+      let record;
+      try { record = JSON.parse(healed); } catch { record = null; }
+      // realpath compare: the tmp root may be reached through /var vs
+      // /private/var; only the resolved tree identity matters.
+      const expectedDist = path.join(target, "dist");
+      const namesRightTree = record && typeof record.buildDir === "string" &&
+        fs.existsSync(record.buildDir) &&
+        fs.realpathSync(record.buildDir) === fs.realpathSync(expectedDist);
+      if (!namesRightTree) {
+        throw new Error(`interrupted publish at ${target} but its receipt names ` +
+          `another tree (${record ? record.buildDir : "unparseable"}); inspect by hand`);
+      }
+      const healTmp = `${configPath}.heal`;
+      fs.writeFileSync(healTmp, healed, { mode: 0o600 });
+      fs.renameSync(healTmp, configPath);
+      try { fs.unlinkSync(configTmp); } catch (err) { if (err.code !== "ENOENT") throw err; }
+      console.log(`PACKFinishedInterruptedPublish=${target} (config receipt installed)`);
+    }
   }
   if (fs.existsSync(target) || fs.existsSync(configPath)) refuseExisting();
   // F24: a failed install must leave its log AND name it — the old `wx` write
@@ -264,20 +297,21 @@ try {
   };
   fs.writeFileSync(path.join(dist, "BUILD_RECEIPT.json"), JSON.stringify(receipt, null, 2) + "\n", { mode: 0o600 });
   fs.writeFileSync(path.join(stage, "file-digests.json"), JSON.stringify(files, null, 2) + "\n", { mode: 0o600 });
-  // F12: everything that can fail while writing is done BEFORE the single
-  // publishing rename, so a refusal publishes nothing. The config receipt
-  // (the file the resolver reads) is staged first and moved into place with a
-  // rename after the tree lands; a crash between the two renames leaves the
-  // tree published, the config receipt one `mv` away, and the next run's
-  // refusal says exactly that.
-  try { fs.unlinkSync(configTmp); } catch (e) { if (e.code !== "ENOENT") throw e; }
-  fs.writeFileSync(configTmp, JSON.stringify(receipt, null, 2) + "\n", { mode: 0o600 });
+  // FU10: the receipt to install travels INSIDE the staged release, so the
+  // single publishing rename publishes tree and receipt together. A crash
+  // after the rename but before the config copy below is healed by the
+  // interrupted-publish recovery at the top of the next run — never by a
+  // human mv. (F12 unchanged: everything that can fail while writing is
+  // done BEFORE the rename, so a refusal still publishes nothing.)
+  fs.writeFileSync(path.join(stage, "PUBLISH_RECEIPT.json"), JSON.stringify(receipt, null, 2) + "\n", { mode: 0o600 });
   fs.renameSync(stage, target);
   activated = true;
   try {
-    fs.renameSync(configTmp, configPath);
+    const healTmp = `${configPath}.new`;
+    fs.writeFileSync(healTmp, JSON.stringify(receipt, null, 2) + "\n", { mode: 0o600 });
+    fs.renameSync(healTmp, configPath);
   } catch (err) {
-    throw new Error(`packed runtime published at ${target} but its config receipt could not be installed: ${err.message}; finish by hand: mv ${configTmp} ${configPath}`);
+    throw new Error(`packed runtime published at ${target} but its config receipt could not be installed (${err.message}); the next pack auto-finishes it, or by hand: cp ${path.join(target, "PUBLISH_RECEIPT.json")} ${configPath}`);
   }
   console.log(`PACKED version=${serverPackage.version} server=${receipt.serverBin} files=${files.length}`);
 } finally {
