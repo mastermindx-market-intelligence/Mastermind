@@ -654,6 +654,21 @@ def test_ask_for_unknown_or_foreign_teammate_is_plain_reply():
     assert pc.issues["is-1"]["status"] == "in_review"
 
 
+def test_ask_block_strips_the_description_label_from_the_first_line():
+    # R2a finding 28: the block format shows `description:` as a labeled
+    # field; a teammate that labels it must not deliver the label itself in
+    # the child issue's description. `description: please` -> `please`.
+    block = ("```paperclip-ask\nassignee: Atlas-TEST\n"
+             "title: Count lines\ndescription: please\n```")
+    assert wc.parse_ask_block(block)["description"] == "please"
+    multi = ("```paperclip-ask\nassignee: Atlas-TEST\n"
+             "title: Count lines\ndescription: please\nalso soon\n```")
+    assert wc.parse_ask_block(multi)["description"] == "please\nalso soon"
+    unlabeled = ("```paperclip-ask\nassignee: Atlas-TEST\n"
+                 "title: Count lines\nplease\n```")
+    assert wc.parse_ask_block(unlabeled)["description"] == "please"
+
+
 def test_ask_block_with_words_after_the_fence_is_not_an_ask():
     # R2a finding 18: an ask block counts only when it ends the reply. Words
     # after the closing fence mean the teammate kept talking — a block they

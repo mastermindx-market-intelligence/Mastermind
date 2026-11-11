@@ -273,6 +273,13 @@ def parse_ask_block(reply):
         if title is None and line.strip().startswith("title:"):
             title = line.split(":", 1)[1].strip()
             continue
+        # R2a finding 28: the block format shows `description:` as a labeled
+        # field like assignee/title. A first description line that carries
+        # the label loses it — `description: please` -> `please`. Later
+        # lines are kept verbatim; an unlabeled first line is kept verbatim.
+        if not desc_lines and line.strip().startswith("description:"):
+            desc_lines.append(line.split(":", 1)[1].strip())
+            continue
         desc_lines.append(line)
     if not closed or not assignee or not (title or "").strip():
         return None
