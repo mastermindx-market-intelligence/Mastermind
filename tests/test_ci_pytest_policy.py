@@ -1184,6 +1184,10 @@ def test_plan_line_reports_shard_sizes_and_default_omits_them():
 def test_sharded_gate_runs_every_resolved_module_once(tmp_path, monkeypatch):
     included = tuple(f"tests/test_m{index}.py" for index in range(10))
     shards = cip.partition_modules(included, jobs=3)
+    # This asserts the serial argv shape (everything after -q is a module);
+    # a shard job exporting CI_PYTEST_WORKERS would add xdist flags that the
+    # positional slice would misread as modules.
+    monkeypatch.delenv("CI_PYTEST_WORKERS", raising=False)
     seen: list[str] = []
 
     def fake_popen(argv, **kwargs):
