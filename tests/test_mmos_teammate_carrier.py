@@ -1144,6 +1144,122 @@ def test_two_done_ask_children_return_oldest_first_then_deliver():
     assert t3.sends == []
 
 
+def test_multi_child_return_delivers_the_answer_sent_this_run():
+    # Two done children: the second's return turn was answered long ago,
+    # the first's is sent THIS run. The loop delivered the last-processed
+    # answer — the stale reconciled one — so the asker's newest word never
+    # reached the issue. An answer produced by this run beats a reconciled
+    # one.
+    issues, ask_op, child1 = blocked_parent_with_done_child()
+    child2 = dict(child1, id="ch-2", identifier="MMO-3",
+                  assigneeAgentId="ag-vega", title="Review it")
+    issues["is-1"]["blockedBy"] = board.blocked_by(child1, child2)
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [dict(child1), child2]
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    pc.comment_rows["ch-2"] = [board.served_comment(
+        "the summary is right", author_agent_id="ag-vega")]
+    ret2 = f"{ask_op}-ch-2-ret"   # answered in an earlier run
+    t3 = FakeT3(messages=[("user", "r9", f"[{ret2}]\n\nthe ask came back"),
+                          ("assistant", "r9", "OLD: the summary is right")],
+                replies=["NEW: 12 lines and the review agrees"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert len(t3.sends) == 1                    # only the fresh turn sent
+    posted = [c[2] for c in pc.calls if c[0] == "comment"]
+    assert any("NEW: 12 lines" in body for body in posted)
+    assert not any("OLD: the summary" in body for body in posted)
+
+
+def test_create_failure_readback_adopts_only_this_asks_child():
+    # The create failed and the read-back scanned for the marker — but the
+    # marker is the PARENT's content, so a sibling of a different ask
+    # matches too. The carrier adopted that sibling: the parent blocked on
+    # a child this ask never created and the asked teammate was never
+    # woken. The read-back matches this ask's assignee and title; no match
+    # fails the run honestly.
+    roster = {"Vega-TEST": "ag-vega"}
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    ask_op = f"{op}-ask"
+    vega_ask = ("I need Vega.\n\n"
+                "```paperclip-ask\n"
+                "assignee: Vega-TEST\n"
+                "title: Review the summary\n"
+                "description: Read it and say if it is right.\n"
+                "```\n")
+    parent = board.served_parent(
+        id="is-1", identifier="MMO-1", status="todo", dependencyReady=True,
+        title="Summarize file X",
+        description="Write a three-line summary.")
+    sibling = board.served_child(
+        id="ch-1", identifier="MMO-2", parentId="is-1",
+        assigneeAgentId="ag-atlas", title="Review the summary",
+        status="todo",
+        description=f"Asked by Mira on MMO-1 [{ask_op}]")
+    parent["blockedBy"] = board.blocked_by(sibling)
+    pc = FakePaperclip(issues={"is-1": parent}, fail=("create_issue",))
+    pc.child_rows["is-1"] = [dict(sibling)]
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}]\n\ntask"),
+                          ("assistant", "r1", vega_ask)])
+    with pytest.raises(wc.CarrierError):
+        run_with_roster(pc, t3, roster)
+    assert [c for c in pc.calls if c[0] == "block"] == []  # nobody adopted
+
+
+def test_a_second_ask_keeps_the_first_child_in_the_blocker_set():
+    # The unblock PATCH carries the WHOLE blocker set, and the carrier sent
+    # only the new child: the first child's relation was deleted, its
+    # completion could never wake the parent home, and its answer was lost
+    # to the asker. The set is merged — every relation the board already
+    # recorded, plus this child.
+    issues, ask_op, child = blocked_parent_with_done_child()
+    child["status"] = "todo"            # the first ask is still open
+    roster = {"Vega-TEST": "ag-vega"}
+    op = wc.op_id("is-1", "Report the line count\nAsk an engineer for "
+                           "the count.")
+    vega_ask = ("I need Vega for the review.\n\n"
+                "```paperclip-ask\n"
+                "assignee: Vega-TEST\n"
+                "title: Review it\n"
+                "description: read it and say if it is right.\n"
+                "```\n")
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [dict(child)]
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}]\n\ntask"),
+                          ("assistant", "r1", vega_ask)])
+    assert run_with_roster(pc, t3, roster) == 0
+    blocks = [c for c in pc.calls if c[0] == "block"]
+    assert blocks                       # the parent re-blocked on the new child
+    new_ids = {row["id"] for row in pc.child_rows["is-1"]} - {"ch-1"}
+    assert len(new_ids) == 1
+    assert set(blocks[-1][2]) == {"ch-1"} | new_ids   # both relations kept
+
+
+def test_single_to_multi_transition_never_resends_the_first_turn():
+    # The single-child era addressed its return turn with the unsuffixed
+    # op. A second child makes the loop probe per-child ops — the first
+    # child's answered legacy turn must still reconcile instead of sending
+    # a duplicate turn (exact-text dedupe does not protect thread turns).
+    issues, ask_op, child1 = blocked_parent_with_done_child()
+    child2 = dict(child1, id="ch-2", identifier="MMO-3",
+                  assigneeAgentId="ag-vega", title="Review it")
+    issues["is-1"]["blockedBy"] = board.blocked_by(child1, child2)
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [dict(child1), child2]
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    pc.comment_rows["ch-2"] = [board.served_comment(
+        "the review agrees", author_agent_id="ag-vega")]
+    legacy = f"{ask_op}-ret"           # the single-child era's op, answered
+    t3 = FakeT3(messages=[("user", "r1", f"[{legacy}]\n\nthe ask came back"),
+                          ("assistant", "r1", "OLD: 12 lines")],
+                replies=["SECOND: the review agrees"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert len(t3.sends) == 1          # only the second child's turn
+    assert "the review agrees" in t3.sends[0]
+    posted = [c[2] for c in pc.calls if c[0] == "comment"]
+    assert any("SECOND" in body for body in posted)  # the asker's fresh word
+    assert not any(body.startswith("OLD:") for body in posted)
+
+
 def test_return_replay_never_resends_or_duplicates():
     issues, ask_op, child = blocked_parent_with_done_child()
     ret_op = f"{ask_op}-ret"

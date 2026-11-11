@@ -1658,15 +1658,35 @@ def handle_return(pc, t3, issue, ask_op, opts):
         return 0
     done_rows = family  # all done here; oldest first as the list serves them
     single = len(done_rows) == 1
-    reply = None
-    for child in done_rows:
+    stale_reply = None   # reconciled from a turn an earlier run sent
+    fresh_reply = None   # produced by THIS run's send/wait
+    for idx, child in enumerate(done_rows):
         ret_op = _return_op(ask_op, child, single)
+        # The single-child era addressed its return turn with the unsuffixed
+        # op; only the OLDEST child can own that turn. When the per-child op
+        # is absent but the legacy one lives in the thread, reconcile it —
+        # a single-to-multi transition must not resend a duplicate turn.
+        legacy_op = None
+        if idx == 0 and ret_op != f"{ask_op}-ret":
+            legacy_op = f"{ask_op}-ret"
         # R2a finding 16: the bounded lookback applies to the return marker.
         state, existing, thread = scan_marker_deep(t3, ret_op)
+        if state is None and legacy_op:
+            legacy_state, legacy_existing, legacy_thread = scan_marker_deep(
+                t3, legacy_op)
+            if legacy_state == "window_exhausted":
+                raise CarrierError(
+                    f"return marker {legacy_op} is beyond the lookback "
+                    "bound and unreadable this run")
+            if legacy_state is not None:
+                state, existing, thread = (legacy_state, legacy_existing,
+                                           legacy_thread)
+                ret_op = legacy_op
         if state == "reply":
             log(f"{ret_op} already answered in the thread; reconciling, "
                 "no resend")
-            reply = existing  # the newest answered turn wins the delivery
+            if fresh_reply is None and stale_reply is None:
+                stale_reply = existing
             continue
         if state == "window_exhausted":
             # beyond the lookback bound without an answer this run can read:
@@ -1685,14 +1705,17 @@ def handle_return(pc, t3, issue, ask_op, opts):
                 "is posted as the issue comment and completes the issue."
             )
             log(f"sending {ret_op} to the asker's thread")
-            reply = send_and_stay(pc, t3, issue, message, ret_op, opts)
+            fresh_reply = send_and_stay(pc, t3, issue, message, ret_op, opts)
         else:  # pending
             if _pending_requests(thread) > 0:
                 log(f"{ret_op} is pending on a waiting question; staying with it")
-                reply = stay_with_question(pc, t3, issue, ret_op, opts)
+                fresh_reply = stay_with_question(pc, t3, issue, ret_op, opts)
             else:
                 log(f"{ret_op} already in the thread and still pending; waiting, no resend")
-                reply = wait_for_reply(t3, ret_op, opts)
+                fresh_reply = wait_for_reply(t3, ret_op, opts)
+    # An answer produced by THIS run is the asker's newest word; a
+    # reconciled one stands in only when nothing fresh came back.
+    reply = fresh_reply if (fresh_reply or "").strip() else stale_reply
     if not (reply or "").strip():
         raise CarrierError("thread reply was empty")
     # Attack finding 12: the asker's post-return reply was never parsed for
@@ -1767,7 +1790,7 @@ def handle_ask(pc, issue, reply, ask, op, opts):
     # (same assignee, same sanitised title) — a revised ask to another
     # teammate gets its own child instead of being swallowed by the earlier
     # one, which left the second teammate never woken.
-    want_title = strip_markers(ask["title"])
+    want_title = strip_markers(ask["title"]) or "Asked work"
     for row in pc.children(issue["id"]):
         # A finished (done/cancelled) child is not work in flight: reusing
         # it re-blocked the parent on a DONE blocker — the return edge
@@ -1800,7 +1823,7 @@ def handle_ask(pc, issue, reply, ask, op, opts):
         # `[pc-…` text it wrote can ride into the child description.
         # Attack finding 14: a title that is ONLY a marker strips to "" — the
         # fallback is a plain label, never the unsanitised ask text back.
-        title = strip_markers(ask["title"]) or "Asked work"
+        title = want_title
         description = strip_markers(ask["description"])
         try:
             child = pc.create_issue(company_id, {
@@ -1817,8 +1840,14 @@ def handle_ask(pc, issue, reply, ask, op, opts):
             # be lost while the server executed it — read the children back
             # for this marker before failing the run (the next wake's reuse
             # scan would find it too; this run can then finish cleanly).
+            # The marker alone is not this ask's child: the marker is the
+            # PARENT's content, so a sibling of a different ask matches it
+            # too. Adopt only this ask's own child — same assignee, same
+            # title the create would have written.
             for row in pc.children(issue["id"]):
-                if is_ask_child_of(row, issue):
+                if (is_ask_child_of(row, issue)
+                        and row.get("assigneeAgentId") == agent_id
+                        and (row.get("title") or "") == want_title):
                     log(f"ask create failed ({exc}) but child "
                         f"{row.get('identifier')} exists; continuing")
                     child = row
@@ -1836,11 +1865,18 @@ def handle_ask(pc, issue, reply, ask, op, opts):
         # This build refuses an agent naming ANOTHER agent as unblock owner
         # (403 "Agents may only name themselves as an unblock owner", live
         # 2026-11-10): the asker owns its own unblock; the action text still
-        # names the teammate whose work it waits for.
+        # names the teammate whose work it waits for. The PATCH carries the
+        # WHOLE blocker set — keep every relation the board already recorded
+        # for this parent (an earlier ask's child still has to wake it
+        # home), plus this child. And the action names the sanitised title:
+        # a marker-shaped or prose-polluted ask title never rides raw into
+        # board text.
+        blocker_ids = list(dict.fromkeys(
+            recorded_blocker_ids(fresh) + [child["id"]]))
         pc.block_issue(
-            issue["id"], [child["id"]], me.get("id"),
+            issue["id"], blocker_ids, me.get("id"),
             f"{ask['assignee']} completes {child.get('identifier')}: "
-            f"{ask['title']}")
+            f"{want_title}")
     if not comment_already_present(pc, issue["id"], reply):
         pc.add_comment(issue["id"], reply)
     log(f"parent {issue.get('identifier')} left blocked on "
