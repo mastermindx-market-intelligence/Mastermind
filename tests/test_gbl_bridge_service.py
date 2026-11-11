@@ -79,8 +79,14 @@ class FakeStore:
     def append_ask_event(self, ask_id, event):
         record = self.asks[ask_id]
         stamped = {**event, "trusted": True}
-        stamped["seq"] = ((record["events"][-1].get("seq", -1) + 1)
-                          if record["events"] else 0)
+        # Round-2 contract: seq derives ONLY from the store's own trusted
+        # appends — a foreign/untrusted row (which carries no store seq)
+        # never moves the counter, so a trailing foreign comment cannot
+        # reset the sequence and brick the record.
+        last_trusted = max(
+            (existing.get("seq", -1) for existing in record["events"]
+             if existing.get("trusted") is True), default=-1)
+        stamped["seq"] = last_trusted + 1
         if not any(self._same_event(stamped, existing)
                    for existing in record["events"]):
             record["events"].append(stamped)

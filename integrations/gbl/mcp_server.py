@@ -444,7 +444,10 @@ def create_gbl_mcp_app(
             if maximum is not None and len(value) > maximum:
                 raise GblEdgeError("INVALID_ARGUMENTS",
                                    f"{key} exceeds {maximum} characters")
-            if pattern is not None and re.match(pattern, value) is None:
+            if pattern is not None and re.fullmatch(pattern, value) is None:
+                # fullmatch, not match: a $-anchored pattern would otherwise
+                # admit a trailing newline the bridge's own fullmatch law
+                # refuses — the edge and the core must agree exactly.
                 raise GblEdgeError("INVALID_ARGUMENTS", f"{key} is malformed")
         return dict(arguments)
 

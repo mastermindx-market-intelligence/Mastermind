@@ -210,10 +210,18 @@ class GblBridge:
         sequence or the defect is named typed (panel B M1/M2 — a broken
         stamp may never silently reorder the chain, and the typed refusal
         names the exact defect instead of bricking the record as a random
-        ASK_STATE_REGRESSION)."""
+        ASK_STATE_REGRESSION).  Round 2: the ``trusted`` stamp must be an
+        exact bool — a truthy 1, a ``"true"`` string or a null is a typed
+        EVENT_TRUST_INVALID, never an authoritative event that slips past
+        the seq law because ``is True``/``is False`` both miss it."""
         events = list(record.get("events", ()))
         last_seq: int | None = None
         for event in events:
+            if "trusted" in event and type(event["trusted"]) is not bool:
+                raise GblBridgeError(
+                    "EVENT_TRUST_INVALID",
+                    f"trusted stamp must be a bool, got "
+                    f"{type(event['trusted']).__name__}")
             if event.get("trusted") is False:
                 continue                       # foreign author: never authoritative
             if event.get("trusted") is True:
@@ -411,10 +419,28 @@ class GblBridge:
                     if event.get("type") == "nudge_attempt"]
         if len(nudges) >= MAX_RENUDGES_PER_ASK:
             raise GblBridgeError("RENUDGE_BUDGET_EXHAUSTED", ask_id)
-        # Cooldown counts DELIVERED nudges and unresolved attempts alike:
-        # an attempt whose effect is unknown is inside its cooldown until
-        # reconcile settles it — an immediate second POST is never lawful.
-        markers = nudges + attempts
+        # Round 2 (the M8 residue): an attempt is SETTLED only by a nudge or
+        # nudge_settled event appended after it — by the receipt here (a
+        # definite no-start) or by reconcile_nudge (an effect-unknown send).
+        # An unsettled attempt blocks re-nudge for good: time never re-arms
+        # an effect whose outcome is unknown, because the only lawful next
+        # step is reconcile, never a second POST of the same wake.
+        settled_after_last_attempt = False
+        for event in events:
+            if event.get("type") == "nudge_attempt":
+                settled_after_last_attempt = False
+            elif event.get("type") in ("nudge", "nudge_settled"):
+                settled_after_last_attempt = True
+        if attempts and not settled_after_last_attempt:
+            raise GblBridgeError(
+                "NUDGE_ATTEMPT_UNSETTLED",
+                "an effect-unknown nudge attempt must be settled by "
+                "reconcile before any re-nudge; it is never re-sent")
+        # Cooldown counts every marker — delivered nudges, attempts and
+        # settlements — so spacing between actual wake POSTs is enforced.
+        markers = nudges + attempts + [
+            event for event in events
+            if event.get("type") == "nudge_settled"]
         if markers:
             last = max(_parse_iso(event["at"]) for event in markers)
             elapsed = (now - last).total_seconds()
@@ -434,6 +460,11 @@ class GblBridge:
         except WakeEffectUnknownError:
             return {"status": "NUDGE_EFFECT_UNKNOWN", "ask_id": ask_id}
         except WakePreSubmitError as exc:
+            # A definite no-start settles the attempt immediately: nothing
+            # unknown remains, so the lane stays usable after cooldown.
+            self._store.append_ask_event(ask_id, {
+                "type": "nudge_settled", "outcome": "NOT_DELIVERED",
+                "state": "ANSWERED", "at": at})
             return {"status": "NUDGE_NOT_DELIVERED", "ask_id": ask_id,
                     "reason_code": str(getattr(exc, "reason_code", ""))}
         except WakeDispatchError as exc:
@@ -448,24 +479,37 @@ class GblBridge:
                     "nudge_count": len(nudges) + 1}
         if outcome in (TransportOutcome.TARGET_UNAVAILABLE,
                        TransportOutcome.FAILED):
+            self._store.append_ask_event(ask_id, {
+                "type": "nudge_settled", "outcome": "NOT_DELIVERED",
+                "state": "ANSWERED", "at": at})
             return {"status": "NUDGE_NOT_DELIVERED", "ask_id": ask_id,
                     "reason_code": str(getattr(receipt, "reason_code", ""))}
         raise GblBridgeError("NUDGE_RECEIPT_INVALID",
                              f"unrecognized receipt shape {type(sent).__name__}")
 
-    def reconcile_nudge(self, *, ask_id: str) -> dict[str, Any]:
+    def reconcile_nudge(self, *, principal: str,
+                        ask_id: str) -> dict[str, Any]:
         """M8's settle path: reconcile the last unresolved nudge attempt by
-        OBSERVING the transport — never by sending again.  A delivered
-        outcome appends the budget-counting nudge event; a definite
-        non-delivery settles the attempt without burning budget."""
+        OBSERVING the transport — never by sending again.  Round 2: the same
+        creator-or-addressee party check as every other mutating op, and
+        BOTH outcomes settle durably — delivered appends the budget-counting
+        nudge event; a definite non-delivery appends a ``nudge_settled``
+        marker so the lane re-arms after cooldown without burning budget."""
         record = self._require_ask(ask_id)
+        self._require_party(record, principal)
         events = self._ordered_events(record)
         attempts = [event for event in events
                     if event.get("type") == "nudge_attempt"]
         nudges = [event for event in events if event.get("type") == "nudge"]
         if not attempts:
             raise GblBridgeError("NUDGE_ATTEMPT_NOT_FOUND", ask_id)
-        if nudges and (events.index(nudges[-1]) > events.index(attempts[-1])):
+        settled_after_last_attempt = False
+        for event in events:
+            if event.get("type") == "nudge_attempt":
+                settled_after_last_attempt = False
+            elif event.get("type") in ("nudge", "nudge_settled"):
+                settled_after_last_attempt = True
+        if settled_after_last_attempt:
             raise GblBridgeError("NUDGE_ALREADY_SETTLED", ask_id)
         if self._nudge_sender is None or self._resolve_handle is None:
             raise GblBridgeError("NUDGE_SENDER_UNAVAILABLE", ask_id)
@@ -476,6 +520,9 @@ class GblBridge:
         except WakeEffectUnknownError:
             return {"status": "NUDGE_EFFECT_UNKNOWN", "ask_id": ask_id}
         except WakePreSubmitError as exc:
+            self._store.append_ask_event(ask_id, {
+                "type": "nudge_settled", "outcome": "NOT_DELIVERED",
+                "state": "ANSWERED", "at": attempts[-1]["at"]})
             return {"status": "RECONCILED_NOT_DELIVERED", "ask_id": ask_id,
                     "reason_code": str(getattr(exc, "reason_code", ""))}
         except WakeDispatchError as exc:
@@ -491,6 +538,9 @@ class GblBridge:
                     "nudge_count": len(nudges) + 1}
         if outcome in (TransportOutcome.TARGET_UNAVAILABLE,
                        TransportOutcome.FAILED):
+            self._store.append_ask_event(ask_id, {
+                "type": "nudge_settled", "outcome": "NOT_DELIVERED",
+                "state": "ANSWERED", "at": attempts[-1]["at"]})
             return {"status": "RECONCILED_NOT_DELIVERED", "ask_id": ask_id,
                     "reason_code": str(getattr(receipt, "reason_code", ""))}
         raise GblBridgeError("NUDGE_RECEIPT_INVALID",
@@ -761,7 +811,8 @@ _OP_ARGUMENTS = {
                  frozenset({"principal", "ask_id"})),
     "status": (frozenset({"principal", "ask_id"}),
                frozenset({"principal", "ask_id"})),
-    "reconcile": (frozenset({"ask_id"}), frozenset({"ask_id"})),
+    "reconcile": (frozenset({"principal", "ask_id"}),
+                  frozenset({"principal", "ask_id"})),
 }
 
 _OP_METHODS = {
