@@ -977,6 +977,17 @@ CONTROL_BUNDLE_FILES = (
     "ops/native_fabric/quota_continuity/source/glm_keys.py",
     "ops/native_fabric/quota_continuity/source/go_shim.py",
     "ops/native_fabric/support_policy_status/reader.py",
+    "ops/native_fabric/provider_plans/fleet_launch_repair/profile.json",
+    "ops/native_fabric/provider_plans/fleet_launch_repair/fabric_task.py.patch",
+    "ops/native_fabric/provider_plans/fleet_launch_repair/lease_broker.py.patch",
+    "ops/native_fabric/provider_plans/fleet_launch_repair/remote_sub.sh.patch",
+    "ops/native_fabric/provider_plans/fleet_launch_repair/support_bundle.py.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/composition.json",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/fabric_task.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/lease_broker.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/remote_sub.sh.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/provider_application/fleet_launch_repair/support_bundle.py.forward.patch",
+    "ops/native_fabric/quota_continuity/rollout/preimages/glm_application_core_5c3d/lease_broker_provider_memory.py",
 )
 # Exact inert pre-control-bundle snapshots observed on the original M2 host.
 # These are NOT executable/source dependencies and confer no runtime authority.

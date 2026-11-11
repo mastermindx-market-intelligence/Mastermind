@@ -246,7 +246,7 @@ def _md_table(tbl_lines, S, content_w):
         st = S["th"] if ri == 0 else S["td"]
         data.append([_p(c, st) for c in r])
     cw = [content_w / ncol] * ncol
-    t = Table(data, colWidths=cw, repeatRows=1, hAlign="LEFT")
+    t = Table(data, colWidths=cw, repeatRows=1, hAlign="LEFT", splitInRow=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), PANEL),
         ("LINEBELOW", (0, 0), (-1, 0), 0.9, LINE),

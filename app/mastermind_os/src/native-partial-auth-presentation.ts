@@ -6,6 +6,7 @@ const copy = {
     someAccessExpired: "Some app access has expired.",
     transactionTimeout: "The authorization attempt timed out before it completed.",
     authorizationRefused: "Authorization was not granted.",
+    tokenExchangeFailed: "Your browser returned to Mastermind OS, but the app could not complete the secure token exchange. Start a new sign-in from the app; the old browser form cannot finish this attempt.",
     label: "Account connected",
     pending: "Additional authorization is still pending.",
     timeout: "Additional authorization timed out. Your account remains connected.",
@@ -18,6 +19,7 @@ const copy = {
     someAccessExpired: "部分应用访问权限已过期。",
     transactionTimeout: "本次授权尚未完成便已超时。",
     authorizationRefused: "授权未获批准。",
+    tokenExchangeFailed: "浏览器已返回 Mastermind OS，但应用未能完成安全令牌交换。请从应用中重新开始登录；旧浏览器表单无法完成此授权。",
     label: "账户已连接",
     pending: "后续授权仍在进行中。",
     timeout: "后续授权已超时；您的账户仍保持连接。",
@@ -52,6 +54,7 @@ export function nativeAuthFeedback(state: AuthState, locale: "en" | "zh-CN"): st
       return state.acquisition || state.content ? text.someAccessExpired : text.sessionExpired;
     case "AUTH_TRANSACTION_EXPIRED": return text.transactionTimeout;
     case "AUTHORIZATION_REFUSED": return text.authorizationRefused;
+    case "TOKEN_EXCHANGE_FAILED": return text.tokenExchangeFailed;
     default: return null;
   }
 }

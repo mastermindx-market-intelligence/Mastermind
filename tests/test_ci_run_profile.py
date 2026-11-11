@@ -409,7 +409,7 @@ def test_unqualified_nonexecuted_completion_keeps_report_incomplete(completed):
 
 @pytest.mark.parametrize("field,value", [
     ("status", "in_progress"), ("conclusion", "failure"),
-    ("conclusion", "cancelled"), ("steps", None),
+    ("conclusion", "success"), ("steps", None),
     ("steps", [_step(1, "Set up job", _t(996), _t(997))]),
     ("runner_id", 1), ("runner_name", "runner"),
     ("runner_group_id", 1), ("runner_group_name", "group"),
@@ -417,6 +417,30 @@ def test_unqualified_nonexecuted_completion_keeps_report_incomplete(completed):
 def test_execution_or_uncertain_evidence_keeps_strict_timestamp_validation(field, value):
     with pytest.raises(ProfileError, match="inverted duration"):
         build_profile(_with_nonexecuted_job(**{field: value}))
+
+
+def test_cancelled_before_any_runner_is_nonexecution_not_an_inverted_duration():
+    # Shape of real job129715087606: cancelled while queued, matrix name never
+    # expanded, completed_at one second before the synthetic started_at.
+    profile = build_profile(_with_nonexecuted_job(
+        name="pytest shard ${{ matrix.index }}", conclusion="cancelled",
+        started_at=_t(991), completed_at=_t(990),
+    ))
+    row = next(row for row in profile["jobs"] if row["job_id"] == 900108)
+    assert row["execution_timing_eligible"] is False
+    assert row["running_seconds"] is None
+    assert profile["progress"]["nonexecuted_jobs"] == [
+        {"job_id": 900108, "name": "pytest shard ${{ matrix.index }}"}
+    ]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("runner_name", "ubuntu1-b"), ("runner_id", 7),
+    ("steps", [_step(1, "Set up job", _t(996), _t(997))]),
+])
+def test_cancelled_job_with_execution_evidence_stays_strict(field, value):
+    with pytest.raises(ProfileError, match="inverted duration"):
+        build_profile(_with_nonexecuted_job(conclusion="cancelled", **{field: value}))
 
 
 def test_nonexecuted_job_still_requires_consistent_identity():

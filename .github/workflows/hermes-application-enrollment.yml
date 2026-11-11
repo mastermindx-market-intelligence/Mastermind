@@ -34,11 +34,51 @@ on:
       - 'ops/native_fabric/quota_continuity/candidate/native_go_entry.py'
       - 'ops/native_fabric/quota_continuity/rollout/native_install.py'
       - '.github/workflows/hermes-application-enrollment.yml'
-  merge_group:
-    types: [checks_requested]
+  # No merge_group trigger: this workflow is not a required check, so the merge
+  # queue never waits for it, and every built, rebuilt or discarded queue group
+  # would spend runners on it. The path-filtered push run below proves each
+  # landed change instead. Policy: tests/test_ci_merge_group_capacity.py.
+  push:
+    branches: [master]
+    paths:
+      - 'tests/test_hermes_primary_application_enrollment.py'
+      - 'tests/test_hermes_primary_retained_enrollment.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_go_native_install.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py'
+      - 'ops/native_fabric/grok47/quota_billing/**'
+      - 'ops/native_fabric/quota_continuity/rollout/build_review_stage.py'
+      - 'ops/native_fabric/quota_continuity/rollout/provider_application/**'
+      - 'ops/native_fabric/provider_plans/profile.json'
+      - 'ops/native_fabric/provider_plans/compose.py'
+      - 'ops/native_fabric/provider_plans/patches/**'
+      - 'tests/fixtures/provider-plan-auto-predecessor.json'
+      - 'tests/test_provider_plan_auto_routing.py'
+      - 'tests/test_provider_plan_local_return.py'
+      - 'ops/native_fabric/quota_continuity/candidate/byteplus_coding_plan.py'
+      - 'ops/native_fabric/quota_continuity/candidate/native_plan_worker.py'
+      - 'control_plane/codex_provider_realm.py'
+      - 'control_plane/experiential_plan_policy.py'
+      - 'control_plane/fs_security.py'
+      - 'ops/native_fabric/experiential_native_bridge/experiential_bridge.py'
+      - 'ops/native_fabric/experiential53/experiential_host_context.py'
+      - 'ops/native_fabric/experiential53/experiential_pin.py'
+      - 'ops/native_fabric/experiential53/experiential_transport.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_go_native_stage.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_go_service_fresh_family_composition.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py'
+      - 'ops/native_fabric/quota_continuity/tests/test_retained_go_service_enrollment.py'
+      - 'ops/native_fabric/quota_continuity/candidate/native_go_entry.py'
+      - 'ops/native_fabric/quota_continuity/rollout/native_install.py'
+      - '.github/workflows/hermes-application-enrollment.yml'
 
 permissions:
   contents: read
+
+concurrency:
+  group: hermes-application-enrollment-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   native-application-enrollment:

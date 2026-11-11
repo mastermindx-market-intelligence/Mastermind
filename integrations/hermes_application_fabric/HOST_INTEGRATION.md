@@ -192,6 +192,71 @@ preimages and candidates after the first write; it does not demand obsolete v1
 live files. Empty/partial/full alias listeners are different from authenticated
 APPLICATION success. A grant-file receipt does not assert tunnel/provider proof.
 
+
+## Ubuntu1 local application hop through the existing home client
+
+The v2 reverse listeners above exist on the VPS. A role service on Ubuntu1
+cannot reach them by opening its own loopback address. Complete that local
+hop with the **existing** mm-chisel-home.service after the original v2
+server grant and reverse listeners are qualified.
+
+The fixed home successor preserves its existing SSH reverse and appends:
+
+| Ubuntu1 listener | VPS destination | Added ACL on the existing home identity |
+|---|---|---|
+| 127.0.0.2:50142 | 127.0.0.2:50142 | ^127\.0\.0\.2:50142$ |
+| 127.0.0.3:50142 | 127.0.0.3:50142 | ^127\.0\.0\.3:50142$ |
+
+Normal-forward ACLs authorize the destination without an R: prefix. The
+APPLICATION reverse identity remains unchanged. The home credential stays
+in its original `/etc/chisel/mm-home.env`, owned by the existing `longr`
+account resolved by name, with mode `0600`. The carried bundle contains only its digest. The VPS owner
+must find exactly one existing matching key; it cannot create or rotate one.
+
+Use the existing application_tunnel_control.py owner from the qualified
+protected release:
+
+1. stage-home validates the source/seal, original home launcher/unit/process,
+   original credential file identity, exact binary/fingerprint qualification
+   and carried v2 predecessor-server-receipt. Its v3 qualification additionally
+   requires normal_remote_destination_acl and simultaneous_home_forwards.
+2. Carry its fixed home-client/server-bundle.json to the original VPS carrier.
+   apply-home-server retains the original role journals, verifies the complete
+   authfile preimage and same server process, and requires all three reverse
+   listeners to remain attributable to that server. It adds only the two
+   normal-destination ACLs. This additive grant needs no M2 client stop.
+3. Carry the resulting nonsecret receipt back to the same Ubuntu1 operation.
+   apply-home-client --server-receipt publishes only the existing launcher.
+   The unit and credential remain untouched. Its separate publication intent
+   precedes the write; matching bytes alone cannot adopt another writer's file.
+4. After preserving the independent control return path, restart-home-client
+   verifies the original effective unit/process/credential, executable launcher
+   custody and absence of active consumer streams, then records and issues
+   **one** restart of mm-chisel-home.service. It never runs daemon-reload.
+   Existing NeedDaemonReload state is retained rather than silently adopting
+   unrelated unit changes.
+5. reconcile-home-server and reconcile-home-client recover the same original
+   operation. A missing acknowledgement is not permission to repeat an ACL
+   write, launcher write or restart. RESTART_UNRESOLVED remains held; the
+   command is not reissued even when a previous return explicitly failed.
+
+Both Linux phases reuse the existing /etc/chisel/application-tunnel purpose
+lock and private publication machinery. The home client uses home-client;
+the VPS uses operation-hermes-home. These are fixed phases beneath the
+incumbent owner, with no new client, relay service, credential registry or
+arbitrary endpoint/port/unit selector.
+
+The [home protocol receipt](qualification/home_forward_protocol_receipt.json)
+records a real v1.12.0 binary test across **three separate network namespaces**:
+a synthetic native application, the VPS, and the home host. Both local aliases
+reached the application once; removing normal-forward permissions denied new
+requests while retaining the synthetic SSH return, and restoring them worked
+on the same authenticated connections. The test uses an internal Docker
+network, no host ports, disposable credentials and a synthetic SSH backend
+on port 22220. It proves protocol/topology behavior, not a production SSH login,
+TLS deployment, native APPLICATION admission or a provider result. All owned
+containers, the network and synthetic credentials are removed after the proof.
+
 ## Source integration and live qualification order
 
 The proposals are reviewable source; tests do not activate their held transports.
@@ -207,7 +272,9 @@ The proposals are reviewable source; tests do not activate their held transports
    credentials remain in their original owners.
 4. Qualify one actual account and route, then publish the internal role grant
    through the original enrollment transaction and install through existing
-   native/Hermes/tunnel lifecycle owners.
+   native/Hermes/tunnel lifecycle owners. For Ubuntu1, complete the original
+   v2 reverse and fixed home-forward successor before the role service can use
+   its own .2/.3 loopback APPLICATION address.
 5. Enroll the actual Hermes session through the existing authenticated native
    command and perform the bounded original admission.
 6. Execute and reconcile the acceptance journey below. Source success,

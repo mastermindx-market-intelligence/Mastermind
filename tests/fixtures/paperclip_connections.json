@@ -1,0 +1,115 @@
+{
+  "schema": "mastermind.paperclip_workspace.v1",
+  "state": "CURRENT",
+  "view": "overview",
+  "company": {
+    "id": "00000000-0000-4000-8000-000000000090",
+    "name": "Synthetic company"
+  },
+  "bindingRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "scopeKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "observedAt": "2026-11-10T07:00:00Z",
+  "sourceRevision": "d69631b01b9c658f80bf8bed389863dce82643e1",
+  "qualifiedRevision": "d69631b01b9c658f80bf8bed389863dce82643e1",
+  "capabilities": [],
+  "item": null,
+  "ownership": {
+    "work": "legacy",
+    "wake": "legacy",
+    "runtime": "hermes",
+    "admission": "executive",
+    "routing": "capacity"
+  },
+  "collections": {
+    "people": {
+      "state": "CURRENT",
+      "items": [
+        {
+          "id": "00000000-0000-4000-8000-000000000001",
+          "name": "Director",
+          "status": "idle"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000002",
+          "name": "Engineer",
+          "reportsTo": "00000000-0000-4000-8000-000000000001",
+          "status": "idle"
+        }
+      ],
+      "coverage": "BOUNDED_RESPONSE",
+      "hasMore": false,
+      "restrictedCount": 0,
+      "nextOffset": null,
+      "nextCursor": null
+    },
+    "projects": {
+      "state": "CURRENT",
+      "items": [
+        {
+          "id": "00000000-0000-4000-8000-000000000010",
+          "name": "Delivery",
+          "goalId": "00000000-0000-4000-8000-000000000020",
+          "leadAgentId": "00000000-0000-4000-8000-000000000001"
+        }
+      ],
+      "coverage": "BOUNDED_RESPONSE",
+      "hasMore": false,
+      "restrictedCount": 0,
+      "nextOffset": null,
+      "nextCursor": null
+    },
+    "goals": {
+      "state": "CURRENT",
+      "items": [
+        {
+          "id": "00000000-0000-4000-8000-000000000020",
+          "title": "Useful outcome",
+          "ownerAgentId": "00000000-0000-4000-8000-000000000001"
+        }
+      ],
+      "coverage": "BOUNDED_RESPONSE",
+      "hasMore": false,
+      "restrictedCount": 0,
+      "nextOffset": null,
+      "nextCursor": null
+    },
+    "work": {
+      "state": "CURRENT",
+      "items": [
+        {
+          "id": "00000000-0000-4000-8000-000000000030",
+          "title": "Original parent",
+          "projectId": "00000000-0000-4000-8000-000000000010",
+          "goalId": "00000000-0000-4000-8000-000000000020"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000031",
+          "title": "Child work",
+          "parentId": "00000000-0000-4000-8000-000000000030",
+          "assigneeAgentId": "00000000-0000-4000-8000-000000000002"
+        }
+      ],
+      "coverage": "BOUNDED_RESPONSE",
+      "hasMore": false,
+      "restrictedCount": 0,
+      "nextOffset": null,
+      "nextCursor": null
+    }
+  },
+  "runtimeBindings": [
+    {
+      "agentId": "00000000-0000-4000-8000-000000000002",
+      "runtime": "hermes",
+      "profileRef": "hermes:engineering",
+      "supervisorSessionRef": "native:original",
+      "gatewayRef": "gateway:original",
+      "qualification": "CONFIGURED_NOT_LIVE_VERIFIED"
+    }
+  ],
+  "projectBindings": [
+    {
+      "projectId": "00000000-0000-4000-8000-000000000010",
+      "workRef": "WS:ORIGINAL-PROJECT"
+    }
+  ]
+}

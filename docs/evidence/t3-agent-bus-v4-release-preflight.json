@@ -1,0 +1,27 @@
+{
+  "schema": "mastermind.t3-agent-bus-release-preflight.v1",
+  "observed_at": "2026-11-10T06:49:52.252220+00:00",
+  "environment_id": "5f4cd5f0-e3df-407d-af02-1aa833637937",
+  "all_projects": true,
+  "includes_subagents": true,
+  "requested_statuses": [
+    "preparing",
+    "queued",
+    "starting",
+    "running",
+    "waiting"
+  ],
+  "returned_count": 25,
+  "statuses": {
+    "running": 25
+  },
+  "next_cursor": null,
+  "partial": false,
+  "connect_enabled": false,
+  "lan_enabled": false,
+  "background_service_installed": false,
+  "connect_evidence": "Explicit installed native t3 status --json in this continuation; no credentials or private message bodies retained.",
+  "installed_strict_lifecycle": false,
+  "mutation_count": 0,
+  "release_disposition": "PROTECT_LIVE_NATIVE_WORK; existing runtime owner must reconcile maintenance and loaded source before activation"
+}

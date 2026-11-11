@@ -104,8 +104,14 @@ def test_actual_incumbent_client_composition_preserves_original_thread_and_new_r
         assert initial.brief_sha256 == continued.brief_sha256
     asyncio.run(exercise())
     assert len(calls) == 2
-    assert calls[0].argv[-2:] == ("project-fixture", "-")
-    assert calls[1].argv == ("/fixture-only/t3", "thread", "send", "--json", "mcp:original", "-")
+    assert calls[0].argv == (
+        "/fixture-only/t3", "thread", "start", "--title", "Web handoff horizon-fixture",
+        "--json", "project-fixture", "-", "--log-level", "error",
+    )
+    assert calls[1].argv == (
+        "/fixture-only/t3", "thread", "send", "--json", "mcp:original", "-",
+        "--log-level", "error",
+    )
     assert '"source_complete_ids":["T1"]' in calls[1].stdin
     assert '"id":"T2"' in calls[1].stdin and "Retain mobile" in calls[1].stdin
 

@@ -1,6 +1,7 @@
 //! Auth0 native refresh-token custody. This module owns only Keychain
 //! credential bytes; resource authorization stays in auth.rs.
 use sha2::{Digest, Sha256};
+mod initial;
 const SERVICE: &str = "com.mastermind.os.auth0.refresh.v1";
 const ISSUER: &str = "https://dev-eo0jf8us5mup7wd5.us.auth0.com/";
 const NOT_FOUND: i32 = -25300;
@@ -25,6 +26,79 @@ pub(crate) fn valid_refresh(value: &str) -> bool {
 /// A rotating grant must never return the same token as its predecessor.
 pub(crate) fn valid_successor(previous: &str, next: &str) -> bool {
     valid_refresh(next) && next != previous
+}
+/// A private predecessor binding, scoped to the incumbent credential account.
+/// This is neither a principal identifier nor permission to adopt another grant.
+pub(crate) fn fingerprint(client_id: &str, audience: &str, value: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"mastermind.os.native.refresh.predecessor.v1\0");
+    hasher.update(account(client_id, audience).as_bytes());
+    hasher.update(b"\0");
+    hasher.update(value.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) type InitialReservation = initial::Reservation<security_framework::os::macos::keychain_item::SecKeychainItem>;
+#[cfg(not(target_os = "macos"))]
+pub(crate) struct InitialReservation;
+
+#[cfg(target_os = "macos")]
+struct InitialStore(security_framework::os::macos::keychain::SecKeychain);
+#[cfg(target_os = "macos")]
+impl initial::Store for InitialStore {
+    type Item = security_framework::os::macos::keychain_item::SecKeychainItem;
+    fn add(&mut self, name: &str, value: &[u8]) -> Result<(), initial::AddError> {
+        self.0.add_generic_password(SERVICE, name, value).map_err(|error|
+            if error.code() == -25299 { initial::AddError::Occupied } else { initial::AddError::Unknown })
+    }
+    fn find(&mut self, name: &str) -> Result<Option<(Vec<u8>, Self::Item)>, &'static str> {
+        match self.0.find_generic_password(SERVICE, name) {
+            Ok((value, item)) => Ok(Some((value.as_ref().to_vec(), item))),
+            Err(error) if error.code() == NOT_FOUND => Ok(None),
+            Err(_) => Err("KEYCHAIN_UNAVAILABLE"),
+        }
+    }
+    fn update(&mut self, item: &mut Self::Item, value: &[u8]) -> Result<(), &'static str> {
+        item.set_password(value).map_err(|_| "KEYCHAIN_WRITE_FAILED")
+    }
+    fn delete(&mut self, item: Self::Item) -> Result<(), &'static str> {
+        delete_keychain_item(item).map_err(|_| "KEYCHAIN_DELETE_FAILED")
+    }
+}
+#[cfg(target_os = "macos")]
+fn initial_store() -> Result<InitialStore, &'static str> {
+    security_framework::os::macos::keychain::SecKeychain::default()
+        .map(InitialStore).map_err(|_| "KEYCHAIN_UNAVAILABLE")
+}
+#[cfg(target_os = "macos")]
+fn initial_nonce() -> Vec<u8> {
+    use rand::{rngs::OsRng, RngCore};
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    let suffix: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!("\0mastermind.os.initial.v1\0{suffix}").into_bytes()
+}
+#[cfg(target_os = "macos")]
+pub(crate) fn reserve_initial_pair(client: &str, audiences: [&str; 2])
+    -> Result<[InitialReservation; 2], &'static str>
+{
+    let accounts = [account(client, audiences[0]), account(client, audiences[1])];
+    initial::reserve_pair(&mut initial_store()?, [&accounts[0], &accounts[1]], [initial_nonce(), initial_nonce()])
+}
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn reserve_initial_pair(_: &str, _: [&str; 2]) -> Result<[InitialReservation; 2], &'static str> {
+    Err("KEYCHAIN_UNSUPPORTED")
+}
+#[cfg(target_os = "macos")]
+pub(crate) fn publish_initial(client: &str, audience: &str, owned: InitialReservation,
+    refresh: Option<&str>) -> Result<(), &'static str>
+{
+    initial::publish(&mut initial_store()?, &account(client, audience), owned, refresh)
+}
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn publish_initial(_: &str, _: &str, _: InitialReservation, _: Option<&str>) -> Result<(), &'static str> {
+    Err("KEYCHAIN_UNSUPPORTED")
 }
 #[cfg(any(target_os = "macos", test))]
 fn rotation_marker(previous: &str) -> String {
@@ -62,29 +136,16 @@ fn pending_exists(client_id: &str, audience: &str) -> Result<bool, &'static str>
 }
 #[cfg(target_os = "macos")]
 pub(crate) fn begin_rotation(client_id: &str, audience: &str, old: &str) -> Result<(), &'static str> {
-    use security_framework::os::macos::keychain::SecKeychain;
-    // The old get-then-set marker was only serialized within one process.
-    // Across two app processes it could overwrite an existing marker and allow
-    // both instances to send the same rotating token. Use Keychain's atomic
-    // add-only operation: a duplicate is an existing owner, not a retry grant.
-    let original = load(client_id, audience)?.ok_or("AUTHENTICATION_REQUIRED")?;
-    if original != old { return Err("REFRESH_TOKEN_CHANGED"); }
-    let marker = rotation_marker(old);
-    let keychain = SecKeychain::default().map_err(|_| "KEYCHAIN_UNAVAILABLE")?;
-    keychain.add_generic_password(
-        SERVICE,
-        &format!("{}:pending", account(client_id, audience)),
-        marker.as_bytes(),
-    ).map_err(|error| {
-        if error.code() == -25299 { "REFRESH_OUTCOME_UNCONFIRMED" }
-        else { "KEYCHAIN_WRITE_FAILED" }
-    })?;
-    // A successful create must also be visible through the read path used by
-    // subsequent launches; no network effect is attempted if it is not.
-    if !pending_exists(client_id, audience)? {
-        return Err("KEYCHAIN_WRITE_FAILED");
-    }
-    Ok(())
+    initial::claim_rotation(&mut initial_store()?, &account(client_id, audience), old, &rotation_marker(old))
+}
+#[cfg(target_os = "macos")]
+pub(crate) fn claim_bound(client_id: &str, audience: &str, expected: &str) -> Result<String, &'static str> {
+    initial::claim_bound(&mut initial_store()?, &account(client_id, audience), expected,
+        |old| fingerprint(client_id, audience, old), rotation_marker)
+}
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn claim_bound(_: &str, _: &str, _: &str) -> Result<String, &'static str> {
+    Err("KEYCHAIN_UNSUPPORTED")
 }
 /// Only a definitively pre-transmission connect error may release the marker.
 /// A timeout or a lost response may already have rotated the token at Auth0.

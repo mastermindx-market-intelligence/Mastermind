@@ -28,7 +28,9 @@ def _private(path: Path) -> str:
 def _browser_block(tmp_path: Path) -> dict[str, object]:
     root = Path(__file__).resolve().parents[1]
     return {
-        "source_root": str(root),
+        # Inert fixtures use explicit relay commands. Their host root must be
+        # private fixture data, not the runner's potentially writable checkout.
+        "source_root": _private(tmp_path / "browser-source"),
         "python_executable": sys.executable,
         "node_executable": "/opt/homebrew/bin/node",
         "mcp_cli_path": "/tmp/mcp/node_modules/@playwright/mcp/cli.js",

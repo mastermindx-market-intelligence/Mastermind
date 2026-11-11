@@ -118,11 +118,17 @@ def _invoke(
     script, fd_arg, expected_sha256, label, *, pass_fd=None,
     barrier=b"\x01", require_blocked=False, **spawn_options,
 ):
-    proc = _spawn(
-        script, fd_arg, expected_sha256, label,
-        pass_fd=pass_fd, **spawn_options,
-    )
-    return _finish(proc, barrier=barrier, require_blocked=require_blocked)
+    # The selected command root is a private fixture, not the runner checkout.
+    # Keep it alive through the launch barrier and terminal process readback.
+    with tempfile.TemporaryDirectory(prefix="workbench-recipe-root-") as root:
+        os.chmod(root, 0o700)
+        if spawn_options.get("root_path") is None:
+            spawn_options["root_path"] = root
+        proc = _spawn(
+            script, fd_arg, expected_sha256, label,
+            pass_fd=pass_fd, **spawn_options,
+        )
+        return _finish(proc, barrier=barrier, require_blocked=require_blocked)
 
 
 def _invoke_raw_args(script, args):
@@ -199,6 +205,28 @@ def test_recipe_inventory_contains_only_two_recipes_and_empty_init():
         assert init_file.read() == b""
 
 
+@pytest.mark.parametrize("script,diagnostic", [
+    (CANARY_CHECKSUM, CHECKSUM_REFUSAL),
+    (CANARY_REFUSE, VALIDATION_REFUSAL),
+])
+def test_recipe_refuses_writable_selected_root(tmp_path, script, diagnostic):
+    root = tmp_path / "writable-root"
+    root.mkdir(mode=0o700)
+    root.chmod(0o770)
+    path = _make_file(b"hello world")
+    try:
+        before = _read_file(path)
+        with open(path, "rb") as input_file:
+            result = _invoke(
+                script, input_file.fileno(), HELLO_SHA256, "fixture.bin",
+                pass_fd=input_file.fileno(), root_path=root, require_blocked=True,
+            )
+        _assert_fixed_refusal(result, diagnostic)
+        assert _read_file(path) == before
+    finally:
+        os.unlink(path)
+
+
 def test_checksum_valid_file_waits_then_emits_exact_match_output():
     """A checksum recipe that skips the barrier or changes its output is rejected."""
     path = _make_file(b"hello world")
@@ -222,7 +250,8 @@ def test_recipe_enters_selected_descriptor_cwd_and_rejects_wrong_root_identity(t
     """A harmless launch cwd cannot substitute for the host-selected root fd."""
     path = _make_file(b"hello world")
     selected_root = tmp_path / "selected-root"
-    selected_root.mkdir()
+    selected_root.mkdir(mode=0o700)
+    selected_root.chmod(0o700)
     try:
         with open(path, "rb") as input_file:
             result = _invoke(
