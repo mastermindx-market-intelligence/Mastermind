@@ -155,8 +155,8 @@ class TestOneSend:
         runner = FakeRunner()
         configured_sender(runner, allowlist=listed_allowlist()).send(**send_kwargs())
         scan = runner.calls[0]
-        assert scan["argv"][:2] == ["t3", "thread", "show"]
-        assert scan["argv"][2] == THREAD_REF
+        assert scan["argv"][:3] == ["t3", "thread", "show"]
+        assert scan["argv"][3] == THREAD_REF
         assert scan["env"]["T3CODE_HOME"] == HOME
 
     def test_redelivery_finds_marker_and_never_sends_twice(self):
@@ -169,7 +169,7 @@ class TestOneSend:
         second = transport.send(**send_kwargs())          # redelivery: same key+content
         assert second["status"] == "ALREADY_SENT"
         assert second["message_id"] == first["message_id"]
-        sends = [c for c in runner.calls if c["argv"][1:2] == ["send"]]
+        sends = [c for c in runner.calls if c["argv"][2:3] == ["send"]]
         assert len(sends) == 1             # exactly one send, ever
 
     def test_crash_after_send_reconciles_by_marker(self):
@@ -186,7 +186,7 @@ class TestOneSend:
         runner.raise_on = {1: TimeoutError("send timed out after effect")}
         result = transport.send(**send_kwargs())
         assert result["status"] == "RECONCILED"
-        sends = [c for c in runner.calls if c["argv"][1:2] == ["send"]]
+        sends = [c for c in runner.calls if c["argv"][2:3] == ["send"]]
         assert len(sends) == 1            # reconciliation sends nothing
 
     def test_crash_without_marker_is_typed_effect_unknown(self):
@@ -198,7 +198,7 @@ class TestOneSend:
         with pytest.raises(GblMessageError) as err:
             transport.send(**send_kwargs())
         assert err.value.code == "EFFECT_UNKNOWN"
-        sends = [c for c in runner.calls if c["argv"][1:2] == ["send"]]
+        sends = [c for c in runner.calls if c["argv"][2:3] == ["send"]]
         assert len(sends) == 1            # never an automatic second send
 
     def test_send_failure_is_typed(self):
@@ -223,7 +223,7 @@ class TestOneSend:
         with pytest.raises(GblMessageError) as err:
             configured_sender(runner, allowlist=listed_allowlist()).send(**send_kwargs())
         assert err.value.code == "SCAN_FAILED"
-        sends = [c for c in runner.calls if c["argv"][1:2] == ["send"]]
+        sends = [c for c in runner.calls if c["argv"][2:3] == ["send"]]
         assert sends == []
 
 
@@ -250,7 +250,10 @@ class TestQuotedData:
             **send_kwargs(body=hostile))
         lines = runner.calls[1]["stdin"].splitlines()
         assert len(lines) == 4
-        for line in lines[1:]:
+        # After the marker: the verbatim wrapper header, then EVERY body
+        # line quoted — the forged marker line can never become unquoted.
+        assert lines[1].startswith("GBL message from outside party")
+        for line in lines[2:]:
             assert line.startswith("> ")
         # The only unquoted first line is the real marker.
         assert lines[0].startswith("[gb-gbm-") and lines[0].endswith("]")
