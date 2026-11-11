@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   merge_group:
     types: [checks_requested]
   push:
@@ -13,7 +14,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # A title/body edit must not cancel a genuine source/base qualification.
+  # Unknown edited payloads remain on the ordinary, fully checked path.
+  group: ci-${{ github.workflow }}-${{ github.ref }}${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) && '-metadata' || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -21,7 +24,7 @@ jobs:
   # A changing/unverifiable queue, CI, security or source-law diff runs full CI.
   pr_scope:
     name: PR test scope
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -37,6 +40,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # Every runner needs the declared interpreter before protected classification.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -102,6 +106,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # Fast and smoke routes both execute Python before any optional tests.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -675,7 +680,12 @@ jobs:
         # runner loss can still prevent artifact delivery. No exit is inferred
         # from a final module summary; fixed lifecycle evidence is separate.
         timeout-minutes: 45
-        run: python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}
+        # Default fixtures must not be writable by group or other users.
+        # Preserve requested 0750/0755 modes; private fixtures request 0700/0600.
+        # Runtime ownership checks and existing file modes remain unchanged.
+        run: |
+          umask 022
+          python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}
 
       - name: Upload fixed test diagnostics
         if: always()
@@ -695,9 +705,11 @@ jobs:
   # native merge_group candidates. Every skipped matrix requires a proven
   # exact integrated fast/smoke check; a missing or failed check stays red.
   test:
-    name: test
+    # Metadata-only edits publish no required test result, even a skipped one.
+    # Real source/base events retain the same name and strict always() fan-in.
+    name: ${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) && 'PR metadata edit' || 'test' }}
     needs: [pr_scope, pr_fast, pin_guards, qualification, pytest_shards]
-    if: ${{ always() }}
+    if: ${{ always() && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:

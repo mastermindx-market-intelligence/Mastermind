@@ -1420,6 +1420,11 @@ body.page-mm.view-desk #view-desk .mm-section { display: block !important; }
 body.page-mm .mm-desk-building { display: flex; align-items: center; gap: 9px; padding: 11px 14px; margin: 6px 0 14px;
   border: 1px dashed var(--line); border-radius: 10px; background: var(--panel2); color: var(--muted); font-size: 12.5px; }
 body.page-mm .mm-desk-building .ic { font-size: 13px; }
+body.page-mm .mm-desk-loading { display: grid; gap: 10px; padding: 14px 0; }
+body.page-mm .mm-desk-loading span { display: block; height: 10px; border-radius: var(--radius-sm); background: var(--panel2); }
+body.page-mm .mm-desk-loading span:first-child { width: 70%; }
+body.page-mm .mm-desk-loading span:last-child { width: 44%; }
+body.page-mm .mm-desk-unavailable { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 12px 0; color: var(--muted); font-size: 12.5px; }
 body.page-mm .mm-desk-chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 8px 0 4px; }
 body.page-mm .mm-desk-theme { display: inline-flex; align-items: baseline; gap: 7px; padding: 5px 11px; border-radius: 8px;
   background: color-mix(in srgb, var(--up) 12%, var(--panel2)); border: 1px solid color-mix(in srgb, var(--up) 30%, var(--line)); }
@@ -6127,11 +6132,92 @@ function _deskEmpty(msgKey) {
   return '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t(msgKey) + '</div>';
 }
 
+function _deskRecord(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+function _deskOptionalArray(v, item) {
+  return v == null || (Array.isArray(v) && (!item || v.every(item)));
+}
+function _deskOptionalMap(v, item) {
+  return v == null || (_deskRecord(v) && Object.keys(v).every(function(k) { return item(v[k]); }));
+}
+function _deskNormalize(kind, d) {
+  // Validate only the containers consumed below. Never turn a malformed read into empty data.
+  if (!_deskRecord(d) || d.status === 'unavailable') return {status: 'unavailable'};
+  var valid = kind === 'firm' || d.status === 'building' || d.status === 'scoring';
+  var record = _deskRecord, array = _deskOptionalArray, map = _deskOptionalMap;
+  if (kind === 'strategist') {
+    valid = valid && array(d.confirmed_themes, function(th) {
+      return record(th) && array(th.names);
+    }) && array(d.crowding_flags) && array(d.watch_emerging) &&
+      (d.regime == null || record(d.regime));
+  } else if (kind === 'decisions') {
+    valid = valid && Array.isArray(d.decisions) && d.decisions.every(function(row) {
+      return record(row) && ['forge', 'sentinel', 'nexus', 'gate', 'risk'].every(function(key) {
+        return row[key] == null || record(row[key]);
+      });
+    });
+  } else if (kind === 'scorecard') {
+    valid = valid && Array.isArray(d.seats) && d.seats.every(record) &&
+      (d.cio == null || (record(d.cio) && (d.cio.note_md == null || typeof d.cio.note_md === 'string')));
+  } else if (kind === 'firm') {
+    valid = valid && Array.isArray(d.books) &&
+      array(d.flags, function(row) { return record(row) && array(row.books_holding); }) &&
+      array(d.top_exposures, record) &&
+      map(d.by_sector, function(row) { return record(row) && array(row.tickers); }) &&
+      map(d.by_chain, function(row) {
+        return record(row) && array(row.tickers) && array(row.leading_tickers);
+      });
+  } else if (kind === 'macroRisk') {
+    valid = valid && (d.status !== 'scoring' || ['risk_on', 'caution', 'risk_off'].indexOf(d.state) >= 0) &&
+      (d.allow_adds == null || typeof d.allow_adds === 'boolean') &&
+      map(d.axes, record) &&
+      array(d.drivers, function(row) { return record(row) && array(row.hot_overlap); }) &&
+      (d.defensive_tilt == null || (record(d.defensive_tilt) &&
+        array(d.defensive_tilt.favor) && array(d.defensive_tilt.avoid)));
+  }
+  return valid ? d : {status: 'unavailable'};
+}
+function _deskLoadingHtml() {
+  var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  return '<div class="mm-desk-loading" role="status" aria-label="' +
+    (isZh ? '正在读取面板' : 'Loading panel') + '">' +
+    '<span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span></div>';
+}
+function _deskUnavailableHtml(kind) {
+  var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  var names = {
+    strategist: ['Strategist', '策略师'], macroRisk: ['Macro risk', '宏观风险'],
+    decisions: ['Desk decisions', '交易台决策'], scorecard: ['Seat scorecard', '席位记分卡'],
+    cio: ['CIO note', 'CIO 周报'], firm: ['Firm exposure', '公司敞口']
+  };
+  var name = names[kind][isZh ? 1 : 0];
+  return '<div class="mm-desk-unavailable" role="status"><span>' +
+    (isZh ? name + '暂不可用。其他面板独立更新。' : name + ' is unavailable. Other panels update independently.') +
+    '</span><button type="button" class="mm-scope-retry" onclick="loadDesk()">' +
+    (isZh ? '重试' : 'Retry') + '</button></div>';
+}
+function _deskShowUnavailable(kind) {
+  var hosts = {strategist: 'desk-strategist', macroRisk: 'desk-macro-risk',
+    decisions: 'desk-decisions', scorecard: 'desk-scorecard', firm: 'desk-firm'};
+  var host = E(hosts[kind]); if (host) host.innerHTML = _deskUnavailableHtml(kind);
+  if (kind === 'scorecard' && E('desk-cio')) E('desk-cio').innerHTML = _deskUnavailableHtml('cio');
+  if (kind === 'strategist' && E('desk-asof')) E('desk-asof').innerHTML = '';
+}
+function _deskRenderPanel(kind, render) {
+  try { render(); }
+  catch (e) {
+    // A malformed field must not retain old content or stop the remaining independent panels.
+    _deskData[kind] = {status: 'unavailable'};
+    _deskShowUnavailable(kind);
+  }
+}
+
 window.loadDesk = function() {
   // re-render any cached data immediately (so a re-open / lang toggle is instant), then refresh
   renderDeskPage();
   var g = function(url) { return fetch(url).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }); };
-  Promise.all([
+  return Promise.all([
     g('/api/desk/strategist'),
     g('/api/desk/decisions'),
     g('/api/desk/watchlist?book=flagship').then(function(d) {
@@ -6142,12 +6228,12 @@ window.loadDesk = function() {
     g('/api/desk/macro-risk'),
     g('/api/scheduler'),
   ]).then(function(res) {
-    _deskData.strategist = res[0];
-    _deskData.decisions  = res[1];
+    _deskData.strategist = _deskNormalize('strategist', res[0]);
+    _deskData.decisions  = _deskNormalize('decisions', res[1]);
     _deskData.watchlist  = res[2];
-    _deskData.scorecard  = res[3];
-    _deskData.firm       = res[4];
-    _deskData.macroRisk  = res[5];
+    _deskData.scorecard  = _deskNormalize('scorecard', res[3]);
+    _deskData.firm       = _deskNormalize('firm', res[4]);
+    _deskData.macroRisk  = _deskNormalize('macroRisk', res[5]);
     var scheduler = res[6];
     _deskData.scheduler = scheduler && Array.isArray(scheduler.jobs)
       ? scheduler
@@ -6158,12 +6244,12 @@ window.loadDesk = function() {
 
 function renderDeskPage() {
   loadDeskPosture();
-  renderDeskStrategist();
-  renderDeskMacroRisk();
-  renderDeskDecisions();
+  _deskRenderPanel('strategist', renderDeskStrategist);
+  _deskRenderPanel('macroRisk', renderDeskMacroRisk);
+  _deskRenderPanel('decisions', renderDeskDecisions);
   renderDeskWatchlist();
-  renderDeskScorecard();
-  renderDeskFirm();
+  _deskRenderPanel('scorecard', renderDeskScorecard);
+  _deskRenderPanel('firm', renderDeskFirm);
   renderDeskScheduler();
 }
 
@@ -6220,11 +6306,16 @@ function renderDeskStrategist() {
   var host = E('desk-strategist'); if (!host) return;
   var d = _deskData.strategist;
   var asofEl = E('desk-asof');
+  if (d == null) {
+    if (asofEl) asofEl.innerHTML = '';
+    host.innerHTML = _deskLoadingHtml(); return;
+  }
+  if (d.status === 'unavailable') { _deskShowUnavailable('strategist'); return; }
   if (asofEl) asofEl.innerHTML = (d && d.asof) ? (t('desk.asof') + ' ' + esc(d.asof)) : '';
   // The backend returns status 'building' only when there is NO verdict; once a verdict exists it
   // is 'scoring' and carries backdrop/crowding/rationale even on a risk-off day that confirmed zero
   // themes. Don't gate on themes alone, or that whole verdict is wrongly hidden as "building".
-  if (!d || d.status === 'building' ||
+  if (d.status === 'building' ||
       (!(d.confirmed_themes || []).length && !d.backdrop_stance && !d.rationale && !(d.crowding_flags || []).length)) {
     host.innerHTML = _deskBuilding('desk.strat_building'); return;
   }
@@ -6268,7 +6359,9 @@ function renderDeskStrategist() {
 function renderDeskMacroRisk() {
   var host = E('desk-macro-risk'); if (!host) return;
   var d = _deskData.macroRisk;
-  if (!d || d.status === 'building' || !d.state) {
+  if (d == null) { host.innerHTML = _deskLoadingHtml(); return; }
+  if (d.status === 'unavailable') { _deskShowUnavailable('macroRisk'); return; }
+  if (d.status === 'building' || !d.state) {
     host.innerHTML = _deskBuilding('desk.macro_building'); return;
   }
   var st = String(d.state);
@@ -6284,7 +6377,7 @@ function renderDeskMacroRisk() {
   html += '<span><strong>' + (t('desk.mr_grosscap') || 'Gross cap') + ':</strong> ' + (d.gross_cap != null ? Math.round(d.gross_cap * 100) + '%' : '—') + '</span>';
   html += '<span><strong>' + (t('desk.mr_adds') || 'Adds') + ':</strong> ' + (d.allow_adds === false
             ? '<span style="color:#d64545;font-weight:700">' + (t('desk.mr_blocked') || 'BLOCKED') + '</span>'
-            : (t('desk.mr_allowed') || 'allowed')) + '</span>';
+            : (d.allow_adds === true ? (t('desk.mr_allowed') || 'allowed') : '—')) + '</span>';
   html += '</div>';
   // per-axis fragility bars
   var axes = d.axes || {};
@@ -6336,7 +6429,9 @@ function _deskActChip(action, cls) {
 function renderDeskDecisions() {
   var host = E('desk-decisions'); if (!host) return;
   var d = _deskData.decisions;
-  if (!d || d.status === 'building' || !(d.decisions || []).length) {
+  if (d == null) { host.innerHTML = _deskLoadingHtml(); return; }
+  if (d.status === 'unavailable') { _deskShowUnavailable('decisions'); return; }
+  if (d.status === 'building' || !(d.decisions || []).length) {
     host.innerHTML = _deskBuilding('desk.dec_building'); return;
   }
   var html = '<div class="mm-rp-wrap"><table class="mm-rp-table"><thead><tr>' +
@@ -6416,7 +6511,13 @@ function renderDeskWatchlist() {
 function renderDeskScorecard() {
   var host = E('desk-scorecard'); if (!host) return;
   var d = _deskData.scorecard;
-  var seats = (d && d.seats) || [];
+  if (d == null) {
+    host.innerHTML = _deskLoadingHtml();
+    if (E('desk-cio')) E('desk-cio').innerHTML = _deskLoadingHtml();
+    return;
+  }
+  if (d.status === 'unavailable') { _deskShowUnavailable('scorecard'); return; }
+  var seats = d.seats || [];
   var rendered = seats.filter(function(s) {
     // surface a seat once it has any calibration OR attribution signal (skip pure-empty rows)
     return s.status != null || s.n != null || s.attributed_bps != null || s.reputation != null;
@@ -6481,7 +6582,9 @@ function _firmBooksStr(ids) {
 function renderDeskFirm() {
   var host = E('desk-firm'); if (!host) return;
   var d = _deskData.firm;
-  if (!d || !(d.books || []).length) { host.innerHTML = _deskBuilding('desk.firm_building'); return; }
+  if (d == null) { host.innerHTML = _deskLoadingHtml(); return; }
+  if (d.status === 'unavailable') { _deskShowUnavailable('firm'); return; }
+  if (!(d.books || []).length) { host.innerHTML = _deskBuilding('desk.firm_building'); return; }
   var html = '';
 
   // flagged pile-ups (the headline). When none, show an explicit "clean" line.

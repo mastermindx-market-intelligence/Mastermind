@@ -1029,7 +1029,10 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
         'tests/test_paid_initializer_sysconfig.py',
         'tests/test_paid_initializer_runtime_library.py::test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed',
         'tests/test_paid_provider_entry_linux.py']
-    assert full[0][1]['run']=='python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}'
+    assert full[0][1]['run'] == (
+        'umask 022\n'
+        'python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}\n'
+    )
     # Only full pytest may reuse the exact prior proof; both H1 gates above
     # still execute on shard two before the proof/pytest steps.
     assert full[0][1].get('if') == "${{ steps.previous_ci.outputs.reuse != 'true' }}"
