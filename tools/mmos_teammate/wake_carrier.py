@@ -2538,13 +2538,17 @@ def _run_carrier_locked(pc, t3_factory, opts, me, binding, thread_id):
             # permission to deliver — the block is a review hold. Delivery
             # from blocked needs the carrier's own waiting line on the issue
             # (this task stopped on a question of ours; the MAS-11 journey).
+            # Delta-3 N10: the line counts only from THIS carrier's own
+            # notes (panel-2 H2: machine prefix + authorType agent +
+            # authorAgentId == me) — anyone who can comment can paste the
+            # visible line verbatim, and a paste is not the carrier speaking.
             # A still-pending marker continues the normal path either way:
             # a question stay posts the waiting line itself, and the
             # slow-turn wait ends in a release for a person.
-            if probe_state == "reply" and not any(
-                    (row.get("body") or "").strip()
-                    == waiting_note(opts, thread_id)
-                    for row in comment_rows(pc, issue)):
+            if probe_state == "reply" and waiting_note(
+                    opts, thread_id) not in [
+                    body.strip() for body in
+                    carrier_note_bodies(pc, comment_rows(pc, issue))]:
                 log(f"blocked issue {issue.get('identifier')} has an "
                     "answered marker but no carrier waiting line; a person "
                     "blocked it — leaving it for the board")

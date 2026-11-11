@@ -1815,8 +1815,8 @@ def test_blocked_task_with_answered_marker_finishes():
     op = wc.op_id("is-1", "Wait on infra\nWaiting on a deploy")
     opts = {"roster": {}}
     pc = FakePaperclip(issues=blocked_issue())
-    pc.comment_rows["is-1"] = [{"body": wc.waiting_note(opts, "th-1"),
-                                "authorType": "user"}]
+    pc.comment_rows["is-1"] = [board.served_comment(   # N10: the carrier's
+        wc.waiting_note(opts, "th-1"), author_agent_id="ag-1")]  # OWN line
     t3 = FakeT3(messages=[("user", "r1", f"[{op}]\n\nthe task"),
                           ("assistant", "r1", "deploy done, answer ready")])
     assert run_with_roster(pc, t3, {}, opts) == 0
@@ -1825,6 +1825,25 @@ def test_blocked_task_with_answered_marker_finishes():
     assert bodies == ["deploy done, answer ready"]
     assert "interaction" in [c[0] for c in pc.calls]
     assert pc.issues["is-1"]["status"] == "in_review"
+
+
+def test_a_person_pasting_the_waiting_line_does_not_lift_the_hold():
+    # Delta-3 N10: the blocked-issue review hold (R2a finding 15) unlocked on
+    # BODY TEXT alone — anyone who can comment pastes the carrier's visible
+    # waiting line verbatim and the hold lifts. The line counts only from
+    # THIS carrier's own notes (authorType agent + authorAgentId == me, the
+    # panel-2 H2 law); a person's paste is not the carrier speaking.
+    op = wc.op_id("is-1", "Wait on infra\nWaiting on a deploy")
+    opts = {"roster": {}}
+    pc = FakePaperclip(issues=blocked_issue())
+    pc.comment_rows["is-1"] = [
+        {"body": wc.waiting_note(opts, "th-1"), "authorType": "user"}]
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}]\n\nthe task"),
+                          ("assistant", "r1", "deploy done, answer ready")])
+    assert run_with_roster(pc, t3, {}, opts) == 0
+    assert t3.sends == []
+    assert [c for c in pc.calls if c[0] == "comment"] == []
+    assert pc.issues["is-1"]["status"] == "blocked"   # the hold stands
 
 
 def test_blocked_task_with_pending_question_stays_with_it():
@@ -1882,8 +1901,9 @@ def test_blocked_issue_with_board_feedback_and_marker_revises():
                        "description": "Write a three-line summary."}}
     pc = FakePaperclip(issues=issues)
     pc.comment_rows["is-1"] = [
-        {"body": wc.waiting_note(opts, "th-1"), "authorType": "user"},
-        {"body": "answer v1", "authorType": "agent"},
+        board.served_comment(wc.waiting_note(opts, "th-1"),
+                             author_agent_id="ag-1"),   # N10: the carrier's
+        {"body": "answer v1", "authorType": "agent"},   # own line lifts it
         {"body": "the numbers were wrong", "authorType": "user"}]
     pc.interaction_rows = [
         {"kind": "request_confirmation", "status": "rejected",
