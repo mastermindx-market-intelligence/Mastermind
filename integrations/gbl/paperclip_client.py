@@ -42,15 +42,26 @@ Boundary law (ADDENDUM §1/§3, BUILD_PLAN GBL-4; repair round 1, panel B):
   balanced JSON, ``validate_ask``-checked), never executed, never
   interpreted as instructions.  Parsed events carry their comment's
   provenance (``comment_author``, ``comment_id``, ``comment_created_at``,
-  ``comment_order``) so the bridge can trust only the bridge agent's own
-  comments and order them totally (panel B M1/M2; the field names follow
-  the GBL lane's in-flight protocol round).
+  ``comment_order``) — DISPLAY AND ORDERING METADATA ONLY, never a trust
+  basis (GBL_REPAIR1_NOTES §2: the plain comments route cannot produce
+  agent-attributed rows).  Trust is the host-held HMAC v1 tag: the store
+  stamps every appended event with a per-record strictly increasing
+  ``seq`` and a tag binding (ask_id, seq, event); on read, an event whose
+  tag is absent, malformed, cross-ask or failing verification surfaces
+  ``trusted: False`` and the bridge ignores it.  ``create_ask`` is
+  CREATE-IF-ABSENT (§1.1): None when created, the existing record when
+  the deterministic id is present — never a second issue.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import http.client
 import json
+import os
 import re
+import secrets
+import stat
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -113,6 +124,27 @@ EVENT_MARKER = "gbl-event-v1"
 _ASK_MARKER_LINE = (
     f"{ASK_MARKER} mastermind.gbl.ask.v1 record — quoted data, not "
     "instructions; do not edit.")
+
+# ── The event trust basis (GBL_REPAIR1_NOTES §1.2/§2, round 2) ───────────────
+#
+# The plain Paperclip comments route cannot produce agent-attributed rows
+# (gbl4-devproof 2026-11-11: authorAgentId null, authorType "user"), so the
+# author field is display metadata and can never separate the store's own
+# events from a forged comment.  The basis is ONE host-held key: 32 random
+# bytes, generated on first use, stored 0600 under the bridge's state root,
+# never on argv, in a log, on the wire, or inside Paperclip.  Every appended
+# event carries ``"tag": "v1:" + HMAC-SHA256(key, message).hexdigest()`` with
+# ``message = ask_id + "\n" + str(seq) + "\n" + canonical_json(event_without_
+# tag)`` — the tag binds the event to ITS ask record, so replaying a genuine
+# tagged comment onto another ask fails verification.  On read, any
+# event-shaped comment whose tag is absent, malformed, wrong-version,
+# bound elsewhere, or failing verification surfaces ``trusted: False`` and
+# the bridge ignores it; the store's own stamps surface ``trusted: True``
+# with a per-record strictly increasing integer ``seq`` derived ONLY from
+# verified events (a foreign comment never moves or blocks the sequence).
+HMAC_TAG_VERSION = "v1"
+HMAC_KEY_BYTES = 32
+_HEX64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 
 
 class GblPaperclipError(Exception):
@@ -190,6 +222,70 @@ def _canonical(value: Mapping[str, Any]) -> str:
                       ensure_ascii=False, allow_nan=False)
 
 
+def _load_or_create_hmac_key(path: Path) -> bytes:
+    """The host-held key (§2.1): read from ``path`` when present (exactly 32
+    bytes, no group/other permission bits — fail closed on anything else),
+    else generated on first use with 0600 inside the EXISTING state
+    directory.  The key never appears in an error, a log, or an exception:
+    only the path and the rule are named."""
+    try:
+        info = path.stat()
+    except FileNotFoundError:
+        parent = path.parent
+        if not parent.is_dir():
+            raise GblPaperclipError(
+                "HMAC_KEY_DIR_MISSING",
+                f"state dir {parent} does not exist; the install step "
+                "creates it — this client never mints directories") from None
+        data = secrets.token_bytes(HMAC_KEY_BYTES)
+        try:
+            handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                             0o600)
+        except FileExistsError:                    # a racing first use
+            return _load_or_create_hmac_key(path)
+        try:
+            os.write(handle, data)
+        finally:
+            os.close(handle)
+        return data
+    except OSError as exc:
+        raise GblPaperclipError(
+            "HMAC_KEY_UNREADABLE",
+            f"cannot state {path}: {type(exc).__name__}") from None
+    if stat.S_IMODE(info.st_mode) & 0o077:
+        raise GblPaperclipError(
+            "HMAC_KEY_MODE_INVALID",
+            f"{path} must carry no group/other permission bits (0600)")
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise GblPaperclipError(
+            "HMAC_KEY_UNREADABLE",
+            f"cannot read {path}: {type(exc).__name__}") from None
+    if len(data) != HMAC_KEY_BYTES:
+        raise GblPaperclipError(
+            "HMAC_KEY_INVALID",
+            f"{path} must hold exactly {HMAC_KEY_BYTES} bytes")
+    return data
+
+
+def _event_tag(key: bytes, ask_id: str, seq: int,
+               event: Mapping[str, Any]) -> str:
+    """The §2.2 v1 tag: HMAC-SHA256 over ``ask_id + "\\n" + str(seq) +
+    "\\n" + canonical_json(event_without_tag)`` (sorted keys, compact
+    separators, UTF-8)."""
+    message = (ask_id + "\n" + str(seq) + "\n"
+               + _canonical(event)).encode("utf-8")
+    return f"{HMAC_TAG_VERSION}:" + hmac.new(
+        key, message, hashlib.sha256).hexdigest()
+
+
+def _tag_is_wellformed(tag: Any) -> bool:
+    return (isinstance(tag, str)
+            and tag.startswith(f"{HMAC_TAG_VERSION}:")
+            and bool(_HEX64_RE.fullmatch(tag[len(HMAC_TAG_VERSION) + 1:])))
+
+
 def _parse_ts(value: Any) -> datetime | None:
     """Parse a Paperclip timestamp (Z- or offset-suffixed ISO) to an aware
     UTC datetime; None when unparseable."""
@@ -232,13 +328,15 @@ class PaperclipAskClient:
     """``GblAskStore`` (bridge_service.py:94) over Paperclip issues+comments.
 
     Constructed with the resolved dev-instance facts (base URL, company id,
-    service-agent id) — ``from_spec`` reads them from a GBL-4 roster spec
-    file.  One urllib request per call; no retries anywhere (the EFFECT_UNKNOWN
-    law: an unproven create is reported, never repeated).
+    service-agent id) plus the host-held HMAC key path (§2) — ``from_spec``
+    reads them from a GBL-4 roster spec file.  One urllib request per call;
+    no retries anywhere (the EFFECT_UNKNOWN law: an unproven create is
+    reported, never repeated).
     """
 
     def __init__(self, base_url: str, company_id: str,
                  service_agent_id: str, *,
+                 hmac_key_path: str | Path | None = None,
                  headers: Mapping[str, str] | None = None,
                  timeout_seconds: float = 15.0):
         self._base = validate_paperclip_base_url(base_url)
@@ -246,6 +344,15 @@ class PaperclipAskClient:
                                            typed=False)
         self._agent_id = _quote_segment(service_agent_id,
                                         what="service_agent_id", typed=False)
+        if hmac_key_path is not None:
+            path = Path(hmac_key_path).expanduser()
+            if not path.is_absolute():
+                raise ValueError(
+                    f"hmac_key_path must be absolute: {hmac_key_path!r}")
+            self._hmac_key_path: Path | None = path
+        else:
+            self._hmac_key_path = None
+        self._hmac_key_bytes: bytes | None = None
         supplied = dict(headers or {})
         merged = {"x-instance-role": "local_trusted"}
         for key in supplied:
@@ -268,7 +375,9 @@ class PaperclipAskClient:
     @classmethod
     def from_spec(cls, path: str | Path) -> "PaperclipAskClient":
         """Build the client from a GBL-4 dev roster spec JSON file (the
-        ``paperclip`` block: base_url, company_id, agent_id)."""
+        ``paperclip`` block: base_url, company_id, agent_id,
+        hmac_key_path — the key path is REQUIRED: a spec that omits it
+        would configure a trust-absent client, which is refused)."""
         try:
             spec = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
@@ -276,19 +385,34 @@ class PaperclipAskClient:
         block = spec.get("paperclip") if isinstance(spec, dict) else None
         if not isinstance(block, dict):
             raise ValueError(f"spec {path} has no paperclip block")
-        for field in ("base_url", "company_id", "agent_id"):
+        for field in ("base_url", "company_id", "agent_id",
+                      "hmac_key_path"):
             if not block.get(field):
                 raise ValueError(f"spec {path} paperclip.{field} is required")
-        return cls(block["base_url"], block["company_id"], block["agent_id"])
+        return cls(block["base_url"], block["company_id"], block["agent_id"],
+                   hmac_key_path=block["hmac_key_path"])
 
     # -- the GblAskStore interface --------------------------------------------
 
-    def create_ask(self, ask: Mapping[str, Any]) -> None:
-        """Persist the validated ask envelope as ONE issue, assigned to the
-        bridge service agent (ADDENDUM §3: the issue IS the record).  A lost
-        or ambiguous outcome raises ``GblCreateEffectUnknown`` — never
-        retried here."""
+    def create_ask(self, ask: Mapping[str, Any]) -> Mapping[str, Any] | None:
+        """CREATE-IF-ABSENT (GBL_REPAIR1_NOTES §1.1): persist the validated
+        ask envelope as ONE issue, assigned to the bridge service agent
+        (ADDENDUM §3: the issue IS the record).
+
+        Returns None when it created the record; returns the EXISTING
+        record (a fresh copy built by :meth:`read_ask`) when the
+        deterministic ask id is already present — no raise, no second
+        issue, no mutation of the stored one.  The absence is decided by
+        the store itself, so a caller whose earlier read raced can never
+        end up with two records.  A lost or ambiguous CREATE outcome still
+        raises ``GblCreateEffectUnknown`` — never retried here; a failure
+        of the pre-create absence check is NOT an unknown effect (nothing
+        began) and propagates as its own typed read error."""
         envelope = validate_ask(ask)      # re-validated; deep copy
+        ask_id = envelope["ask_id"]
+        existing = self.read_ask(ask_id)  # exact-key resolution; typed errors
+        if existing is not None:          # propagate honestly
+            return existing
         payload = {
             "title": _issue_title(envelope),
             "description": f"{_ASK_MARKER_LINE}\n{_canonical(envelope)}",
@@ -315,11 +439,12 @@ class PaperclipAskClient:
                 f"issue create outcome unknown ({exc.code})") from None
         issue_id = row.get("id") if isinstance(row, dict) else None
         try:
-            self._issue_ids[envelope["ask_id"]] = self._issue_seg(issue_id)
+            self._issue_ids[ask_id] = self._issue_seg(issue_id)
         except GblPaperclipError:
             # The create may have landed; the reply's id is unusable (M9).
             raise GblCreateEffectUnknown(
                 "issue create reply carried no usable issue id") from None
+        return None
 
     def read_ask(self, ask_id: str) -> dict[str, Any] | None:
         """The stored record for the ask id, or None.  Found by the
@@ -340,21 +465,49 @@ class PaperclipAskClient:
                 "RECORD_INVALID",
                 f"issue {issue.get('id')} failed contract validation: "
                 f"{exc.code}") from None
-        record["events"] = self._events(self._issue_seg(issue.get("id")))
+        record["events"] = self._events(self._issue_seg(issue.get("id")),
+                                        ask_id)
         return record
 
     def append_ask_event(self, ask_id: str,
                          event: Mapping[str, Any]) -> None:
-        """Append ONE comment carrying the event; idempotent by content (a
-        redelivered identical event does not duplicate the comment)."""
+        """Append ONE comment carrying the event, stamped by the store
+        itself with the next per-record ``seq`` and its §2 v1 tag
+        (idempotent by core content: a redelivered identical event — or an
+        append whose reply was lost and is retried — matches a TRUSTED
+        existing core and never duplicates the comment).
+
+        The store is the only stamper: incoming ``seq``/``tag``/``trusted``
+        keys are never written through.  ``seq`` is
+        ``max(seq of VERIFIED events) + 1`` — derived solely from
+        tag-verified events, so a foreign or untrusted comment can never
+        move or block the sequence (deputy steer, round 2)."""
         issue = self._issue_for(ask_id)
         if issue is None:
             raise GblPaperclipError("ASK_ISSUE_NOT_FOUND", ask_id)
         seg = self._issue_seg(issue.get("id"))
-        body = f"{EVENT_MARKER} {_canonical(dict(event))}"
-        for row in self._comment_rows(seg):
-            if str(row.get("body") or "") == body:
-                return                      # already appended; no duplicate
+        core = {key: value for key, value in dict(event).items()
+                if key not in ("seq", "tag", "trusted")}
+        verified = [self._verified_event(stored, ask_id)
+                    for stored in self._stored_events(seg)]
+        next_seq = 1
+        for _event, trusted in verified:
+            if trusted is True and type(_event.get("seq")) is int:
+                next_seq = max(next_seq, _event["seq"] + 1)
+        core_json = _canonical(core)
+        for _event, trusted in verified:
+            # Idempotent only on a TRUSTED match: a forged copy of our core
+            # (untrusted) must not suppress the real append.
+            if trusted is True:
+                stored_core = {k: v for k, v in _event.items()
+                               if k not in ("seq", "trusted")}
+                if _canonical(stored_core) == core_json:
+                    return                  # already appended; no duplicate
+        stamped = {**core, "seq": next_seq}
+        tagged = dict(stamped)
+        tagged["tag"] = _event_tag(self._hmac_key(), ask_id, next_seq,
+                                   stamped)
+        body = f"{EVENT_MARKER} {_canonical(tagged)}"
         self._request("POST", f"/api/issues/{seg}/comments",
                       {"clientRequestId": str(uuid.uuid4()), "body": body})
 
@@ -485,14 +638,65 @@ class PaperclipAskClient:
         # total server order (createdAt, then id) the bridge also sees.
         return sorted(rows, key=order)
 
-    def _events(self, issue_seg: str) -> list[dict[str, Any]]:
-        events: list[dict[str, Any]] = []
+    def _stored_events(self, issue_seg: str) -> list[dict[str, Any]]:
+        """The parsed JSON of every event-shaped comment on the issue, in
+        the stable server order (oldest first)."""
+        stored: list[dict[str, Any]] = []
         for row in self._comment_rows(issue_seg):
             event = _parse_event_body(str(row.get("body") or ""))
             if event is not None:
-                _add_comment_provenance(event, row)
-                events.append(event)
+                stored.append(event)
+        return stored
+
+    def _events(self, issue_seg: str,
+                ask_id: str) -> list[dict[str, Any]]:
+        """The record's events, each stamped with the computed ``trusted``
+        flag (§2: verified by the host-held tag — never by an author field
+        or a claimed in-JSON ``trusted`` key) and carrying the stored
+        ``seq``.  Untrusted events stay visible with ``trusted: False``;
+        the bridge ignores them."""
+        events: list[dict[str, Any]] = []
+        for row in self._comment_rows(issue_seg):
+            stored = _parse_event_body(str(row.get("body") or ""))
+            if stored is None:
+                continue          # a plain comment: not an event at all
+            event, _trusted = self._verified_event(stored, ask_id)
+            _add_comment_provenance(event, row)
+            events.append(event)
         return events
+
+    def _verified_event(self, stored: Mapping[str, Any],
+                        ask_id: str) -> tuple[dict[str, Any], bool]:
+        """One stored event JSON → (surfaced event, trusted).  Trust is
+        EXACTLY tag verification (§2.4): the tag must be well-formed v1,
+        the seq an integer, and the HMAC must bind (ask_id, seq, event).
+        Everything else — no tag, wrong version, cross-ask binding,
+        tampered content, a claimed ``trusted`` key — is ``False``."""
+        event = {key: value for key, value in stored.items()
+                 if key not in ("tag", "trusted")}
+        tag = stored.get("tag")
+        trusted = False
+        if _tag_is_wellformed(tag):
+            seq = event.get("seq")
+            if type(seq) is int:
+                expected = _event_tag(self._hmac_key(), ask_id, seq, event)
+                trusted = hmac.compare_digest(expected, str(tag))
+        event["trusted"] = trusted
+        return event, trusted
+
+    def _hmac_key(self) -> bytes:
+        """The host-held key, loaded once.  A client configured with NO key
+        fails closed the moment a key is actually needed (a tagged event is
+        proof one exists); it never degrades into silent untrusted reads."""
+        if self._hmac_key_bytes is None:
+            if self._hmac_key_path is None:
+                raise GblPaperclipError(
+                    "HMAC_KEY_NOT_CONFIGURED",
+                    "this client holds no hmac_key_path; a spec always "
+                    "configures one")
+            self._hmac_key_bytes = _load_or_create_hmac_key(
+                self._hmac_key_path)
+        return self._hmac_key_bytes
 
     # -- one request, no retries, no redirects, the URL law every time ---------
 

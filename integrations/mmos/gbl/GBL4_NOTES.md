@@ -5,8 +5,8 @@ of the Grok Bot link (BUILD_PLAN row GBL-4; ADDENDUM_1 §1/§3; ARCHITECTURE
 §5–§6; GBL2_NOTES "The Paperclip client interface"). Files owned here, as
 sole writer:
 
-- `tools/gbl/gbl_ask.py` — the asker-side CLI (`ask` / `status` / `fetch`,
-  `--wait` on ask and fetch).
+- `tools/gbl/gbl_ask.py` — the asker-side CLI (`ask` / `status` / `fetch`
+  with `--wait`, plus `reconcile` since round 2).
 - `integrations/gbl/paperclip_client.py` — `PaperclipAskClient`, the
   `GblAskStore` protocol (`bridge_service.py:94`) over Paperclip
   issues+comments, plus `validate_paperclip_base_url` and
@@ -14,8 +14,8 @@ sole writer:
 - `tools/gbl/specs/grok_bridge_dev.json` — NEW dev-only roster entry for the
   bridge service agent in the isolated dev instance (no existing roster or
   spec was edited).
-- `tests/test_gbl_ask_cli.py` (20), `tests/test_gbl_paperclip_client.py`
-  (33).
+- `tests/test_gbl_ask_cli.py` (44 after round 2),
+  `tests/test_gbl_paperclip_client.py` (119 after round 2).
 - this note.
 
 `common/gbl_contract.py` and the GBL-1/GBL-2 modules were imported and NOT
@@ -213,6 +213,119 @@ Test evidence for this round (same command, one file at a time):
 35/35; regressions `tests/common/gbl_contract_test.py` 72/72,
 `tests/test_gbl_bridge_service.py` 35/35, `tests/test_gbl_nudge.py`
 10/10, `tests/test_gbl_message_send.py` 19/19.
+
+## Round 2 (GBL contract adaptation, 2026-11-11)
+
+Merged the GBL lane's `t3/mmos-v4-gbl` at `a20872981` (clean merge,
+non-force; NO GBL-owned file — `bridge_service.py`, `gbl_contract.py`,
+`nudge.py`, `message_send.py`, `mcp_server.py`, `admission.py`, their
+tests — was edited here). The contract note
+(`integrations/mmos/gbl/GBL_REPAIR1_NOTES.md` §1–§3) needed no change;
+everything it requires was implementable on the current Paperclip
+surface. Tests first (`de402e7e2`, 88 failing assertions), fixes in the
+same files I own (`integrations/gbl/paperclip_client.py`,
+`tools/gbl/gbl_ask.py`, the two test files, this note, the dev spec):
+
+- **§1.1 create-if-absent** — `create_ask` first resolves the
+  deterministic ask id through the exact-key path (`read_ask`), returns
+  the EXISTING record when present (a fresh copy; no raise, no second
+  issue, no mutation), and returns `None` only after a create POST
+  landed. A failure of the pre-create absence check is NOT an unknown
+  effect (nothing began) and propagates as its own typed read error —
+  the POST is never issued. `GblCreateEffectUnknown` keeps its exact
+  meaning for a lost/ambiguous CREATE (transport, 5xx, redirect,
+  truncated reply, 408/409/425/429/499, unusable reply id), and the
+  bridge's read-back reconcile path is unchanged. Replay through the
+  merged bridge: two submits, exactly one issue, `IDEMPOTENT`.
+- **§1.2 seq + trusted** — every append is stamped BY THE STORE with
+  `seq = max(seq of verified events) + 1` (per record, starting at 1) and
+  surfaced `trusted: True` only when the §2 tag verifies. Incoming
+  `seq`/`tag`/`trusted` keys on an append are never written through.
+  **Deputy steer (round 2), implemented as ruled:** seq derives ONLY
+  from tag-verified (trusted) events, so a foreign or untrusted comment
+  — including one carrying a huge forged `seq` or a claimed
+  `"trusted": true` — can never move or block the sequence, and trust is
+  gated on `trusted is True` EXACTLY (the flag is computed from HMAC
+  verification, never read from the comment JSON). A fresh client
+  instance continues the record's sequence: derivation is from the
+  stored record, not instance state.
+- **§2 HMAC v1 tag** — the adapter holds ONE host-local key: 32 random
+  bytes, generated on first use (lazy), stored mode 0600 inside the
+  EXISTING bridge state dir (a missing dir is the typed
+  `HMAC_KEY_DIR_MISSING` — this client never mints directories), read
+  from the `hmac_key_path` given by config (constructor /
+  `paperclip.hmac_key_path` in the spec — REQUIRED in `from_spec`; no
+  spec configures a trust-absent client). File law is enforced on load:
+  wrong length → `HMAC_KEY_INVALID`, any group/other permission bit →
+  `HMAC_KEY_MODE_INVALID`, unreadable → `HMAC_KEY_UNREADABLE`, and a
+  client with no key configured fails closed with
+  `HMAC_KEY_NOT_CONFIGURED` the moment a key is needed (a tagged event
+  is proof one exists — never a silent all-untrusted read). Tag shape
+  is exactly §2.2: `"v1:" + HMAC-SHA256(key, ask_id + "\n" + str(seq) +
+  "\n" + canonical_json(event_without_tag)).hexdigest()`, so the tag
+  binds the event to ITS ask record (a genuine tagged comment replayed
+  onto another ask fails verification — tested). On read, an
+  event-shaped comment whose tag is absent, malformed, wrong-version,
+  bound elsewhere, or failing verification surfaces `trusted: False`
+  and the bridge ignores it; the `tag` itself never surfaces to the
+  bridge. The author/id/timestamp/order provenance fields from Repair 1
+  are now DISPLAY AND ORDERING METADATA ONLY (per §2's ruling; the
+  dev-proof fact stands: the plain comments route cannot produce
+  agent-attributed rows). The KEY never crosses the wire, never enters
+  Paperclip, never appears in an error — asserted over every recorded
+  request body/path/header and every stored comment in the suite.
+- **§3 expires_at + reconcile** — `status` prints `expires_at` whenever
+  the bridge carries it and exits 4 on a status of `EXPIRED`. New
+  `reconcile --id <gb-…>` subcommand: wire op `reconcile` with
+  arguments EXACTLY `{ask_id}` (its parser deliberately has NO `--bot`;
+  the door's `_OP_ARGUMENTS` pins the key set). Rationale for the CLI
+  owning this surface: the MCP edge is a static five-tool census
+  (`team.delegate/result/question/answer/message`) with no reconcile
+  tool, so the local AF_UNIX door is the op's one lawful caller — an
+  operator settling a `NUDGE_EFFECT_UNKNOWN` by observation, which
+  never sends.
+- **§5 nudge write-law mitigation, already in place** —
+  `append_ask_event` is idempotent by CORE content (a trusted match
+  suppresses the duplicate POST), so a nudge-event append whose reply
+  was lost is safely retryable: the retry finds the landed core and
+  never double-counts cooldown/budget. No store change was needed for
+  this; it falls out of the content-idempotency law above.
+
+Not fixed here (not mine / by design):
+
+- **Rotation beyond `v1`** — §2.5 pins a single key; re-tagging events
+  is a conscious future migration, not this round.
+- **`create_service_agent` idempotency (Repair-1 L9)** — the contract
+  round defined create-if-absent for ASK records only; agent creation
+  stays a dev-proof helper and remains non-idempotent.
+
+### Install: HMAC key (the principal's step — never done by this lane)
+
+The production bridge's store adapter generates its key on first use,
+so the INSTALL step is to place the state directory and let the bridge
+create the file — or pre-create it:
+
+1. **Path**: `<bridge state root>/gbl_hmac_v1.key`, where the state
+   root is the directory holding that deployment's `bridge.sock` (the
+   dev proof's root is `~/.mastermind/mmos_dev/gbl4/`; production uses
+   the production bridge's state dir chosen at install). The path goes
+   into the roster spec as `paperclip.hmac_key_path`.
+2. **Owner**: the uid that runs the bridge process (the same user that
+   owns `bridge.sock`). No other user needs read access — the key never
+   leaves the host.
+3. **Mode 0600** exactly; the client refuses the file on ANY group/other
+   permission bit (`HMAC_KEY_MODE_INVALID`), so a loose mode is a
+   visible deployment error, not a silent risk.
+4. **Generation** — either let the adapter generate it on first use
+   (32 random bytes via `secrets`, written 0600 into the existing dir),
+   or pre-create: `umask 077 && head -c 32 /dev/urandom >
+   <state root>/gbl_hmac_v1.key && chmod 600 <state root>/gbl_hmac_v1.key`.
+   The key file must hold exactly 32 bytes.
+5. **Never**: on argv, in a log, in a commit, in Paperclip, on the wire,
+   or in an error message. Losing the file demotes every existing event
+   to `trusted: false` (visible: answered asks stop looking answered)
+   — restore from backup or accept the migration; do not delete it
+   casually. A fresh dev instance may freely generate a new one.
 
 ## Test-run evidence (one file at a time)
 

@@ -1,5 +1,5 @@
 {
-  "_note": "GBL-4 dev-only roster entry for the bridge service agent (BUILD_PLAN install step 3, dev shape). It records the TEST 'Grok Bridge' agent inside the isolated dev Paperclip instance gbl4 (home ~/.mastermind/mmos-dev/paperclip/, server http://127.0.0.1:3191) — never the production Paperclip (127.0.0.1:3100), never instance 'default'. The bridge runtime socket lives in a SEPARATE tree, ~/.mastermind/mmos_dev/gbl4/ (underscore), which holds only the socket/pid/log of the dev bridge process; the two trees are intentionally distinct. No credential anywhere: the dev instance's local-trusted surface is the only authorization. The admission row is a TEST principal for the dev proof only; production admission is the principal's act (RULING §3).",
+  "_note": "GBL-4 dev-only roster entry for the bridge service agent (BUILD_PLAN install step 3, dev shape). It records the TEST 'Grok Bridge' agent inside the isolated dev Paperclip instance gbl4 (home ~/.mastermind/mmos-dev/paperclip/, server http://127.0.0.1:3191) — never the production Paperclip (127.0.0.1:3100), never instance 'default'. The bridge runtime state root is a SEPARATE tree, ~/.mastermind/mmos_dev/gbl4/ (underscore), which holds the socket/pid/log of the dev bridge process AND the dev HMAC key file (hmac_key_path below) — the two trees are intentionally distinct. The HMAC key is NOT a credential: it is a harmless dev-only fixture value generated on first use (32 random bytes, mode 0600) that tags the bridge's own event comments inside this dev instance so the client can tell them from foreign comments (GBL repair-1 §2); the production key's placement is the install step in GBL4_NOTES.md. No credential anywhere: the dev instance's local-trusted surface is the only authorization. The admission row is a TEST principal for the dev proof only; production admission is the principal's act (RULING §3).",
   "kind": "gbl_bridge_service_agent_dev",
   "paperclip": {
     "base_url": "http://127.0.0.1:3191",
@@ -9,7 +9,8 @@
     "agent_name": "Grok Bridge",
     "agent_role": "general",
     "adapter_type": "process",
-    "heartbeat": false
+    "heartbeat": false,
+    "hmac_key_path": "~/.mastermind/mmos_dev/gbl4/hmac_v1.key"
   },
   "bridge": {
     "socket_path": "~/.mastermind/mmos_dev/gbl4/bridge.sock",

@@ -13,9 +13,16 @@ Commands:
 * ``ask --bot <account-label> --question "<text>" [--wait]`` — mint the ask
   through the bridge (deterministic id over principal/target/key) and print
   ``ask_id=… status=CREATED`` (or ``status=IDEMPOTENT`` on a key replay).
-* ``status --id <gb-…>`` — print the ask's state.
+* ``status --id <gb-…>`` — print the ask's state and ``expires_at``; a dead
+  ask reports ``EXPIRED`` and exits 4 (the bridge's status op carries both,
+  GBL repair-1 §3).
 * ``fetch --id <gb-…>`` — fetch the answer once it exists (the first
   successful fetch consumes it).
+* ``reconcile --id <gb-…>`` — the operator's settle path for an
+  effect-unknown nudge: it OBSERVES the last attempt by ask id and never
+  sends.  The wire op takes exactly ``{ask_id}`` (no ``--bot``); the MCP
+  edge's static five-tool census has no reconcile surface, so this local
+  door is the one caller.
 
 ``--wait`` polls ``fetch`` for up to the deadline, then exits: the EXIT is
 the asker session's wake when the command runs as a background task
@@ -222,6 +229,18 @@ def build_parser() -> argparse.ArgumentParser:
                                  help="show an ask's state")
     status.add_argument("--id", required=True, help="the ask id (gb-…)")
 
+    # reconcile is the ONE command without --bot: the wire law pins its
+    # argument set to exactly {ask_id} (bridge _OP_ARGUMENTS), and it names
+    # no principal — the ask record itself is the whole address.
+    reconcile = commands.add_parser(
+        "reconcile", help="settle the last nudge attempt by observation "
+                          "(never sends)")
+    reconcile.add_argument("--socket", metavar="PATH",
+                           default=os.environ.get(SOCKET_ENV),
+                           help="bridge service socket path "
+                                f"(default: ${SOCKET_ENV})")
+    reconcile.add_argument("--id", required=True, help="the ask id (gb-…)")
+
     fetch = commands.add_parser("fetch", parents=[common],
                                 help="fetch the answer")
     fetch.add_argument("--id", required=True, help="the ask id (gb-…)")
@@ -292,8 +311,35 @@ def cmd_status(client: BridgeSocketClient, args: argparse.Namespace) -> int:
     _require_ask_id(args.id)
     result = client.request("status", {"principal": args.bot,
                                        "ask_id": args.id})
-    print(f"status={result.get('status')} ask_id={args.id} "
-          f"state={result.get('state')}")
+    line = (f"status={result.get('status')} ask_id={args.id} "
+            f"state={result.get('state')}")
+    expires = result.get("expires_at")
+    if expires:
+        # GBL repair-1 §3 (panel B L4): the status op carries expires_at;
+        # a dead ask is reported honestly, never as a live state.
+        line += f" expires_at={expires}"
+    print(line)
+    if str(result.get("status")) == "EXPIRED":
+        return EXIT_EXPIRED
+    return EXIT_OK
+
+
+def cmd_reconcile(client: BridgeSocketClient,
+                  args: argparse.Namespace) -> int:
+    """Observe-and-settle for the last nudge attempt (wire op
+    ``reconcile``, arguments exactly ``{ask_id}``): after a
+    ``NUDGE_EFFECT_UNKNOWN`` this is the lawful next step — it never
+    sends, so it is always safe to run.  A settled observation prints its
+    status (RECONCILED_DELIVERED / RECONCILED_NOT_DELIVERED /
+    NUDGE_EFFECT_UNKNOWN when the transport still cannot prove the
+    outcome) and exits 0; a typed bridge refusal (no attempt to settle,
+    unknown ask, no sender) exits 5."""
+    _require_ask_id(args.id)
+    result = client.request("reconcile", {"ask_id": args.id})
+    line = f"status={result.get('status')} ask_id={args.id}"
+    if result.get("reason_code"):
+        line += f" reason_code={result['reason_code']}"
+    print(line)
     return EXIT_OK
 
 
@@ -396,7 +442,8 @@ def main(argv: list[str] | None = None) -> int:
                               f"pass --socket or set ${SOCKET_ENV}")
         client = BridgeSocketClient(args.socket)
         handler = {"ask": cmd_ask, "status": cmd_status,
-                   "fetch": cmd_fetch}[args.command]
+                   "fetch": cmd_fetch, "reconcile": cmd_reconcile
+                   }[args.command]
         return handler(client, args)
     except AskCliError as exc:
         print(f"error={exc.code} {exc.detail}".rstrip(), file=sys.stderr)
