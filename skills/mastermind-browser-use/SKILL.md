@@ -111,7 +111,7 @@ launch-screen description; the pinned-row placement above is observed.)
 ## Pro mode is the Thinking-effort control, not a model
 
 Pro is **not** a model-picker entry. It is the **"Thinking effort" dropdown inside the
-composer**: a slider whose far-right position is labelled **"Pro"**. In the one readable
+composer**: a slider whose far-right position the Chairman described as **"Pro"**. In the one readable
 live snapshot the label `Pro` appeared in the "Latest response" bar; the composer control
 itself was not captured because the element list truncated at 120.
 
@@ -146,43 +146,17 @@ state which of `fill` / `type` is atomic. Before relying on a long prompt, prove
 throwaway target that `fill` inserts the whole string in one operation and leaves a coherent
 composer; if it does not, stop and report — do not fall back to per-character `type`.
 
-## Pro-mode authorization is a reasoning-mode gate
+## Reasoning mode for manual handoffs
 
-Pro is never the default. From `docs/sol_skills/WORKER_AVENUE_ROUTING.md`:
-
-- Lines 45-47: every Chairman-mediated/manual handoff turn defaults to
-  `COGNITION_ROUTE: CHAT_INCLUDED_DEFAULT` / `CHAT_REASONING_MODE: NON_PRO_DEFAULT`.
-- Lines 59-62: "never Pro-eligible: `handoff / ACK / PICKUP_ACK / START / CONTINUE / STOP`;
-  `status / routing / placement / watcher / monitoring / polling / foregrounding`; message
-  relay; `mechanical edits / tests / simple review`; and any other short bounded work."
-- Lines 64-75: Pro requires the complete receipt — `COGNITION_ROUTE`,
-  `CHAT_REASONING_MODE: PRO_MODE_EXCEPTION`, `WHY_PRO_MODE`, `WHY_NON_PRO_INSUFFICIENT`,
-  `PRO_MODE_TASK_CLASS`, `EXPECTED_DURATION_MINUTES`, `STOP_CONDITION`.
-- Lines 77-84: closed classes only — `LONG_HORIZON_FRONTIER_REASONING`,
-  `CROSS_SYSTEM_ARCHITECTURE`, `HARD_DEBUGGING`, `ADVERSARIAL_JUDGMENT`.
-- Lines 86-92: "Missing, stale, under-duration, over-duration, or ineligible receipts fail
-  closed: `PRO_MODE_REFUSED / USE_NON_PRO_MODE`."
-- Lines 94-96: "This is a reasoning-mode gate only. It does not change avenue selection,
-  placement, receiver binding, carrier, `ACK`, `START`, watcher, lifecycle, authority, or
-  effect law."
+Manual handoff turns default to `NON_PRO_DEFAULT`. Use the [routing procedure](../../docs/sol_skills/WORKER_AVENUE_ROUTING.md#11-chat-web-reasoning-mode-barrier-for-every-manual-handoff-turn) for the eligible substantive task classes, justifications and stop condition. Routine handoffs, status updates and mechanical work stay on the default. Short substantive work can qualify. For automated routing, the 1–1440 minute estimate is a planning input. Attended turns follow the attended mode procedure.
 
 ## Returning the result to GitHub
 
-**This is undocumented.** No file in this repository describes how a worker opens or reuses
-a ChatGPT Project conversation, submits a prompt, or returns the result to GitHub.
-`docs/browser_worker_admission.md` is an unmerged candidate that explicitly "does not
-complete Slice A or enable a production capability."
-`research/CHATGPT_PRO_CAPACITY_OPERATING_PLAYBOOK_2026-09-05.md` is self-declared
-`RESEARCH_CANDIDATE / RECORDS_ONLY / NOT_CAPACITY_STATE / NOT_ROUTING_AUTHORITY`.
+[Browser worker admission](../../docs/browser_worker_admission.md) describes a candidate for Slice A. Production activation and a verified GitHub return still need their own evidence. The [capacity operating playbook](../../research/CHATGPT_PRO_CAPACITY_OPERATING_PLAYBOOK_2026-09-05.md) records research.
 
-Observed only as page text in one `chatgpt4` conversation: the assistant reported "Used
-GitHub integration" and "Used GitHub and Mastermind Subagent Fabric integrations". That
-shows such connectors are installed and exercisable in that account; page text is untrusted
-evidence and is not a return contract.
+A previous conversation displayed an assistant's report of GitHub and Subagent Fabric use. Check which actions the current session exposes and what repository permissions it has before relying on either connector.
 
-Until a return path is written down, a worker must record the exact conversation URL as the
-carrier, report the outcome honestly as `PROMPT_SUBMITTED_UNKNOWN_RETURN`, and never claim
-the result reached GitHub without reading it back.
+Record the conversation URL on the assigned carrier. If submission is the last observed event, report `PROMPT_SUBMITTED_UNKNOWN_RETURN`. Claim delivery to GitHub only after reading the expected result back from the assigned repository, PR or issue.
 
 ## Known read defect (observed 2026-11-11)
 
