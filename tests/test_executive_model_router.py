@@ -116,14 +116,32 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
         WorkRequest("planning"),
         WorkRequest("judgment"),
         WorkRequest("escalation"),
-        WorkRequest("implementation", risk="critical"),
-        WorkRequest("implementation", ambiguity="high"),
     ):
         decision = router.route(request)
         assert decision.mode is RouteMode.FRONTIER_LEAD
         assert decision.preferred_model_aliases == ("frontier.orchestrator",)
         assert decision.execution_profile_id == "operator.appserver.readonly.v1"
+        assert decision.principal_review_required is False
+        assert decision.effective_complexity is None
         with pytest.raises(RoutingPolicyError, match="frontier-lead work"):
+            decision.job_constraints()
+
+    # OQ-8 (WO-06): critical risk / high ambiguity no longer inflate child
+    # cognition to frontier-lead. The bounded worker route stands and the
+    # required principal review is surfaced on the decision instead.
+    for request in (
+        WorkRequest("implementation", risk="critical"),
+        WorkRequest("implementation", ambiguity="high"),
+    ):
+        decision = router.route(request)
+        assert decision.mode is RouteMode.WORKER
+        assert decision.worker_eligible
+        assert decision.principal_review_required is True
+        assert {"critical_risk", "high_ambiguity"} & set(decision.reason_codes)
+        assert "principal_review_required" in decision.reason_codes
+        with pytest.raises(
+            RoutingPolicyError, match="principal review required before worker dispatch"
+        ):
             decision.job_constraints()
 
 
@@ -822,10 +840,17 @@ def test_v2_model_provider_identity_does_not_grant_authority_or_re_admit_frontie
 
     with pytest.raises(RoutingPolicyError, match="not worker eligible"):
         router.resolve_model_alias("frontier.orchestrator")
-    frontier = router.route(WorkRequest("implementation", ambiguity="high"))
-    assert frontier.mode is RouteMode.FRONTIER_LEAD
-    assert not frontier.worker_eligible
-    assert frontier.suitability_tiers == (
+    # OQ-8 (WO-06): provider identity or high ambiguity cannot re-admit
+    # frontier; the bounded worker route stands with review required.
+    downgraded = router.route(WorkRequest("implementation", ambiguity="high"))
+    assert downgraded.mode is RouteMode.WORKER
+    assert downgraded.worker_eligible
+    assert downgraded.principal_review_required is True
+    assert "high_ambiguity" in downgraded.reason_codes
+    assert "principal_review_required" in downgraded.reason_codes
+    lead = router.route(WorkRequest("planning"))
+    assert lead.mode is RouteMode.FRONTIER_LEAD
+    assert lead.suitability_tiers == (
         SuitabilityTier("frontier.lead", ("frontier.orchestrator",)),
     )
 
@@ -991,3 +1016,151 @@ def test_minimax_attended_resolution_refuses_the_unpromoted_provider():
         router.resolve_attended_model_alias(
             "minimax.attended", "minimax-token-plan.claude-code-anthropic"
         )
+
+
+# --- WO-06 (OQ-8): consume effective_complexity, never re-inflate -------------
+
+
+def test_wo06_c2_downgraded_critical_child_stays_worker_while_review_is_preserved():
+    """Acceptance evidence (WO-06): a C2-downgraded child with risk=critical
+    stays non-frontier for worker cognition while the principal review
+    requirement remains visible and prevents premature worker dispatch."""
+    router = ModelRouter.load()
+
+    decision = router.route(
+        WorkRequest(
+            "research",
+            risk="critical",
+            required_capabilities=("research",),
+            effective_complexity="C2_COMPLEX_BOUNDED",
+        )
+    )
+    assert decision.mode is RouteMode.WORKER
+    assert decision.worker_eligible
+    assert decision.principal_review_required is True
+    assert decision.effective_complexity == "C2_COMPLEX_BOUNDED"
+    assert {"critical_risk", "principal_review_required"} <= set(
+        decision.reason_codes
+    )
+    assert "effective_complexity_c2_complex_bounded" in decision.reason_codes
+    assert decision.preferred_model_aliases != ("frontier.orchestrator",)
+    persisted = decision.to_dict()
+    assert persisted["principal_review_required"] is True
+    assert persisted["effective_complexity"] == "C2_COMPLEX_BOUNDED"
+    with pytest.raises(
+        RoutingPolicyError, match="principal review required before worker dispatch"
+    ):
+        decision.job_constraints()
+
+    # C0..C3 shorthand normalizes to the canonical long name at the boundary.
+    shorthand = router.route(WorkRequest("research", effective_complexity="C2"))
+    assert shorthand.mode is RouteMode.WORKER
+    assert shorthand.effective_complexity == "C2_COMPLEX_BOUNDED"
+
+    # Frontier complexity composes with a lead task_kind and keeps the review
+    # requirement visible on the frontier decision.
+    frontier = router.route(
+        WorkRequest("judgment", risk="critical", effective_complexity="C3")
+    )
+    assert frontier.mode is RouteMode.FRONTIER_LEAD
+    assert frontier.effective_complexity == "C3_FRONTIER_JUDGMENT"
+    assert frontier.principal_review_required is True
+    assert "effective_complexity_frontier_judgment" in frontier.reason_codes
+
+
+def test_wo06_effective_complexity_vocabulary_is_canonical_and_coherent():
+    router = ModelRouter.load()
+
+    with pytest.raises(RoutingPolicyError, match="canonical class"):
+        WorkRequest("research", effective_complexity="ultra")
+    # The reviewer lane is a lane, not a complexity rung.
+    with pytest.raises(RoutingPolicyError, match="canonical class"):
+        WorkRequest("research", effective_complexity="reviewer")
+    # Worker cognition cannot self-select frontier judgment.
+    with pytest.raises(RoutingPolicyError, match="requires a lead task_kind"):
+        router.route(WorkRequest("mechanical", effective_complexity="C3"))
+    # A wrapper downgrade cannot be applied to lead cognition either.
+    with pytest.raises(
+        RoutingPolicyError, match="cannot downgrade a lead task_kind"
+    ):
+        router.route(WorkRequest("planning", effective_complexity="C2"))
+
+
+def test_wo06_required_capabilities_still_bind_downgraded_worker_cognition(
+    tmp_path,
+):
+    raw = _v2_policy()
+    router = _load_policy(tmp_path, raw)
+    # Research worker tiers cannot satisfy a code capability even when the
+    # child was downgraded: route keeps consuming required capabilities.
+    with pytest.raises(
+        RoutingPolicyError, match="cannot satisfy requested capabilities"
+    ):
+        router.route(
+            WorkRequest(
+                "research",
+                effective_complexity="C1_ROUTINE_BOUNDED",
+                required_capabilities=("code",),
+            )
+        )
+    ok = router.route(
+        WorkRequest(
+            "research",
+            effective_complexity="C1_ROUTINE_BOUNDED",
+            required_capabilities=("research",),
+        )
+    )
+    assert ok.mode is RouteMode.WORKER
+    assert ok.principal_review_required is False
+    assert "effective_complexity_c1_routine_bounded" in ok.reason_codes
+
+
+@pytest.mark.parametrize("route_args", [
+    ("--risk", "critical"),
+    ("--ambiguity", "high"),
+])
+@pytest.mark.parametrize("sibling_review_required", [False, True])
+def test_wo06_cli_refuses_principal_review_before_creating_any_job(
+    tmp_path, capsys, route_args, sibling_review_required
+):
+    root = tmp_path / "runtime"
+    common = ["--root", str(root)]
+
+    # A bounded preview remains available and does not open runtime state.
+    assert phase1b_main([*common, "route", "implementation", *route_args]) == 0
+    preview = json.loads(capsys.readouterr().out)
+    assert preview["mode"] == "worker"
+    assert preview["principal_review_required"] is True
+    assert not (root / "data" / "control_plane" / "executive.sqlite3").exists()
+
+    submission = [
+        *common, "create-job", "Review-gated bounded work",
+        "--task-kind", "implementation", *route_args,
+    ]
+    if sibling_review_required:
+        submission.append("--review-required")
+    assert phase1b_main(submission) == 2
+    captured = capsys.readouterr()
+    assert "principal review required before worker dispatch" in captured.err
+
+    # Ordinary sibling review is not a principal disposition. The real CLI
+    # must refuse before a Job or JOB_CREATED receipt reaches the temp store.
+    runtime = Runtime.at(root)
+    assert runtime.jobs.list_jobs() == []
+    assert all(
+        event.event_type != "JOB_CREATED"
+        for event in runtime.events.list_events()
+    )
+
+
+@pytest.mark.parametrize("task_kind", ["research", "planning"])
+@pytest.mark.parametrize("complexity", ["", " \t\n"])
+def test_wo06_blank_complexity_normalizes_to_the_default(task_kind, complexity):
+    request = WorkRequest(task_kind, effective_complexity=complexity)
+    assert request.effective_complexity == ""
+    decision = ModelRouter.load().route(request)
+    assert decision.effective_complexity is None
+    assert decision.principal_review_required is False
+    assert decision.mode is (
+        RouteMode.WORKER if task_kind == "research" else RouteMode.FRONTIER_LEAD
+    )

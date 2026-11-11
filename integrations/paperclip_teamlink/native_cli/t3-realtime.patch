@@ -1,0 +1,2030 @@
+diff --git a/apps/server/src/auth/EnvironmentAuth.ts b/apps/server/src/auth/EnvironmentAuth.ts
+index b6bf637..11b7020 100644
+--- a/apps/server/src/auth/EnvironmentAuth.ts
++++ b/apps/server/src/auth/EnvironmentAuth.ts
+@@ -551,6 +551,7 @@ export class EnvironmentAuth extends Context.Service<
+       readonly access: AuthMcpClientAccess;
+       readonly peerLink: boolean;
+       readonly client: AuthClientMetadata;
++      readonly ttl?: Duration.Duration;
+     }) => Effect.Effect<
+       {
+         readonly sessionId: AuthSessionId;
+@@ -1326,7 +1327,7 @@ export const make = Effect.gen(function* () {
+         subject: MCP_CLIENT_SUBJECT,
+         method: "bearer-access-token",
+         scopes: mcpClientScopes(input.access),
+-        ttl: MCP_CLIENT_SESSION_TTL,
++        ttl: input.ttl ?? MCP_CLIENT_SESSION_TTL,
+         ...(input.access === "read-only" ? {} : { runtimeModeCeiling: input.access }),
+         peerLink: input.peerLink,
+         client: { ...input.client, label: input.label, deviceType: "bot" },
+diff --git a/apps/server/src/cli/thread-watch.test.ts b/apps/server/src/cli/thread-watch.test.ts
+new file mode 100644
+index 0000000..c0819e7
+--- /dev/null
++++ b/apps/server/src/cli/thread-watch.test.ts
+@@ -0,0 +1,724 @@
++import { assert, it } from "@effect/vitest";
++import { AuthSessionId } from "@t3tools/contracts";
++import * as Cause from "effect/Cause";
++import * as PlatformError from "effect/PlatformError";
++import * as Sink from "effect/Sink";
++import * as Stdio from "effect/Stdio";
++import * as DateTime from "effect/DateTime";
++import * as Deferred from "effect/Deferred";
++import * as Effect from "effect/Effect";
++import * as Fiber from "effect/Fiber";
++import * as Layer from "effect/Layer";
++import * as Redacted from "effect/Redacted";
++import * as Result from "effect/Result";
++import * as Stream from "effect/Stream";
++import * as TestClock from "effect/testing/TestClock";
++import { beforeEach } from "vite-plus/test";
++
++import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
++import type { ThreadTools } from "./thread.ts";
++import {
++  NATIVE_WATCH_MAX_PROJECTS,
++  NATIVE_WATCH_MAX_REQUEST_BYTES,
++  NATIVE_WATCH_MAX_THREADS,
++  NATIVE_WATCH_SCHEMA,
++  applyNativeWatchStreamItem,
++  collapseNativeWatchNotices,
++  classifyNativeWatchBootstrapError,
++  classifyNativeWatchSubscriptionCause,
++  initialNativeWatchThreadState,
++  parseNativeWatchRequest,
++  runNativeWatch,
++  type NativeWatchErrorCode,
++  type NativeWatchRequest,
++  type NativeWatchStreamItem,
++  type NativeWatchThreadOpener,
++} from "./thread-watch.ts";
++
++const wire: string[] = [];
++const captureOutput = () =>
++  Sink.forEach((chunk: string | Uint8Array) =>
++    Effect.sync(() => {
++      wire.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk));
++    }),
++  );
++
++const auth = {
++  issues: 0,
++  revokes: 0,
++  scopes: [] as ReadonlyArray<string>,
++  ttl: undefined as unknown,
++};
++
++/** The native auth the watch uses, with no server and no stored credential. */
++const authLayer = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
++  issueSession: (input) =>
++    Effect.map(DateTime.now, (expiresAt) => {
++      auth.issues += 1;
++      auth.scopes = input?.scopes ?? [];
++      auth.ttl = input?.ttl;
++      return {
++        sessionId: AuthSessionId.make("watch-session"),
++        token: "synthetic-token",
++        method: "bearer-access-token" as const,
++        scopes: input?.scopes ?? [],
++        subject: "t3-thread-native-watch",
++        client: { deviceType: "bot" as const },
++        expiresAt,
++      };
++    }),
++  issueWebSocketTicket: () =>
++    Effect.map(DateTime.now, (expiresAt) => ({
++      ticket: Redacted.make("synthetic-ticket"),
++      expiresAt,
++    })),
++  revokeSession: () =>
++    Effect.sync(() => {
++      auth.revokes += 1;
++      return true;
++    }),
++});
++
++beforeEach(() => {
++  wire.length = 0;
++  auth.issues = 0;
++  auth.revokes = 0;
++});
++
++const request = (overrides: Partial<NativeWatchRequest> = {}): NativeWatchRequest => ({
++  environmentId: "env-1",
++  projectIds: ["project-1"],
++  threadIds: ["thread-1"],
++  ...overrides,
++});
++
++/** Answers each tool call with the next scripted response for that tool. */
++const fakeTools = (script: Record<string, Array<unknown>>) => {
++  const calls: Array<{ readonly tool: string; readonly args: unknown }> = [];
++  const call = ((tool: string, args: unknown) => {
++    calls.push({ tool, args });
++    const next = script[tool]?.shift();
++    return next === undefined ? Effect.die(`unscripted ${tool} call`) : Effect.succeed(next);
++  }) as ThreadTools["call"];
++  return { tools: { call } satisfies ThreadTools, calls };
++};
++
++const qualifiedTools = (threads: ReadonlyArray<unknown> = []) =>
++  fakeTools({
++    t3_environment_read: [{ environmentId: "env-1" }],
++    t3_project_list: [{ projects: [{ id: "project-1" }], nextCursor: null }],
++    t3_thread_list: [{ threads, nextCursor: null }],
++  });
++
++const rootThread = { threadId: "thread-1", projectId: "project-1", parentThreadId: null };
++
++/** Runs one watch on the mocked native auth, with the scripted subscription. */
++const runWatch = (
++  watch: NativeWatchRequest,
++  closed: Deferred.Deferred<void>,
++  tools: ThreadTools,
++  opener: NativeWatchThreadOpener,
++) =>
++  Effect.scoped(runNativeWatch(watch, closed, tools, "http://127.0.0.1:1", opener)).pipe(
++    Effect.provide(Layer.mergeAll(authLayer, Stdio.layerTest({ stdout: captureOutput }))),
++  );
++
++/** The notice lines this command printed, parsed. */
++const printedNotices = Effect.sync(() =>
++  wire
++    .join("")
++    .trim()
++    .split("\n")
++    .filter(Boolean)
++    .map((line) => JSON.parse(line) as Record<string, unknown>),
++);
++
++const expectRefusal = (line: string, code: NativeWatchErrorCode) => {
++  const parsed = parseNativeWatchRequest(line);
++  if (Result.isFailure(parsed)) {
++    assert.strictEqual(parsed.failure.code, code);
++    return;
++  }
++  assert.fail(`expected the request to be refused with ${code}`);
++};
++
++it("parseNativeWatchRequest accepts one exact request", () => {
++  const parsed = parseNativeWatchRequest(
++    JSON.stringify({ environmentId: "env-1", projectIds: ["project-1"], threadIds: ["thread-1"] }),
++  );
++  if (Result.isFailure(parsed)) {
++    assert.fail(`expected the request to be accepted, got ${parsed.failure.code}`);
++  }
++  assert.deepStrictEqual(parsed.success, {
++    environmentId: "env-1",
++    projectIds: ["project-1"],
++    threadIds: ["thread-1"],
++  });
++});
++
++it("parseNativeWatchRequest refuses input that is not one exact object", () => {
++  expectRefusal("", "invalid_request");
++  expectRefusal("not json", "invalid_request");
++  expectRefusal("[1, 2]", "invalid_request");
++  expectRefusal("null", "invalid_request");
++  expectRefusal(
++    JSON.stringify({ environmentId: "env-1", projectIds: [], threadIds: [] }),
++    "invalid_request",
++  );
++  expectRefusal(
++    JSON.stringify({ environmentId: " env-1", projectIds: ["p"], threadIds: ["t"] }),
++    "invalid_request",
++  );
++  expectRefusal(
++    JSON.stringify({ environmentId: "env-1", projectIds: [" p"], threadIds: ["t"] }),
++    "invalid_request",
++  );
++  expectRefusal(
++    JSON.stringify({ environmentId: 7, projectIds: ["p"], threadIds: ["t"] }),
++    "invalid_request",
++  );
++});
++
++it("parseNativeWatchRequest refuses a field this command does not accept", () => {
++  expectRefusal(
++    JSON.stringify({ environmentId: "env-1", projectIds: ["p"], threadIds: ["t"], cursor: 4 }),
++    "invalid_request",
++  );
++  expectRefusal(JSON.stringify({ environmentId: "env-1", projectIds: ["p"] }), "invalid_request");
++});
++
++it("parseNativeWatchRequest refuses oversized and over-counted requests", () => {
++  const manyProjects = Array.from(
++    { length: NATIVE_WATCH_MAX_PROJECTS + 1 },
++    (_, index) => `p-${index}`,
++  );
++  expectRefusal(
++    JSON.stringify({ environmentId: "env-1", projectIds: manyProjects, threadIds: ["t"] }),
++    "invalid_request",
++  );
++  const manyThreads = Array.from(
++    { length: NATIVE_WATCH_MAX_THREADS + 1 },
++    (_, index) => `t-${index}`,
++  );
++  expectRefusal(
++    JSON.stringify({ environmentId: "env-1", projectIds: ["p"], threadIds: manyThreads }),
++    "invalid_request",
++  );
++  expectRefusal(
++    JSON.stringify({
++      environmentId: "env-1",
++      projectIds: ["p", "p"],
++      threadIds: ["t"],
++    }),
++    "invalid_request",
++  );
++  expectRefusal(
++    JSON.stringify({
++      environmentId: "env-1",
++      projectIds: ["p"],
++      threadIds: ["t", "t"],
++    }),
++    "invalid_request",
++  );
++  expectRefusal(
++    JSON.stringify({
++      environmentId: "env-1",
++      projectIds: ["p"],
++      threadIds: ["t"],
++      padding: "x".repeat(NATIVE_WATCH_MAX_REQUEST_BYTES),
++    }),
++    "request_too_large",
++  );
++});
++
++it("applyNativeWatchStreamItem turns the snapshot into ready and later events into changed", () => {
++  const snapshot = applyNativeWatchStreamItem("env-1", "thread-1", initialNativeWatchThreadState, {
++    kind: "snapshot",
++    snapshotSequence: 12,
++  });
++  assert.deepStrictEqual(snapshot.notices, [
++    {
++      schema: NATIVE_WATCH_SCHEMA,
++      type: "ready",
++      environmentId: "env-1",
++      threadId: "thread-1",
++      sequence: 12,
++    },
++  ]);
++
++  const synchronized = applyNativeWatchStreamItem("env-1", "thread-1", snapshot.state, {
++    kind: "synchronized",
++  });
++  assert.deepStrictEqual(synchronized.notices, []);
++  assert.strictEqual(synchronized.state.ready, true);
++
++  const changed = applyNativeWatchStreamItem("env-1", "thread-1", synchronized.state, {
++    kind: "event",
++    sequence: 13,
++  });
++  assert.deepStrictEqual(changed.notices, [
++    {
++      schema: NATIVE_WATCH_SCHEMA,
++      type: "changed",
++      environmentId: "env-1",
++      threadId: "thread-1",
++      sequence: 13,
++    },
++  ]);
++
++  const stale = applyNativeWatchStreamItem("env-1", "thread-1", changed.state, {
++    kind: "event",
++    sequence: 13,
++  });
++  assert.deepStrictEqual(stale.notices, []);
++});
++
++it("applyNativeWatchStreamItem keeps thread content out of the notice", () => {
++  const changed = applyNativeWatchStreamItem("env-1", "thread-1", initialNativeWatchThreadState, {
++    kind: "event",
++    sequence: 13,
++  });
++  for (const notice of changed.notices) {
++    assert.deepStrictEqual(Object.keys(notice).toSorted(), [
++      "environmentId",
++      "schema",
++      "sequence",
++      "threadId",
++      "type",
++    ]);
++    assert.strictEqual(JSON.stringify(notice).includes("text"), false);
++    assert.strictEqual(JSON.stringify(notice).includes("token"), false);
++  }
++});
++
++it("collapseNativeWatchNotices keeps the newest change per thread and the rest in order", () => {
++  const ready = {
++    schema: NATIVE_WATCH_SCHEMA,
++    type: "ready",
++    environmentId: "env-1",
++    threadId: "thread-1",
++    sequence: 12,
++  } as const;
++  const first = {
++    schema: NATIVE_WATCH_SCHEMA,
++    type: "changed",
++    environmentId: "env-1",
++    threadId: "thread-1",
++    sequence: 13,
++  } as const;
++  const second = {
++    schema: NATIVE_WATCH_SCHEMA,
++    type: "changed",
++    environmentId: "env-1",
++    threadId: "thread-1",
++    sequence: 14,
++  } as const;
++  const heartbeat = {
++    schema: NATIVE_WATCH_SCHEMA,
++    type: "heartbeat",
++    environmentId: "env-1",
++  } as const;
++
++  assert.deepStrictEqual(collapseNativeWatchNotices([ready, first, second, heartbeat]), [
++    ready,
++    second,
++    heartbeat,
++  ]);
++});
++
++it.effect("the watch refuses an environment it cannot prove", () =>
++  Effect.gen(function* () {
++    const { tools } = fakeTools({
++      t3_environment_read: [{ environmentId: "env-2" }],
++      t3_project_list: [{ projects: [{ id: "project-1" }], nextCursor: null }],
++    });
++    const closed = yield* Deferred.make<void>();
++    const before = (yield* printedNotices).length;
++
++    yield* runWatch(request(), closed, tools, () => Effect.succeed(Stream.empty));
++
++    const lines = (yield* printedNotices).slice(before);
++    assert.deepStrictEqual(lines, [
++      {
++        schema: NATIVE_WATCH_SCHEMA,
++        type: "error",
++        environmentId: "env-1",
++        code: "environment_mismatch",
++      },
++    ]);
++    assert.strictEqual(auth.issues, 0);
++  }),
++);
++
++it.effect("the watch refuses a project that is not bound to this environment", () =>
++  Effect.gen(function* () {
++    const { tools } = fakeTools({
++      t3_environment_read: [{ environmentId: "env-1" }],
++      t3_project_list: [{ projects: [{ id: "other-project" }], nextCursor: null }],
++    });
++    const closed = yield* Deferred.make<void>();
++    const before = (yield* printedNotices).length;
++
++    yield* runWatch(request(), closed, tools, () => Effect.succeed(Stream.empty));
++
++    const lines = (yield* printedNotices).slice(before);
++    assert.deepStrictEqual(lines, [
++      {
++        schema: NATIVE_WATCH_SCHEMA,
++        type: "error",
++        environmentId: "env-1",
++        code: "project_not_found",
++      },
++    ]);
++    assert.strictEqual(auth.issues, 0);
++  }),
++);
++
++it.effect("the watch refuses a child thread and an unknown thread", () =>
++  Effect.gen(function* () {
++    const child = qualifiedTools([
++      { threadId: "thread-1", projectId: "project-1", parentThreadId: "parent-thread" },
++    ]);
++    const closed = yield* Deferred.make<void>();
++    const before = (yield* printedNotices).length;
++
++    yield* runWatch(request(), closed, child.tools, () => Effect.succeed(Stream.empty));
++
++    const lines = (yield* printedNotices).slice(before);
++    assert.deepStrictEqual(lines, [
++      {
++        schema: NATIVE_WATCH_SCHEMA,
++        type: "error",
++        environmentId: "env-1",
++        code: "thread_not_root",
++      },
++    ]);
++    assert.strictEqual(auth.issues, 0);
++
++    const unknown = qualifiedTools([]);
++    const unknownBefore = (yield* printedNotices).length;
++    yield* runWatch(request(), closed, unknown.tools, () => Effect.succeed(Stream.empty));
++    assert.deepStrictEqual((yield* printedNotices).slice(unknownBefore), [
++      {
++        schema: NATIVE_WATCH_SCHEMA,
++        type: "error",
++        environmentId: "env-1",
++        code: "thread_not_found",
++      },
++    ]);
++    assert.strictEqual(auth.issues, 0);
++  }),
++);
++
++it.effect("the watch reports readiness and changes, then a closed subscription", () =>
++  Effect.gen(function* () {
++    const { tools } = qualifiedTools([rootThread]);
++    const closed = yield* Deferred.make<void>();
++    const before = (yield* printedNotices).length;
++    const items: ReadonlyArray<NativeWatchStreamItem> = [
++      { kind: "snapshot", snapshotSequence: 12 },
++      { kind: "synchronized" },
++      { kind: "event", sequence: 13 },
++    ];
++    const opener: NativeWatchThreadOpener = () => Effect.succeed(Stream.fromIterable(items));
++
++    yield* runWatch(request(), closed, tools, opener);
++
++    const lines = (yield* printedNotices).slice(before);
++    assert.deepStrictEqual(lines, [
++      {
++        schema: NATIVE_WATCH_SCHEMA,
++        type: "ready",
++        environmentId: "env-1",
++        threadId: "thread-1",
++        sequence: 12,
++      },
++      {
++        schema: NATIVE_WATCH_SCHEMA,
++        type: "changed",
++        environmentId: "env-1",
++        threadId: "thread-1",
++        sequence: 13,
++      },
++      {
++        schema: NATIVE_WATCH_SCHEMA,
++        type: "error",
++        environmentId: "env-1",
++        code: "subscription_closed",
++      },
++    ]);
++    assert.strictEqual(auth.issues, 1);
++    assert.deepStrictEqual(auth.scopes, ["orchestration:read"]);
++    assert.strictEqual(auth.revokes, 1);
++  }),
++);
++
++it.effect("stdin closing ends the watch and revokes the session", () =>
++  Effect.gen(function* () {
++    const { tools } = qualifiedTools([rootThread]);
++    const closed = yield* Deferred.make<void>();
++    const subscribed = yield* Deferred.make<void>();
++    const before = (yield* printedNotices).length;
++    const opener: NativeWatchThreadOpener = () =>
++      Effect.gen(function* () {
++        yield* Deferred.succeed(subscribed, void 0);
++        return Stream.never;
++      });
++
++    const fiber = yield* Effect.forkChild(runWatch(request(), closed, tools, opener));
++    yield* Deferred.await(subscribed);
++    yield* Deferred.succeed(closed, void 0);
++    yield* Fiber.join(fiber);
++
++    assert.deepStrictEqual((yield* printedNotices).slice(before), [
++      { schema: NATIVE_WATCH_SCHEMA, type: "error", environmentId: "env-1", code: "stdin_closed" },
++    ]);
++    assert.strictEqual(auth.issues, 1);
++    assert.strictEqual(auth.revokes, 1);
++  }),
++);
++
++it.effect("cancelling the watch still revokes the session", () =>
++  Effect.gen(function* () {
++    const { tools } = qualifiedTools([rootThread]);
++    const closed = yield* Deferred.make<void>();
++    const subscribed = yield* Deferred.make<void>();
++    const opener: NativeWatchThreadOpener = () =>
++      Effect.gen(function* () {
++        yield* Deferred.succeed(subscribed, void 0);
++        return Stream.never;
++      });
++
++    const fiber = yield* Effect.forkChild(runWatch(request(), closed, tools, opener));
++    yield* Deferred.await(subscribed);
++    yield* Fiber.interrupt(fiber);
++
++    assert.strictEqual(auth.issues, 1);
++    assert.strictEqual(auth.revokes, 1);
++  }),
++);
++
++it.effect("the heartbeat only reports a live subscription", () =>
++  Effect.gen(function* () {
++    const { tools } = qualifiedTools([rootThread]);
++    const closed = yield* Deferred.make<void>();
++    const subscribed = yield* Deferred.make<void>();
++    const before = (yield* printedNotices).length;
++    const opener: NativeWatchThreadOpener = () =>
++      Effect.gen(function* () {
++        yield* Deferred.succeed(subscribed, void 0);
++        return Stream.never;
++      });
++
++    const fiber = yield* Effect.forkChild(runWatch(request(), closed, tools, opener));
++    yield* Deferred.await(subscribed);
++    yield* TestClock.adjust("15 seconds");
++    yield* Deferred.succeed(closed, void 0);
++    yield* Fiber.join(fiber);
++
++    assert.deepStrictEqual((yield* printedNotices).slice(before), [
++      { schema: NATIVE_WATCH_SCHEMA, type: "heartbeat", environmentId: "env-1" },
++      { schema: NATIVE_WATCH_SCHEMA, type: "error", environmentId: "env-1", code: "stdin_closed" },
++    ]);
++    assert.strictEqual(auth.revokes, 1);
++  }),
++);
++
++it("only proved transport failures reconnect, while authorization and unknown causes stay held", () => {
++  for (const status of [401, 403]) {
++    assert.strictEqual(
++      classifyNativeWatchBootstrapError({
++        _tag: "AcpMcpBridgeError",
++        message: `T3 Code MCP endpoint responded with HTTP ${status}.`,
++        cause: { code: "ECONNRESET" },
++      }),
++      "authorization_failed",
++    );
++  }
++  assert.strictEqual(
++    classifyNativeWatchBootstrapError({
++      _tag: "AcpMcpBridgeError",
++      cause: { code: "ECONNREFUSED" },
++    }),
++    "connection_lost",
++  );
++  assert.strictEqual(
++    classifyNativeWatchBootstrapError({ _tag: "AcpMcpBridgeError", message: "unexpected result" }),
++    "server_unreachable",
++  );
++  for (const error of [
++    { _tag: "EnvironmentAuthorizationError" },
++    { _tag: "OrchestrationV2GetThreadProjectionError" },
++    { _tag: "RpcClientError", reason: { _tag: "RpcClientDefect" } },
++    { _tag: "RpcClientError", reason: { _tag: "SocketCloseError", code: 1008 } },
++    { _tag: "RpcClientError", reason: { _tag: "SocketOpenError", kind: "Unknown" } },
++  ])
++    assert.notStrictEqual(
++      classifyNativeWatchSubscriptionCause(Cause.fail(error)),
++      "connection_lost",
++    );
++  for (const reason of [
++    { _tag: "SocketReadError" },
++    { _tag: "SocketWriteError" },
++    { _tag: "SocketCloseError", code: 1006 },
++    { _tag: "SocketOpenError", kind: "Timeout" },
++  ])
++    assert.strictEqual(
++      classifyNativeWatchSubscriptionCause(Cause.fail({ _tag: "RpcClientError", reason })),
++      "connection_lost",
++    );
++});
++
++it.effect("bounded qualification refuses stalled cursors and incomplete inventories", () =>
++  Effect.gen(function* () {
++    const cases = [
++      { projects: [{ projects: [], nextCursor: 0 }], threads: [] },
++      {
++        projects: Array.from({ length: 20 }, (_, i) => ({
++          projects: [],
++          nextCursor: (i + 1) * 100,
++        })),
++        threads: [],
++      },
++      {
++        projects: [{ projects: [{ id: "project-1" }], nextCursor: null }],
++        threads: [{ threads: [], nextCursor: 0 }],
++      },
++      {
++        projects: [{ projects: [{ id: "project-1" }], nextCursor: null }],
++        threads: Array.from({ length: 20 }, (_, i) => ({ threads: [], nextCursor: (i + 1) * 100 })),
++      },
++    ];
++    for (const fixture of cases) {
++      const closed = yield* Deferred.make<void>();
++      const { tools, calls } = fakeTools({
++        t3_environment_read: [{ environmentId: "env-1" }],
++        t3_project_list: fixture.projects,
++        t3_thread_list: fixture.threads,
++      });
++      yield* runWatch(request(), closed, tools, () => Effect.succeed(Stream.empty));
++      assert.strictEqual((yield* printedNotices).at(-1)?.code, "qualification_incomplete");
++      assert.ok(calls.length <= 22);
++      assert.strictEqual(auth.issues, 0);
++    }
++  }),
++);
++
++it.effect("qualification stops after every requested identity is proven", () =>
++  Effect.gen(function* () {
++    const closed = yield* Deferred.make<void>();
++    const { tools, calls } = fakeTools({
++      t3_environment_read: [{ environmentId: "env-1" }],
++      t3_project_list: [{ projects: [{ id: "project-1" }, { id: "project-2" }], nextCursor: 100 }],
++      t3_thread_list: [{ threads: [rootThread], nextCursor: 100 }],
++    });
++    yield* runWatch(request({ projectIds: ["project-1", "project-2"] }), closed, tools, () =>
++      Effect.succeed(Stream.empty),
++    );
++    assert.deepStrictEqual(
++      calls.map((call) => call.tool),
++      ["t3_environment_read", "t3_project_list", "t3_thread_list"],
++    );
++    assert.strictEqual(auth.issues, 1);
++    assert.strictEqual(auth.revokes, 1);
++  }),
++);
++
++it.effect("a stalled stdout sink applies backpressure to the bounded notice queue", () =>
++  Effect.gen(function* () {
++    const closed = yield* Deferred.make<void>();
++    const writeStarted = yield* Deferred.make<void>();
++    const releaseWrite = yield* Deferred.make<void>();
++    let produced = 0;
++    const opener: NativeWatchThreadOpener = () =>
++      Effect.succeed(
++        Stream.range(1, 2000).pipe(
++          Stream.rechunk(1),
++          Stream.map((sequence): NativeWatchStreamItem => {
++            produced += 1;
++            return sequence === 1
++              ? { kind: "snapshot", snapshotSequence: sequence }
++              : { kind: "event", sequence };
++          }),
++        ),
++      );
++    const watched = Effect.scoped(
++      runNativeWatch(
++        request(),
++        closed,
++        qualifiedTools([rootThread]).tools,
++        "http://127.0.0.1:1",
++        opener,
++      ),
++    ).pipe(
++      Effect.provide(
++        Layer.mergeAll(
++          authLayer,
++          Stdio.layerTest({
++            stdout: (options) => {
++              assert.strictEqual(options?.endOnDone, false);
++              return Sink.forEach((_chunk: string | Uint8Array) =>
++                Effect.gen(function* () {
++                  yield* Deferred.succeed(writeStarted, void 0);
++                  yield* Deferred.await(releaseWrite);
++                }),
++              );
++            },
++          }),
++        ),
++      ),
++    );
++    const fiber = yield* Effect.forkChild(watched);
++    yield* Deferred.await(writeStarted);
++    for (let i = 0; i < 20; i += 1) yield* Effect.yieldNow;
++    assert.ok(produced < 2000, `unexpected unbounded upstream progress: ${produced}`);
++    yield* Deferred.succeed(releaseWrite, void 0);
++    yield* Fiber.join(fiber);
++    assert.strictEqual(auth.revokes, 1);
++  }),
++);
++
++it.effect("stdout failure cancels the watch and revokes its session without a second write", () =>
++  Effect.gen(function* () {
++    const closed = yield* Deferred.make<void>();
++    let writes = 0;
++    const opener: NativeWatchThreadOpener = () =>
++      Effect.succeed(
++        Stream.make({ kind: "snapshot", snapshotSequence: 1 } as const).pipe(
++          Stream.concat(Stream.never),
++        ),
++      );
++    const exit = yield* Effect.exit(
++      Effect.scoped(
++        runNativeWatch(
++          request(),
++          closed,
++          qualifiedTools([rootThread]).tools,
++          "http://127.0.0.1:1",
++          opener,
++        ),
++      ).pipe(
++        Effect.provide(
++          Layer.mergeAll(
++            authLayer,
++            Stdio.layerTest({
++              stdout: () => {
++                writes += 1;
++                return Sink.fail(
++                  PlatformError.systemError({
++                    _tag: "BadResource",
++                    module: "Stdio",
++                    method: "stdout",
++                  }),
++                );
++              },
++            }),
++          ),
++        ),
++      ),
++    );
++    assert.strictEqual(exit._tag, "Failure");
++    assert.strictEqual(writes, 1);
++    assert.strictEqual(auth.revokes, 1);
++  }),
++);
+diff --git a/apps/server/src/cli/thread-watch.ts b/apps/server/src/cli/thread-watch.ts
+new file mode 100644
+index 0000000..c6ce477
+--- /dev/null
++++ b/apps/server/src/cli/thread-watch.ts
+@@ -0,0 +1,902 @@
++/**
++ * `thread native-watch` streams one bounded JSON request line into compact
++ * JSONL notices; the parent holds stdin open. Sequences are signals only.
++ */
++import {
++  AuthOrchestrationReadScope,
++  EnvironmentAuthorizationError,
++  ORCHESTRATION_PROTOCOL_VERSION,
++  OrchestrationV2GetThreadProjectionError,
++  ThreadId,
++  WsRpcGroup,
++} from "@t3tools/contracts";
++import * as Cause from "effect/Cause";
++import * as Deferred from "effect/Deferred";
++import * as Duration from "effect/Duration";
++import * as Effect from "effect/Effect";
++import * as Exit from "effect/Exit";
++import * as Fiber from "effect/Fiber";
++import * as Layer from "effect/Layer";
++import * as Option from "effect/Option";
++import * as Queue from "effect/Queue";
++import * as Redacted from "effect/Redacted";
++import * as Ref from "effect/Ref";
++import * as References from "effect/References";
++import * as Result from "effect/Result";
++import * as Schema from "effect/Schema";
++import * as Stream from "effect/Stream";
++import * as Stdio from "effect/Stdio";
++import * as RpcClient from "effect/rpc/RpcClient";
++import * as RpcClientError from "effect/rpc/RpcClientError";
++import * as RpcSerialization from "effect/rpc/RpcSerialization";
++import * as Socket from "effect/socket/Socket";
++
++import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
++import type { ThreadTools } from "./thread.ts";
++
++export const NATIVE_WATCH_SCHEMA = "mastermind.teamlink.native-watch.v1" as const;
++
++export const NATIVE_WATCH_MAX_PROJECTS = 32;
++export const NATIVE_WATCH_MAX_THREADS = 128;
++/** One request line; the parent writes it once and then only holds stdin open. */
++export const NATIVE_WATCH_MAX_REQUEST_BYTES = 64 * 1024;
++const NATIVE_WATCH_HEARTBEAT_INTERVAL = Duration.seconds(15);
++const NATIVE_WATCH_MAX_LIFETIME = Duration.minutes(10);
++/** Notices wait here while stdout is slow; producers block instead of buffering. */
++const NATIVE_WATCH_NOTICE_QUEUE_CAPACITY = 512;
++const NATIVE_WATCH_MAX_WRITE_BATCH = 256;
++/** A project's thread list is read in pages of 100, like the existing native client. */
++const NATIVE_WATCH_MAX_THREAD_PAGES = 20;
++const NATIVE_WATCH_MAX_PROJECT_PAGES = 20;
++
++const NATIVE_WATCH_ERROR_CODES = [
++  "invalid_request",
++  "request_too_large",
++  "environment_mismatch",
++  "project_not_found",
++  "thread_not_found",
++  "thread_not_root",
++  "qualification_failed",
++  "qualification_incomplete",
++  "authorization_failed",
++  "connection_lost",
++  "server_unreachable",
++  "session_failed",
++  "subscription_failed",
++  "subscription_closed",
++  "stdin_closed",
++  "lifetime_expired",
++  "terminated",
++] as const;
++export type NativeWatchErrorCode = (typeof NATIVE_WATCH_ERROR_CODES)[number];
++
++class NativeWatchRefused extends Schema.TaggedError<NativeWatchRefused>()("NativeWatchRefused", {
++  code: Schema.Literals(NATIVE_WATCH_ERROR_CODES),
++  detail: Schema.String,
++}) {
++  override get message(): string {
++    return this.detail;
++  }
++}
++
++export interface NativeWatchRequest {
++  readonly environmentId: string;
++  readonly projectIds: ReadonlyArray<string>;
++  readonly threadIds: ReadonlyArray<string>;
++}
++
++export interface NativeWatchRejection {
++  readonly code: NativeWatchErrorCode;
++  readonly detail: string;
++}
++
++const NATIVE_WATCH_REQUEST_FIELDS = ["environmentId", "projectIds", "threadIds"] as const;
++
++/** An exact id: present, non-empty, and carrying no surrounding whitespace. */
++const isExactIdentifier = (value: unknown): value is string =>
++  typeof value === "string" && value.length > 0 && value.trim() === value;
++
++const rejected = (
++  code: NativeWatchErrorCode,
++  detail: string,
++): Result.Result<NativeWatchRequest, NativeWatchRejection> => Result.fail({ code, detail });
++
++const rejection = (code: NativeWatchErrorCode, detail: string): NativeWatchRejection => ({
++  code,
++  detail,
++});
++
++const decodeJsonText = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
++
++/**
++ * Parses the one request line. Unknown fields, inexact ids, oversized input and
++ * duplicate ids are refused before any server call, so a malformed request never
++ * reaches the environment.
++ */
++export const parseNativeWatchRequest = (
++  line: string,
++): Result.Result<NativeWatchRequest, NativeWatchRejection> => {
++  if (Buffer.byteLength(line, "utf8") > NATIVE_WATCH_MAX_REQUEST_BYTES) {
++    return rejected(
++      "request_too_large",
++      `The request line exceeds the ${NATIVE_WATCH_MAX_REQUEST_BYTES}-byte limit.`,
++    );
++  }
++  const parsed = decodeJsonText(line);
++  if (Option.isNone(parsed)) {
++    return rejected("invalid_request", "The request line is not one JSON value.");
++  }
++  const value = parsed.value;
++  if (typeof value !== "object" || value === null || Array.isArray(value)) {
++    return rejected("invalid_request", "The request must be one JSON object.");
++  }
++  const record = value as Record<string, unknown>;
++  for (const field of Object.keys(record)) {
++    if (!(NATIVE_WATCH_REQUEST_FIELDS as ReadonlyArray<string>).includes(field)) {
++      return rejected(
++        "invalid_request",
++        "The request carries a field this command does not accept.",
++      );
++    }
++  }
++  const environmentId = record.environmentId;
++  if (!isExactIdentifier(environmentId)) {
++    return rejected("invalid_request", "environmentId must be one exact non-empty string.");
++  }
++  const projectIds = record.projectIds;
++  if (
++    !Array.isArray(projectIds) ||
++    projectIds.length === 0 ||
++    projectIds.length > NATIVE_WATCH_MAX_PROJECTS ||
++    !projectIds.every(isExactIdentifier)
++  ) {
++    return rejected(
++      "invalid_request",
++      `projectIds must hold 1 to ${NATIVE_WATCH_MAX_PROJECTS} exact ids.`,
++    );
++  }
++  const threadIds = record.threadIds;
++  if (
++    !Array.isArray(threadIds) ||
++    threadIds.length === 0 ||
++    threadIds.length > NATIVE_WATCH_MAX_THREADS ||
++    !threadIds.every(isExactIdentifier)
++  ) {
++    return rejected(
++      "invalid_request",
++      `threadIds must hold 1 to ${NATIVE_WATCH_MAX_THREADS} exact ids.`,
++    );
++  }
++  if (new Set(projectIds).size !== projectIds.length) {
++    return rejected("invalid_request", "projectIds must not repeat an id.");
++  }
++  if (new Set(threadIds).size !== threadIds.length) {
++    return rejected("invalid_request", "threadIds must not repeat an id.");
++  }
++  return Result.succeed({ environmentId, projectIds, threadIds });
++};
++
++export const NativeWatchNotice = Schema.Struct({
++  schema: Schema.Literal(NATIVE_WATCH_SCHEMA),
++  type: Schema.Literals(["ready", "changed", "heartbeat", "error"]),
++  environmentId: Schema.String,
++  threadId: Schema.optionalKey(Schema.String),
++  sequence: Schema.optionalKey(Schema.Int),
++  code: Schema.optionalKey(Schema.String),
++});
++export type NativeWatchNotice = typeof NativeWatchNotice.Type;
++
++const encodeNativeWatchNotice = Schema.encodeSync(Schema.fromJsonString(NativeWatchNotice));
++
++const nativeWatchReadyNotice = (
++  environmentId: string,
++  threadId: string,
++  sequence: number | undefined,
++): NativeWatchNotice => ({
++  schema: NATIVE_WATCH_SCHEMA,
++  type: "ready",
++  environmentId,
++  threadId,
++  ...(sequence === undefined ? {} : { sequence }),
++});
++
++const nativeWatchChangedNotice = (
++  environmentId: string,
++  threadId: string,
++  sequence: number,
++): NativeWatchNotice => ({
++  schema: NATIVE_WATCH_SCHEMA,
++  type: "changed",
++  environmentId,
++  threadId,
++  sequence,
++});
++
++const nativeWatchHeartbeatNotice = (environmentId: string): NativeWatchNotice => ({
++  schema: NATIVE_WATCH_SCHEMA,
++  type: "heartbeat",
++  environmentId,
++});
++
++const nativeWatchErrorNotice = (
++  environmentId: string,
++  code: NativeWatchErrorCode,
++): NativeWatchNotice => ({
++  schema: NATIVE_WATCH_SCHEMA,
++  type: "error",
++  environmentId,
++  code,
++});
++
++export interface NativeWatchThreadState {
++  readonly snapshotSequence: number | undefined;
++  readonly ready: boolean;
++  readonly lastSequence: number;
++}
++
++export const initialNativeWatchThreadState: NativeWatchThreadState = {
++  snapshotSequence: undefined,
++  ready: false,
++  lastSequence: -1,
++};
++
++export interface NativeWatchStreamItem {
++  readonly kind: string;
++  readonly sequence?: number;
++  readonly snapshotSequence?: number;
++}
++
++/**
++ * Projects one server stream item onto notices. The snapshot establishes the
++ * subscription and the catch-up boundary, so `ready` follows it; later events
++ * only signal that something moved. A stale or repeated sequence is dropped.
++ */
++export const applyNativeWatchStreamItem = (
++  environmentId: string,
++  threadId: string,
++  state: NativeWatchThreadState,
++  item: NativeWatchStreamItem,
++): {
++  readonly state: NativeWatchThreadState;
++  readonly notices: ReadonlyArray<NativeWatchNotice>;
++} => {
++  if (item.kind === "snapshot") {
++    const sequence = item.snapshotSequence;
++    return {
++      state: {
++        snapshotSequence: sequence,
++        ready: true,
++        lastSequence:
++          sequence === undefined ? state.lastSequence : Math.max(state.lastSequence, sequence),
++      },
++      notices: [nativeWatchReadyNotice(environmentId, threadId, sequence)],
++    };
++  }
++  if (item.kind === "event") {
++    const sequence = item.sequence;
++    if (sequence === undefined || sequence <= state.lastSequence) {
++      return { state, notices: [] };
++    }
++    return {
++      state: { ...state, ready: true, lastSequence: sequence },
++      notices: [nativeWatchChangedNotice(environmentId, threadId, sequence)],
++    };
++  }
++  // "synchronized" marks the end of the replay and carries nothing of its own.
++  return { state, notices: [] };
++};
++
++/**
++ * Keeps the newest change signal per thread from one drained batch. Every other
++ * notice is preserved in order, so a backlog collapses instead of piling up.
++ */
++export const collapseNativeWatchNotices = (
++  notices: ReadonlyArray<NativeWatchNotice>,
++): ReadonlyArray<NativeWatchNotice> => {
++  const collapsed: Array<NativeWatchNotice> = [];
++  const changedIndex = new Map<string, number>();
++  for (const notice of notices) {
++    if (notice.type !== "changed" || notice.threadId === undefined) {
++      collapsed.push(notice);
++      continue;
++    }
++    const index = changedIndex.get(notice.threadId);
++    if (index === undefined) {
++      changedIndex.set(notice.threadId, collapsed.length);
++      collapsed.push(notice);
++      continue;
++    }
++    const previous = collapsed[index];
++    if (previous !== undefined && (previous.sequence ?? -1) <= (notice.sequence ?? -1)) {
++      collapsed[index] = notice;
++    }
++  }
++  return collapsed;
++};
++
++const EnvironmentReadResult = Schema.Struct({ environmentId: Schema.String });
++
++const ProjectListResult = Schema.Struct({
++  projects: Schema.Array(Schema.Struct({ id: Schema.String })),
++  nextCursor: Schema.NullOr(Schema.Int),
++});
++
++const ThreadListResult = Schema.Struct({
++  threads: Schema.Array(
++    Schema.Struct({
++      threadId: Schema.String,
++      projectId: Schema.String,
++      parentThreadId: Schema.optionalKey(Schema.NullOr(Schema.String)),
++    }),
++  ),
++  nextCursor: Schema.NullOr(Schema.Int),
++});
++
++export interface NativeWatchRequestHandle {
++  /** The parsed request, or the refusal that replaced it. */
++  readonly request: Result.Result<NativeWatchRequest, NativeWatchRejection>;
++  /** The environment the request named, or "" when it named none. */
++  readonly environmentId: string;
++  /** Completes when stdin reaches EOF; the watch ends then. */
++  readonly closed: Deferred.Deferred<void>;
++}
++
++const findNewline = (chunk: Uint8Array): number => {
++  for (let index = 0; index < chunk.byteLength; index += 1) {
++    if (chunk[index] === 0x0a) return index;
++  }
++  return -1;
++};
++
++const concatBytes = (parts: ReadonlyArray<Uint8Array>): Uint8Array => {
++  const total = parts.reduce((sum, part) => sum + part.byteLength, 0);
++  const joined = new Uint8Array(total);
++  let offset = 0;
++  for (const part of parts) {
++    joined.set(part, offset);
++    offset += part.byteLength;
++  }
++  return joined;
++};
++
++/**
++ * Reads one bounded request line and then keeps draining stdin, so the parent
++ * can hold the pipe open for the life of the watch and close it to stop.
++ */
++export const readNativeWatchRequest = Effect.fn("cli.thread.nativeWatch.readRequest")(function* () {
++  const stdio = yield* Stdio.Stdio;
++  const outcome = yield* Deferred.make<Result.Result<NativeWatchRequest, NativeWatchRejection>>();
++  const closed = yield* Deferred.make<void>();
++  const parts: Array<Uint8Array> = [];
++  let buffered = 0;
++  let resolved = false;
++
++  const reader = Effect.gen(function* () {
++    yield* stdio.stdin.pipe(
++      Stream.runForEach((chunk: Uint8Array) =>
++        Effect.gen(function* () {
++          if (resolved) return;
++          const newline = findNewline(chunk);
++          if (newline === -1) {
++            buffered += chunk.byteLength;
++            if (buffered > NATIVE_WATCH_MAX_REQUEST_BYTES) {
++              resolved = true;
++              yield* Deferred.succeed(
++                outcome,
++                Result.fail(
++                  rejection(
++                    "request_too_large",
++                    `The request line exceeds the ${NATIVE_WATCH_MAX_REQUEST_BYTES}-byte limit.`,
++                  ),
++                ),
++              );
++              return;
++            }
++            parts.push(chunk);
++            return;
++          }
++          if (buffered + newline > NATIVE_WATCH_MAX_REQUEST_BYTES) {
++            resolved = true;
++            yield* Deferred.succeed(
++              outcome,
++              Result.fail(
++                rejection(
++                  "request_too_large",
++                  `The request line exceeds the ${NATIVE_WATCH_MAX_REQUEST_BYTES}-byte limit.`,
++                ),
++              ),
++            );
++            return;
++          }
++          parts.push(chunk.subarray(0, newline));
++          resolved = true;
++          yield* Deferred.succeed(
++            outcome,
++            parseNativeWatchRequest(new TextDecoder().decode(concatBytes(parts))),
++          );
++        }),
++      ),
++    );
++    if (!resolved) {
++      yield* Deferred.succeed(
++        outcome,
++        Result.fail(rejection("stdin_closed", "stdin ended before the request line arrived.")),
++      );
++    }
++    yield* Deferred.succeed(closed, void 0);
++  });
++
++  yield* Effect.forkScoped(reader, { startImmediately: true });
++
++  const request = yield* Deferred.await(outcome);
++  const environmentId = Result.isSuccess(request) ? request.success.environmentId : "";
++  return { request, environmentId, closed } satisfies NativeWatchRequestHandle;
++});
++
++/**
++ * Proves the exact environment and that every requested thread is a root thread
++ * of a requested project. A child thread, an unknown project and an unknown
++ * thread are refused before any subscription is opened.
++ */
++const qualifyNativeWatchTargets = Effect.fn("cli.thread.nativeWatch.qualify")(function* (
++  request: NativeWatchRequest,
++  tools: ThreadTools,
++) {
++  const environment: typeof EnvironmentReadResult.Type = yield* tools.call(
++    "t3_environment_read",
++    {},
++    EnvironmentReadResult,
++  );
++  if (environment.environmentId !== request.environmentId) {
++    return yield* new NativeWatchRefused({
++      code: "environment_mismatch",
++      detail: "The server's environment id differs from the requested one.",
++    });
++  }
++
++  const missingProjects = new Set(request.projectIds);
++  let projectCursor: number | null = 0;
++  for (let pageIndex = 0; pageIndex < NATIVE_WATCH_MAX_PROJECT_PAGES; pageIndex += 1) {
++    const page: typeof ProjectListResult.Type = yield* tools.call(
++      "t3_project_list",
++      { cursor: projectCursor, limit: 100 },
++      ProjectListResult,
++    );
++    for (const project of page.projects) missingProjects.delete(project.id);
++    if (missingProjects.size === 0) break;
++    if (page.nextCursor === null) {
++      return yield* new NativeWatchRefused({
++        code: "project_not_found",
++        detail: "A requested project is not bound to this environment.",
++      });
++    }
++    if (page.nextCursor <= projectCursor || pageIndex + 1 === NATIVE_WATCH_MAX_PROJECT_PAGES) {
++      return yield* new NativeWatchRefused({
++        code: "qualification_incomplete",
++        detail: "The bounded project inventory did not prove the requested projects.",
++      });
++    }
++    projectCursor = page.nextCursor;
++  }
++
++  const missingThreads = new Set(request.threadIds);
++  let incomplete = false;
++  for (const projectId of request.projectIds) {
++    if (missingThreads.size === 0) break;
++    let cursor = 0;
++    for (let pageIndex = 0; pageIndex < NATIVE_WATCH_MAX_THREAD_PAGES; pageIndex += 1) {
++      const result: typeof ThreadListResult.Type = yield* tools.call(
++        "t3_thread_list",
++        { projectId, includeSubagents: true, limit: 100, cursor },
++        ThreadListResult,
++      );
++      for (const thread of result.threads) {
++        if (!missingThreads.has(thread.threadId)) continue;
++        if (thread.projectId !== projectId) {
++          return yield* new NativeWatchRefused({
++            code: "qualification_failed",
++            detail: "The thread inventory returned an inconsistent project identity.",
++          });
++        }
++        if (thread.parentThreadId !== null) {
++          return yield* new NativeWatchRefused({
++            code: "thread_not_root",
++            detail: "A requested thread is not proven to be a root thread.",
++          });
++        }
++        missingThreads.delete(thread.threadId);
++      }
++      if (missingThreads.size === 0 || result.nextCursor === null) break;
++      if (result.nextCursor <= cursor) {
++        return yield* new NativeWatchRefused({
++          code: "qualification_incomplete",
++          detail: "The thread inventory cursor did not advance.",
++        });
++      }
++      if (pageIndex + 1 === NATIVE_WATCH_MAX_THREAD_PAGES) incomplete = true;
++      cursor = result.nextCursor;
++    }
++  }
++  if (missingThreads.size > 0) {
++    return yield* new NativeWatchRefused({
++      code: incomplete ? "qualification_incomplete" : "thread_not_found",
++      detail: incomplete
++        ? "The bounded thread inventory did not prove every requested root."
++        : "A requested thread is not in a requested project of this environment.",
++    });
++  }
++});
++
++const writeNativeWatchNotice = (notice: NativeWatchNotice) =>
++  Effect.flatMap(Stdio.Stdio, (stdio) =>
++    Stream.make(`${encodeNativeWatchNotice(notice)}\n`).pipe(
++      Stream.run(stdio.stdout({ endOnDone: false })),
++      // A dead reader cannot retain native credentials while stdout is blocked.
++      Effect.timeout("1 second"),
++    ),
++  );
++
++const writeNativeWatchNotices = Effect.fn("cli.thread.nativeWatch.write")(function* (
++  queue: Queue.Queue<NativeWatchNotice, Cause.Done>,
++) {
++  const exit = yield* Effect.exit(
++    Effect.gen(function* () {
++      for (;;) {
++        const first = yield* Queue.take(queue);
++        const batch: Array<NativeWatchNotice> = [first];
++        while (batch.length < NATIVE_WATCH_MAX_WRITE_BATCH) {
++          const next = yield* Queue.poll(queue);
++          if (Option.isNone(next)) break;
++          batch.push(next.value);
++        }
++        for (const notice of collapseNativeWatchNotices(batch)) {
++          yield* writeNativeWatchNotice(notice);
++        }
++      }
++    }),
++  );
++  // Ending the queue is the writer's normal exit; anything else is a defect.
++  if (Exit.isFailure(exit) && !Cause.isDone(Cause.squash(exit.cause))) {
++    return yield* Effect.die(exit.cause);
++  }
++});
++
++/** The ways a native thread subscription can fail. */
++export type NativeWatchSubscriptionError =
++  | EnvironmentAuthorizationError
++  | OrchestrationV2GetThreadProjectionError
++  | RpcClientError.RpcClientError;
++
++/** Only an identified transient failure is eligible for a parent reconnect. */
++export const classifyNativeWatchBootstrapError = (cause: unknown): NativeWatchErrorCode => {
++  let current = cause;
++  let transport = false;
++  const seen = new Set<unknown>();
++  for (let depth = 0; depth < 8 && typeof current === "object" && current !== null; depth += 1) {
++    if (seen.has(current)) break;
++    seen.add(current);
++    const record = current as {
++      _tag?: unknown;
++      message?: unknown;
++      code?: unknown;
++      cause?: unknown;
++    };
++    if (record._tag === "EnvironmentAuthorizationError") return "authorization_failed";
++    if (record._tag === "AcpMcpBridgeError" && typeof record.message === "string") {
++      // This anchored format is produced by AcpMcpStdioBridge.send at the pinned source.
++      const status = /^T3 Code MCP endpoint responded with HTTP (\d{3})\.$/.exec(record.message);
++      if (status !== null)
++        return ["401", "403"].includes(status[1] ?? "")
++          ? "authorization_failed"
++          : "server_unreachable";
++    }
++    if (
++      typeof record.code === "string" &&
++      [
++        "ECONNREFUSED",
++        "ECONNRESET",
++        "ETIMEDOUT",
++        "EHOSTUNREACH",
++        "ENETUNREACH",
++        "EPIPE",
++        "UND_ERR_CONNECT_TIMEOUT",
++        "UND_ERR_SOCKET",
++      ].includes(record.code)
++    )
++      transport = true;
++    current = record.cause;
++  }
++  return transport ? "connection_lost" : "server_unreachable";
++};
++
++export const classifyNativeWatchSubscriptionCause = (
++  cause: Cause.Cause<unknown>,
++): NativeWatchErrorCode => {
++  const errors = cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error);
++  const tag = (value: unknown) =>
++    typeof value === "object" && value !== null ? (value as { _tag?: unknown })._tag : undefined;
++  if (
++    errors.some(
++      (error) =>
++        tag(error) === "EnvironmentAuthorizationError" ||
++        classifyNativeWatchBootstrapError(error) === "authorization_failed",
++    )
++  )
++    return "authorization_failed";
++  if (errors.some((error) => tag(error) === "OrchestrationV2GetThreadProjectionError")) {
++    return "qualification_failed";
++  }
++  if (Cause.hasInterruptsOnly(cause)) return "terminated";
++  if (Cause.hasDies(cause) || errors.length === 0) return "subscription_failed";
++  const transient = errors.every((error) => {
++    if (tag(error) !== "RpcClientError") return false;
++    const reason = (error as RpcClientError.RpcClientError).reason;
++    if (classifyNativeWatchBootstrapError(reason) === "authorization_failed") return false;
++    switch (reason._tag) {
++      case "SocketReadError":
++      case "SocketWriteError":
++        return true;
++      case "SocketOpenError":
++        return (
++          reason.kind === "Timeout" ||
++          classifyNativeWatchBootstrapError(reason.cause) === "connection_lost"
++        );
++      case "SocketCloseError":
++        return [1000, 1001, 1006, 1011, 1012, 1013].includes(reason.code);
++      default:
++        return false;
++    }
++  });
++  return transient ? "connection_lost" : "subscription_failed";
++};
++
++/**
++ * Opens one thread's native event stream. The default opens the real RPC
++ * subscription; a test opens a scripted stream instead.
++ */
++export type NativeWatchThreadOpener = (
++  threadId: string,
++) => Effect.Effect<Stream.Stream<NativeWatchStreamItem, NativeWatchSubscriptionError>, never>;
++
++/**
++ * Issues the short-lived native session the watch runs on. The session is
++ * revoked when the surrounding scope ends, so an aborted watch leaves no
++ * credential behind.
++ */
++const acquireNativeWatchSession = Effect.fn("cli.thread.nativeWatch.session")(function* () {
++  const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth;
++  return yield* Effect.acquireRelease(
++    environmentAuth
++      .issueSession({
++        ttl: Duration.minutes(15),
++        scopes: [AuthOrchestrationReadScope],
++        label: "t3 thread native-watch",
++      })
++      .pipe(
++        Effect.mapError(
++          () =>
++            new NativeWatchRefused({
++              code: "session_failed",
++              detail: "The native session could not be issued.",
++            }),
++        ),
++      ),
++    (issued) => environmentAuth.revokeSession(issued.sessionId).pipe(Effect.ignore),
++  );
++});
++
++/**
++ * Reports readiness, changes and heartbeats for every requested thread until
++ * stdin closes, a signal arrives, the lifetime ends or a subscription drops.
++ */
++const watchNativeThreadsWith = Effect.fn("cli.thread.nativeWatch.with")(function* (
++  request: NativeWatchRequest,
++  closed: Deferred.Deferred<void>,
++  emit: (notice: NativeWatchNotice) => Effect.Effect<boolean>,
++  open: NativeWatchThreadOpener,
++) {
++  const environmentId = request.environmentId;
++  const stop = yield* Deferred.make<NativeWatchErrorCode>();
++  const live = yield* Ref.make(0);
++
++  const onSignal = () => {
++    void Deferred.doneUnsafe(stop, Effect.succeed("terminated"));
++  };
++  yield* Effect.acquireRelease(
++    Effect.sync(() => {
++      process.on("SIGTERM", onSignal);
++      process.on("SIGINT", onSignal);
++    }),
++    () =>
++      Effect.sync(() => {
++        process.off("SIGTERM", onSignal);
++        process.off("SIGINT", onSignal);
++      }),
++  );
++
++  yield* Effect.forkScoped(
++    Effect.gen(function* () {
++      yield* Deferred.await(closed);
++      void Deferred.doneUnsafe(stop, Effect.succeed("stdin_closed"));
++    }),
++    { startImmediately: true },
++  );
++  yield* Effect.forkScoped(
++    Effect.gen(function* () {
++      yield* Effect.sleep(NATIVE_WATCH_MAX_LIFETIME);
++      void Deferred.doneUnsafe(stop, Effect.succeed("lifetime_expired"));
++    }),
++    { startImmediately: true },
++  );
++  yield* Effect.forkScoped(
++    Effect.gen(function* () {
++      for (;;) {
++        yield* Effect.sleep(NATIVE_WATCH_HEARTBEAT_INTERVAL);
++        // A heartbeat reports live subscription health, never a timer that runs on.
++        if ((yield* Ref.get(live)) === request.threadIds.length) {
++          yield* emit(nativeWatchHeartbeatNotice(environmentId));
++        }
++      }
++    }),
++    { startImmediately: true },
++  );
++
++  for (const threadId of request.threadIds) {
++    yield* Effect.forkScoped(
++      Effect.gen(function* () {
++        const state = yield* Ref.make(initialNativeWatchThreadState);
++        yield* Ref.update(live, (count) => count + 1);
++        const stream = yield* open(threadId);
++        const exit = yield* Effect.exit(
++          stream.pipe(
++            Stream.runForEach((item) =>
++              Effect.gen(function* () {
++                const notices = yield* Ref.modify(state, (current) => {
++                  const next = applyNativeWatchStreamItem(environmentId, threadId, current, item);
++                  return [next.notices, next.state];
++                });
++                for (const notice of notices) {
++                  yield* emit(notice);
++                }
++              }),
++            ),
++          ),
++        );
++        yield* Ref.update(live, (count) => count - 1);
++        void Deferred.doneUnsafe(
++          stop,
++          Effect.succeed(
++            Exit.isFailure(exit)
++              ? classifyNativeWatchSubscriptionCause(exit.cause)
++              : "subscription_closed",
++          ),
++        );
++      }),
++      { startImmediately: true },
++    );
++  }
++
++  return yield* Deferred.await(stop);
++});
++
++/**
++ * Subscribes to every requested thread over one native RPC socket and reports
++ * readiness, changes and heartbeats until stdin closes, a signal arrives, the
++ * lifetime ends or the socket drops.
++ */
++const watchNativeThreads = Effect.fn("cli.thread.nativeWatch.watch")(function* (
++  request: NativeWatchRequest,
++  closed: Deferred.Deferred<void>,
++  origin: string,
++  emit: (notice: NativeWatchNotice) => Effect.Effect<boolean>,
++  openThreadStream: NativeWatchThreadOpener | undefined,
++) {
++  const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth;
++  const session = yield* acquireNativeWatchSession();
++  if (openThreadStream !== undefined) {
++    return yield* watchNativeThreadsWith(request, closed, emit, openThreadStream).pipe(
++      Effect.provideService(References.MinimumLogLevel, "Error"),
++    );
++  }
++  const ticket = yield* environmentAuth
++    .issueWebSocketTicket({ sessionId: session.sessionId }, { use: "rpc" })
++    .pipe(
++      Effect.mapError(
++        () =>
++          new NativeWatchRefused({
++            code: "session_failed",
++            detail: "The native socket ticket could not be issued.",
++          }),
++      ),
++    );
++  const socketUrl = `${origin.replace("http:", "ws:")}/ws?orchestrationProtocol=${
++    ORCHESTRATION_PROTOCOL_VERSION
++  }&wsTicket=${encodeURIComponent(Redacted.value(ticket.ticket))}`;
++  const layerSocket = Socket.layerWebSocket(socketUrl).pipe(
++    Layer.provide(Socket.layerWebSocketConstructorGlobal),
++  );
++  const layerProtocol = RpcClient.layerProtocolSocket().pipe(
++    Layer.provide(layerSocket),
++    Layer.provide(RpcSerialization.layerJson),
++  );
++
++  return yield* Effect.gen(function* () {
++    const client = yield* RpcClient.make(WsRpcGroup);
++    const open: NativeWatchThreadOpener = (threadId: string) =>
++      Effect.succeed(
++        client["orchestration.subscribeThread"]({
++          threadId: ThreadId.make(threadId),
++          acceptBoundedSnapshot: true,
++          requestCompletionMarker: true,
++        }).pipe(Stream.map((item): NativeWatchStreamItem => item)),
++      );
++    return yield* watchNativeThreadsWith(request, closed, emit, open);
++  }).pipe(
++    Effect.provide(layerProtocol),
++    Effect.provideService(References.MinimumLogLevel, "Error"),
++  );
++});
++
++/**
++ * Runs one watch. Every outcome, including a refusal, leaves the process
++ * through the notice stream.
++ */
++export const runNativeWatch = Effect.fn("cli.thread.nativeWatch")(function* (
++  request: NativeWatchRequest,
++  closed: Deferred.Deferred<void>,
++  tools: ThreadTools,
++  origin: string,
++  openThreadStream: NativeWatchThreadOpener | undefined = undefined,
++) {
++  const environmentId = request.environmentId;
++  const queue = yield* Queue.make<NativeWatchNotice, Cause.Done>({
++    capacity: NATIVE_WATCH_NOTICE_QUEUE_CAPACITY,
++    strategy: "suspend",
++  });
++  const writer = yield* Effect.forkScoped(writeNativeWatchNotices(queue), {
++    startImmediately: true,
++  });
++  const emit = (notice: NativeWatchNotice) => Queue.offer(queue, notice);
++
++  const finish = Effect.fn("cli.thread.nativeWatch.finish")(function* (code: NativeWatchErrorCode) {
++    yield* emit(nativeWatchErrorNotice(environmentId, code));
++    yield* Queue.end(queue);
++    yield* Fiber.join(writer);
++  });
++
++  yield* Effect.raceFirst(
++    Effect.gen(function* () {
++      const qualified = yield* qualifyNativeWatchTargets(request, tools).pipe(
++        Effect.asVoid,
++        Effect.catchTags({
++          NativeWatchRefused: (error) => Effect.succeed(error.code),
++          ThreadToolFailedError: () =>
++            Effect.succeed("qualification_failed" as NativeWatchErrorCode),
++          ThreadServerUnreachableError: (error) =>
++            Effect.succeed(classifyNativeWatchBootstrapError(error.cause)),
++        }),
++      );
++      if (qualified !== undefined) {
++        yield* finish(qualified);
++        return;
++      }
++
++      const reason = yield* watchNativeThreads(
++        request,
++        closed,
++        origin,
++        emit,
++        openThreadStream,
++      ).pipe(
++        Effect.catchTags({ NativeWatchRefused: (error) => Effect.succeed(error.code) }),
++        Effect.catchCause((cause) => Effect.succeed(classifyNativeWatchSubscriptionCause(cause))),
++      );
++      yield* finish(reason);
++    }),
++    Fiber.join(writer),
++  );
++});
++
++/** Writes one refusal notice without a watch, for failures that happen first. */
++export const emitNativeWatchErrorNotice = (environmentId: string, code: NativeWatchErrorCode) =>
++  writeNativeWatchNotice(nativeWatchErrorNotice(environmentId, code));
+diff --git a/apps/server/src/cli/thread.native.test.ts b/apps/server/src/cli/thread.native.test.ts
+index 9d2920a..9a2fa5f 100644
+--- a/apps/server/src/cli/thread.native.test.ts
++++ b/apps/server/src/cli/thread.native.test.ts
+@@ -16,12 +16,16 @@ import * as Layer from "effect/Layer";
+ import * as Option from "effect/Option";
+ import * as Path from "effect/Path";
+ import * as Result from "effect/Result";
++import * as Sink from "effect/Sink";
++import * as Duration from "effect/Duration";
++import * as Redacted from "effect/Redacted";
+ import * as Stdio from "effect/Stdio";
+ import * as Stream from "effect/Stream";
+ import * as TestConsole from "effect/testing/TestConsole";
+ import { Command } from "effect/cli";
+ import { beforeEach, vi } from "vite-plus/test";
+
++import * as Watch from "./thread-watch.ts";
+ import * as McpBridge from "../mcp/AcpMcpStdioBridge.ts";
+ import type { McpToolSession } from "../mcp/AcpMcpStdioBridge.ts";
+ import {
+@@ -30,25 +34,55 @@ import {
+ } from "../serverRuntimeState.ts";
+ import { readNativeCatalog, threadCommand } from "./thread.ts";
+
+-const auth = vi.hoisted(() => ({ issues: 0, revokes: 0 }));
++const auth = vi.hoisted(() => ({
++  issues: 0,
++  revokes: 0,
++  access: [] as string[],
++  mcpTtl: undefined as unknown,
++  socketScopes: [] as ReadonlyArray<string>,
++  socketTtl: undefined as unknown,
++  revokedIds: [] as string[],
++}));
+
+ vi.mock("../auth/EnvironmentAuth.ts", async (importOriginal) => {
+   const actual = await importOriginal<typeof import("../auth/EnvironmentAuth.ts")>();
+   return {
+     ...actual,
+     layerRuntime: Layer.mock(actual.EnvironmentAuth)({
+-      issueMcpClientSession: () =>
++      issueMcpClientSession: (input) =>
+         Effect.map(DateTime.now, (expiresAt) => {
+           auth.issues += 1;
++          auth.access.push(input.access);
++          auth.mcpTtl = input.ttl;
+           return {
+             sessionId: AuthSessionId.make("test-session"),
+             token: "synthetic-token",
+             expiresAt,
+           };
+         }),
+-      revokeSession: () =>
++      issueSession: (input) =>
++        Effect.map(DateTime.now, (expiresAt) => {
++          auth.socketScopes = input?.scopes ?? [];
++          auth.socketTtl = input?.ttl;
++          return {
++            sessionId: AuthSessionId.make("watch-session"),
++            token: "synthetic-watch-token",
++            method: "bearer-access-token" as const,
++            scopes: input?.scopes ?? [],
++            subject: "t3-thread-native-watch",
++            client: { deviceType: "bot" as const },
++            expiresAt,
++          };
++        }),
++      issueWebSocketTicket: () =>
++        Effect.map(DateTime.now, (expiresAt) => ({
++          ticket: Redacted.make("synthetic-ticket"),
++          expiresAt,
++        })),
++      revokeSession: (sessionId) =>
+         Effect.sync(() => {
+           auth.revokes += 1;
++          auth.revokedIds.push(sessionId);
+           return true;
+         }),
+     }),
+@@ -58,6 +92,11 @@ vi.mock("../auth/EnvironmentAuth.ts", async (importOriginal) => {
+ beforeEach(() => {
+   auth.issues = 0;
+   auth.revokes = 0;
++  auth.access = [];
++  auth.mcpTtl = undefined;
++  auth.socketScopes = [];
++  auth.socketTtl = undefined;
++  auth.revokedIds = [];
+ });
+
+ const encoder = new TextEncoder();
+@@ -453,3 +492,161 @@ it.effect("native-catalog prints the filtered catalog from the running server",
+     assert.strictEqual(auth.revokes, 1);
+   }).pipe(Effect.scoped, Effect.provide(cliLayers)),
+ );
++
++const watchRequestLine =
++  JSON.stringify({ environmentId: "env-1", projectIds: ["project-1"], threadIds: ["thread-1"] }) +
++  "\n";
++const watchMcpSession = {
++  call: (tool: string) => {
++    const responses: Record<string, unknown> = {
++      t3_environment_read: { environmentId: "env-1" },
++      t3_project_list: { projects: [{ id: "project-1" }], nextCursor: null },
++      t3_thread_list: {
++        threads: [{ threadId: "thread-1", projectId: "project-1", parentThreadId: null }],
++        nextCursor: null,
++      },
++    };
++    return responses[tool] === undefined
++      ? Effect.die(`unexpected tool ${tool}`)
++      : Effect.succeed({ structuredContent: responses[tool] });
++  },
++  listTools: () => Effect.die("unexpected tools/list"),
++} satisfies McpToolSession;
++const runWatchCommand = (baseDir: string) =>
++  Command.runWith(threadCommand, { version: "0.0.0" })([
++    "native-watch",
++    "--json",
++    "--base-dir",
++    baseDir,
++  ]);
++
++it.effect.each(["stdin", "interrupt"] as const)(
++  "native-watch uses two read-only sessions and revokes both on %s",
++  (stop) =>
++    Effect.gen(function* () {
++      const baseDir = yield* makeBaseDir();
++      const eof = yield* Deferred.make<void>();
++      const subscribed = yield* Deferred.make<void>();
++      const stdin = Stream.make(encoder.encode(watchRequestLine)).pipe(
++        Stream.concat(Stream.fromEffect(Deferred.await(eof)).pipe(Stream.drain)),
++      );
++      using _session = vi
++        .spyOn(McpBridge, "mcpToolSession")
++        .mockReturnValue(Effect.succeed(watchMcpSession));
++      const actualRun = Watch.runNativeWatch;
++      using _watch = vi
++        .spyOn(Watch, "runNativeWatch")
++        .mockImplementation((request, closed, tools, origin) =>
++          actualRun(request, closed, tools, origin, () =>
++            Effect.gen(function* () {
++              yield* Deferred.succeed(subscribed, void 0);
++              return Stream.never;
++            }),
++          ),
++        );
++      const command = Effect.scoped(runWatchCommand(baseDir)).pipe(
++        Effect.provide(
++          Layer.provideMerge(
++            NodeChildProcessSpawner.layer,
++            Layer.mergeAll(cliLayers, Stdio.layerTest({ stdin, stdout: () => Sink.drain })),
++          ),
++        ),
++      );
++      const fiber = yield* Effect.forkChild(command);
++      yield* Deferred.await(subscribed);
++      if (stop === "stdin") {
++        yield* Deferred.succeed(eof, void 0);
++        yield* Fiber.join(fiber);
++      } else yield* Fiber.interrupt(fiber);
++      assert.deepStrictEqual(auth.access, ["read-only"]);
++      assert.deepStrictEqual(auth.mcpTtl, Duration.minutes(15));
++      assert.deepStrictEqual(auth.socketScopes, ["orchestration:read"]);
++      assert.deepStrictEqual(auth.socketTtl, Duration.minutes(15));
++      assert.deepStrictEqual(auth.revokedIds.toSorted(), ["test-session", "watch-session"]);
++    }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("native-watch reports HTTP auth refusals as held and revokes its outer session", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    for (const status of [401, 403]) {
++      const wire: string[] = [];
++      using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(
++        Effect.fail(
++          new McpBridge.AcpMcpBridgeError({
++            message: `T3 Code MCP endpoint responded with HTTP ${status}.`,
++          }),
++        ),
++      );
++      yield* runWatchCommand(baseDir).pipe(
++        Effect.provide(
++          Layer.provideMerge(
++            NodeChildProcessSpawner.layer,
++            Layer.mergeAll(
++              cliLayers,
++              Stdio.layerTest({
++                stdin: Stream.make(encoder.encode(watchRequestLine)).pipe(
++                  Stream.concat(Stream.never),
++                ),
++                stdout: () =>
++                  Sink.forEach((chunk: string | Uint8Array) =>
++                    Effect.sync(() => {
++                      wire.push(
++                        typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk),
++                      );
++                    }),
++                  ),
++              }),
++            ),
++          ),
++        ),
++      );
++      assert.strictEqual(JSON.parse(wire.join("").trim()).code, "authorization_failed");
++    }
++    assert.deepStrictEqual(auth.access, ["read-only", "read-only"]);
++    assert.deepStrictEqual(auth.revokedIds, ["test-session", "test-session"]);
++    assert.deepStrictEqual(auth.socketScopes, []);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
++
++it.effect("the existing native command retains its previous access default", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    using _session = vi
++      .spyOn(McpBridge, "mcpToolSession")
++      .mockReturnValue(Effect.succeed(watchMcpSession));
++    yield* runNative(baseDir, "t3_environment_read");
++    assert.deepStrictEqual(auth.access, ["full-access"]);
++    assert.strictEqual(auth.mcpTtl, undefined);
++    assert.deepStrictEqual(auth.revokedIds, ["test-session"]);
++  }).pipe((effect) => provideCli(effect, "{}")),
++);
++
++it.effect("closing the stdin owner cancels a stalled MCP handshake and revokes its session", () =>
++  Effect.gen(function* () {
++    const baseDir = yield* makeBaseDir();
++    const entered = yield* Deferred.make<void>();
++    const eof = yield* Deferred.make<void>();
++    using _session = vi
++      .spyOn(McpBridge, "mcpToolSession")
++      .mockReturnValue(Effect.andThen(Deferred.succeed(entered, void 0), Effect.never));
++    const stdin = Stream.make(encoder.encode(watchRequestLine)).pipe(
++      Stream.concat(Stream.fromEffect(Deferred.await(eof)).pipe(Stream.drain)),
++    );
++    const command = runWatchCommand(baseDir).pipe(
++      Effect.provide(
++        Layer.provideMerge(
++          NodeChildProcessSpawner.layer,
++          Layer.mergeAll(cliLayers, Stdio.layerTest({ stdin, stdout: () => Sink.drain })),
++        ),
++      ),
++    );
++    const fiber = yield* Effect.forkChild(command);
++    yield* Deferred.await(entered);
++    yield* Deferred.succeed(eof, void 0);
++    yield* Fiber.join(fiber);
++    assert.deepStrictEqual(auth.access, ["read-only"]);
++    assert.deepStrictEqual(auth.revokedIds, ["test-session"]);
++    assert.deepStrictEqual(auth.socketScopes, []);
++  }).pipe(Effect.scoped, Effect.provide(cliLayers)),
++);
+diff --git a/apps/server/src/cli/thread.ts b/apps/server/src/cli/thread.ts
+index fa5d0cc..a441d8c 100644
+--- a/apps/server/src/cli/thread.ts
++++ b/apps/server/src/cli/thread.ts
+@@ -14,12 +14,15 @@ import {
+ } from "@t3tools/contracts";
+ import * as HostProcess from "@t3tools/shared/HostProcess";
+ import * as Console from "effect/Console";
++import * as Deferred from "effect/Deferred";
++import * as Duration from "effect/Duration";
+ import * as Effect from "effect/Effect";
+ import * as FileSystem from "effect/FileSystem";
+ import * as Layer from "effect/Layer";
+ import * as Option from "effect/Option";
+ import * as Path from "effect/Path";
+ import * as References from "effect/References";
++import * as Result from "effect/Result";
+ import * as Runtime from "effect/Runtime";
+ import * as Schema from "effect/Schema";
+ import * as Stdio from "effect/Stdio";
+@@ -32,6 +35,12 @@ import { mcpToolSession, type McpToolSession } from "../mcp/AcpMcpStdioBridge.ts
+ import { expandHomePath } from "../os-jank.ts";
+ import { readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
+ import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
++import {
++  classifyNativeWatchBootstrapError,
++  emitNativeWatchErrorNotice,
++  readNativeWatchRequest,
++  runNativeWatch,
++} from "./thread-watch.ts";
+
+ /**
+  * Short enough that a run which stops to ask the user something is noticed
+@@ -206,7 +215,8 @@ export type ThreadTools = ReturnType<typeof makeThreadTools>;
+  */
+ const withThreadTools = Effect.fn("cli.thread.withThreadTools")(function* <A, E, R>(
+   flags: { readonly baseDir: Option.Option<string> },
+-  run: (tools: ThreadTools, session: McpToolSession) => Effect.Effect<A, E, R>,
++  run: (tools: ThreadTools, session: McpToolSession, origin: string) => Effect.Effect<A, E, R>,
++  access: "read-only" | "full-access" = "full-access",
+ ) {
+   const logLevel = yield* GlobalFlag.LogLevel;
+   const config = yield* resolveCliAuthConfig(flags, logLevel);
+@@ -222,7 +232,8 @@ const withThreadTools = Effect.fn("cli.thread.withThreadTools")(function* <A, E,
+         label: "t3 thread cli",
+         // The CLI runs as the machine's owner. New threads still start at
+         // the project's default mode, never at this ceiling by default.
+-        access: "full-access",
++        access,
++        ...(access === "read-only" ? { ttl: Duration.minutes(15) } : {}),
+         peerLink: false,
+         client: { deviceType: "bot" },
+       }),
+@@ -234,7 +245,7 @@ const withThreadTools = Effect.fn("cli.thread.withThreadTools")(function* <A, E,
+       authorization: `Bearer ${issued.token}`,
+       clientName: "t3-thread-cli",
+     }).pipe(Effect.mapError((cause) => new ThreadServerUnreachableError({ origin, cause })));
+-    return yield* run(makeThreadTools(session, origin), session);
++    return yield* run(makeThreadTools(session, origin), session, origin);
+   }).pipe(
+     Effect.scoped,
+     Effect.provide(
+@@ -974,6 +985,47 @@ const threadNativeCatalogCommand = Command.make("native-catalog", {
+   ),
+ );
+
++const threadNativeWatchCommand = Command.make("native-watch", {
++  ...projectLocationFlags,
++  json: jsonFlag,
++}).pipe(
++  Command.withDescription(
++    "Watch exact root threads and print compact JSONL notices. Reads one JSON request line on stdin and keeps stdin open for the life of the watch.",
++  ),
++  Command.withHandler((flags) =>
++    Effect.gen(function* () {
++      const handle = yield* readNativeWatchRequest();
++      const request = handle.request;
++      if (Result.isFailure(request)) {
++        yield* emitNativeWatchErrorNotice(handle.environmentId, request.failure.code);
++        return;
++      }
++      yield* withThreadTools(
++        flags,
++        (tools, _session, origin) => runNativeWatch(request.success, handle.closed, tools, origin),
++        "read-only",
++      ).pipe(
++        // The stdin owner also controls qualification and a stalled MCP handshake.
++        Effect.raceFirst(Deferred.await(handle.closed)),
++        Effect.catchTags({
++          ThreadServerNotRunningError: () =>
++            emitNativeWatchErrorNotice(handle.environmentId, "connection_lost"),
++          ThreadServerUnreachableError: (error) =>
++            emitNativeWatchErrorNotice(
++              handle.environmentId,
++              classifyNativeWatchBootstrapError(error.cause),
++            ),
++        }),
++      );
++    }).pipe(
++      Effect.scoped,
++      // The notice stream is the only thing this command writes to stdout.
++      Effect.provideService(References.MinimumLogLevel, "Error"),
++      reportThreadErrors,
++    ),
++  ),
++);
++
+ export const threadCommand = Command.make("thread").pipe(
+   Command.withDescription("Start, message, and read threads on the running server."),
+   Command.withSubcommands([
+@@ -983,5 +1035,6 @@ export const threadCommand = Command.make("thread").pipe(
+     threadShowCommand,
+     threadNativeCommand,
+     threadNativeCatalogCommand,
++    threadNativeWatchCommand,
+   ]),
+ );

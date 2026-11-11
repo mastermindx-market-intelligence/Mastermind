@@ -39,6 +39,7 @@ from integrations.secretary_team_access.projection import (
 OUTCOME_SCHEMA = "mastermind.secretary_team_access_outcome.v1"
 _READ_MISSION = "/workspace/mission/v3/current"
 _READ_PROJECT_PLAN = "/workspace/project-plan/current"
+_READ_COMPANY = "/workspace/company/current"
 _NATIVE_CATALOG = "/workspace/fabric/catalog/current"
 _NATIVE_STATUS = "/workspace/fabric/status/current"
 _COO_MANDATE = "/v1/tools/executive_mandate"
@@ -249,6 +250,27 @@ class SecretaryAccessClient:
         except (TypeError, ValueError, KeyError, OverflowError, RecursionError, UnicodeError):
             return _outcome("project_plan", "UNAVAILABLE",
                             reason_code="invalid_owner_document")
+
+    async def read_company_context(self) -> dict[str, Any]:
+        """One fixed read through the same host-authenticated Workspace client.
+
+        No model-selected company, project, role, endpoint or credential. The
+        existing wire/node budgets still apply; excess input is unavailable.
+        This read supplies discovery, never permission to consult or delegate.
+        """
+        from integrations.paperclip_control.agent_context import company_context
+        selected = dict(self.selection)
+        workspace = self._workspace
+        code, status, payload = await self._request(
+            workspace, "GET", _READ_COMPANY, params={"view": "overview"}, max_bytes=_MAX_MISSION)
+        if workspace is not self._workspace or self.selection != selected:
+            return _outcome("company_context", "REFUSED", reason_code="host_binding_changed")
+        if code != "OK":
+            return _outcome("company_context", code, reason_code=(
+                _refusal_code(payload) if code == "REFUSED" else "source_unavailable"))
+        if status != 200:
+            return _outcome("company_context", "UNAVAILABLE", reason_code="invalid_read_status")
+        return company_context(payload, work_ref=selected["work_ref"], now=self._clock())
 
     async def read_native_catalog(self, *,
                                   previous_fingerprint: str | None = None,
