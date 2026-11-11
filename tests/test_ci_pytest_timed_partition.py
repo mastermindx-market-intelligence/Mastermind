@@ -132,6 +132,15 @@ def test_invalid_table_values_are_rejected(tmp_path, mutate):
     assert cip.load_module_timings(path) is None
 
 
+def test_overflowing_integer_seconds_fall_back_instead_of_raising(tmp_path):
+    # json.loads accepts arbitrarily large ints; math.isfinite(10**400) raises.
+    path = tmp_path / "pytest_timings.json"
+    payload = table()
+    payload["default_module_seconds"] = 10**400
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert cip.load_module_timings(path) is None
+
+
 def test_invalid_table_falls_back_to_frozen_placement_without_dropping_tests(monkeypatch):
     modules = included()
     with monkeypatch.context() as patch:

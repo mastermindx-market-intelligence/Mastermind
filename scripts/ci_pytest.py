@@ -249,6 +249,9 @@ _MEASURED_SIX_JOB_PLACEMENT = {
     # fixed runner overhead, the hash-placed remainder, and the hermes-forward
     # keep-pin on shard 4. The five non-pytest qualification gates left shard
     # zero for a parallel job (F3). Evidence: ci/shard_timings/42708053350.json.
+    # FALLBACK ONLY: when ci/pytest_timings.json is valid, timed LPT placement
+    # decides every shard and these pins (including the hermes keep-pin) do not
+    # describe the live plan; this table is used only if that file is invalid.
     # Changes require new timings and policy review. Hash placement for others.
     'tests/test_capacity_host_artifacts.py': 2,  # 834.1s
     'tests/test_hermes_primary_application_enrollment.py': 4,  # 224.2s keep-pin (hermes-forward)
@@ -422,8 +425,12 @@ def load_module_timings(path: Path | None = None) -> dict[str, Any] | None:
         return None
 
     def seconds(value: Any) -> bool:
-        return (isinstance(value, (int, float)) and not isinstance(value, bool)
-                and math.isfinite(value) and value >= 0)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False
+        try:  # math.isfinite(10**400) raises OverflowError
+            return math.isfinite(value) and value >= 0
+        except OverflowError:
+            return False
 
     if not isinstance(payload, dict) or payload.get("schema") != TIMINGS_SCHEMA:
         return None
