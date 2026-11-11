@@ -27,8 +27,10 @@ tests/test_mmos_bcu_computer_use.py):
     display-wide or all-windows parameter exists anywhere in the tool schema.
   * A deny list (deny.json) is checked on EVERY op that targets a window or
     app; a match refuses the op (cause DENY_LISTED) and no window content is
-    read. Credential managers, password managers and System Settings are
-    denied by default.
+    read. Credential managers, password managers, System Settings, terminal
+    emulators and Script Editor are denied by default. The windows op
+    additionally denies every RESOLVED app identity in the CLI result and
+    drops entries whose resolved app is not exactly the requested app.
   * Every ACT returns a receipt {target, status, cause?, observed}. ACT without
     the lease is NOT_APPLIED / LEASE_NOT_HELD; ACT while a human is actively
     using the machine is NOT_APPLIED / HUMAN_ACTIVE.
@@ -62,11 +64,12 @@ tests/test_mmos_bcu_computer_use.py):
     pacing.json under the state dir. Too soon -> NOT_APPLIED / PACING_WAIT
     with the seconds remaining. The single-holder lease already guarantees
     one worker at a time.
-  * Challenge stop: slice_send scans the window's AX text (and OCR text if
+  * Challenge stop: every input-delivering slice act (slice_click,
+    slice_paste, slice_send) scans the window's AX text (and OCR text if
     present) for challenge patterns (captcha, sign in, rate limit, unusual
     activity, ...) BEFORE dispatching; a match is a terminal NOT_APPLIED /
     CHALLENGE_DETECTED with a bounded quote of what was seen. No retry after
-    a challenge refusal.
+    a challenge refusal. slice_front raises without input and keeps no scan.
   * Honest automation: this layer performs ordinary, visible automation. It
     never imitates or disguises itself as a human: no randomized or
     human-like motion/timing is synthesized and no fingerprint/user-agent/
@@ -154,6 +157,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -182,6 +186,16 @@ WINDOW_OPS = {"inspect", "capture", "press", "set_text", "keys", "scroll",
 ACT_OPS = {"press", "set_text", "keys", "scroll", "pointer_click"}
 # Slice ops that pace per target window (one sequence per interval).
 PACED_SLICE_OPS = {"slice_paste", "slice_send"}
+# slice_paste failures that are PROVABLY pre-dispatch (nothing was sent,
+# clipboard untouched) and may be reported NOT_APPLIED. Any other
+# dispatch-phase failure maps to EFFECT_UNKNOWN (paste truthfulness).
+PASTE_CLEAN_PRE_DISPATCH_CODES = {
+    "WINDOW_IDENTITY_UNKNOWN", "DENY_LISTED", "LEASE_NOT_HELD",
+    "LEASE_OWNER_REQUIRED", "PRESENCE_UNKNOWN", "HUMAN_ACTIVE",
+    "HUMAN_ACTIVE_MID_SEQUENCE", "PACING_WAIT", "CHALLENGE_DETECTED",
+    "ELEMENT_NOT_FOUND", "ELEMENT_REF_INVALID", "TEXT_REQUIRED",
+    "WINDOW_ID_REQUIRED", "SNAPSHOT_UNAVAILABLE",
+}
 
 MAX_TREELINES = 400
 MAX_LINE_CHARS = 240
@@ -190,6 +204,11 @@ MAX_ERROR_TEXT = 240
 
 DEFAULT_MIN_IDLE_SECONDS = 180.0
 DEFAULT_PACING_SECONDS = 180.0
+# Runtime gate floors (security-fix pass): a presence or pacing threshold
+# below these values would effectively disable the safety gate; both sources
+# (runtime.json and the MMOS_CU_* env overrides) refuse at startup.
+MIN_IDLE_FLOOR_SECONDS = 1.0
+PACING_FLOOR_SECONDS = 1.0
 DEFAULT_LEASE_TTL = 120
 SEE_TIMEOUT_S = 30.0
 ACT_TIMEOUT_S = 15.0
@@ -228,6 +247,17 @@ GLOBAL_CHORDS = {
     "shift+cmd+q", "cmd+option+escape", "ctrl+cmd+power",
 }
 
+# Keyboard chords the keys op may deliver at all: plain navigation/editing
+# keys, plus shift modified on the four arrow keys only (checked AFTER the
+# GLOBAL_CHORDS refusal, defense in depth). Everything else — chords with
+# cmd/ctrl/option modifiers (save, quit, screenshot, app switcher, force
+# quit, ...) — is refused with CHORD_NOT_ALLOWED; there is no escape hatch.
+CHORD_ALLOWLIST = {
+    "enter", "return", "escape", "tab", "space", "delete", "forwarddelete",
+    "home", "end", "pageup", "pagedown", "left", "right", "up", "down",
+}
+SHIFT_ARROW_CHORDS = {"shift+left", "shift+right", "shift+up", "shift+down"}
+
 TOOL_DESCRIPTION = (
     "Supervised, window-scoped macOS computer use. SEE operations read one "
     "named window (app list, window list, accessibility tree, capture with "
@@ -237,15 +267,17 @@ TOOL_DESCRIPTION = (
     "(lease_acquire) and a human-idle screen, and return a receipt instead of "
     "retrying. SLICE operations drive one named window end-to-end "
     "(slice_front raise, slice_click, slice_paste whole-text paste, "
-    "challenge-checked slice_send, slice_look) with a 180 s human-idle "
-    "default, mid-sequence presence aborts, per-window pacing between "
-    "paste/send sequences, and a challenge stop. vision_ask captures one "
-    "window in memory and asks a vision model for an answer plus clickable "
-    "elements with normalized 0-1000 coordinates. Every operation names "
-    "exactly one window_id or app; credential/password managers and System "
-    "Settings are deny-listed and refuse all operations. The layer performs "
-    "ordinary visible automation only: no human imitation, no fingerprint or "
-    "user-agent changes; on a challenge it stops and reports."
+    "slice_send, slice_look) with a 180 s human-idle default, mid-sequence "
+    "presence aborts, per-window pacing between paste/send sequences, and a "
+    "challenge stop on every input-delivering slice act. The keys op accepts "
+    "an allowlist of navigation/editing chords only. vision_ask captures one "
+    "window in memory and asks a vision model (https or loopback endpoint "
+    "only) for an answer plus clickable elements with normalized 0-1000 "
+    "coordinates. Every operation names exactly one window_id or app; "
+    "credential/password managers, System Settings, terminal emulators and "
+    "Script Editor are deny-listed and refuse all operations. The layer "
+    "performs ordinary visible automation only: no human imitation, no "
+    "fingerprint or user-agent changes; on a challenge it stops and reports."
 )
 
 TOOL_SCHEMA = {
@@ -352,8 +384,9 @@ def load_runtime(path):
             raise RefuseError("RUNTIME_%s" % key.upper(), repr(value))
         return value
 
-    presence_min_idle = _number("presence_min_idle_seconds", 0.001)
-    pacing = _number("pacing_seconds", 0.0)
+    presence_min_idle = _number("presence_min_idle_seconds",
+                                MIN_IDLE_FLOOR_SECONDS)
+    pacing = _number("pacing_seconds", PACING_FLOOR_SECONDS)
     paste_focus_ms = _number("paste_focus_timeout_ms", 0)
     paste_restore_ms = _number("paste_restore_delay_ms", 0)
     challenge_extra = data.get("challenge_patterns_extra")
@@ -399,11 +432,15 @@ DEFAULT_DENY = {
         "Keychain Access", "1Password", "Bitwarden", "Dashlane",
         "Proton Pass", "Keeper", "Enpass", "Strongbox", "System Settings",
         "Passwords",
+        # Terminal emulators and the script editor: a shell or script window
+        # is an arbitrary-command surface, not a document window.
+        "Terminal", "iTerm", "iTerm2", "Script Editor",
     ],
     "bundle_ids": [
         "com.apple.KeychainAccess", "com.apple.Passwords",
         "com.apple.systempreferences", "com.1password.1password",
         "com.bitwarden.desktop",
+        "com.apple.Terminal", "com.apple.ScriptEditor.id",
     ],
     "title_regexes": [],
     "extra_app_names": [],
@@ -496,8 +533,19 @@ class Presence:
                 self.min_idle = float(raw)
             except ValueError:
                 self.min_idle = DEFAULT_MIN_IDLE_SECONDS
+            else:
+                if self.min_idle < MIN_IDLE_FLOOR_SECONDS:
+                    raise RefuseError(
+                        "PRESENCE_MIN_IDLE_FLOOR",
+                        "MMOS_CU_PRESENCE_MIN_IDLE %r is below the %.0fs "
+                        "floor" % (raw, MIN_IDLE_FLOOR_SECONDS))
         elif runtime_value is not None:
             self.min_idle = float(runtime_value)
+            if self.min_idle < MIN_IDLE_FLOOR_SECONDS:
+                raise RefuseError(
+                    "PRESENCE_MIN_IDLE_FLOOR",
+                    "runtime presence_min_idle_seconds %r is below the "
+                    "%.0fs floor" % (runtime_value, MIN_IDLE_FLOOR_SECONDS))
         else:
             self.min_idle = DEFAULT_MIN_IDLE_SECONDS
         self.ioreg_bin = ioreg_bin or "/usr/sbin/ioreg"
@@ -603,7 +651,7 @@ class Lease:
                     return {"held": True, "owner": owner, "renewed": True,
                             "expires_at": now + ttl}
                 raise OpError("LEASE_HELD", "owner=%s expires_in=%.0fs" % (
-                    existing.get("owner"), expires - now))
+                    (existing.get("owner") or "")[:8] + "…", expires - now))
             # Expired lease: prior holder crashed or let it lapse; take over.
         payload = {"owner": owner, "acquired_at": now,
                    "expires_at": now + ttl, "heartbeat_at": now}
@@ -621,7 +669,7 @@ class Lease:
             return {"released": True, "note": "no lease"}
         if lease.get("owner") != owner:
             raise OpError("LEASE_NOT_OWNER",
-                          "held by %s" % lease.get("owner"))
+                          "held by %s" % ((lease.get("owner") or "")[:8] + "…"))
         try:
             os.unlink(self.lease_path)
         except OSError:
@@ -636,8 +684,14 @@ class Lease:
         remaining = None
         if isinstance(expires, (int, float)):
             remaining = round(max(0.0, expires - time.time()), 3)
-        return {"held": bool(remaining), "owner": lease.get("owner"),
-                "expires_in_seconds": remaining}
+        owner = lease.get("owner")
+        out = {"held": bool(remaining), "expires_in_seconds": remaining}
+        if isinstance(owner, str) and owner:
+            # Owner id is redacted in status output (first 8 chars + ellipsis);
+            # acquire/release still require the EXACT owner string.
+            out["owner"] = owner[:8] + "…"
+            out["owner_redacted"] = True
+        return out
 
     def require_and_renew(self, owner, ttl_seconds=DEFAULT_LEASE_TTL):
         """Gate for ACT ops: verifies ownership, renews expiry in place."""
@@ -685,8 +739,19 @@ class Pacer:
                 self.seconds = float(raw)
             except ValueError:
                 self.seconds = DEFAULT_PACING_SECONDS
+            else:
+                if self.seconds < PACING_FLOOR_SECONDS:
+                    raise RefuseError(
+                        "PACING_SECONDS_FLOOR",
+                        "MMOS_CU_PACING_SECONDS %r is below the %.0fs floor"
+                        % (raw, PACING_FLOOR_SECONDS))
         elif runtime_value is not None:
             self.seconds = float(runtime_value)
+            if self.seconds < PACING_FLOOR_SECONDS:
+                raise RefuseError(
+                    "PACING_SECONDS_FLOOR",
+                    "runtime pacing_seconds %r is below the %.0fs floor"
+                    % (runtime_value, PACING_FLOOR_SECONDS))
         else:
             self.seconds = DEFAULT_PACING_SECONDS
 
@@ -862,6 +927,11 @@ class PeekabooAdapter:
                 "window_id": window.get("window_id", window.get("windowID")),
                 "title": window.get("title"),
                 "owner_pid": window.get("owner_pid", window.get("pid")),
+                # Resolved app identity when the CLI reports it per window;
+                # the windows op deny-checks and filters on it (FIX 8).
+                "app": window.get("app", window.get("app_name")),
+                "bundle_id": window.get("bundle_id",
+                                        window.get("app_bundle_id")),
             })
         return out
 
@@ -933,11 +1003,48 @@ class PeekabooAdapter:
         return self.run_json(args, timeout, with_strategy=False)
 
 
+def _top_find(obj, keys):
+    """Case-insensitive TOP-LEVEL key lookup in a dict; None otherwise.
+
+    Used by the identity/bounds resolvers so payload-level and
+    coordinate-context values win over any nested decoy key found by the
+    deep scan (identity-before-decoy, security-fix pass)."""
+    if isinstance(obj, dict):
+        lowered = {k.lower(): v for k, v in obj.items()}
+        for key in keys:
+            if key in lowered:
+                return lowered[key]
+    return None
+
+
+_IDENTITY_APP_KEYS = ["app", "app_name", "application"]
+_IDENTITY_BUNDLE_KEYS = ["bundle_id", "app_bundle_id"]
+_IDENTITY_TITLE_KEYS = ["window_title", "title"]
+
+
 def window_identity(meta):
-    """Best-effort {app_name, bundle_id, window_title} from peekaboo JSON."""
-    app = _deep_find(meta, ["app", "app_name", "application"])
-    bundle = _deep_find(meta, ["bundle_id", "app_bundle_id"])
-    title = _deep_find(meta, ["window_title", "window", "title"])
+    """Best-effort {app_name, bundle_id, window_title} from peekaboo JSON.
+
+    Order: payload top level, then coordinate_context, and only then the
+    deep scan as a last fallback — a nested decoy "app" key (e.g. inside a
+    ui_element) must never outrank the payload-level identity."""
+    app = _top_find(meta, _IDENTITY_APP_KEYS)
+    bundle = _top_find(meta, _IDENTITY_BUNDLE_KEYS)
+    title = _top_find(meta, _IDENTITY_TITLE_KEYS)
+    coord = _top_find(meta, ["coordinate_context"])
+    if isinstance(coord, dict):
+        if app is None:
+            app = _top_find(coord, _IDENTITY_APP_KEYS)
+        if bundle is None:
+            bundle = _top_find(coord, _IDENTITY_BUNDLE_KEYS)
+        if title is None:
+            title = _top_find(coord, _IDENTITY_TITLE_KEYS)
+    if app is None:
+        app = _deep_find(meta, _IDENTITY_APP_KEYS)
+    if bundle is None:
+        bundle = _deep_find(meta, _IDENTITY_BUNDLE_KEYS)
+    if title is None:
+        title = _deep_find(meta, ["window_title", "window", "title"])
     return {"app_name": app if isinstance(app, str) else None,
             "bundle_id": bundle if isinstance(bundle, str) else None,
             "window_title": title if isinstance(title, str) else None}
@@ -946,49 +1053,61 @@ def window_identity(meta):
 def window_bounds(meta):
     """Best-effort (width, height) of the captured window from peekaboo JSON.
 
-    Accepts data.coordinate_context (fresh `see` receipts), bounds/frame dicts
-    and CG-style {origin, size} rects.
+    Prefers the coordinate-context window-level logical bounds of a fresh
+    `see` receipt; the deep scan (element-level bounds/frame dicts, CG-style
+    {origin, size} rects) runs only as a fallback so a smaller nested
+    "bounds" (e.g. of one ui_element) can never shrink the window frame.
     """
+    coord = _top_find(meta, ["coordinate_context"])
+    if coord is not None:
+        result = _window_bounds_walk(coord)
+        if result:
+            return result
+    return _window_bounds_deep(meta)
+
+
+def _window_bounds_from_dict(value):
+    if not isinstance(value, dict):
+        return None
+    width = value.get("width", value.get("w"))
+    height = value.get("height", value.get("h"))
+    if isinstance(width, (int, float)) and isinstance(height, (int, float)):
+        return float(width), float(height)
+    size = value.get("size")
+    if isinstance(size, dict):
+        width = size.get("width", size.get("w"))
+        height = size.get("height", size.get("h"))
+        if isinstance(width, (int, float)) and \
+                isinstance(height, (int, float)):
+            return float(width), float(height)
+    return None
+
+
+def _window_bounds_walk(value, depth=0):
+    if depth > 4:
+        return None
+    result = _window_bounds_from_dict(value)
+    if result:
+        return result
+    if isinstance(value, dict):
+        for key in ("window_bounds", "bounds", "frame", "content_bounds",
+                    "size", "coordinate_context", "window"):
+            if key in value:
+                result = _window_bounds_walk(value[key], depth + 1)
+                if result:
+                    return result
+    return None
+
+
+def _window_bounds_deep(meta):
     candidates = []
-    for keys in (["window_bounds", "bounds", "frame", "content_bounds"],
-                 ["coordinate_context"]):
+    for keys in (["window_bounds", "bounds", "frame", "content_bounds"],):
         found = _deep_find(meta, keys)
         if found is not None:
             candidates.append(found)
 
-    def from_dict(value):
-        if not isinstance(value, dict):
-            return None
-        width = value.get("width", value.get("w"))
-        height = value.get("height", value.get("h"))
-        if isinstance(width, (int, float)) and isinstance(height, (int, float)):
-            return float(width), float(height)
-        size = value.get("size")
-        if isinstance(size, dict):
-            width = size.get("width", size.get("w"))
-            height = size.get("height", size.get("h"))
-            if isinstance(width, (int, float)) and \
-                    isinstance(height, (int, float)):
-                return float(width), float(height)
-        return None
-
-    def walk(value, depth=0):
-        if depth > 4:
-            return None
-        result = from_dict(value)
-        if result:
-            return result
-        if isinstance(value, dict):
-            for key in ("window_bounds", "bounds", "frame", "content_bounds",
-                        "size", "coordinate_context", "window"):
-                if key in value:
-                    result = walk(value[key], depth + 1)
-                    if result:
-                        return result
-        return None
-
     for candidate in candidates:
-        result = walk(candidate)
+        result = _window_bounds_walk(candidate)
         if result:
             return result
         if isinstance(candidate, list) and len(candidate) >= 4 and all(
@@ -1155,6 +1274,14 @@ VISION_PROMPT = (
     "left, 1000,1000 bottom right). Omit elements you cannot see."
 )
 
+# Vision prompt caps: a caller may not smuggle unbounded text into the
+# vision prompt via question or element_hints. Over-limit input is refused
+# (QUESTION_TOO_LONG / HINTS_TOO_LONG), never silently truncated.
+VISION_QUESTION_MAX_CHARS = 2000
+VISION_HINT_MAX_ENTRIES = 20
+VISION_HINT_MAX_CHARS = 120
+VISION_HINTS_MAX_TOTAL_CHARS = 1200
+
 
 class VisionClient:
     """Anthropic-protocol vision request over urllib. The token is read from
@@ -1188,14 +1315,38 @@ class VisionClient:
             else os.environ.get("ANTHROPIC_AUTH_TOKEN")
         return bool(token and self.base_url)
 
+    def _require_secure_endpoint(self):
+        """The vision endpoint must be https, or plain http only on the
+        loopback (localhost / 127.0.0.1 / ::1); anything else would send the
+        captured window image and token over an unencrypted link."""
+        try:
+            parsed = urllib.parse.urlparse(self.base_url or "")
+        except ValueError:
+            raise OpError("VISION_ENDPOINT_INSECURE",
+                          "endpoint URL unparseable; refused")
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme != "https" and \
+                host not in ("localhost", "127.0.0.1", "::1"):
+            raise OpError("VISION_ENDPOINT_INSECURE",
+                          "endpoint scheme/host refused; https or loopback "
+                          "http only")
+
     def ask(self, png_bytes, question, element_hints=None):
         if not question or not isinstance(question, str):
             raise OpError("VISION_QUESTION_REQUIRED", "question missing")
+        if len(question) > VISION_QUESTION_MAX_CHARS:
+            raise OpError("QUESTION_TOO_LONG",
+                          "question exceeds %d chars"
+                          % VISION_QUESTION_MAX_CHARS)
         token = self._resolve_token()
+        self._require_secure_endpoint()
         prompt = VISION_PROMPT
         if element_hints:
+            # Bounded final assembly: per-entry/total caps are enforced on
+            # caller-supplied hints at the op boundary (_validate_vision_hints).
             prompt += "\nHints from the accessibility tree: %s" % \
-                "; ".join(str(h) for h in element_hints[:20])
+                ("; ".join(str(h) for h in element_hints[:20])
+                 [:VISION_HINTS_MAX_TOTAL_CHARS])
         prompt += "\n\nQuestion: %s" % question
         import base64
         encoded = base64.b64encode(png_bytes).decode("ascii")
@@ -1255,6 +1406,29 @@ def _parse_vision_json(text):
         return json.loads(text[start:end + 1])
     except ValueError:
         return None
+
+
+def _validate_vision_hints(hints):
+    """Cap the caller-supplied element_hints (count, per-entry length, total
+    length) at the op boundary, BEFORE any capture or network dispatch.
+
+    The layer-generated tree hint added afterwards is internally bounded and
+    is not subject to the caller caps."""
+    if not isinstance(hints, list):
+        return
+    lengths = [len(str(h)) for h in hints]
+    if len(hints) > VISION_HINT_MAX_ENTRIES:
+        raise OpError("HINTS_TOO_LONG",
+                      "element_hints exceeds %d entries"
+                      % VISION_HINT_MAX_ENTRIES)
+    if any(length > VISION_HINT_MAX_CHARS for length in lengths):
+        raise OpError("HINTS_TOO_LONG",
+                      "an element_hints entry exceeds %d chars"
+                      % VISION_HINT_MAX_CHARS)
+    if sum(lengths) > VISION_HINTS_MAX_TOTAL_CHARS:
+        raise OpError("HINTS_TOO_LONG",
+                      "element_hints total length exceeds %d chars"
+                      % VISION_HINTS_MAX_TOTAL_CHARS)
 
 
 # ── keep_path guard ──────────────────────────────────────────────────────────
@@ -1419,6 +1593,7 @@ def handle_tool_call(ctx, args):
                           "WINDOW_IDENTITY_UNKNOWN", "KEEP_PATH_NOT_ABSOLUTE",
                           "KEEP_PATH_NO_SCRATCH", "KEEP_PATH_OUTSIDE_SCRATCH",
                           "CHORD_GLOBAL", "CHORD_INVALID",
+                          "CHORD_NOT_ALLOWED",
                           "COORDS_REQUIRED", "WINDOW_BOUNDS_UNKNOWN",
                           "POINT_OUTSIDE_WINDOW", "APP_REQUIRED",
                           "WINDOW_ID_REQUIRED", "VISION_QUESTION_REQUIRED",
@@ -1430,7 +1605,9 @@ def handle_tool_call(ctx, args):
                           "DIRECTION_INVALID", "AMOUNT_INVALID",
                           "HUMAN_ACTIVE_MID_SEQUENCE", "PACING_WAIT",
                           "CHALLENGE_DETECTED", "SLICE_TARGET_REQUIRED",
-                          "SLICE_TARGET_AMBIGUOUS", "SLICE_TARGET_NOT_FOUND"):
+                          "SLICE_TARGET_AMBIGUOUS", "SLICE_TARGET_NOT_FOUND",
+                          "VISION_ENDPOINT_INSECURE", "HINTS_TOO_LONG",
+                          "QUESTION_TOO_LONG"):
             payload = receipt(str(action), args.get("window_id"),
                               args.get("element_ref"), "NOT_APPLIED",
                               cause=error)
@@ -1438,10 +1615,15 @@ def handle_tool_call(ctx, args):
                                  "text": json.dumps(payload)}],
                     "isError": True}
         if error.code in ("DISPATCH_TIMEOUT", "DISPATCH_UNAVAILABLE",
-                          "VISION_UNAVAILABLE"):
+                          "VISION_UNAVAILABLE", "EFFECT_UNKNOWN"):
             payload = receipt(str(action), args.get("window_id"),
                               args.get("element_ref"), "EFFECT_UNKNOWN",
                               cause=error)
+            if str(action) == "slice_paste":
+                # Paste truthfulness: after a paste dispatch attempt the
+                # clipboard state is unconfirmable (text may be sitting in
+                # the clipboard, or the restore may not have run).
+                payload["clipboard_state"] = "unknown"
             return {"content": [{"type": "text",
                                  "text": json.dumps(payload)}],
                     "isError": True}
@@ -1483,10 +1665,34 @@ def _op_windows(ctx, args):
     app = args.get("app")
     if not app or not isinstance(app, str):
         raise OpError("APP_REQUIRED", "app name required for the windows op")
-    _deny_gate(ctx, app, None, None)
+    # Deny the REQUESTED string against both app names and bundle ids (a
+    # bundle-id string for a denied app must refuse, not fuzz its way in).
+    _deny_gate(ctx, app, app, None)
     windows = ctx.adapter.list_windows(app)
+    # Deny-check every RESOLVED app identity present in the result before
+    # anything is returned; any match denies the whole op (zero results).
+    for window in windows:
+        if not isinstance(window, dict):
+            continue
+        matched = ctx.deny.matches(window.get("app"), window.get("bundle_id"),
+                                   None)
+        if matched:
+            raise OpError("DENY_LISTED",
+                          "resolved window entry matched by %s" % matched)
+    # Drop entries whose resolved app name is not exactly (case-insensitive)
+    # the requested app — a fuzzy `window list --app` must not leak foreign
+    # windows.
+    filtered = []
+    for window in windows:
+        if not isinstance(window, dict):
+            continue
+        entry_name = window.get("app") or window.get("app_name")
+        if isinstance(entry_name, str) and entry_name and \
+                entry_name.lower() != app.lower():
+            continue
+        filtered.append(window)
     return _text_result({"op": "windows", "status": "OK", "app": app,
-                         "windows": windows})
+                         "windows": filtered})
 
 
 def _op_inspect(ctx, args):
@@ -1504,6 +1710,11 @@ def _op_capture(ctx, args):
     keep_path = args.get("keep_path")
     if keep_path is not None:
         validate_keep_path(keep_path)  # refuse BEFORE capturing
+    # Identity BEFORE capture: resolve the window's owning app with the
+    # screenshot-less observe and deny-gate it BEFORE the pixel capture is
+    # dispatched. A denied window is never captured, not even into staging.
+    observe_meta = ctx.adapter.inspect_window(window_id)
+    _deny_gate_window(ctx, observe_meta)
     staging = None
     try:
         png, meta, staging = ctx.adapter.capture_window(window_id, ocr=ocr)
@@ -1590,6 +1801,17 @@ def _op_keys(ctx, args):
     if chord.lower() in GLOBAL_CHORDS:
         raise OpError("CHORD_GLOBAL",
                       "system-global chord refused; window-targeted keys only")
+    # Keys allowlist (security-fix pass): after the GLOBAL_CHORDS refusal,
+    # only plain navigation/editing keys and shift+arrow are deliverable.
+    # Modifier chords (cmd/ctrl/option — save, quit, screenshot, app
+    # switcher, force quit, ...) are refused with CHORD_NOT_ALLOWED.
+    lowered = chord.lower()
+    if lowered not in CHORD_ALLOWLIST and lowered not in SHIFT_ARROW_CHORDS:
+        raise OpError(
+            "CHORD_NOT_ALLOWED",
+            "chord %r not allowed; single keys from %s or shift+ one of "
+            "left/right/up/down only" % (
+                chord, "{" + ", ".join(sorted(CHORD_ALLOWLIST)) + "}"))
     # press takes no element; the fresh exact-window snapshot is the receipt
     # that authorizes background key delivery.
     _snap, snapshot_id = _act_observe(ctx, args, window_id)
@@ -1707,6 +1929,25 @@ def _op_pointer_click(ctx, args):
 # directly and is never attempted in the background first and never retried.
 
 
+def _challenge_scan(ctx, snap, args, op):
+    """Pre-dispatch challenge scan for every input-delivering slice act
+    (slice_click / slice_paste / slice_send).
+
+    Scans the fresh snapshot's window text (AX + OCR if present) for
+    challenge patterns; a match raises the terminal CHALLENGE_DETECTED
+    refusal BEFORE any dispatch (zero peekaboo act calls). The receipt's op
+    field names the refused op. slice_front (raise only, no input delivered)
+    keeps no scan."""
+    corpus = slice_window_text(snap)
+    extra_patterns = ctx.runtime.get("challenge_patterns_extra") \
+        if isinstance(ctx.runtime, dict) else ()
+    hit = scan_challenge_text(corpus, extra_patterns or ())
+    if hit:
+        raise OpError("CHALLENGE_DETECTED",
+                      "pattern %r matched window text; quote: %s"
+                      % (hit["pattern"], hit["quote"]))
+
+
 def _slice_sequence_gate(ctx, completed, step):
     """Presence check before ONE named step of a slice sequence.
 
@@ -1760,7 +2001,8 @@ def _slice_front_select(ctx, args):
     app = args.get("app")
     if not app or not isinstance(app, str):
         raise OpError("APP_REQUIRED", "app name required for slice_front")
-    _deny_gate(ctx, app, None, None)
+    # Deny the requested string against app names AND bundle ids.
+    _deny_gate(ctx, app, app, None)
     window_id = args.get("window_id")
     title = args.get("title")
     has_wid = isinstance(window_id, int) and not isinstance(window_id, bool)
@@ -1841,6 +2083,8 @@ def _op_slice_click(ctx, args):
         raise OpError("COORDS_REQUIRED", "element_ref, or integer x,y required")
     completed = []
     snap, snapshot_id = _slice_observe(ctx, args, window_id, completed)
+    # Challenge scan BEFORE any click dispatch (a click is an input too).
+    _challenge_scan(ctx, snap, args, "slice_click")
     if element_ref is not None:
         if not isinstance(element_ref, str) or not element_ref:
             raise OpError("ELEMENT_REF_INVALID", repr(element_ref))
@@ -1902,6 +2146,8 @@ def _op_slice_paste(ctx, args):
     ctx.pacer.check(window_id)  # PACING_WAIT between paste/send sequences
     completed = []
     snap, snapshot_id = _slice_observe(ctx, args, window_id, completed)
+    # Challenge scan BEFORE any dispatch (the focus click is an input too).
+    _challenge_scan(ctx, snap, args, "slice_paste")
     app_name = window_identity(snap)["app_name"]
     if not app_name:
         raise OpError("WINDOW_IDENTITY_UNKNOWN",
@@ -1924,6 +2170,21 @@ def _op_slice_paste(ctx, args):
     try:
         paste_meta = ctx.adapter.paste(
             _paste_argv(ctx, text, app_name, window_id))
+    except OpError as error:
+        # Failure truthfulness (security-fix pass): once the paste dispatch
+        # has been ATTEMPTED, only the clean pre-dispatch refusal codes are
+        # provably "nothing happened". Any other dispatch-phase failure
+        # (CLI_ERROR, FOREGROUND_REQUIRED, ...) may have set the clipboard
+        # and/or delivered the paste chord — report EFFECT_UNKNOWN, never
+        # NOT_APPLIED. DISPATCH_TIMEOUT / DISPATCH_UNAVAILABLE already map
+        # to EFFECT_UNKNOWN in the handler and pass through unchanged.
+        if error.code in ("DISPATCH_TIMEOUT", "DISPATCH_UNAVAILABLE"):
+            raise
+        if error.code not in PASTE_CLEAN_PRE_DISPATCH_CODES:
+            raise OpError("EFFECT_UNKNOWN",
+                          "paste dispatch failed in flight; effect unknown "
+                          "(%s: %s)" % (error.code, error.detail))
+        raise
     finally:
         ctx.pacer.record(window_id)
     completed.append("act:paste window_id=%s" % window_id)
@@ -1974,14 +2235,7 @@ def _op_slice_send(ctx, args):
     # Challenge check BEFORE any send dispatch, on the window's AX text (and
     # OCR text if present in the snapshot). A match STOPS the layer:
     # terminal NOT_APPLIED, bounded quote, no retry.
-    corpus = slice_window_text(snap)
-    extra_patterns = ctx.runtime.get("challenge_patterns_extra") \
-        if isinstance(ctx.runtime, dict) else ()
-    hit = scan_challenge_text(corpus, extra_patterns or ())
-    if hit:
-        raise OpError("CHALLENGE_DETECTED",
-                      "pattern %r matched window text; quote: %s"
-                      % (hit["pattern"], hit["quote"]))
+    _challenge_scan(ctx, snap, args, "slice_send")
     element = resolve_element(snap, element_ref)
     elem_id = element_id_of(element)
     if not elem_id:
@@ -2044,6 +2298,12 @@ def _op_vision_ask(ctx, args):
     window_id = _require_window_id(args)
     question = args.get("question")
     hints = args.get("element_hints")
+    # Prompt caps BEFORE any gate, capture or network dispatch.
+    if isinstance(question, str) and \
+            len(question) > VISION_QUESTION_MAX_CHARS:
+        raise OpError("QUESTION_TOO_LONG",
+                      "question exceeds %d chars" % VISION_QUESTION_MAX_CHARS)
+    _validate_vision_hints(hints)
     tree_meta = _act_gate(ctx, args, window_id)  # deny, lease, presence gate
     hints = list(hints or [])
     tree_text = render_tree(tree_meta, max_lines=60)

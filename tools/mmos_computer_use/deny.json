@@ -10,14 +10,20 @@
     "Enpass",
     "Strongbox",
     "System Settings",
-    "Passwords"
+    "Passwords",
+    "Terminal",
+    "iTerm",
+    "iTerm2",
+    "Script Editor"
   ],
   "bundle_ids": [
     "com.apple.KeychainAccess",
     "com.apple.Passwords",
     "com.apple.systempreferences",
     "com.1password.1password",
-    "com.bitwarden.desktop"
+    "com.bitwarden.desktop",
+    "com.apple.Terminal",
+    "com.apple.ScriptEditor.id"
   ],
   "title_regexes": [],
   "extra_app_names": [],

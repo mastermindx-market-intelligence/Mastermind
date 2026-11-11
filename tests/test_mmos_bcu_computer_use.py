@@ -109,6 +109,10 @@ case "$1" in
     fi
     ;;
   paste)
+    if [ -n "${FAKE_PEEKABOO_PASTE_FAIL:-}" ]; then
+      echo '{"success": false, "errors": ["paste chord delivery failed mid-flight"]}'
+      exit 0
+    fi
     echo "{\"success\": true, \"data\": {\"result\": \"pasted\", \"clipboard_restored\": ${FAKE_PEEKABOO_CLIPBOARD_RESTORED:-true}}}"
     ;;
   action|set-value|press|scroll|click)
@@ -230,7 +234,10 @@ class TestLease(unittest.TestCase):
         result = self.lease.acquire("agent-a", ttl_seconds=60)
         self.assertTrue(result["held"])
         status = self.lease.status()
-        self.assertEqual(status["owner"], "agent-a")
+        # FIX 4: owner is redacted in status output (first 8 chars + ellipsis;
+        # a 7-char owner is not shortened, it only gains the ellipsis marker).
+        self.assertEqual(status["owner"], "agent-a…")
+        self.assertTrue(status["owner_redacted"])
         self.assertGreater(status["expires_in_seconds"], 0)
         self.assertEqual(self.lease.release("agent-a"), {"released": True})
         self.assertFalse(self.lease.status()["held"])
@@ -250,7 +257,7 @@ class TestLease(unittest.TestCase):
             json.dump(lease, handle)
         result = self.lease.acquire("agent-b", ttl_seconds=60)
         self.assertTrue(result["took_over"])
-        self.assertEqual(self.lease.status()["owner"], "agent-b")
+        self.assertEqual(self.lease.status()["owner"], "agent-b…")
 
     def test_release_by_wrong_owner_refused(self):
         self.lease.acquire("agent-a", ttl_seconds=60)
@@ -968,6 +975,15 @@ class TestVisionClient(unittest.TestCase):
         self.assertEqual(content[0]["type"], "image")
         self.assertEqual(content[0]["source"]["media_type"], "image/png")
 
+    def test_ask_accepts_small_hints(self):
+        client = mmos.VisionClient(base_url="http://127.0.0.1:%d" % self.port)
+        png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQ"
+            "DwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+        result = client.ask(png, "Where is the OK button?",
+                            ["OK button", "Cancel button"])
+        self.assertEqual(result["elements"][0]["label"], "OK")
+
     def test_missing_token_refused_without_network(self):
         os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
         client = mmos.VisionClient(base_url="http://127.0.0.1:%d" % self.port)
@@ -1082,7 +1098,10 @@ class TestMcpFraming(unittest.TestCase):
             "name": "mmos_computer_use", "arguments": {
                 "action": "lease_status"}}})
         payload = json.loads(response["result"]["content"][0]["text"])
-        self.assertEqual(payload["owner"], "framing-test")
+        # FIX 4: the full owner id never appears in lease_status output.
+        self.assertNotIn("framing-test", json.dumps(payload))
+        self.assertEqual(payload["owner"], "framing-…")
+        self.assertTrue(payload["owner_redacted"])
         response = self._rpc({"id": 6, "method": "tools/call", "params": {
             "name": "mmos_computer_use", "arguments": {
                 "action": "lease_release", "owner": "framing-test"}}})
@@ -1720,6 +1739,557 @@ class TestHonestAutomation(unittest.TestCase):
             for key in ("FAKE_PEEKABOO_IDENTITY", "FAKE_PEEKABOO_LOG"):
                 os.environ.pop(key, None)
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class TestLeaseStatusRedaction(unittest.TestCase):
+    """FIX 4: lease_status redacts the owner; acquire/release still need the
+    exact owner string."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mmos-cu-redact-")
+        self.lease = mmos.Lease(state_dir=os.path.join(self.tmp, "state"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_status_owner_redacted(self):
+        self.lease.acquire("owner-agent-1234567890", ttl_seconds=60)
+        status = self.lease.status()
+        self.assertEqual(status["owner"], "owner-ag…")
+        self.assertTrue(status["owner_redacted"])
+        self.assertIn("expires_in_seconds", status)
+        self.assertNotIn("owner-agent-1234567890", json.dumps(status))
+
+    def test_acquire_still_needs_exact_owner(self):
+        self.lease.acquire("owner-agent-1234567890", ttl_seconds=60)
+        with self.assertRaises(mmos.OpError) as caught:
+            self.lease.release("owner-age…")  # the redacted form must fail
+        self.assertEqual(caught.exception.code, "LEASE_NOT_OWNER")
+
+    def test_lease_held_error_redacts_other_owner(self):
+        self.lease.acquire("owner-agent-1234567890", ttl_seconds=60)
+        with self.assertRaises(mmos.OpError) as caught:
+            self.lease.acquire("agent-b", ttl_seconds=60)
+        self.assertNotIn("owner-agent-1234567890",
+                         caught.exception.detail)
+
+
+class TestKeysAllowlist(unittest.TestCase):
+    """FIX 1: only navigation/editing chords and shift+arrow pass the keys
+    op; every modifier chord is refused with CHORD_NOT_ALLOWED."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mmos-cu-keys-")
+
+    def tearDown(self):
+        os.environ.pop("FAKE_PEEKABOO_IDENTITY", None)
+        os.environ.pop("FAKE_PEEKABOO_LOG", None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _ctx(self):
+        ctx = build_ctx(self.tmp)
+        ctx.lease.acquire("agent-a", ttl_seconds=60)
+        return ctx
+
+    def _keys(self, ctx, chord):
+        return mmos.handle_tool_call(ctx, {
+            "action": "keys", "window_id": 42, "chord": chord,
+            "owner": "agent-a"})
+
+    def test_plain_key_allowed(self):
+        ctx = self._ctx()
+        payload = json.loads(self._keys(ctx, "return")["content"][0]["text"])
+        self.assertEqual(payload["status"], "APPLIED")
+        presses = [c for c in read_calls(ctx) if c[0] == "press"]
+        self.assertEqual(len(presses), 1)
+
+    def test_shift_arrow_allowed(self):
+        ctx = self._ctx()
+        payload = json.loads(self._keys(ctx, "shift+right")["content"][0]
+                             ["text"])
+        self.assertEqual(payload["status"], "APPLIED")
+        self.assertEqual(len([c for c in read_calls(ctx)
+                              if c[0] == "press"]), 1)
+
+    def test_shift_return_refused(self):
+        ctx = self._ctx()
+        payload = json.loads(self._keys(ctx, "shift+return")["content"][0]
+                             ["text"])
+        self.assertEqual(payload["status"], "NOT_APPLIED")
+        self.assertIn("CHORD_NOT_ALLOWED", payload["cause"])
+        self.assertEqual([c for c in read_calls(ctx) if c[0] == "press"], [])
+
+    def test_cmd_s_refused(self):
+        ctx = self._ctx()
+        payload = json.loads(self._keys(ctx, "cmd+s")["content"][0]["text"])
+        self.assertEqual(payload["status"], "NOT_APPLIED")
+        self.assertIn("CHORD_NOT_ALLOWED", payload["cause"])
+        self.assertEqual([c for c in read_calls(ctx) if c[0] == "press"], [])
+
+    def test_screenshot_chord_refused(self):
+        # shift+cmd+3 is the screenshot chord; the allowlist refuses it.
+        ctx = self._ctx()
+        payload = json.loads(self._keys(ctx, "shift+cmd+3")["content"][0]
+                             ["text"])
+        self.assertEqual(payload["status"], "NOT_APPLIED")
+        self.assertIn("CHORD_NOT_ALLOWED", payload["cause"])
+        self.assertEqual([c for c in read_calls(ctx) if c[0] == "press"], [])
+
+    def test_cmd_q_refused(self):
+        ctx = self._ctx()
+        payload = json.loads(self._keys(ctx, "cmd+q")["content"][0]["text"])
+        self.assertEqual(payload["status"], "NOT_APPLIED")
+        self.assertIn("CHORD_NOT_ALLOWED", payload["cause"])
+        self.assertEqual([c for c in read_calls(ctx) if c[0] == "press"], [])
+
+
+class TestChallengeScanSliceOps(unittest.TestCase):
+    """FIX 2: every input-delivering slice act challenge-scans before
+    dispatch; slice_front (raise-only) keeps no scan."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mmos-cu-chalscan-")
+
+    def tearDown(self):
+        for key in ("FAKE_PEEKABOO_IDENTITY", "FAKE_PEEKABOO_LOG",
+                    "FAKE_PEEKABOO_CHALLENGE"):
+            os.environ.pop(key, None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _ctx(self):
+        ctx = build_ctx(self.tmp)
+        ctx.lease.acquire("agent-a", ttl_seconds=60)
+        return ctx
+
+    def test_slice_click_challenge_refused_zero_dispatches(self):
+        os.environ["FAKE_PEEKABOO_CHALLENGE"] = \
+            "Security check: verify you are human"
+        ctx = self._ctx()
+        result = mmos.handle_tool_call(ctx, {
+            "action": "slice_click", "window_id": 42,
+            "element_ref": "btn1", "owner": "agent-a"})
+        payload = json.loads(result["content"][0]["text"])
+        self.assertEqual(payload["status"], "NOT_APPLIED")
+        self.assertIn("CHALLENGE_DETECTED", payload["cause"])
+        self.assertEqual([c for c in read_calls(ctx) if c[0] == "click"], [])
+        self.assertFalse(os.path.exists(ctx.pacer.path))
+
+    def test_slice_paste_challenge_refused_zero_dispatches(self):
+        os.environ["FAKE_PEEKABOO_CHALLENGE"] = \
+            "Security check: verify you are human"
+        ctx = self._ctx()
+        result = mmos.handle_tool_call(ctx, {
+            "action": "slice_paste", "window_id": 42, "text": "hello",
+            "owner": "agent-a"})
+        payload = json.loads(result["content"][0]["text"])
+        self.assertEqual(payload["status"], "NOT_APPLIED")
+        self.assertIn("CHALLENGE_DETECTED", payload["cause"])
+        calls = read_calls(ctx)
+        self.assertEqual([c for c in calls if c[0] == "click"], [])
+        self.assertEqual([c for c in calls if c[0] == "paste"], [])
+        self.assertFalse(os.path.exists(ctx.pacer.path))
+
+    def test_slice_front_keeps_no_scan(self):
+        # slice_front raises without delivering input: a challenge string in
+        # the AX tree does NOT refuse it.
+        os.environ["FAKE_PEEKABOO_CHALLENGE"] = \
+            "Security check: verify you are human"
+        ctx = self._ctx()
+        result = mmos.handle_tool_call(ctx, {
+            "action": "slice_front", "app": "TextEdit", "window_id": 42,
+            "owner": "agent-a"})
+        payload = json.loads(result["content"][0]["text"])
+        self.assertEqual(payload["status"], "APPLIED")
+
+
+class TestDenyHardening(unittest.TestCase):
+    """FIX 3: terminal emulators and Script Editor are denied by default."""
+
+    NEW_NAMES = ("Terminal", "iTerm", "iTerm2", "Script Editor")
+    NEW_BUNDLES = ("com.apple.Terminal", "com.apple.ScriptEditor.id")
+
+    def test_defaults_and_shipped_deny_json_carry_new_entries(self):
+        for name in self.NEW_NAMES:
+            self.assertIn(name, mmos.DEFAULT_DENY["app_names"])
+        for bundle in self.NEW_BUNDLES:
+            self.assertIn(bundle, mmos.DEFAULT_DENY["bundle_ids"])
+        with open(os.path.join(TOOL_DIR, "deny.json"),
+                  encoding="utf-8") as handle:
+            shipped = json.load(handle)
+        for name in self.NEW_NAMES:
+            self.assertIn(name, shipped["app_names"])
+        for bundle in self.NEW_BUNDLES:
+            self.assertIn(bundle, shipped["bundle_ids"])
+
+    def test_new_names_refused_on_window_op(self):
+        tmp = tempfile.mkdtemp(prefix="mmos-cu-denyh-")
+        try:
+            ctx = build_ctx(tmp)
+            ctx.deny = mmos.DenyList(
+                {"terminal", "iterm", "iterm2", "script editor", "1password"},
+                {"com.apple.terminal", "com.apple.scripteditor.id",
+                 "com.1password.1password"}, [])
+            for name in self.NEW_NAMES:
+                result = mmos.handle_tool_call(ctx, {
+                    "action": "windows", "app": name})
+                self.assertIn("DENY_LISTED", result["content"][0]["text"])
+            # Exact-match semantics unchanged: lookalikes pass.
+            result = mmos.handle_tool_call(ctx, {
+                "action": "windows", "app": "TerminalTwo"})
+            payload = json.loads(result["content"][0]["text"])
+            self.assertEqual(payload["status"], "OK")
+        finally:
+            os.environ.pop("FAKE_PEEKABOO_IDENTITY", None)
+            os.environ.pop("FAKE_PEEKABOO_LOG", None)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class TestWindowsDenyResolution(unittest.TestCase):
+    """FIX 8: the windows op denies the requested string against bundle ids,
+    denies every resolved app identity in the result, and drops foreign-app
+    entries."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mmos-cu-windeny-")
+
+    def tearDown(self):
+        for key in ("FAKE_PEEKABOO_IDENTITY", "FAKE_PEEKABOO_LOG",
+                    "FAKE_PEEKABOO_WINDOWS_JSON"):
+            os.environ.pop(key, None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _ctx(self):
+        ctx = build_ctx(self.tmp)
+        return ctx
+
+    def test_bundle_id_string_refused(self):
+        ctx = self._ctx()
+        result = mmos.handle_tool_call(ctx, {
+            "action": "windows", "app": "com.1password.1password"})
+        self.assertIn("DENY_LISTED", result["content"][0]["text"])
+        self.assertEqual(read_calls(ctx), [])
+
+    def test_denied_resolved_app_refused_whole_op(self):
+        os.environ["FAKE_PEEKABOO_WINDOWS_JSON"] = json.dumps([
+            {"window_id": 42, "title": "Secret", "app": "1Password",
+             "bundle_id": "com.1password.1password"}])
+        ctx = self._ctx()
+        result = mmos.handle_tool_call(ctx, {
+            "action": "windows", "app": "TextEdit"})
+        self.assertIn("DENY_LISTED", result["content"][0]["text"])
+        payload = json.loads(result["content"][0]["text"])
+        self.assertNotIn("windows", payload)
+
+    def test_foreign_app_entry_filtered(self):
+        os.environ["FAKE_PEEKABOO_WINDOWS_JSON"] = json.dumps([
+            {"window_id": 42, "title": "a", "app": "TextEdit",
+             "bundle_id": "com.apple.TextEdit"},
+            {"window_id": 43, "title": "b", "app": "SneakyApp",
+             "bundle_id": "com.example.sneaky"}])
+        ctx = self._ctx()
+        result = mmos.handle_tool_call(ctx, {
+            "action": "windows", "app": "TextEdit"})
+        payload = json.loads(result["content"][0]["text"])
+        ids = [w["window_id"] for w in payload["windows"]]
+        self.assertEqual(ids, [42])
+
+    def test_slice_front_bundle_id_string_refused(self):
+        ctx = self._ctx()
+        result = mmos.handle_tool_call(ctx, {
+            "action": "slice_front", "app": "com.1password.1password",
+            "window_id": 42, "owner": "agent-a"})
+        self.assertIn("DENY_LISTED", result["content"][0]["text"])
+        self.assertEqual(read_calls(ctx), [])
+
+
+class TestCaptureIdentityBeforeCapture(unittest.TestCase):
+    """FIX 9: capture resolves the window identity screenshot-less and
+    deny-gates it BEFORE the pixel capture dispatch."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mmos-cu-capid-")
+
+    def tearDown(self):
+        os.environ.pop("FAKE_PEEKABOO_IDENTITY", None)
+        os.environ.pop("FAKE_PEEKABOO_LOG", None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_denied_window_never_captured(self):
+        ctx = build_ctx(self.tmp, identity=IDENTITY_ONepw)
+        result = mmos.handle_tool_call(ctx, {
+            "action": "capture", "window_id": 42, "ocr": True,
+            "owner": "agent-a"})
+        self.assertIn("DENY_LISTED", result["content"][0]["text"])
+        calls = read_calls(ctx)
+        # The screenshot-less identity observe may run; no capture dispatch.
+        for argv in calls:
+            self.assertNotIn("--path", argv)
+
+
+class TestWindowIdentityBoundsPreference(unittest.TestCase):
+    """FIX 7/13: coordinate-context window bounds and payload-level identity
+    outrank nested element bounds / decoy keys; deep scan only as fallback."""
+
+    def test_element_bounds_do_not_shrink_window(self):
+        meta = {
+            "ui_elements": [{"role": "Button",
+                             "bounds": {"width": 100, "height": 50}}],
+            "coordinate_context": {"window_bounds": {"x": 0, "y": 0,
+                                                     "width": 800,
+                                                     "height": 600}},
+        }
+        self.assertEqual(mmos.window_bounds(meta), (800.0, 600.0))
+
+    def test_deep_scan_fallback_without_coordinate_context(self):
+        meta = {"bounds": {"width": 640, "height": 480}}
+        self.assertEqual(mmos.window_bounds(meta), (640.0, 480.0))
+
+    def test_nested_decoy_app_does_not_beat_coordinate_context(self):
+        meta = {
+            "ui_elements": [{"app": "Decoy", "role": "Button"}],
+            "coordinate_context": {"app": "TextEdit",
+                                   "bundle_id": "com.apple.TextEdit",
+                                   "window_title": "Real"},
+        }
+        identity = mmos.window_identity(meta)
+        self.assertEqual(identity["app_name"], "TextEdit")
+        self.assertEqual(identity["bundle_id"], "com.apple.TextEdit")
+        self.assertEqual(identity["window_title"], "Real")
+
+    def test_toplevel_identity_beats_nested_decoy(self):
+        meta = {"app": "TextEdit", "ui_elements": [{"app": "Decoy"}]}
+        self.assertEqual(mmos.window_identity(meta)["app_name"], "TextEdit")
+
+
+class TestPasteTruthfulness(unittest.TestCase):
+    """FIX 10: a dispatch-phase paste failure that is not a clean
+    pre-dispatch refusal is EFFECT_UNKNOWN (never NOT_APPLIED), and the
+    timeout receipt carries clipboard_state "unknown"."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mmos-cu-ptruth-")
+
+    def tearDown(self):
+        for key in ("FAKE_PEEKABOO_IDENTITY", "FAKE_PEEKABOO_LOG",
+                    "FAKE_PEEKABOO_PASTE_FAIL"):
+            os.environ.pop(key, None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _ctx(self):
+        ctx = build_ctx(self.tmp)
+        ctx.lease.acquire("agent-a", ttl_seconds=60)
+        return ctx
+
+    def _paste(self, ctx, **extra):
+        args = {"action": "slice_paste", "window_id": 42, "owner": "agent-a",
+                "text": "hello world"}
+        args.update(extra)
+        return mmos.handle_tool_call(ctx, args)
+
+    def test_paste_cli_error_is_effect_unknown(self):
+        os.environ["FAKE_PEEKABOO_PASTE_FAIL"] = "1"
+        ctx = self._ctx()
+        result = self._paste(ctx)
+        payload = json.loads(result["content"][0]["text"])
+        self.assertEqual(payload["status"], "EFFECT_UNKNOWN")
+        self.assertIn("EFFECT_UNKNOWN", payload["cause"])
+        self.assertIn("mid-flight", payload["cause"])
+        self.assertEqual(payload["clipboard_state"], "unknown")
+        # The attempt consumed the pacing window (record in finally).
+        self.assertTrue(os.path.exists(ctx.pacer.path))
+
+    def test_paste_timeout_is_effect_unknown_with_clipboard_unknown(self):
+        ctx = self._ctx()
+
+        def boom(_argv):
+            raise mmos.OpError("DISPATCH_TIMEOUT",
+                               "peekaboo paste exceeded 60s")
+
+        ctx.adapter.paste = boom
+        result = self._paste(ctx)
+        payload = json.loads(result["content"][0]["text"])
+        self.assertEqual(payload["status"], "EFFECT_UNKNOWN")
+        self.assertIn("DISPATCH_TIMEOUT", payload["cause"])
+        self.assertEqual(payload["clipboard_state"], "unknown")
+        self.assertTrue(os.path.exists(ctx.pacer.path))
+
+    def test_clean_pre_dispatch_refusal_stays_not_applied(self):
+        ctx = self._ctx()
+        ctx.pacer.record(42)  # force PACING_WAIT before any dispatch
+        result = self._paste(ctx)
+        payload = json.loads(result["content"][0]["text"])
+        self.assertEqual(payload["status"], "NOT_APPLIED")
+        self.assertIn("PACING_WAIT", payload["cause"])
+        self.assertNotIn("clipboard_state", payload)
+
+
+class TestRuntimeGateFloors(unittest.TestCase):
+    """FIX 11: presence and pacing floors (>= 1 s) refuse at startup for
+    runtime.json AND env overrides."""
+
+    def test_runtime_presence_floor_refused(self):
+        tmp = tempfile.mkdtemp(prefix="mmos-cu-floor-")
+        try:
+            bin_path = make_fake_peekaboo(tmp)
+            path = os.path.join(tmp, "runtime.json")
+            with open(path, "w") as handle:
+                json.dump({"schema": mmos.RUNTIME_SCHEMA,
+                           "peekaboo_bin": bin_path,
+                           "peekaboo_sha256": mmos.sha256_file(bin_path),
+                           "presence_min_idle_seconds": 0.5}, handle)
+            with self.assertRaises(mmos.RefuseError) as caught:
+                mmos.load_runtime(path)
+            self.assertEqual(caught.exception.code,
+                             "RUNTIME_PRESENCE_MIN_IDLE_SECONDS")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_runtime_pacing_floor_refused(self):
+        tmp = tempfile.mkdtemp(prefix="mmos-cu-floor-")
+        try:
+            bin_path = make_fake_peekaboo(tmp)
+            path = os.path.join(tmp, "runtime.json")
+            with open(path, "w") as handle:
+                json.dump({"schema": mmos.RUNTIME_SCHEMA,
+                           "peekaboo_bin": bin_path,
+                           "peekaboo_sha256": mmos.sha256_file(bin_path),
+                           "pacing_seconds": 0.5}, handle)
+            with self.assertRaises(mmos.RefuseError) as caught:
+                mmos.load_runtime(path)
+            self.assertEqual(caught.exception.code,
+                             "RUNTIME_PACING_SECONDS")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_env_presence_floor_refused(self):
+        saved = os.environ.pop("MMOS_CU_PRESENCE_MIN_IDLE", None)
+        try:
+            os.environ["MMOS_CU_PRESENCE_MIN_IDLE"] = "0.5"
+            with self.assertRaises(mmos.RefuseError) as caught:
+                mmos.Presence()
+            self.assertEqual(caught.exception.code, "PRESENCE_MIN_IDLE_FLOOR")
+        finally:
+            if saved is None:
+                os.environ.pop("MMOS_CU_PRESENCE_MIN_IDLE", None)
+            else:
+                os.environ["MMOS_CU_PRESENCE_MIN_IDLE"] = saved
+
+    def test_env_pacing_floor_refused(self):
+        saved = os.environ.pop("MMOS_CU_PACING_SECONDS", None)
+        try:
+            os.environ["MMOS_CU_PACING_SECONDS"] = "0.5"
+            with self.assertRaises(mmos.RefuseError) as caught:
+                mmos.Pacer()
+            self.assertEqual(caught.exception.code, "PACING_SECONDS_FLOOR")
+        finally:
+            if saved is None:
+                os.environ.pop("MMOS_CU_PACING_SECONDS", None)
+            else:
+                os.environ["MMOS_CU_PACING_SECONDS"] = saved
+
+    def test_runtime_dict_presence_floor_refused(self):
+        with self.assertRaises(mmos.RefuseError) as caught:
+            mmos.Presence(runtime={"presence_min_idle_seconds": 0.5})
+        self.assertEqual(caught.exception.code, "PRESENCE_MIN_IDLE_FLOOR")
+
+    def test_runtime_dict_pacing_floor_refused(self):
+        with self.assertRaises(mmos.RefuseError) as caught:
+            mmos.Pacer(runtime={"pacing_seconds": 0.5})
+        self.assertEqual(caught.exception.code, "PACING_SECONDS_FLOOR")
+
+
+class TestVisionEndpointScheme(unittest.TestCase):
+    """FIX 6: the vision endpoint must be https or loopback http."""
+
+    def setUp(self):
+        self.old_token = os.environ.get("ANTHROPIC_AUTH_TOKEN")
+        os.environ["ANTHROPIC_AUTH_TOKEN"] = "test-vision-token"
+
+    def tearDown(self):
+        if self.old_token is None:
+            os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
+        else:
+            os.environ["ANTHROPIC_AUTH_TOKEN"] = self.old_token
+
+    def test_plain_http_remote_refused(self):
+        client = mmos.VisionClient(base_url="http://example.com",
+                                   token="t")
+        with self.assertRaises(mmos.OpError) as caught:
+            client.ask(b"\x89PNG", "question")
+        self.assertEqual(caught.exception.code, "VISION_ENDPOINT_INSECURE")
+
+    def test_loopback_and_https_allowed(self):
+        for url in ("http://127.0.0.1:8080", "http://localhost:9000",
+                    "http://[::1]:9", "https://example.com"):
+            client = mmos.VisionClient(base_url=url, token="t")
+            client._require_secure_endpoint()  # must not raise
+
+
+class TestVisionPromptCaps(unittest.TestCase):
+    """FIX 12: element_hints (20 entries / 120 chars each / 1200 total) and
+    question (2000 chars) caps refuse over-limit input before any capture or
+    network dispatch."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mmos-cu-caps-")
+
+    def tearDown(self):
+        os.environ.pop("FAKE_PEEKABOO_IDENTITY", None)
+        os.environ.pop("FAKE_PEEKABOO_LOG", None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _ctx(self):
+        ctx = build_ctx(self.tmp)
+        ctx.lease.acquire("agent-a", ttl_seconds=60)
+        return ctx
+
+    def test_too_many_hints_refused(self):
+        ctx = self._ctx()
+        result = mmos.handle_tool_call(ctx, {
+            "action": "vision_ask", "window_id": 42,
+            "question": "Where is OK?",
+            "element_hints": ["hint-%d" % i for i in range(21)],
+            "owner": "agent-a"})
+        self.assertTrue(result["isError"])
+        self.assertIn("HINTS_TOO_LONG", result["content"][0]["text"])
+        self.assertEqual(read_calls(ctx), [])
+
+    def test_overlong_hint_entry_refused(self):
+        ctx = self._ctx()
+        result = mmos.handle_tool_call(ctx, {
+            "action": "vision_ask", "window_id": 42,
+            "question": "Where is OK?",
+            "element_hints": ["x" * 130],
+            "owner": "agent-a"})
+        self.assertTrue(result["isError"])
+        self.assertIn("HINTS_TOO_LONG", result["content"][0]["text"])
+        self.assertEqual(read_calls(ctx), [])
+
+    def test_total_hint_budget_refused(self):
+        ctx = self._ctx()
+        result = mmos.handle_tool_call(ctx, {
+            "action": "vision_ask", "window_id": 42,
+            "question": "Where is OK?",
+            "element_hints": ["y" * 110 for _ in range(12)],
+            "owner": "agent-a"})
+        self.assertTrue(result["isError"])
+        self.assertIn("HINTS_TOO_LONG", result["content"][0]["text"])
+        self.assertEqual(read_calls(ctx), [])
+
+    def test_question_too_long_refused(self):
+        ctx = self._ctx()
+        result = mmos.handle_tool_call(ctx, {
+            "action": "vision_ask", "window_id": 42,
+            "question": "q" * 2100, "owner": "agent-a"})
+        self.assertTrue(result["isError"])
+        self.assertIn("QUESTION_TOO_LONG", result["content"][0]["text"])
+        self.assertEqual(read_calls(ctx), [])
+
+    def test_ask_enforces_question_cap(self):
+        client = mmos.VisionClient(base_url="http://127.0.0.1:1", token="t")
+        with self.assertRaises(mmos.OpError) as caught:
+            client.ask(b"\x89PNG", "q" * 2100)
+        self.assertEqual(caught.exception.code, "QUESTION_TOO_LONG")
 
 
 if __name__ == "__main__":
