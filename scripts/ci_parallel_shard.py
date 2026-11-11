@@ -107,6 +107,17 @@ _EXPECTED_SHARD_SOURCE_STEPS = [
 ]
 
 
+# The fan-in job runs no suite, but its gate revalidates the canonical plan
+# with repository code. Pin every step before the gate so nothing can replace
+# that code or redirect the gate's working directory.
+_EXPECTED_GATE_SETUP_STEPS = [
+    {"uses": "actions/checkout@v4"},
+    {"uses": "actions/setup-python@v5", "with": {"python-version": "3.12"}},
+    {"name": "Install gate parser",
+     "run": "python -m pip install --disable-pip-version-check PyYAML==6.0.2"},
+]
+
+
 _EXPECTED_SCOPE_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 0, 'persist-credentials': False}},
  {'uses': 'actions/setup-python@v5', 'with': {'python-version': '3.12'}},
  {'name': 'Classify integrated source diff using protected base code',
@@ -689,6 +700,11 @@ def validate_parallel_workflow(text: str) -> None:
     if len(test_steps) != 1:
         raise ci_pytest.PolicyError("required fan-in gate step is missing")
     final = test_steps[0]
+    if (gate_steps[:-1] != _EXPECTED_GATE_SETUP_STEPS or gate_steps[-1] is not final
+            or set(final) != {"name", "env", "run"}):
+        raise ci_pytest.PolicyError(
+            "required fan-in job steps must be exactly the pinned setup and gate"
+        )
     code = final.get("run")
     # Exact gate source is tested as a whole, not by searching for "exit 1"
     # text in comments or after a branch that already accepted fast PR mode.

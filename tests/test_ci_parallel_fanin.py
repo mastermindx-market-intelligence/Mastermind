@@ -616,6 +616,32 @@ def test_released_paper_prepare_gate_cannot_be_omitted_or_weakened(mutation):
         fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
 
 
+@pytest.mark.parametrize("mutation", ["gate-working-directory", "gate-shell", "gate-id", "step-before-gate", "step-after-gate", "setup-changed", "checkout-removed"])
+def test_fan_in_job_steps_are_pinned_exactly(mutation):
+    # The gate's last command re-runs repository plan code; an extra key or
+    # step could point it at a different (stub) copy of that code.
+    import yaml
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["test"]["steps"]
+    gate = steps[-1]
+    if mutation == "gate-working-directory":
+        gate["working-directory"] = "integrations/studio_direct_mcp"
+    elif mutation == "gate-shell":
+        gate["shell"] = "bash"
+    elif mutation == "gate-id":
+        gate["id"] = "gate"
+    elif mutation == "step-before-gate":
+        steps.insert(len(steps) - 1, {"name": "x", "run": "echo 'import sys' > scripts/ci_pytest.py"})
+    elif mutation == "step-after-gate":
+        steps.append({"name": "x", "run": "true"})
+    elif mutation == "setup-changed":
+        steps[2]["run"] = "python -m pip install PyYAML"
+    else:
+        del steps[0]
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
 def test_primary_checkout_never_persists_expanded_proof_credentials():
     import yaml
     workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
