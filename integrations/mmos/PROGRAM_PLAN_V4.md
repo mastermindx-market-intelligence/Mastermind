@@ -879,3 +879,51 @@ returns.
 **Running now, at the width cap of four:** T8, T4c, TSHb, R2a.
 
 Evidence: `~/.mastermind/mmos_evidence/short-names-20261111/LEDGER.md`.
+
+## 24. Amendment, 2026-11-11 03:00 UTC: review R2a returned; one hole closed live, the rest is lane RF
+
+**Verdict.** Safe to keep the three teammates running. Not safe to move more agents onto the
+carrier until findings 1 to 4 are fixed. The run token stays inside the carrier on every path
+the reviewer traced. Fifteen findings: four high, eight medium, three low. Each one and my
+decision on it is in `integrations/mmos/R2A_REVIEW_FINDINGS.md`. I re-ran the reviewer's probe
+for findings 2, 3 and 4 and all three reproduce.
+
+**Finding 1 is fixed and live.** A teammate could read any file this Mac user can read
+(pairing file, browser cookies, its own cut-over preimage) and could rewrite its own limits
+and charter. I changed the roster tool so each teammate's limits now refuse reads of the
+server's private folders, the other teammates' homes, its own preimage and the credential
+folders named in the spec, and refuse writes to its own limits, charter, carrier config and
+preimage. Applied to all three with no run live; titles, threads and pins unchanged.
+
+**The teammate checked its own limits (MAS-14).** I asked Assurance to try five file actions
+and report what happened. Reading a file in the server's private folder: refused. Reading
+Design Lead's charter: refused. Reading its own charter: allowed. Editing its own charter:
+refused. Adding a line to its own memory: allowed. All five as intended. The session was
+already running when the limits changed and picked them up on its next turn, so tightening
+limits needs no restart.
+
+**What the fix does not do.** It is a list of refused paths, and the teammate is the same Mac
+user as everything else. A new credential folder that is not on the list is readable until it
+is added. The stronger design (reads allowed only from named places, the limits file kept
+outside the teammate's writable home) is not built or proven. It goes to the next independent
+review together with whether teammates keep web fetch.
+
+**Lane RF repairs the rest (started 02:55 UTC, GLM 5.3, one Kimi attack child).** Findings 2,
+3 and 4 first: a turn marker counts only as the first line of a message the carrier itself
+sent; an issue is an asked child only by structure the carrier wrote; an asked teammate
+cannot ask again, nobody can ask themselves, at most three asks per issue. Then the mediums in
+the carrier and the cut-over tool. Unit-level only; it touches no server. Its diff and my
+finding-1 diff then go to an independent read-only reviewer, and only after that do I install
+with `refresh-carrier` (no run live) and repeat the ask journey and the unanswered-question
+journey on the installed app.
+
+**Ruling.** Ten agents stay on Hermes until that install is proven. The roster-side findings
+(atomic settings write, one primary thread per agent checked against Paperclip, the pairing
+command accepting only the local team server) follow RF in the same file I just changed.
+
+**Correction to earlier sections.** MAS-7's confirmation was not left pending: it was accepted
+at 01:00 UTC and MAS-7 is done.
+
+**Running now, at the width cap of four:** T8, T4c, TSHb, RF.
+
+Evidence: `~/.mastermind/mmos_evidence/r2a-20261111/LEDGER.md`.
