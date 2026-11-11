@@ -2052,17 +2052,21 @@ def untruncated_children(pc, issue_id):
     marker sits at the very END of the description — invisible in a
     truncated list row. Every truncated row is re-read in full before any
     marker test, so a long description never costs the carrier its own
-    child (a stranded return edge, or a duplicate ask). A failed full read
-    keeps the truncated row: the marker test then says no, as before."""
+    child (a stranded return edge, or a duplicate ask). Delta-3 N5: the ask
+    marker cannot be tested on a truncated row, so a FAILED full read fails
+    the walk (CarrierError) — keeping the markerless list row made the
+    family look empty and the run end 0 having delivered nothing, a silent
+    strand on every wake. The next wake retries the read."""
     rows = []
     for row in pc.children(issue_id):
         if row.get("descriptionTruncated") and row.get("id"):
             try:
                 rows.append(pc.issue(row["id"]))
             except CarrierError as exc:
-                log(f"full read of truncated child {row.get('identifier')} "
-                    f"failed ({exc}); the list row stands")
-                rows.append(row)
+                raise CarrierError(
+                    f"full read of truncated child "
+                    f"{row.get('identifier') or row.get('id')} failed "
+                    f"({exc}); the ask marker cannot be tested this run")
         else:
             rows.append(row)
     return rows

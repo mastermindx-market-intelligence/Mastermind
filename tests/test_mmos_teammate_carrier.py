@@ -1130,6 +1130,45 @@ def test_a_truncated_child_list_row_is_re_read_in_full():
     assert pc.issues["par-1"]["status"] == "in_review"
 
 
+def test_a_failed_full_read_of_a_truncated_child_fails_loudly():
+    # Delta-3 N5: when the full re-read of a truncated child fails, the old
+    # fallback kept the markerless list row — the family then looked empty
+    # (or lost that child) and the run ended 0 having delivered nothing, a
+    # silent strand on every wake. The marker test cannot run without the
+    # full description, so the failed read fails the run; the next wake
+    # retries it inside the existing bounds.
+    import copy as _copy
+    parent = board.served_parent(
+        id="par-1", identifier="MMO-1", status="blocked",
+        dependencyReady=True, title="Report the line count",
+        description="Ask an engineer for the count.")
+    ask_op = wc.expected_ask_op(parent)
+    rows = _copy.deepcopy(board.CHILDREN_DEV)
+    full = _copy.deepcopy(board.CHILD_TRUNCATED_FULL)
+    for row in rows + [full]:
+        row["parentId"] = "par-1"
+    rows[2]["id"] = full["id"] = "ch-1"
+    rows[2]["identifier"] = full["identifier"] = "MMO-2"
+    rows[2]["status"] = full["status"] = "done"
+    full["description"] = full["description"].rstrip().rsplit("\n", 1)[0] \
+        + f"\nAsked by Mira on MMO-1\n[{ask_op}]"
+    parent["blockedBy"] = board.blocked_by(rows[2])
+    pc = FakePaperclip(issues={"par-1": parent})   # no full row served
+
+    def failing_full_read(issue_id):
+        if issue_id == "ch-1":
+            raise wc.CarrierError("GET /api/issues/ch-1 -> HTTP 503 (fake)")
+        return FakePaperclip.issue(pc, issue_id)
+
+    pc.issue = failing_full_read
+    pc.child_rows["par-1"] = rows
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    t3 = FakeT3(replies=["SHOULD NOT SEND"])
+    with pytest.raises(wc.CarrierError):
+        run_with_roster(pc, t3, {})
+    assert t3.sends == []          # nothing delivered, nothing invented
+
+
 def test_a_done_child_with_no_recorded_relation_is_left_for_a_person():
     # The board records a blocker relation for every parent this carrier
     # asked on (block_issue writes it before the child is ever visible).
