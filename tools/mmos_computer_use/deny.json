@@ -1,0 +1,26 @@
+{
+  "schema": "mmos.computer_use.deny/v1",
+  "app_names": [
+    "Keychain Access",
+    "1Password",
+    "Bitwarden",
+    "Dashlane",
+    "Proton Pass",
+    "Keeper",
+    "Enpass",
+    "Strongbox",
+    "System Settings",
+    "Passwords"
+  ],
+  "bundle_ids": [
+    "com.apple.KeychainAccess",
+    "com.apple.Passwords",
+    "com.apple.systempreferences",
+    "com.1password.1password",
+    "com.bitwarden.desktop"
+  ],
+  "title_regexes": [],
+  "extra_app_names": [],
+  "extra_bundle_ids": [],
+  "extra_title_regexes": []
+}
