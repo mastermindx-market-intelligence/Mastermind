@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import os
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -52,6 +53,7 @@ from control_plane.worker_execution_contract import (
     WorkerLaunchSpec,
     WorkerProcessRef,
     WorkerRecoveryBinding,
+    WorkerRecoveryContractError,
     WorkerRunStatus,
 )
 
@@ -467,6 +469,39 @@ class T3StartTests(unittest.IsolatedAsyncioTestCase):
             ref.launch_nonce, port.launch_calls[0].client_request_id
         )
         self.assertEqual(ref.run_id, spec.run_id)
+
+    async def test_receipt_recovery_binding_rebuilds_from_durable_state(self) -> None:
+        # T4c findings 1/2/7: an identity-less claim (crash between the
+        # persisted receipt and record_process) recovers from durable state
+        # alone: the seam rebuilds a real binding over the retained ref,
+        # refuses a tampered prompt, and answers None without a durable
+        # launch record — the supervisor quarantines typed on None.
+        adapter, _port, _ = _t3_adapter(binding=_binding())
+        spec = _launch_spec(run_dir=_recovery_run_dir())
+        ref = await adapter.start(spec)
+        prompt_path = spec.run_dir / "input" / "worker-prompt.txt"
+        prompt_path.write_bytes(spec.prompt.encode("utf-8"))
+        os.chmod(prompt_path, 0o600)
+        binding = adapter.receipt_recovery_binding(
+            spec.run_id, prompt_path=prompt_path
+        )
+        self.assertIsNotNone(binding)
+        self.assertEqual(
+            binding.process_ref, adapter.retained_original_ref(spec.run_id)
+        )
+        self.assertEqual(binding.recover_launch_spec(), spec)
+        # a prompt that drifted from the durable spec refuses typed
+        prompt_path.write_bytes(b"tampered")
+        with self.assertRaises(WorkerRecoveryContractError):
+            adapter.receipt_recovery_binding(
+                spec.run_id, prompt_path=prompt_path
+            )
+        # no durable launch record: not recoverable through this seam
+        self.assertIsNone(
+            adapter.receipt_recovery_binding(
+                "run-never-launched", prompt_path=prompt_path
+            )
+        )
 
     async def test_lost_reply_effect_unknown_carries_client_request_id(self) -> None:
         adapter, port, _ = _t3_adapter(binding=_binding())

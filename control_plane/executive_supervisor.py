@@ -314,6 +314,7 @@ class ReconcileStatus(str, Enum):
     OPERATOR_RECOVERED = "OPERATOR_RECOVERED"
     LIVE_RECOVERED = "LIVE_RECOVERED"
     TERMINAL_RECOVERED = "TERMINAL_RECOVERED"
+    RECEIPT_RECOVERED = "RECEIPT_RECOVERED"
     ALREADY_RECOVERED = "ALREADY_RECOVERED"
     LEASE_EXPIRED_QUARANTINED = "LEASE_EXPIRED_QUARANTINED"
     STALE_FENCE_QUARANTINED = "STALE_FENCE_QUARANTINED"
@@ -2897,6 +2898,7 @@ class ExecutiveSupervisor:
         process_ref: WorkerProcessRef,
         effective_grant: Mapping[str, Any] | None = None,
         recovery_prompt_path: Path | None = None,
+        tolerate_existing_attestation: bool = False,
     ) -> dict[str, Any]:
         if paid_supervisor.is_paid_adapter(self.adapter):
             return paid_supervisor.launch_metadata(
@@ -2955,7 +2957,23 @@ class ExecutiveSupervisor:
             "launch-attestation.json",
             legacy=self._run_dir(lease.attempt.attempt_id) / "input" / "launch-attestation.json",
         )
-        _write_private_json(receipt_path, attestation)
+        if tolerate_existing_attestation and receipt_path.exists():
+            # T4c finding 1: a launcher that crashed between its receipt and
+            # record_process already persisted this attestation.  Recovery
+            # recomputes the SAME evidence from durable state; if the file on
+            # disk differs, that is an identity problem to quarantine, never
+            # evidence to overwrite (O_EXCL stays the law for fresh launches).
+            existing_attestation = json.loads(
+                receipt_path.read_text(encoding="utf-8")
+            )
+            if existing_attestation != attestation:
+                raise SupervisorError(
+                    "recomputed launch attestation differs from the one the "
+                    "original launcher persisted; refusing to overwrite "
+                    "evidence"
+                )
+        else:
+            _write_private_json(receipt_path, attestation)
         result = {
             "schema_version": "mastermind.executive_process_launch/v1",
             "launch_attestation": attestation,
@@ -5011,25 +5029,204 @@ class ExecutiveSupervisor:
             return None
         return session.strip()
 
-    def _adopt_with_receipt_identity(
+    def _reconcile_receipt_claim(
         self, attempt: Attempt, *, session_id: str
-    ) -> ReconcileReceipt | None:
-        """Adopt an identity-less claim under its durable receipt, no requeue.
+    ) -> ReconcileReceipt:
+        """Findings 1/2/7 (T4c): reconcile an identity-less claim under its
+        durable receipt — defer while the lease is live, recover fully at
+        expiry, never requeue into a second launch.
 
-        Used at reconcile_restart's unbound-claim point: the receipt proves a
-        launch took effect, so expiry → requeue would arm a SECOND launch of
-        the same work.  Adoption records the provider session id and rotates
-        the fence to this supervisor instead; a StateConflict means another
-        reconciler won (returns its receipt) or the attempt moved on (None).
+        The receipt proves the launch took effect, so this claim is NEVER
+        expired-and-requeued.  But while its lease is unexpired the claim
+        still belongs to its original claimant, who may be a live launcher
+        sitting between ``put_launch_receipt`` and ``record_process``:
+        adopting then would rotate the fence away from it, its
+        ``record_process`` would CAS-fail, and its failure path would cancel
+        the only native run (finding 2).  Adoption therefore waits for lease
+        expiry — the engine's own proof the claimant lost its rights, and
+        the one expired-lease recovery path shared with bound attempts
+        (finding 7) — and then runs the FULL recovery path: a
+        ``worker_recovery_binding`` reconstructed from the adapter's durable
+        state plus the launch metadata the launcher would have persisted are
+        written in the SAME adoption transaction, and the adopted lease is
+        normalised and reattached through the adapter into the recovered-runs
+        list, so the run ends up owned by somebody (finding 1).
         """
+        if attempt.attempt_id in self._recovered_attempt_ids:
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                status=ReconcileStatus.ALREADY_RECOVERED,
+                process_was_live=False,
+            )
+        if not self._attempt_lease_expired(attempt):
+            if attempt.lease_owner == self.instance_id:
+                deferral = (
+                    "in-flight launch by this supervisor instance "
+                    f"({attempt.lease_owner!r}) has not recorded its process"
+                )
+            else:
+                deferral = (
+                    "claim's lease is unexpired and owned by "
+                    f"{attempt.lease_owner!r}; a live launcher may still "
+                    "record its process"
+                )
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                status=ReconcileStatus.AWAITING_LEASE_EXPIRY,
+                process_was_live=False,
+                error=(
+                    "identity-less claim holds a durable provider receipt "
+                    f"(session {session_id}); {deferral}; adoption deferred "
+                    "to lease expiry, never requeued"
+                ),
+            )
+        binding_source = getattr(self.adapter, "receipt_recovery_binding", None)
+        if not callable(binding_source):
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                status=ReconcileStatus.LIVE_QUARANTINED,
+                process_was_live=False,
+                error=(
+                    "identity-less claim holds a durable provider receipt but "
+                    "its adapter exposes no receipt_recovery_binding seam; "
+                    "execution preserved, no requeue"
+                ),
+            )
+        prompt_path = (
+            self._run_dir(attempt.attempt_id) / "input" / "worker-prompt.txt"
+        )
         try:
-            self.runtime.attempts.adopt_attempt(
+            binding = binding_source(
+                attempt.attempt_id, prompt_path=prompt_path
+            )
+        except Exception as exc:
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                status=ReconcileStatus.LIVE_QUARANTINED,
+                process_was_live=False,
+                error=_render_recovery_error(exc),
+            )
+        if not isinstance(binding, WorkerRecoveryBinding):
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                status=ReconcileStatus.LIVE_QUARANTINED,
+                process_was_live=False,
+                error=(
+                    "adapter returned no durable recovery binding for the "
+                    "receipt; execution preserved, no requeue"
+                ),
+            )
+        try:
+            fields = binding.launch_spec.get("fields")
+            spec_type = (
+                OrchestrationLaunchSpec
+                if isinstance(fields, Mapping)
+                and "effective_grant_digest" in fields
+                else WorkerLaunchSpec
+            )
+            spec = binding.recover_launch_spec(spec_type)
+        except WorkerRecoveryContractError as exc:
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                status=ReconcileStatus.LIVE_QUARANTINED,
+                process_was_live=False,
+                error=f"receipt recovery binding is invalid: {exc}"[:1000],
+            )
+        ref = binding.process_ref
+        if (
+            ref.run_id != attempt.attempt_id
+            or (ref.provider_session_id or None) != session_id
+            or spec.run_id != attempt.attempt_id
+            or spec.job_id != attempt.job_id
+            or spec.worker_id != attempt.worker_id
+        ):
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                status=ReconcileStatus.LIVE_QUARANTINED,
+                process_was_live=False,
+                error=(
+                    "receipt recovery binding differs from the durable "
+                    "Attempt; refusing to adopt a foreign execution"
+                ),
+            )
+        job = self._job(attempt.job_id)
+        if not job.worktree:
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                status=ReconcileStatus.LIVE_QUARANTINED,
+                process_was_live=False,
+                error="job has no assigned workspace for receipt recovery",
+            )
+        effective_grant = self._effective_grant(job, attempt)
+        expected_authorities = tuple(
+            effective_grant["authorities"]
+            if effective_grant is not None
+            else job.requested_authorities
+        )
+        expected_paths = tuple(
+            effective_grant["write_paths"]
+            if effective_grant is not None
+            else job.allowed_write_paths
+        )
+        if (
+            tuple(spec.authorities) != expected_authorities
+            or tuple(spec.allowed_artifact_paths) != expected_paths
+            or spec.expected_base_sha
+            != (str(job.constraints.get("base_sha") or "") or None)
+        ):
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                status=ReconcileStatus.LIVE_QUARANTINED,
+                process_was_live=False,
+                error=(
+                    "receipt recovery launch contract differs from the "
+                    "durable Job"
+                ),
+            )
+        if effective_grant is not None and (
+            not isinstance(spec, OrchestrationLaunchSpec)
+            or spec.effective_grant_digest != attempt.effective_grant_digest
+        ):
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                status=ReconcileStatus.LIVE_QUARANTINED,
+                process_was_live=False,
+                error="receipt recovery orchestration grant changed",
+            )
+        try:
+            # Recompute the exact launch metadata the launcher would have
+            # persisted (a pure function of durable row state), so the
+            # adopted row is indistinguishable from a normally recorded one.
+            metadata = self._launch_metadata(
+                job=job,
+                lease=AttemptLease(attempt=attempt, lease_token=""),
+                spec=spec,
+                process_ref=ref,
+                effective_grant=effective_grant,
+                recovery_prompt_path=prompt_path,
+                tolerate_existing_attestation=True,
+            )
+        except Exception as exc:
+            return ReconcileReceipt(
+                attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                status=ReconcileStatus.LIVE_QUARANTINED,
+                process_was_live=False,
+                error=_render_recovery_error(exc),
+            )
+        try:
+            adopted = self.runtime.attempts.adopt_attempt(
                 attempt.attempt_id,
                 expected_fence_generation=attempt.fence_generation,
                 lease_owner=self.instance_id,
+                expected_lease_owner=attempt.lease_owner,
                 reattach_provider_session_id=session_id,
+                reattach_launch_metadata=metadata,
+                reattach_process_paths=(
+                    ref.stdout_path, ref.stderr_path, ref.result_path,
+                ),
+                adopt_expired_lease=True,
             )
-        except StateConflict:
+        except StateConflict as exc:
             current = self.runtime.attempts.get_attempt(attempt.attempt_id)
             if (
                 current is None
@@ -5040,13 +5237,30 @@ class ExecutiveSupervisor:
                     status=ReconcileStatus.ALREADY_RECOVERED,
                     process_was_live=False,
                 )
+            if "renewed" in str(exc):
+                return ReconcileReceipt(
+                    attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                    status=ReconcileStatus.LIVE_QUARANTINED,
+                    process_was_live=False,
+                    error=(
+                        "lease renewed by its live owner during receipt "
+                        "adoption; execution preserved, no requeue"
+                    ),
+                )
             return ReconcileReceipt(
                 attempt_id=attempt.attempt_id, job_id=attempt.job_id,
                 status=ReconcileStatus.STALE_FENCE_QUARANTINED,
                 process_was_live=False,
-                error="receipt adoption lost the fence race",
+                error=str(exc)[:1000],
             )
-        return None
+        return self._reattach_and_record_recovered_run(
+            adopted,
+            spec=spec,
+            binding=binding,
+            effective_grant=effective_grant,
+            presence=ProcessPresence.UNKNOWN,
+            receipt=True,
+        )
 
     def _recover_existing_attempt(
         self,
@@ -5075,17 +5289,13 @@ class ExecutiveSupervisor:
                 status=ReconcileStatus.ALREADY_RECOVERED,
                 process_was_live=process_was_live,
             )
-        if self._attempt_lease_expired(attempt):
-            return ReconcileReceipt(
-                attempt_id=attempt.attempt_id,
-                job_id=attempt.job_id,
-                status=ReconcileStatus.LEASE_EXPIRED_QUARANTINED,
-                process_was_live=process_was_live,
-                error=(
-                    "live or terminal execution has an expired lease; "
-                    "Runtime-owner reconciliation required"
-                ),
-            )
+        # T4c finding 7: an expired lease is the engine's own proof the
+        # original claimant lost its rights — restart reconciliation IS the
+        # runtime-owner reconciliation that recovers the SAME attempt through
+        # adoption (never expiry → requeue → a second launch).  The expired
+        # variant re-verifies expiry inside the adoption transaction, so a
+        # lease renewed by a live owner still refuses.
+        lease_expired = self._attempt_lease_expired(attempt)
         try:
             binding, spec, effective_grant = (
                 self._validated_recovery_binding(attempt)
@@ -5134,6 +5344,7 @@ class ExecutiveSupervisor:
                 attempt.attempt_id,
                 expected_fence_generation=attempt.fence_generation,
                 lease_owner=self.instance_id,
+                adopt_expired_lease=lease_expired,
                 **({"reattach_provider_session_id":
                     reattach_provider_session_id}
                    if reattach_provider_session_id else {}),
@@ -5157,6 +5368,47 @@ class ExecutiveSupervisor:
                 process_was_live=process_was_live,
                 error=str(exc)[:1000],
             )
+        return self._reattach_and_record_recovered_run(
+            adopted,
+            spec=spec,
+            binding=binding,
+            effective_grant=effective_grant,
+            presence=presence,
+        )
+
+    def _reattach_and_record_recovered_run(
+        self,
+        adopted: AttemptLease,
+        *,
+        spec: WorkerLaunchSpec,
+        binding: WorkerRecoveryBinding,
+        effective_grant: Mapping[str, Any] | None,
+        presence: ProcessPresence,
+        receipt: bool = False,
+    ) -> ReconcileReceipt:
+        """The shared recovery tail: normalise, reattach, own the run.
+
+        Used by both recovery shapes — the durable-binding path
+        (``_recover_existing_attempt``) and the receipt path (T4c finding 1)
+        — so an adopted lease always ends with somebody owning the run: the
+        lease is normalised onto the recovered owner, the adapter reattaches
+        the SAME execution, and the resulting ``ActiveRun`` is handed to
+        ``take_recovered_runs``.
+        """
+        attempt_id = adopted.attempt.attempt_id
+        job_id = adopted.attempt.job_id
+        process_was_live = presence is ProcessPresence.LIVE
+        reattach = getattr(self.adapter, "reattach", None)
+        if not callable(reattach):
+            return ReconcileReceipt(
+                attempt_id=attempt_id,
+                job_id=job_id,
+                status=ReconcileStatus.LIVE_QUARANTINED,
+                process_was_live=process_was_live,
+                error=(
+                    "worker adapter does not support existing-execution recovery"
+                ),
+            )
         try:
             if paid_supervisor.is_paid_adapter(self.adapter):
                 pending = reattach(spec, binding, lease=adopted)
@@ -5176,8 +5428,8 @@ class ExecutiveSupervisor:
                     ref = reattach(spec, binding)
         except Exception as exc:
             return ReconcileReceipt(
-                attempt_id=attempt.attempt_id,
-                job_id=attempt.job_id,
+                attempt_id=attempt_id,
+                job_id=job_id,
                 status=ReconcileStatus.LIVE_QUARANTINED,
                 process_was_live=process_was_live,
                 error=_render_recovery_error(exc),
@@ -5189,11 +5441,18 @@ class ExecutiveSupervisor:
             effective_grant=effective_grant,
             recovered_presence=presence,
         )
-        self._recovered_runs[attempt.attempt_id] = active
-        self._recovered_attempt_ids.add(attempt.attempt_id)
+        self._recovered_runs[attempt_id] = active
+        self._recovered_attempt_ids.add(attempt_id)
+        if receipt:
+            return ReconcileReceipt(
+                attempt_id=attempt_id,
+                job_id=job_id,
+                status=ReconcileStatus.RECEIPT_RECOVERED,
+                process_was_live=False,
+            )
         return ReconcileReceipt(
-            attempt_id=attempt.attempt_id,
-            job_id=attempt.job_id,
+            attempt_id=attempt_id,
+            job_id=job_id,
             status=(
                 ReconcileStatus.LIVE_RECOVERED
                 if process_was_live
@@ -5468,27 +5727,15 @@ class ExecutiveSupervisor:
             if presence is ProcessPresence.UNKNOWN and self._is_unbound_claim(attempt):
                 receipt_session = self._receipt_provider_session_id(attempt)
                 if receipt_session is not None:
-                    # L1B3-5: the durable receipt proves this claim's launch
-                    # took effect; cleanup → expiry → requeue would arm a
-                    # SECOND launch.  Adopt under the receipt's identity; the
-                    # execution stays owned, never re-armed.
-                    raced = self._adopt_with_receipt_identity(
-                        attempt, session_id=receipt_session)
-                    if raced is not None:
-                        outcomes.append(raced)
-                        continue
+                    # L1B3-5 + T4c findings 1/2/7: the durable receipt proves
+                    # this claim's launch took effect; cleanup → expiry →
+                    # requeue would arm a SECOND launch.  Reconcile under the
+                    # receipt's identity: a live lease defers (never fences a
+                    # launcher), an expired lease adopts the SAME attempt and
+                    # ends with a run somebody owns.  Never requeued.
                     outcomes.append(
-                        ReconcileReceipt(
-                            attempt_id=attempt.attempt_id,
-                            job_id=attempt.job_id,
-                            status=ReconcileStatus.LIVE_QUARANTINED,
-                            process_was_live=False,
-                            error=(
-                                "identity-less claim adopted under its durable "
-                                f"provider receipt (session {receipt_session}); "
-                                "execution preserved, no requeue"
-                            ),
-                        )
+                        self._reconcile_receipt_claim(
+                            attempt, session_id=receipt_session)
                     )
                     continue
                 try:

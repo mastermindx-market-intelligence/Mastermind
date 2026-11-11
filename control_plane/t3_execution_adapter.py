@@ -1983,6 +1983,31 @@ class T3ExecutionAdapter:
         run = self._state.load_run(str(run_id))
         return run.original_ref if run is not None else None
 
+    def receipt_recovery_binding(
+        self, run_id: str, *, prompt_path: str | Path
+    ) -> WorkerRecoveryBinding | None:
+        """Findings 1/2/7 (T4c): the durable recovery binding for an
+        identity-less claim.
+
+        Rebuilt ONLY from durable state the adapter wrote before its ACK —
+        the persisted spec and the retained original ref — so the supervisor
+        can adopt a claim whose launcher died between the persisted receipt
+        and ``record_process`` and end with a run somebody owns, without a
+        second launch.  A run without both durable halves is not recoverable
+        through this seam (``None``); the supervisor then quarantines typed
+        instead of guessing.  ``bind`` re-verifies the prompt bytes on disk
+        against the durable spec, so a tampered or foreign prompt refuses.
+        """
+        run = self._state.load_run(str(run_id))
+        if run is None or run.spec is None or run.original_ref is None:
+            return None
+        return WorkerRecoveryBinding.bind(
+            adapter_id=self.adapter_id,
+            spec=run.spec,
+            process_ref=run.original_ref,
+            prompt_path=prompt_path,
+        )
+
     def read_cursor(self, run_id: str) -> str:
         """The persisted incremental read cursor for a run ("" when none)."""
         run = self._state.load_run(str(run_id))

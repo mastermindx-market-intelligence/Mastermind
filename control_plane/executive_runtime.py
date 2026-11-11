@@ -20456,6 +20456,11 @@ class AttemptRegistry:
         lease_owner: str,
         lease_seconds: int | None = None,
         reattach_provider_session_id: str | None = None,
+        expected_lease_owner: str | None = None,
+        adopt_expired_lease: bool = False,
+        reattach_launch_metadata: Mapping[str, Any] | None = None,
+        reattach_process_paths: tuple[str | None, str | None, str | None]
+        | None = None,
     ) -> AttemptLease:
         """Rotate a live persisted lease for a restarted trusted supervisor.
 
@@ -20473,6 +20478,25 @@ class AttemptRegistry:
         ``ATTEMPT_PROCESS_RECORDED`` event) in the SAME adoption transaction,
         under the SAME CAS fence rotation — no second window and no separate
         record_process call that could race a concurrent adopter.
+
+        T4c findings 2/7 parameters (receipt recovery only):
+
+        * ``expected_lease_owner`` names the owner the adopter believes it is
+          displacing; a different actual owner is a typed refusal.  Naming
+          the displacement keeps a reconciler from silently taking a lease
+          that changed hands between its read and its transaction.
+        * ``adopt_expired_lease`` is the ONE expired-lease recovery path: an
+          expired lease is the engine's own proof the claimant lost its
+          rights, so reconcile may adopt it — but the transaction re-verifies
+          expiry, and a lease that was RENEWED in between is refused typed
+          (its owner is live).  Without the flag the pre-existing refusal
+          stands unchanged.
+        * ``reattach_launch_metadata`` / ``reattach_process_paths`` persist
+          the launch metadata (including the ``worker_recovery_binding`` the
+          recovering supervisor reconstructed from the durable receipt) and
+          the provider ref's process paths in the SAME transaction, so the
+          adopted row is indistinguishable from one that recorded its
+          process normally.  Existing metadata keys are never rewritten.
         """
         reattach_session = (
             str(reattach_provider_session_id or "").strip() or None
@@ -20480,6 +20504,32 @@ class AttemptRegistry:
         owner = str(lease_owner).strip()
         if not owner:
             raise StateConflict("lease_owner is required for adoption")
+        if reattach_launch_metadata is not None:
+            if reattach_session is None:
+                raise StateConflict(
+                    "reattach launch metadata requires the receipt session id"
+                )
+            if not isinstance(reattach_launch_metadata, Mapping):
+                raise StateConflict(
+                    "reattach launch metadata must be a mapping"
+                )
+        paths: tuple[str | None, str | None, str | None] | None = None
+        if reattach_process_paths is not None:
+            if reattach_session is None:
+                raise StateConflict(
+                    "reattach process paths require the receipt session id"
+                )
+            if (
+                len(reattach_process_paths) != 3
+                or any(
+                    value is not None and not isinstance(value, str)
+                    for value in reattach_process_paths
+                )
+            ):
+                raise StateConflict(
+                    "reattach process paths must be three string paths or None"
+                )
+            paths = tuple(reattach_process_paths)
         duration = (
             self.store.lease_seconds if lease_seconds is None else int(lease_seconds)
         )
@@ -20525,9 +20575,24 @@ class AttemptRegistry:
                 raise PersistenceError(
                     f"attempt {attempt_id} and quota class have inconsistent fences"
                 )
-            if timestamp >= int(row["lease_expires_at_ms"]):
+            if expected_lease_owner is not None and str(expected_lease_owner) != str(
+                row["lease_owner"]
+            ):
+                raise StateConflict(
+                    f"attempt {attempt_id} lease owner changed; refusing to "
+                    f"displace {str(row['lease_owner'])!r} as "
+                    f"{str(expected_lease_owner)!r}"
+                )
+            lease_expired = timestamp >= int(row["lease_expires_at_ms"])
+            if lease_expired and not adopt_expired_lease:
                 raise StateConflict(
                     f"attempt {attempt_id} lease has expired; reconcile it first"
+                )
+            if adopt_expired_lease and not lease_expired:
+                # in-transaction liveness proof: the lease the adopter verified
+                # as expired was renewed meanwhile — its owner is live
+                raise StateConflict(
+                    f"attempt {attempt_id} lease was renewed; its owner is live"
                 )
             if row["lease_token"] is None:
                 raise PersistenceError(
@@ -20548,6 +20613,22 @@ class AttemptRegistry:
                     f"attempt {attempt_id} already has a durable process/provider "
                     "identity; reattach would rewrite it"
                 )
+            merged_metadata_json: str | None = None
+            if reattach_launch_metadata is not None:
+                prior_metadata = json.loads(row["launch_metadata_json"] or "{}")
+                if not isinstance(prior_metadata, dict):
+                    raise StateConflict(
+                        f"attempt {attempt_id} has malformed launch metadata"
+                    )
+                merged_metadata = dict(prior_metadata)
+                for key, value in dict(reattach_launch_metadata).items():
+                    if key in merged_metadata and merged_metadata[key] != value:
+                        raise StateConflict(
+                            f"attempt {attempt_id} launch metadata key "
+                            f"{str(key)!r} already exists; adoption never rewrites it"
+                        )
+                    merged_metadata[str(key)] = value
+                merged_metadata_json = _json_dumps(merged_metadata)
             _finite_existing_effect(self.store, connection, str(row["job_id"]))
             next_fence = current_fence + 1
             expiry = max(int(row["lease_expires_at_ms"]), timestamp + duration * 1_000)
@@ -20577,6 +20658,12 @@ class AttemptRegistry:
                         heartbeat_at_ms=?,updated_at_ms=?,version=version+1
                     """
                     + (",provider_session_id=?" if reattach_session else "")
+                    + (",launch_metadata_json=?" if merged_metadata_json else "")
+                    + (
+                        ",stdout_path=?,stderr_path=?,result_path=?"
+                        if paths is not None
+                        else ""
+                    )
                     + """
                     WHERE attempt_id=? AND fence_generation=? AND lease_token=?
                       AND status IN ('CLAIMED','RUNNING','CHECKPOINTED','CANCEL_REQUESTED')
@@ -20590,6 +20677,8 @@ class AttemptRegistry:
                     timestamp,
                     timestamp,
                     *(((reattach_session,) if reattach_session else ())),
+                    *(((merged_metadata_json,) if merged_metadata_json else ())),
+                    *(paths if paths is not None else ()),
                     attempt_id,
                     current_fence,
                     row["lease_token"],
@@ -20617,6 +20706,26 @@ class AttemptRegistry:
                         "process_kind": "provider",
                         "reattached_from_receipt": True,
                         "provider_session_id": reattach_session,
+                    },
+                    timestamp_ms=timestamp,
+                )
+                self.store.append_event(
+                    connection,
+                    aggregate_type="attempt",
+                    aggregate_id=attempt_id,
+                    event_type="ATTEMPT_RECEIPT_ADOPTED",
+                    actor="supervisor",
+                    job_id=str(row["job_id"]),
+                    attempt_id=attempt_id,
+                    worker_id=str(row["worker_id"]),
+                    quota_class=str(row["quota_class"]),
+                    payload={
+                        "provider_session_id": reattach_session,
+                        "previous_lease_owner": str(row["lease_owner"]),
+                        "lease_expired": lease_expired,
+                        "launch_metadata_keys": sorted(reattach_launch_metadata)
+                        if reattach_launch_metadata is not None
+                        else [],
                     },
                     timestamp_ms=timestamp,
                 )

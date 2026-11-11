@@ -1845,9 +1845,12 @@ def test_restart_recovers_terminal_result_race_instead_of_marking_attempt_lost(
     assert second_adapter.start_calls == 0
 
 
-def test_restart_live_worker_with_expired_lease_is_quarantined_without_signal(
+def test_restart_live_worker_with_expired_lease_recovers_the_same_attempt(
     tmp_path: Path,
 ) -> None:
+    # T4c finding 7: the expired lease no longer quarantines a bound attempt —
+    # it authorises the ONE expired-lease recovery path, which adopts and
+    # reattaches the SAME attempt (never a second launch, never a signal).
     now = [1_800_000_000_000]
     clock = lambda: now[0]
     runtime, job_id, _workspace = _runtime_and_job(
@@ -1861,15 +1864,19 @@ def test_restart_live_worker_with_expired_lease_is_quarantined_without_signal(
     )
     now[0] += 2_000
     reopened = Runtime.at(tmp_path, clock=clock, lease_seconds=1)
-    restarted = _supervisor(
-        reopened, tmp_path, RestartCapableFakeAdapter(inspector)
-    )
+    adapter = RestartCapableFakeAdapter(inspector)
+    restarted = _supervisor(reopened, tmp_path, adapter)
     outcomes = restarted.reconcile_restart(requeue_lost=False)
     assert [outcome.status for outcome in outcomes] == [
-        ReconcileStatus.LEASE_EXPIRED_QUARANTINED
+        ReconcileStatus.LIVE_RECOVERED
     ]
+    # without signal: the original execution is reattached, never terminated
     assert restarted.process_controller.terminated_attempt_ids == []
-    assert restarted.take_recovered_runs() == ()
+    recovered = restarted.take_recovered_runs()
+    assert len(recovered) == 1
+    assert recovered[0].lease.attempt.attempt_id == active.lease.attempt.attempt_id
+    assert adapter.start_calls == 0, "recovery must never launch a second run"
+    assert len(adapter.reattach_calls) == 1
     persisted = reopened.attempts.get_attempt(active.lease.attempt.attempt_id)
     assert persisted is not None and persisted.status is AttemptStatus.CHECKPOINTED
 

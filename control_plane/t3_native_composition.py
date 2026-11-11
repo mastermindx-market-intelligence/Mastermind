@@ -1002,6 +1002,28 @@ class SupervisorBoundaryT3Adapter:
             asyncio.run(self._inner.reattach(spec, neutral_binding))
         )
 
+    def receipt_recovery_binding(
+        self, run_id: str, *, prompt_path: Any
+    ) -> Any:
+        # T4c findings 1/2/7: the supervisor's receipt path feature-detects
+        # this seam.  The inner adapter builds the binding from its durable
+        # record in the NEUTRAL ref shape; at this boundary the supervisor
+        # convention is the TWIN, so the ref is translated exactly as
+        # ``reattach`` translates it — verified against the durable retained
+        # ref first, fail-closed, never guessed.
+        binding = self._inner.receipt_recovery_binding(
+            str(run_id), prompt_path=prompt_path
+        )
+        if binding is None:
+            return None
+        retained = self._inner.retained_original_ref(str(run_id))
+        if retained is None or binding.process_ref != retained:
+            raise T3NativeCompositionError(
+                "receipt recovery binding is not the durable retained ref "
+                f"for run {str(run_id)!r}; refusing to translate"
+            )
+        return dataclass_replace(binding, process_ref=self._twin(retained))
+
     async def status(self, ref: Any) -> Any:
         return await self._inner.status(self._retained(ref))
 

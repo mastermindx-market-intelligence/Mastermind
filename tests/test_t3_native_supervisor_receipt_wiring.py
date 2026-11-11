@@ -4,8 +4,9 @@ the COMPOSED supervisor, not only in tests.
 ``compose_t3_native_supervisor`` must wire a ``provider_receipt_reader`` over
 the composed adapter's durable launch receipts, so an identity-less claim
 left by a crash between the persisted receipt and ``record_process`` is
-adopted under its receipt by the production composition — never expired and
-requeued into a second launch.
+reconciled under its receipt by the production composition: deferred while
+the claim's lease is live (T4c finding 2), never expired and requeued into a
+second launch.
 
 Run: TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q \
      -p no:cacheprovider tests/test_t3_native_supervisor_receipt_wiring.py
@@ -56,8 +57,14 @@ class _ReceiptAdapter:
         raise AssertionError("an identity-less claim must not be signalled")
 
 
-def test_composed_supervisor_adopts_an_identity_less_claim_under_its_receipt(
+def test_composed_supervisor_defers_a_live_receipt_claim_and_never_requeues(
         tmp_path):
+    # T4c finding 2: the composed owner NEVER takes a claim whose lease is
+    # still live — a live launcher may be sitting between its persisted
+    # receipt and record_process.  The deferral proves the reader is wired
+    # into the composed supervisor (the receipt names the session); the full
+    # expiry adoption, composed end-to-end, is proven in
+    # tests/test_executive_supervisor_receipt_recovery_t4c.py.
     runtime, job_id, _ = _runtime_and_job(tmp_path)
     lease = runtime.broker.claim(job_id, lease_owner="dead-original-owner")
     attempt_id = lease.attempt.attempt_id
@@ -76,12 +83,14 @@ def test_composed_supervisor_adopts_an_identity_less_claim_under_its_receipt(
     )
     outcomes = supervisor.reconcile_restart(requeue_lost=True)
 
-    # with the wiring: adopted under the receipt, execution preserved
+    # live lease: deferred without touching fence, owner or identity
     assert [item.status for item in outcomes] == [
-        owner.ReconcileStatus.LIVE_QUARANTINED]
+        owner.ReconcileStatus.AWAITING_LEASE_EXPIRY]
+    assert RECEIPT_SESSION in (outcomes[0].error or "")
     row = runtime.attempts.get_attempt(attempt_id)
-    assert row.provider_session_id == RECEIPT_SESSION
-    assert row.lease_owner == supervisor.instance_id
+    assert row.provider_session_id is None
+    assert row.lease_owner == "dead-original-owner"
+    assert row.fence_generation == lease.attempt.fence_generation
     # the one-initiator invariant: one attempt, job RUNNING, no requeue
     assert runtime.jobs.get_job(job_id).status is owner.JobStatus.RUNNING
     attempts = [a for a in runtime.attempts.list_attempts()

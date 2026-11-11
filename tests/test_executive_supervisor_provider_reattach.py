@@ -14,7 +14,7 @@ Run: TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q \
 import pytest
 
 import control_plane.executive_supervisor as owner
-from control_plane.executive_runtime import StateConflict
+from control_plane.executive_runtime import Runtime, StateConflict
 from tests.test_executive_supervisor import (
     FakeAdapter,
     FakeInspector,
@@ -118,8 +118,17 @@ def _unbound_receipt_adapter(runtime):
     return adapter
 
 
-def test_unbound_claim_with_durable_receipt_adopts_and_never_requeues(tmp_path):
-    runtime, job_id, _ = _runtime_and_job(tmp_path)
+def test_unbound_claim_with_durable_receipt_defers_then_quarantines_typed(
+        tmp_path):
+    # T4c finding 2: while the claim's lease is live, reconcile NEVER takes
+    # it — a live launcher may still be sitting between the persisted receipt
+    # and record_process.  At expiry, an adapter without the
+    # receipt_recovery_binding seam quarantines typed.  Either way the claim
+    # is never requeued into a second launch.
+    now = [1_800_000_000_000]
+    clock = lambda: now[0]
+    runtime, job_id, _ = _runtime_and_job(
+        tmp_path, clock=clock, lease_seconds=1)
     lease, attempt = _claimed_identity_less(runtime, job_id)
     adapter = _unbound_receipt_adapter(runtime)
     supervisor = _supervisor(
@@ -127,19 +136,35 @@ def test_unbound_claim_with_durable_receipt_adopts_and_never_requeues(tmp_path):
         provider_receipt_reader=lambda _attempt_id: {
             "provider_session_id": RECEIPT_SESSION,
         })
-    outcomes = supervisor.reconcile_restart(requeue_lost=True)
 
+    # live lease: deferred, fence and owner untouched
+    outcomes = supervisor.reconcile_restart(requeue_lost=True)
+    assert [item.status for item in outcomes] == [
+        owner.ReconcileStatus.AWAITING_LEASE_EXPIRY]
+    row = runtime.attempts.get_attempt(lease.attempt.attempt_id)
+    assert row.fence_generation == attempt.fence_generation
+    assert row.lease_owner == "dead-original-owner"
+    assert row.provider_session_id is None
+
+    # lease expired but the adapter cannot rebuild a recovery binding:
+    # typed quarantine, still no requeue, still no invented identity
+    now[0] += 2_000
+    reopened = Runtime.at(tmp_path, clock=clock, lease_seconds=1)
+    restarted = _supervisor(
+        reopened, tmp_path, _unbound_receipt_adapter(reopened),
+        provider_receipt_reader=lambda _attempt_id: {
+            "provider_session_id": RECEIPT_SESSION,
+        })
+    outcomes = restarted.reconcile_restart(requeue_lost=True)
     assert [item.status for item in outcomes] == [
         owner.ReconcileStatus.LIVE_QUARANTINED]
-    row = runtime.attempts.get_attempt(lease.attempt.attempt_id)
-    # adopted under the receipt's identity, fence rotated to this supervisor
-    assert row.provider_session_id == RECEIPT_SESSION
-    assert row.fence_generation == attempt.fence_generation + 1
-    assert row.lease_owner == supervisor.instance_id
-    assert row.status is owner.AttemptStatus.CLAIMED
+    assert "receipt_recovery_binding" in (outcomes[0].error or "")
+    row = reopened.attempts.get_attempt(lease.attempt.attempt_id)
+    assert row.provider_session_id is None
+    assert row.lease_owner == "dead-original-owner"
     # the one-initiator invariant: no requeue, no second attempt, job intact
-    assert runtime.jobs.get_job(job_id).status is owner.JobStatus.RUNNING
-    attempts = [a for a in runtime.attempts.list_attempts()
+    assert reopened.jobs.get_job(job_id).status is owner.JobStatus.RUNNING
+    attempts = [a for a in reopened.attempts.list_attempts()
                 if a.job_id == job_id]
     assert len(attempts) == 1
 
