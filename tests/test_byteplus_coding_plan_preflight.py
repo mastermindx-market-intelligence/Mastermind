@@ -40,7 +40,8 @@ def test_source_preflight_refuses_any_real_network_or_subprocess(monkeypatch):
     assert row["actual_concurrent_worker_limit"] is None
     assert row["estimated_startable_jobs"] is None
     assert row["individual_supported_tool_mode_statically_allowed"] is True
-    assert "implementation_not_built" in row["canary_source_blockers"]
+    assert "implementation_not_built" not in row["canary_source_blockers"]
+    assert row["native_coding_plan_implementation_state"] == "BUILT_NOT_PROVEN"
     assert "provider_realm_enrolled" in row["canary_source_blockers"]
     assert "capacity_known" in row["canary_source_blockers"]
     assert "source_policy_disarmed" in row["production_source_blockers"]
@@ -62,7 +63,7 @@ def test_preflight_matches_every_current_specialist_role():
         "routine": "glm-5.3-flash",
         "subagent": "glm-5.3-flash",
     }
-    assert get_binding(doc["binding_id"]).implementation_state == "SPEC_ONLY"
+    assert get_binding(doc["binding_id"]).implementation_state == "BUILT_NOT_PROVEN"
 
 
 @pytest.mark.parametrize("kwargs", [
@@ -121,8 +122,11 @@ def test_missing_reviewed_model_role_fails_closed(monkeypatch):
 def test_new_byteplus_branded_alias_requires_canonical_router_admission(alias):
     from control_plane.model_router import ModelRouter, RoutingPolicyError
 
+    # Load outside the assertion: a config-loading RoutingPolicyError must fail
+    # honestly instead of masquerading as a regex mismatch here.
+    router = ModelRouter.load()
     with pytest.raises(RoutingPolicyError, match="unknown model alias"):
-        ModelRouter.load().resolve_model_alias(alias)
+        router.resolve_model_alias(alias)
 
 
 def test_preflight_cli_emits_closed_json_without_activation():

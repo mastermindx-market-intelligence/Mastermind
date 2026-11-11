@@ -23,6 +23,12 @@ from control_plane.claude_worker import (
     ClaudeWorkerContractError,
     attest_claude_code_binary,
 )
+from control_plane.claude_native_helper_projection import (
+    ClaudeNativeHelperDefinition,
+    project_claude_native_helpers,
+)
+from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+from control_plane.operator_harness_contract import ObservedTriState
 from control_plane.worker_adapter import (
     WorkerExecutionAdapter,
     adapter_descriptor,
@@ -490,6 +496,115 @@ def test_compiler_projects_only_read_write_and_test_capabilities(
         "WebSearch,mcp__*"
     )
 
+
+def _native_helper_projection():
+    registry = ExecutionCapabilityRegistry.load(
+        Path(
+            "tests/fixtures/"
+            "executive_agent_capabilities_claude_native_helper_v3.json"
+        ),
+        source_root=Path.cwd(),
+    )
+    profile = registry.resolve("operator.claude.readonly.native-helper.v1")
+    profile = dataclasses.replace(profile, mcp_server_grants=())
+    return project_claude_native_helpers(
+        profile,
+        helpers=(
+            ClaudeNativeHelperDefinition(
+                agent_id="code-reader",
+                description="Inspect bounded implementation evidence read-only.",
+                prompt="Read only. Return bounded findings and risks.",
+                max_turns=8,
+            ),
+        ),
+        permission_mode="dontAsk",
+        execution_mode="noninteractive",
+        supports_subagent_capability_ceiling=ObservedTriState.VERIFIED,
+    )
+
+
+def test_native_helper_candidate_compiler_composes_exact_cardless_parent_contract(
+    tmp_path: Path,
+) -> None:
+    adapter = _adapter(tmp_path)
+    spec = _spec(tmp_path)
+    projection = _native_helper_projection()
+
+    candidate = adapter.compile_native_helper_candidate_launch(spec, projection)
+
+    assert candidate.production_armed is False
+    assert candidate.runtime_ceiling_seconds == projection.runtime_ceiling_seconds
+    assert dict(candidate.environment_overrides) == projection.environment()
+    argv = candidate.argv
+    assert "--agents" in argv
+    assert argv[argv.index("--agents") + 1] == projection.cli_arguments()[-1]
+    assert set(argv[argv.index("--tools") + 1].split(",")) == {
+        "Agent", "Glob", "Grep", "Read"
+    }
+    allowed = argv[argv.index("--allowedTools") + 1].split(",")
+    denied = argv[argv.index("--disallowedTools") + 1].split(",")
+    assert "Agent" in allowed
+    assert "Agent" not in denied
+    assert {"SendMessage", "ListAgents", "TaskCreate", "TaskUpdate"} <= set(denied)
+    assert "mcp__*" in denied
+    settings = json.loads(argv[argv.index("--settings") + 1])
+    assert settings["permissions"]["allow"] == allowed
+    assert settings["permissions"]["deny"][: len(denied)] == denied
+    assert settings["model"] == _EXACT_MODEL
+    assert settings["availableModels"] == [_EXACT_MODEL]
+
+
+def test_native_helper_candidate_does_not_change_live_start_compiler(
+    tmp_path: Path,
+) -> None:
+    adapter = _adapter(tmp_path)
+    spec = _spec(tmp_path)
+    projection = _native_helper_projection()
+
+    candidate = adapter.compile_native_helper_candidate_launch(spec, projection)
+    live = adapter.compile_launch(spec)
+
+    assert "--agents" in candidate.argv
+    assert "--agents" not in live.argv
+    assert "Agent" in live.argv[live.argv.index("--disallowedTools") + 1].split(",")
+    assert "Agent" not in live.argv[live.argv.index("--tools") + 1].split(",")
+    assert "native_helper_projection" not in inspect.signature(adapter.start).parameters
+
+
+def test_native_helper_candidate_refuses_write_parent_or_mcp_projection(
+    tmp_path: Path,
+) -> None:
+    adapter = _adapter(tmp_path)
+    projection = _native_helper_projection()
+    with pytest.raises(ClaudeWorkerContractError, match="read-only parent"):
+        adapter.compile_native_helper_candidate_launch(
+            _spec(
+                tmp_path,
+                authorities=("READ", "WRITE_BRANCH"),
+                allowed_artifact_paths=("src/allowed.py",),
+            ),
+            projection,
+        )
+
+    drifted = dataclasses.replace(
+        projection,
+        source_mcp_grant_digests=("a" * 64,),
+    )
+    with pytest.raises(ClaudeWorkerContractError, match="zero-MCP"):
+        adapter.compile_native_helper_candidate_launch(_spec(tmp_path), drifted)
+
+
+def test_native_helper_candidate_refuses_untyped_or_armed_projection(
+    tmp_path: Path,
+) -> None:
+    adapter = _adapter(tmp_path)
+    spec = _spec(tmp_path)
+    with pytest.raises(ClaudeWorkerContractError, match="typed native-helper projection"):
+        adapter.compile_native_helper_candidate_launch(spec, object())
+    projection = _native_helper_projection()
+    object.__setattr__(projection, "production_armed", True)
+    with pytest.raises(ClaudeWorkerContractError, match="production-inert"):
+        adapter.compile_native_helper_candidate_launch(spec, projection)
 
 def test_compiler_refuses_unknown_or_unmapped_capabilities(tmp_path: Path) -> None:
     adapter = _adapter(tmp_path)
@@ -1098,12 +1213,89 @@ def test_malformed_json_never_retains_raw_payload_in_exception_chain(tmp_path: P
     assert "CREDENTIAL-SENTINEL" not in repr(auth_raised.value)
 
     (tmp_path / "mode").write_text("malformed-sentinel", encoding="utf-8")
-    async def malformed() -> CollectionReceipt:
-        return await adapter.collect_result(await adapter.start(_workspace_and_spec(tmp_path)))
+    # This case qualifies output handling after an admitted start. Keep the real
+    # fixture PID alive through identity/attestation, without relaxing the
+    # adapter's separate fail-closed tests for an already-exited process. The
+    # malformed fixture prints its payload and exits immediately, so without
+    # this barrier the fixture PID can be gone before the adapter inspects the
+    # real launch identity. The FIFO is released only once start has returned.
+    gate = tmp_path / "launch-release"
+    os.mkfifo(gate, 0o600)
+    gate_fd = os.open(gate, os.O_RDWR | os.O_NONBLOCK)
 
-    receipt = asyncio.run(malformed())
+    async def malformed() -> CollectionReceipt:
+        ref = await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=5))
+        assert os.write(gate_fd, b"release\n") == len(b"release\n")
+        return await adapter.collect_result(ref)
+
+    try:
+        receipt = asyncio.run(malformed())
+    finally:
+        os.close(gate_fd)
+
     assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
     assert "CREDENTIAL-SENTINEL" not in str(receipt.result.error)
+
+
+def test_malformed_json_delayed_first_identity_inspection_still_redacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bounded deliberate delay before the first identity read must not change
+    the malformed-output contract.
+
+    The delay lets an ungated fixture exit before the parent performs its first
+    identity read. With the launch-release FIFO in place the real fixture PID is
+    still alive, the real inspector still qualifies it, and the malformed
+    payload is still redacted. The delay delegates to the original inspector and
+    is a discriminator only; the FIFO, not the delay, supplies the ordering.
+    """
+    binary = _fixture_claude_binary(tmp_path)
+    adapter = _adapter(tmp_path, binary)
+    (tmp_path / "mode").write_text("malformed-sentinel", encoding="utf-8")
+    real_inspect = claude_worker.LocalProcessInspector.inspect
+    first_inspection = True
+
+    def delayed_inspect(self: object, pid: int) -> object:
+        nonlocal first_inspection
+        if first_inspection:
+            first_inspection = False
+            # Exercise a child scheduled before the parent's first identity
+            # read. The FIFO, not this delay, supplies the launch ordering.
+            time.sleep(0.2)
+            # Reap this one owned fixture child only if it has already exited,
+            # so the real inspector observes the same absent-PID condition the
+            # hosted CI observed. A gated fixture is still alive at this point,
+            # so the probe reaps nothing and the real inspection is unchanged.
+            try:
+                os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+        return real_inspect(self, pid)
+
+    monkeypatch.setattr(claude_worker.LocalProcessInspector, "inspect", delayed_inspect)
+
+    gate = tmp_path / "launch-release"
+    os.mkfifo(gate, 0o600)
+    gate_fd = os.open(gate, os.O_RDWR | os.O_NONBLOCK)
+
+    async def malformed() -> CollectionReceipt:
+        ref = await adapter.start(_workspace_and_spec(tmp_path, timeout_seconds=5))
+        assert os.write(gate_fd, b"release\n") == len(b"release\n")
+        return await adapter.collect_result(ref)
+
+    try:
+        receipt = asyncio.run(malformed())
+    finally:
+        os.close(gate_fd)
+
+    assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
+    assert "CREDENTIAL-SENTINEL" not in str(receipt.result.error)
+    for path in (
+        Path(receipt.process_ref.stdout_path),
+        Path(receipt.process_ref.stderr_path),
+        Path(receipt.process_ref.result_path),
+    ):
+        assert "CREDENTIAL-SENTINEL" not in path.read_text(encoding="utf-8")
 
 
 def test_foreground_environment_is_private_and_closed(
@@ -1249,35 +1441,50 @@ def test_secret_stderr_and_replaced_bound_evidence_never_succeed(
     tmp_path: Path,
 ) -> None:
     binary = _fixture_claude_binary(tmp_path)
-    (tmp_path / "mode").write_text("secret-stderr", encoding="utf-8")
-    adapter = _adapter(tmp_path, binary)
+    # All four negative controls require a live attested child. The fixture's
+    # fixed 0.2s sleep (and immediate secret-stderr exit) cannot ensure /proc
+    # visibility on loaded CI. Reuse the suite's FIFO release barrier; do not
+    # weaken the production identity inspector or relax any invalid-result gate.
+    gate = tmp_path / "launch-release"
+    os.mkfifo(gate, 0o600)
+    gate_fd = os.open(gate, os.O_RDWR | os.O_NONBLOCK)
+    try:
+        (tmp_path / "mode").write_text("secret-stderr", encoding="utf-8")
+        adapter = _adapter(tmp_path, binary)
 
-    async def secret_stderr() -> CollectionReceipt:
-        return await adapter.collect_result(await adapter.start(_workspace_and_spec(tmp_path)))
+        async def secret_stderr() -> CollectionReceipt:
+            ref = await adapter.start(_workspace_and_spec(tmp_path))
+            # Exit only after the real fixture process has been identity-attested.
+            assert os.write(gate_fd, b"release\n") == len(b"release\n")
+            return await adapter.collect_result(ref)
 
-    secret_receipt = asyncio.run(secret_stderr())
-    assert secret_receipt.result.status is WorkerRunStatus.INVALID_RESULT
-    assert "CREDENTIAL-SENTINEL" not in Path(secret_receipt.process_ref.stderr_path).read_text()
+        secret_receipt = asyncio.run(secret_stderr())
+        assert secret_receipt.result.status is WorkerRunStatus.INVALID_RESULT
+        assert "CREDENTIAL-SENTINEL" not in Path(secret_receipt.process_ref.stderr_path).read_text()
 
-    for label in ("stdout_path", "stderr_path", "result_path"):
-        (tmp_path / "mode").write_text("delayed-success", encoding="utf-8")
-        replacing_adapter = _adapter(tmp_path, binary)
-        spec = _workspace_and_spec(
-            tmp_path, run_id=f"run-replace-{label}", timeout_seconds=0.7
-        )
-        victim = tmp_path / f"victim-{label}"
-        victim.write_text("victim-data", encoding="utf-8")
+        for label in ("stdout_path", "stderr_path", "result_path"):
+            (tmp_path / "mode").write_text("delayed-success", encoding="utf-8")
+            replacing_adapter = _adapter(tmp_path, binary)
+            spec = _workspace_and_spec(
+                tmp_path, run_id=f"run-replace-{label}", timeout_seconds=0.7
+            )
+            victim = tmp_path / f"victim-{label}"
+            victim.write_text("victim-data", encoding="utf-8")
 
-        async def replace_then_collect() -> CollectionReceipt:
-            ref = await replacing_adapter.start(spec)
-            target = Path(getattr(ref, label))
-            target.unlink()
-            os.link(victim, target)
-            return await replacing_adapter.collect_result(ref)
+            async def replace_then_collect() -> CollectionReceipt:
+                ref = await replacing_adapter.start(spec)
+                target = Path(getattr(ref, label))
+                target.unlink()
+                os.link(victim, target)
+                # Release only *after* a verified start and path replacement.
+                assert os.write(gate_fd, b"release\n") == len(b"release\n")
+                return await replacing_adapter.collect_result(ref)
 
-        receipt = asyncio.run(replace_then_collect())
-        assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
-        assert victim.read_text(encoding="utf-8") == "victim-data"
+            receipt = asyncio.run(replace_then_collect())
+            assert receipt.result.status is WorkerRunStatus.INVALID_RESULT
+            assert victim.read_text(encoding="utf-8") == "victim-data"
+    finally:
+        os.close(gate_fd)
 
 
 def test_post_parse_git_rejection_leaves_bound_result_empty(tmp_path: Path) -> None:

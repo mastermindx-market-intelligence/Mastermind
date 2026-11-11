@@ -11,7 +11,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from control_plane.executive_runtime import AttemptStatus, Runtime, StateConflict
+from control_plane.executive_runtime import AttemptStatus, Runtime, StateConflict, orchestration_digest
 from control_plane.operator_continuation import GIT_OBJECT_ID_RE, OperatorContinuationDraft
 
 
@@ -104,14 +104,19 @@ def build_current_continuation_draft(
     if target.effective_grant_digest is None or target.effective_grant is None:
         raise StateConflict("continuation target lacks an effective grant")
 
-    source_worker = runtime.workers.get_worker(source.worker_id)
-    target_worker = runtime.workers.get_worker(target.worker_id)
-    if source_worker is None or target_worker is None:
-        raise StateConflict("continuation worker identity is unavailable")
-    same_realm = (
-        source_worker.provider == target_worker.provider
-        and source_worker.account_label == target_worker.account_label
-    )
+    # Worker metadata can rotate after a claim. Realm identity belongs to the
+    # immutable admitted placement, as in the PREPARE/ACK Runtime transaction.
+    def realm(attempt):
+        placement = attempt.placement_snapshot
+        if (not isinstance(placement, dict)
+                or orchestration_digest(placement) != attempt.placement_snapshot_digest
+                or placement.get("worker_id") != attempt.worker_id
+                or placement.get("quota_class") != attempt.quota_class
+                or any(type(placement.get(k)) is not str or not placement[k]
+                       for k in ("provider", "account_label"))):
+            raise StateConflict("continuation placement identity is unavailable")
+        return placement["provider"], placement["account_label"]
+    same_realm = realm(source) == realm(target)
     if same_realm:
         raise StateConflict("continuation requires a cross-realm claim")
 

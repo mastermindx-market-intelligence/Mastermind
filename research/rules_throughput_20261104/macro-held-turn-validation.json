@@ -1,0 +1,98 @@
+{
+  "base_revision": "34b4dd3e4dddd36c75348e3298624153cbab9c24",
+  "files": [
+    {
+      "path": "scripts/ship_loop_hold_wrapper.py",
+      "additions": 51,
+      "deletions": 87,
+      "sha256": "aa448d8339a7c2c1d16538fe26308cf01baf355b505efb71946e7a18b5896a1d"
+    },
+    {
+      "path": "tests/test_ship_loop_hold_wrapper.py",
+      "additions": 56,
+      "deletions": 22,
+      "sha256": "3af5a34622f3a9128ad61911ef6fa4aed92d0a30de506aa3144e4d6863129d81"
+    },
+    {
+      "path": ".cursor/rules/ship-loop-terminal-states.mdc",
+      "additions": 27,
+      "deletions": 13,
+      "sha256": "0b8dde141d42d074854e6a647a457c292201494444c4fabbf44e2aac6cd1df05"
+    },
+    {
+      "path": "docs/agent_guides/CODEX_DELIVERY.md",
+      "additions": 43,
+      "deletions": 50,
+      "sha256": "c40317639ca45b82abb50c0d6ed467128c420104856c9f72bfeee92e349af5aa"
+    },
+    {
+      "path": "docs/agent_guides/CLAUDE_WORKSPACE_COMPLETION.md",
+      "additions": 2,
+      "deletions": 2,
+      "sha256": "b488a198e4637726cc942f72209b79584092d6ee111c5ca273802294ae041abd"
+    }
+  ],
+  "changed_production_functions": [
+    "_hold_block",
+    "_parked_message"
+  ],
+  "preserved_production_functions": [
+    "_hold_protocol_is_complete",
+    "_hold_probe",
+    "_parked_hold",
+    "main",
+    "_relay",
+    "_git"
+  ],
+  "changed_existing_tests": [
+    "test_pending_sol_hold_waits_before_first_unsafe_branch_remediation",
+    "test_red_sol_hold_repairs_check_without_branch_remediation",
+    "test_pending_ordinary_claude_hold_waits_instead_of_demanding_a_forbidden_merge",
+    "test_red_ordinary_claude_hold_repairs_the_check_and_never_merges",
+    "test_hold_whose_ci_yml_run_has_not_published_waits_instead_of_parking",
+    "test_no_red_rollup_without_a_clean_anchor_verdict_never_parks",
+    "test_parked_message_separates_ship_terminal_from_dialogue_terminal",
+    "test_parked_message_requires_truthful_continuation_receipt_before_yield",
+    "test_source_law_keeps_hold_a_hard_merge_barrier"
+  ],
+  "all_changed_tests_are_called_by_existing_fast_fence": true,
+  "syntax": "Both Python files compile",
+  "pytest": "NOT RUN: local python has no pytest; M2 managed-workspace acquisition explicitly refused; no bypass attempted",
+  "publication": "local candidate only; no external mutation",
+  "historical_decisions": "unchanged",
+  "guard_and_continuation_law": "unchanged",
+  "existing_fence_test_entrypoints": [
+    "test_every_hold_suite_regression_is_called_inside_the_fast_fence",
+    "test_hold_wrapper_regressions_execute_inside_the_fast_fence"
+  ],
+  "pytest_commands": [
+    "python3 -m pytest tests/test_ship_loop_hold_wrapper.py -q",
+    "python3 -m pytest tests/test_fence_checkout_contract.py::test_every_hold_suite_regression_is_called_inside_the_fast_fence tests/test_fence_checkout_contract.py::test_hold_wrapper_regressions_execute_inside_the_fast_fence -q"
+  ],
+  "runtime_dependencies": [
+    "A lawful admitted Macro source workspace with candidate overlay",
+    "Genuine pytest",
+    "PyYAML",
+    "Existing repository modules, .claude/settings.json, .claude/hooks/ship_loop_guard.py, .github/workflows/ci.yml, root instructions and referenced DEC files for the existing tests"
+  ],
+  "host_blocker": {
+    "operation": "rules-throughput-audit-macro-parked-20261104-c1",
+    "result": "REFUSED / NOT_APPLIED / REPOSITORY_SOURCE_UNAVAILABLE",
+    "effect": "No M2 candidate/test workspace created; no fallback or repeated acquire"
+  },
+  "collision": {
+    "PR7799": "Exact wrapper/test overlap; original e8727ff branch and explicit release hold preserved. No current START proved by inspected metadata/comments; parent verified original workspace unchanged.",
+    "PR8413": "Guard.py and continuation-law files not changed.",
+    "owner_guides": "Targeted open-PR text search returned no matching guide-path mentions; not an exhaustive all-PR overlap assertion."
+  },
+  "hook_scope": "Tracked Claude Stop wiring uses the wrapper. Tracked Cursor hooks have sessionStart/workspaceOpen sparse-workspace hooks only; Cursor consumes the alwaysApply prose rule. No live hook installation claimed.",
+  "patch_sha256": "9f89b9f50afa683953ebd9904d53028562e270f37e9bbf0ec9c68362095b5e16",
+  "patch_context_lines": 1,
+  "composition_note": "Unapplied current-main candidate. Compose into existing held Macro #7799; preserve and adapt its three extra parametrized functions/six cases, its root entrypoint advice, and its Draft/release hold. Do not overwrite the old branch with whole current-main files.",
+  "unmerged_tests_to_preserve": [
+    "test_pending_advice_preserves_hold_without_a_foreground_stop",
+    "test_stop_entrypoint_emits_nonterminal_hold_and_never_relays",
+    "test_native_entrypoints_keep_ci_wait_action_scoped"
+  ],
+  "patch_applies_to_exact_base_snapshot": true
+}

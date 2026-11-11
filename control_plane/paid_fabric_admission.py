@@ -22,6 +22,52 @@ def _refuse():
     raise StateConflict('paid current source/status admission unavailable')
 
 
+def require_registered_paid_placements(runtime, source, placements, binding):
+    """Read the qualified source and existing registration; never enroll or refresh.
+
+    This only gates continuation past a foreground plan. Runtime claims, the
+    current capacity observation, the paid lease and physical adapter remain
+    the authorities for each actual child dispatch.
+    """
+    if type(source) is not PaidBindingSource or not placements:
+        _refuse()
+    source._current()
+    router = ModelRouter.load()
+    expected = []
+    for physical in source.bindings:
+        current = source.source_for(physical)
+        quota = source.quota_for(physical)
+        member = placement_member(router, PaidWorkPlacement('glm.paid.sealed-input', quota))
+        expected.append(member)
+        route = member['paid_execution_route']
+        if (route['provider_alias'] != physical.provider or route['model'] != physical.model
+                or route['execution_profile_digest'] != physical.execution_profile_digest):
+            _refuse()
+        worker = runtime.workers.get_worker(physical.worker_id)
+        if worker is None:
+            _refuse()
+        metadata = dict(route, paid_execution_route=route,
+            capacity_join=CapacityJoin(physical.host_ref, current['capacity_capability_id'],
+                PROVIDER_CAPACITY_SCHEMA, physical.worker_source_config_digest).to_dict())
+        worker_meta = dict(service_managed=True,
+            worker_source_config_digest=physical.worker_source_config_digest)
+        _require_registration(runtime, physical, quota, worker.account_label, route, metadata, worker_meta)
+        # Registration is identity, not capacity. In particular an original
+        # paid child may still own its quota while its finisher collects it,
+        # and another registered route may be busy. The canonical claim and
+        # lease owners decide availability, without this reader overriding it.
+    configured = [placement_member(router, item) for item in placements]
+    frozen = [item for item in binding.get('work_placement_union', ())
+              if 'paid_execution_route' in item]
+    # The installed constructor deduplicates one placement shared by several
+    # physical workers; each identity above must still be registered exactly.
+    expected_union = sorted({digest(member) for member in expected})
+    if expected_union != sorted(map(digest, configured)) or (
+            expected_union != sorted(map(digest, frozen))):
+        _refuse()
+    source._current()
+
+
 def _reserve_status(runtime, worker_id, quota_class, scope):
     """One actual Runtime transaction retains the operation before transport."""
     with runtime.store.transaction() as connection:

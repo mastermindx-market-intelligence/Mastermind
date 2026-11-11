@@ -1783,7 +1783,7 @@ def _v5_host_fixture(tmp_path, monkeypatch, *, logical=False):
                 {'success_job_id': proof.job_id}, ancestor_material)
     monkeypatch.setattr(m, 'prior_carry_material', prior)
     monkeypatch.setattr(m, 'terminal_assignment',
-                        lambda *args: {'assignment_seal_sha256': '7'*64})
+                        lambda *args, **kwargs: {'assignment_seal_sha256': '7'*64})
     from tests.test_executive_schema_upgrade_evidence import _mock_root
     _mock_root(monkeypatch, runtime_root.parent.parent, runtime_root,
                Path(config['backup_root']), m.SYSTEM_ROOT/'config/control.json')

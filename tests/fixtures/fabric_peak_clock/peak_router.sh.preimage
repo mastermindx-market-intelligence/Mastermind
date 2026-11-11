@@ -1,0 +1,35 @@
+#!/bin/zsh
+# Peak-hour GLM routing for the fabric router.
+#
+# Peak window: 01:00-05:00 America/New_York (== 22:00-02:00 America/Los_Angeles;
+# both zones shift with DST so the 3h offset holds year-round).
+#
+# During peak (Z.ai peak pricing hours):
+#   glm-5.3        -> unorouter pools first (cheap GLM pricing)
+#   glm-5.3-flash  -> opencode_go first, unorouter second, Z.ai chairman last
+# Off-peak: overrides removed, Z.ai chairman routes primary again.
+#
+# The script transforms routes.json surgically (only the keys below), so
+# concurrent route edits by other sessions are preserved. Reload goes through
+# reload.sh (drain-preserving, health-gated, auto-rollback).
+#
+# launchd invokes it at 22:00 and 02:00 local (Pacific) and at load; it always
+# derives the correct state from the current New York time, so a reboot or
+# missed firing self-corrects on the next run.
+
+set -u
+ROUTES="$HOME/.local/share/mastermind/fabric-router/routes.json"
+LOG="$HOME/.local/share/mastermind/fabric-router/logs/peak_router.log"
+RELOAD="$HOME/.local/share/mastermind/fabric-router/reload.sh"
+
+log() { print -r -- "$(date -u +%Y-%m-%dT%H:%M:%SZ) peak-router: $*" >> "$LOG" }
+mkdir -p "$(dirname "$LOG")"
+
+# Desired state: peak if 01:00 <= ET time-of-day < 05:00 (forced by $1 override).
+ET_NOW=$(TZ=America/New_York date +%H%M)
+if [[ "${1:-}" == "on" ]]; then WANT=peak
+elif [[ "${1:-}" == "off" ]]; then WANT=offpeak
+elif (( ET_NOW >= 100 && ET_NOW < 500 )); then WANT=peak
+else WANT=offpeak; fi
+
+log "run (ET now $ET_NOW) -> $WANT"

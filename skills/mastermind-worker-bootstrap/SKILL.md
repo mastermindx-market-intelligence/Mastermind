@@ -16,9 +16,16 @@ Apply current protected source law and the assigned repository's AGENTS.md. Read
 relevant Craft common method and one role playbook from the admitted source package.
 Do not duplicate all eight roles or copy the parent conversation into the worker.
 
+For substantive engineering leaves, apply the accepted protected
+`docs/REUSE_FIRST_ENGINEERING.md` policy before inventing another commodity
+component: check the incumbent, maintained OSS and sound adapter path. This is
+not a new worker approval, tool grant or prerequisite survey for small repairs.
+
 Read [launch-input.md](references/launch-input.md) when preparing a task.
 Read [tools.md](references/tools.md) when selecting or troubleshooting tools.
 Read [context-and-returns.md](references/context-and-returns.md) for project facts and memory.
+Read [hermes-gateway-drain.md](references/hermes-gateway-drain.md) before holding a Hermes
+gateway external drain during enrollment or activation maintenance (#983).
 
 ## Prepare before launch
 

@@ -2,15 +2,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { bindMissionHost, type AuthState, type RawClient } from "../host";
-import { attendedSelection, decodeAttendedStatus } from "./attended-status";
+import { attendedSelection, decodeAttendedStatus, type AttendedStatus } from "./attended-status";
 import { AttendedFabricInspector } from "./AttendedFabricInspector";
 
 afterEach(cleanup);
 const selected = { rootId: "source-root", runId: "source-run" };
-const raw = () => ({ schema: "mastermind.fabric_task_status.v1", run_id: "source-run", root_id: "source-root", parent_run_id: "source-root",
+const raw = (): AttendedStatus => ({ schema: "mastermind.fabric_task_status.v1", run_id: "source-run", root_id: "source-root", parent_run_id: "source-root",
   state: "TERMINAL", rc: 0, signal: "ok", result_available: true, result_bytes: 3672, accepted: false, accepted_by: null,
   acceptance_state: "NOT_ACCEPTED", acceptance_reason: "NO_OUTCOME" });
-function client(read = vi.fn(async () => raw())) {
+function client(read: () => Promise<AttendedStatus> = vi.fn(async () => raw())) {
   let state: AuthState = { status: "signed_in", acquisition: true, content: false, reason: null }, gen = 0;
   const listeners: Array<(s: AuthState) => void> = [];
   const c: RawClient = { getState: () => state, invalidationGeneration: () => gen,
@@ -26,6 +26,36 @@ const enter = () => {
 };
 
 describe("direct Fabric status-only boundary", () => {
+
+  it("rejects accepted metadata after raw owner generation changes without notification", async () => {
+    let finish!: (value: AttendedStatus) => void;
+    const a = client(vi.fn(() => new Promise<AttendedStatus>(resolve => { finish = resolve; })));
+    let generation = 0;
+    a.c.invalidationGeneration = () => generation;
+    const host = bindMissionHost(a.c);
+    const pending = host.readAttendedFabric!({ ...selected, signal: new AbortController().signal });
+    const rejected = expect(pending).rejects.toThrow("READ_CANCELLED");
+    generation++;
+    finish({ ...raw(), accepted: true, accepted_by: "reviewer",
+      acceptance_state: "ACCEPTED", acceptance_reason: "VALIDATED_OUTCOME" });
+    await rejected;
+    expect(a.read).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects accepted metadata after the exact status reader is replaced without notification", async () => {
+    let finish!: (value: AttendedStatus) => void;
+    const a = client(vi.fn(() => new Promise<AttendedStatus>(resolve => { finish = resolve; })));
+    const host = bindMissionHost(a.c);
+    const pending = host.readAttendedFabric!({ ...selected, signal: new AbortController().signal });
+    const rejected = expect(pending).rejects.toThrow("READ_CANCELLED");
+    const replacement = vi.fn(async () => raw());
+    a.c.readAttendedFabric = replacement;
+    finish({ ...raw(), accepted: true, accepted_by: "reviewer",
+      acceptance_state: "ACCEPTED", acceptance_reason: "VALIDATED_OUTCOME" });
+    await rejected;
+    expect(a.read).toHaveBeenCalledTimes(1);
+    expect(replacement).not.toHaveBeenCalled();
+  });
   it("uses selectors, not paths, commands or guessed Executive IDs", () => {
     expect(attendedSelection(selected)).toEqual(selected);
     for (const bad of ["../root", "run;whoami", "a\n", "a".repeat(129), ""]) expect(attendedSelection({ rootId: "ok", runId: bad })).toBeNull();
@@ -52,6 +82,18 @@ describe("direct Fabric status-only boundary", () => {
     for (const extra of [{ run_id: "other-run" }, { rc: NaN }, { result_bytes: -1 }, { result_bytes: 1.5 }, { result_available: false, result_bytes: 100 }, { accepted_by: "CEO" }])
       expect(() => decodeAttendedStatus({ ...raw(), ...extra }, selected)).toThrow();
   });
+  it("clears manually entered original-run selectors when the host principal changes", () => {
+    const first = client(), second = client();
+    const view = render(<AttendedFabricInspector host={bindMissionHost(first.c)} />);
+    fireEvent.click(screen.getByText("Direct M2 Fabric · inspect an existing run"));
+    fireEvent.change(screen.getByLabelText("Original root"), { target: { value: "prior-root" } });
+    fireEvent.change(screen.getByLabelText("Existing run ID"), { target: { value: "prior-run" } });
+    view.rerender(<AttendedFabricInspector host={bindMissionHost(second.c)} />);
+    expect((screen.getByLabelText("Original root") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Existing run ID") as HTMLInputElement).value).toBe("");
+    expect(first.read).not.toHaveBeenCalled();
+    expect(second.read).not.toHaveBeenCalled();
+  });
   it("does not expose a reader on unconfigured clients", () => {
     const a = client(); delete a.c.readAttendedFabric;
     expect(bindMissionHost(a.c).readAttendedFabric).toBeUndefined();
@@ -72,7 +114,7 @@ describe("direct Fabric status-only boundary", () => {
   });
   it("rejects a reply after same-display-state identity generation changes", async () => {
     let resolve!: (value: ReturnType<typeof raw>) => void;
-    const a = client(vi.fn(() => new Promise(r => { resolve = r; }))); const host = bindMissionHost(a.c);
+    const a = client(vi.fn(() => new Promise<AttendedStatus>(r => { resolve = r; }))); const host = bindMissionHost(a.c);
     const promise = host.readAttendedFabric!({ ...selected, signal: new AbortController().signal }); a.change(); resolve(raw());
     await expect(promise).rejects.toThrow("READ_CANCELLED");
   });
@@ -80,6 +122,28 @@ describe("direct Fabric status-only boundary", () => {
     const a = client(), abort = new AbortController(); abort.abort();
     await expect(bindMissionHost(a.c).readAttendedFabric!({ ...selected, signal: abort.signal })).rejects.toThrow("READ_CANCELLED");
     expect(a.read).not.toHaveBeenCalled();
+  });
+  it("shows that rc0 without accepted result requires original-run adjudication", async () => {
+    const a = client(); render(<AttendedFabricInspector host={bindMissionHost(a.c)} />); enter();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
+    await waitFor(() => expect(screen.getByText(/Exit 0: result not accepted/)).toBeTruthy());
+    expect(screen.getByText(/source repairs and production readiness are not proven/)).toBeTruthy();
+    expect(a.read).toHaveBeenCalledTimes(1);
+  });
+  it("distinguishes missing retained bytes from an accepted terminal result", async () => {
+    const missing = client(vi.fn(async (): Promise<AttendedStatus> => ({ ...raw(), result_available: false, result_bytes: null,
+      accepted: null, acceptance_state: "UNVERIFIED" })));
+    const first = render(<AttendedFabricInspector host={bindMissionHost(missing.c)} />); enter();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
+    await waitFor(() => expect(screen.getByText(/Exit 0: retained result unavailable/)).toBeTruthy());
+    first.unmount();
+    const accepted = client(vi.fn(async (): Promise<AttendedStatus> => ({ ...raw(), accepted: true, accepted_by: "reviewer",
+      acceptance_state: "ACCEPTED", acceptance_reason: "VALIDATED_OUTCOME" })));
+    render(<AttendedFabricInspector host={bindMissionHost(accepted.c)} />); enter();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
+    await waitFor(() => expect(screen.getByText("ACCEPTED")).toBeTruthy());
+    expect(screen.queryByText(/Exit 0: result not accepted/)).toBeNull();
+    expect(screen.queryByText(/Exit 0: retained result unavailable/)).toBeNull();
   });
   it("reads only on explicit inspection and renders same-run metadata", async () => {
     const a = client(); render(<AttendedFabricInspector host={bindMissionHost(a.c)} />); enter();
@@ -90,7 +154,7 @@ describe("direct Fabric status-only boundary", () => {
   });
   it("discards delayed replies after selection changes", async () => {
     let resolve!: (value: ReturnType<typeof raw>) => void;
-    const a = client(vi.fn(() => new Promise(r => { resolve = r; }))); render(<AttendedFabricInspector host={bindMissionHost(a.c)} />); enter();
+    const a = client(vi.fn(() => new Promise<AttendedStatus>(r => { resolve = r; }))); render(<AttendedFabricInspector host={bindMissionHost(a.c)} />); enter();
     fireEvent.click(screen.getByRole("button", { name: "Inspect run" }));
     fireEvent.change(screen.getByLabelText("Existing run ID"), { target: { value: "other-run" } }); resolve(raw());
     await waitFor(() => expect(screen.getByRole("button", { name: "Inspect run" })).toBeTruthy());

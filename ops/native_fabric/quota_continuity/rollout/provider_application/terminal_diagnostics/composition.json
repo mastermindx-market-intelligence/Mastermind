@@ -1,0 +1,27 @@
+{
+  "application_after_manifest_sha256": "52a13ceeec7ec38113230fd9e47addbe2115e093f30cf7b91ad8a2fd04e2edad",
+  "application_before_manifest_sha256": "4dccdb9401e27a38bba9153de5f82a23d1169aa204bac847887f6c9bc31a73be",
+  "authority": "SOURCE_COMPOSITION_ONLY; no publication, selection, request, retry, service enrollment or native activation",
+  "combined_bytes": 31883,
+  "combined_sha256": "9e450c6aab4c4a82b8f78b5706c7eaa7236241dba030a762b6257d3b0f8d11dc",
+  "forward_patch": "rollout/provider_application/terminal_diagnostics/native_plan_worker.py.forward.patch",
+  "forward_patch_sha256": "eb35dd1385c947dab63c0c9601325b558443d902652d1494439f0f5b4fcff500",
+  "guard_preimage_sha256": "266c6dddb43e9abb669101504d6dc62a1936acd58628dd59927451deb8cc3f28",
+  "installed_predecessor_profile": {
+    "manifest_sha256": "5511104937c8bcf68a89558c510a88a7519de8b9958c7064fde20dfdf90c5f7a",
+    "sha256": "02f1ab856b74e236a04213fc387fbf498b81b81a224e46f7ac0e45c2d62ab6c4",
+    "source": "../provider_plans/terminal_diagnostics/current40/profile.json",
+    "source_commit": "c34df5ac9a933c14971a7cf9055c505effef50ce"
+  },
+  "member": "ext/native_plan_worker.py",
+  "original_component": {
+    "after": "2df8947c446e143d46bbf979e30dd11965080922839e2e37c3d8c0289ef2af7b",
+    "before": "ef27796c353e408aaaa8df89fa66c3332175007d6b1cfd6354a644a2d23bbef0",
+    "patch_sha256": "003be9b4f2121b51c443be9f72e66b653ff2ee0fd129f57e5e0e90dd8ba2fd7b",
+    "patch_source": "../provider_plans/terminal_diagnostics/native_plan_worker.py.forward.patch",
+    "sha256": "3a6ca607c98ce8edd2f2d5ac2c86a080d344befc3ec4eeff659643a0934fa832",
+    "source": "../provider_plans/terminal_diagnostics/component.json",
+    "source_commit": "7efbbaa61abe9ec1efcde85dafcb70f7126646bd"
+  },
+  "schema": "native-provider-terminal-diagnostics-composition.v1"
+}

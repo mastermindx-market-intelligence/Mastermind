@@ -17,9 +17,10 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import CallToolResult, TextContent, Tool, ToolAnnotations
 
 from control_plane.browser_resource_contract import (
-    ALLOWED_BROWSER_TOOLS,
-    READ_ONLY_BROWSER_TOOLS,
     WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+    APP_CONTROL_TOOL_SCHEMA_DIGEST,
+    browser_tools_for_digest,
+    browser_read_tools_for_digest,
 )
 from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_digest
 from integrations.business_mcp_auth.contracts import (
@@ -34,6 +35,7 @@ from integrations.workbench_action_mcp.contracts import ActionCaller
 from .browser_port import BrowserPortRefused
 from .contracts import BrowserContractError
 from .resource_port import BrowserResourceRefused
+from .credential_use import PREPARE_CREDENTIAL_TOOL
 
 
 PREPARE_RESOURCE_TOOL = "prepare_browser_resource"
@@ -125,14 +127,15 @@ def _validated_catalog(
         ):
             raise ValueError("browser tool catalog is invalid")
         by_name[name] = copy.deepcopy(dict(row))
-    if not ALLOWED_BROWSER_TOOLS <= set(by_name):
+    allowed = browser_tools_for_digest(expected_digest)
+    if not allowed <= set(by_name):
         raise ValueError("browser tool catalog lacks a granted tool")
     selected = {
-        "tools": {name: by_name[name] for name in sorted(ALLOWED_BROWSER_TOOLS)}
+        "tools": {name: by_name[name] for name in sorted(allowed)}
     }
     if observed_mcp_tool_schema_digest(selected) != expected_digest:
         raise ValueError("browser tool catalog schema drift")
-    return {name: by_name[name] for name in ALLOWED_BROWSER_TOOLS}
+    return {name: by_name[name] for name in allowed}
 
 
 def _with_browser_ref(native_schema: Mapping[str, Any]) -> dict[str, Any]:
@@ -153,6 +156,8 @@ def _with_browser_ref(native_schema: Mapping[str, Any]) -> dict[str, Any]:
     if "browser_ref" not in required:
         required.append("browser_ref")
     schema["required"] = required
+    if "minProperties" in schema:
+        schema["minProperties"] += 1
     schema["additionalProperties"] = False
     return schema
 
@@ -240,6 +245,16 @@ _ACTION_REF_SCHEMA = {
     "additionalProperties": False,
 }
 
+_CREDENTIAL_PREPARE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "browser_ref": {"type": "string", "minLength": 16, "maxLength": MAX_REF_BYTES},
+        "grant_ref": {"type": "string", "pattern": "^credential:[a-f0-9]{32}$"},
+    },
+    "required": ["browser_ref", "grant_ref"],
+    "additionalProperties": False,
+}
+
 
 @dataclass(frozen=True)
 class BrowserToolSurface:
@@ -250,13 +265,19 @@ class BrowserToolSurface:
     validators: Mapping[str, Draft202012Validator]
     prepare_tool_to_native: Mapping[str, str]
     tools: tuple[Tool, ...]
+    read_tools: frozenset[str]
 
 
 def build_browser_tool_surface(
     tool_catalog: Mapping[str, Any],
     *,
     expected_tool_schema_digest: str = WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+    credentials_enabled: bool = False,
 ) -> BrowserToolSurface:
+    if credentials_enabled and expected_tool_schema_digest == APP_CONTROL_TOOL_SCHEMA_DIGEST:
+        raise ValueError("app control and vault profiles are not jointly qualified")
+    allowed_tools = browser_tools_for_digest(expected_tool_schema_digest)
+    read_tools = browser_read_tools_for_digest(expected_tool_schema_digest)
     catalog = _validated_catalog(
         tool_catalog,
         expected_digest=expected_tool_schema_digest,
@@ -272,9 +293,13 @@ def build_browser_tool_surface(
         RECONCILE_ACTION_TOOL: action_ref_schema,
     }
     prepare_tool_to_native: dict[str, str] = {}
-    for name in sorted(ALLOWED_BROWSER_TOOLS):
+    if type(credentials_enabled) is not bool:
+        raise ValueError("credential surface switch is invalid")
+    if credentials_enabled:
+        schemas[PREPARE_CREDENTIAL_TOOL] = _snapshot(_CREDENTIAL_PREPARE_SCHEMA, 32768)
+    for name in sorted(allowed_tools):
         wrapped = _snapshot(_with_browser_ref(catalog[name]["inputSchema"]), 32768)
-        if name in READ_ONLY_BROWSER_TOOLS:
+        if name in read_tools:
             schemas[name] = wrapped
         else:
             prepare_name = "prepare_" + name
@@ -318,7 +343,7 @@ def build_browser_tool_surface(
             ),
         ),
     ]
-    for name in sorted(READ_ONLY_BROWSER_TOOLS):
+    for name in sorted(read_tools):
         native = catalog[name]
         annotations = native.get("annotations", {})
         rows.append(
@@ -329,7 +354,7 @@ def build_browser_tool_surface(
                 annotations=ToolAnnotations(
                     readOnlyHint=True,
                     destructiveHint=False,
-                    idempotentHint=True,
+                    idempotentHint=not name.startswith("mastermind_os_"),
                     openWorldHint=bool(annotations.get("openWorldHint", True)),
                 ),
             )
@@ -342,6 +367,7 @@ def build_browser_tool_surface(
                 description=(
                     f"Prepare {native_name} against one browser resource. "
                     "This does not execute the browser action."
+                    + (" " + str(native.get("description", "")) if native_name.startswith("mastermind_os_") else "")
                 ),
                 inputSchema=schemas[prepare_name],
                 annotations=ToolAnnotations(
@@ -352,6 +378,12 @@ def build_browser_tool_surface(
                 ),
             )
         )
+    if credentials_enabled:
+        rows.append(Tool(name=PREPARE_CREDENTIAL_TOOL,
+            description="Prepare the installed account/item/origin grant on one isolated browser. No vault is read. Run and reconcile the returned action_ref using the existing browser action tools. Filling fields does not prove login success.",
+            inputSchema=schemas[PREPARE_CREDENTIAL_TOOL],
+            annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False,
+                idempotentHint=False, openWorldHint=False)))
     rows.extend(
         [
             Tool(
@@ -384,6 +416,7 @@ def build_browser_tool_surface(
         validators=validators,
         prepare_tool_to_native=prepare_tool_to_native,
         tools=tuple(rows),
+        read_tools=read_tools,
     )
 
 
@@ -405,6 +438,7 @@ def create_authenticated_browser_server(
     call_receipt_sink: CallReceiptSink | None = None,
     allowed_origins: tuple[str, ...] = (),
     expected_tool_schema_digest: str = WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+    prepare_credential_fill: Callable[..., Awaitable[str]] | None = None,
 ) -> FastMCP:
     selected_policy = validate_resource_policy(policy)
     if selected_policy.required_scopes != ("workbench.action",):
@@ -419,6 +453,7 @@ def create_authenticated_browser_server(
         or not callable(run_action)
         or not callable(reconcile_action)
         or (call_receipt_sink is not None and not callable(call_receipt_sink))
+        or (prepare_credential_fill is not None and not callable(prepare_credential_fill))
         or type(allowed_hosts) is not tuple
         or not allowed_hosts
     ):
@@ -427,6 +462,7 @@ def create_authenticated_browser_server(
     surface = build_browser_tool_surface(
         tool_catalog,
         expected_tool_schema_digest=expected_tool_schema_digest,
+        credentials_enabled=prepare_credential_fill is not None,
     )
     catalog = surface.catalog
     schemas = surface.schemas
@@ -530,7 +566,7 @@ def create_authenticated_browser_server(
                 observed = await start_resource(caller, request["start_ref"])
             elif name == RECONCILE_RESOURCE_TOOL:
                 observed = await reconcile_resource(caller, request["start_ref"])
-            elif name in READ_ONLY_BROWSER_TOOLS:
+            elif name in surface.read_tools:
                 native_args = dict(request)
                 browser_ref = native_args.pop("browser_ref")
                 direct_native = await read_tool(caller, browser_ref, name, native_args)
@@ -551,6 +587,9 @@ def create_authenticated_browser_server(
                     request["browser_ref"],
                     request["action_ref"],
                 )
+            elif name == PREPARE_CREDENTIAL_TOOL:
+                action_ref = await prepare_credential_fill(caller, request["browser_ref"], request["grant_ref"])
+                observed = {"status": "PREPARED", "action_ref": action_ref}
             else:
                 observed = await reconcile_action(
                     caller,

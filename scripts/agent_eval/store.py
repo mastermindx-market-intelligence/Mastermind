@@ -57,9 +57,12 @@ class WriteResult:
 
 _DIGEST_FIELD_BY_SCHEMA = {
     contracts.SCENARIO_SCHEMA: "scenario_digest",
+    contracts.SCENARIO_SCHEMA_V2: "scenario_digest",
     contracts.CONFIGURATION_SCHEMA: "configuration_digest",
     contracts.EXPERIMENT_SCHEMA: "experiment_digest",
     contracts.RUN_SCHEMA: "run_digest",
+    contracts.RUN_SCHEMA_V2: "run_digest",
+    contracts.RUN_SCHEMA_V3: "run_digest",
     scoring.SCORER_PASS_SCHEMA: "scorer_pass_digest",
     scoring.EVIDENCE_REF_SCHEMA: "evidence_ref_digest",
     # EVAL-S1 (operation mastermind-agent-evaluation-s1-scorers-20260901-
@@ -141,13 +144,13 @@ def evidence_ref_path(evidence_ref_id: str) -> Path:
 
 def _artifact_path_for(document: dict) -> tuple[str, Path]:
     schema = document.get("schema")
-    if schema == contracts.SCENARIO_SCHEMA:
+    if schema in contracts.SCENARIO_SCHEMAS:
         return document["scenario_id"], scenario_path(document["scenario_id"], document["scenario_version"])
     if schema == contracts.CONFIGURATION_SCHEMA:
         return document["configuration_id"], configuration_path(document["configuration_id"])
     if schema == contracts.EXPERIMENT_SCHEMA:
         return document["experiment_id"], experiment_path(document["experiment_id"])
-    if schema == contracts.RUN_SCHEMA:
+    if schema in contracts.RUN_SCHEMAS:
         return document["run_id"], run_path(document["run_id"])
     if schema == scoring.SCORER_PASS_SCHEMA:
         return document["scorer_pass_id"], scorer_pass_path(document["scorer_pass_id"])
@@ -160,13 +163,13 @@ def _artifact_path_for(document: dict) -> tuple[str, Path]:
 
 def _graph_verify_for(document: dict, resolver) -> VerificationResult:
     schema = document.get("schema")
-    if schema == contracts.SCENARIO_SCHEMA:
+    if schema in contracts.SCENARIO_SCHEMAS:
         return verify_scenario_graph(document, resolver)
     if schema == contracts.CONFIGURATION_SCHEMA:
         return verify_configuration_graph(document, resolver)
     if schema == contracts.EXPERIMENT_SCHEMA:
         return verify_experiment_graph(document, resolver)
-    if schema == contracts.RUN_SCHEMA:
+    if schema in contracts.RUN_SCHEMAS:
         return verify_run_graph(document, resolver)
     if schema == scoring.SCORER_PASS_SCHEMA:
         return verify_scorer_pass_graph(document, resolver)
@@ -184,15 +187,33 @@ class ArtifactStore:
     ``MemoryArtifactResolver`` is a separate, narrower implementation under
     ``tests/agent_eval_factories.py``)."""
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, *, create_root: bool = True) -> None:
+        # Read-only consumers can require an existing store without creating a root.
+        # This narrows accidental init races; the existing trusted-root
+        # filesystem contract does not claim hostile same-user race immunity.
+        if type(create_root) is not bool:
+            raise TypeError("create_root must be a boolean")
         root_path = Path(root)
-        if root_path.exists() and root_path.is_symlink():
-            raise ContractError([ContractDefect("$", "ROOT_IS_SYMLINK", "artifact store root must not be a symlink")])
-        if not root_path.exists():
+        try:
+            before = root_path.lstat()
+        except FileNotFoundError:
+            if not create_root:
+                raise
             root_path.mkdir(parents=True, exist_ok=False, mode=0o700)
-        elif not root_path.is_dir():
+            before = root_path.lstat()
+        if stat.S_ISLNK(before.st_mode):
+            raise ContractError([ContractDefect("$", "ROOT_IS_SYMLINK", "artifact store root must not be a symlink")])
+        if not stat.S_ISDIR(before.st_mode):
             raise ContractError([ContractDefect("$", "ROOT_NOT_A_DIRECTORY", "artifact store root must be a directory")])
-        self._root = root_path.resolve(strict=True)
+        resolved = root_path.resolve(strict=True)
+        # Reject ordinary path substitution between root classification and
+        # canonicalization. No writes are performed when create_root=False.
+        after = root_path.lstat()
+        if (not stat.S_ISDIR(after.st_mode)
+                or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)):
+            raise ContractError([ContractDefect("$", "ROOT_CHANGED", "artifact store root changed during initialization")])
+        self._root = resolved
+        self._root_identity = (after.st_dev, after.st_ino)
 
     @property
     def root(self) -> Path:
@@ -201,10 +222,14 @@ class ArtifactStore:
     # -- internal filesystem safety -----------------------------------
 
     def _require_no_symlink_parents(self, path: Path) -> None:
+        info = self._root.lstat()
+        if (not stat.S_ISDIR(info.st_mode)
+                or (info.st_dev, info.st_ino) != self._root_identity):
+            raise ContractError([ContractDefect(str(self._root), "ROOT_CHANGED", "artifact store root changed")])
         current = self._root
         for part in path.relative_to(self._root).parts[:-1]:
             current = current / part
-            if current.exists() and current.is_symlink():
+            if current.is_symlink():
                 raise ContractError(
                     [ContractDefect(str(current), "SYMLINK_PARENT_REJECTED", "a parent directory is a symlink")]
                 )
@@ -244,6 +269,56 @@ class ArtifactStore:
                 [ContractDefect(str(path), "ARTIFACT_TOO_LARGE", "stored artifact exceeds the canonical size bound")]
             )
         return raw
+
+    def _complete_publication(self, relative_path: Path, document: dict, canonical_bytes: bytes) -> None:
+        """One durability/readback barrier for new and identical publications.
+
+        A previous link may be visible after a failed directory fsync. Replays
+        sync the actual final inode and its whole canonical ancestor chain;
+        existing directories are not evidence of earlier durable creation.
+        This retains the store's trusted-root/same-user concurrency boundary.
+        """
+        final_path = self._root / relative_path
+        self._require_regular_readable(final_path)
+        observed = final_path.lstat()
+        fd = os.open(str(final_path), os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            if (not stat.S_ISREG(opened.st_mode)
+                    or (opened.st_dev, opened.st_ino) != (observed.st_dev, observed.st_ino)):
+                raise ArtifactConflictError(str(final_path), "published artifact identity changed")
+            if handle.read(MAX_CANONICAL_ARTIFACT_BYTES + 1) != canonical_bytes:
+                raise ArtifactConflictError(str(final_path), "published artifact bytes changed")
+            os.fsync(handle.fileno())
+        directory = final_path.parent
+        while True:
+            before = directory.lstat()
+            if not stat.S_ISDIR(before.st_mode):
+                raise ContractError([ContractDefect(str(directory), "SYMLINK_PARENT_REJECTED",
+                                                     "publication ancestor is not a real directory")])
+            descriptor = os.open(str(directory), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                                 | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                opened = os.fstat(descriptor)
+                if (not stat.S_ISDIR(opened.st_mode)
+                        or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)):
+                    raise ContractError([ContractDefect(str(directory), "ROOT_CHANGED",
+                                                         "publication ancestor changed")])
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            if directory.parent == directory:
+                break
+            directory = directory.parent
+        self._require_regular_readable(final_path)
+        if self._read_bytes_bounded(final_path) != canonical_bytes:
+            raise ArtifactConflictError(str(final_path), "publication readback bytes changed")
+        readback = self.read_shape(relative_path)
+        if readback != document:
+            raise ContractError([ContractDefect(str(final_path), "READBACK_MISMATCH",
+                                                 "read-back artifact does not match the published document")])
+        _graph_verify_for(readback, self)
+        self._require_evidence_ref_population_complete(readback)
 
     def _read_json(self, path: Path) -> dict:
         raw = self._read_bytes_bounded(path)
@@ -496,7 +571,7 @@ class ArtifactStore:
     def create(self, document: dict) -> WriteResult:
         if not isinstance(document, dict):
             raise ContractError([ContractDefect("$", "NOT_A_DOCUMENT", "document must be a JSON object")])
-        if document.get("schema") == contracts.RUN_DRAFT_SCHEMA:
+        if document.get("schema") in contracts.RUN_DRAFT_SCHEMAS:
             raise ContractError(
                 [ContractDefect("$.schema", "DRAFT_SCHEMA_REJECTED", "a draft is never publishable to the artifact store")]
             )
@@ -528,51 +603,40 @@ class ArtifactStore:
         self._require_no_symlink_parents(final_path)
         digest_field = _DIGEST_FIELD_BY_SCHEMA[document["schema"]]
 
+        disposition = WriteDisposition.IDEMPOTENT
         if final_path.exists():
             if final_path.is_symlink() or not stat.S_ISREG(final_path.lstat().st_mode):
                 raise ArtifactConflictError(str(final_path), "existing artifact path is not a regular file")
             existing_bytes = self._read_bytes_bounded(final_path)
-            if existing_bytes == canonical_bytes:
-                return WriteResult(WriteDisposition.IDEMPOTENT, str(relative_path), artifact_id, document[digest_field])
-            raise ArtifactConflictError(str(final_path), "existing artifact bytes differ from the proposed document")
-
-        # 4. create-only filesystem publication
-        final_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        temp_fd, temp_name = tempfile.mkstemp(dir=str(final_path.parent), prefix=".tmp-write-", suffix=".part")
-        try:
-            os.chmod(temp_name, 0o600)
-            with os.fdopen(temp_fd, "wb") as handle:
-                handle.write(canonical_bytes)
-                handle.flush()
-                os.fsync(handle.fileno())
+            if existing_bytes != canonical_bytes:
+                raise ArtifactConflictError(str(final_path), "existing artifact bytes differ from the proposed document")
+        else:
+            # 4. create-only filesystem publication
+            final_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            temp_fd, temp_name = tempfile.mkstemp(dir=str(final_path.parent), prefix=".tmp-write-", suffix=".part")
             try:
-                os.link(temp_name, str(final_path))
-            except FileExistsError:
-                existing_bytes = self._read_bytes_bounded(final_path)
-                if existing_bytes != canonical_bytes:
-                    raise ArtifactConflictError(str(final_path), "concurrent publish produced different bytes")
-                return WriteResult(WriteDisposition.IDEMPOTENT, str(relative_path), artifact_id, document[digest_field])
-            except OSError as exc:
-                raise ContractError(
-                    [ContractDefect(str(final_path), "HARD_LINK_UNSUPPORTED", f"hard-link publish failed: {exc}")]
-                ) from exc
-            dir_fd = os.open(str(final_path.parent), os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
+                os.chmod(temp_name, 0o600)
+                with os.fdopen(temp_fd, "wb") as handle:
+                    handle.write(canonical_bytes)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                try:
+                    os.link(temp_name, str(final_path))
+                    disposition = WriteDisposition.CREATED
+                except FileExistsError:
+                    self._require_regular_readable(final_path)
+                    if self._read_bytes_bounded(final_path) != canonical_bytes:
+                        raise ArtifactConflictError(str(final_path), "concurrent publish produced different bytes")
+                except OSError as exc:
+                    raise ContractError(
+                        [ContractDefect(str(final_path), "HARD_LINK_UNSUPPORTED", f"hard-link publish failed: {exc}")]
+                    ) from exc
             finally:
-                os.close(dir_fd)
-        finally:
-            try:
-                os.unlink(temp_name)
-            except FileNotFoundError:
-                pass
+                try:
+                    os.unlink(temp_name)
+                except FileNotFoundError:
+                    pass
 
-        # read back and graph-verify the published artifact
-        readback = self.read_shape(relative_path)
-        if readback != document:
-            raise ContractError(
-                [ContractDefect(str(final_path), "READBACK_MISMATCH", "read-back artifact does not match the published document")]
-            )
-        _graph_verify_for(readback, self)
+        self._complete_publication(relative_path, document, canonical_bytes)
 
-        return WriteResult(WriteDisposition.CREATED, str(relative_path), artifact_id, document[digest_field])
+        return WriteResult(disposition, str(relative_path), artifact_id, document[digest_field])

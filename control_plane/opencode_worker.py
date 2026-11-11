@@ -15,6 +15,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
+from control_plane.child_execution_contracts import ExecutionBinding
+from control_plane.execution_binding_compat import binding_for_launch_spec
 from control_plane.worker_adapter import WorkerExecutionAdapter
 from control_plane.worker_execution_contract import (
     BinaryAttestation, CancelReceipt, CollectionReceipt, ProcessInspector,
@@ -117,18 +119,39 @@ class OpenCodeWorkerAdapter:
 
     def __init__(self, configuration: OpenCodeWorkerConfiguration, *,
                  validation_adapter: WorkerExecutionAdapter | None = None,
-                 inspector: ProcessInspector | None = None) -> None:
+                 inspector: ProcessInspector | None = None,
+                 binding_required: bool = False) -> None:
         if type(configuration) is not OpenCodeWorkerConfiguration:
             raise ValueError("OPENCODE_CONFIGURATION_REQUIRED")
         self.configuration = configuration
         self.validation_adapter = validation_adapter
         self.inspector = inspector
+        #: WO-16: a binding-required lane (placement child) refuses to accept
+        #: any start without the broker-issued ExecutionBinding.v1.
+        self.binding_required = bool(binding_required)
+        self.admitted_binding: ExecutionBinding | None = None
+
+    @property
+    def admitted_class(self) -> str:
+        """The admitted class of the last accepted binding ('' when none)."""
+        return self.admitted_binding.effective_complexity if self.admitted_binding else ""
+
+    def _accept_binding(self, spec: WorkerLaunchSpec,
+                        binding: ExecutionBinding | Mapping[str, Any] | None) -> None:
+        # WO-16 compatibility: accept ExecutionBinding.v1 and the admitted
+        # class.  Refusals precede every lifecycle effect; compatibility does
+        # not change availability below (no full DeepSeek desktop activation).
+        self.admitted_binding = binding_for_launch_spec(
+            spec, binding, required=self.binding_required)
 
     @property
     def missing_composition_fields(self) -> tuple[str, ...]:
         return MISSING_COMPOSITION_FIELDS
 
-    async def start(self, spec: WorkerLaunchSpec) -> WorkerProcessRef:
+    async def start(self, spec: WorkerLaunchSpec, *,
+                    binding: ExecutionBinding | Mapping[str, Any] | None = None
+                    ) -> WorkerProcessRef:
+        self._accept_binding(spec, binding)
         raise OpenCodeLifecycleUnavailable(effect="NO_EFFECT")
 
     async def status(self, ref: WorkerProcessRef) -> WorkerRunStatus:

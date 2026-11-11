@@ -1155,5 +1155,79 @@ class TestC2HistoricalEightRequestTunnel(unittest.TestCase):
         self.assertEqual(legacy[legacy.index(flag)+1], "8")
 
 
+class TestSealedHistoricalPublicEightRequestTunnels(unittest.TestCase):
+    """Match only the seven exact legacy accounts; ordinary staging remains at four."""
+
+    def test_known_seat_set_and_hash_shapes(self):
+        self.assertEqual(set(svc.LEGACY_PUBLIC_EIGHT_SEALS), {
+            "admin-business", "chatgpt1", "chatgpt2-personal", "chatgpt3",
+            "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9", "chatgpt4",
+        })
+        for semantic, raw in svc.LEGACY_PUBLIC_EIGHT_SEALS.values():
+            self.assertEqual(len(semantic), 64)
+            self.assertEqual(len(raw), 64)
+
+    def test_sealed_existing_eight_is_accepted_but_reformatted_bytes_are_not(self):
+        import hashlib
+        data = TestC2HistoricalEightRequestTunnel()._manifest("chatgpt1")
+        data["maxConcurrentRequests"] = 8
+        canonical = hashlib.sha256(json.dumps(
+            data, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        raw = (json.dumps(data, indent=2, sort_keys=True) + "\n").encode()
+        sealed = hashlib.sha256(raw).hexdigest()
+        with mock.patch.object(svc, "LEGACY_PUBLIC_EIGHT_SEALS",
+                               {"chatgpt1": (canonical, sealed)}):
+            self.assertTrue(svc._valid_manifest(data, data["account"], data["label"]))
+            with tempfile.TemporaryDirectory() as temp:
+                path = Path(temp) / "tunnel-manifest.json"
+                path.write_bytes(raw)
+                self.assertEqual(svc._read_manifest(
+                    path, data["account"], data["label"]), data)
+                path.write_text(json.dumps(data, sort_keys=True))
+                with self.assertRaisesRegex(SystemExit, "corrupt tunnel manifest"):
+                    svc._read_manifest(path, data["account"], data["label"])
+            mutated = dict(data, gatewayPort=45030)
+            self.assertFalse(svc._valid_manifest(
+                mutated, mutated["account"], mutated["label"]))
+            version = dict(data, version=2)
+            self.assertFalse(svc._valid_manifest(
+                version, version["account"], version["label"]))
+            unknown = TestC2HistoricalEightRequestTunnel()._manifest("unlisted-seat")
+            self.assertFalse(svc._valid_manifest(
+                unknown, unknown["account"], unknown["label"]))
+
+    def test_single_buffer_denies_manifest_swap_between_parse_and_hash(self):
+        # The old implementation read forged JSON, then separately hashed a
+        # pathname. Returning a known-good hash from that second read admitted
+        # the forged object. The accepted parser must hash its captured bytes.
+        import hashlib
+        forged = TestC2HistoricalEightRequestTunnel()._manifest("chatgpt1")
+        forged["gatewayPort"] = 45030
+        canonical = hashlib.sha256(json.dumps(
+            forged, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        genuine = dict(forged, gatewayPort=45028)
+        genuine_raw = (json.dumps(genuine, indent=2, sort_keys=True) + "\n").encode()
+        old_good_raw_digest = hashlib.sha256(genuine_raw).hexdigest()
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "tunnel-manifest.json"
+            path.write_bytes(json.dumps(forged).encode("utf-8"))
+            with mock.patch.object(
+                svc, "LEGACY_PUBLIC_EIGHT_SEALS",
+                {"chatgpt1": (canonical, old_good_raw_digest)},
+            ), mock.patch.object(
+                svc, "_sha256_file", return_value=old_good_raw_digest,
+            ) as second_read:
+                with self.assertRaisesRegex(SystemExit, "corrupt tunnel manifest"):
+                    svc._read_manifest(path, forged["account"], forged["label"])
+                second_read.assert_not_called()
+
+    def test_default_is_still_four(self):
+        self.assertEqual(svc.MAX_CONCURRENT_REQUESTS, 4)
+        self.assertIn("4", svc._expected_argv(
+            Path(svc.PINNED_TUNNEL_CLIENT), Path("/tmp/fake"), 45029))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,150 @@
+{
+  "schema": "soxx.failure_to_ignite.cumulative_read_only_v19b",
+  "source": {
+    "checks": {
+      "M1_SHA_verified": 9,
+      "v14_independent_replay": 84,
+      "v18_source_audited": 4
+    },
+    "gap_controls": {
+      "KLAC_missing_5m_expected_slots": 7,
+      "KLAC_episode_count": 10,
+      "KLAC_censored": 0
+    },
+    "original_v19_sha256": "d63fee0884ee3a5b44868f2c1d70831ab626976549bc503ed68a1228cbe96521",
+    "KLAC_addendum_sha256": "de32d8053695c12bf667d5b3cfc4d4e5d9832846a94948d6e3b649780ed160f4"
+  },
+  "extra_six_semis": {
+    "label": "six_additional_semiconductor_stocks",
+    "symbols": [
+      "AMAT",
+      "AVGO",
+      "INTC",
+      "KLAC",
+      "LRCX",
+      "MU",
+      "NVDA"
+    ],
+    "resolved": 47,
+    "source_episodes": 47,
+    "mean_base": 0.61975,
+    "mean_no_ignition": 0.49113,
+    "mean_difference": -0.12863,
+    "median_base": -1.59925,
+    "average_lift_without_best": -0.17499,
+    "check_eligible": 20,
+    "stopped_before_3h": 27,
+    "no_ignition_exits": 9,
+    "earlier_losses_helped": 7,
+    "earlier_winners_harmed": 1,
+    "new_winners": 1,
+    "lost_winners": 1,
+    "winner_sacrifice_total": 11.64071,
+    "losers_avoided_total": 5.9214,
+    "week_blocks": 23,
+    "block_bootstrap95": [
+      -0.65488,
+      0.25049
+    ]
+  },
+  "combined": {
+    "label": "all_exploratory_assets_including_original",
+    "symbols": [
+      "AMAT",
+      "AMD",
+      "AVGO",
+      "INTC",
+      "KLAC",
+      "LRCX",
+      "MU",
+      "NVDA",
+      "QQQ",
+      "SMH",
+      "SOXX",
+      "XLE",
+      "XLV"
+    ],
+    "resolved": 91,
+    "source_episodes": 91,
+    "mean_base": 1.92261,
+    "mean_no_ignition": 1.9076,
+    "mean_difference": -0.01501,
+    "median_base": -1.59925,
+    "average_lift_without_best": -0.03956,
+    "check_eligible": 56,
+    "stopped_before_3h": 35,
+    "no_ignition_exits": 21,
+    "earlier_losses_helped": 15,
+    "earlier_winners_harmed": 3,
+    "new_winners": 1,
+    "lost_winners": 3,
+    "winner_sacrifice_total": 16.84202,
+    "losers_avoided_total": 16.16854,
+    "week_blocks": 27,
+    "block_bootstrap95": [
+      -0.28808,
+      0.23068
+    ]
+  },
+  "controls": {
+    "label": "sector_controls_recomputed",
+    "symbols": [
+      "XLE",
+      "XLV"
+    ],
+    "resolved": 10,
+    "source_episodes": 10,
+    "mean_base": 0.95432,
+    "mean_no_ignition": 0.71133,
+    "mean_difference": -0.24299,
+    "median_base": 0.03576,
+    "average_lift_without_best": -0.42478,
+    "check_eligible": 10,
+    "stopped_before_3h": 0,
+    "no_ignition_exits": 4,
+    "earlier_losses_helped": 2,
+    "earlier_winners_harmed": 2,
+    "new_winners": 0,
+    "lost_winners": 2,
+    "winner_sacrifice_total": 5.20131,
+    "losers_avoided_total": 2.77137,
+    "week_blocks": 10,
+    "block_bootstrap95": [
+      -1.08703,
+      0.55131
+    ]
+  },
+  "leave_one_added_semiconductor_out": {
+    "AMAT": {
+      "n": 38,
+      "mean_lift": -0.1868
+    },
+    "INTC": {
+      "n": 39,
+      "mean_lift": -0.1609
+    },
+    "KLAC": {
+      "n": 37,
+      "mean_lift": -0.2087
+    },
+    "LRCX": {
+      "n": 41,
+      "mean_lift": 0.1365
+    },
+    "MU": {
+      "n": 39,
+      "mean_lift": -0.155
+    },
+    "NVDA": {
+      "n": 41,
+      "mean_lift": -0.2118
+    }
+  },
+  "caveats": [
+    "AVGO unavailable: no qualified 15m warmup; NOT scored as zero or success",
+    "KLAC 7 missing observed 5m input bars: none of 10 v19b candidate exposure paths crosses one; other source gaps must be independently checked",
+    "historical 15m/5m stored/live basis and adjustments not point-in-time qualified",
+    "all names correlate during one previously inspected market year; so called independent names are NOT independent event-time holdouts",
+    "sample return means and bootstrap uncertainty do not constitute personalized trade sizing"
+  ]
+}

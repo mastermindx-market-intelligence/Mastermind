@@ -7,12 +7,16 @@ import "./observed-transcript.css";
 type Locale = "en" | "zh-CN";
 const labels = {
   "Observed responses": "已观察的回复",
-  "Search observed responses": "搜索已观察的回复",
+  "Find in these replies": "在这些回复中查找",
+  "Reply details": "回复详情",
+  "Partial reply": "部分回复",
+  "Reply": "回复",
+  "Reply state": "回复状态",
   "Search this window only": "仅搜索此窗口",
   "Clear search": "清除搜索",
   "Formatted responses": "格式化回复",
   "Exact source": "原始文本",
-  "Only this observed window is searched. Full history is not established.": "仅搜索此观察窗口，尚未确认完整历史记录。",
+  "Only these supplied replies are searched.": "仅搜索此处已提供的回复。",
   "Observed response list": "已观察的回复列表",
   "Owner-visible response": "所有者提供的回复",
   "Content withheld": "内容已隐藏",
@@ -85,7 +89,7 @@ export function ObservedTranscript({ items, locale = "en" }: ObservedTranscriptP
   return <section className="observed-transcript" aria-label={t(locale, "Observed responses")}>
     <div className="observed-transcript-toolbar">
       <div className="observed-search">
-        <label htmlFor={`${id}-search`}>{t(locale, "Search observed responses")}</label>
+        <label htmlFor={`${id}-search`}>{t(locale, "Find in these replies")}</label>
         <div className="observed-search-input">
           <input id={`${id}-search`} ref={search} type="search" value={query} maxLength={160}
             placeholder={t(locale, "Search this window only")} aria-describedby={`${id}-coverage`}
@@ -103,7 +107,7 @@ export function ObservedTranscript({ items, locale = "en" }: ObservedTranscriptP
       </button>
     </div>
     <p id={`${id}-coverage`} className="observed-transcript-coverage">
-      {t(locale, "Only this observed window is searched. Full history is not established.")}
+      {t(locale, "Only these supplied replies are searched.")}
     </p>
     {normalized && <p role="status" className="observed-transcript-count">
       {locale === "zh-CN" ? `${matches.length} / ${readable.length} 条可见回复匹配` : `${matches.length} of ${readable.length} visible responses match`}
@@ -115,7 +119,7 @@ export function ObservedTranscript({ items, locale = "en" }: ObservedTranscriptP
         {rendered.map(({ item, ordinal }) => <article key={item.id} className="conversation-response"
           aria-label={locale === "zh-CN" ? `观察回复 ${ordinal}` : `Observed response ${ordinal}`}>
           <header className="observed-response-header">
-            <p className="conversation-eyebrow">{t(locale, visible(item) ? "Owner-visible response" : "Content withheld")} · {item.state}</p>
+            <p className="conversation-eyebrow">{t(locale, !visible(item) ? "Content withheld" : item.state === "partial" ? "Partial reply" : "Reply")} {ordinal}</p>
             {visible(item) && typeof item.text === "string" && item.text.length > 0 &&
               <ResponseCopy key={item.text} text={item.text} ordinal={ordinal} locale={locale} />}
           </header>
@@ -123,6 +127,7 @@ export function ObservedTranscript({ items, locale = "en" }: ObservedTranscriptP
             : item.text == null || item.text === "" ? <p>{t(locale, "No visible text was supplied.")}</p>
             : formatted ? <ObservedResponseMarkdown source={item.text} streaming={item.state === "partial"}
               locale={locale} viewport={scroll.viewport} /> : <p className="conversation-answer">{item.text}</p>}
+          <details className="observed-reply-details"><summary>{t(locale, "Reply details")}</summary><p>{t(locale, "Reply state")}: <code>{item.state}</code></p></details>
         </article>)}
         {items.length === 0 && <p>{t(locale, "No visible response was supplied in this observed window.")}</p>}
         {normalized && matches.length === 0 && <p>{t(locale, "No visible responses match this search.")}</p>}

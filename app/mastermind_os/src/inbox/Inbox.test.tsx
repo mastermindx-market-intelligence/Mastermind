@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Inbox } from "./Inbox";
+import { BriefSharingInbox } from "./BriefSharingInbox";
 import { decodeMission } from "../mission";
 import { projectOffice, type OfficeInput, type ProjectionContext, type SourceState } from "../meta-ceo/projection";
 import fixture from "../fixtures/mission-v2-current-128c46f6.json";
@@ -111,4 +112,24 @@ describe("owner-defined Inbox", () => {
     expect(screen.queryByText("Decide the exact release scope.")).toBeNull();
     expect(screen.queryByText("private:attention-one")).toBeNull();
   });
+});
+
+it("keeps the same Terminal request attempt mounted across unrelated Mission revisions", async () => {
+  const review=vi.fn(async()=>{});
+  const terminal=<BriefSharingInbox locale="en" state="ready" requests={[{
+    requestRef:"request:terminal-one",requestRevision:"1",deliveryId:"delivery:terminal-one",
+    contentSha256:"a".repeat(64),title:"Actual Terminal brief",version:null,
+    audienceName:"Actual team",audienceMemberCount:3,access:"VIEW_ONLY"
+  }]} onReview={review}/>;
+  const {rerender}=render(<Inbox projection={projectOffice(input(),context)} sharingRequests={terminal}/>);
+  fireEvent.click(screen.getByRole("button",{name:"Continue in Terminal"}));
+  await act(async()=>{});
+  expect(screen.getByText("Continue in Terminal to review this request.")).toBeTruthy();
+  const changed={...context,authGeneration:context.authGeneration+1,revisions:{...context.revisions,mission:"mission:2"}};
+  rerender(<Inbox projection={projectOffice(input(),changed)} sharingRequests={terminal}/>);
+  expect(screen.getByText("Continue in Terminal to review this request.")).toBeTruthy();
+  expect((screen.getByRole("button",{name:"Continue in Terminal"}) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button",{name:"Continue in Terminal"}));
+  expect(review).toHaveBeenCalledTimes(1);
+  expect(screen.getAllByRole("heading",{level:1})).toHaveLength(1);
 });

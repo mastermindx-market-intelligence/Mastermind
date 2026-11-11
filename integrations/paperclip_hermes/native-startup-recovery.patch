@@ -1,0 +1,893 @@
+diff --git a/hermes_bootstrap.py b/hermes_bootstrap.py
+index 619dc5747b..0887747a54 100644
+--- a/hermes_bootstrap.py
++++ b/hermes_bootstrap.py
+@@ -605,9 +605,14 @@ if not _pm_repair:
+         # (a failed sync commits nothing), so an offline or half-finished update leaves a
+         # usable Hermes plus a warning. Activation below is the real gate — a tree whose
+         # dependencies cannot load still exits with the repair remedy.
+-        print(f"hermes: source-update completion failed: {exc}; "
+-              "running with the previous dependencies — run `hermes update` to finish it",
+-              file=sys.stderr)
++        from pm.runtime import RuntimeProbeUnavailable
++
++        if isinstance(exc, RuntimeProbeUnavailable):
++            print(f"hermes: {exc}; continuing with the selected dependencies", file=sys.stderr)
++        else:
++            print(f"hermes: source-update completion failed: {exc}; "
++                  "running with the previous dependencies — run `hermes update` to finish it",
++                  file=sys.stderr)
+     try:
+         recover_if_needed(_root)
+         activate_dependencies(_root)
+diff --git a/hermes_cli/cli_chat_error_copy.py b/hermes_cli/cli_chat_error_copy.py
+index cbf6b33b69..af3d76d477 100644
+--- a/hermes_cli/cli_chat_error_copy.py
++++ b/hermes_cli/cli_chat_error_copy.py
+@@ -87,10 +87,10 @@ def chat_error_response(
+ def agent_init_failure_message(error: BaseException) -> str:
+     """Copy for a failed AIAgent build on first message: the user's turn was dropped.
+
+-    A gateway that cannot be reached keeps its whole first line: its discovery detail is already
+-    bounded (``DiscoveryError.bounded_detail``) and ends in the repair command, which the summary
+-    limit would cut mid-path."""
++    Gateway lifecycle refusals retain their native verdict and repair details. They happen before
++    model submission and must not be wrapped in provider-switch advice."""
+     from hermes_cli.gateway_client import GatewayUnavailableError
+
+-    limit = None if isinstance(error, GatewayUnavailableError) else _SUMMARY_LIMIT
+-    return t("cli.error.agent_init_failed", error=_short(refusal_text(error), limit) or type(error).__name__)
++    if isinstance(error, GatewayUnavailableError):
++        return refusal_text(error)
++    return t("cli.error.agent_init_failed", error=_short(refusal_text(error)) or type(error).__name__)
+diff --git a/hermes_cli/gateway_client.py b/hermes_cli/gateway_client.py
+index c574053333..afa0fcdd2c 100644
+--- a/hermes_cli/gateway_client.py
++++ b/hermes_cli/gateway_client.py
+@@ -49,6 +49,26 @@ class GatewayClientError(ValueError):
+     pass
+
+
++def gateway_startup_timeout() -> float:
++    """Local readiness budget; explicit remote connections keep their existing policy."""
++    from hermes_cli.gateway_runtime import DEFAULT_ENSURE_TIMEOUT
++
++    if os.environ.get("HERMES_TUI_GATEWAY_URL", "").strip():
++        return DEFAULT_ENSURE_TIMEOUT
++    name = "HERMES_GATEWAY_STARTUP_TIMEOUT_SECONDS"
++    raw = os.environ.get(name)
++    if raw is None:
++        return DEFAULT_ENSURE_TIMEOUT
++    message = f"{name} must be finite and greater than 0, up to 900 seconds"
++    try:
++        timeout = float(raw)
++    except ValueError:
++        raise GatewayClientError(message) from None
++    if not 0 < timeout <= 900:
++        raise GatewayClientError(message)
++    return timeout
++
++
+ DISCONNECTED = ("Gateway disconnected; turn outcome is unknown. "
+                 "Resume the printed session ID to check whether it completed or was interrupted; do not resend the work.")
+ # A request refused before it reached any socket: nothing is in doubt, so never DISCONNECTED.
+@@ -252,12 +272,16 @@ def private_control_query(home: Path, request: bytes, timeout: float = 5) -> byt
+     from hermes_cli.gateway_runtime_discovery import connect_private
+     deadline = time.monotonic() + timeout
+     with connect_private(home, timeout) as peer:
++        budget = deadline - time.monotonic()
++        if budget <= 0:
++            raise TimeoutError("Gateway bootstrap timed out")
++        peer.settimeout(budget)
+         peer.sendall(request)
+         data = bytearray()
+         while b"\n" not in data:
+             budget = deadline - time.monotonic()
+             if budget <= 0:
+-                raise GatewayClientError("Gateway bootstrap timed out")
++                raise TimeoutError("Gateway bootstrap timed out")
+             peer.settimeout(budget)
+             chunk = peer.recv(4096)
+             if not chunk or len(data) + len(chunk) > 65536:
+@@ -270,8 +294,16 @@ def private_control_query(home: Path, request: bytes, timeout: float = 5) -> byt
+ _UNKNOWN_TICKET_PARAMS = "PermissionError: invalid bootstrap parameters"
+
+
++def _bootstrap_timeout_error():
++    return GatewayUnavailableError(
++        "Gateway local authentication timed out; no message was sent",
++        "inaccessible", "bootstrap_timeout")
++
++
+ def _session_ticket(home: Path, endpoint, *, purpose="interactive", scope=None, subject=None,
+-                    refuse_restart_wait=False) -> str:
++                    refuse_restart_wait=False, timeout=5, deadline=None) -> str:
++    # An absolute caller deadline also charges time queued behind other client-thread work.
++    deadline = min(time.monotonic() + timeout, deadline) if deadline is not None else time.monotonic() + timeout
+     from hermes_cli.gateway_runtime import control_home_for
+     from hermes_cli.gateway_runtime_discovery import _identify_response
+     # A served secondary's ticket is minted by the multiplexer's socket, bound to the secondary.
+@@ -282,15 +314,23 @@ def _session_ticket(home: Path, endpoint, *, purpose="interactive", scope=None,
+     params = {"profile_id": endpoint.profile_id, "instance_id": endpoint.instance_id, "purpose": purpose,
+               **({"scope": scope} if scope else {}), **({"subject": subject} if subject else {}),
+               **({"restart_wait": "refuse"} if refuse_restart_wait else {})}
+-    request = json.dumps({"protocol": 1, "id": 1, "verb": "session-ticket", "params": params}).encode() + b"\n"
+-    answer = private_control_query(home, request)
++    def query():
++        request = json.dumps({"protocol": 1, "id": 1, "verb": "session-ticket", "params": params}).encode() + b"\n"
++        try:
++            remaining = deadline - time.monotonic()
++            if remaining <= 0:
++                raise TimeoutError("Gateway bootstrap timed out")
++            return private_control_query(home, request, timeout=remaining)
++        except TimeoutError:
++            raise _bootstrap_timeout_error() from None
++
++    answer = query()
+     refused = json.loads(answer.split(b"\n", 1)[0]) if refuse_restart_wait else None
+     if isinstance(refused, dict) and refused.get("error") == _UNKNOWN_TICKET_PARAMS:
+         # An owner older than this client (the code on disk was updated under it) cannot hold the
+         # policy; refusing it outright would strand the caller until it restarts. The pre-dial check stands.
+         del params["restart_wait"]
+-        answer = private_control_query(home, json.dumps(
+-            {"protocol": 1, "id": 1, "verb": "session-ticket", "params": params}).encode() + b"\n")
++        answer = query()  # The existing parameter negotiation shares the original deadline.
+     grant = _identify_response(answer)
+     if any(grant.get(k) != v for k, v in {
+         "profile_id": endpoint.profile_id, "instance_id": endpoint.instance_id, "runtime_protocol": 1,
+@@ -347,7 +387,10 @@ async def connect_gateway(endpoint=None, subject=None, *, max_size=8 * 1024 * 10
+         home = gateway_profile_home(get_hermes_home())
+         # A client's own start: the daemon it may launch ends itself once idle (no client, adapter,
+         # cron/kanban work or admission), and the next client starts a fresh one.
+-        result = await asyncio.to_thread(ensure_gateway_runtime, home, idle_exit=True)
++        startup_timeout = gateway_startup_timeout()
++        connection_deadline = time.monotonic() + startup_timeout + 30
++        result = await asyncio.to_thread(
++            ensure_gateway_runtime, home, timeout=startup_timeout, idle_exit=True)
+         if not attachable(result) or (_REFUSE_RESTART_WAIT.get() and result.state != "ready"):
+             detail = getattr(result, "detail", None)
+             if result.reason_code == "runtime_exited" and detail:
+@@ -359,7 +402,12 @@ async def connect_gateway(endpoint=None, subject=None, *, max_size=8 * 1024 * 10
+         endpoint = result.endpoint
+         try:
+             policy: dict = {"refuse_restart_wait": True} if _REFUSE_RESTART_WAIT.get() else {}
+-            ticket = await asyncio.to_thread(_session_ticket, home, endpoint, **policy)
++            now = time.monotonic()
++            ticket_deadline = min(now + 30, connection_deadline - 10)
++            if ticket_deadline <= now:
++                raise _bootstrap_timeout_error()
++            ticket = await asyncio.to_thread(
++                _session_ticket, home, endpoint, timeout=30, deadline=ticket_deadline, **policy)
+         except DiscoveryError as exc:
+             # The control socket refused the ticket: the verdict discovery gives the same refusal.
+             detail = exc.bounded_detail(500)
+diff --git a/hermes_cli/gateway_connection.py b/hermes_cli/gateway_connection.py
+index fe3a5c1cf1..78e418867c 100644
+--- a/hermes_cli/gateway_connection.py
++++ b/hermes_cli/gateway_connection.py
+@@ -17,7 +17,7 @@ import threading
+ import time
+
+ from hermes_cli.gateway_client import (DEFAULT_RPC_TIMEOUT, DISCONNECTED, NOT_SENT, RESUME_KEY_MISMATCH,
+-                                       GatewayClientError, GatewayRPCError)
++                                       GatewayClientError, GatewayRPCError, gateway_startup_timeout)
+
+ logger = logging.getLogger(__name__)
+
+@@ -209,7 +209,9 @@ class GatewayConnection:
+         return state
+
+     # -- lifecycle ---------------------------------------------------------------------------
+-    def start(self, timeout=90):
++    def start(self, timeout=None):
++        if timeout is None:
++            timeout = gateway_startup_timeout() + 30
+         deadline = time.monotonic() + timeout
+         while True:
+             with self._start_lock:
+diff --git a/hermes_cli/gateway_runtime_start.py b/hermes_cli/gateway_runtime_start.py
+index 2ba266f5da..e87c9e9bdc 100644
+--- a/hermes_cli/gateway_runtime_start.py
++++ b/hermes_cli/gateway_runtime_start.py
+@@ -27,6 +27,8 @@ DAEMON_STRIPPED_ENV = (
+     "HERMES_INTERACTIVE", "HERMES_GATEWAY_SESSION", "HERMES_SINGLE_QUERY_SESSION",
+     "HERMES_EPHEMERAL_SYSTEM_PROMPT", "HERMES_PREFILL_MESSAGES_FILE", "HERMES_INFERENCE_PROVIDER",
+     "HERMES_ENABLE_PROJECT_PLUGINS", "HERMES_TUI_CLIENT_ENV",
++    # Startup patience belongs to this client, never to a shared daemon or its later children.
++    "HERMES_GATEWAY_STARTUP_TIMEOUT_SECONDS",
+     # A terminal's shell under a systemd service (gnome-terminal-server, a user unit) carries these; the
+     # unmanaged daemon would then identify as "systemd" and maintenance would refuse it as supervised.
+     "INVOCATION_ID", "JOURNAL_STREAM",
+diff --git a/pm/client.py b/pm/client.py
+index be154967c6..ae89d32f5c 100644
+--- a/pm/client.py
++++ b/pm/client.py
+@@ -12,7 +12,7 @@ import uuid
+ from pm import paths, plugin_inputs
+ from pm.package import InstallError, Runner, StatePackage
+ from pm.plugin_inputs import Candidates, Members, PluginInput, Selection
+-from pm.runtime import is_runtime, runtime_command, runtime_environment
++from pm.runtime import RuntimeProbeUnavailable, is_runtime, runtime_command, runtime_environment
+ from pm.worker_operations import OPERATIONS
+
+
+@@ -375,9 +375,11 @@ def venv_is_current(*, extras: list[str] | None = None, plugins: Members | Candi
+     try:
+         return bool(_request("venv_is_current", {"extras": extras, "plugins": plugin_inputs.encode(plugins)},
+                              project_root=project_root))
++    except RuntimeProbeUnavailable:
++        raise  # An inconclusive checker must not start an application dependency update.
+     except InstallError as exc:
+         if exc.package == "pm-runtime":
+-            return False  # Without its checker, currency cannot be established.
++            return False  # A missing or broken manager still needs its existing repair path.
+         raise
+
+
+diff --git a/pm/runtime.py b/pm/runtime.py
+index db3455efa0..f3ec779e88 100644
+--- a/pm/runtime.py
++++ b/pm/runtime.py
+@@ -19,6 +19,10 @@ from pm.filesystem import native
+ from pm.package import InstallError
+
+
++class RuntimeProbeUnavailable(InstallError):
++    """The selected manager could not be checked; this is not dependency drift."""
++
++
+ def runtime_environment() -> dict[str, str]:
+     """Do not let an activated application or a uv caller select PM's imports."""
+     from hermes_constants import get_hermes_home
+@@ -105,8 +109,18 @@ def _validate(python: Path, env: dict[str, str]) -> str:
+             env=env, capture_output=True, text=True, timeout=30,
+             check=False,
+         )
+-    except (OSError, subprocess.TimeoutExpired) as exc:
++    except subprocess.TimeoutExpired as exc:
++        raise RuntimeProbeUnavailable(
++            "pm-runtime", "validation timed out after 30 seconds",
++            "retry when the host is responsive; no replacement runtime was prepared",
++        ) from exc
++    except OSError as exc:
+         return str(exc)
++    if checked.returncode < 0:
++        raise RuntimeProbeUnavailable(
++            "pm-runtime", f"validation was interrupted by signal {-checked.returncode}",
++            "retry when the host is responsive; no replacement runtime was prepared",
++        )
+     return checked.stderr.strip() or f"exit {checked.returncode}" if checked.returncode else ""
+
+
+diff --git a/tests/hermes_cli/test_gateway_client_startup_timeout.py b/tests/hermes_cli/test_gateway_client_startup_timeout.py
+new file mode 100644
+index 0000000000..0fc52a2cdf
+--- /dev/null
++++ b/tests/hermes_cli/test_gateway_client_startup_timeout.py
+@@ -0,0 +1,176 @@
++"""Native client readiness budgets preserve gateway ownership and remote routing."""
++from types import SimpleNamespace
++import socket
++
++import pytest
++
++from hermes_cli import gateway_client as client
++from hermes_cli import gateway_connection as connection
++from hermes_cli import gateway_runtime as runtime
++
++SETTING = "HERMES_GATEWAY_STARTUP_TIMEOUT_SECONDS"
++
++
++@pytest.fixture(autouse=True)
++def isolated_gateway_selection(monkeypatch):
++    monkeypatch.delenv(SETTING, raising=False)
++    monkeypatch.delenv("HERMES_TUI_GATEWAY_URL", raising=False)
++
++
++@pytest.mark.parametrize("raw,expected", [(None, 60), ("0.5", 0.5), ("60", 60), ("900", 900)])
++def test_startup_budget_is_bounded_and_opt_in(monkeypatch, raw, expected):
++    if raw is not None:
++        monkeypatch.setenv(SETTING, raw)
++    assert client.gateway_startup_timeout() == expected
++
++
++@pytest.mark.parametrize("raw", ["0", "-1", "900.001", "nan", "inf", "-inf", "", "private-do-not-echo"])
++def test_invalid_startup_budget_fails_without_echoing_input(monkeypatch, raw):
++    monkeypatch.setenv(SETTING, raw)
++    with pytest.raises(client.GatewayClientError, match=SETTING) as caught:
++        client.gateway_startup_timeout()
++    assert "private-do-not-echo" not in str(caught.value)
++
++
++@pytest.mark.parametrize("remote", ["ws://localhost/api/ws", "invalid-explicit-remote"])
++def test_explicit_remote_ignores_local_startup_override(monkeypatch, remote):
++    monkeypatch.setenv(SETTING, "private-do-not-echo")
++    monkeypatch.setenv("HERMES_TUI_GATEWAY_URL", remote)
++    assert client.gateway_startup_timeout() == 60
++
++
++@pytest.mark.parametrize("state,reason", [("starting", "deadline"), ("draining", "update_paused")])
++@pytest.mark.asyncio
++async def test_local_ensure_gets_one_budget_and_keeps_native_refusal(monkeypatch, tmp_path, state, reason):
++    monkeypatch.setenv(SETTING, "900")
++    monkeypatch.setenv("HERMES_TUI_GATEWAY_URL", "   ")
++    monkeypatch.setattr(runtime, "gateway_profile_home", lambda home: tmp_path)
++    calls = []
++
++    def ensure(home, **kwargs):
++        calls.append((home, kwargs))
++        return SimpleNamespace(state=state, reason_code=reason, endpoint=None, detail=None)
++
++    monkeypatch.setattr(runtime, "ensure_gateway_runtime", ensure)
++    with pytest.raises(client.GatewayUnavailableError) as caught:
++        async with client.connect_gateway():
++            pytest.fail("A native refusal must never open a chat connection")
++    assert calls == [(tmp_path, {"timeout": 900, "idle_exit": True})]
++    assert (caught.value.state, caught.value.reason_code) == (state, reason)
++
++
++@pytest.mark.parametrize("override,explicit,remote,expected", [
++    (None, None, None, 90),
++    ("900", None, None, 930),
++    ("invalid-local-budget", 5, None, 5),
++    ("invalid-local-budget", None, "ws://localhost/api/ws", 90),
++    ("invalid-local-budget", None, "invalid-explicit-remote", 90),
++])
++def test_classic_wait_shares_startup_budget_and_preserves_explicit_deadline(
++    monkeypatch, override, explicit, remote, expected,
++):
++    if override is not None:
++        monkeypatch.setenv(SETTING, override)
++    if remote is not None:
++        monkeypatch.setenv("HERMES_TUI_GATEWAY_URL", remote)
++    monkeypatch.setattr(connection, "time", SimpleNamespace(monotonic=lambda: 100))
++    viewer = connection.GatewayConnection()
++    viewer._thread = SimpleNamespace(is_alive=lambda: True)
++    waits = []
++    viewer._ready = SimpleNamespace(wait=lambda timeout: waits.append(timeout) or False)
++    with pytest.raises(client.GatewayClientError, match="connection timed out"):
++        if explicit is None:
++            viewer.start()
++        else:
++            viewer.start(explicit)
++    assert waits == [expected]
++
++
++@pytest.mark.asyncio
++async def test_invalid_explicit_remote_keeps_native_failure_without_local_ensure(monkeypatch):
++    monkeypatch.setenv(SETTING, "invalid-local-budget")
++    monkeypatch.setenv("HERMES_TUI_GATEWAY_URL", "invalid-explicit-remote")
++
++    def forbidden(*args, **kwargs):
++        pytest.fail("Explicit remote selection must not ensure a local owner")
++
++    monkeypatch.setattr(runtime, "ensure_gateway_runtime", forbidden)
++    with pytest.raises(client.GatewayClientError, match="Invalid explicit gateway WebSocket URL"):
++        async with client.connect_gateway():
++            pytest.fail("Invalid remote unexpectedly connected")
++
++
++@pytest.mark.asyncio
++async def test_remote_connection_failure_keeps_native_route_with_invalid_local_budget(monkeypatch):
++    monkeypatch.setenv(SETTING, "invalid-local-budget")
++
++    def forbidden(*args, **kwargs):
++        pytest.fail("Remote failure must not invoke local lifecycle")
++
++    monkeypatch.setattr(runtime, "ensure_gateway_runtime", forbidden)
++    with socket.socket() as unavailable:
++        unavailable.bind(("127.0.0.1", 0))
++        url = f"ws://127.0.0.1:{unavailable.getsockname()[1]}/api/ws?token=private-test-value"
++        monkeypatch.setenv("HERMES_TUI_GATEWAY_URL", url)
++        with pytest.raises(client.GatewayClientError, match="no local fallback") as caught:
++            async with client.connect_gateway():
++                pytest.fail("Unavailable remote unexpectedly connected")
++        assert "private-test-value" not in str(caught.value)
++        assert SETTING not in str(caught.value)
++
++
++@pytest.mark.asyncio
++async def test_explicit_endpoint_does_not_parse_local_budget_or_ensure(monkeypatch, tmp_path):
++    from websockets.asyncio import client as websocket_client
++
++    monkeypatch.setenv(SETTING, "invalid-local-budget")
++    monkeypatch.setattr(runtime, "gateway_profile_home", lambda home: tmp_path)
++    monkeypatch.setattr(client, "_session_ticket", lambda *args, **kwargs: "private-test-ticket")
++    endpoint = SimpleNamespace(api_origin="http://localhost")
++    calls = []
++
++    def forbidden(*args, **kwargs):
++        pytest.fail("An explicit endpoint must not ensure a local owner")
++
++    def unavailable(url, **kwargs):
++        calls.append(url)
++        raise OSError("fixture endpoint unavailable")
++
++    monkeypatch.setattr(runtime, "ensure_gateway_runtime", forbidden)
++    monkeypatch.setattr(websocket_client, "connect", unavailable)
++    with pytest.raises(client.GatewayClientError, match="no local fallback"):
++        async with client.connect_gateway(endpoint=endpoint):
++            pytest.fail("Unavailable endpoint unexpectedly connected")
++    assert calls == ["ws://localhost/api/ws"]
++
++
++@pytest.mark.parametrize("backend", ["native_job", "popen"])
++def test_startup_budget_stays_in_client_environment(monkeypatch, tmp_path, backend):
++    import os
++    import sys
++    import time
++    from hermes_cli import gateway_runtime_start as start
++    from tools.environments import local
++
++    monkeypatch.setenv(SETTING, "900")
++    monkeypatch.setenv("RUNTIME_TEST_SENTINEL", "retained")
++    monkeypatch.setattr(local, "served_profile_child_env", lambda *, base, **kwargs: dict(base))
++    monkeypatch.setattr(start, "sys", SimpleNamespace(
++        platform="darwin" if backend == "native_job" else "linux", executable=sys.executable))
++    child = SimpleNamespace(pid=123)
++    captured = []
++
++    def spawn(command, **kwargs):
++        captured.append(kwargs["env"])
++        return child
++
++    def forbidden(*args, **kwargs):
++        pytest.fail("The other spawn backend must not run")
++
++    monkeypatch.setattr(start, "start_gateway_job", spawn if backend == "native_job" else forbidden)
++    monkeypatch.setattr(start.subprocess, "Popen", spawn if backend == "popen" else forbidden)
++    assert start.spawn_unmanaged_gateway(tmp_path, deadline=time.monotonic() + 5) is child
++    assert len(captured) == 1
++    assert SETTING not in captured[0]
++    assert captured[0]["RUNTIME_TEST_SENTINEL"] == "retained"
++    assert os.environ[SETTING] == "900"
+diff --git a/tests/hermes_cli/test_gateway_init_failure_copy.py b/tests/hermes_cli/test_gateway_init_failure_copy.py
+new file mode 100644
+index 0000000000..2c6ed7e50e
+--- /dev/null
++++ b/tests/hermes_cli/test_gateway_init_failure_copy.py
+@@ -0,0 +1,19 @@
++"""Gateway lifecycle refusals keep their native diagnostics before submission."""
++import pytest
++
++from hermes_cli.cli_chat_error_copy import agent_init_failure_message
++from hermes_cli.gateway_client import GatewayUnavailableError
++
++
++@pytest.mark.parametrize("message,state,reason", [
++    ("Gateway draining: update_paused.", "draining", "update_paused"),
++    ("Gateway starting: deadline.", "starting", "deadline"),
++    ("Gateway inaccessible: runtime_exited.\nCheck the startup log, then run hermes gateway ensure.",
++     "inaccessible", "runtime_exited"),
++])
++def test_gateway_init_refusal_preserves_native_lifecycle_diagnostics(message, state, reason):
++    error = GatewayUnavailableError(message, state, reason)
++    rendered = agent_init_failure_message(error)
++    assert rendered == message
++    assert "/model" not in rendered
++    assert "model connection" not in rendered
+diff --git a/tests/hermes_cli/test_gateway_ticket_startup_budget.py b/tests/hermes_cli/test_gateway_ticket_startup_budget.py
+new file mode 100644
+index 0000000000..66c2d27ed5
+--- /dev/null
++++ b/tests/hermes_cli/test_gateway_ticket_startup_budget.py
+@@ -0,0 +1,239 @@
++"""Local ticket bootstrap stays bounded without replaying native authentication."""
++from contextlib import contextmanager
++import json
++from types import SimpleNamespace
++
++import pytest
++
++from hermes_cli import gateway_client as client
++from hermes_cli import gateway_runtime as runtime
++from hermes_cli import gateway_runtime_discovery as discovery
++
++
++@pytest.fixture
++def clock(monkeypatch):
++    now = [100.0]
++    monkeypatch.setattr(client, "time", SimpleNamespace(monotonic=lambda: now[0]))
++    return now
++
++
++@pytest.fixture
++def endpoint(tmp_path, monkeypatch):
++    monkeypatch.delenv("HERMES_TUI_GATEWAY_URL", raising=False)
++    monkeypatch.delenv("HERMES_GATEWAY_STARTUP_TIMEOUT_SECONDS", raising=False)
++    monkeypatch.setattr(runtime, "gateway_profile_home", lambda home: tmp_path)
++    monkeypatch.setattr(runtime, "control_home_for", lambda home, selected: tmp_path)
++    return SimpleNamespace(
++        api_origin="http://127.0.0.1:1", profile_id=str(tmp_path), instance_id="fixture-owner",
++    )
++
++
++def _answer(endpoint):
++    return json.dumps({"ok": True, "protocol": 1, "id": 1, "result": {
++        "profile_id": endpoint.profile_id, "instance_id": endpoint.instance_id,
++        "runtime_protocol": 1, "ticket": "private-fixture-ticket",
++    }}).encode() + b"\n"
++
++
++@pytest.mark.parametrize("startup,elapsed,expected", [
++    (60, 2, 30), (60, 59, 21), (900, 899, 21), (0.5, 0.4, 20.1),
++])
++@pytest.mark.asyncio
++async def test_local_ticket_uses_remaining_connection_budget(
++    monkeypatch, tmp_path, clock, endpoint, startup, elapsed, expected,
++):
++    monkeypatch.setenv("HERMES_GATEWAY_STARTUP_TIMEOUT_SECONDS", str(startup))
++    calls = []
++
++    def ensure(home, **kwargs):
++        assert kwargs == {"timeout": startup, "idle_exit": True}
++        clock[0] += elapsed
++        return runtime.GatewayDiscovery("ready", endpoint)
++
++    def ticket(home, selected, **kwargs):
++        calls.append(kwargs)
++        raise client.GatewayUnavailableError("fixture stop", "inaccessible", "fixture_stop")
++
++    monkeypatch.setattr(runtime, "ensure_gateway_runtime", ensure)
++    monkeypatch.setattr(client, "_session_ticket", ticket)
++    with pytest.raises(client.GatewayUnavailableError, match="fixture stop"):
++        async with client.connect_gateway():
++            pytest.fail("Fixture must stop before opening a socket")
++    assert len(calls) == 1
++    assert calls[0]["timeout"] == 30
++    assert calls[0]["deadline"] - clock[0] == pytest.approx(expected)
++
++
++@pytest.mark.asyncio
++async def test_exhausted_connection_budget_refuses_before_ticket(monkeypatch, clock, endpoint):
++    def ensure(home, **kwargs):
++        clock[0] += 81
++        return runtime.GatewayDiscovery("ready", endpoint)
++
++    def forbidden(*args, **kwargs):
++        pytest.fail("No ticket request may leave after its available budget expired")
++
++    monkeypatch.setattr(runtime, "ensure_gateway_runtime", ensure)
++    monkeypatch.setattr(client, "_session_ticket", forbidden)
++    with pytest.raises(client.GatewayUnavailableError) as caught:
++        async with client.connect_gateway():
++            pytest.fail("Expired bootstrap unexpectedly connected")
++    assert (caught.value.state, caught.value.reason_code) == ("inaccessible", "bootstrap_timeout")
++
++
++@pytest.mark.asyncio
++async def test_explicit_endpoint_retains_default_ticket_budget(monkeypatch, clock, endpoint):
++    calls = []
++
++    def query(home, request, timeout=5):
++        calls.append(timeout)
++        raise TimeoutError("private-fixture-value")
++
++    def forbidden(*args, **kwargs):
++        pytest.fail("An explicit owner must not ensure or start a gateway")
++
++    monkeypatch.setenv("HERMES_GATEWAY_STARTUP_TIMEOUT_SECONDS", "invalid-local-setting")
++    monkeypatch.setattr(runtime, "ensure_gateway_runtime", forbidden)
++    monkeypatch.setattr(client, "private_control_query", query)
++    with pytest.raises(client.GatewayUnavailableError) as caught:
++        async with client.connect_gateway(endpoint=endpoint):
++            pytest.fail("Timed-out ticket unexpectedly connected")
++    assert calls == [5]
++    assert caught.value.reason_code == "bootstrap_timeout"
++    assert "private-fixture-value" not in str(caught.value)
++
++
++@pytest.mark.parametrize("timeout", [5, 30])
++def test_ticket_socket_timeout_is_typed_and_never_retried(
++    monkeypatch, tmp_path, clock, endpoint, timeout,
++):
++    calls = []
++
++    def query(home, request, timeout=5):
++        calls.append((json.loads(request), timeout))
++        raise TimeoutError("private-fixture-value")
++
++    monkeypatch.setattr(client, "private_control_query", query)
++    with pytest.raises(client.GatewayUnavailableError) as caught:
++        client._session_ticket(tmp_path, endpoint, timeout=timeout)
++    assert len(calls) == 1
++    assert calls[0][1] == timeout
++    assert (caught.value.state, caught.value.reason_code) == ("inaccessible", "bootstrap_timeout")
++    assert "private-fixture-value" not in str(caught.value)
++    assert "no message was sent" in str(caught.value)
++
++
++@pytest.mark.parametrize("elapsed,expected_calls", [(4, [5, 1]), (6, [5])])
++def test_old_owner_parameter_negotiation_does_not_reset_ticket_deadline(
++    monkeypatch, tmp_path, clock, endpoint, elapsed, expected_calls,
++):
++    calls = []
++
++    def query(home, request, timeout=5):
++        calls.append(timeout)
++        params = json.loads(request)["params"]
++        if len(calls) == 1:
++            assert params["restart_wait"] == "refuse"
++            clock[0] += elapsed
++            return json.dumps({"ok": False, "error": client._UNKNOWN_TICKET_PARAMS,
++                               "protocol": 1, "id": 1}).encode() + b"\n"
++        assert "restart_wait" not in params
++        return _answer(endpoint)
++
++    monkeypatch.setattr(client, "private_control_query", query)
++    if elapsed < 5:
++        assert client._session_ticket(tmp_path, endpoint, refuse_restart_wait=True) == "private-fixture-ticket"
++    else:
++        with pytest.raises(client.GatewayUnavailableError) as caught:
++            client._session_ticket(tmp_path, endpoint, refuse_restart_wait=True)
++        assert caught.value.reason_code == "bootstrap_timeout"
++    assert calls == expected_calls
++
++
++def test_owner_permission_refusal_is_not_timeout_or_retried(monkeypatch, tmp_path, clock, endpoint):
++    calls = []
++
++    def query(home, request, timeout=5):
++        calls.append(timeout)
++        return json.dumps({"ok": False, "error": "PermissionError: stale runtime instance",
++                           "protocol": 1, "id": 1}).encode() + b"\n"
++
++    monkeypatch.setattr(client, "private_control_query", query)
++    with pytest.raises(discovery.DiscoveryError):
++        client._session_ticket(tmp_path, endpoint)
++    assert calls == [5]
++
++
++def test_private_query_does_not_send_after_connect_used_its_budget(monkeypatch, tmp_path, clock):
++    sent = []
++
++    class Peer:
++        def settimeout(self, timeout):
++            pass
++
++        def sendall(self, request):
++            sent.append(request)
++
++        def recv(self, count):
++            pytest.fail("Expired query must not read a response")
++
++    @contextmanager
++    def connect(home, timeout):
++        clock[0] += 6
++        yield Peer()
++
++    monkeypatch.setattr(discovery, "connect_private", connect)
++    with pytest.raises(TimeoutError):
++        client.private_control_query(tmp_path, b'{"verb":"session-ticket"}\n', timeout=5)
++    assert sent == []
++
++
++def test_private_query_rechecks_budget_after_partial_response(monkeypatch, tmp_path, clock):
++    requests = []
++    reads = []
++    budgets = []
++
++    class Peer:
++        def settimeout(self, timeout):
++            budgets.append(timeout)
++
++        def sendall(self, request):
++            requests.append(request)
++
++        def recv(self, count):
++            reads.append(count)
++            clock[0] += 6
++            return b'{"ok":'
++
++    @contextmanager
++    def connect(home, timeout):
++        yield Peer()
++
++    monkeypatch.setattr(discovery, "connect_private", connect)
++    with pytest.raises(TimeoutError):
++        client.private_control_query(tmp_path, b'{"verb":"session-ticket"}\n', timeout=5)
++    assert len(requests) == len(reads) == 1
++    assert all(0 < timeout <= 5 for timeout in budgets)
++
++
++@pytest.mark.parametrize("queued_seconds,expected_budget", [(7, 23), (31, None)])
++def test_absolute_ticket_deadline_includes_time_waiting_for_worker(
++    monkeypatch, tmp_path, clock, endpoint, queued_seconds, expected_budget,
++):
++    deadline = clock[0] + 30
++    clock[0] += queued_seconds
++    calls = []
++
++    def query(home, request, timeout=5):
++        calls.append(timeout)
++        return _answer(endpoint)
++
++    monkeypatch.setattr(client, "private_control_query", query)
++    if expected_budget is None:
++        with pytest.raises(client.GatewayUnavailableError) as caught:
++            client._session_ticket(tmp_path, endpoint, timeout=30, deadline=deadline)
++        assert caught.value.reason_code == "bootstrap_timeout"
++        assert calls == []
++    else:
++        assert client._session_ticket(tmp_path, endpoint, timeout=30, deadline=deadline) == "private-fixture-ticket"
++        assert calls == [expected_budget]
+diff --git a/tests/hermes_cli/test_kanban_worker_socket_recovery.py b/tests/hermes_cli/test_kanban_worker_socket_recovery.py
+index 00b8fb1c3b..5a91ad491f 100644
+--- a/tests/hermes_cli/test_kanban_worker_socket_recovery.py
++++ b/tests/hermes_cli/test_kanban_worker_socket_recovery.py
+@@ -249,7 +249,7 @@ async def test_a_refused_ticket_reads_like_a_refusing_owner(monkeypatch, _worker
+     monkeypatch.setattr(gateway_runtime, "ensure_gateway_runtime", lambda *_, **__: SimpleNamespace(endpoint=None))
+     monkeypatch.setattr(gateway_runtime, "attachable", lambda result: True)
+
+-    def refuse(*_):
++    def refuse(*_, **__):
+         raise DiscoveryError("invalid_control_response")
+     monkeypatch.setattr(gateway_client, "_session_ticket", refuse)
+     with pytest.raises(GUE) as raised:
+diff --git a/tests/pm/test_runtime_probe_uncertainty.py b/tests/pm/test_runtime_probe_uncertainty.py
+new file mode 100644
+index 0000000000..a785279efa
+--- /dev/null
++++ b/tests/pm/test_runtime_probe_uncertainty.py
+@@ -0,0 +1,105 @@
++"""An inconclusive manager probe must not create an application update obligation."""
++from __future__ import annotations
++
++import json
++from pathlib import Path
++import subprocess
++import sys
++
++import pytest
++
++
++@pytest.fixture
++def selected_manager(tmp_path, monkeypatch):
++    from pm import client, paths, runtime
++    from pm.environments import install_state_dir
++
++    project = tmp_path / "checkout"
++    (project / ".git").mkdir(parents=True)
++    (project / "pyproject.toml").write_text("[project]\nname='example'\n", encoding="utf-8")
++    (project / "uv.lock").write_text("version = 1\n", encoding="utf-8")
++    (project / "install-stamp.json").write_text(
++        json.dumps({"updateMechanism": "self", "dirty": True}), encoding="utf-8",
++    )
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
++    monkeypatch.setenv("HERMES_RUNTIME_DIR", str(tmp_path / "tools"))
++    monkeypatch.setattr(Path, "home", lambda: tmp_path)
++    monkeypatch.delenv("HERMES_DISABLE_LAZY_INSTALLS", raising=False)
++    monkeypatch.setattr(paths, "repo_root", lambda: project)
++    monkeypatch.setattr(client, "is_runtime", lambda: False)
++    monkeypatch.setattr(runtime, "is_runtime", lambda: False)
++    monkeypatch.setattr(runtime, "_resident_runtime", lambda: None)
++    tools = (tmp_path / "uv", Path(sys.executable))
++    monkeypatch.setattr("pm._uv._toolchain", lambda **kwargs: tools)
++    manager = install_state_dir(project) / "pm-runtime"
++    previous = manager / "generations" / "previous"
++    previous.mkdir(parents=True)
++    identity = runtime._inputs(Path(runtime.__file__).parent, tools[1])
++    (previous / "pm-runtime.json").write_text(json.dumps({"inputs": identity}), encoding="utf-8")
++    selected = manager / "selected.json"
++    selected.write_text(json.dumps({"inputs": identity, "generation": "generations/previous"}), encoding="utf-8")
++    return project, manager, previous, selected, tools
++
++
++def _inconclusive(monkeypatch, failure):
++    from pm import runtime
++
++    def probe(command, **kwargs):
++        if failure == "timeout":
++            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
++        return subprocess.CompletedProcess(command, -9, stdout="", stderr="")
++
++    monkeypatch.setattr(runtime.subprocess, "run", probe)
++
++    def stage(*args, **kwargs):
++        pytest.fail("An inconclusive probe attempted to stage a replacement manager")
++
++    monkeypatch.setattr("pm.runtime_stage.stage_runtime", stage)
++
++
++@pytest.mark.parametrize("bootstrap", [False, True])
++@pytest.mark.parametrize("failure", ["timeout", "signal"])
++def test_inconclusive_probe_preserves_selected_manager(selected_manager, monkeypatch, bootstrap, failure):
++    from pm import runtime
++    from pm.package import InstallError
++
++    _project, manager, previous, selected, tools = selected_manager
++    before = selected.read_bytes()
++    _inconclusive(monkeypatch, failure)
++
++    with pytest.raises(InstallError, match="validation (timed out|was interrupted)"):
++        runtime.prepare_runtime(*tools, manager, bootstrap=bootstrap)
++
++    assert selected.read_bytes() == before
++    assert list((manager / "generations").iterdir()) == [previous]
++    # A later successful probe can acquire the same lock and reuse the committed generation.
++    monkeypatch.setattr(runtime, "_validate", lambda python, env: "")
++    assert runtime.prepare_runtime(*tools, manager, bootstrap=False) == runtime._python(previous)
++    assert selected.read_bytes() == before
++
++
++@pytest.mark.parametrize("existing_debt", [False, True])
++@pytest.mark.parametrize("failure", ["timeout", "signal"])
++def test_public_probe_cannot_arm_source_completion(selected_manager, monkeypatch, existing_debt, failure):
++    from hermes_cli import venv_sync
++    from pm import client
++    from pm.package import InstallError
++
++    project, manager, previous, selected, _tools = selected_manager
++    pending = venv_sync.completion_pending_path(project)
++    attempts = pending.with_name("source-completion-attempts")
++    if existing_debt:
++        pending.parent.mkdir(parents=True, exist_ok=True)
++        pending.write_bytes(b"existing update obligation\n")
++        attempts.write_bytes(b"existing retry accounting\n")
++    before = {p: p.read_bytes() if p.exists() else None for p in [selected, pending, attempts]}
++    _inconclusive(monkeypatch, failure)
++
++    # Exercise the actual public client -> runtime_command -> selected-runtime probe.
++    with pytest.raises(InstallError, match="validation (timed out|was interrupted)"):
++        client.venv_is_current(project_root=project)
++    with pytest.raises(InstallError, match="validation (timed out|was interrupted)"):
++        venv_sync.prepare_launch(project, ["chat", "-q", "fixture"])
++
++    assert {p: p.read_bytes() if p.exists() else None for p in before} == before
++    assert list((manager / "generations").iterdir()) == [previous]
+diff --git a/tests/pm/test_source_update_launch.py b/tests/pm/test_source_update_launch.py
+index 6ee7948b80..b775ce6b4c 100644
+--- a/tests/pm/test_source_update_launch.py
++++ b/tests/pm/test_source_update_launch.py
+@@ -595,3 +595,51 @@ def test_failed_tail_attempt_is_counted_and_success_clears_it(source_launch, tmp
+     assert not completion_pending_path(root).exists()
+     assert not _completion_attempts_path(root).exists(), "success cleared the attempt record"
+
++
++
++@pytest.mark.platforms("posix")
++def test_inconclusive_manager_probe_keeps_normal_activation(tmp_path, request):
++    """A transient checker failure warns without inventing a source update."""
++    root, _store_python, _worker_command = request.getfixturevalue("source_launch")
++    launch_python = request.getfixturevalue("isolated_python")
++    repository = Path(__file__).resolve().parents[2]
++    shutil.copy2(repository / "hermes_bootstrap.py", root / "hermes_bootstrap.py")
++    (root / "launch_test_tools.py").write_text(
++        "import sys\n"
++        f"sys.path.insert(1, {str(repository)!r})\n"
++        "from hermes_cli import venv_sync\n"
++        "from pm.runtime import RuntimeProbeUnavailable\n"
++        "def unavailable(*args, **kwargs):\n"
++        "    raise RuntimeProbeUnavailable('pm-runtime', 'validation timed out after 30 seconds', "
++        "'retry when the host is responsive')\n"
++        "venv_sync.prepare_launch = unavailable\n",
++        encoding="utf-8",
++    )
++    entry = root / "launch_probe.py"
++    entry.write_text(
++        "import launch_test_tools\n"
++        "import hermes_bootstrap\n"
++        "import json, sys\n"
++        "print(json.dumps({'executable': sys.executable, 'args': sys.argv[1:]}))\n",
++        encoding="utf-8",
++    )
++    pm.sync_venv(["all"], explicit=True, project_root=root)
++    previous = _fact(root)
++    before_receipts = _receipts(tmp_path)
++    pending = venv_sync.completion_pending_path(root)
++    assert not pending.exists()
++
++    result = subprocess.run(
++        [str(launch_python), str(entry)], cwd=root,
++        env=dict(os.environ), capture_output=True, text=True, timeout=60, check=False,
++    )
++
++    assert result.returncode == 0, result.stderr
++    assert json.loads(result.stdout) == {"executable": str(launch_python), "args": []}
++    assert _fact(root) == previous
++    assert _receipts(tmp_path) == before_receipts
++    assert not pending.exists()
++    assert "validation timed out" in result.stderr
++    assert "continuing with the selected dependencies" in result.stderr
++    assert "source-update completion failed" not in result.stderr
++    assert "hermes update" not in result.stderr

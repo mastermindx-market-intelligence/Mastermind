@@ -57,3 +57,52 @@ async function system(f,{present=false,losePush=false,authenticate}={}) {
 test('lost push response then reopened preparer reconciles exact head with one total push',async()=>{const f=await fixture();try{const a=argumentsFor(f.operationId),first=await system(f,{losePush:true}),one=await first.prepare(a,'b');assert.equal(one.status,'prepared');assert.equal(first.counter.push,1);const reopened=await system(f,{present:true}),two=await reopened.prepare(a,'b');assert.equal(two.status,'prepared');assert.equal(reopened.counter.push,0);assert.equal(two.head_sha,one.head_sha);assert.equal((await git(f.workspace,'ls-remote','--heads','origin','refs/heads/'+f.branch)).stdout.trim().split(/\s+/)[0],one.head_sha)}finally{await f.cleanup()}});
 test('preexisting dirty foreign commission returns unknown with zero write commit push',async()=>{const f=await fixture();try{const a=argumentsFor(f.operationId);await mkdir(path.join(f.workspace,'research','executive_commissions'),{recursive:true});await writeFile(path.join(f.workspace,'research','executive_commissions','COMMISSION.md'),'foreign\n');const s=await system(f,{present:true}),out=await s.prepare(a,'b');assert.equal(out.status,'effect_unknown');assert.deepEqual(s.counter,{push:0,commit:0,write:0})}finally{await f.cleanup()}});
 test('authorization policy drift after write preserves partial source and prevents commit push',async()=>{const f=await fixture();try{let calls=0;const drift=async(_b,a)=>{calls++;return {ok:true,identity:{principal_scope:scope,policy_digest:calls>=4?'3'.repeat(64):policy,expires_at:9999999999},arguments_digest:sha(canonicalJson(a))}};const s=await system(f,{authenticate:drift}),out=await s.prepare(argumentsFor(f.operationId),'b');assert.equal(out.status,'effect_unknown');assert.equal(s.counter.write,1);assert.equal(s.counter.commit,0);assert.equal(s.counter.push,0);await readFile(path.join(f.workspace,'research','executive_commissions','COMMISSION.md'))}finally{await f.cleanup()}});
+
+test('explicit CEO alias has the same pinned operation identity as the TS launch port', () => {
+ const args={workstream:'WS:ALPHA',department:'research',execution_profile:'research_only',
+  objective:'Ship the launch binding',priority:0,frontier_model_alias:'frontier.one'};
+ assert.equal(operationKeyForCommission(args,'scope-A'),'mmos-launch-056eb33de8d699fbb3c205913c93a1b4874f94e7');
+ const other={...args,frontier_model_alias:'frontier.two'};
+ assert.notEqual(operationKeyForCommission(args,'scope-A'),operationKeyForCommission(other,'scope-A'));
+ assert.notDeepEqual(commissionBytes(args,'scope-A'),commissionBytes(other,'scope-A'));
+});
+
+test('selected CEO requires the exact sealed template before source inspection', async () => {
+ const template={workstream:'WS:EXECUTIVE-CAPACITY-FABRIC',department:'engineering',priority:5,
+  execution_profile:'research_only',frontier_model_alias:'frontier.one'};
+ const args={...template,objective:'record requested CEO'};
+ args.operation_key=operationKeyForCommission(args,scope);
+ const head='a'.repeat(40);
+ for (const selected of [undefined,'frontier.two','frontier.one']) {
+  let inspected=0;
+  const workspace={
+   inspect:async()=>{inspected++;return {status:'PRESENT'}},
+   acquire:async()=>{throw Error('unexpected acquisition')},
+   commitCommission:async()=>{throw Error('unexpected commit')},
+   push:async()=>{throw Error('unexpected push')},
+   commissionStatus:async()=>({operation_id:args.operation_key,branch:'sol/web-'+args.operation_key,
+    clean:true,local_head_sha:head,remote_head_sha:head,commission_content_sha256:sha(commissionBytes(args,scope))}),
+  };
+  const {frontier_model_alias,...legacy}=template;
+  const admittedTemplate=selected===undefined?legacy:{...legacy,frontier_model_alias:selected};
+  const prepare=createCommissionPreparer({workspace,files:{write:async()=>{throw Error('unexpected write')}},
+   authenticate:async(_bearer,a)=>({ok:true,identity:{principal_scope:scope,policy_digest:policy,
+    expires_at:9999999999},arguments_digest:sha(canonicalJson(a))}),
+   baseSha:head,policyDigest:policy,grants:[{principal_scope:scope,template:admittedTemplate}]}).prepare;
+  const outcome=await prepare(args,'inert bearer');
+  assert.equal(inspected,selected==='frontier.one'?1:0);
+  assert.equal(outcome.status,selected==='frontier.one'?'prepared':'refused');
+ }
+});
+
+
+test('sealed CEO alias grants reject non-exact trailing newline identities', () => {
+ const workspace={inspect:async()=>{},acquire:async()=>{},commitCommission:async()=>{},
+  push:async()=>{},commissionStatus:async()=>{}};
+ for (const alias of ['frontier.one\n','frontier.one\r\n','UPPER','a'.repeat(65),'']) {
+  assert.throws(()=>createCommissionPreparer({workspace,files:{write:async()=>{}},
+   authenticate:async()=>{},baseSha:'a'.repeat(40),policyDigest:policy,
+   grants:[{principal_scope:scope,template:{...grant()[0].template,frontier_model_alias:alias}}]}),
+   /COMMISSION_GRANT_INVALID/);
+ }
+});

@@ -18,6 +18,7 @@ import math
 import os
 from pathlib import Path
 import pwd
+import re
 import secrets
 import socket
 import stat
@@ -27,6 +28,10 @@ import tempfile
 import threading
 import time
 
+from control_plane.child_execution_contracts import (
+    CANONICAL_TASK_COMPLEXITIES, POLICY_REVISION, WITNESS_DISPOSITIONS,
+    canonical_task_complexity,
+)
 from control_plane.fabric_control_start import ControlStartAuthority
 from control_plane.paid_model_execution_contract import (
     ADAPTER_ID, ATTESTATION_SCHEMA, PROFILE_ID, EXECUTION_SURFACE,
@@ -46,6 +51,107 @@ class PaidOwnerRefused(ValueError):
 
 def _refuse():
     raise PaidOwnerRefused('canonical_paid_original_owner_unavailable')
+
+
+# --- admitted child class projection (MMOS V1 WO-05; census C4.4) --------------
+#: The owner projects the broker-admitted classification of the claim into the
+#: child env. Values derive ONLY from the admitted record carried in the
+#: authenticated Control payload — never a blanket stamp, never caller or child
+#: env (Rev 4 §S3.A l.191: children cannot self-promote via env).
+PAID_CHILD_ADMISSION_SCHEMA = 'mastermind.paid_child_admission/v1'
+#: Explicit compatibility mapping value for the legacy POOL_TASK_CLASS consumers
+#: (census C4.4): the paid operator surface —
+#: session_bridge/paid_operator/fabric_operator_issue.py and
+#: fabric_operator_client.py, plus remote_sub.sh's operator scope — requires
+#: exactly this string for the operator role. Every other admitted task kind
+#: projects verbatim.
+LEGACY_OPERATOR_TASK_CLASS = 'domain_orchestration'
+#: Projected env names. POOL_TASK_CLASS/POOL_TASK_COMPLEXITY are the legacy
+#: names (prospective_completion/candidate/fabric_task.py reads
+#: POOL_TASK_COMPLEXITY as existing economic metadata; remote_sub.sh forwards
+#: both and lifts its runtime floor from the canonical long names); the other
+#: two carry the witness disposition and policy revision additively.
+_ADMITTED_POOL_ENV_NAMES = ('POOL_TASK_CLASS', 'POOL_TASK_COMPLEXITY',
+                            'POOL_WITNESS_DISPOSITION', 'POOL_POLICY_REVISION')
+_TASK_KIND_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z')
+
+
+def legacy_pool_task_class(task_kind):
+    """The explicit POOL_TASK_CLASS compatibility mapping (WO-05, census C4.4).
+
+    The operator role keeps the legacy literal its consumers require; every
+    other admitted task kind passes through unchanged.
+    """
+    if task_kind == LEGACY_OPERATOR_TASK_CLASS:
+        return LEGACY_OPERATOR_TASK_CLASS
+    return task_kind
+
+
+def admitted_class_digest(record):
+    """Digest pinning a child classification record to its admitted binding.
+
+    Canonical long complexity names only (the shared boundary vocabulary); the
+    digest covers the classification fields together with the exact broker
+    binding, so a record cannot be re-pointed to another claim or inflated
+    without breaking it.
+    """
+    return digest({'binding': record['binding'],
+                   'task_kind': record['task_kind'],
+                   'effective_complexity':
+                       canonical_task_complexity(record['effective_complexity']),
+                   'witness_disposition': record['witness_disposition'],
+                   'policy_revision': record['policy_revision']})
+
+
+def admitted_child_class_record(payload):
+    """Validate and return the admitted classification of THIS start payload.
+
+    The record rides the authenticated payload as ``paid_child_admission`` and
+    must match the broker-admitted ``binding`` exactly. Refusal (never a
+    default) when the record is absent, malformed, off-vocabulary, from another
+    policy revision, bound to a different claim, or re-stamped past its digest.
+    """
+    record = payload.get('paid_child_admission')
+    if (type(record) is not dict or set(record) != {
+            'schema', 'binding', 'task_kind', 'effective_complexity',
+            'witness_disposition', 'policy_revision', 'admission_digest'}):
+        _refuse()
+    if (record['schema'] != PAID_CHILD_ADMISSION_SCHEMA
+            or record['binding'] != payload['binding']
+            or record['policy_revision'] != POLICY_REVISION):
+        _refuse()  # classification drift is a conflict, not a new default
+    task_kind = record['task_kind']
+    if type(task_kind) is not str or not _TASK_KIND_ID.fullmatch(task_kind):
+        _refuse()
+    complexity = canonical_task_complexity(record['effective_complexity'])
+    if complexity not in CANONICAL_TASK_COMPLEXITIES:
+        _refuse()  # paid children classify on the complexity ladder only
+    if record['witness_disposition'] not in WITNESS_DISPOSITIONS:
+        _refuse()
+    if type(record['admission_digest']) is not str or (
+            record['admission_digest'] != admitted_class_digest(record)):
+        _refuse()  # a re-stamped record cannot self-promote past its digest
+    return (task_kind, complexity, record['witness_disposition'],
+            record['policy_revision'])
+
+
+def admitted_pool_class_env(payload):
+    """Server-derived POOL_* projection of the admitted request/binding.
+
+    Refuses when an inherited env value disagrees with the admitted digest:
+    the surrounding lane cannot promote the child's class through env. There
+    is no blanket fallback — without an admitted record the start refuses.
+    """
+    task_kind, complexity, witness, revision = admitted_child_class_record(payload)
+    derived = dict(POOL_TASK_CLASS=legacy_pool_task_class(task_kind),
+                   POOL_TASK_COMPLEXITY=complexity,
+                   POOL_WITNESS_DISPOSITION=witness,
+                   POOL_POLICY_REVISION=revision)
+    for name in _ADMITTED_POOL_ENV_NAMES:
+        inherited = os.environ.get(name)
+        if inherited is not None and inherited != derived[name]:
+            _refuse()  # env disagrees with the admitted digest
+    return derived
 
 
 def _identity(info):
@@ -127,7 +233,14 @@ def qualify_paid_startup(release_root, *, config):
     required = ('remote_sub.sh', 'paid_controller_spawn.py', 'paid_controller_channel.py',
                 'paid_model_owner.py', 'paid_glm_model_client.py', 'linux_process_identity.py',
                 'paid_incumbent_state.py','host_pull.sh','host_pull_backend.py',
-                'host_pull_probe.template','paid_host_qualification.py')
+                'host_pull_probe.template','paid_host_qualification.py',
+                'paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py',
+                'paid_provider_entry.py','paid_host_readiness.py',
+                'fabric_task.py','pool_ledger.py','pick.py','remote_sub_helpers.py',
+                'artifact_delivery.py','native_runtime_bindings.py','quota_circuit.py',
+                'provider_outcome.py','a04_terminal_reconcile.py',
+                'native_completion_reconcile.py','native_prestart_reconcile.py',
+                'native_preexec_reconcile.py','native_host_review_controller_reconcile.py')
     manifest = json.loads(_root_source(root / '.executive-release-manifest.json'))
     if (type(manifest) is not dict
             or set(manifest) != {'schema_version', 'commit_sha', 'tree_sha', 'entries'}
@@ -428,6 +541,30 @@ class CanonicalPaidBackend:
                 or account!=payload['paid_account']):_refuse()
         self._require_account_status(account)
 
+    def _provider_entry_descriptor(self, payload):
+        """Re-open the actual installed owner, not a supplied context dictionary."""
+        self._require_source_context(payload)
+        import paid_host_readiness as readiness
+        from control_plane.paid_fabric_wire import provider_entry_descriptor
+        from ops.native_fabric.quota_continuity.candidate import paid_provider_entry
+        if Path(readiness.__file__).resolve()!=self._startup.native_ext/'paid_host_readiness.py':_refuse()
+        with readiness.open_installed_context() as context:
+            context.check()
+            source = payload['paid_source_config']
+            if context.initializer_commitment != source['qualification']['initializer_commitment']:_refuse()
+            hashes = {}
+            for name in paid_provider_entry.SOURCE_NAMES:
+                path = self._startup.native_ext/name
+                raw = _root_source(path)
+                sha = hashlib.sha256(raw).hexdigest()
+                if self._startup.sources.get(str(path.relative_to(self._startup.release_root))) != sha:_refuse()
+                hashes[name] = sha
+            value = provider_entry_descriptor(payload, sources_sha256=hashes,
+                readiness_binding=context.binding,
+                config_identity=readiness.qualified_config_identity(context))
+            context.check()
+        return value
+
     def require_original_controller(self, payload, lease, *, expected=None):
         self.require_gateway(self._gateway)
         self._require_source_context(payload)
@@ -512,6 +649,9 @@ class CanonicalPaidBackend:
             capsule = self._gateway._issue_canonical(operation.payload,
                 authority=operation.authority, lease_id=lease_id, ttl=ttl,
                 request_body=json.loads(compile_request(operation.payload)))
+            # This addition is correlation DATA on the already authenticated
+            # original channel. Only the actual issuer/Control/lease owns auth.
+            capsule['provider_entry'] = self._provider_entry_descriptor(operation.payload)
             operation.capsule = capsule
             self._channel.answer_lease(sock, run_id=operation.payload['binding']['attempt_id'],
                 lease_id=lease_id, nonce=operation.nonce, capsule=capsule)
@@ -539,6 +679,7 @@ class CanonicalPaidBackend:
             _refuse()
         operation.authority.require(operation.payload)
         self.require_original_controller(operation.payload, operation.lease)
+        if operation.capsule.get('provider_entry') != self._provider_entry_descriptor(operation.payload):_refuse()
 
     def consume_provider_intent(self, claims):
         self.require_canonical_request(claims)
@@ -553,6 +694,9 @@ class CanonicalPaidBackend:
         if operation.launch_frame is not None:
             _refuse()
         self.require_original_controller(operation.payload, operation.lease)
+        if (operation.capsule is None
+                or operation.capsule.get('provider_entry') != self._provider_entry_descriptor(operation.payload)):
+            _refuse()
         support = json.loads(_private_read(
             self._startup.log_dir/(operation.payload['binding']['attempt_id']+'.support.json'), 65536))
         if type(support) is not dict:
@@ -633,6 +777,7 @@ class CanonicalPaidBackend:
         authority.require(payload)
         body = compile_request(payload)
         self._require_source_context(payload)
+        self._provider_entry_descriptor(payload)
         from control_plane.paid_fabric_wire import require_paid_physical
         require_paid_physical(payload)
         run_id = payload['binding']['attempt_id']
@@ -640,6 +785,9 @@ class CanonicalPaidBackend:
             if self._stop_fence is not None:_refuse()
             if self._occupied(run_id):
                 _refuse()  # original record is never reconstructed into START
+            # Server-derived class projection of the admitted request/binding;
+            # refuses before any filesystem or socket effect (WO-05, census C4.4).
+            class_env = admitted_pool_class_env(payload)
             fd, name = tempfile.mkstemp(prefix='.' + run_id + '.canonical-input.',
                                         dir=self._startup.log_dir)
             try:
@@ -667,7 +815,7 @@ class CanonicalPaidBackend:
                 POOL_STATUS_JSON=str(self._startup.owner_ext.parent/'orch/fabric/status.json'),
                 POOL_LEDGER_PATH=str(self._startup.owner_ext.parent/'orch/fabric/ledger.jsonl'),
                 POOL_POLICY_YAML=str(self._startup.owner_ext.parent/'orch/fabric/pools.yaml'),
-                POOL_TASK_CLASS='research', POOL_TASK_COMPLEXITY='C2_COMPLEX_BOUNDED',
+                **class_env,
                 REMOTE_SUB_PYTHON=sys.executable,
                 FABRIC_CANONICAL_PAID_MODE='sealed-model-only-v1',
                 FABRIC_CANONICAL_PAID_NONCE=nonce,
@@ -841,6 +989,42 @@ class CanonicalPaidBackend:
                         start_state='NO_RETAINED_START')
         if not starts:
             _refuse()
+        if operation == 'native-fabric-status':
+            # The authenticated Control reader has already joined the current
+            # principal/root to this exact immutable original paid launch. Its
+            # selectors alone cannot substitute a successor or another process.
+            original = starts[0]
+            if (original['request_sha256'] != payload['start_request_sha256']
+                    or digest(original['process_ref']) != payload['process_ref_sha256']):
+                _refuse()
+            before = self._installed_source()
+            rows = [row for row in before['bindings']
+                    if digest(row['physical_binding']) == payload['physical_binding_sha256']]
+            if len(rows) != 1:
+                _refuse()
+            self._require_source_data(rows[0]['physical_binding'], rows[0]['source_config'])
+            import fabric_task
+            if Path(fabric_task.__file__).resolve() != self._startup.native_ext / 'fabric_task.py':
+                _refuse()
+            # This is the actual incumbent status/ledger reader, using fixed
+            # original-owner data. It does not collect, adjudicate or refresh.
+            from control_plane.workspace_owned_task import await_owned
+            status = await await_owned(asyncio.create_task(asyncio.to_thread(
+                fabric_task.inspect_run, payload['run_id'], owner_ext=self._startup.owner_ext)))
+            if self._installed_source() != before:
+                _refuse()
+            self._require_source_data(rows[0]['physical_binding'], rows[0]['source_config'])
+            self.require_gateway(self._gateway)
+            # Re-read the HMAC journal after the native observation. Appending
+            # an original collection is fine; replacing its start is not.
+            after = [r['value'] for r in self._records(payload) if r['kind'] == 'start']
+            if after != [original]:
+                _refuse()
+            from common.executive_workspace_fabric_contract import status_metadata
+            status = status_metadata(status, run_id=payload['run_id'], root_id=payload['binding']['root_id'],
+                                     parent_run_id=payload['parent_run_id'])
+            return dict(common, status=status, request_sha256=payload['start_request_sha256'],
+                        process_ref_sha256=payload['process_ref_sha256'])
         if operation == 'status':
             collections = [r['value'] for r in records if r['kind'] == 'collection']
             if len(collections) > 1:

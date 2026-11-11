@@ -1,0 +1,9 @@
+{
+  "name": "mastermind-browser-app-control-profile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Opt-in semantic app adapter inside the existing Workbench browser resource.",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2"
+  }
+}

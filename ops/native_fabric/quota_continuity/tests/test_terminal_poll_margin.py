@@ -28,7 +28,7 @@ def shell_function(path):
 
 
 def budget(path, maximum, poll):
-    assert isinstance(maximum, int) and 1 <= maximum <= 7200
+    assert isinstance(maximum, int) and 1 <= maximum <= 14400
     assert isinstance(poll, int) and 1 <= poll <= maximum
     script = (
         f'COMMISSION_ACTIVE=0; MAX_SECS={maximum}; POLL_SECS={poll}; '
@@ -46,6 +46,7 @@ class TerminalPollBudgetTests(unittest.TestCase):
     def test_max_fuse_unchanged_and_two_interval_reserve(self):
         for file in PATHS:
             for maximum, poll, expected_child in (
+                (14400, 30, 14340),
                 (7200, 30, 7140),
                 (3600, 30, 3540),
                 (3600, 10, 3580),
@@ -58,6 +59,20 @@ class TerminalPollBudgetTests(unittest.TestCase):
                     self.assertEqual(child, expected_child)
                     self.assertGreater(child, 0)
                     self.assertLessEqual(child, fuse)
+
+    def test_fast_observer_caps_large_caller_poll_margin_at_30s(self):
+        # Candidate only: the older Grok overlay has its own original
+        # 120-second observation contract and is not silently republished.
+        file = ROOT / 'candidate/remote_sub.sh'
+        for max_secs, poll, expected_child in (
+                (14400, 120, 14340),
+                (3600, 120, 3540),
+                (7200, 45, 7140),
+                (210, 120, 150),
+        ):
+            with self.subTest(max_secs=max_secs, poll=poll):
+                self.assertEqual(budget(file, max_secs, poll),
+                                 (max_secs, expected_child))
 
     def test_edge_cases_do_not_make_negative_timeout(self):
         for file in PATHS:
@@ -103,7 +118,8 @@ class TerminalPollBudgetTests(unittest.TestCase):
             self.assertIn('while [ $((SECONDS - WAIT_STARTED_SECONDS)) -lt "$MAX_SECS" ]; do', body)
             self.assertIn('EFFECT_UNKNOWN timeout max_secs=$MAX_SECS rc_file_missing=1; preserve broker lease until TTL', body)
             self.assertIn('PRESERVE_LEASE=1', body)
-            self.assertIn('MAX_SECS must not exceed 7200', body)
+            self.assertIn('MAX_SECS must not exceed 14400' if file == PATHS[0]
+                          else 'MAX_SECS must not exceed 7200', body)
 
     def test_native_inventory_closure_and_original_preimage(self):
         manifest = json.loads((ROOT / 'rollout/native-manifest.json').read_text())
@@ -113,10 +129,11 @@ class TerminalPollBudgetTests(unittest.TestCase):
         original = ROOT / 'source/remote_sub.sh'
         # The closed, hash-pinned forward candidate preserves both reviewed
         # Grok behavior and caller UTC narrowing. Both distinct launchers keep
-        # their real runtime-margin checks above; this asserts the actual source.
+        # their real runtime-margin checks above; this current pin additionally
+        # binds the qualified APPLICATION carrier and private-diagnostic retention.
         selected = candidate
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),
-                         '09e000db51b2eca4fadd2e3d1a201f4027b4ea725359d1b42ef4d3baf92fe5d7')
+                         '1b7618c76aedfe058caf5eb0bc21667051af14beffa7a706f1ef5c92551563ca')
         self.assertEqual(inventory['files']['ext/remote_sub.sh']['source'],
                          'candidate/remote_sub.sh')
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),

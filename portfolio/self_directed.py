@@ -31,6 +31,8 @@ import json
 import logging
 import math
 import os
+import re
+import stat
 from collections import defaultdict, deque
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -52,8 +54,62 @@ _STARTING_NAV = 1_000_000.0
 # persistence helpers
 # ---------------------------------------------------------------------------
 
-def _ensure_dir() -> None:
-    _DATA.mkdir(parents=True, exist_ok=True)
+def _check_book_dir(data_dir: Path) -> tuple[str | None, OSError | None]:
+    """Classify a book's data directory WITHOUT creating it (E14 ruling b/c).
+
+    Returns (None, None) for an existing directory, else (problem, exc) with problem one of
+    ``data_dir_missing``, ``data_dir_not_directory``, ``data_dir_unreadable:<ExcName>``.
+    """
+    try:
+        st = os.stat(data_dir)
+    except FileNotFoundError as exc:
+        return "data_dir_missing", exc
+    except OSError as exc:
+        return f"data_dir_unreadable:{type(exc).__name__}", exc
+    if not stat.S_ISDIR(st.st_mode):
+        return "data_dir_not_directory", None
+    return None, None
+
+
+def _classify_account_path(account_path: Path) -> tuple[str, str | None, OSError | None]:
+    """Classify account.json by stat only (E14 ruling a/b): ("absent"|"present"|"invalid", problem, exc).
+
+    ``absent`` ONLY when the book directory exists and ``os.lstat`` raises FileNotFoundError.
+    A dangling symlink is ``invalid``/``dangling_symlink``; any other stat failure is
+    ``invalid``/``unreadable:<ExcName>``; a directory problem is ``invalid``/``data_dir_*``.
+    """
+    problem, exc = _check_book_dir(account_path.parent)
+    if problem:
+        return "invalid", problem, exc
+    try:
+        os.lstat(account_path)
+    except FileNotFoundError:
+        return "absent", None, None
+    except OSError as exc:
+        return "invalid", f"unreadable:{type(exc).__name__}", exc
+    try:
+        os.stat(account_path)
+    except FileNotFoundError as exc:
+        return "invalid", "dangling_symlink", exc
+    except OSError as exc:
+        return "invalid", f"unreadable:{type(exc).__name__}", exc
+    return "present", None, None
+
+
+def _require_book_dir(*, step: str = "require_book_dir") -> Path:
+    """Return the book's existing data dir; fail closed (typed, no write) if it is not usable."""
+    problem, exc = _check_book_dir(_DATA)
+    if problem:
+        _raise_path_invalid(_DATA, [problem], cause=exc, step=step)
+    return _DATA
+
+
+def bootstrap_book_dir() -> Path:
+    """EXPLICIT first-ever book creation (E14 ruling c): the book dir and the published-snapshot
+    dir, each one level, never parents.  Not reachable from a GET, the scheduler or a sweep."""
+    _DATA.mkdir(exist_ok=True)
+    _PUBLISHED_PATH.parent.mkdir(exist_ok=True)
+    return _DATA
 
 
 def _now_iso() -> str:
@@ -156,13 +212,21 @@ def account_file_status(*, path: str | Path | None = None) -> dict[str, Any]:
 
     NEVER writes, quarantines, alerts or raises.  ``path`` overrides the module's account path
     (resolved at call time).  Returns ``{status, path, sha256, size, problems}`` with status
-    MISSING | VALID | INVALID; problems is ``["unreadable:<ExcName>"]``, ``["unparseable"]`` or
-    the :func:`validate_account_state` codes.
+    MISSING | VALID | INVALID; problems is ``["unreadable:<ExcName>"]``, ``["unparseable"]``,
+    a path-level code (``dangling_symlink``, ``data_dir_missing``, ``data_dir_not_directory``,
+    ``data_dir_unreadable:<ExcName>``) or the :func:`validate_account_state` codes.
     """
     account_path = Path(path) if path is not None else _ACCOUNT_PATH
-    if not account_path.exists():
+    try:
+        kind, problem, _exc = _classify_account_path(account_path)
+    except Exception as exc:  # noqa: BLE001 — classification must never raise
+        kind, problem = "invalid", f"unreadable:{type(exc).__name__}"
+    if kind == "absent":
         return {"status": "MISSING", "path": str(account_path), "sha256": None,
                 "size": None, "problems": []}
+    if kind == "invalid":
+        return {"status": "INVALID", "path": str(account_path), "sha256": None,
+                "size": None, "problems": [problem]}
     try:
         raw_bytes = account_path.read_bytes()
     except Exception as exc:  # noqa: BLE001 — classification must never raise
@@ -179,11 +243,21 @@ def account_file_status(*, path: str | Path | None = None) -> dict[str, Any]:
 
 
 def _atomic_write_bytes(path: Path, payload: bytes) -> None:
-    """Durably replace one runtime-state file without exposing a partial JSON document."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Replace one complete file, retaining an existing target's permission bits.
+
+    Fresh files retain the existing open/umask behavior. Directory admission stays with each
+    caller; this primitive never creates directories or supplies a multi-file transaction.
+    """
+    existing_mode = None
+    try:
+        existing_mode = path.stat().st_mode & 0o777
+    except FileNotFoundError:
+        pass
     tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     try:
         with tmp.open("wb") as fh:
+            if existing_mode is not None:
+                os.fchmod(fh.fileno(), existing_mode)
             fh.write(payload)
             fh.flush()
             os.fsync(fh.fileno())
@@ -286,6 +360,78 @@ def _raise_invalid_account(path: Path, raw_bytes: Optional[bytes], problems: lis
     raise error
 
 
+def _raise_path_invalid(
+    path: Path,
+    problems: list[str],
+    *,
+    cause: Exception | None = None,
+    step: str = "load_account",
+) -> NoReturn:
+    """Fail closed on a path-level problem (dangling symlink, missing/unusable book dir).
+
+    Writes NOTHING: no quarantine copy, no ledger row, no directory.  Emits one best-effort
+    HARD_STOP run_event and one log line, then raises SelfDirectedAccountInvalid.
+    """
+    record: dict[str, Any] = {
+        "event": "account_state_invalid",
+        "book": "self_directed",
+        "path_name": path.name,
+        "source_sha256": None,
+        "size": None,
+        "problems": list(problems),
+        "quarantine_file": None,
+        "status": "path_invalid",
+        "detected_at": datetime.now(timezone.utc).isoformat(),
+        "recoverable": True,
+    }
+    try:
+        from control_plane import run_events  # lazy: keeps this module import-light
+        run_events.append({
+            "kind": "account_state_invalid",
+            "job": "self_directed",
+            "book": "self_directed",
+            "step": step,
+            "status": "error",
+            "severity": "HARD_STOP",
+            "actor": "deterministic_engine",
+            "extra": {
+                "problems": record["problems"],
+                "quarantine_file": None,
+                "quarantine_status": "path_invalid",
+                "source_sha256": None,
+                "recoverable": True,
+            },
+        })
+    except Exception as exc:  # noqa: BLE001 — event logging never re-enables an invalid book
+        record["event_log_error"] = repr(exc)[:300]
+    logging.getLogger(__name__).error(
+        "self_directed account_path_invalid path=%s problems=%s",
+        path.name, record["problems"],
+    )
+    error = SelfDirectedAccountInvalid(
+        f"self-directed account state invalid: {problems}",
+        problems=list(problems), record=record,
+    )
+    if cause is not None:
+        raise error from cause
+    raise error
+
+
+def _raise_for_path_problem(
+    account_path: Path,
+    problem: str | None,
+    exc: OSError | None,
+) -> NoReturn:
+    """Route one path-classification problem to its fail-closed raise (E14).
+
+    ``unreadable:*`` keeps the E13 quarantine path (best-effort copy + one ledger row + one
+    event); every other problem (dangling symlink, unusable book dir) writes NOTHING."""
+    problem = problem or "unreadable:Unknown"
+    if problem.startswith("unreadable:"):
+        _raise_invalid_account(account_path, None, [problem], cause=exc)
+    _raise_path_invalid(account_path, [problem], cause=exc)
+
+
 def _load_account() -> dict[str, Any]:
     """Load account state — fail-closed (E13).
 
@@ -294,13 +440,27 @@ def _load_account() -> dict[str, Any]:
     raises :class:`SelfDirectedAccountInvalid`.  It is NEVER replaced by a fresh book: the old
     any-corruption fallback handed back a fabricated $1M all-cash book and the next save
     silently overwrote the user's real paper positions with it.
+
+    E14: the classification is stat-based — a file that cannot be stat'ed (dangling symlink,
+    unreadable path) is INVALID, never absent, and a missing book data directory fails closed
+    with ``data_dir_missing`` instead of seeding a fresh book.
     """
-    if not _ACCOUNT_PATH.exists():
+    kind, problem, exc = _classify_account_path(_ACCOUNT_PATH)
+    if kind == "absent":
         return _fresh_account()
+    if kind == "invalid":
+        _raise_for_path_problem(_ACCOUNT_PATH, problem, exc)
     try:
         raw_bytes = _ACCOUNT_PATH.read_bytes()
-    except FileNotFoundError:
-        return _fresh_account()
+    except FileNotFoundError as read_exc:
+        # Re-classify: the file may have vanished between the stat and the read.
+        kind, problem, exc = _classify_account_path(_ACCOUNT_PATH)
+        if kind == "absent":
+            return _fresh_account()
+        if kind == "invalid":
+            _raise_for_path_problem(_ACCOUNT_PATH, problem, exc)
+        _raise_invalid_account(_ACCOUNT_PATH, None, ["unreadable:FileNotFoundError"],
+                               cause=read_exc)
     except Exception as exc:
         _raise_invalid_account(_ACCOUNT_PATH, None,
                                [f"unreadable:{type(exc).__name__}"], cause=exc)
@@ -321,8 +481,10 @@ def _save_account(state: dict[str, Any]) -> None:
             f"self-directed account state invalid: {state_problems}",
             problems=state_problems, record=None,
         )
-    _ensure_dir()
-    if _ACCOUNT_PATH.exists():
+    kind, problem, exc = _classify_account_path(_ACCOUNT_PATH)
+    if kind == "invalid":
+        _raise_for_path_problem(_ACCOUNT_PATH, problem, exc)
+    if kind == "present":
         # Nothing may overwrite an INVALID book (E13): saving a fresh/valid state over it would
         # silently reset the user's live paper book.  Quarantine the invalid bytes, then fail
         # closed — a human repairs the file directly.
@@ -339,7 +501,7 @@ def _save_account(state: dict[str, Any]) -> None:
 
 
 def _append_fill(fill: dict) -> None:
-    _ensure_dir()
+    _require_book_dir()
     with _FILLS_PATH.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(fill, default=str) + "\n")
 
@@ -373,8 +535,8 @@ def _load_pending() -> list[dict]:
 
 
 def _save_pending(orders: list[dict]) -> None:
-    _ensure_dir()
-    _PENDING_PATH.write_text(json.dumps(orders, indent=2, default=str))
+    _require_book_dir()
+    _atomic_write_bytes(_PENDING_PATH, json.dumps(orders, indent=2, default=str).encode("utf-8"))
 
 
 def _load_theses() -> dict[str, dict]:
@@ -388,22 +550,64 @@ def _load_theses() -> dict[str, dict]:
 
 
 def _save_theses(theses: dict[str, dict]) -> None:
-    _ensure_dir()
-    _THESES_PATH.write_text(json.dumps(theses, indent=2, default=str, ensure_ascii=False))
+    _require_book_dir()
+    _atomic_write_bytes(
+        _THESES_PATH, json.dumps(theses, indent=2, default=str, ensure_ascii=False).encode("utf-8")
+    )
 
 
 # ---------------------------------------------------------------------------
 # price + clock resolution (all lazy / optional)
 # ---------------------------------------------------------------------------
 
+# A US symbol is letters/digits plus '.' (BRK.B) and '-' (preferred/class shares). Anchoring the
+# WHOLE string to that allowlist and capping the length is what makes the ticker safe to interpolate
+# into a filename: no path separator, no '..' component, no NUL, no drive prefix, no whitespace.
+_TICKER_RE = re.compile(r"^[A-Z0-9.\-]{1,12}$")
+
+_STOCKDATA_DIR = _ROOT / "vendor" / "macro" / "site" / "stockdata"
+
+
+def _safe_ticker(t: str) -> Optional[str]:
+    """Normalize an operator-supplied ticker to a filesystem-safe symbol, or None if unusable.
+
+    Closes CodeQL py/path-injection at the SOURCE (alerts #23/#24, sinks in ``_stockdata_price``):
+    every path built from a ticker goes through this allowlist first, so the tainted value can
+    never steer the path outside ``vendor/macro/site/stockdata``. Callers treat None as "no data"
+    and degrade exactly as they already do for a missing file.
+    """
+    if not isinstance(t, str):
+        return None
+    sym = t.strip().upper()
+    if not _TICKER_RE.match(sym):
+        return None
+    # '.' and '..' satisfy the character class (dots are legal in symbols) but are directory
+    # components, not symbols — never let one name a file.
+    if not sym.strip("."):
+        return None
+    return sym
+
+
 def _stockdata_price(ticker: str) -> Optional[float]:
     """Last mark from vendor/macro/site/stockdata/<T>.json — a plain file read, no import."""
+    sym = _safe_ticker(ticker)
+    if sym is None:
+        return None
     try:
-        p = _ROOT / "vendor" / "macro" / "site" / "stockdata" / f"{ticker.upper()}.json"
-        if p.exists():
-            v = (json.loads(p.read_text()).get("tech") or {}).get("price")
-            if v is not None and float(v) > 0:
-                return float(v)
+        # No path is ever CONSTRUCTED from the ticker: the directory is enumerated and the
+        # sanitized symbol only selects an already-existing entry by exact name comparison.
+        # Tainted data flows into a comparison, never into a path join.
+        target = f"{sym}.json"
+        p = None
+        for entry in _STOCKDATA_DIR.iterdir():
+            if entry.name == target:
+                p = entry
+                break
+        if p is None:
+            return None
+        v = (json.loads(p.read_text()).get("tech") or {}).get("price")
+        if v is not None and float(v) > 0:
+            return float(v)
     except Exception:
         pass
     return None
@@ -487,6 +691,76 @@ def _market_status() -> dict:
 
 def _today() -> str:
     return datetime.now(timezone.utc).date().isoformat()
+
+
+class SelfDirectedMarkUnavailable(RuntimeError):
+    """A held Self-Directed position has no truthful mark for the requested date."""
+
+
+def _positive_price(value) -> Optional[float]:
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) and value > 0 else None
+
+
+def _carry_stale_max_days() -> int:
+    """Use the canonical marking layer's carry horizon; keep the dependency lazy."""
+    try:
+        from portfolio import marks
+        return int(marks._stale_max_days())
+    except Exception:  # noqa: BLE001
+        return 30
+
+
+def _persisted_position_mark(pos: dict, asof: str) -> Optional[float]:
+    """Return a prior observed market mark only when its dated provenance is eligible for `asof`."""
+    px = _positive_price(pos.get("current_price"))
+    mark_asof = str(pos.get("current_price_asof") or "")[:10]
+    if px is None or not mark_asof:
+        return None
+    try:
+        age_days = (date.fromisoformat(asof) - date.fromisoformat(mark_asof)).days
+    except (TypeError, ValueError):
+        return None
+    if age_days < 0 or age_days > _carry_stale_max_days():
+        return None
+    return px
+
+
+def _resolve_position_mark(ticker: str, pos: dict, prices: dict[str, float], asof: str) -> tuple[Optional[float], bool]:
+    """Resolve one held-position mark without crossing the requested clock.
+
+    Returns ``(price, observed_now)``. Explicit prices win. When the daily-mark job installs the
+    canonical resolver, its miss is authoritative — do not fall through to an unrelated live quote.
+    Without a resolver, undated live/snapshot access is allowed only for today's mark. A bounded,
+    dated persisted market observation is the final carry; cost basis is never a market mark.
+    """
+    px = _positive_price(prices.get(ticker))
+    if px is None and _price_resolver is not None:
+        try:
+            px = _positive_price(_price_resolver(ticker))
+        except Exception:  # noqa: BLE001
+            px = None
+    elif px is None and asof == _today():
+        px = _positive_price(_live_quote(ticker) or _stockdata_price(ticker))
+    if px is not None:
+        return px, True
+    return _persisted_position_mark(pos, asof), False
+
+
+def _resolve_benchmark_mark(ticker: str, prices: dict[str, float], asof: str) -> Optional[float]:
+    """Resolve benchmark without ever relabelling a current quote as a historical mark."""
+    px = _positive_price(prices.get(ticker))
+    if px is None and _price_resolver is not None:
+        try:
+            px = _positive_price(_price_resolver(ticker))
+        except Exception:  # noqa: BLE001
+            px = None
+    elif px is None and asof == _today():
+        px = _positive_price(_live_quote(ticker) or _stockdata_price(ticker))
+    return px
 
 
 # ---------------------------------------------------------------------------
@@ -720,27 +994,35 @@ def publish(*, prices: dict[str, float] | None = None, asof: str | None = None) 
 
     Schema matches paper_account's published format so _load_book() reads it without modification:
     {schema, portfolio_id, as_of, nav, positions:[{ticker, weight, shares, market_value}]}.
-    Un-priced names are included at weight derived from avg_cost (an honest approximation tagged in
-    the note). Best-effort; never raises; returns the written doc or None on failure."""
+    Every positive-share position must resolve from the requested-date observation or the bounded,
+    dated persisted market mark. Cost basis is never a market-value substitute. Raises the typed
+    SelfDirectedMarkUnavailable refusal before touching the publication when a held line is unknown.
+    Invalid accounts and missing publication directories retain the existing None refusal."""
     asof_str = str(asof or _today())[:10]
     try:
         state = _load_account()
     except SelfDirectedAccountInvalid:
         # E13: publish is best-effort — an invalid book is never published or saved over.
         return None
-    prices_map = {(k or "").upper(): float(v) for k, v in (prices or {}).items() if v and v > 0}
+    prices_map = {(k or "").upper(): float(v) for k, v in (prices or {}).items() if _positive_price(v) is not None}
     positions_raw = state.get("positions", {})
 
-    # Mark every position (live price > avg_cost fallback — honest approximation)
     marks: dict[str, float] = {}
-    for ticker in positions_raw:
-        px = prices_map.get(ticker) or _current_price(ticker)
-        if px and px > 0:
-            marks[ticker] = float(px)
+    for ticker, pos in positions_raw.items():
+        shares = float(pos.get("shares") or 0.0)
+        if shares <= 0:
+            continue
+        px, _observed = _resolve_position_mark(ticker, pos, prices_map, asof_str)
+        if px is None:
+            raise SelfDirectedMarkUnavailable(
+                f"no truthful mark for held self-directed position {ticker} at {asof_str}"
+            )
+        marks[ticker] = px
 
     invested = sum(
-        (pos.get("shares") or 0.0) * marks.get(tk, pos.get("avg_cost") or 0.0)
+        float(pos.get("shares") or 0.0) * marks[tk]
         for tk, pos in positions_raw.items()
+        if float(pos.get("shares") or 0.0) > 0
     )
     cash = state.get("cash", 0.0)
     nav = cash + invested
@@ -750,14 +1032,14 @@ def publish(*, prices: dict[str, float] | None = None, asof: str | None = None) 
         shares = float(pos.get("shares") or 0.0)
         if shares <= 0:
             continue
-        px = marks.get(ticker, pos.get("avg_cost") or 0.0)
-        mv = shares * px if px else None
-        w = round(mv / nav, 6) if (mv is not None and nav > 0) else None
+        px = marks[ticker]
+        mv = shares * px
+        w = round(mv / nav, 6) if nav > 0 else None
         rows.append({
             "ticker": ticker,
             "shares": round(shares, 6),
-            "current_price": round(marks[ticker], 4) if ticker in marks else None,
-            "market_value": round(mv, 2) if mv is not None else None,
+            "current_price": round(px, 4),
+            "market_value": round(mv, 2),
             "weight": w,
         })
 
@@ -769,62 +1051,77 @@ def publish(*, prices: dict[str, float] | None = None, asof: str | None = None) 
         "currency": "USD",
         "positions": rows,
         "note": ("Self-directed book published for firm-wide concentration visibility. "
-                 "Positions at live mark (avg_cost fallback for unpriced names). "
+                 "Positions use requested-date or bounded persisted market marks; never cost basis. "
                  "EXCLUDED from firm headroom/clamp math — the benchmark book must not "
                  "mechanically constrain the books it measures."),
     }
-    try:
-        _PUBLISHED_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _PUBLISHED_PATH.write_text(json.dumps(doc, indent=2, default=str))
-        return doc
-    except Exception:  # noqa: BLE001
-        return None
+    if _check_book_dir(_PUBLISHED_PATH.parent)[0] is not None:
+        return None   # E14: never create the published dir from a scheduler path
+    _atomic_write_bytes(_PUBLISHED_PATH, json.dumps(doc, indent=2, default=str).encode("utf-8"))
+    return doc
 
 
 def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
          benchmark: str = "SPY", mark_source: str = "self_directed_mark") -> Optional[dict]:
-    """Snapshot this book's NAV to nav_history.jsonl (idempotent per date), so the CIO review and
-    the improvement agenda see it alongside the paper_account books. Uses the SAME price resolution
-    as book() (the injected marking layer first, then the legacy accessor) — a held name with no
-    mark falls back to its avg_cost for the NAV total ONLY (never written back as a price). The
-    benchmark line (spy_nav) initialises its shares on the first mark, mirroring paper_account.mark.
-    Best-effort; never raises."""
+    """Snapshot this book's truthful NAV to nav_history.jsonl (idempotent per date).
+
+    Explicit/canonical requested-date observations win; the final fallback is the existing dated
+    persisted market observation while it remains within the canonical carry horizon. Historical
+    marks never borrow an undated current quote, and cost basis is never substituted for a market
+    mark. If any positive-share holding is still unknown, raise SelfDirectedMarkUnavailable before
+    mutating account mark provenance or appending a NAV row. Invalid accounts retain the
+    existing None refusal; storage failures remain visible to the scheduler's per-book guard.
+    """
     asof = str(asof or _today())[:10]
     try:
         state = _load_account()
     except SelfDirectedAccountInvalid:
         # E13: a mark is best-effort — an invalid book gets no NAV row and is never saved over.
         return None
-    prices = {(k or "").upper(): v for k, v in (prices or {}).items() if v and v > 0}
+    prices = {(k or "").upper(): v for k, v in (prices or {}).items() if _positive_price(v) is not None}
     positions = state.get("positions", {})
 
-    invested = 0.0
-    stored_mark_changed = False
+    resolved: dict[str, float] = {}
+    observed_updates: dict[str, float] = {}
     for ticker, pos in positions.items():
-        observed = prices.get(ticker) or _current_price(ticker)
-        try:
-            observed = float(observed) if observed is not None else None
-        except (TypeError, ValueError):
-            observed = None
-        if observed is not None and math.isfinite(observed) and observed > 0:
+        shares = float(pos.get("shares") or 0.0)
+        if shares <= 0:
+            continue
+        px, observed_now = _resolve_position_mark(ticker, pos, prices, asof)
+        if px is None:
+            raise SelfDirectedMarkUnavailable(
+                f"no truthful mark for held self-directed position {ticker} at {asof}"
+            )
+        resolved[ticker] = px
+        if observed_now:
             previous_asof = str(pos.get("current_price_asof") or "")[:10]
             try:
                 may_update = not previous_asof or date.fromisoformat(previous_asof) <= date.fromisoformat(asof)
             except (TypeError, ValueError):
                 may_update = True
             if may_update:
-                pos["current_price"] = round(observed, 4)
-                pos["current_price_asof"] = asof
-                pos["current_price_source"] = str(mark_source or "self_directed_mark")
-                pos["current_price_time_kind"] = "portfolio_mark_date"
-                stored_mark_changed = True
-        px = observed if observed is not None and observed > 0 else (pos.get("avg_cost") or 0.0)
-        invested += (pos.get("shares") or 0.0) * px
+                observed_updates[ticker] = px
+
+    invested = sum(
+        float(pos.get("shares") or 0.0) * resolved[ticker]
+        for ticker, pos in positions.items()
+        if float(pos.get("shares") or 0.0) > 0
+    )
     cash = state.get("cash", 0.0)
     nav = cash + invested
 
+    # Only after every held line is priceable may requested-date observations advance provenance.
+    stored_mark_changed = False
+    for ticker, observed in observed_updates.items():
+        pos = positions[ticker]
+        pos["current_price"] = round(observed, 4)
+        pos["current_price_asof"] = asof
+        pos["current_price_source"] = str(mark_source or "self_directed_mark")
+        pos["current_price_time_kind"] = "portfolio_mark_date"
+        stored_mark_changed = True
+
     # benchmark shares are pinned on the first mark (back-compat with the paper_account convention)
-    spy_px = prices.get(benchmark) or _current_price(benchmark)
+    spy_px = _resolve_benchmark_mark(benchmark, prices, asof)
     if state.get("spy_shares") is None and spy_px and spy_px > 0:
         state["spy_shares"] = _STARTING_NAV / spy_px
         state["spy_inception_price"] = spy_px
@@ -836,24 +1133,23 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
     row = {"date": asof, "nav": round(nav, 2), "cash": round(cash, 2),
            "invested": round(invested, 2),
            "spy_nav": round(spy_nav, 2) if spy_nav is not None else None}
-    try:
-        _ensure_dir()
-        rows: list[dict] = []
-        if _NAV_PATH.exists():
-            for line in _NAV_PATH.read_text().splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    r = json.loads(line)
-                except Exception:
-                    continue
-                if r.get("date") != asof:            # idempotent per date
-                    rows.append(r)
-        rows.append(row)
-        _NAV_PATH.write_text("\n".join(json.dumps(r, default=str) for r in rows) + "\n")
-    except Exception:
-        pass
+    _require_book_dir()
+    rows: list[dict] = []
+    if _NAV_PATH.exists():
+        for line in _NAV_PATH.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+            except Exception:
+                continue
+            if r.get("date") != asof:            # idempotent per date
+                rows.append(r)
+    rows.append(row)
+    _atomic_write_bytes(
+        _NAV_PATH, ("\n".join(json.dumps(r, default=str) for r in rows) + "\n").encode("utf-8")
+    )
     return row
 
 
@@ -886,6 +1182,8 @@ def book(*, prices: dict[str, float] | None = None, now: datetime | None = None,
     Settles pending orders first (if the market is open), then returns positions with live
     marks + weights, the allocation scorecard, the market state, and the pending queue.
     `prices` (TICKER→px) overrides live marks (used by tests / a shared price fetch).
+    An eligible dated persisted market mark is the final local carry, with its original
+    vintage retained. Any unpriced nonzero holding leaves totals and weights unknown.
 
     `read_only=True` skips the settle_pending() side-effect so a GET request does not
     mutate state files.  ``resolve_missing_prices=False`` also prevents per-name live
@@ -900,40 +1198,54 @@ def book(*, prices: dict[str, float] | None = None, now: datetime | None = None,
 
     positions_raw = state.get("positions", {})
     marks: dict[str, float] = {}
+    carried_asof: dict[str, str] = {}
+    asof = _today()
     for ticker, pos in positions_raw.items():
-        px = prices.get(ticker)
+        px = _positive_price(prices.get(ticker))
         if px is None and resolve_missing_prices:
-            px = _current_price(ticker)
-        if px and px > 0:
-            marks[ticker] = float(px)
+            px = _positive_price(_current_price(ticker))
+        if px is None:
+            px = _persisted_position_mark(pos, asof)
+            if px is not None:
+                carried_asof[ticker] = str(pos["current_price_asof"])[:10]
+        if px is not None:
+            marks[ticker] = px
 
-    invested = 0.0
-    for ticker, pos in positions_raw.items():
-        px = marks.get(ticker, pos.get("avg_cost") or 0.0)
-        invested += pos.get("shares", 0.0) * px
+    # Signed quantities count before display rounding; cost basis is never a mark.
+    unpriced_tickers = sorted(
+        ticker for ticker, pos in positions_raw.items()
+        if float(pos.get("shares") or 0.0) != 0.0 and ticker not in marks
+    )
+    valuation_complete = not unpriced_tickers
+    invested = (
+        sum(float(pos.get("shares") or 0.0) * marks.get(ticker, 0.0)
+            for ticker, pos in positions_raw.items())
+        if valuation_complete else None
+    )
     cash = state.get("cash", 0.0)
-    nav = cash + invested
+    nav = cash + invested if invested is not None else None
 
     positions: list[dict] = []
     for ticker, pos in positions_raw.items():
         shares = float(pos.get("shares") or 0.0)
         avg = float(pos.get("avg_cost") or 0.0)
         px = marks.get(ticker)
-        mv = shares * px if px else None
+        mv = shares * px if px is not None else (0.0 if shares == 0.0 else None)
         th = theses.get(ticker) or {}
         positions.append({
             "ticker": ticker,
             "shares": round(shares, 6),
             "avg_cost": round(avg, 4) if avg else None,
-            "current_price": round(px, 4) if px else None,
+            "current_price": round(px, 4) if px is not None else None,
+            "current_price_asof": carried_asof.get(ticker),
             "market_value": round(mv, 2) if mv is not None else None,
             "unrealized_pnl": round((px - avg) * shares, 2) if (px and avg) else None,
             "unrealized_pct": round((px / avg - 1) * 100, 2) if (px and avg) else None,
-            "weight": round(mv / nav, 6) if (mv is not None and nav > 0) else None,
+            "weight": round(mv / nav, 6) if (mv is not None and nav is not None and nav > 0) else None,
             "thesis": th.get("note"),
             "thesis_updated_at": th.get("updated_at"),
         })
-    # heaviest weight first; un-priced names sink to the bottom
+    # Preserve complete-book ordering; partial books have no comparable weights.
     positions.sort(key=lambda p: (p["weight"] if p["weight"] is not None else -1), reverse=True)
 
     weights = [p["weight"] for p in positions if p["weight"] is not None]
@@ -944,19 +1256,24 @@ def book(*, prices: dict[str, float] | None = None, now: datetime | None = None,
     return {
         "starting_nav": state.get("starting_nav", _STARTING_NAV),
         "inception_date": state.get("inception_date"),
-        "nav": round(nav, 2),
+        "valuation_complete": valuation_complete,
+        "unpriced_tickers": unpriced_tickers,
+        "nav": round(nav, 2) if nav is not None else None,
         "cash": round(cash, 2),
-        "invested": round(invested, 2),
+        "invested": round(invested, 2) if invested is not None else None,
         "positions": positions,
         "allocation": {
-            "cash_pct": round(cash / nav, 6) if nav > 0 else 1.0,
-            "invested_pct": round(invested / nav, 6) if nav > 0 else 0.0,
-            "gross": round(invested / nav, 6) if nav > 0 else 0.0,
+            "cash_pct": (round(cash / nav, 6) if nav > 0 else 1.0) if valuation_complete else None,
+            "invested_pct": (round(invested / nav, 6) if nav > 0 else 0.0) if valuation_complete else None,
+            "gross": (round(invested / nav, 6) if nav > 0 else 0.0) if valuation_complete else None,
             "n_positions": len(positions),
-            "largest_weight": round(max(weights), 6) if weights else 0.0,
-            "total_unrealized_pnl": round(total_unreal, 2),
-            "total_return_pct": round((nav - state.get("starting_nav", _STARTING_NAV))
-                                      / state.get("starting_nav", _STARTING_NAV) * 100, 4),
+            "largest_weight": (round(max(weights), 6) if weights else 0.0) if valuation_complete else None,
+            "total_unrealized_pnl": round(total_unreal, 2) if valuation_complete else None,
+            "total_return_pct": (
+                round((nav - state.get("starting_nav", _STARTING_NAV))
+                      / state.get("starting_nav", _STARTING_NAV) * 100, 4)
+                if valuation_complete else None
+            ),
         },
         "pending": pending,
         "market": _market_status(),

@@ -112,6 +112,8 @@ def codex_chain(
         raise ValueError('Working directory must be inside the explicitly selected repository')
     if isinstance(project_max_bytes, bool) or not isinstance(project_max_bytes, int) or project_max_bytes < 0:
         raise ValueError('Project instruction byte budget must be a nonnegative integer')
+    if fallback_names is not None and not isinstance(fallback_names, list):
+        raise ValueError('fallback filenames must be a list of simple filenames')
     fallbacks = list(fallback_names or [])
     for name in fallbacks:
         if not isinstance(name, str) or not name or Path(name).name != name or name in {'.', '..'}:

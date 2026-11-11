@@ -220,3 +220,56 @@ def test_denylisted_prefixes_are_never_cached(monkeypatch):
     client.get("/api/pfolio/positions")
     assert len(response_cache._CACHE) == 0, "the personal portfolio panel must never be cached"
     response_cache.clear()
+
+
+def test_repeated_scalar_query_order_keeps_distinct_cache_entries(cache_app):
+    client, _clock, calls = cache_app
+    first = client.get("/api/probe?n=1&n=2")
+    reverse = client.get("/api/probe?n=2&n=1")
+    assert first.json()["n"] == 2
+    assert reverse.json()["n"] == 1
+    assert first.headers["x-mm-cache"] == "miss"
+    assert reverse.headers["x-mm-cache"] == "miss"
+    assert client.get("/api/probe?n=1&n=2").json() == first.json()
+    assert client.get("/api/probe?n=2&n=1").json() == reverse.json()
+    assert calls["n"] == 2
+    assert len(response_cache._CACHE) == 2
+
+
+def test_distinct_names_reorder_without_reordering_repeated_values(cache_app):
+    client, _clock, calls = cache_app
+    first = client.get("/api/probe?n=1&a=x&n=2&b=y")
+    reordered = client.get("/api/probe?b=y&n=1&n=2&a=x")
+    assert reordered.headers["x-mm-cache"] == "hit"
+    assert reordered.json() == first.json()
+    assert calls["n"] == 1
+
+
+def test_cached_valid_duplicate_cannot_hide_invalid_final_value(cache_app):
+    client, _clock, calls = cache_app
+    assert client.get("/api/probe?n=&n=2").status_code == 200
+    invalid = client.get("/api/probe?n=2&n=")
+    assert invalid.status_code == 422
+    assert invalid.headers.get("x-mm-cache") is None
+    assert calls["n"] == 1
+    assert len(response_cache._CACHE) == 1
+
+
+def test_encoded_duplicate_names_preserve_last_value(cache_app):
+    client, _clock, calls = cache_app
+    first = client.get("/api/probe?%6e=1&n=2")
+    reverse = client.get("/api/probe?n=2&%6e=1")
+    assert first.json()["n"] == 2
+    assert reverse.json()["n"] == 1
+    assert client.get("/api/probe?n=1&n=2").headers["x-mm-cache"] == "hit"
+    assert calls["n"] == 2
+
+
+def test_query_identity_preserves_repeated_values_and_blanks():
+    key = response_cache._cache_key
+    assert key("/api/probe", "tag=a&tag=b") != key("/api/probe", "tag=b&tag=a")
+    assert key("/api/probe", "tag=&tag=a") != key("/api/probe", "tag=a&tag=")
+    assert key("/api/probe", "tag=a&tag=a") != key("/api/probe", "tag=a")
+    assert key("/api/probe", "tag=a+b") == key("/api/probe", "tag=a%20b")
+    assert key("/api/probe", "") != key("/api/probe", "tag=")
+    assert key("/api/probe", "tag=a") != key("/api/other", "tag=a")

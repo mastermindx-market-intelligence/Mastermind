@@ -1,0 +1,35 @@
+{
+  "bridge_sha256": "242c19aec6f13db182e5b51c2bf560d48e1280cba87e9410bed17848b0e0e832",
+  "gateway_restart": false,
+  "global_mcp_reload": false,
+  "native_canary_prompt": false,
+  "observed_at": "2026-11-07T14:04:02.660356+00:00",
+  "profile": "default",
+  "provider_request": false,
+  "result": {
+    "oauth_needed": false,
+    "oauth_tokens_present": null,
+    "ok": true,
+    "prompts": 0,
+    "resources": 0,
+    "tools": [
+      {
+        "description": "Read-only metadata of Mastermind Subagent Fabric pools and model names. Does ...",
+        "name": "fabric_capacity_catalog"
+      },
+      {
+        "description": "Ask the existing Subagent Fabric owner for one NON-RESERVING capacity/model p...",
+        "name": "fabric_route_preview"
+      }
+    ]
+  },
+  "runtime": {
+    "authority_epoch": 3,
+    "instance_id": "a9115d5bee674ff98a3fac21d9ad5ca8",
+    "profile_id": "/Users/chriswong/.hermes"
+  },
+  "schema": "mastermind.hermes_h4_capacity_default_startup.v1",
+  "source_commit": "f008b67333ecf627270a7d8378720f1f034864ce",
+  "source_unchanged": true,
+  "worker_dispatch": false
+}

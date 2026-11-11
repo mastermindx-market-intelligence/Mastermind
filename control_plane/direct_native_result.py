@@ -45,7 +45,7 @@ def _completion(value, selection, identity):
     if (type(terminal) is not dict or terminal.get("payload") != value["payload"]
             or terminal.get("job_id") != selected["job_id"]
             or terminal.get("attempt_id") != selected["attempt_id"]
-            or terminal.get("status") != "COMPLETED"
+            or terminal.get("status") not in {"COMPLETED","CANCELLED"}
             or terminal.get("admission_digest") != identity["admission_digest"]
             or wire.digest(terminal) != value["terminal_digest"]):
         _refuse()
@@ -97,7 +97,8 @@ def project_direct_native_result(snapshot, receipt):
     consumption = wire.validate_consumption(snapshot.consumption)
     over = wire.unavailable(selection, "CONTENT_OVER_BUDGET")
     try:
-        complete = wire.available(selection, completion["payload"], snapshot.terminal_digest, consumption)
+        complete = wire.available(selection, completion["payload"], snapshot.terminal_digest, consumption,
+            cancelled=completion["terminal_record"]["status"]=="CANCELLED")
     except wire.DirectResultContractError:
         # Source shape/meaning has already been qualified above. This branch
         # omits content only, and never fabricates an acknowledgment.

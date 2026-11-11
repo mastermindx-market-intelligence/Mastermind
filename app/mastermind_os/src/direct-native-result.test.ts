@@ -54,6 +54,34 @@ describe("closed direct-result view", () => {
     ])
       expect(directLocationInput(raw).selection).toBeNull();
   });
+  it.each(["fabric_attempt", "hermes_secretary"])("retains the closed %s session choice without expanding the Mission grammar", (kind) => {
+    const base = "?work_ref=WS%3AH2-FIXTURE&root_job_id=JOB-123";
+    const selection = { workRef: "WS:H2-FIXTURE", rootJobId: "JOB-123" };
+    for (const name of ["session_target_kind", "%73ession_target_kind"]) {
+      const selected = base + "&" + name + "=" + kind;
+      expect(selectionFromLocation(selected)).toBeNull();
+      expect(directLocationInput(selected)).toEqual({ hasIdentity: true, selection, direct: false });
+      expect(directLocationInput(selected + "&direct_native_job=JOB-123"))
+        .toEqual({ hasIdentity: true, selection, direct: true });
+      expect(directLocationInput(selected + "&direct_native_job=JOB-other").selection).toBeNull();
+    }
+  });
+  it("refuses duplicate, malformed and foreign session selectors at the existing route join", () => {
+    const base = "?work_ref=WS%3AH2-FIXTURE&root_job_id=JOB-123";
+    const kind = "&session_target_kind=hermes_secretary";
+    for (const suffix of [
+      kind + kind, kind + "&%73ession_target_kind=fabric_attempt",
+      "&session_target_kind=codex", "&session_target_kind=",
+      "&session_target_kind=%GG", "&session_target_kind=hermes_secretary%0A",
+      "&session_target_kind=hermes_secretary=extra",
+      kind + "&worker=codex-01", kind + "&root_job_id=JOB-123",
+      kind + "&direct_native_job=JOB-123&direct_native_job=JOB-123",
+    ]) {
+      expect(directLocationInput(base + suffix).selection).toBeNull();
+      expect(directLocationInput(base + suffix).direct).toBe(false);
+    }
+    expect(directLocationInput("?session_target_kind=hermes_secretary").selection).toBeNull();
+  });
   it("discovers only the exact selected Job's actual Attempt without role inference", () => {
     const decoded = decodeDirectNativeResult(result(), {
       ...selected,

@@ -1,0 +1,349 @@
+/* ProjectPlanContinuity: scoped layout for the read-only planning-continuity
+   presenter inside the existing Project Details panel. Reuses the accepted
+   panel/domain token vocabulary: no new root variables and no literal colors.
+   Dark keeps the quiet graphite panel hairlines; the light treatment stays
+   scoped to the shell's own [data-theme="light"] owner. Dark and light share
+   order and semantics; long identifiers and captured bodies wrap instead of
+   clipping or overflowing the page. */
+
+.mm-plan-continuity {
+  container: plan-comparison / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+  color: var(--text);
+}
+
+.mm-plan-continuity__heading {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.mm-plan-continuity__lede {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.mm-plan-continuity__status {
+  margin: 0;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+/* Records: quiet bordered groups for the baseline and the recorded proposals,
+   matching the accepted panel record grammar. */
+.mm-plan-continuity__record {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+
+.shell[data-theme="light"] .mm-plan-continuity__record {
+  border-color: var(--control-border);
+}
+
+/* Declaration-only block: a declared adoption that is not available never
+   borrows available-baseline styling; it stays a bordered declaration group. */
+.mm-plan-continuity__declared {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+
+.shell[data-theme="light"] .mm-plan-continuity__declared {
+  border-color: var(--control-border);
+}
+
+.mm-plan-continuity__proposal-detail,
+.mm-plan-continuity__comparison,
+.mm-plan-continuity__comparison-unavailable {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.mm-plan-continuity__section-title {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.mm-plan-continuity__subsection-title {
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.mm-plan-continuity__body-title {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.mm-plan-continuity__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-5);
+  margin: 0;
+  min-width: 0;
+}
+
+.mm-plan-continuity__facts > div {
+  min-width: 0;
+}
+
+.mm-plan-continuity dt {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.mm-plan-continuity dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.mm-plan-continuity__explanation,
+.mm-plan-continuity__rationale {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.mm-plan-continuity__fact-key {
+  margin-right: var(--sp-2);
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.mm-plan-continuity__note,
+.mm-plan-continuity__meta-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.mm-plan-continuity__footnote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.mm-plan-continuity code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Exact source identity as inert, wrapping metadata: never truncated,
+   never a link. */
+.mm-plan-continuity__source-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.mm-plan-continuity__source-name {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.mm-plan-continuity__source-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
+  min-width: 0;
+}
+
+.mm-plan-continuity__source-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.mm-plan-continuity__source-key {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.mm-plan-continuity__evidence {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* Explicit proposal selection: a labelled native select holding every
+   readable recorded proposal in producer order, including all options when a
+   capture lists up to the decoder maximum. */
+.mm-plan-continuity__select-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.mm-plan-continuity__select {
+  width: 100%;
+  max-width: 40rem;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 var(--sp-3);
+  font: inherit;
+  font-size: 0.86rem;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+}
+
+.shell[data-theme="light"] .mm-plan-continuity__select {
+  border-color: var(--control-border);
+}
+
+/* Details grammar: keyboard/touch disclosures with >=44px targets; long
+   identifiers wrap instead of truncating. */
+.mm-plan-continuity details > summary {
+  cursor: pointer;
+  color: var(--text);
+  min-height: 44px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  overflow-wrap: anywhere;
+}
+
+.mm-plan-continuity__disclose {
+  align-self: flex-start;
+  min-width: 0;
+}
+
+.mm-plan-continuity__source {
+  min-width: 0;
+}
+
+.mm-plan-continuity__disclose[open] > summary,
+.mm-plan-continuity__source[open] > summary {
+  margin-bottom: var(--sp-2);
+}
+
+.mm-plan-continuity__disclosure-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: 0;
+  min-width: 0;
+}
+
+.mm-plan-continuity__select:focus-visible,
+.mm-plan-continuity details > summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Captured plan text: readable pre-wrap plain text that preserves every
+   newline and byte of the authored bodies without reserialization. */
+.mm-plan-continuity__pre {
+  margin: 0;
+  min-width: 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.mm-plan-continuity__bodies {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.mm-plan-continuity__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.mm-plan-continuity__invalid-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.mm-plan-continuity__invalid-entry {
+  min-width: 0;
+}
+
+.mm-plan-continuity__invalid-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+}
+
+/* Fit the actual Details width, independently of the desktop viewport/sidebar.
+   Narrow containers stack both captured bodies without horizontal overflow. */
+@container plan-comparison (min-width: 700px) {
+  .mm-plan-continuity__bodies {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .mm-plan-continuity__record,
+  .mm-plan-continuity__declared {
+    padding: var(--sp-3);
+  }
+  .mm-plan-continuity__facts {
+    flex-direction: column;
+    gap: var(--sp-3);
+  }
+  .mm-plan-continuity__select {
+    max-width: none;
+  }
+}

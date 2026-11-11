@@ -1,0 +1,68 @@
+--- a/tools/computer_use/permissions.py
++++ b/tools/computer_use/permissions.py
+@@ -37,16 +37,15 @@
+             f"driver's signature): run `{resets}`, then `hermes computer-use permissions grant`.")
+ 
+ def _child_env() -> dict[str, str]:
+-    """cua-driver child env (telemetry policy + provider secrets stripped); ``os.environ`` on import error.
+-
+-    cua-driver is a third-party binary — it must never inherit provider API keys (#53503/#55709/#58889
+-    lineage). Each layer degrades gracefully so permission probes never break on a helper import error.
+-    """
++    """Use the native sanitizer; refuse before spawn when it is unavailable."""
+     try:
+         from tools.computer_use.cua_backend import sanitized_cua_driver_env
+-        return sanitized_cua_driver_env()
++        env = sanitized_cua_driver_env()
++        if type(env) is not dict or any(type(k) is not str or type(v) is not str for k, v in env.items()):
++            raise ValueError("invalid sanitized environment")
++        return env
+     except Exception:
+-        return dict(os.environ)
++        raise OSError("CUA_DRIVER_ENV_UNAVAILABLE") from None
+ 
+ def _run(binary: str, *args: str, timeout: float) -> subprocess.CompletedProcess:
+     return subprocess.run([binary, *args], capture_output=True, text=True, encoding='utf-8', errors='replace',
+--- a/tools/computer_use/cua_backend.py
++++ b/tools/computer_use/cua_backend.py
+@@ -173,15 +173,16 @@
+ 
+ 
+ def sanitized_cua_driver_env() -> dict[str, str]:
+-    """``cua_driver_child_env()`` with Hermes provider secrets stripped — cua-driver is a third-party binary and must
+-    never inherit API keys. Falls back to the unsanitized telemetry env if the sanitizer can't import."""
+-    env = cua_driver_child_env()
+-    with contextlib.suppress(Exception):
+-        # cua-driver is a third-party binary — never hand it provider API keys via inherited env (same
+-        # policy as the manifest probe and MCP spawn; #53503/#55709/#58889 lineage).
++    """Use the existing secret filter and desktop policy; fail closed before spawn."""
++    try:
++        env = cua_driver_child_env()
+         from tools.environments.local import _sanitize_subprocess_env
+-        return _sanitize_subprocess_env(env)
+-    return env
++        sanitized = _sanitize_subprocess_env(env)
++        if type(sanitized) is not dict or any(type(k) is not str or type(v) is not str for k, v in sanitized.items()):
++            raise ValueError("invalid sanitized environment")
++        return sanitized
++    except Exception:
++        raise OSError("CUA_DRIVER_ENV_UNAVAILABLE") from None
+ 
+ def _run_quiet(argv: list[str], *, timeout: float, swallow: Any = (), **kw: Any) -> Any:
+     """``subprocess.run`` for short probe verbs: text mode, stdin=DEVNULL unless overridden (older drivers fall into a
+@@ -198,9 +199,12 @@
+         return None
+ 
+ def _run_driver(driver_cmd: str, *args: str, timeout: float, swallow: Any = ()) -> Any:
+-    """Run a short cua-driver verb with the sanitized env and hidden window."""
+-    return _run_quiet([driver_cmd, *args], timeout=timeout, swallow=swallow, encoding="utf-8",
+-                      errors="replace", creationflags=windows_hide_flags(), env=sanitized_cua_driver_env())
++    """Apply the caller's failure contract to environment preparation and spawn."""
++    try:
++        return _run_quiet([driver_cmd, *args], timeout=timeout, swallow=swallow, encoding="utf-8",
++                          errors="replace", creationflags=windows_hide_flags(), env=sanitized_cua_driver_env())
++    except swallow:
++        return None
+ 
+ def cua_daemon_listening(driver_cmd: str, socket_path: Optional[str] = None, *, timeout: float = 3.0) -> Optional[bool]:
+     """Socket-level liveness of a ``cua-driver serve`` daemon: ``cua-driver status`` connects to the daemon

@@ -10,6 +10,7 @@ import json
 import re
 
 SCHEMA = "mastermind.direct_native_result_response.v1"
+CANCELLED_SCHEMA = "mastermind.direct_native_result_response.cancelled.v1"
 PRIVATE_SCHEMA = "mastermind.ceo_ingress.direct_native.v1"
 MAX_RESPONSE_BYTES = 24576
 MAX_REQUEST_BYTES = 4096
@@ -93,6 +94,13 @@ def validate_private_frame(value):
     if type(value) is not dict or value.get("schema") != PRIVATE_SCHEMA:
         _refuse()
     operation = value.get("operation")
+    if operation in {'correction-inspect','correct'}:
+        from common import direct_native_correction_contract as correction
+        base={'schema','operation','principal_scope'}
+        body={key:item for key,item in value.items() if key not in base}
+        request=(correction.validate_request(body) if operation=='correct' else validate_request(body))
+        if set(value)!=base|set(request):_refuse()
+        return dict(request,schema=PRIVATE_SCHEMA,operation=operation,principal_scope=hex_digest(value['principal_scope']))
     if operation not in {"result", "consume"}:
         _refuse()
     base = {"schema", "operation", "principal_scope"}
@@ -129,7 +137,7 @@ def validate_consumption(value):
 def validate_response(value):
     if type(value) is not dict or set(value) != {
         "schema", "selection", "availability", "reason_codes", "result", "consumption"
-    } or value["schema"] != SCHEMA:
+    } or value["schema"] not in {SCHEMA,CANCELLED_SCHEMA}:
         _refuse()
     selected = validate_selection(value["selection"], allow_current=value["availability"] == "UNAVAILABLE")
     reasons = value["reason_codes"]
@@ -137,12 +145,15 @@ def validate_response(value):
         _refuse()
     if value["availability"] == "AVAILABLE":
         item = value["result"]
-        if reasons or type(item) is not dict or set(item) != PAYLOAD_KEYS | {"result_digest"}:
+        if reasons or type(item) is not dict or set(item) != PAYLOAD_KEYS | {"result_digest"} | ({"terminal_status"} if value["schema"]==CANCELLED_SCHEMA else set()):
             _refuse()
         result = validate_payload({k: item[k] for k in PAYLOAD_KEYS})
         result["result_digest"] = hex_digest(item["result_digest"])
+        if value['schema']==CANCELLED_SCHEMA:
+            if item['terminal_status']!='CANCELLED':_refuse()
+            result['terminal_status']='CANCELLED'
         consumption = validate_consumption(value["consumption"])
-    elif value["availability"] == "UNAVAILABLE":
+    elif value["availability"] == "UNAVAILABLE" and value["schema"]==SCHEMA:
         if (not reasons or len(reasons) > len(REASON_CODES)
                 or any(type(r) is not str or r not in REASON_CODES for r in reasons)
                 or len(set(reasons)) != len(reasons)
@@ -151,7 +162,7 @@ def validate_response(value):
         result = consumption = None
     else:
         _refuse()
-    result = dict(schema=SCHEMA, selection=selected, availability=value["availability"],
+    result = dict(schema=value["schema"], selection=selected, availability=value["availability"],
                   reason_codes=list(reasons), result=result, consumption=consumption)
     if len(canonical_bytes(result)) > MAX_RESPONSE_BYTES:
         _refuse()
@@ -163,10 +174,11 @@ def unavailable(selection, reason):
         availability="UNAVAILABLE", reason_codes=[reason], result=None, consumption=None))
 
 
-def available(selection, payload, terminal_digest, consumption):
-    return validate_response(dict(schema=SCHEMA, selection=selection,
+def available(selection, payload, terminal_digest, consumption, *, cancelled=False):
+    return validate_response(dict(schema=CANCELLED_SCHEMA if cancelled else SCHEMA, selection=selection,
         availability="AVAILABLE", reason_codes=[],
-        result=dict(validate_payload(payload), result_digest=hex_digest(terminal_digest)),
+        result=dict(validate_payload(payload), result_digest=hex_digest(terminal_digest),
+                    **({"terminal_status":"CANCELLED"} if cancelled else {})),
         consumption=consumption))
 
 

@@ -80,6 +80,7 @@ def main(argv=None):
     parser.add_argument('--worker-id')
     parser.add_argument('--quota-class')
     parser.add_argument('--account-label')
+    parser.add_argument('--expected-initializer-sha256')
     args=parser.parse_args(argv)
     try:
         if os.geteuid()!=0:raise ValueError()
@@ -92,12 +93,15 @@ def main(argv=None):
                 transport_host=args.transport_host,capacity_id=args.capacity_id)
         elif args.action=='qualify-paid':
             if not all((args.control_sha256,args.expected_definition_sha256,args.transport_host,
-                        args.python_path,args.capture_root,args.worker_id,args.quota_class,args.account_label)):
+                        args.python_path,args.capture_root,args.worker_id,args.quota_class,args.account_label,
+                        args.expected_initializer_sha256)):
                 raise ValueError()
             from ops.executive_os.canonical_paid_qualification import qualify_and_publish
             result=qualify_and_publish(args.expected_sha,args.control_sha256,args.expected_definition_sha256,
                 transport_host=args.transport_host,python_path=args.python_path,capture_root=args.capture_root,
-                worker_id=args.worker_id,quota_class=args.quota_class,account_label=args.account_label)
+                worker_id=args.worker_id,quota_class=args.quota_class,account_label=args.account_label,
+                initializer_raw=sys.stdin.buffer.read(16385),
+                expected_initializer_sha256=args.expected_initializer_sha256)
         elif args.action in {'stage-paid','reconcile-paid'}:
             if not args.expected_definition_sha256:raise ValueError()
             if args.action=='stage-paid' and not args.control_sha256:raise ValueError()

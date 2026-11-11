@@ -1,0 +1,43 @@
+{
+  "schema": "fresh-turn-no-replay-settlement-qualification.v1",
+  "source_head": "4981e39bc16f5b646e88986dbcd60cea1d5cb4d3",
+  "failed_ci": {
+    "run_id": 42359846449,
+    "job_id": 128365751637,
+    "test": "test_signed_consumed_parent_second_turn_original_read_and_no_replay",
+    "observed_extra_event": {
+      "aggregate_id": "JOB-002",
+      "event_type": "JOB_COMPLETED",
+      "event_id": 34
+    },
+    "source_blob": "3197c86b17771c54ea9e678156734f209c2d33a0",
+    "classification": "Inherited test measures event equality before original dispatch settlement; exact same test and turn implementation exist in protected064a and passing2206."
+  },
+  "change": "Move the existing original-dispatch await before the no-replay event snapshot; retain whole event-log equality and begin_turn_calls==2. Production source unchanged.",
+  "command": [
+    "/tmp/mmx-release-exact-proof-3k1jks3z/venv/bin/python",
+    "-m",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "tests/test_fresh_conversation_turn.py",
+    "--junitxml=/tmp/mmx-2187-turn-settlement.xml"
+  ],
+  "exit_code": 0,
+  "log_sha256": "eb27a136c18598aedc0e4f11e6893b614a04335a9faf3ec03433325d777e2663",
+  "junit": "/tmp/mmx-2187-turn-settlement.xml",
+  "test_blob": "5bde9177ed841a51f50d8dc6f3df4dba2b5da9cb",
+  "suites": [
+    {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "12",
+      "time": "76.350",
+      "timestamp": "2026-11-07T02:58:30.844278-07:00",
+      "hostname": "m2studio"
+    }
+  ]
+}
