@@ -15,6 +15,13 @@ on:
     paths:
       - "requirements/gate-*.lock"
       - "scripts/rwe_env.py"
+      - "scripts/ci_pytest.py"
+      - "scripts/ci_parallel_shard.py"
+      - "scripts/ci_pytest_timing.py"
+      - "scripts/ci_fixed_diagnostics.py"
+      - "tests/test_rwe*.py"
+      - "tests/test_ci_pytest*.py"
+      - ".github/workflows/ci.yml"
       - ".github/workflows/rwe-shadow.yml"
       - "pyproject.toml"
   workflow_dispatch:
@@ -27,15 +34,56 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  shadow-gate:
+  prepare-lock:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # One bootstrap owner supplies identical bytes to all six environments.
+      # In the ordinary case this publishes the existing committed lock.
+      - name: Mint linux lock (bootstrap only)
+        if: hashFiles('requirements/gate-linux-x86_64-py312.lock') == ''
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pip-tools
+          pip-compile --quiet --generate-hashes --extra dev \
+            --output-file requirements/gate-linux-x86_64-py312.lock pyproject.toml
+      - name: Publish common Linux lock input
+        uses: actions/upload-artifact@v4
+        with:
+          name: rwe-linux-lock
+          path: requirements/gate-linux-x86_64-py312.lock
+          if-no-files-found: error
+
+  shadow-shards:
+    needs: [prepare-lock]
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        index: [0, 1, 2, 3, 4, 5]
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: app/mastermind_os/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci --prefix app/mastermind_os
 
       - uses: actions/setup-python@v5
         with:
@@ -66,39 +114,72 @@ jobs:
           sparse-checkout: |
             engine
             lib
+            config
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
 
-      - name: Mint linux lock (bootstrap only)
-        if: hashFiles('requirements/gate-linux-x86_64-py312.lock') == ''
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install pip-tools
-          pip-compile --quiet --generate-hashes --extra dev \
-            --output-file requirements/gate-linux-x86_64-py312.lock pyproject.toml
-          echo "minted=true" >> "$GITHUB_ENV"
-
-      - name: Upload bootstrap lock artifact
-        if: hashFiles('requirements/gate-linux-x86_64-py312.lock') != '' && env.minted == 'true'
-        uses: actions/upload-artifact@v4
+      - name: Download the common Linux lock input
+        uses: actions/download-artifact@v4
         with:
-          name: linux-lock
-          path: requirements/gate-linux-x86_64-py312.lock
-          if-no-files-found: error
+          name: rwe-linux-lock
+          path: requirements
 
       - name: Realize hash-locked environment
-        # Runs whether the lock was freshly minted above or already
-        # committed -- either way requirements/gate-linux-x86_64-py312.lock
-        # exists in the workspace by this point.
-        run: python scripts/rwe_env.py realize --dest /tmp/rwe-env
+        # Every runner consumes the one prepare-lock artifact above.
+        run: |
+          set -euo pipefail
+          env_parent="$(mktemp -d "${RUNNER_TEMP:?}/rwe-shadow.XXXXXX")"
+          env_dir="$env_parent/env"
+          printf 'MMX_RWE_SHADOW_ENV=%s\n' "$env_dir" >> "$GITHUB_ENV"
+          python scripts/rwe_env.py realize --dest "$env_dir"
 
-      - name: Run repository test gate inside the realized environment
-        run: python scripts/rwe_env.py gate --env /tmp/rwe-env
+      # Same owned directory and closed diagnostic schema as canonical CI.
+      # The canonical shard already loads its fixed timing plugin; no plugin,
+      # pytest selector or environment policy is supplied by this workflow.
+      - name: Prepare fixed test diagnostics
+        run: |
+          diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
+          chmod 0700 "$diagnostic_dir"
+          printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
 
-      - name: Upload receipt
+      - name: Run canonical test shard inside the realized environment
+        run: python scripts/rwe_env.py gate --env "${MMX_RWE_SHADOW_ENV:?}" --shard-index ${{ matrix.index }}
+
+      - name: Upload fixed test diagnostics
         if: always()
+        timeout-minutes: 2
         uses: actions/upload-artifact@v4
         with:
-          name: rwe-receipt-linux
-          path: /tmp/rwe-env/rwe_receipt.json
+          name: rwe-fixed-diagnostics-${{ matrix.index }}
+          path: |
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-unit/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-rollout/ci-fixed-diagnostics.json
           if-no-files-found: warn
+          retention-days: 3
+          compression-level: 0
+
+      - name: Upload receipt
+        if: ${{ always() && env.MMX_RWE_SHADOW_ENV != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rwe-receipt-linux-${{ matrix.index }}
+          path: ${{ env.MMX_RWE_SHADOW_ENV }}/rwe_receipt.json
+          if-no-files-found: warn
+
+  shadow-gate:
+    needs: [prepare-lock, shadow-shards]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Require the complete shadow matrix
+        env:
+          LOCK_RESULT: ${{ needs.prepare-lock.result }}
+          SHARDS_RESULT: ${{ needs.shadow-shards.result }}
+        run: |
+          set -euo pipefail
+          if [ "$LOCK_RESULT" != success ] || [ "$SHARDS_RESULT" != success ]; then
+            echo "All six canonical shards must complete successfully against the common lock"
+            exit 1
+          fi

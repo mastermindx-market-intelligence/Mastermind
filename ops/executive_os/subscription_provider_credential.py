@@ -6,6 +6,7 @@ never grants readiness, capacity, route authority, or autonomous execution.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import os
 import stat
 import subprocess
@@ -17,6 +18,7 @@ from control_plane.codex_provider_realm import (
     PROVIDER_CREDENTIAL_FILENAME,
     CodexProviderRealm,
     ProviderRealmError,
+    validate_provider_credential_format,
 )
 from control_plane.executive_ambient_process import (
     AmbientProcessClassifier,
@@ -200,7 +202,7 @@ def _assert_worker_quiescent(
 
 
 def _read_stdin_credential(
-    realm: CodexProviderRealm,
+    realm: CodexProviderRealm | AttendedProfileCredentialFormat,
     *,
     stream=None,
 ) -> bytes:
@@ -254,7 +256,7 @@ def _fsync_directory(path: Path) -> None:
 
 def install_provider_credential(
     config: Mapping[str, Any],
-    realm: CodexProviderRealm,
+    realm: CodexProviderRealm | AttendedProfileCredentialFormat,
     *,
     credential: bytes,
     replace_existing: bool,
@@ -352,12 +354,65 @@ def verify_provider_credential(config: Mapping[str, Any]) -> Path:
     return path
 
 
+_FINITE_ATTENDED_ADAPTER = "claude-compatible-subscription"
+_FINITE_ATTENDED_HARNESS = "claude-code"
+_FINITE_ATTENDED_PROTOCOL = "anthropic"
+
+
+@dataclasses.dataclass(frozen=True)
+class AttendedProfileCredentialFormat:
+    """Credential-format authority for the reviewed attended profile target.
+
+    The finite attended Anthropic subscription never resolves through
+    ``CodexProviderRealm`` and is never reinterpreted as a Codex responses
+    realm. It carries only the reviewed binding/profile identity and the
+    shared provider-neutral credential format boundary: no secret bytes,
+    provider response interpretation, login verdict, readiness, capacity, or
+    route authority.
+    """
+
+    binding_id: str
+    profile_id: str
+
+    def validate_credential(self, value: str) -> str:
+        return validate_provider_credential_format(value)
+
+
+def _resolve_attended_profile_credential(
+    binding: Any,
+    finite_binding_id: str,
+) -> AttendedProfileCredentialFormat:
+    """Actual reviewed-profile checks for the finite attended Anthropic target."""
+    profile_id = getattr(binding, "profile_id", None)
+    autonomous = getattr(binding, "autonomous_allowed", None)
+    if (
+        getattr(binding, "binding_id", None) != finite_binding_id
+        or getattr(binding, "adapter_id", None) != _FINITE_ATTENDED_ADAPTER
+        or getattr(binding, "harness_id", None) != _FINITE_ATTENDED_HARNESS
+        or getattr(binding, "protocol", None) != _FINITE_ATTENDED_PROTOCOL
+        or type(autonomous) is not bool
+        or autonomous
+        or getattr(binding, "implementation_state", None) == "SPEC_ONLY"
+        or not isinstance(profile_id, str)
+        or not profile_id
+        or profile_id != profile_id.strip()
+    ):
+        raise SubscriptionCredentialError(
+            "attended subscription credential target profile is not reviewed"
+        )
+    return AttendedProfileCredentialFormat(
+        binding_id=str(binding.binding_id),
+        profile_id=profile_id,
+    )
+
+
 def _load_reviewed_target_config(
     path: Path,
-) -> tuple[dict[str, Any], CodexProviderRealm]:
+) -> tuple[dict[str, Any], CodexProviderRealm | AttendedProfileCredentialFormat]:
     try:
         from scripts.executive_os_phase1c_worker import (
             SUBSCRIPTION_CONFIG_SCHEMA_VERSION,
+            _FINITE_ATTENDED_BINDING,
             _load_config,
             _resolve_subscription_binding,
             _resolve_subscription_realm,
@@ -369,14 +424,23 @@ def _load_reviewed_target_config(
                 "subscription credential target must use worker config v5"
             )
         binding = _resolve_subscription_binding(config.get("harness_binding_id"))
-        realm = _resolve_subscription_realm(binding)
+        # Codex bindings keep their exact reviewed CodexProviderRealm. The
+        # finite attended Anthropic binding resolves to its reviewed profile
+        # authority instead and is never reinterpreted as a Codex realm.
+        authority: CodexProviderRealm | AttendedProfileCredentialFormat
+        if binding.adapter_id == "codex-cli":
+            authority = _resolve_subscription_realm(binding)
+        else:
+            authority = _resolve_attended_profile_credential(
+                binding, _FINITE_ATTENDED_BINDING
+            )
     except SubscriptionCredentialError:
         raise
     except Exception:
         raise SubscriptionCredentialError(
             "subscription credential target config is not reviewed"
         ) from None
-    return config, realm
+    return config, authority
 
 
 def _assert_global_autonomy_disarmed() -> None:
@@ -455,6 +519,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 __all__ = [
     "MAX_CREDENTIAL_BYTES",
+    "AttendedProfileCredentialFormat",
     "SubscriptionCredentialEffectUnknown",
     "SubscriptionCredentialError",
     "install_provider_credential",

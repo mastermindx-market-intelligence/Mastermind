@@ -58,10 +58,10 @@ ambiguous and grants no Pro-mode authorization.
 
 The following work is never Pro-eligible: `handoff / ACK / PICKUP_ACK / START / CONTINUE / STOP`;
 `status / routing / placement / watcher / monitoring / polling / foregrounding`; message relay;
-`mechanical edits / tests / simple review`; and any other short bounded work. The size or importance
-of the parent program does not upgrade one of those turns.
+`mechanical edits / tests / simple review`; and any other routine administrative work. The size or
+importance of the parent program does not upgrade one of those turns.
 
-Only a genuinely long-horizon frontier-reasoning turn may request Pro mode, and only with the
+Only a qualifying substantive reasoning turn may request Pro mode, and only with the
 complete receipt:
 
 ```text
@@ -70,7 +70,7 @@ CHAT_REASONING_MODE: PRO_MODE_EXCEPTION
 WHY_PRO_MODE: <specific frontier-reasoning advantage required by this turn>
 WHY_NON_PRO_INSUFFICIENT: <specific evidence that non-Pro reasoning cannot reliably meet the bar>
 PRO_MODE_TASK_CLASS: <one allowed class below>
-EXPECTED_DURATION_MINUTES: <integer between 80 and 1440 minutes, inclusive>
+EXPECTED_DURATION_MINUTES: <integer between 1 and 1440 minutes, inclusive>
 STOP_CONDITION: <observable completion or abort condition>
 ```
 
@@ -83,9 +83,20 @@ HARD_DEBUGGING
 ADVERSARIAL_JUDGMENT
 ```
 
-Every field is required. `EXPECTED_DURATION_MINUTES` must be an integer between 80 and 1440 minutes,
-inclusive, and therefore at least 80 minutes. Missing, stale, under-duration, over-duration, or
-ineligible receipts fail closed:
+Every field is required. `EXPECTED_DURATION_MINUTES` must be an integer between 1 and 1440 minutes,
+inclusive.
+
+Duration is a planning estimate, not a minimum run time. Short substantive work is eligible
+under the same task-class and justification gates. Do not inflate estimates or generate to fill
+time; existing completion/continuity gates still apply.
+Current model/account allowances and remaining capacity remain facts supplied by existing Capacity
+owners; this receipt neither reserves quota nor proves model availability. No quota constants,
+new capacity store, or provider entitlement are introduced here.
+
+The 1-1440 range is the typed automated Pro-mode routing-receipt validation bound; attended mode
+stays separately governed and no attended turn manufactures this receipt.
+
+Missing, stale, out-of-range, or ineligible receipts fail closed:
 
 ```text
 PRO_MODE_REFUSED / USE_NON_PRO_MODE
@@ -385,3 +396,11 @@ Fable, Grok or another surface is exempt because it historically emitted or expe
 > eligible session is assignment. Exact-session continuation stays exact; after START, runtime changes
 > require canonical reconciliation. Prefer Terra and CTO Sol when sufficient. Fable is for the hardest
 > principal-level problems, not the default.**
+
+## 10. Source-linked cross-account recovery and Project instruction delivery
+
+An archived original PR author, historical named ChatGPT account or system-name "owner" is a custody clue, not a living execution owner. After actual Chairman assignment, the **current eligible receiver owns the next authorized executable action**: discover current source, check the true writer/lease and original pending effects, do the permitted work, and save evidence. A real active writer or `EFFECT_UNKNOWN` still fences that action. An explicit safety/permission denial is never authorization to retry on another host, account, model or connector. Do not require the Chairman to locate or resurrect an archived chat.
+
+`HANDOFF_SOURCE_LINK_V1` is a transport discipline, not a new approval, runtime state or queue. Store the complete implementation/recovery packet in the already-owning **reviewed GitHub source**. Deliver a small scoped Slack message to the actual eligible receiver naming its task, exact link, original effect/lease fence and return location. Distinguish DELIVERED from actual PICKUP_ACK, START and verified result; neither a message nor a checked-in PR is implementation proof. Keep same-child follow-ups in its existing thread, never spawn duplicate reviewer/worker carriers simply because the first delivery has not been consumed.
+
+For ChatGPT Web Project instructions, the **actual authorized Project owner/editor** installs accepted protected-source text into each *distinct* eligible Project, without duplicating edits for every member or overwriting newer valid existing rules. Check Project ID, editor permission, live browser/tab writer, character and UTF-8 byte limits, saved-settings readback and per-account fresh-chat behavioral proof. If the host is human-active or an editor restriction applies, do not steal focus, bypass it, or claim installation; preserve the exact missing step while independently safe work continues. A source-only PR, Slack transport or paraphrase is never evidence that Web settings were saved.

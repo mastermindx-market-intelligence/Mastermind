@@ -93,7 +93,11 @@ def _brain_job_outcome(result: object) -> tuple[str, str | None, dict]:
 
     target = str(result.get("target_status") or "").strip().lower()
     extra = {"target_status": target or None}
-    if any(result.get(key) for key in ("publish_error", "decision_log_error", "mark_error")):
+    if result.get("fabric_held") is True:
+        return "error", "FREEZE", {**extra, "reason": "fabric_effect_unsettled"}
+    if any(result.get(key) for key in (
+        "publish_error", "write_error", "decision_log_error", "mark_error"
+    )):
         return "error", "FREEZE", {**extra, "reason": "projection_failed"}
     if result.get("cost_capped") is True:
         return "skip", "ADVISORY_ONLY", {**extra, "reason": "cost_capped"}
@@ -106,6 +110,22 @@ def _brain_job_outcome(result: object) -> tuple[str, str | None, dict]:
 
     if target in {"queued", "executed"}:
         if result.get("decision_effective") is True:
+            # Accepted execution and completed receipt projections are separate facts.
+            # No receipt is legitimate; a reported finalization must include its ACK.
+            finalization = result.get("settlement_receipt_finalization")
+            if result.get("settlement_receipt_retained") is True or (
+                "settlement_receipt_finalization" in result
+                and (
+                    not isinstance(finalization, dict)
+                    or finalization.get("ok") is not True
+                    or finalization.get("receipt_acknowledged") is not True
+                    or finalization.get("receipt_retained") is True
+                    or bool(finalization.get("finalization_errors"))
+                )
+            ):
+                return "error", "FREEZE", {
+                    **extra, "reason": "settlement_finalization_incomplete"
+                }
             return "ok", None, extra
         return "error", "FREEZE", {**extra, "reason": "inconsistent_result"}
     if target == "rejected_no_submission":
@@ -376,6 +396,10 @@ def _maybe_schedule_brain_retry(job_id: str, book: str, since_ts) -> None:
     try:
         if _BRAIN_RETRY_JOBS.get(job_id) != book:
             return  # archived/unknown jobs are ineligible even if an old failure marker exists
+        if book in {"autonomous", "china", "hk"}:
+            from brain import fabric_portfolio, runlog
+            if runlog.portfolio_lookup(book=book) is not None or fabric_portfolio.selected():
+                return  # Original Fabric effects never become legacy whole-book retries.
         marker = _read_pool_exhausted_since(book, since_ts)
         if marker is None:
             return  # no all-cooling failure this run — nothing to retry
@@ -505,7 +529,8 @@ def _autonomous_job():
             return
         with lock:
             from bot.autonomous import run_autonomous
-            _result = run_autonomous()
+            from brain import fabric_portfolio
+            _result = run_autonomous(**fabric_portfolio.caller_kwargs(handle))
             _post_mark_forward_evaluation("autonomous", _result)
         _status, _severity, _extra = _brain_job_outcome(_result)
         _ledger_end(handle, _status, severity=_severity, extra=_extra)
@@ -554,7 +579,8 @@ def _china_job():
             return
         with lock:
             from bot.china import run_china
-            _result = run_china()
+            from brain import fabric_portfolio
+            _result = run_china(**fabric_portfolio.caller_kwargs(handle, book="china"))
             _post_mark_forward_evaluation("china", _result)
         _status, _severity, _extra = _brain_job_outcome(_result)
         _ledger_end(handle, _status, severity=_severity, extra=_extra)
@@ -579,7 +605,8 @@ def _hk_job():
             return
         with lock:
             from bot.hk import run_hk
-            _result = run_hk()
+            from brain import fabric_portfolio
+            _result = run_hk(**fabric_portfolio.caller_kwargs(handle, book="hk"))
             _post_mark_forward_evaluation("hk", _result)
         _status, _severity, _extra = _brain_job_outcome(_result)
         _ledger_end(handle, _status, severity=_severity, extra=_extra)
@@ -751,6 +778,29 @@ def _settle_brain_asia_job():
         log.warning("settle_brain_asia failed: %s", exc)
 
 
+def _watch_job_outcome(result: object) -> tuple[str, str | None, dict]:
+    """Keep the existing per-book classifier visible through the overnight wrapper."""
+    if not isinstance(result, dict) or not result:
+        return "error", "FREEZE", {"reason": "invalid_watch_result"}
+    outcomes = {}
+    benign = {"market_open", "nothing_queued", "tape_calm", "portfolio_archived",
+              "legacy_etf_migration_pending"}
+    for book, item in result.items():
+        if not isinstance(item, dict) or item.get("error"):
+            status, severity, extra = "error", "FREEZE", {"reason": "watch_failed"}
+        elif isinstance(item.get("refined"), dict):
+            status, severity, extra = _brain_job_outcome(item["refined"])
+        elif item.get("skipped") in benign:
+            status, severity, extra = "skip", "ADVISORY_ONLY", {"reason": item["skipped"]}
+        else:
+            status, severity, extra = "error", "FREEZE", {"reason": "invalid_watch_result"}
+        outcomes[book] = {"status": status, "severity": severity, **extra}
+    statuses = {item["status"] for item in outcomes.values()}
+    status = next(value for value in ("error", "warn", "ok", "skip") if value in statuses)
+    severity = "FREEZE" if status in {"error", "warn"} else "ADVISORY_ONLY" if status == "skip" else None
+    return status, severity, {"books": outcomes}
+
+
 def _watch_us_job():
     """Overnight watch for the US Brain books: between the US close and the next open, re-read the live
     overnight tape; on a MATERIAL move (deterministic tripwire — free, no LLM) re-prompt the Brain to
@@ -770,12 +820,14 @@ def _watch_us_job():
         try:
             from bot import overnight
             try:
-                overnight.watch_us()
+                _result = overnight.watch_us(handle=handle)
             except Exception as exc:  # noqa: BLE001 — a watch miss must never kill the scheduler
                 _step_failed_event("watch_us_overnight", "autonomous", "watch_us", exc)
+                raise
         finally:
             lock_auto.release()
-        _ledger_end(handle, "ok")
+        _status, _severity, _extra = _watch_job_outcome(_result)
+        _ledger_end(handle, _status, severity=_severity, extra=_extra)
     except Exception as exc:  # noqa: BLE001
         _ledger_end(handle, "error")
         log.warning("watch_us_overnight outer failed: %s", exc)
@@ -807,13 +859,15 @@ def _watch_asia_job():
         try:
             from bot import overnight
             try:
-                overnight.watch_asia()
+                _result = overnight.watch_asia(handle=handle)
             except Exception as exc:  # noqa: BLE001 — a watch miss must never kill the scheduler
                 _step_failed_event("watch_asia_overnight", "china+hk", "watch_asia", exc)
+                raise
         finally:
             lock_hk.release()
             lock_china.release()
-        _ledger_end(handle, "ok")
+        _status, _severity, _extra = _watch_job_outcome(_result)
+        _ledger_end(handle, _status, severity=_severity, extra=_extra)
     except Exception as exc:  # noqa: BLE001
         _ledger_end(handle, "error")
         log.warning("watch_asia_overnight outer failed: %s", exc)
@@ -859,8 +913,16 @@ def _macro_refresh_job():
     handle = _ledger_start("macro_refresh", trigger="cron")
     try:
         from data_layer import macro_refresh
-        macro_refresh.refresh_and_check()
-        _ledger_end(handle, "ok")
+        info = macro_refresh.refresh_and_check()
+        from brain import perception_publication
+        publication = perception_publication.publish_after_refresh(info)
+        accepted = publication.get("status") in {"published", "unchanged"}
+        _ledger_end(handle, "ok" if accepted else "error")
+        if not accepted:
+            log.warning("perception publication unavailable: %s", publication.get("reason"))
+        else:
+            log.info("perception publication %s seq=%s",
+                     publication.get("status"), publication.get("seq"))
     except Exception as exc:  # noqa: BLE001 — a refresh miss must never kill the scheduler
         _ledger_end(handle, "error")
         log.warning("macro_refresh failed: %s", exc)
@@ -1406,7 +1468,9 @@ def _daily_mark_job():
                         else:
                             try:
                                 try:
-                                    self_directed.mark(prices=union_usd, asof=asof)
+                                    marked = self_directed.mark(prices=union_usd, asof=asof)
+                                    if marked is None:
+                                        raise self_directed.SelfDirectedMarkUnavailable("self-directed mark returned unavailable")
                                 except Exception as exc:  # noqa: BLE001
                                     _step_failed_event(
                                         "daily_mark", "self_directed", "mark:self_directed",
@@ -1414,7 +1478,9 @@ def _daily_mark_job():
                                     )
                                 else:
                                     try:
-                                        self_directed.publish(prices=union_usd, asof=asof)
+                                        published = self_directed.publish(prices=union_usd, asof=asof)
+                                        if published is None:
+                                            raise self_directed.SelfDirectedMarkUnavailable("self-directed publication returned unavailable")
                                     except Exception as exc:  # noqa: BLE001
                                         _step_failed_event(
                                             "daily_mark", "self_directed", "publish:self_directed",
@@ -2060,8 +2126,11 @@ def maybe_first_autonomous_run() -> bool:
     except Exception:
         pass
     try:
-        from brain import cli_bridge
-        if not cli_bridge.available():
+        from brain import cli_bridge, fabric_portfolio, runlog
+        original = runlog.portfolio_lookup()
+        ready = (True if original is not None else fabric_portfolio.available()
+                 if fabric_portfolio.selected() else cli_bridge.available())
+        if not ready:
             return False  # no subscription/CLI → don't fire a doomed armed run
     except Exception:
         return False
@@ -2078,9 +2147,11 @@ def maybe_first_autonomous_run() -> bool:
                 return
             with lock:
                 from bot.autonomous import run_autonomous
-                _result = run_autonomous()
+                from brain import fabric_portfolio
+                _result = run_autonomous(**fabric_portfolio.caller_kwargs(handle))
                 _post_mark_forward_evaluation("autonomous", _result)
-            _ledger_end(handle, "ok")
+            _status, _severity, _extra = _brain_job_outcome(_result)
+            _ledger_end(handle, _status, severity=_severity, extra=_extra)
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
             log.warning("autonomous first-run failed: %s", exc)
@@ -2151,8 +2222,11 @@ def maybe_first_china_run() -> bool:
     except Exception:
         pass
     try:
-        from brain import cli_bridge
-        if not cli_bridge.available():
+        from brain import cli_bridge, fabric_portfolio, runlog
+        original = runlog.portfolio_lookup(book="china")
+        ready = (True if original is not None else fabric_portfolio.available("china")
+                 if fabric_portfolio.selected() else cli_bridge.available())
+        if not ready:
             return False  # no subscription/CLI → don't fire a doomed armed run
     except Exception:
         return False
@@ -2169,9 +2243,11 @@ def maybe_first_china_run() -> bool:
                 return
             with lock:
                 from bot.china import run_china
-                _result = run_china()
+                from brain import fabric_portfolio
+                _result = run_china(**fabric_portfolio.caller_kwargs(handle, book="china"))
                 _post_mark_forward_evaluation("china", _result)
-            _ledger_end(handle, "ok")
+            _status, _severity, _extra = _brain_job_outcome(_result)
+            _ledger_end(handle, _status, severity=_severity, extra=_extra)
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
             log.warning("china first-run failed: %s", exc)
@@ -2193,8 +2269,11 @@ def maybe_first_hk_run() -> bool:
     except Exception:
         pass
     try:
-        from brain import cli_bridge
-        if not cli_bridge.available():
+        from brain import cli_bridge, fabric_portfolio, runlog
+        original = runlog.portfolio_lookup(book="hk")
+        ready = (True if original is not None else fabric_portfolio.available("hk")
+                 if fabric_portfolio.selected() else cli_bridge.available())
+        if not ready:
             return False  # no subscription/CLI → don't fire a doomed armed run
     except Exception:
         return False
@@ -2211,9 +2290,11 @@ def maybe_first_hk_run() -> bool:
                 return
             with lock:
                 from bot.hk import run_hk
-                _result = run_hk()
+                from brain import fabric_portfolio
+                _result = run_hk(**fabric_portfolio.caller_kwargs(handle, book="hk"))
                 _post_mark_forward_evaluation("hk", _result)
-            _ledger_end(handle, "ok")
+            _status, _severity, _extra = _brain_job_outcome(_result)
+            _ledger_end(handle, _status, severity=_severity, extra=_extra)
         except Exception as exc:  # noqa: BLE001
             _ledger_end(handle, "error")
             log.warning("hk first-run failed: %s", exc)

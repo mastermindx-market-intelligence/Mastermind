@@ -1,0 +1,62 @@
+{
+  "schema": "mastermind.fabric_application_j_recovery_source.v1",
+  "mission": "fabric-application-integration-20261104-sol",
+  "source_parent": "2cf01336ba7f7e5bc2011f50c0319892ddebb292",
+  "law_pin": "e37dc82f070fd391e29f0dbd0bf46b022166beea",
+  "takeover_ref": "https://github.com/mastermindx-market-intelligence/Mastermind/issues/983#issuecomment-6704218544",
+  "original_j_status": "EFFECT_UNKNOWN; no replay or fresh collection",
+  "source_claim": "Source recovery and preserving migration qualified; runtime activation and original J recovery not performed.",
+  "changes": [
+    "Preserve exact original C3 predecessor observations and fixed original run slots through the installed gateway/control owner.",
+    "Persist a content-addressed immutable same-owner installation plan before target writes, bind original request/source/executor/control/runtime closure and original predecessor; resume only exact OLD/TARGET bytes.",
+    "Manifest last; require stable inode and strict file/parent fsync/readback before completion. Visible failed durability evidence holds start/helper admission.",
+    "Same completed request requalifies original completion without target rewrite; historical completion cannot authorize rollback and remains preserved across a later legitimate source upgrade.",
+    "Use existing C3 lifecycle/quiescence owners and strict launchctl identity/exact absence; indeterminate rc2 or malformed rc0 refuses before recovery target effects."
+  ],
+  "proofs": [
+    {
+      "name": "Actual modern and legacy MCP SDK original collection",
+      "tests": 22,
+      "passed": 22,
+      "skipped": 0,
+      "log_sha256": "4a92a07745f62e752a98f309b91d9875c6b64dfb8f9b245802b2109809d76b29"
+    },
+    {
+      "name": "Collector plain and APPLICATION executions",
+      "tests": 90,
+      "passed": 90,
+      "skipped": 0,
+      "log_sha256": "c8bce11a907924fb9dd329c3f6bdb6720099a302512362639aa7891f877854e7",
+      "source_commit": "2cf01336ba7f7e5bc2011f50c0319892ddebb292"
+    },
+    {
+      "name": "Composed original delivery plus8incumbent service/control modules",
+      "tests": 370,
+      "passed": 369,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "log_sha256": "b6a80b18c25e7f398593e4d6421f77346c03ac2fad6ed10548ac86ee767fa96e",
+      "remaining_failure": "private_service_test.TestCLI.test_parser_has_expected_subcommands: expected set omits the newly implemented original-predecessor-readback; separate bounded fixture amendment required."
+    }
+  ],
+  "review_findings_closed": [
+    "Strict parent directory open/fsync, including swallowed incumbent os.open failures; actual directory-open regression cases added.",
+    "Strict C3 stopped-service evidence for pending original preserving upgrade; rc2 and malformed rc0 keep same pending plan and targets."
+  ],
+  "runtime_effects": [],
+  "remaining": [
+    "Native package collector cohort repair original worker active.",
+    "Strict-schema retained-Go service compatibility worker active.",
+    "Closed eight-seat Studio forward pin companion needed; ordinary CURRENT selection does not authorize changed Go bridge.",
+    "Update one command inventory expectation and rerun that exact affected gate.",
+    "Rebuild/distribute qualified installed control; preserve active Fabric return paths before C3 upgrade.",
+    "Original J same-scope collection reconciliation, native recipe qualification, service enrollment, VPS consumer activation and real-path proof remain owed."
+  ],
+  "source_sha256": {
+    "integrations/studio_direct_mcp/original-delivery.mjs": "37e7cee03652f79e7cd9751651683f048e222ede22792171af465d33a87b3f75",
+    "integrations/studio_direct_mcp/original-delivery.test.mjs": "d4224d1e655ad1373f46e4ea1298c024cd1ef9a3956fc8d142d0b9357e509303",
+    "integrations/studio_direct_mcp/private_service.py": "fb43f385584a1932ebe4259b1ed2454e0b773ab7c16c7a4e67970ad1f370e293",
+    "integrations/studio_direct_mcp/private_service_original_delivery_test.py": "8debc45f0dbfe9942c8ada34b7d62ad6de47d19ab6f64bd88eba7b26ff9aa56f"
+  }
+}

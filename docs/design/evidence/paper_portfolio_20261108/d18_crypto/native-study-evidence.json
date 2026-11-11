@@ -1,0 +1,2159 @@
+{
+  "schema": "PAPER_NATIVE_STUDY_EVIDENCE_V1",
+  "mission_date": "2026-11-08",
+  "scope": "D18 relative comparison window",
+  "target": {
+    "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+    "page_id": "p-3-0",
+    "url": "https://app.paper.design/file/01M6Y3F0NXNDPAKJMJGCAD759Z/p-3-0",
+    "boards": [
+      {
+        "id": "2XH-0",
+        "key": "basis",
+        "name": "01 · PROPOSED · Relative comparison basis"
+      },
+      {
+        "id": "2YI-0",
+        "key": "states",
+        "name": "02 · PROPOSED · Paired history states · EN ZH"
+      },
+      {
+        "id": "2ZJ-0",
+        "key": "contract",
+        "name": "03 · D18 · Existing owner and window contract"
+      }
+    ],
+    "node_count": 255,
+    "native_page_name": "Proposed · Relative comparison basis"
+  },
+  "law_pin": "5c3d3885234358aefb97ecdbc59be0864df14f8b",
+  "source_repository": "mastermindx-market-intelligence/Macro",
+  "sources": [
+    {
+      "ref": "5eb1603edb4486f06c74df7c43a1082427a59b6e",
+      "path": "engine/eth_state.py",
+      "blob": "481c04ad243c11abd8482a22b1845be1cd2a518d",
+      "role": "existing asset-state owner"
+    },
+    {
+      "ref": "5eb1603edb4486f06c74df7c43a1082427a59b6e",
+      "path": "scripts/build_crypto.py",
+      "blob": "f88a01545af0ef634f7ab947e90471a59513c081",
+      "role": "current publication and asset lanes"
+    },
+    {
+      "ref": "5eb1603edb4486f06c74df7c43a1082427a59b6e",
+      "path": "templates/crypto.html.j2",
+      "blob": "0c657a1b1d7eaa41faa2edb14ec110878c0601bc",
+      "role": "current public template"
+    },
+    {
+      "ref": "5e496c24c962e85a4f7f514dd43dc61443b95cab",
+      "path": "engine/eth_state.py",
+      "blob": "481c04ad243c11abd8482a22b1845be1cd2a518d",
+      "role": "existing draft R4 candidate; no mutation"
+    },
+    {
+      "ref": "5e496c24c962e85a4f7f514dd43dc61443b95cab",
+      "path": "lib/crypto_intelligence_view.py",
+      "blob": "44d47c10fd9e39762d5304fc0bacbc29bf511e41",
+      "role": "existing draft R4 candidate; no mutation"
+    },
+    {
+      "ref": "5e496c24c962e85a4f7f514dd43dc61443b95cab",
+      "path": "scripts/build_crypto_intelligence_r4.py",
+      "blob": "64105d836bfe13492749425bea65a3f3749e0494",
+      "role": "existing draft R4 candidate; no mutation"
+    },
+    {
+      "ref": "5e496c24c962e85a4f7f514dd43dc61443b95cab",
+      "path": "templates/crypto_intelligence_r4.html.j2",
+      "blob": "c54fe52ddce6fe3cb5f7640e3b694e8316a546de",
+      "role": "existing draft R4 candidate; no mutation"
+    },
+    {
+      "ref": "5e496c24c962e85a4f7f514dd43dc61443b95cab",
+      "path": "templates/crypto_intelligence_r4.js",
+      "blob": "ff46d4408d243bcebb8e6cac95167b4a6ef933c4",
+      "role": "existing draft R4 candidate; no mutation"
+    }
+  ],
+  "findings": [
+    "Each asset/BTC ratio uses independently joined daily labels and compares [-91] to [-1], requiring 91 common observations for 90 steps.",
+    "Aggregate as_of is max(asset as_of), not a shared relative-window end.",
+    "Asset source is emitted; selected BTC source and matched window endpoints/counts are not.",
+    "The actual R4 draft candidate preserves asset dates but copies relative results without paired metadata; its comparison drawer refers to the same published horizon and sorting defaults to relative value.",
+    "No claim that the original illustrative R4 values are numerically wrong."
+  ],
+  "contract": {
+    "current": [
+      "symbol",
+      "asset as_of",
+      "coverage.source",
+      "coverage.observations",
+      "coverage.first_date",
+      "coverage.last_date",
+      "relative.state",
+      "relative.state_zh",
+      "relative.change_90d_pct",
+      "generated_at",
+      "aggregate as_of"
+    ],
+    "proposed": [
+      "owner-declared observation-step window basis",
+      "matched start and end",
+      "observations used for selected window",
+      "common observations available",
+      "benchmark identity/source/price basis",
+      "explicit relative-unavailability reason"
+    ],
+    "counts": {
+      "insufficient_fixture": {
+        "independent_asset_observations": 120,
+        "common_dated_observations_available": 82,
+        "common_observations_required": 91,
+        "relative_result": null
+      },
+      "eligible_window": {
+        "observations_used": 91,
+        "steps": 90
+      }
+    },
+    "illustrative_windows": [
+      {
+        "asset": "ETH",
+        "asset_as_of": "2026-10-08",
+        "matched_start": "2026-07-10",
+        "matched_end": "2026-10-08",
+        "observations_used": 91,
+        "steps": 90
+      },
+      {
+        "asset": "SOL",
+        "asset_as_of": "2026-10-15",
+        "matched_start": "2026-07-17",
+        "matched_end": "2026-10-15",
+        "observations_used": 91,
+        "steps": 90
+      }
+    ],
+    "fixture_aggregate_as_of": "2026-10-15",
+    "clock_note": "Asset dates happen to equal paired ends in this fixture; aggregate is computed from asset dates. Complete series illustrate unequal endpoints, not gap expansion.",
+    "invariants": [
+      "No UI recomputation or raw history fetch",
+      "No zero bar/leadership state for unavailable comparison",
+      "Do not infer missing reason/count from generic Building history",
+      "Close preserves selected asset/filter/source context",
+      "No source fallback or venue/UTC-close inference",
+      "No new endpoint or state owner",
+      "Missing basis metadata alone does not silently erase an otherwise supplied relative result; retain its provenance and withhold unsupported ranking."
+    ]
+  },
+  "verification": {
+    "original_r4_exact_checks": [
+      {
+        "id": "1-0",
+        "exact": true,
+        "length": 33475
+      },
+      {
+        "id": "4B-0",
+        "exact": true,
+        "length": 32205
+      },
+      {
+        "id": "8E-0",
+        "exact": true,
+        "length": 23141
+      },
+      {
+        "id": "BB-0",
+        "exact": true,
+        "length": 24525
+      },
+      {
+        "id": "EF-0",
+        "exact": true,
+        "length": 14954
+      },
+      {
+        "id": "G5-0",
+        "exact": true,
+        "length": 14394
+      },
+      {
+        "id": "HX-0",
+        "exact": true,
+        "length": 71761
+      },
+      {
+        "id": "QI-0",
+        "exact": true,
+        "length": 8816
+      }
+    ],
+    "original_page_metadata": {
+      "pageName": true,
+      "nodeCount": true,
+      "artboards": true
+    },
+    "native_visual_review": "Root inspected all three final board layouts; no clipping or collision observed.",
+    "action_frames": [
+      {
+        "id": "31O-0",
+        "name": "Action · Close ×",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "id": "34I-0",
+        "name": "Action · Inspect",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "id": "360-0",
+        "name": "Action · Inspect asset evidence",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "id": "364-0",
+        "name": "Action · ← Markets",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "id": "36R-0",
+        "name": "Action · View asset evidence",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "id": "36T-0",
+        "name": "Action · Back to Markets",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "id": "36Z-0",
+        "name": "Action · ← 市场",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "id": "37M-0",
+        "name": "Action · 查看资产证据",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "id": "37O-0",
+        "name": "Action · 返回市场",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "id": "37U-0",
+        "name": "Action · ← 市场",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "id": "38J-0",
+        "name": "Action · 查看资产证据",
+        "minHeight": "44px",
+        "ok": true
+      },
+      {
+        "id": "38L-0",
+        "name": "Action · 返回市场",
+        "minHeight": "44px",
+        "ok": true
+      }
+    ],
+    "phone_frames": [
+      {
+        "id": "320-0",
+        "width": "390px",
+        "height": "830px",
+        "expected": 390,
+        "ok": true
+      },
+      {
+        "id": "321-0",
+        "width": "390px",
+        "height": "830px",
+        "expected": 390,
+        "ok": true
+      },
+      {
+        "id": "322-0",
+        "width": "320px",
+        "height": "830px",
+        "expected": 320,
+        "ok": true
+      }
+    ],
+    "board_layout": {
+      "boardCount": 3,
+      "overlap": []
+    },
+    "no_undefined_nan_literal_newline": true,
+    "source_engine_same_blob_in_main_and_r4": true,
+    "native_not_runtime": "Native layout, text and source inspection only. No connected app interaction, focus/accessibility execution, endpoint, runtime test, cutover or production acceptance is claimed."
+  },
+  "release": {
+    "r4_pr": 9580,
+    "head": "5e496c24c962e85a4f7f514dd43dc61443b95cab",
+    "state": "open",
+    "draft": true,
+    "merged": false,
+    "labels": [],
+    "auto_merge": null,
+    "mutated": false
+  },
+  "operations": [
+    {
+      "key": "create-page",
+      "operation_id": "paper-portfolio-d18-window-20261108-create-page-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "create_page",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": null,
+      "node_ids": null,
+      "expected_snapshot": "b5a69b6ec8fef3861b78340f28f65f6cddf35ce4455448d306ea14272906a237",
+      "retry_allowed": false,
+      "created_nodes": [],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "clone-basis",
+      "operation_id": "paper-portfolio-d18-window-20261108-clone-basis-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "duplicate_nodes",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": null,
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [],
+      "duplicated_nodes": [
+        {
+          "source": "QI-0",
+          "new_id": "2XH-0"
+        }
+      ]
+    },
+    {
+      "key": "clone-states",
+      "operation_id": "paper-portfolio-d18-window-20261108-clone-states-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "duplicate_nodes",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": null,
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [],
+      "duplicated_nodes": [
+        {
+          "source": "QI-0",
+          "new_id": "2YI-0"
+        }
+      ]
+    },
+    {
+      "key": "clone-contract",
+      "operation_id": "paper-portfolio-d18-window-20261108-clone-contract-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "duplicate_nodes",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": null,
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [],
+      "duplicated_nodes": [
+        {
+          "source": "QI-0",
+          "new_id": "2ZJ-0"
+        }
+      ]
+    },
+    {
+      "key": "name-boards",
+      "operation_id": "paper-portfolio-d18-window-20261108-name-boards-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "rename_nodes",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": null,
+      "node_ids": [
+        "2XH-0",
+        "2YI-0",
+        "2ZJ-0"
+      ],
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-header",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-header-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "2YA-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "30K-0",
+          "name": "D18 study heading"
+        },
+        {
+          "id": "30L-0",
+          "name": "D18 / 01 · PROPOSED …"
+        },
+        {
+          "id": "30M-0",
+          "name": "Inspect the window b…"
+        },
+        {
+          "id": "30N-0",
+          "name": "A selected-asset ins…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-body",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-body-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "2XR-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "30P-0",
+          "name": "D18 desktop comparison body"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-footer",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-footer-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "2XI-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "30R-0",
+          "name": "Design boundary"
+        },
+        {
+          "id": "30S-0",
+          "name": "DESIGN BOUNDARY"
+        },
+        {
+          "id": "30T-0",
+          "name": "Entry: the existing …"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "states-header",
+      "operation_id": "paper-portfolio-d18-window-20261108-states-header-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "2ZB-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "30V-0",
+          "name": "D18 study heading"
+        },
+        {
+          "id": "30W-0",
+          "name": "D18 / 02 · PROPOSED …"
+        },
+        {
+          "id": "30X-0",
+          "name": "Keep usable asset ev…"
+        },
+        {
+          "id": "30Y-0",
+          "name": "390px EN / ZH and 32…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "states-body",
+      "operation_id": "paper-portfolio-d18-window-20261108-states-body-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "2YS-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "310-0",
+          "name": "D18 mobile specimens"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "states-footer",
+      "operation_id": "paper-portfolio-d18-window-20261108-states-footer-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "2YJ-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "312-0",
+          "name": "Design boundary"
+        },
+        {
+          "id": "313-0",
+          "name": "DESIGN BOUNDARY"
+        },
+        {
+          "id": "314-0",
+          "name": "The 82/91 count is a…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "contract-header",
+      "operation_id": "paper-portfolio-d18-window-20261108-contract-header-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "30C-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "316-0",
+          "name": "D18 study heading"
+        },
+        {
+          "id": "317-0",
+          "name": "D18 / 03 · PROPOSED …"
+        },
+        {
+          "id": "318-0",
+          "name": "Make the comparison …"
+        },
+        {
+          "id": "319-0",
+          "name": "Source and builder c…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "contract-body",
+      "operation_id": "paper-portfolio-d18-window-20261108-contract-body-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "2ZT-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "31B-0",
+          "name": "D18 contract body"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "contract-footer",
+      "operation_id": "paper-portfolio-d18-window-20261108-contract-footer-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "2ZK-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "31D-0",
+          "name": "Design boundary"
+        },
+        {
+          "id": "31E-0",
+          "name": "DESIGN BOUNDARY"
+        },
+        {
+          "id": "31F-0",
+          "name": "Source pin: Macro 5e…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-top",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-top-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "30P-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "31H-0",
+          "name": "Markets comparison toolbar"
+        },
+        {
+          "id": "31I-0",
+          "name": "Markets title"
+        },
+        {
+          "id": "31J-0",
+          "name": "MARKETS / RELATIVE T…"
+        },
+        {
+          "id": "31K-0",
+          "name": "Comparison basis"
+        },
+        {
+          "id": "31L-0",
+          "name": "Toolbar actions"
+        },
+        {
+          "id": "31M-0",
+          "name": "Status · Window details unavailable"
+        },
+        {
+          "id": "31N-0",
+          "name": "Window details unava…"
+        },
+        {
+          "id": "31O-0",
+          "name": "Action · Close ×"
+        },
+        {
+          "id": "31P-0",
+          "name": "Close ×"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-intro",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-intro-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "30P-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "31R-0",
+          "name": "Comparison qualification notice"
+        },
+        {
+          "id": "31S-0",
+          "name": "The source does not …"
+        },
+        {
+          "id": "31T-0",
+          "name": "The R4 examples belo…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-columns",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-columns-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "30P-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "31V-0",
+          "name": "D18 desktop columns"
+        },
+        {
+          "id": "31W-0",
+          "name": "D18 asset readings"
+        },
+        {
+          "id": "31X-0",
+          "name": "D18 selected comparison"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "states-phones",
+      "operation_id": "paper-portfolio-d18-window-20261108-states-phones-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "310-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "31Z-0",
+          "name": "D18 phone row"
+        },
+        {
+          "id": "320-0",
+          "name": "390 EN · Insufficient paired history"
+        },
+        {
+          "id": "321-0",
+          "name": "390 ZH · Insufficient paired history"
+        },
+        {
+          "id": "322-0",
+          "name": "320 ZH · Comparison basis unknown"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "contract-owner",
+      "operation_id": "paper-portfolio-d18-window-20261108-contract-owner-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "31B-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "324-0",
+          "name": "Existing source ownership"
+        },
+        {
+          "id": "325-0",
+          "name": "Asset-state owner"
+        },
+        {
+          "id": "326-0",
+          "name": "01 / CALCULATE"
+        },
+        {
+          "id": "327-0",
+          "name": "engine/eth_state.py"
+        },
+        {
+          "id": "328-0",
+          "name": "Pair each asset with…"
+        },
+        {
+          "id": "329-0",
+          "name": "Current publication owner"
+        },
+        {
+          "id": "32A-0",
+          "name": "02 / PUBLISH"
+        },
+        {
+          "id": "32B-0",
+          "name": "scripts/build_crypto…"
+        },
+        {
+          "id": "32C-0",
+          "name": "Writes crypto_asset_…"
+        },
+        {
+          "id": "32D-0",
+          "name": "Current consumer"
+        },
+        {
+          "id": "32E-0",
+          "name": "03 / DISPLAY"
+        },
+        {
+          "id": "32F-0",
+          "name": "templates/crypto.htm…"
+        },
+        {
+          "id": "32G-0",
+          "name": "Current asset lanes;…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "contract-fields",
+      "operation_id": "paper-portfolio-d18-window-20261108-contract-fields-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "31B-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "32I-0",
+          "name": "Existing and proposed source fields"
+        },
+        {
+          "id": "32J-0",
+          "name": "Extend this owner’s …"
+        },
+        {
+          "id": "32K-0",
+          "name": "Current emitted source"
+        },
+        {
+          "id": "32L-0",
+          "name": "Current label"
+        },
+        {
+          "id": "32M-0",
+          "name": "Status · ALREADY EMITTED"
+        },
+        {
+          "id": "32N-0",
+          "name": "ALREADY EMITTED"
+        },
+        {
+          "id": "32O-0",
+          "name": "symbol · asset as_of…"
+        },
+        {
+          "id": "32P-0",
+          "name": "Divider"
+        },
+        {
+          "id": "32Q-0",
+          "name": "Proposed paired evidence"
+        },
+        {
+          "id": "32R-0",
+          "name": "Proposed label"
+        },
+        {
+          "id": "32S-0",
+          "name": "Status · PROPOSED · NOT EMITTED"
+        },
+        {
+          "id": "32T-0",
+          "name": "PROPOSED · NOT EMITT…"
+        },
+        {
+          "id": "32U-0",
+          "name": "Window basis · match…"
+        },
+        {
+          "id": "32V-0",
+          "name": "Read the owner’s rel…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "contract-windows",
+      "operation_id": "paper-portfolio-d18-window-20261108-contract-windows-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "31B-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "32X-0",
+          "name": "Independent paired-window fixture"
+        },
+        {
+          "id": "32Y-0",
+          "name": "Window fixture heading"
+        },
+        {
+          "id": "32Z-0",
+          "name": "Two 90-step windows …"
+        },
+        {
+          "id": "330-0",
+          "name": "Status · ILLUSTRATIVE COMPLETE DAILY SERIES"
+        },
+        {
+          "id": "331-0",
+          "name": "ILLUSTRATIVE COMPLET…"
+        },
+        {
+          "id": "332-0",
+          "name": "Ethereum window fixture"
+        },
+        {
+          "id": "333-0",
+          "name": "ETH fixture label"
+        },
+        {
+          "id": "334-0",
+          "name": "ETH / BTC"
+        },
+        {
+          "id": "335-0",
+          "name": "ETH dates"
+        },
+        {
+          "id": "336-0",
+          "name": "10 Jul → 08 Oct 2026"
+        },
+        {
+          "id": "337-0",
+          "name": "91 observations used…"
+        },
+        {
+          "id": "338-0",
+          "name": "ETH asset date"
+        },
+        {
+          "id": "339-0",
+          "name": "Asset observation: 0…"
+        },
+        {
+          "id": "33A-0",
+          "name": "Paired end: 08 Oct i…"
+        },
+        {
+          "id": "33B-0",
+          "name": "Solana window fixture"
+        },
+        {
+          "id": "33C-0",
+          "name": "SOL fixture label"
+        },
+        {
+          "id": "33D-0",
+          "name": "SOL / BTC"
+        },
+        {
+          "id": "33E-0",
+          "name": "SOL dates"
+        },
+        {
+          "id": "33F-0",
+          "name": "17 Jul → 15 Oct 2026"
+        },
+        {
+          "id": "33G-0",
+          "name": "91 observations used…"
+        },
+        {
+          "id": "33H-0",
+          "name": "SOL asset date"
+        },
+        {
+          "id": "33I-0",
+          "name": "Asset observation: 1…"
+        },
+        {
+          "id": "33J-0",
+          "name": "Paired end: 15 Oct i…"
+        },
+        {
+          "id": "33K-0",
+          "name": "Aggregate as_of = la…"
+        },
+        {
+          "id": "33L-0",
+          "name": "These complete-serie…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "contract-checks",
+      "operation_id": "paper-portfolio-d18-window-20261108-contract-checks-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "31B-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "33N-0",
+          "name": "Interaction and failure checks"
+        },
+        {
+          "id": "33O-0",
+          "name": "Result invariants"
+        },
+        {
+          "id": "33P-0",
+          "name": "NULL ≠ ZERO"
+        },
+        {
+          "id": "33Q-0",
+          "name": "No zero bar or leade…"
+        },
+        {
+          "id": "33R-0",
+          "name": "Return invariants"
+        },
+        {
+          "id": "33S-0",
+          "name": "RETURN CONTEXT"
+        },
+        {
+          "id": "33T-0",
+          "name": "Close keeps the sele…"
+        },
+        {
+          "id": "33U-0",
+          "name": "Source invariants"
+        },
+        {
+          "id": "33V-0",
+          "name": "NO INFERRED CLOCK OR…"
+        },
+        {
+          "id": "33W-0",
+          "name": "Provider identity al…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-table-heading",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-table-heading-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "31W-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "33Y-0",
+          "name": "Retained R4 examples heading"
+        },
+        {
+          "id": "33Z-0",
+          "name": "Retained R4 illustra…"
+        },
+        {
+          "id": "340-0",
+          "name": "Not current quotes ·…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-table-head",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-table-head-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "31W-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "342-0",
+          "name": "Relative table labels"
+        },
+        {
+          "id": "343-0",
+          "name": "Asset column"
+        },
+        {
+          "id": "344-0",
+          "name": "Asset"
+        },
+        {
+          "id": "345-0",
+          "name": "Value column"
+        },
+        {
+          "id": "346-0",
+          "name": "Reported ratio chang…"
+        },
+        {
+          "id": "347-0",
+          "name": "Window column"
+        },
+        {
+          "id": "348-0",
+          "name": "Paired window"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-eth-row",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-eth-row-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "31W-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "34A-0",
+          "name": "Ethereum reference reading"
+        },
+        {
+          "id": "34B-0",
+          "name": "Ethereum identity"
+        },
+        {
+          "id": "34C-0",
+          "name": "Ethereum"
+        },
+        {
+          "id": "34D-0",
+          "name": "ETH / BTC"
+        },
+        {
+          "id": "34E-0",
+          "name": "Ethereum result"
+        },
+        {
+          "id": "34F-0",
+          "name": "+2.6%"
+        },
+        {
+          "id": "34G-0",
+          "name": "Ethereum unknown window"
+        },
+        {
+          "id": "34H-0",
+          "name": "Not supplied"
+        },
+        {
+          "id": "34I-0",
+          "name": "Action · Inspect"
+        },
+        {
+          "id": "34J-0",
+          "name": "Inspect"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-sol-row",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-sol-row-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "31W-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "34L-0",
+          "name": "Selected Solana reference reading"
+        },
+        {
+          "id": "34M-0",
+          "name": "Solana identity"
+        },
+        {
+          "id": "34N-0",
+          "name": "Solana"
+        },
+        {
+          "id": "34O-0",
+          "name": "SOL / BTC"
+        },
+        {
+          "id": "34P-0",
+          "name": "Solana result"
+        },
+        {
+          "id": "34Q-0",
+          "name": "+8.8%"
+        },
+        {
+          "id": "34R-0",
+          "name": "Solana unknown window"
+        },
+        {
+          "id": "34S-0",
+          "name": "Not supplied"
+        },
+        {
+          "id": "34T-0",
+          "name": "Status · Selected"
+        },
+        {
+          "id": "34U-0",
+          "name": "Selected"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-method",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-method-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "31W-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "34W-0",
+          "name": "What the metric means"
+        },
+        {
+          "id": "34X-0",
+          "name": "What this measures"
+        },
+        {
+          "id": "34Y-0",
+          "name": "Change in the asset …"
+        },
+        {
+          "id": "34Z-0",
+          "name": "91 matched dated obs…"
+        },
+        {
+          "id": "350-0",
+          "name": "A verified common wi…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-inspector-title",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-inspector-title-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "31X-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "352-0",
+          "name": "Selected-asset heading"
+        },
+        {
+          "id": "353-0",
+          "name": "Selected asset title"
+        },
+        {
+          "id": "354-0",
+          "name": "SELECTED COMPARISON"
+        },
+        {
+          "id": "355-0",
+          "name": "Solana / Bitcoin"
+        },
+        {
+          "id": "356-0",
+          "name": "Status · Basis unknown"
+        },
+        {
+          "id": "357-0",
+          "name": "Basis unknown"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-inspector-reading",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-inspector-reading-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "31X-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "359-0",
+          "name": "Retained R4 SOL reading"
+        },
+        {
+          "id": "35A-0",
+          "name": "+8.8%"
+        },
+        {
+          "id": "35B-0",
+          "name": "Retained R4 illustra…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-inspector-fields",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-inspector-fields-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "31X-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "35D-0",
+          "name": "Comparison source fields"
+        },
+        {
+          "id": "35E-0",
+          "name": "Divider"
+        },
+        {
+          "id": "35F-0",
+          "name": "Field · Matched start → end"
+        },
+        {
+          "id": "35G-0",
+          "name": "Matched start → end"
+        },
+        {
+          "id": "35H-0",
+          "name": "Value"
+        },
+        {
+          "id": "35I-0",
+          "name": "Not supplied"
+        },
+        {
+          "id": "35J-0",
+          "name": "Field · Shared observations used"
+        },
+        {
+          "id": "35K-0",
+          "name": "Shared observations …"
+        },
+        {
+          "id": "35L-0",
+          "name": "Value"
+        },
+        {
+          "id": "35M-0",
+          "name": "Not supplied"
+        },
+        {
+          "id": "35N-0",
+          "name": "Field · Bitcoin source and price basis"
+        },
+        {
+          "id": "35O-0",
+          "name": "Bitcoin source and p…"
+        },
+        {
+          "id": "35P-0",
+          "name": "Value"
+        },
+        {
+          "id": "35Q-0",
+          "name": "Not supplied"
+        },
+        {
+          "id": "35R-0",
+          "name": "Field · Asset source in this specimen"
+        },
+        {
+          "id": "35S-0",
+          "name": "Asset source in this…"
+        },
+        {
+          "id": "35T-0",
+          "name": "Value"
+        },
+        {
+          "id": "35U-0",
+          "name": "Not attached"
+        },
+        {
+          "id": "35V-0",
+          "name": "Divider"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "basis-inspector-explain",
+      "operation_id": "paper-portfolio-d18-window-20261108-basis-inspector-explain-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "31X-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "35X-0",
+          "name": "Why the date cannot substitute"
+        },
+        {
+          "id": "35Y-0",
+          "name": "A page date is not t…"
+        },
+        {
+          "id": "35Z-0",
+          "name": "Keep the asset obser…"
+        },
+        {
+          "id": "360-0",
+          "name": "Action · Inspect asset evidence"
+        },
+        {
+          "id": "361-0",
+          "name": "Inspect asset eviden…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-en-nav",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-en-nav-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "320-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "363-0",
+          "name": "Mobile navigation"
+        },
+        {
+          "id": "364-0",
+          "name": "Action · ← Markets"
+        },
+        {
+          "id": "365-0",
+          "name": "← Markets"
+        },
+        {
+          "id": "366-0",
+          "name": "EN · 390"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-en-identity",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-en-identity-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "320-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "368-0",
+          "name": "Independent asset observation"
+        },
+        {
+          "id": "369-0",
+          "name": "ETHEREUM / ETH"
+        },
+        {
+          "id": "36A-0",
+          "name": "Asset price"
+        },
+        {
+          "id": "36B-0",
+          "name": "$2,413"
+        },
+        {
+          "id": "36C-0",
+          "name": "R4 example · 15 Oct …"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-en-history",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-en-history-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "320-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "36E-0",
+          "name": "Insufficient paired history"
+        },
+        {
+          "id": "36F-0",
+          "name": "RELATIVE TO BITCOIN"
+        },
+        {
+          "id": "36G-0",
+          "name": "Building shared hist…"
+        },
+        {
+          "id": "36H-0",
+          "name": "—"
+        },
+        {
+          "id": "36I-0",
+          "name": "82 common observatio…"
+        },
+        {
+          "id": "36J-0",
+          "name": "90 shared steps requ…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-en-independent",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-en-independent-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "320-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "36L-0",
+          "name": "Asset evidence remains available"
+        },
+        {
+          "id": "36M-0",
+          "name": "Asset evidence remai…"
+        },
+        {
+          "id": "36N-0",
+          "name": "This fixture has 120…"
+        },
+        {
+          "id": "36O-0",
+          "name": "Insufficient shared …"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-en-actions",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-en-actions-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "320-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "36Q-0",
+          "name": "Mobile evidence actions"
+        },
+        {
+          "id": "36R-0",
+          "name": "Action · View asset evidence"
+        },
+        {
+          "id": "36S-0",
+          "name": "View asset evidence"
+        },
+        {
+          "id": "36T-0",
+          "name": "Action · Back to Markets"
+        },
+        {
+          "id": "36U-0",
+          "name": "Back to Markets"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-en-note",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-en-note-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "320-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "36W-0",
+          "name": "Missing relative str…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-zh-nav",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-zh-nav-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "321-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "36Y-0",
+          "name": "Mobile navigation"
+        },
+        {
+          "id": "36Z-0",
+          "name": "Action · ← 市场"
+        },
+        {
+          "id": "370-0",
+          "name": "← 市场"
+        },
+        {
+          "id": "371-0",
+          "name": "ZH · 390"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-zh-identity",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-zh-identity-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "321-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "373-0",
+          "name": "Independent asset observation"
+        },
+        {
+          "id": "374-0",
+          "name": "ETHEREUM / ETH"
+        },
+        {
+          "id": "375-0",
+          "name": "资产报价"
+        },
+        {
+          "id": "376-0",
+          "name": "$2,413"
+        },
+        {
+          "id": "377-0",
+          "name": "R4 示例 · 2026年10月15日"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-zh-history",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-zh-history-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "321-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "379-0",
+          "name": "Insufficient paired history"
+        },
+        {
+          "id": "37A-0",
+          "name": "相对比特币"
+        },
+        {
+          "id": "37B-0",
+          "name": "正在积累共同历史"
+        },
+        {
+          "id": "37C-0",
+          "name": "—"
+        },
+        {
+          "id": "37D-0",
+          "name": "共同观测 82 / 所需 91"
+        },
+        {
+          "id": "37E-0",
+          "name": "计算90个观测间隔需要91个匹配的日频观…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-zh-independent",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-zh-independent-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "321-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "37G-0",
+          "name": "Asset evidence remains available"
+        },
+        {
+          "id": "37H-0",
+          "name": "资产证据仍可查看"
+        },
+        {
+          "id": "37I-0",
+          "name": "本例资产自身有120个日频观测；与比特币…"
+        },
+        {
+          "id": "37J-0",
+          "name": "共同日期不足不会把有效的资产报价清零。"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-zh-actions",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-zh-actions-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "321-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "37L-0",
+          "name": "Mobile evidence actions"
+        },
+        {
+          "id": "37M-0",
+          "name": "Action · 查看资产证据"
+        },
+        {
+          "id": "37N-0",
+          "name": "查看资产证据"
+        },
+        {
+          "id": "37O-0",
+          "name": "Action · 返回市场"
+        },
+        {
+          "id": "37P-0",
+          "name": "返回市场"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-zh-note",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-zh-note-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "321-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "37R-0",
+          "name": "暂缺相对强弱结果不表示领先、跟随或落后。"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-compact-nav",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-compact-nav-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "322-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "37T-0",
+          "name": "Compact navigation"
+        },
+        {
+          "id": "37U-0",
+          "name": "Action · ← 市场"
+        },
+        {
+          "id": "37V-0",
+          "name": "← 市场"
+        },
+        {
+          "id": "37W-0",
+          "name": "ZH · 320"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-compact-identity",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-compact-identity-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "322-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "37Y-0",
+          "name": "Compact asset observation"
+        },
+        {
+          "id": "37Z-0",
+          "name": "SOLANA / SOL"
+        },
+        {
+          "id": "380-0",
+          "name": "资产报价"
+        },
+        {
+          "id": "381-0",
+          "name": "$104.19"
+        },
+        {
+          "id": "382-0",
+          "name": "R4 示例 · 2026年10月15日"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-compact-unknown",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-compact-unknown-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "322-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "384-0",
+          "name": "Unknown comparison basis"
+        },
+        {
+          "id": "385-0",
+          "name": "相对比特币"
+        },
+        {
+          "id": "386-0",
+          "name": "比较窗口未提供"
+        },
+        {
+          "id": "387-0",
+          "name": "—"
+        },
+        {
+          "id": "388-0",
+          "name": "此示例未附比较口径，不能用页面日期补齐。"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-compact-unknown-fields",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-compact-unknown-fields-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "322-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "38A-0",
+          "name": "Unknown paired evidence"
+        },
+        {
+          "id": "38B-0",
+          "name": "共同起止日期"
+        },
+        {
+          "id": "38C-0",
+          "name": "未提供"
+        },
+        {
+          "id": "38D-0",
+          "name": "比特币来源与价格口径"
+        },
+        {
+          "id": "38E-0",
+          "name": "未提供"
+        },
+        {
+          "id": "38F-0",
+          "name": "匹配观测数"
+        },
+        {
+          "id": "38G-0",
+          "name": "未提供"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-compact-actions",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-compact-actions-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "322-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "38I-0",
+          "name": "Compact evidence actions"
+        },
+        {
+          "id": "38J-0",
+          "name": "Action · 查看资产证据"
+        },
+        {
+          "id": "38K-0",
+          "name": "查看资产证据"
+        },
+        {
+          "id": "38L-0",
+          "name": "Action · 返回市场"
+        },
+        {
+          "id": "38M-0",
+          "name": "返回市场"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "phone-compact-note",
+      "operation_id": "paper-portfolio-d18-window-20261108-phone-compact-note-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "322-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "38O-0",
+          "name": "缺失的比较不显示为 0，也不代表落后于比…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "candidate-source-labels",
+      "operation_id": "paper-portfolio-d18-window-20261108-candidate-source-labels-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": null,
+      "node_ids": [
+        "32E-0",
+        "32F-0",
+        "32G-0",
+        "319-0"
+      ],
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "candidate-source-frame",
+      "operation_id": "paper-portfolio-d18-window-20261108-candidate-source-frame-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "rename_nodes",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": null,
+      "node_ids": [
+        "32D-0"
+      ],
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "candidate-path",
+      "operation_id": "paper-portfolio-d18-window-20261108-candidate-path-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "write_html",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": "32I-0",
+      "node_ids": null,
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [
+        {
+          "id": "38Q-0",
+          "name": "R4 path: scripts/bui…"
+        }
+      ],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "candidate-pin-footer",
+      "operation_id": "paper-portfolio-d18-window-20261108-candidate-pin-footer-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": null,
+      "node_ids": [
+        "31F-0"
+      ],
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "finish",
+      "operation_id": "paper-portfolio-d18-window-20261108-finish-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": null,
+      "node_ids": [
+        "2XH-0",
+        "2YI-0",
+        "2ZJ-0"
+      ],
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "compact-basis-result",
+      "operation_id": "paper-portfolio-d18-window-20261108-compact-basis-result-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "set_text_content",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": null,
+      "node_ids": [
+        "387-0",
+        "388-0",
+        "38O-0"
+      ],
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [],
+      "duplicated_nodes": []
+    },
+    {
+      "key": "finish-after-basis-fix",
+      "operation_id": "paper-portfolio-d18-window-20261108-finish-after-basis-fix-01",
+      "state": "APPLIED_RESPONSE_OBSERVED",
+      "tool": "finish_working_on_nodes",
+      "file_id": "01M6Y3F0NXNDPAKJMJGCAD759Z",
+      "target_node_id": null,
+      "node_ids": [
+        "2YI-0"
+      ],
+      "expected_snapshot": "4c33971c16910537dd52fe1ed2be2bec2d90a948393992778cc1dfc24a793eb3",
+      "retry_allowed": false,
+      "created_nodes": [],
+      "duplicated_nodes": []
+    }
+  ],
+  "unknown_effects": 0,
+  "operation_count": 56,
+  "image_verification": "Original native JPEG base64 is sent directly to Git blob creation, then path/SHA read back. No independent local digest or decoded binary-body verification is claimed.",
+  "validation_review": {
+    "bounded_reasoning_review": "Reviewed three new JSX exports and identified compact missing-basis versus missing-result ambiguity.",
+    "resolved": true,
+    "exact_three_text_substitutions": true,
+    "changes": [
+      {
+        "nodeId": "387-0",
+        "before": "—",
+        "html": "+8.8%"
+      },
+      {
+        "nodeId": "388-0",
+        "before": "此示例未附比较口径，不能用页面日期补齐。",
+        "html": "保留 R4 示例相对读数。共同窗口未提供，页面日期不能代替配对起止日期。"
+      },
+      {
+        "nodeId": "38O-0",
+        "before": "缺失的比较不显示为 0，也不代表落后于比特币。",
+        "html": "共同窗口待核验；保留读数不等于可跨资产排名。"
+      }
+    ],
+    "result": "320 ZH retains +8.8% as an R4 illustrative reading with unverified paired window. The 390 EN/ZH insufficient-history cases retain null relative results."
+  }
+}

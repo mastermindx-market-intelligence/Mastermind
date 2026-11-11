@@ -1,0 +1,388 @@
+{
+  "spec": {
+    "mission": "Frozen SOXX extreme-MACD + 1H pivot and cycle-failure cross-symbol generalization; never tune to peers",
+    "base_v10": "/Users/mini4/.local/share/mastermind-review-artifacts/SOXX_COHERENT_CYCLE_20261010_v10",
+    "protected_sha": "326c8469a21d7f50fc9ecb1848196bf1c6e66685",
+    "symbols_precommitted": [
+      "AMD",
+      "AVGO",
+      "MU",
+      "INTC",
+      "NVDA",
+      "AMAT",
+      "LRCX",
+      "KLAC",
+      "SPY",
+      "XLV"
+    ],
+    "comparators_existing": [
+      "SOXX",
+      "SMH",
+      "QQQ"
+    ],
+    "window": [
+      "2025-10-09",
+      "2026-10-08"
+    ],
+    "entry": [
+      "frozen_3h_1h",
+      "pivot_valid",
+      "strict_structure_1p5",
+      "pivot_retest_1p5"
+    ],
+    "exit": [
+      "previous_early_guard_and_3h_rollover",
+      "time52",
+      "confirmed_cycle_failure_from_v9"
+    ],
+    "rules": "No re-optimization. Same threshold, gross same notional, same 5bp per side. Skips counted as zero; censor gaps.",
+    "basket_assumptions": "Semiconductor constituents share factors; not independent out-of-sample SOXX evidence",
+    "scope": "Offline local research only; no trading, production, git or credential writes"
+  },
+  "assets": {
+    "SOXX": {
+      "sha": "ce4c6ae05c29f92a3903b2148f7a0595d10baf0b226b82dec2f7b73528e34720",
+      "raw_points": 3498,
+      "splits": [],
+      "zero_close": 5,
+      "qualified_rows": 3473,
+      "origin_signals": 15,
+      "audit_gap_count": 19,
+      "class_name": "semi"
+    },
+    "SMH": {
+      "sha": "d944772022e2d5a55afbdfab286b010e5a3eaa8c0b23e706c530f0bf341609a9",
+      "raw_points": 3498,
+      "splits": [],
+      "zero_close": 5,
+      "qualified_rows": 3473,
+      "origin_signals": 13,
+      "audit_gap_count": 12,
+      "class_name": "semi"
+    },
+    "QQQ": {
+      "sha": "14b123c80e0ed29dfd5a8091871f970f1e1f11d68d34a5d0a155968d3c051dab",
+      "raw_points": 3498,
+      "splits": [],
+      "zero_close": 33,
+      "qualified_rows": 3424,
+      "origin_signals": 13,
+      "audit_gap_count": 38,
+      "class_name": "control"
+    },
+    "AMD": {
+      "sha": "c0c8f7ef59365251c06d7878191cd186d3e5a1f03873bfd7cae59f84394bd1e9",
+      "raw_points": 3498,
+      "splits": [],
+      "zero_close": 5,
+      "qualified_rows": 3475,
+      "origin_signals": 13,
+      "audit_gap_count": 10,
+      "class_name": "semi"
+    },
+    "AVGO": {
+      "sha": "8ccdd7a2968b2a1c5b011e52ea63c22e4ac5b992f7c924776f396242a50deb6e",
+      "raw_points": 3498,
+      "splits": [],
+      "zero_close": 5,
+      "qualified_rows": 3476,
+      "origin_signals": 9,
+      "audit_gap_count": 9,
+      "class_name": "semi"
+    },
+    "MU": {
+      "sha": "c7ad535d2b88b72b03d149326a6a99e9761221427af2af33f93f0b6e5107db99",
+      "raw_points": 3498,
+      "splits": [],
+      "zero_close": 5,
+      "qualified_rows": 3477,
+      "origin_signals": 12,
+      "audit_gap_count": 8,
+      "class_name": "semi"
+    },
+    "INTC": {
+      "sha": "7f25dfd59d9eac66ee9f5ee9bf70faaa2bccdcac38704ddeedbf5d525d3ae7e1",
+      "raw_points": 3498,
+      "splits": [],
+      "zero_close": 31,
+      "qualified_rows": 3445,
+      "origin_signals": 9,
+      "audit_gap_count": 19,
+      "class_name": "semi"
+    },
+    "NVDA": {
+      "sha": "faa43f5851724db4951ae934430bbbeed98aec964517aa1ac204e1262c643c22",
+      "raw_points": 3498,
+      "splits": [],
+      "zero_close": 5,
+      "qualified_rows": 3470,
+      "origin_signals": 11,
+      "audit_gap_count": 15,
+      "class_name": "semi"
+    },
+    "AMAT": {
+      "sha": "ce911e0f743fc7c1959b1319abadbe39e907ff25e3a9d911ffbcc1eb5e9c4f8e",
+      "raw_points": 3498,
+      "splits": [],
+      "zero_close": 33,
+      "qualified_rows": 3450,
+      "origin_signals": 15,
+      "audit_gap_count": 12,
+      "class_name": "semi"
+    },
+    "LRCX": {
+      "sha": "cc6e5a9146db2fb4c9dc5ba622e36fba4653e3517ed2abcfa80d5041d9303b26",
+      "raw_points": 3498,
+      "splits": [],
+      "zero_close": 28,
+      "qualified_rows": 3453,
+      "origin_signals": 13,
+      "audit_gap_count": 13,
+      "class_name": "semi"
+    },
+    "KLAC": {
+      "sha": "ff8a50aa62fc8c854436ab7e167dc65acf7479f68952bd8c192dfa448f90f16c",
+      "raw_points": 3498,
+      "splits": [
+        {
+          "date": "2026-06-12T13:30:00+00:00",
+          "ratio": "10:1"
+        }
+      ],
+      "zero_close": 5,
+      "qualified_rows": 3477,
+      "origin_signals": 16,
+      "audit_gap_count": 8,
+      "class_name": "semi"
+    },
+    "SPY": {
+      "sha": "609ff6b8591c3cff931a8ed8e4b77e4f3d0db84516588f34f2ebf0242f5e454b",
+      "raw_points": 3498,
+      "splits": [],
+      "zero_close": 5,
+      "qualified_rows": 3480,
+      "origin_signals": 12,
+      "audit_gap_count": 5,
+      "class_name": "control"
+    },
+    "XLV": {
+      "sha": "7ce2f95e455e1b20ac1f23488094e441f099e13e0d19cfed9c8bd5c809e25070",
+      "raw_points": 3498,
+      "splits": [],
+      "zero_close": 31,
+      "qualified_rows": 3451,
+      "origin_signals": 7,
+      "audit_gap_count": 13,
+      "class_name": "control"
+    }
+  },
+  "errors": [],
+  "asset_rows": 78,
+  "pairs": 264,
+  "cluster_stats": [
+    {
+      "mode": "old_guard",
+      "category": "new_semis",
+      "n": 53,
+      "unique_assets": 8,
+      "weeks": 23,
+      "lift_mean": -0.31811,
+      "positive": 7,
+      "negative": 4,
+      "sum_avoided": 15.2616,
+      "sum_sacrificed": 32.1216,
+      "winner_harmed": 4,
+      "week_bootstrap95": [
+        -1.5215,
+        0.3531
+      ]
+    },
+    {
+      "mode": "old_guard",
+      "category": "new_controls",
+      "n": 10,
+      "unique_assets": 2,
+      "weeks": 10,
+      "lift_mean": -0.04948,
+      "positive": 0,
+      "negative": 2,
+      "sum_avoided": 0,
+      "sum_sacrificed": 0.4948,
+      "winner_harmed": 2,
+      "week_bootstrap95": [
+        -0.1474,
+        0.0
+      ]
+    },
+    {
+      "mode": "old_guard",
+      "category": "all_semis",
+      "n": 71,
+      "unique_assets": 10,
+      "weeks": 24,
+      "lift_mean": -0.16551,
+      "positive": 12,
+      "negative": 9,
+      "sum_avoided": 23.4812,
+      "sum_sacrificed": 35.2327,
+      "winner_harmed": 9,
+      "week_bootstrap95": [
+        -1.0994,
+        0.4206
+      ]
+    },
+    {
+      "mode": "old_guard",
+      "category": "all_assets",
+      "n": 88,
+      "unique_assets": 13,
+      "weeks": 27,
+      "lift_mean": -0.15008,
+      "positive": 12,
+      "negative": 12,
+      "sum_avoided": 23.4812,
+      "sum_sacrificed": 36.6884,
+      "winner_harmed": 12,
+      "week_bootstrap95": [
+        -0.8496,
+        0.3384
+      ]
+    },
+    {
+      "mode": "fast_weak_control",
+      "category": "new_semis",
+      "n": 53,
+      "unique_assets": 8,
+      "weeks": 23,
+      "lift_mean": -0.18102,
+      "positive": 9,
+      "negative": 3,
+      "sum_avoided": 16.0388,
+      "sum_sacrificed": 25.6328,
+      "winner_harmed": 3,
+      "week_bootstrap95": [
+        -0.8491,
+        0.3325
+      ]
+    },
+    {
+      "mode": "fast_weak_control",
+      "category": "new_controls",
+      "n": 10,
+      "unique_assets": 2,
+      "weeks": 10,
+      "lift_mean": -1.16381,
+      "positive": 3,
+      "negative": 5,
+      "sum_avoided": 2.841,
+      "sum_sacrificed": 14.4792,
+      "winner_harmed": 5,
+      "week_bootstrap95": [
+        -2.616,
+        0.0796
+      ]
+    },
+    {
+      "mode": "fast_weak_control",
+      "category": "all_semis",
+      "n": 71,
+      "unique_assets": 10,
+      "weeks": 24,
+      "lift_mean": -0.49547,
+      "positive": 15,
+      "negative": 7,
+      "sum_avoided": 25.5428,
+      "sum_sacrificed": 60.7214,
+      "winner_harmed": 7,
+      "week_bootstrap95": [
+        -1.6079,
+        0.4298
+      ]
+    },
+    {
+      "mode": "fast_weak_control",
+      "category": "all_assets",
+      "n": 88,
+      "unique_assets": 13,
+      "weeks": 27,
+      "lift_mean": -0.5396,
+      "positive": 22,
+      "negative": 13,
+      "sum_avoided": 31.4264,
+      "sum_sacrificed": 78.911,
+      "winner_harmed": 13,
+      "week_bootstrap95": [
+        -1.5819,
+        0.3297
+      ]
+    },
+    {
+      "mode": "momentum_reset",
+      "category": "new_semis",
+      "n": 53,
+      "unique_assets": 8,
+      "weeks": 23,
+      "lift_mean": -0.12036,
+      "positive": 1,
+      "negative": 1,
+      "sum_avoided": 0.8412,
+      "sum_sacrificed": 7.2203,
+      "winner_harmed": 1,
+      "week_bootstrap95": [
+        -0.4814,
+        0.0388
+      ]
+    },
+    {
+      "mode": "momentum_reset",
+      "category": "new_controls",
+      "n": 10,
+      "unique_assets": 2,
+      "weeks": 10,
+      "lift_mean": -0.53801,
+      "positive": 3,
+      "negative": 2,
+      "sum_avoided": 2.2346,
+      "sum_sacrificed": 7.6147,
+      "winner_harmed": 2,
+      "week_bootstrap95": [
+        -2.0335,
+        0.4278
+      ]
+    },
+    {
+      "mode": "momentum_reset",
+      "category": "all_semis",
+      "n": 71,
+      "unique_assets": 10,
+      "weeks": 24,
+      "lift_mean": -0.0363,
+      "positive": 4,
+      "negative": 1,
+      "sum_avoided": 4.6429,
+      "sum_sacrificed": 7.2203,
+      "winner_harmed": 1,
+      "week_bootstrap95": [
+        -0.3502,
+        0.1251
+      ]
+    },
+    {
+      "mode": "momentum_reset",
+      "category": "all_assets",
+      "n": 88,
+      "unique_assets": 13,
+      "weeks": 27,
+      "lift_mean": -0.08224,
+      "positive": 8,
+      "negative": 3,
+      "sum_avoided": 7.5982,
+      "sum_sacrificed": 14.835,
+      "winner_harmed": 3,
+      "week_bootstrap95": [
+        -0.3711,
+        0.1296
+      ]
+    }
+  ]
+}

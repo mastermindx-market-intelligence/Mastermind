@@ -1,0 +1,1429 @@
+diff --git a/gateway/run.py b/gateway/run.py
+index 55c2473258..84029cc80d 100644
+--- a/gateway/run.py
++++ b/gateway/run.py
+@@ -2328,7 +2328,9 @@ def _resolve_runtime_agent_kwargs() -> dict:
+ 
+ def _runtime_agent_kwargs(runtime: dict) -> dict:
+     """AIAgent constructor kwargs shared by every runtime-provider resolution.
+-    ``request_overrides`` passes through as resolved so the provider's request body reaches each turn."""
++    ``request_overrides`` passes through as resolved so the provider's request body reaches each turn.
++    The host-bound resolver marker is retained only as gateway metadata; the
++    turn projection moves it outside the final AIAgent constructor kwargs."""
+     return {
+         "api_key": runtime.get("api_key"),
+         "base_url": runtime.get("base_url"),
+@@ -2338,7 +2340,8 @@ def _runtime_agent_kwargs(runtime: dict) -> dict:
+         "command": runtime.get("command"),
+         "args": list(runtime.get("args") or []),
+         "credential_pool": runtime.get("credential_pool"),
+-        "request_overrides": runtime.get("request_overrides")}
++        "request_overrides": runtime.get("request_overrides"),
++        **({"source": "host_bound"} if runtime.get("source") == "host_bound" else {})}
+ 
+ 
+ @dataclasses.dataclass(frozen=True)
+diff --git a/gateway/run_turn_prepare.py b/gateway/run_turn_prepare.py
+index 333eeabec0..55ac549672 100644
+--- a/gateway/run_turn_prepare.py
++++ b/gateway/run_turn_prepare.py
+@@ -239,6 +239,9 @@ class GatewayTurnPrepareMixin:
+                 runtime["api_mode"], runtime["command"], tuple(runtime["args"]),
+             ),
+         }
++        if runtime_kwargs.get("source") == "host_bound":
++            # Admission metadata belongs to the route, never AIAgent kwargs.
++            route["source"] = "host_bound"
+         if tier is _TIER_FROM_RUNNER:
+             tier = getattr(self, "_service_tier", None)
+         if tier not in STATIC_TIERS:
+diff --git a/gateway/run_turn_runner.py b/gateway/run_turn_runner.py
+index 1b66830294..f57ab1e261 100644
+--- a/gateway/run_turn_runner.py
++++ b/gateway/run_turn_runner.py
+@@ -1225,7 +1225,7 @@ class TurnRunner(GatewayTurnProgressMixin, GatewaySessionAgentMixin):
+             else:
+                 scope.enter_context(api_policy_scope())
+                 bind_turn_workspace(policy, self._ctx.session_id)
+-                result = self._run_sync_scoped()
++                result = self._run_sync_scoped(scope)
+             from gateway.session_results import execution_result
+             captured = execution_result.get()
+             if captured is not None:
+@@ -1238,7 +1238,7 @@ class TurnRunner(GatewayTurnProgressMixin, GatewaySessionAgentMixin):
+                 )
+             return result
+ 
+-    def _run_sync_scoped(self):
++    def _run_sync_scoped(self, scope):
+         """Executor-thread body of the turn; returns the gateway result dict.
+ 
+         The turn message lives on the shared TurnContext (``ctx.message``) so ``_run_agent_inner`` sees
+@@ -1339,6 +1339,8 @@ class TurnRunner(GatewayTurnProgressMixin, GatewaySessionAgentMixin):
+         runner._reasoning_config = reasoning_config
+         stream_consumer, stream_delta_cb, interim_cb, want_interim = self._setup_stream_consumer(platform_key)
+         turn_route = runner._resolve_turn_agent_config(ctx.message, model, runtime_kwargs)
++        from gateway.session_provider_context import provider_turn_scope
++        scope.enter_context(provider_turn_scope(runner, ctx, turn_route))
+         agent, reused_cached_agent = self._resolve_turn_agent(
+             turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr,
+         )
+diff --git a/gateway/session_authority.py b/gateway/session_authority.py
+index 052252b70e..ef3d69546a 100644
+--- a/gateway/session_authority.py
++++ b/gateway/session_authority.py
+@@ -92,6 +92,9 @@ class LiveSession:
+     retire_timer: object = None
+     # Last-viewer detaches between losing their subscriber and recording the close (``detach``).
+     detaching: int = 0
++    # Last host-provider attempt on this original admission, retained after local close.
++    # A repeated executor cannot reconstruct it; the next native claim has a new stamp.
++    host_provider_claim: tuple | None = None
+ 
+     def __post_init__(self):
+         self.controls = PendingControls(self.event_stream)
+@@ -197,6 +200,11 @@ class SessionAuthority:
+         # reset while that turn's admission is started, so the drain runs it once the turn settles.
+         self.deferred_resets = {}
+ 
++    def bind_provider_turn(self, context):
++        """Consume the host-provider entry for this already admitted native turn."""
++        from gateway.session_provider_context import bind_provider_turn
++        return bind_provider_turn(self, context)
++
+     def authorize(self, actor, ref, capability):
+         """Every handler calls this first, so a later ``self.sessions[ref.session_id]`` is
+         safe: a deleted/evicted live entry surfaces here as ``not_found``, not as a KeyError
+diff --git a/gateway/session_provider_context.py b/gateway/session_provider_context.py
+new file mode 100644
+index 0000000000..39daa291aa
+--- /dev/null
++++ b/gateway/session_provider_context.py
+@@ -0,0 +1,97 @@
++"""Provider composition consumes the original admitted turn; it never admits work."""
++from contextlib import contextmanager
++from dataclasses import dataclass
++
++from hermes_cli.runtime_provider_host import is_host_bound_runtime
++from hermes_state_runtime import RuntimeStoreError
++
++
++@dataclass(frozen=True)
++class AdmittedProviderTurn:
++    authority: object
++    context: object
++    live: object
++    stamp: object
++    operation_id: str
++    epoch: int
++    generation: int
++
++    def current(self, _call=None):
++        a, c, live = self.authority, self.context, self.live
++        with live.event_stream.lock:
++            return (not a.retiring and not a.retired and not a.runner._draining
++                and a.epoch == self.epoch and a.sessions.get(c.session_id) is live
++                and live.event_stream.execution is self.stamp
++                and self.stamp == {"authority_epoch": self.epoch,
++                                   "execution_generation": self.generation,
++                                   "admission_id": self.operation_id}
++                and a.executing.get(c.session_id) == self.generation
++                and a.pending_stops.get(c.session_id) != self.generation
++                and a.delivered_stops.get(c.session_id) != self.generation
++                and callable(c._run_still_current) and c._run_still_current() is True)
++
++
++def bind_provider_turn(authority, context):
++    """The existing SessionAuthority's once-only entry, under its session lock."""
++    from gateway.session_authority import LiveSession
++    from gateway.turn_context import TurnContext
++    from hermes_state_runtime import get_session_admission
++    if type(context) is not TurnContext:
++        raise RuntimeStoreError("provider_turn_not_admitted")
++    live = authority.sessions.get(context.session_id)
++    if (type(live) is not LiveSession or live.route != context.session_key
++            or live.source.platform != context.source.platform
++            or live.source.user_id != context.source.user_id):
++        raise RuntimeStoreError("provider_turn_not_admitted")
++    with live.event_stream.lock:
++        stamp = live.event_stream.execution
++        epoch, generation = stamp.get("authority_epoch"), stamp.get("execution_generation")
++        admission_id = stamp.get("admission_id")
++    if (type(epoch) is not int or type(generation) is not int
++            or epoch < 1 or generation < 1 or not isinstance(admission_id, str)):
++        raise RuntimeStoreError("provider_turn_not_admitted")
++    binding = AdmittedProviderTurn(authority, context, live, stamp, admission_id, epoch, generation)
++    if not binding.current():
++        raise RuntimeStoreError("stale_generation")
++    row = get_session_admission(authority.db, admission_id=admission_id)
++    if (not row or row["status"] != "started" or row["owner_epoch"] != epoch
++            or row["generation"] != generation or row["target_session_id"] != context.session_id):
++        raise RuntimeStoreError("provider_turn_not_admitted")
++    claim = (epoch, generation, admission_id)
++    with live.event_stream.lock:
++        if not binding.current():
++            raise RuntimeStoreError("stale_generation")
++        if live.host_provider_claim == claim:
++            raise RuntimeStoreError("provider_turn_recovery_required")
++        # Provider/model/plugin replacement cannot make the same native admission new.
++        # Never clear on failure, close or unload. Native restart recovery fences started rows.
++        live.host_provider_claim = claim
++    return binding
++
++
++@contextmanager
++def provider_turn_scope(runner, turn_context, turn_route):
++    if turn_route.get("source") != "host_bound":
++        # A separately held role host already owns its original capability.
++        # Its runtime does not originate from the attended keyless resolver.
++        yield
++        return
++    if not is_host_bound_runtime(turn_route["runtime"]):
++        raise RuntimeStoreError("provider_turn_binding_invalid")
++    from gateway.session_authorities import require_active_authority
++    from gateway.session_authority import SessionAuthority
++    from hermes_cli.plugins import invoke_hook
++    authority = require_active_authority(runner)
++    if type(authority) is not SessionAuthority or authority.runner is not runner:
++        raise RuntimeStoreError("provider_turn_not_admitted")
++    admitted = authority.bind_provider_turn(turn_context)
++    contexts = invoke_hook("provide_gateway_turn_context",
++        provider=turn_route["runtime"]["provider"], runner=runner,
++        turn_context=turn_context, turn_route=turn_route, admitted=admitted)
++    if len(contexts) != 1:
++        raise RuntimeStoreError("provider_turn_binding_required")
++    binding = contexts[0]
++    if not callable(getattr(binding, "__enter__", None)) or not callable(getattr(binding, "__exit__", None)):
++        raise RuntimeStoreError("provider_turn_binding_invalid")
++    with binding:
++        yield
+diff --git a/hermes_cli/cli_agent_setup_mixin.py b/hermes_cli/cli_agent_setup_mixin.py
+index 3a595fad8d..a8b774f019 100644
+--- a/hermes_cli/cli_agent_setup_mixin.py
++++ b/hermes_cli/cli_agent_setup_mixin.py
+@@ -304,7 +304,9 @@ class CLIAgentSetupMixin:
+             list(runtime.get("args") or []))
+         # A callable api_key is a bearer-token provider (Azure Entra ID): the OpenAI SDK
+         # invokes it per request, so skip string validation / placeholder substitution.
+-        if not callable(api_key) and not (isinstance(api_key, str) and api_key):
++        from hermes_cli.runtime_provider_host import is_host_bound_runtime
++        host_bound = is_host_bound_runtime(runtime)
++        if not host_bound and not callable(api_key) and not (isinstance(api_key, str) and api_key):
+             if _keyless_custom_base(base_url):
+                 # Placeholder key so the SDK doesn't reject the keyless local endpoint.
+                 api_key = "no-key-required"
+@@ -320,7 +322,7 @@ class CLIAgentSetupMixin:
+                     print(f"\n{t('cli.startup.no_provider_configured')}")
+                 print(f"   {t('cli.startup.run_model_or_setup')}")
+                 return False
+-        if not isinstance(base_url, str) or not base_url:
++        if not host_bound and (not isinstance(base_url, str) or not base_url):
+             print(f"\n{t('cli.startup.empty_base_url')}")
+             return False
+         credentials_changed = api_key != self.api_key or base_url != self.base_url
+@@ -439,6 +441,9 @@ class CLIAgentSetupMixin:
+             return False, exc
+         if not isinstance(runtime, dict):
+             return False, None
++        from hermes_cli.runtime_provider_host import is_host_bound_runtime
++        if is_host_bound_runtime(runtime):
++            return True, None
+         api_key = runtime.get("api_key")
+         base_url = runtime.get("base_url")
+         if callable(api_key) or (isinstance(api_key, str) and api_key):
+diff --git a/hermes_cli/config.py b/hermes_cli/config.py
+index efb88b892b..1ffdc95099 100644
+--- a/hermes_cli/config.py
++++ b/hermes_cli/config.py
+@@ -1424,7 +1424,7 @@ def _env_ref_lookup(name: str) -> Optional[str]:
+     return _get_secret(name)
+ 
+ 
+-def _env_expand_match(m: re.Match) -> str:
++def _env_expand_match(m: re.Match, *, lookup=None) -> str:
+     """Expand one ``${VAR}`` (legacy bare name) or ``${env:VAR}`` (Cursor-style SecretRef).
+     Other SecretRef sources (``file:``, ``bitwarden:``, ``vault:``...) are NOT resolved here:
+     external backends inject their values into the environment at startup (the ``secrets:``
+@@ -1441,7 +1441,7 @@ def _env_expand_match(m: re.Match) -> str:
+                 "startup, so reference the variable as ${env:NAME} instead",
+                 raw, inner.split(":", 1)[0])
+         return raw  # non-env source, or empty ``${env:}``
+-    val = _env_ref_lookup(name)
++    val = (lookup or _env_ref_lookup)(name)
+     if val is not None:
+         return val
+     if inner.startswith("env:"):
+@@ -1466,18 +1466,18 @@ def _env_ref_var_name(ref: str) -> Optional[str]:
+     return ref
+ 
+ 
+-def _expand_env_vars(obj):
++def _expand_env_vars(obj, *, lookup=None):
+     """Recursively expand ``${VAR}`` / ``${env:VAR}`` in string values (keys/non-strings untouched)."""
+     if isinstance(obj, str):
+-        return _ENV_REF_RE.sub(_env_expand_match, obj)
++        return _ENV_REF_RE.sub(lambda match: _env_expand_match(match, lookup=lookup), obj)
+     if isinstance(obj, dict):
+-        return {k: _expand_env_vars(v) for k, v in obj.items()}
++        return {k: _expand_env_vars(v, lookup=lookup) for k, v in obj.items()}
+     if isinstance(obj, list):
+-        return [_expand_env_vars(item) for item in obj]
++        return [_expand_env_vars(item, lookup=lookup) for item in obj]
+     return obj
+ 
+ 
+-def _env_ref_snapshot(obj, snapshot=None):
++def _env_ref_snapshot(obj, snapshot=None, *, lookup=None):
+     """Map each env-sourced ``${...}`` ref in *obj* to its current value.
+     Stored with cached ``load_config()`` results so a cache hit can detect that the expansion was
+     made against a different environment (load before ``load_hermes_dotenv()``, in-process
+@@ -1491,13 +1491,13 @@ def _env_ref_snapshot(obj, snapshot=None):
+         for raw in _ENV_REF_RE.findall(obj):
+             name = _env_ref_var_name(raw)
+             if name is not None:
+-                snapshot[name] = _env_ref_lookup(name)
++                snapshot[name] = (lookup or _env_ref_lookup)(name)
+     elif isinstance(obj, dict):
+         for value in obj.values():
+-            _env_ref_snapshot(value, snapshot)
++            _env_ref_snapshot(value, snapshot, lookup=lookup)
+     elif isinstance(obj, list):
+         for item in obj:
+-            _env_ref_snapshot(item, snapshot)
++            _env_ref_snapshot(item, snapshot, lookup=lookup)
+     return snapshot
+ 
+ 
+@@ -2167,13 +2167,12 @@ def _last_known_good_fallback(config_path: Path, path_key: str, cache_sig, exc:
+     return lkg_copy
+ 
+ 
+-def _merge_managed_overlay(expanded: dict[str, Any]) -> tuple[dict[str, Any], Any]:
++def _compose_managed_overlay(expanded: dict[str, Any], managed_config, *, lookup=None) -> tuple[dict[str, Any], Any]:
+     """Apply the managed-scope overlay; returns ``(merged, managed_config_or_falsy)``.
+     Managed wins at the leaf and is applied AFTER user expansion so a user ``${VAR}`` cannot shadow
+     a managed literal: managed values expand only against the process environment. This
+     deliberately inverts the usual env-over-config precedence for the keys the managed layer pins
+     (docs/design/managed-scope.md §4.1)."""
+-    managed_config = managed_scope.load_managed_config()
+     if not managed_config:
+         return expanded, managed_config
+     # Same canonicalization as the user config BEFORE merging (parity with
+@@ -2182,7 +2181,7 @@ def _merge_managed_overlay(expanded: dict[str, Any]) -> tuple[dict[str, Any], An
+     if isinstance(managed_normalized.get("model"), str):
+         managed_normalized = dict(managed_normalized)
+         managed_normalized["model"] = {"default": managed_normalized["model"]}
+-    return _deep_merge(expanded, _expand_env_vars(managed_normalized)), managed_config
++    return _deep_merge(expanded, _expand_env_vars(managed_normalized, lookup=lookup)), managed_config
+ 
+ 
+ def _load_config_cache_hit(path_key: str, cache_sig: Any) -> Optional[dict[str, Any]]:
+@@ -2212,6 +2211,57 @@ def _load_config_cache_hit(path_key: str, cache_sig: Any) -> Optional[dict[str,
+     return None
+ 
+ 
++def _merge_managed_overlay(expanded: dict[str, Any]) -> tuple[dict[str, Any], Any]:
++    return _compose_managed_overlay(expanded, managed_scope.load_managed_config())
++
++
++def _compose_user_config(user_config: dict[str, Any]) -> dict[str, Any]:
++    config = copy.deepcopy(DEFAULT_CONFIG)
++    user_config = copy.deepcopy(user_config)
++    if "max_turns" in user_config:
++        agent_user_config = dict(user_config.get("agent") or {})
++        if agent_user_config.get("max_turns") is None:
++            agent_user_config["max_turns"] = user_config["max_turns"]
++        user_config["agent"] = agent_user_config
++        user_config.pop("max_turns", None)
++    config = _deep_merge(config, user_config)
++    from hermes_cli.moa_config import apply_user_moa_presets
++    apply_user_moa_presets(config, user_config)
++    return config
++
++
++def load_config_observational() -> dict[str, Any]:
++    """Current effective local configuration, without startup, cache or recovery effects.
++
++    This admission-oriented read refuses malformed/unreadable input and any concurrent
++    change. It does not use worker snapshots or last-known-good configuration. Backend
++    selection still follows the process deployment; the document follows the bound home.
++    """
++    from hermes_cli.config_backend import observational_file_backend
++    # The ordinary expander tolerates an unavailable secret-scope module. An
++    # admission observation must not substitute ambient values for that failure.
++    from agent.secret_scope import current_secret_scope, get_secret  # noqa: F401
++
++    with observational_file_backend() as backend:
++        config_path = get_config_path()
++        user_config, user_signature = backend.observational_document(config_path)
++        managed_config, managed_path, managed_signature = (
++            managed_scope.load_managed_config_observational(backend))
++        normalized = _canonicalize_config(_compose_user_config(user_config))
++        user_environment = _env_ref_snapshot(normalized)
++        managed_environment = _env_ref_snapshot(managed_config, lookup=os.environ.get)
++        expanded, _ = _compose_managed_overlay(
++            _expand_env_vars(normalized), managed_config, lookup=os.environ.get)
++        if (get_config_path() != config_path
++                or backend.observational_signature(config_path) != user_signature
++                or (managed_path is not None
++                    and backend.observational_signature(managed_path) != managed_signature)
++                or _env_ref_snapshot(normalized) != user_environment
++                or _env_ref_snapshot(managed_config, lookup=os.environ.get) != managed_environment):
++            raise ValueError("configuration changed during observation")
++        return expanded
++
++
+ def _load_config_impl(*, want_deepcopy: bool) -> dict[str, Any]:
+     snapshot = _worker_config_snapshot()
+     if snapshot is not None:
+@@ -2252,16 +2302,7 @@ def _load_config_impl(*, want_deepcopy: bool) -> dict[str, Any]:
+                 user_config = read_config_doc(config_path) or {}
+                 _CONFIG_PARSE_FAILURES.pop(path_key, None)  # the file reads now (a transient error left the record)
+ 
+-                if "max_turns" in user_config:
+-                    agent_user_config = dict(user_config.get("agent") or {})
+-                    if agent_user_config.get("max_turns") is None:
+-                        agent_user_config["max_turns"] = user_config["max_turns"]
+-                    user_config["agent"] = agent_user_config
+-                    user_config.pop("max_turns", None)
+-
+-                config = _deep_merge(config, user_config)
+-                from hermes_cli.moa_config import apply_user_moa_presets
+-                apply_user_moa_presets(config, user_config)
++                config = _compose_user_config(user_config)
+                 # A copy of the file that just parsed is what a FRESH process falls back to when the
+                 # next edit breaks the YAML (see _last_known_good_fallback). backup_config() skips
+                 # byte-identical repeats and keeps a bounded count, so steady-state loads cost one stat.
+diff --git a/hermes_cli/config_backend.py b/hermes_cli/config_backend.py
+index 622d5f4777..6adfe58b63 100644
+--- a/hermes_cli/config_backend.py
++++ b/hermes_cli/config_backend.py
+@@ -24,6 +24,7 @@ import contextvars
+ import importlib
+ import os
+ import re
++import stat
+ import sys
+ import threading
+ from dataclasses import dataclass, field
+@@ -197,6 +198,91 @@ class FileBackend:
+         from utils import load_yaml_file_readonly
+         return load_yaml_file_readonly(path)
+ 
++    @staticmethod
++    def observational_absence(path: Path):
++        """Missing input is distinct from an existing dangling path or race."""
++        for current in (path, *path.parents):
++            try:
++                info = current.lstat()
++            except FileNotFoundError:
++                continue
++            if current == path:
++                raise ValueError("configuration input is unavailable")
++            if stat.S_ISLNK(info.st_mode):
++                try:
++                    current.stat()
++                except FileNotFoundError as exc:
++                    raise ValueError("configuration ancestor is unavailable") from exc
++            break
++
++    @staticmethod
++    def observational_signature(path: Path):
++        try:
++            info = path.stat()
++        except FileNotFoundError:
++            FileBackend.observational_absence(path)
++            return None
++        if not stat.S_ISREG(info.st_mode) or not 0 <= info.st_size <= 4 * 1024 * 1024:
++            raise ValueError("configuration observation requires a bounded regular file")
++        keys = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid",
++                "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")
++        links = []
++        for current in (path, *path.parents):
++            try:
++                link = current.lstat()
++            except FileNotFoundError as exc:
++                raise ValueError("configuration path changed during observation") from exc
++            if stat.S_ISLNK(link.st_mode):
++                links.append((str(current), *(getattr(link, key) for key in keys)))
++        return (*tuple(getattr(info, key) for key in keys), tuple(links))
++
++    @staticmethod
++    def observational_bytes(path: Path):
++        """Current bounded bytes, without cache, repair, backup or fallback."""
++        try:
++            fd = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0))
++        except FileNotFoundError:
++            if FileBackend.observational_signature(path) is not None:
++                raise ValueError("configuration changed during observation")
++            return None, None
++        try:
++            info = os.fstat(fd)
++            if not stat.S_ISREG(info.st_mode) or not 0 <= info.st_size <= 4 * 1024 * 1024:
++                raise ValueError("configuration observation requires a bounded regular file")
++            opened_signature = tuple(getattr(info, key) for key in (
++                "st_dev", "st_ino", "st_mode", "st_uid", "st_gid",
++                "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns"))
++            signature = FileBackend.observational_signature(path)
++            if signature is None or signature[:9] != opened_signature:
++                raise ValueError("configuration changed during observation")
++            raw = bytearray()
++            while len(raw) <= info.st_size:
++                part = os.read(fd, min(65536, info.st_size + 1 - len(raw)))
++                if not part:
++                    break
++                raw.extend(part)
++            current = os.fstat(fd)
++            after = tuple(getattr(current, key) for key in (
++                "st_dev", "st_ino", "st_mode", "st_uid", "st_gid",
++                "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns"))
++            if (len(raw) != info.st_size or after != opened_signature
++                    or FileBackend.observational_signature(path) != signature):
++                raise ValueError("configuration changed during observation")
++            return bytes(raw), signature
++        finally:
++            os.close(fd)
++
++    @staticmethod
++    def observational_document(path: Path):
++        from utils import fast_safe_load
++        raw, signature = FileBackend.observational_bytes(path)
++        document = fast_safe_load(raw.decode("utf-8-sig")) if raw is not None else None
++        if document is None:
++            document = {}
++        if type(document) is not dict:
++            raise ValueError("configuration observation requires a mapping")
++        return document, signature
++
+     @staticmethod
+     def write_path(path: Path, changes: Changes) -> None:
+         from utils import atomic_roundtrip_yaml_save, atomic_roundtrip_yaml_update
+@@ -326,6 +412,22 @@ def _bootstrap(home: Optional[Path], project_env: Optional[Path], *, once: bool)
+             _BOOTSTRAPPED = True
+ 
+ 
++@contextlib.contextmanager
++def observational_file_backend():
++    """Observe the selected local owner without booting or publishing a backend."""
++    from hermes_cli.env_loader import selected_config_backend_name
++    environment = dict(os.environ)
++    before = {}
++    if (selected_config_backend_name(strict=True, observations=before) != "file"
++            or (_BOOTSTRAPPED and (os.environ.get(BACKEND_ENV, "").strip().lower() or "file") != "file")):
++        raise ValueError("configuration observation requires the file backend")
++    yield FileBackend()
++    after = {}
++    if (selected_config_backend_name(strict=True, observations=after) != "file"
++            or before != after or dict(os.environ) != environment):
++        raise ValueError("configuration deployment changed during observation")
++
++
+ def get_config_backend() -> ConfigBackend:
+     """The backend selected by ``HERMES_CONFIG_BACKEND`` (default ``file``).
+ 
+diff --git a/hermes_cli/env_loader.py b/hermes_cli/env_loader.py
+index fa153d6f03..f6eeaeccd2 100644
+--- a/hermes_cli/env_loader.py
++++ b/hermes_cli/env_loader.py
+@@ -451,10 +451,26 @@ def _load_dotenv_with_fallback(
+     _sanitize_loaded_credentials()  # httpx encodes headers as ASCII
+ 
+ 
+-def _dotenv_assignments(path: Path) -> list:
++def _dotenv_assignments(path: Path, *, strict: bool = False, observations=None) -> list:
+     """``(name, raw value)`` pairs of one dotenv file as the loader will see it once
+     ``_sanitize_env_file_if_needed`` has run: :func:`_parse_dotenv_file` plus the sanitizer's UTF-16
+     rewrite and NUL strip, for the pre-boot bootstrap reads that run before the sanitizer."""
++    if strict:
++        from hermes_cli.config_backend import FileBackend
++        raw, signature = FileBackend.observational_bytes(path)
++        if observations is not None:
++            observations[str(path)] = signature
++        if raw is None:
++            raise FileNotFoundError(path)
++        encoding = "utf-16" if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) else "utf-8-sig"
++        text = raw.decode(encoding)
++        if "\x00" in text:
++            raise ValueError("configuration deployment contains a NUL")
++        from dotenv.parser import parse_stream
++        bindings = list(parse_stream(io.StringIO(text)))
++        if any(binding.error for binding in bindings):
++            raise ValueError("configuration deployment contains malformed dotenv")
++        return [(binding.key, binding.value) for binding in bindings if binding.key is not None]
+     raw = path.read_bytes()
+     if raw.startswith(codecs.BOM_UTF16_LE) or raw.startswith(codecs.BOM_UTF16_BE):
+         # Notepad "Unicode": ``_sanitize_env_file_if_needed`` rewrites it as UTF-8 before the loader
+@@ -481,48 +497,72 @@ def _dotenv_assignments(path: Path) -> list:
+     return list(DotEnv(dotenv_path=None, stream=io.StringIO(text), interpolate=False).parse())
+ 
+ 
+-def _bootstrap_env(home: Path | None = None, project_env: Path | None = None) -> dict:
+-    """The process env as ``load_hermes_dotenv`` leaves it for the names its dotenv layers define:
+-    the home's ``.env`` (override), ``.op.env`` (fills gaps, only without a process
+-    ``OP_SERVICE_ACCOUNT_TOKEN``), the caller's *project_env* (fills gaps when the home has a
+-    ``.env``, else overrides) and the managed ``.env`` (override, last); ``${VAR}`` resolved, the
+-    loader's parser. Read-only: nothing is published and no file is rewritten (sanitizing imports
+-    hermes_cli.config, whose import-time config read must not run before the backend is decided)."""
++def _bootstrap_env(
++    home: Path | None = None, project_env: Path | None = None, *,
++    strict: bool = False, observations=None,
++) -> dict:
++    """Resolve the existing deployment layers without publishing or booting them.
++
++    Strict observations reject unreadable/malformed inputs and replacement during the
++    read. The ordinary bootstrap keeps its existing tolerant startup behavior.
++    """
+     home = Path(home) if home is not None else _process_hermes_home()
+-    env = dict(os.environ)
++    environment = dict(os.environ)
++    env = dict(environment)
++    observed = {} if observations is None else observations
+     user_env = home / ".env"
+     layers: list[tuple[Path, bool]] = [(user_env, True)]
+-    if not os.environ.get("OP_SERVICE_ACCOUNT_TOKEN"):
++    if not environment.get("OP_SERVICE_ACCOUNT_TOKEN"):
+         layers.append((home / ".op.env", False))
+     if project_env is not None:
+         layers.append((Path(project_env), not user_env.exists()))
+-    try:
++    if strict:
+         from hermes_cli import managed_scope
+-
+-        managed_dir = managed_scope.get_managed_dir()
+-    except Exception:  # health: allow BLE001 -- managed scope never blocks startup, as in _apply_managed_env
+-        managed_dir = None
++        managed_dir = managed_scope.get_managed_dir(strict=True)
++        observed["deployment_home"] = str(home)
++        observed["managed_directory"] = str(managed_dir) if managed_dir is not None else None
++    else:
++        try:
++            from hermes_cli import managed_scope
++            managed_dir = managed_scope.get_managed_dir()
++        except Exception:  # health: allow BLE001 -- ordinary startup remains tolerant
++            managed_dir = None
+     if managed_dir is not None:
+         layers.append((managed_dir / ".env", True))
+     for path, override in layers:
+         try:
+-            assignments = _dotenv_assignments(path)
++            assignments = (_dotenv_assignments(path, strict=True, observations=observed)
++                           if strict else _dotenv_assignments(path))
++        except FileNotFoundError:
++            continue
+         except OSError:
++            if strict:
++                raise
+             continue
+         resolved = _resolve_dotenv_assignments(assignments, env, override=override)
+         for name, value in resolved.items():
+             if value is not None and (override or name not in env):
+                 env[name] = value
++    if strict:
++        from hermes_cli.config_backend import FileBackend
++        if any(FileBackend.observational_signature(path) != observed[str(path)]
++               for path, _ in layers):
++            raise ValueError("configuration deployment changed during observation")
++        if (managed_scope.get_managed_dir(strict=True) != managed_dir
++                or dict(os.environ) != environment):
++            raise ValueError("configuration deployment changed during observation")
+     return env
+ 
+ 
+-def selected_config_backend_name(home: Path | None = None) -> str:
++def selected_config_backend_name(
++    home: Path | None = None, *, strict: bool = False, observations=None,
++) -> str:
+     """The config backend ``load_hermes_dotenv`` selects for *home*, decided without loading or
+     booting anything. For a caller that must decide before Hermes starts (Docker stage2 skips the
+     config-file migration in remote mode, D12)."""
+     from hermes_cli.config_backend import BACKEND_ENV
+ 
+-    return (_bootstrap_env(home).get(BACKEND_ENV) or "").strip().lower() or "file"
++    return (_bootstrap_env(home, strict=strict, observations=observations).get(BACKEND_ENV) or "").strip().lower() or "file"
+ 
+ 
+ def apply_config_bootstrap_env(backend_names, home: Path | None = None, project_env: Path | None = None) -> None:
+diff --git a/hermes_cli/inventory.py b/hermes_cli/inventory.py
+index a54eed7aa6..539a78cc4a 100644
+--- a/hermes_cli/inventory.py
++++ b/hermes_cli/inventory.py
+@@ -124,6 +124,9 @@ def build_models_payload(
+     if moa_row is not None:
+         rows = [moa_row] + _without_slug(rows, "moa")
+ 
++    host_slugs, host_rows = _host_bound_rows(ctx, refresh=refresh)
++    rows = [row for row in rows if _slug(row) not in host_slugs] + host_rows
++
+     if explicit_only:
+         rows = _filter_explicit_provider_rows(rows, ctx)
+         # If the current provider lost its credential, list_authenticated_providers() omits it; keep
+@@ -699,12 +702,57 @@ def _canonical_row(entry, cur: str, **extra: Any) -> dict:
+     return _row(entry.slug, _PROVIDER_LABELS.get(entry.slug, entry.label), entry.slug.lower() == cur, **extra)
+ 
+ 
++def _host_bound_rows(ctx: ConfigContext, *, refresh: bool = False) -> tuple[set[str], list[dict]]:
++    """Credential-free host catalogs; eligibility is observed, never granted here."""
++    from providers import get_provider_profile
++    from hermes_cli.models import _PROVIDER_ALIASES
++    from hermes_cli.models_catalog_static import listed_canonical_providers
++
++    excluded = {str(p).strip().lower() for p in (ctx.excluded_providers or []) if p}
++    configured = {str(k).strip().lower(): v for k, v in (ctx.user_providers or {}).items()}
++    names_for: dict[str, set[str]] = {}
++    for alias, canonical in _PROVIDER_ALIASES.items():
++        names_for.setdefault(canonical.lower(), {canonical.lower()}).add(alias.lower())
++    owned, rows = set(), []
++    for entry in listed_canonical_providers():
++        profile = get_provider_profile(entry.slug)
++        if profile is None or getattr(profile, "host_bound_runtime", False) is not True:
++            continue
++        slug = entry.slug.lower()
++        owned.add(slug)
++        names = names_for.get(slug, {slug})
++        if names & excluded or any(
++            isinstance(configured.get(name), dict) and configured[name].get("enabled") is False
++            for name in names
++        ):
++            continue
++        models = []
++        if callable(profile.picker_catalog):
++            try:
++                observed = profile.picker_catalog(bool(refresh))
++                if isinstance(observed, list) and all(
++                    isinstance(model, str) and model and model == model.strip()
++                    for model in observed
++                ):
++                    models = list(dict.fromkeys(observed))
++            except Exception:
++                pass  # A held or unavailable owner cannot resurrect a static/saved catalog.
++        rows.append(_canonical_row(
++            entry, (ctx.current_provider or "").lower(), models=models, total_models=len(models),
++            source="host-bound", authenticated=False, auth_type="host_bound", key_env="",
++            warning=("Managed by this host; access is checked on each turn." if models
++                     else "Host setup is unavailable. Restore the configured service before choosing a model."),
++        ))
++    return owned, rows
++
++
+ def _append_unconfigured_rows(
+     rows: list[dict], ctx: ConfigContext, *, current_only: bool = False,
+ ) -> list[dict]:
+     """Empty setup skeletons for canonical providers missing from ``rows`` — except the *current* one:
+     if config.yaml still points at it but credentials are gone, keep a row carrying the saved model so
+     GUI pickers don't silently snap to another provider."""
++    from providers import get_provider_profile
+     from hermes_cli.models import _PROVIDER_ALIASES, _model_requires_account_discovery
+     from hermes_cli.models_catalog_static import listed_canonical_providers
+ 
+@@ -722,6 +770,9 @@ def _append_unconfigured_rows(
+     extras: list[dict] = []
+     for entry in listed_canonical_providers():
+         slug = entry.slug.lower()
++        profile = get_provider_profile(entry.slug)
++        if profile is not None and getattr(profile, "host_bound_runtime", False) is True:
++            continue  # The host catalog owns held/current rows and all policy filters.
+         if slug in seen:
+             continue
+         if names_for.get(slug, {slug}) & excluded:
+diff --git a/hermes_cli/managed_scope.py b/hermes_cli/managed_scope.py
+index a00ac0630d..6dc5ae5999 100644
+--- a/hermes_cli/managed_scope.py
++++ b/hermes_cli/managed_scope.py
+@@ -11,6 +11,7 @@ from __future__ import annotations
+ import copy
+ import logging
+ import os
++import stat
+ import threading
+ from pathlib import Path
+ from typing import Dict, Optional
+@@ -42,7 +43,7 @@ def _under_pytest() -> bool:
+     return "PYTEST_CURRENT_TEST" in os.environ
+ 
+ 
+-def get_managed_dir() -> Optional[Path]:
++def get_managed_dir(*, strict: bool = False) -> Optional[Path]:
+     """Resolve the managed-scope directory, or None when no scope is present.
+ 
+     Priority: ``$HERMES_MANAGED_DIR`` (IT-only bootstrap override; never persisted to any .env;
+@@ -56,7 +57,17 @@ def get_managed_dir() -> Optional[Path]:
+         return None
+     else:
+         p = _DEFAULT_MANAGED_DIR
+-    return p if p.is_dir() else None
++    if not strict:
++        return p if p.is_dir() else None
++    try:
++        info = p.stat()
++    except FileNotFoundError:
++        from hermes_cli.config_backend import FileBackend
++        FileBackend.observational_absence(p)
++        return None
++    if not stat.S_ISDIR(info.st_mode):
++        raise ValueError("managed configuration scope is not a directory")
++    return p
+ 
+ 
+ def invalidate_managed_cache() -> None:
+@@ -104,6 +115,16 @@ def _load_managed_file(name: str, cache: dict[str, tuple], parse) -> dict:
+     return parsed if isinstance(parsed, dict) else {}
+ 
+ 
++def load_managed_config_observational(backend):
++    """Read the current local policy without cache, repair or fail-open parsing."""
++    managed_dir = get_managed_dir(strict=True)
++    if managed_dir is None:
++        return {}, None, None
++    path = managed_dir / "config.yaml"
++    document, signature = backend.observational_document(path)
++    return document, path, signature
++
++
+ def load_managed_config() -> dict:
+     """Parsed managed config.yaml, or {} when absent/malformed (fail-open). Always {} under a config
+     backend that takes config and locks from elsewhere (remote mode, D18; boot warns about the file)."""
+diff --git a/hermes_cli/plugins.py b/hermes_cli/plugins.py
+index eda71a0ee4..ba36c23a4b 100644
+--- a/hermes_cli/plugins.py
++++ b/hermes_cli/plugins.py
+@@ -136,7 +136,7 @@ VALID_HOOKS: set[str] = {
+     # pre_gateway_dispatch: once per incoming MessageEvent, after the internal-event guard, BEFORE
+     # auth/pairing and dispatch. Kwargs: event, gateway, session_store. Return {"action": "skip",
+     # "reason"} -> drop; {"action": "rewrite", "text"} -> replace event.text; "allow"/None -> normal.
+-    "pre_gateway_dispatch", "post_gateway_admission",  # post_*: fail-open consume, gateway/run_inbound_consumer.py
++    "pre_gateway_dispatch", "post_gateway_admission", "provide_gateway_turn_context",
+     # agent_loop_stopped: an agent turn was interrupted mid-run (/stop, or the running-agent
+     # fast-path of /new; see gateway/run.py::_interrupt_and_clear_session). Kwargs: session_key,
+     # platform, reason, invalidation_reason. Return values are ignored.
+diff --git a/hermes_cli/runtime_provider.py b/hermes_cli/runtime_provider.py
+index 03a8995cfd..cf85bea147 100644
+--- a/hermes_cli/runtime_provider.py
++++ b/hermes_cli/runtime_provider.py
+@@ -1111,6 +1111,8 @@ def _raise_for_credentialless_bare_custom(requested_provider: str, runtime: dict
+ def _ladder_rungs(requested_provider, explicit_api_key, explicit_base_url, target_model):
+     """Ladder rungs 2-8, yielded lazily so each is evaluated only when the previous one returned
+     nothing; the last rung (OpenRouter / bare-custom fallback) always yields a runtime."""
++    from hermes_cli.runtime_provider_host import resolve_host_bound_runtime
++    yield resolve_host_bound_runtime(requested_provider, explicit_api_key, explicit_base_url, _get_model_config())
+     yield _resolve_requested_shortcuts(requested_provider, explicit_api_key, explicit_base_url, target_model)
+     yield _named_custom_rung(requested_provider, explicit_api_key, explicit_base_url, target_model)
+     # If provider is "auto" (or unset) but config.yaml has an explicit base_url pointing at a custom/local
+diff --git a/hermes_cli/runtime_provider_host.py b/hermes_cli/runtime_provider_host.py
+new file mode 100644
+index 0000000000..1ec36eebbb
+--- /dev/null
++++ b/hermes_cli/runtime_provider_host.py
+@@ -0,0 +1,36 @@
++"""Registered gateway-bound providers: a keyless route is not an admission."""
++from __future__ import annotations
++
++from collections.abc import Mapping
++
++
++def resolve_host_bound_runtime(requested, explicit_api_key, explicit_base_url, model_config):
++    from providers import get_provider_profile
++    profile = get_provider_profile(requested) if requested and requested != "auto" else None
++    if profile is None or profile.host_bound_runtime is not True:
++        return None
++    if (explicit_api_key not in (None, "") or explicit_base_url not in (None, "")
++            or model_config.get("api_key") not in (None, "")
++            or model_config.get("base_url") not in (None, "")):
++        raise RuntimeError("Host-bound providers cannot accept endpoint or credential overrides")
++    return {"provider": profile.name, "requested_provider": requested,
++            "api_mode": profile.api_mode, "api_key": None, "base_url": None,
++            "credential_pool": None, "source": "host_bound"}
++
++
++def is_host_bound_runtime(runtime):
++    if not isinstance(runtime, Mapping):
++        return False
++    from providers import get_provider_profile
++    name = runtime.get("provider")
++    profile = get_provider_profile(name) if isinstance(name, str) else None
++    if profile is None or profile.host_bound_runtime is not True:
++        return False
++    if (runtime.get("requested_provider", name) not in (profile.name, *profile.aliases)
++            or runtime.get("api_mode") != profile.api_mode
++            or any(runtime.get(key) not in (None, "")
++                   for key in ("api_key", "base_url", "command", "acp_command"))
++            or any(runtime.get(key) not in (None, [], {})
++                   for key in ("credential_pool", "args", "acp_args", "fallback_model"))):
++        raise RuntimeError("Invalid host-bound provider runtime")
++    return True
+diff --git a/pm/workspace.py b/pm/workspace.py
+index addbe5a626..adfbde86ea 100644
+--- a/pm/workspace.py
++++ b/pm/workspace.py
+@@ -54,11 +54,16 @@ def members_stamp(plugin_dirs) -> str:
+         if (entry / "pyproject.toml").is_file():
+             for directory, dirs, files in os.walk(entry):
+                 dirs[:] = sorted(set(dirs) - set(_member_ignored(directory, dirs)))
+-                for name in sorted(set(files) - set(_member_ignored(directory, files))):
++                for name in sorted(dirs + list(set(files) - set(_member_ignored(directory, files)))):
+                     path = Path(directory) / name
+                     h.update(path.relative_to(entry).as_posix().encode())
+                     h.update(b"\0")
+-                    h.update(os.readlink(path).encode() if path.is_symlink() else path.read_bytes())
++                    h.update(str(path.lstat().st_mode).encode())
++                    h.update(b"\0")
++                    if path.is_symlink():
++                        h.update(os.readlink(path).encode())
++                    elif path.is_file():
++                        h.update(path.read_bytes())
+                     h.update(b"\0")
+     return h.hexdigest()
+ 
+@@ -134,6 +139,67 @@ def _copy_core_inputs(source: Path, destination: Path) -> None:
+         shutil.copy2(entry, target)
+ 
+ 
++
++def _buildable_inputs_fingerprint(member: Path, document: dict) -> str:
++    """Only coalesce complete self-contained snapshots, never outside inputs."""
++    import stat
++    from packaging.requirements import Requirement
++
++    for relative in document.get("build-system", {}).get("backend-path", []):
++        path = Path(relative)
++        if path.is_absolute() or not (member / path).resolve().is_relative_to(member.resolve()):
++            raise InstallError("venv", f"shared build input escapes its plugin: {member}")
++    for values in document.get("tool", {}).get("uv", {}).get("sources", {}).values():
++        for spec in values if isinstance(values, list) else [values]:
++            if isinstance(spec, dict) and "path" in spec:
++                path = Path(spec["path"])
++                if path.is_absolute() or not (member / path).resolve().is_relative_to(member.resolve()):
++                    raise InstallError("venv", f"shared dependency input escapes its plugin: {member}")
++    for raw in document.get("project", {}).get("dependencies", []):
++        url = Requirement(raw).url
++        if url and (url.startswith("file:") or "://" not in url):
++            raise InstallError("venv", f"shared dependency input is not snapshotted: {member}")
++    rows = []
++    for directory, dirs, files in os.walk(member, followlinks=False):
++        for name in sorted(dirs + files):
++            path = Path(directory) / name
++            info = path.lstat()
++            if stat.S_ISLNK(info.st_mode) or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
++                raise InstallError("venv", f"shared build input is not a direct file or directory: {member}")
++            rows.append((path.relative_to(member).as_posix(), stat.S_IFMT(info.st_mode),
++                         stat.S_IMODE(info.st_mode),
++                         hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None))
++        dirs.sort()
++    return hashlib.sha256(json.dumps(sorted(rows), separators=(",", ":")).encode()).hexdigest()
++
++
++def _coalesce_buildable_members(copied: list[tuple[Path, Path]]) -> list[Path]:
++    """Share identical package builds while every home retains its own identity."""
++    import re
++    import tomllib
++
++    groups, members = {}, []
++    for identity, member in sorted(copied):
++        document = tomllib.loads((member / "pyproject.toml").read_text(encoding="utf-8-sig"))
++        buildable = "build-system" in document or document.get("tool", {}).get("uv", {}).get("package") is True
++        if not buildable:
++            members.append(member)
++            continue
++        name = document.get("project", {}).get("name")
++        if not isinstance(name, str) or not name:
++            raise InstallError("venv", f"buildable plugin has no distribution name: {identity}")
++        groups.setdefault(re.sub(r"[-_.]+", "-", name).lower(), []).append((identity, member, document))
++    for name, group in sorted(groups.items()):
++        first_identity, first_member, first_document = group[0]
++        if len(group) > 1:
++            fingerprint = _buildable_inputs_fingerprint(first_member, first_document)
++            for identity, member, document in group[1:]:
++                if _buildable_inputs_fingerprint(member, document) != fingerprint:
++                    raise InstallError("venv", f"conflicting copies of package {name}: {first_identity} and {identity}")
++        members.append(first_member)
++    return members
++
++
+ def _generate_pyproject(plugin_dirs: list[Path] | Mapping[Path, Path], root: Path, *, source: Path,
+                         python: Path, extras: Iterable[str] = ()) -> None:
+     """Snapshot core and plugin build inputs into a fresh generation for the *python* that installs it."""
+@@ -148,8 +214,9 @@ def _generate_pyproject(plugin_dirs: list[Path] | Mapping[Path, Path], root: Pat
+     candidates = {identity: source for identity, source in member_sources(plugin_dirs).items()
+                   if _is_member_candidate(source)}
+     target = _target_environment(python) if candidates else {}
+-    members = [_workspace_member(source, root, identity=identity, extras=extras, target=target)
+-               .relative_to(root).as_posix() for identity, source in candidates.items()]
++    copied = [(identity, _workspace_member(source, root, identity=identity, extras=extras, target=target))
++              for identity, source in candidates.items()]
++    members = [member.relative_to(root).as_posix() for member in _coalesce_buildable_members(copied)]
+ 
+     if members:
+         import tomllib
+diff --git a/providers/base.py b/providers/base.py
+index 3610e20af5..e2b16d3cec 100644
+--- a/providers/base.py
++++ b/providers/base.py
+@@ -169,6 +169,10 @@ class ProviderProfile:
+     supports_health_check: bool = True  # False → doctor skips /models probe for this provider
+     # False → fetch_models returns None without a network call (catalog comes from an SDK/subprocess).
+     supports_model_listing: bool = True
++    # An explicitly registered provider may delegate credentials and admission to the
++    # authenticated gateway. Its provide_gateway_turn_context hook must bind each turn;
++    # this descriptor alone never authorizes inference or exempts an ordinary API provider.
++    host_bound_runtime: bool = field(default=False, kw_only=True)
+ 
+     # ── Provider-owned auth (optional; non-api-key plugins) ──────────
+     # ``auth_handler(action, args) -> bool``: ``hermes auth add|status|logout|refresh <name>`` calls it
+diff --git a/tests/hermes_cli/test_config_observational.py b/tests/hermes_cli/test_config_observational.py
+new file mode 100644
+index 0000000000..1da2f86ad0
+--- /dev/null
++++ b/tests/hermes_cli/test_config_observational.py
+@@ -0,0 +1,215 @@
++"""Current-config admission reads preserve native policy without startup effects."""
++from __future__ import annotations
++
++import json
++import os
++import tempfile
++import unittest
++from pathlib import Path
++from unittest import mock
++
++from hermes_cli import config, config_backend
++from hermes_constants import set_hermes_home_override, reset_hermes_home_override
++
++
++class ObservationalConfigurationTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.root = Path(self.temp.name)
++        self.home = self.root / "home"
++        self.home.mkdir()
++        self.managed = self.root / "managed"
++        self.managed.mkdir()
++        self.environment = mock.patch.dict(os.environ, {
++            "HERMES_HOME": str(self.home),
++            "HERMES_MANAGED_DIR": str(self.managed),
++            "HERMES_CONFIG_BACKEND": "file",
++        })
++        self.environment.start()
++        self.token = set_hermes_home_override(str(self.home))
++
++    def tearDown(self):
++        reset_hermes_home_override(self.token)
++        self.environment.stop()
++        self.temp.cleanup()
++
++    def write(self, document):
++        (self.home / "config.yaml").write_text(json.dumps(document))
++
++    def read(self):
++        return config.load_config_observational()
++
++    def test_fresh_current_user_and_managed_policy_without_home_initialization(self):
++        self.write({"plugins": {"enabled": ["worker"]}, "max_turns": 9,
++                    "moa": {"presets": {}}})
++        (self.managed / "config.yaml").write_text(
++            'plugins:\n  disabled: [worker]\nmodel: managed-model\n')
++        before = sorted(str(p.relative_to(self.root)) for p in self.root.rglob("*"))
++        result = self.read()
++        self.assertEqual(result["plugins"]["disabled"], ["worker"])
++        self.assertEqual(result["agent"]["max_turns"], 9)
++        self.assertEqual(result["moa"]["presets"], {})
++        self.assertEqual(result["model"]["default"], "managed-model")
++        self.assertEqual(before, sorted(str(p.relative_to(self.root)) for p in self.root.rglob("*")))
++        result["plugins"]["enabled"].clear()
++        self.assertEqual(self.read()["plugins"]["enabled"], ["worker"])
++
++    def test_current_malformed_file_never_uses_cached_or_good_backup(self):
++        self.write({"plugins": {"enabled": ["worker"]}})
++        config.load_config()
++        self.assertTrue((self.home / "backups/config").is_dir())
++        (self.home / "config.yaml").write_text("plugins: [unterminated")
++        with self.assertRaises(Exception):
++            self.read()
++
++    def test_current_malformed_managed_file_refuses(self):
++        self.write({"plugins": {"enabled": ["worker"]}})
++        (self.managed / "config.yaml").write_text("plugins: [unterminated")
++        with self.assertRaises(Exception):
++            self.read()
++
++    def test_missing_home_does_not_initialize_files(self):
++        missing = self.root / "absent"
++        token = set_hermes_home_override(str(missing))
++        try:
++            self.assertIsInstance(self.read(), dict)
++            self.assertFalse(missing.exists())
++        finally:
++            reset_hermes_home_override(token)
++
++    def test_remote_backend_refused_before_backend_import_or_boot(self):
++        self.write({})
++        with mock.patch.dict(os.environ, {"HERMES_CONFIG_BACKEND": "remote"}):
++            with mock.patch.object(config_backend, "_backend_for",
++                                   side_effect=AssertionError("backend import forbidden")):
++                with self.assertRaises(ValueError):
++                    self.read()
++
++    def test_deployment_dotenv_selects_backend_before_served_home(self):
++        (self.home / ".env").write_text("HERMES_CONFIG_BACKEND=remote\n")
++        served = self.root / "served"
++        served.mkdir()
++        (served / ".env").write_text("HERMES_CONFIG_BACKEND=file\n")
++        (served / "config.yaml").write_text("{}")
++        token = set_hermes_home_override(str(served))
++        try:
++            with self.assertRaises(ValueError):
++                self.read()
++        finally:
++            reset_hermes_home_override(token)
++
++    def test_managed_dotenv_keeps_final_selection_precedence(self):
++        (self.home / ".env").write_text("HERMES_CONFIG_BACKEND=file\n")
++        (self.managed / ".env").write_text("HERMES_CONFIG_BACKEND=remote\n")
++        with self.assertRaises(ValueError):
++            self.read()
++
++    def test_malformed_dotenv_and_non_mapping_yaml_refuse(self):
++        for raw in ('BROKEN="unterminated\n', 'KEY=value\x00\n'):
++            (self.home / ".env").write_text(raw)
++            with self.subTest(dotenv=repr(raw)):
++                with self.assertRaises(ValueError):
++                    self.read()
++        (self.home / ".env").unlink()
++        for document in ([1, 2], "text", False):
++            self.write(document)
++            with self.subTest(document=document):
++                with self.assertRaises(ValueError):
++                    self.read()
++
++    def test_unreadable_input_does_not_become_absence(self):
++        self.write({})
++        original = config_backend.FileBackend.observational_bytes
++        def read(path):
++            if path == self.home / ".env":
++                raise PermissionError("fixture permission refusal")
++            return original(path)
++        with mock.patch.object(config_backend.FileBackend, "observational_bytes", side_effect=read):
++            with self.assertRaises(PermissionError):
++                self.read()
++
++    def test_file_replacement_during_observation_refuses(self):
++        self.write({"plugins": {"enabled": ["worker"]}})
++        original = config_backend.FileBackend.observational_document
++        def replace_after_read(path):
++            result = original(path)
++            if path == self.home / "config.yaml":
++                replacement = self.home / "replacement.yaml"
++                replacement.write_text('{"plugins":{"disabled":["worker"]}}')
++                replacement.replace(path)
++            return result
++        with mock.patch.object(config_backend.FileBackend, "observational_document",
++                               side_effect=replace_after_read):
++            with self.assertRaises(ValueError):
++                self.read()
++
++    def test_valid_policy_symlink_replacement_refuses(self):
++        target = self.root / "policy.yaml"
++        target.write_text('{"plugins":{"disabled":["worker"]}}')
++        path = self.managed / "config.yaml"
++        path.symlink_to(target)
++        original = config_backend.FileBackend.observational_document
++        def replace_after_read(current):
++            result = original(current)
++            if current == path:
++                replacement = self.managed / "replacement.yaml"
++                replacement.symlink_to(target)
++                replacement.replace(path)
++            return result
++        with mock.patch.object(config_backend.FileBackend, "observational_document",
++                               side_effect=replace_after_read):
++            with self.assertRaises(ValueError):
++                self.read()
++
++    def test_backend_change_during_observation_refuses(self):
++        self.write({})
++        original = config_backend.FileBackend.observational_document
++        def change_after_read(path):
++            result = original(path)
++            if path == self.home / "config.yaml":
++                (self.home / ".env").write_text("HERMES_CONFIG_BACKEND=remote\n")
++            return result
++        with mock.patch.object(config_backend.FileBackend, "observational_document",
++                               side_effect=change_after_read):
++            with self.assertRaises(ValueError):
++                self.read()
++
++    def test_dangling_inputs_and_managed_directory_refuse(self):
++        for path in (self.home / ".env", self.managed / "config.yaml"):
++            with self.subTest(path=path.name):
++                path.symlink_to(self.root / "absent-target")
++                try:
++                    with self.assertRaises(ValueError):
++                        self.read()
++                finally:
++                    path.unlink()
++        self.managed.rmdir()
++        self.managed.symlink_to(self.root / "absent-directory")
++        with self.assertRaises(ValueError):
++            self.read()
++
++    def test_booted_remote_backend_cannot_be_reinterpreted_from_edited_dotenv(self):
++        (self.home / ".env").write_text("HERMES_CONFIG_BACKEND=file\n")
++        with mock.patch.dict(os.environ, {"HERMES_CONFIG_BACKEND": "remote"}):
++            with mock.patch.object(config_backend, "_BOOTSTRAPPED", True):
++                with self.assertRaises(ValueError):
++                    self.read()
++
++    def test_managed_references_use_process_values_not_profile_values(self):
++        self.write({"fixture_label": "${USER_LABEL}"})
++        (self.managed / "config.yaml").write_text(
++            'plugins:\n  disabled: ["${BLOCKED_PLUGIN}"]\n')
++        with mock.patch.dict(os.environ, {"BLOCKED_PLUGIN": "worker"}):
++            with mock.patch.object(config, "_env_ref_lookup", return_value="profile-value"):
++                result = self.read()
++        self.assertEqual(result["fixture_label"], "profile-value")
++        self.assertEqual(result["plugins"]["disabled"], ["worker"])
++
++    def test_bounded_regular_inputs_only(self):
++        (self.home / "config.yaml").mkdir()
++        with self.assertRaises(ValueError):
++            self.read()
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/pm/test_buildable_multi_home.py b/tests/pm/test_buildable_multi_home.py
+new file mode 100644
+index 0000000000..2768f540f9
+--- /dev/null
++++ b/tests/pm/test_buildable_multi_home.py
+@@ -0,0 +1,84 @@
++"""The existing PM shares identical package builds, not home identities."""
++import os
++from pathlib import Path
++import sys
++import tomllib
++
++import pytest
++
++from pm.package import InstallError
++from pm.workspace import _generate_pyproject, member_sources, members_stamp
++
++
++def _inputs(tmp_path):
++    core = tmp_path / "core"
++    core.mkdir()
++    (core / "pyproject.toml").write_text(
++        '[project]\nname="hermes-agent"\nversion="0.0.1"\ndependencies=[]\n'
++        '[tool.uv]\npackage=false\n')
++    plugins = []
++    for name in ("home-a", "home-b"):
++        plugin = tmp_path / name / "plugins" / "same"
++        plugin.mkdir(parents=True)
++        (plugin / "pyproject.toml").write_text(
++            '[project]\nname="shared-plugin"\nversion="1.0"\ndependencies=[]\n'
++            '[build-system]\nrequires=[]\nbuild-backend="fixture_backend"\nbackend-path=["."]\n')
++        (plugin / "fixture_backend.py").write_text('raise RuntimeError("metadata checks must not execute backend")\n')
++        (plugin / "adapter.py").write_text('IDENTITY = "same"\n')
++        plugins.append(plugin)
++    return core, plugins
++
++
++def test_identical_builds_share_one_member_but_preserve_both_home_snapshots(tmp_path):
++    core, plugins = _inputs(tmp_path)
++    generation = tmp_path / "generation"
++    _generate_pyproject(plugins, generation, source=core, python=Path(sys.executable))
++    document = tomllib.loads((generation / "pyproject.toml").read_text())
++    assert len(document["tool"]["uv"]["workspace"]["members"]) == 1
++    assert len(list((generation / "plugin-sources").iterdir())) == 2
++    assert set(member_sources(plugins)) == set(plugins)
++    stamp = members_stamp(plugins)
++    (plugins[1] / "adapter.py").write_text('IDENTITY = "changed"\n')
++    assert members_stamp(plugins) != stamp
++    assert all((path / "adapter.py").read_text() == 'IDENTITY = "same"\n'
++               for path in (generation / "plugin-sources").iterdir())
++
++
++def test_different_copy_refuses_before_lock_or_environment_publication(tmp_path):
++    core, plugins = _inputs(tmp_path)
++    (plugins[1] / "adapter.py").write_text('IDENTITY = "different"\n')
++    generation = tmp_path / "generation"
++    with pytest.raises(InstallError, match="conflicting copies.*home-a.*home-b"):
++        _generate_pyproject(plugins, generation, source=core, python=Path(sys.executable))
++    assert not (generation / "pyproject.toml").exists()
++    assert not (generation / "uv.lock").exists()
++    assert (plugins[0] / "adapter.py").read_text() == 'IDENTITY = "same"\n'
++
++
++def test_mode_change_in_either_home_invalidates_the_build_stamp(tmp_path):
++    core, plugins = _inputs(tmp_path)
++    stamp = members_stamp(plugins)
++    (plugins[1] / "adapter.py").chmod(0o755)
++    assert members_stamp(plugins) != stamp
++    with pytest.raises(InstallError, match="conflicting copies"):
++        _generate_pyproject(plugins, tmp_path / "generation", source=core, python=Path(sys.executable))
++
++
++def test_external_link_cannot_be_declared_an_equivalent_build_input(tmp_path):
++    core, plugins = _inputs(tmp_path)
++    outside = tmp_path / "outside.py"
++    outside.write_text("secret_build_input = True\n")
++    for plugin in plugins:
++        (plugin / "outside.py").symlink_to(outside)
++    with pytest.raises(InstallError, match="not a direct file or directory"):
++        _generate_pyproject(plugins, tmp_path / "generation", source=core, python=Path(sys.executable))
++
++
++def test_remaining_home_builds_after_the_other_is_deselected(tmp_path):
++    core, plugins = _inputs(tmp_path)
++    (plugins[0] / "adapter.py").write_text('IDENTITY = "disabled-copy"\n')
++    generation = tmp_path / "generation"
++    _generate_pyproject([plugins[1]], generation, source=core, python=Path(sys.executable))
++    document = tomllib.loads((generation / "pyproject.toml").read_text())
++    assert len(document["tool"]["uv"]["workspace"]["members"]) == 1
++    assert len(list((generation / "plugin-sources").iterdir())) == 1
+diff --git a/ui-tui/src/__tests__/modelPickerHostBound.test.tsx b/ui-tui/src/__tests__/modelPickerHostBound.test.tsx
+new file mode 100644
+index 0000000000..b5b295191f
+--- /dev/null
++++ b/ui-tui/src/__tests__/modelPickerHostBound.test.tsx
+@@ -0,0 +1,74 @@
++import { PassThrough } from 'node:stream'
++
++import { renderSync } from '@hermes/ink'
++import React from 'react'
++import { expect, it, vi } from 'vitest'
++
++import { ModelPicker } from '../components/modelPicker.js'
++import { DEFAULT_THEME } from '../theme.js'
++import { messages } from '../i18n/runtime.js'
++
++const model = 'mastermind-fabric/auto'
++
++function mount(eligible: boolean) {
++  const request = vi.fn(async (_method: string, _params?: unknown) => ({
++    provider: 'mastermind-fabric',
++    model,
++    providers: [{
++      slug: 'mastermind-fabric', name: 'Mastermind Fabric', source: 'host-bound',
++      authenticated: false, auth_type: 'host_bound', key_env: '', is_current: true,
++      models: eligible ? [model] : [], total_models: eligible ? 1 : 0,
++      warning: eligible ? 'Managed by this host; access is checked on each turn.' : 'Host setup is unavailable.',
++      capabilities: { [model]: { fast: false, reasoning: false } }
++    }]
++  }))
++  const stdin = Object.assign(new PassThrough(), { isTTY: true, setRawMode: vi.fn(), ref: vi.fn(), unref: vi.fn() })
++  const stdout = Object.assign(new PassThrough(), { columns: 100, rows: 30, isTTY: false })
++  let output = ''
++  stdout.on('data', chunk => { output += chunk.toString() })
++  const onSelect = vi.fn()
++  const element = <ModelPicker gw={{ request } as any} onCancel={vi.fn()} onSelect={onSelect} t={DEFAULT_THEME} />
++  const instance = renderSync(element, {
++    stdin: stdin as any, stdout: stdout as any, stderr: new PassThrough() as any, patchConsole: false
++  })
++  return { request, stdin, onSelect, instance, element, output: () => output }
++}
++
++it('selects an eligible host-managed model without key entry or credential disconnect', async () => {
++  const mounted = mount(true)
++  try {
++    await vi.waitFor(() => expect(mounted.output()).toContain('Managed access'))
++    expect(mounted.output()).not.toContain('needs setup')
++    mounted.stdin.write('\u0004')
++    await new Promise(resolve => setImmediate(resolve))
++    mounted.instance.rerender(React.cloneElement(mounted.element))
++    mounted.stdin.write('\r')
++    await vi.waitFor(() => {
++      mounted.instance.rerender(React.cloneElement(mounted.element))
++      expect(mounted.output()).toContain(messages().pickers.model.modelStage.title)
++    })
++    mounted.instance.rerender(React.cloneElement(mounted.element))
++    mounted.stdin.write('\r')
++    await vi.waitFor(() => expect(mounted.onSelect).toHaveBeenCalledWith(
++      'mastermind-fabric/auto --provider mastermind-fabric --tui-session'
++    ))
++    expect(mounted.request.mock.calls.map(call => call[0])).toEqual(['model.options'])
++  } finally {
++    mounted.instance.unmount()
++  }
++})
++
++it('keeps a held host-managed row unavailable without asking for credentials', async () => {
++  const mounted = mount(false)
++  try {
++    await vi.waitFor(() => expect(mounted.output()).toContain('Host setup is unavailable'))
++    mounted.stdin.write('\u0004')
++    mounted.stdin.write('\r')
++    mounted.instance.rerender(React.cloneElement(mounted.element))
++    expect(mounted.onSelect).not.toHaveBeenCalled()
++    expect(mounted.request.mock.calls.map(call => call[0])).toEqual(['model.options'])
++    expect(mounted.output()).not.toContain('Paste')
++  } finally {
++    mounted.instance.unmount()
++  }
++})
+diff --git a/ui-tui/src/components/modelPicker.tsx b/ui-tui/src/components/modelPicker.tsx
+index e1f0313729..522c20ef27 100644
+--- a/ui-tui/src/components/modelPicker.tsx
++++ b/ui-tui/src/components/modelPicker.tsx
+@@ -480,7 +480,11 @@ export function ModelPicker({
+           return
+         }
+ 
+-        if (provider.authenticated === false) {
++        if (provider.source === 'host-bound' && !provider.models?.length) {
++          return
++        }
++
++        if (provider.authenticated === false && provider.source !== 'host-bound') {
+           // api_key providers: prompt for key inline
+           if (provider.auth_type === 'api_key' && provider.key_env) {
+             const fullProviderIdx = providerIndexAfterClearingFilter(providerRows, provider)
+@@ -560,7 +564,10 @@ export function ModelPicker({
+     }
+ 
+     // Disconnect (Ctrl+D): only in provider stage, only for authenticated providers.
+-    if (key.ctrl && ch === 'd' && stage === 'provider' && provider?.authenticated !== false) {
++    if (
++      key.ctrl && ch === 'd' && stage === 'provider'
++      && provider?.authenticated !== false && provider?.source !== 'host-bound'
++    ) {
+       const fullProviderIdx = providerIndexAfterClearingFilter(providerRows, provider)
+ 
+       if (fullProviderIdx >= 0) {
+@@ -691,17 +698,22 @@ export function ModelPicker({
+   // ── Provider selection stage ─────────────────────────────────────────
+   if (stage === 'provider') {
+     const rows = filteredProviderRows.map(({ provider: p, name }) => {
+-      const authMark = p.authenticated === false ? '○' : p.is_current ? '*' : '●'
++      const unavailable = p.source === 'host-bound' ? !p.models?.length : p.authenticated === false
++      const authMark = unavailable ? '○' : p.is_current ? '*' : '●'
+       const modelCount = p.total_models ?? p.models?.length ?? 0
+ 
+       const suffix =
+-        p.authenticated === false
+-          ? p.auth_type === 'api_key'
+-            ? M.provider.noKey
++        p.source === 'host-bound'
++          ? modelCount
++            ? 'Managed access'
+             : M.provider.needsSetup
+-          : modelCount === 1
+-            ? M.provider.modelCountOne(1)
+-            : M.provider.modelCountOther(modelCount)
++          : p.authenticated === false
++            ? p.auth_type === 'api_key'
++              ? M.provider.noKey
++              : M.provider.needsSetup
++            : modelCount === 1
++              ? M.provider.modelCountOne(1)
++              : M.provider.modelCountOther(modelCount)
+ 
+       return `${authMark} ${name} · ${suffix}`
+     })
+@@ -741,7 +753,7 @@ export function ModelPicker({
+             const row = items[i]
+             const idx = offset + i
+             const p = filteredProviderRows[idx]?.provider
+-            const dimmed = p?.authenticated === false
++            const dimmed = p?.source === 'host-bound' ? !p.models?.length : p?.authenticated === false
+ 
+             return row ? (
+               <Text

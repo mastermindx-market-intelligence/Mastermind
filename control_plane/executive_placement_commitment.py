@@ -444,6 +444,8 @@ def _build_commitment_plan_from_canonical_selection(
     selected: Mapping[str, Any],
     placement_mode: str,
     validated_target_facts: Any,
+    responsibility_ref: str | None = None,
+    selection_evidence: Any = None,
 ) -> PlacementCommitmentPlan:
     source_root = _token(source_root_job_id, code="SOURCE_ROOT_JOB_ID_INVALID")
     revision = _revision(
@@ -455,8 +457,12 @@ def _build_commitment_plan_from_canonical_selection(
         raise PlacementCommitmentError("TARGET_DEFINITION_CONFLICT")
     target_fingerprint = digest(target)
     responsibility_ref = _token(
-        selection["responsibility_ref"], code="RESPONSIBILITY_REF_INVALID"
+        selection["responsibility_ref"]
+        if responsibility_ref is None
+        else responsibility_ref,
+        code="RESPONSIBILITY_REF_INVALID",
     )
+    evidence = selection["evidence"] if selection_evidence is None else selection_evidence
     carrier_semantics = _carrier_command_semantics(
         session_alias=SESSION_ALIAS,
         target_definition_fingerprint=target_fingerprint,
@@ -469,7 +475,7 @@ def _build_commitment_plan_from_canonical_selection(
         "responsibility_ref": responsibility_ref,
         "placement_mode": placement_mode,
         "selection_document_digest": digest(selection),
-        "selection_evidence_digest": digest(selection["evidence"]),
+        "selection_evidence_digest": digest(evidence),
         "selected_worker_id": selected["worker_id"],
         "selected_quota_class": selected["quota_class"],
         "committed_placement_snapshot_digest": digest(selected),
@@ -566,6 +572,65 @@ def build_commitment_plan_from_selection_decision(
         selected=selected,
         placement_mode=placement_mode,
         validated_target_facts=validated_target_facts,
+    )
+
+
+def build_commitment_plan_from_selection_decision_v2(
+    *,
+    source_root_job_id: str,
+    expected_source_root_revision: int,
+    placement_selection: Any,
+    resolved_capacity_sources: Mapping[str, bytes],
+    validated_target_facts: Any,
+) -> PlacementCommitmentPlan:
+    """Bind one resolved Capacity-preference v2 decision without reselecting.
+
+    Unlike the v1 typed seam, v2 source admissibility is not self-contained in
+    the dataclass: the exact content-addressed Capacity source bytes are an
+    external currentness input.  Revalidate them here, then bind the full v2
+    document while preserving the candidate evidence digest from base_v1.
+    """
+
+    try:
+        from control_plane.executive_placement_preference import (
+            PREFERENCE_ADMISSIBLE,
+            PlacementSelectionDecisionV2,
+            validate_placement_selection_v2,
+        )
+
+        if not isinstance(placement_selection, PlacementSelectionDecisionV2):
+            raise TypeError("placement selection is not v2")
+        selection = validate_placement_selection_v2(
+            placement_selection.to_dict(),
+            resolved_capacity_sources=resolved_capacity_sources,
+        )
+    except (TypeError, ValueError, OrchestrationPrincipalError) as exc:
+        raise PlacementCommitmentError("PLACEMENT_SELECTION_INVALID") from exc
+    if (
+        selection.get("state") != SelectionState.SELECTED.value
+        or selection.get("selection_is_commitment") is not False
+        or selection.get("preference_admissibility") != PREFERENCE_ADMISSIBLE
+        or selection.get("selected") is None
+        or selection.get("selected_mode") is None
+    ):
+        raise PlacementCommitmentError("PLACEMENT_SELECTION_NOT_SELECTED")
+    try:
+        selected = validate_placement_snapshot(selection["selected"])
+    except (TypeError, ValueError, OrchestrationPrincipalError) as exc:
+        raise PlacementCommitmentError("PLACEMENT_SNAPSHOT_INVALID") from exc
+    placement_mode = selection["selected_mode"]
+    if placement_mode not in _PLACEMENT_MODE_TO_DISPOSITION:
+        raise PlacementCommitmentError("PLACEMENT_MODE_INVALID")
+    base = selection["base_v1"]
+    return _build_commitment_plan_from_canonical_selection(
+        source_root_job_id=source_root_job_id,
+        expected_source_root_revision=expected_source_root_revision,
+        selection=selection,
+        selected=selected,
+        placement_mode=placement_mode,
+        validated_target_facts=validated_target_facts,
+        responsibility_ref=base["responsibility_ref"],
+        selection_evidence=base["evidence"],
     )
 
 

@@ -1,0 +1,24 @@
+{
+  "observedAt": "2026-11-07T08:49:40.212909+00:00",
+  "source": "1f431c6c4087656ae3dbdc683d96ee2572f061c9",
+  "build": "hermes-thin-native-1f431c6c4087-20261107-pro-05",
+  "prior386PidConfirmedExited": 31049,
+  "singleAppGuard": "no mastermind-os process before launch",
+  "actions": [
+    {
+      "action": "-f",
+      "exitCode": 0,
+      "stderr": ""
+    },
+    {
+      "action": "-u",
+      "exitCode": 0,
+      "stderr": ""
+    },
+    {
+      "action": "open",
+      "exitCode": 0,
+      "stderr": ""
+    }
+  ]
+}

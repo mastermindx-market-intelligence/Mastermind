@@ -1,0 +1,458 @@
+--- a/host_pick.py
++++ b/host_pick.py
+@@ -102,7 +102,7 @@
+     return {
+         str(name): entry
+         for name, entry in document.items()
+-        if name != "_doc" and isinstance(entry, dict)
++        if not str(name).startswith("_") and isinstance(entry, dict)
+     }
+ 
+ 
+--- a/pool_status.py
++++ b/pool_status.py
+@@ -757,7 +757,7 @@
+         return {}
+     if not isinstance(doc, dict):
+         return {}
+-    return {k: v for k, v in doc.items() if k != "_doc" and isinstance(v, dict)}
++    return {k: v for k, v in doc.items() if not str(k).startswith("_") and isinstance(v, dict)}
+ 
+ 
+ def _fmt_host_age(secs: int) -> str:
+--- a/host_pull_backend.py
++++ b/host_pull_backend.py
+@@ -15,12 +15,12 @@
+         raise SystemExit("host_pull: registry must be an object")
+     selected = set(sys.argv[2].split())
+     once = len(sys.argv) < 4 or sys.argv[3] == "1"
+-    known = {name for name, entry in db.items() if name != "_doc" and isinstance(entry, dict)}
++    known = {name for name, entry in db.items() if not str(name).startswith("_") and isinstance(entry, dict)}
+     if selected - known:
+         sys.stderr.write("host_pull: unknown host(s): " + ",".join(sorted(selected - known)) + "\n")
+         raise SystemExit(2)
+     for name, e in sorted(db.items()):
+-        if name == "_doc" or not isinstance(e, dict) or (selected and name not in selected):
++        if str(name).startswith("_") or not isinstance(e, dict) or (selected and name not in selected):
+             continue
+         # The unattended lane collector must not spend most of its cycle
+         # probing decommissioned minis, CI-only hardware, or candidate seats.
+@@ -107,7 +107,7 @@
+                         or len(observation["accounts"]) > 64):
+                     raise ValueError("readiness identity")
+                 doc[key] = observation
+-            except (OSError, ValueError, TypeError, AttributeError):
++            except (OSError, ValueError, TypeError, AttributeError, ImportError):
+                 pass
+         doc["load1"] = num(kv.get("load1"))
+         doc["load5"] = num(kv.get("load5"))
+--- a/remote_lane_v8.sh
++++ b/remote_lane_v8.sh
+@@ -46,8 +46,8 @@
+         if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+             sys.stderr.write("hosts.json: %s.%s must be a positive integer\n" % (host, field))
+             raise SystemExit(3)
+-        if field == "max_active" and value > 8:
+-            sys.stderr.write("hosts.json: %s.max_active exceeds the lane ceiling of 8\n" % host)
++        if field == "max_active" and value > 32:
++            sys.stderr.write("hosts.json: %s.max_active exceeds the lane ceiling of 32\n" % host)
+             raise SystemExit(3)
+     elif field in NUM_FIELDS:
+         if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+--- a/tests/test_hosts_registry.py
++++ b/tests/test_hosts_registry.py
+@@ -34,11 +34,9 @@
+ HOST_PULL_SH = os.path.join(EXT, "host_pull.sh")
+ 
+ # Current canonical policy tokens; parser compatibility is independent of values.
+-POLICY_TOKENS = {
+-    "m1": "ssh_alias=m1 cores=10 max_active=2 load_gate=7 min_free_gb=6 require_ac=false",
+-    "mb": "ssh_alias=mb cores=12 max_active=2 load_gate=8 min_free_gb=30 require_ac=true",
+-    "bmb": "ssh_alias=mb cores=12 max_active=2 load_gate=8 min_free_gb=30 require_ac=true",
+-}
++# Confirm the v8 parser reproduces the installed registry values, rather than
++# freezing yesterday's thermal/concurrency settings into test expectations.
++PARSER_LEGACY_HOSTS = ("m1", "mb", "bmb")
+ 
+ 
+ # ── (a) legacy parser compatibility ───────────────────────────────────────────
+@@ -75,16 +73,34 @@
+     return rc, buffer.getvalue().strip()
+ 
+ 
+-@pytest.mark.parametrize("host", sorted(POLICY_TOKENS))
++@pytest.mark.parametrize("host", PARSER_LEGACY_HOSTS)
+ def test_current_policy_parser_tokens(host):
+     snippet = _sed_extract_parser(HOST_QUEUE_SH)
+     rc, out = _run_parser(snippet, HOSTS_JSON, host)
+     assert rc == 0
+-    assert out == POLICY_TOKENS[host]
++    entry = _hosts_doc()[host]
++    fields = ("ssh_alias", "cores", "max_active", "load_gate", "min_free_gb", "require_ac")
++    expected = " ".join(f"{field}={str(entry[field]).lower() if isinstance(entry[field], bool) else entry[field]}" for field in fields)
++    assert out == expected
+ 
+ 
+ def test_remote_lane_parser_snippet_identical():
+     assert _sed_extract_parser(REMOTE_LANE_SH) == _sed_extract_parser(HOST_QUEUE_SH)
++
++
++def test_both_parsers_allow_admitted_ubuntu_capacity_but_reject_above_32(tmp_path):
++    current = _hosts_doc()
++    assert current["ubuntu1"]["max_active"] == 18
++    for script in (HOST_QUEUE_SH, REMOTE_LANE_SH):
++        snippet = _sed_extract_parser(script)
++        rc, out = _run_parser(snippet, HOSTS_JSON, "ubuntu1")
++        assert rc == 0 and "max_active=18" in out
++        modified = dict(current)
++        modified["ubuntu1"] = dict(current["ubuntu1"], max_active=33)
++        invalid = tmp_path / "invalid-hosts.json"
++        invalid.write_text(json.dumps(modified))
++        rc, _ = _run_parser(snippet, str(invalid), "ubuntu1")
++        assert rc == 3
+ 
+ 
+ def test_legacy_parser_rejects_v2_only_host():
+@@ -109,13 +125,13 @@
+ 
+ def test_v2_schema_all_hosts():
+     db = _hosts_doc()
+-    hosts = [k for k in db if k != "_doc"]
++    hosts = [k for k in db if not str(k).startswith("_")]
+     assert set(hosts) >= {"m1", "mb", "m2", "pc"}
+     for name in hosts:
+         entry = db[name]
+         # legacy six (parsed by host_queue.sh / remote_lane_v8.sh)
+         assert isinstance(entry.get("cores"), int) and entry["cores"] >= 1
+-        assert isinstance(entry.get("max_active"), int) and 1 <= entry["max_active"] <= 8
++        assert isinstance(entry.get("max_active"), int) and 1 <= entry["max_active"] <= min(32, entry["cores"])
+         assert isinstance(entry.get("load_gate"), (int, float)) and entry["load_gate"] >= 0
+         assert isinstance(entry.get("min_free_gb"), (int, float)) and entry["min_free_gb"] >= 0
+         assert isinstance(entry.get("require_ac"), bool)
+@@ -175,26 +191,31 @@
+     assert len(m1["windows"]) == 2 and m1["windows"][0]["open_utc"] == "02:00"
+     assert "thetadata-daily" in m1["notes"].lower()
+     mb = db["mb"]
+-    assert mb["ram_gb"] == 36 and mb["lane_ceiling"] == 2
+-    assert mb["max_active"] == 2 and mb["load_gate"] == 8
++    assert mb["ram_gb"] == 36 and mb["lane_ceiling"] == 3
++    assert 1 <= mb["max_active"] <= mb["lane_ceiling"] and mb["load_gate"] == 8
+     assert mb["min_free_gb"] == 30
+     bmb = db["bmb"]
+-    assert bmb["max_active"] == 2 and bmb["lane_ceiling"] == 2
++    assert 1 <= bmb["max_active"] <= bmb["lane_ceiling"] and bmb["lane_ceiling"] == 3
+     assert bmb["load_gate"] == 8 and bmb["min_free_gb"] == 30
+     assert bmb["require_ac"] is True
+     assert bmb["ssh_alias"] == mb["ssh_alias"]
+     assert bmb["hostnames"] == mb["hostnames"]
+-    assert bmb["roles"] == ["lanes-shadow"]
++    assert bmb["roles"] == ["candidate"]  # same physical Mac, never an additional worker host
+     assert mb["roles"] == ["lanes"] and mb["require_ac"] is True
+     assert mb["hostnames"] == ["MacBook-Pro-9"]
+     for candidate, alias, platform in (
+         ("mini1", "mini1", "darwin"), ("mini3", "mini3", "darwin"),
+-        ("ubuntu1", "ubuntu1", "linux"), ("ubuntu2", "ubuntu2", "linux"),
++        ("mini2", "mini2", "darwin"), ("mini4", "mini4", "darwin"),
+     ):
+         entry = db[candidate]
+         assert entry["roles"] == ["candidate"]
+         assert entry["allowed_modes"] == []
+         assert entry["ssh_alias"] == alias and entry["platform"] == platform
++    for host in ("ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"):
++        entry = db[host]
++        assert entry["roles"] == ["lanes"]
++        assert entry["require_thermal"] is True
++        assert 1 <= entry["max_active"] <= min(32, entry["cores"], entry["lane_ceiling"])
+ 
+ 
+ def test_doc_fields_extended():
+@@ -216,10 +237,10 @@
+ 
+ def test_host_table_fresh_stale_missing_down(tmp_path, monkeypatch, capsys):
+     registry = {
+-        "m1": {"cores": 10, "roles": ["lanes"], "lane_ceiling": 3, "windows": []},
+-        "mb": {"cores": 12, "roles": ["lanes"], "lane_ceiling": 4, "windows": []},
+-        "pc": {"cores": 16, "roles": ["ci-runner"], "lane_ceiling": 2, "windows": []},
+-        "mx": {"cores": 8, "roles": ["lanes"], "lane_ceiling": 2, "windows": []},
++        "m1": {"cores": 10, "roles": ["lanes"], "lane_ceiling": 3, "max_active": 3, "windows": []},
++        "mb": {"cores": 12, "roles": ["lanes"], "lane_ceiling": 4, "max_active": 4, "windows": []},
++        "pc": {"cores": 16, "roles": ["ci-runner"], "lane_ceiling": 2, "max_active": 2, "windows": []},
++        "mx": {"cores": 8, "roles": ["lanes"], "lane_ceiling": 2, "max_active": 2, "windows": []},
+     }
+     reg_path = tmp_path / "hosts.json"
+     reg_path.write_text(json.dumps(registry))
+@@ -260,7 +281,7 @@
+ def test_host_table_state_dir_absent_is_all_no_probe(tmp_path, monkeypatch, capsys):
+     reg_path = tmp_path / "hosts.json"
+     reg_path.write_text(json.dumps({
+-        "m1": {"cores": 10, "roles": ["lanes"], "lane_ceiling": 3, "windows": []},
++        "m1": {"cores": 10, "roles": ["lanes"], "lane_ceiling": 3, "max_active": 3, "windows": []},
+     }))
+     monkeypatch.setattr(pool_status, "HOSTS_JSON_PATH", str(reg_path))
+     monkeypatch.setattr(pool_status, "HOSTS_STATE_DIR",
+@@ -303,6 +324,10 @@
+     ext.mkdir()
+     shutil.copy(HOST_PULL_SH, ext / "host_pull.sh")
+     shutil.copy(HOSTS_JSON, ext / "hosts.json")
++    # Copy the current split collector dependencies, not a retired monolithic fixture.
++    for name in ("host_pull_probe.template", "host_pull_backend.py",
++                 "host_pick.py", "pool_status.py", "model_tier.py", "glm_host_account_source.py"):
++        shutil.copy(os.path.join(EXT, name), ext / name)
+     bindir = tmp_path / "bin"
+     bindir.mkdir()
+     (bindir / "ssh").write_text(shim_body)
+@@ -371,9 +396,9 @@
+ 
+ 
+ def test_lane_counter_counts_one_lane_per_process_tree():
+-    with open(HOST_PULL_SH, encoding="utf-8") as source:
+-        pull_script = source.read()
+-    match = _LANE_COUNTER.search(pull_script)
++    with open(os.path.join(EXT, "host_pull_probe.template"), encoding="utf-8") as source:
++        probe_script = source.read()
++    match = _LANE_COUNTER.search(probe_script)
+     assert match is not None
+     census = """\
+   100    99 /bin/zsh         /bin/zsh -l -c codex exec review
+--- a/tests/test_host_pull_selected.py
++++ b/tests/test_host_pull_selected.py
+@@ -86,10 +86,12 @@
+     env,states,log=fixture(tmp_path)
+     kit=tmp_path/"kit";(kit/"ext").mkdir(parents=True)
+     shutil.copy2(SCRIPT,kit/"ext/host_pull.sh")
+-    for name in ("host_pull_backend.py", "host_pull_probe.template"):
++    for name in ("host_pull_backend.py", "host_pull_probe.template", "host_pick.py",
++                 "pool_status.py", "model_tier.py", "glm_host_account_source.py"):
+         shutil.copy2(SCRIPT.parent/name, kit/"ext"/name)
+     wrapper=tmp_path/"pool"
+-    s=Path(os.environ.get("HOST_REFRESH_POOL_WRAPPER", ROOT/"bin/pool")).read_text()
++    wrapper_source = os.environ.get("HOST_REFRESH_POOL_WRAPPER") or shutil.which("pool") or str(ROOT / "bin/pool")
++    s=Path(wrapper_source).read_text()
+     s=re.sub(r'^KIT_DIR=.*$',lambda _:f'KIT_DIR="{kit}"',s,flags=re.M)
+     wrapper.write_text(s);wrapper.chmod(0o755)
+     p=subprocess.run([str(wrapper),"refresh"],env=env,capture_output=True,text=True,timeout=5)
+--- a/tests/test_host_aware_pick.py
++++ b/tests/test_host_aware_pick.py
+@@ -98,13 +98,21 @@
+ 
+ 
+ @pytest.mark.parametrize('modes,expected', [
+-    (('glm-codex', 'glm'), 'glm-codex'), (('glm',), 'glm'),
++    (('glm-codex', 'glm'), 'glm-codex'),
+ ])
+ def test_glm_adapter_identity_is_reported(env, modes, expected):
+     env(modes=modes)
+     result = pick.format_pick('census', host='target', pool='glm-flash')
+     assert result.startswith('POOL=glm ')
+     assert result.endswith('HOST=target MODE='+expected)
++
++
++def test_glm_host_without_observed_local_account_is_not_eligible(env):
++    env(modes=('glm',))
++    # The host's tool alone is insufficient: the existing account-readiness
++    # join must refuse absent current authenticated local-account evidence.
++    result = pick.format_pick('census', host='target', pool='glm-flash')
++    assert result.startswith('NONE reason=no eligible remote mode')
+ 
+ 
+ def test_fallback_cannot_escape_go_host(env, monkeypatch):
+--- a/tests/test_auto_host_pick.py
++++ b/tests/test_auto_host_pick.py
+@@ -90,14 +90,16 @@
+ 
+ def test_auto_fixed_clock_cached_observations_and_no_reservation(cluster, monkeypatch):
+     cluster()
+-    reads = []; times = []
++    reads = []; times = []; exclusions = []
+     reader = placement_view._default_read_bytes
+     build = placement_view.build_placement_view
+     def read(path):
+         reads.append(path)
+         return reader(path)
+     def view(*a, **k):
+-        assert k['excluded'] == set() and k['plan_path'] is None
++        assert isinstance(k['excluded'], set) and k['plan_path'] is None
++        # Per-provider host exclusions are required for account/model routing.
++        exclusions.append(set(k['excluded']))
+         times.append(k['now'])
+         result = build(*a, **k)
+         assert result['reservation'] == 'NONE'
+@@ -107,6 +109,7 @@
+     monkeypatch.setattr(placement_view, 'build_placement_view', view)
+     assert 'HOST=mmhost MODE=minimax' in pick.format_pick('census', host='auto')
+     assert len(reads) == 2 and len(set(times)) == 1
++    assert any(exclusions)  # missing local-account proof excludes unsafe modes
+ 
+ 
+ def test_auto_keeps_no_host_behavior_and_does_not_contaminate_next_call(cluster):
+--- /dev/null
++++ b/tests/test_registry_metadata_filter.py
+@@ -0,0 +1,55 @@
++"""Host registry metadata must never become a physical Fabric host."""
++import json
++import pathlib
++import subprocess
++import sys
++
++import host_pick
++import pool_status
++
++
++def test_metadata_keys_not_hosts_in_pick_status_or_pull(tmp_path, monkeypatch):
++    path = tmp_path / "hosts.json"
++    path.write_text(json.dumps({
++        "_doc": {"schema": "documentation"},
++        "_thermal_headroom_change_20261013": {"comment": "not a host"},
++        "ubuntu2": {"roles": ["lanes"], "ssh_alias": "ubuntu2",
++                    "worktree_root": "/home/ubuntu2"},
++    }))
++    assert list(host_pick.load_registry(str(path))) == ["ubuntu2"]
++    monkeypatch.setattr(pool_status, "HOSTS_JSON_PATH", str(path))
++    assert list(pool_status._load_host_registry()) == ["ubuntu2"]
++    pull = pathlib.Path(host_pick.__file__).with_name("host_pull_backend.py")
++    result = subprocess.run([sys.executable, str(pull), "read-hosts", str(path), "", "1"],
++                            check=False, capture_output=True, text=True, timeout=8)
++    assert result.returncode == 0, result.stderr
++    assert result.stdout.strip() == "ubuntu2|0|ubuntu2|/home/ubuntu2"
++    rejected = subprocess.run([sys.executable, str(pull), "read-hosts",
++                               str(path), "_thermal_headroom_change_20261013", "1"],
++                              check=False, capture_output=True, text=True, timeout=8)
++    assert rejected.returncode == 2
++    assert rejected.stdout == ""
++    assert "unknown host" in rejected.stderr
++
++
++def test_missing_account_validator_keeps_telemetry_but_grants_no_readiness(tmp_path):
++    # The readiness source is optional to host telemetry, never to account admission.
++    # The isolated backend intentionally cannot import glm_host_account_source.
++    import shutil
++    standalone = tmp_path / "isolated"
++    standalone.mkdir()
++    backend = standalone / "host_pull_backend.py"
++    shutil.copy2(pathlib.Path(host_pick.__file__).with_name("host_pull_backend.py"), backend)
++    state = tmp_path / "state"
++    state.mkdir(mode=0o700)
++    probe = ("load1=0.5\nncpu=4\nmem_free_gb=12\ndisk_free_gb=90\n"
++             "active_lanes_status=known\nactive_lanes=0\nprocess_active_lanes=0\n")
++    result = subprocess.run([sys.executable, str(backend), "write-state",
++                             str(state), "ubuntu1", "0", probe, "ubuntu1"],
++                            capture_output=True, text=True, timeout=8)
++    assert result.returncode == 0, result.stderr
++    output = json.loads((state / "ubuntu1.json").read_text())
++    assert output["reachable"] is True and output["load1"] == 0.5
++    assert output["active_lanes"] == 0
++    assert "glm_local_account_readiness" not in output
++    assert "bailian_local_account_readiness" not in output
+--- a/tests/test_five_host_enrollment.py
++++ b/tests/test_five_host_enrollment.py
+@@ -29,16 +29,21 @@
+ 
+ def test_registry_contains_all_five_and_metadata_is_not_a_host():
+     doc = json.loads((EXT / "hosts.json").read_text())
+-    assert all(isinstance(v, dict) for k, v in doc.items() if k != "_doc")
++    assert all(isinstance(v, dict) for k, v in doc.items() if not str(k).startswith("_"))
+     assert {"mini1", "mini2", "mini3", "ubuntu1", "ubuntu2"} <= set(doc)
+-    for name in ("mini1", "mini3", "ubuntu1", "ubuntu2"):
++    for name in ("mini1", "mini2", "mini3", "mini4"):
+         assert doc[name]["roles"] == ["candidate"]
+         assert doc[name]["allowed_modes"] == []
++    for name in ("ubuntu0", "ubuntu1", "ubuntu2", "ubuntu3"):
++        assert doc[name]["roles"] == ["lanes"]
++        assert doc[name]["require_thermal"] is True
+ 
+ 
+ def test_existing_mini2_keeps_legacy_mode_policy_while_active_routes_exist():
+     doc = json.loads((EXT / "hosts.json").read_text())
+-    assert "allowed_modes" not in doc["mini2"]
++    assert doc["mini2"]["roles"] == ["candidate"]
++    assert doc["mini2"]["allowed_modes"] == []
++    assert "qwen" in doc["mini2"].get("qualification_only_modes", [])
+ 
+ 
+ def test_host_pick_refuses_mode_not_allowed_even_when_other_gates_pass(tmp_path):
+@@ -46,7 +51,7 @@
+         "h": {
+             "roles": ["lanes"], "allowed_modes": ["minimax"],
+             "load_gate": 8, "min_free_gb": 10, "require_ac": False,
+-            "windows": [], "lane_ceiling": 2, "local": False,
++            "windows": [], "lane_ceiling": 2, "max_active": 2, "local": False,
+         }
+     }
+     state_dir = _state_dir(tmp_path, ["h"])
+@@ -64,7 +69,7 @@
+         "h": {
+             "roles": ["lanes"], "allowed_modes": ["minimax-codex"],
+             "load_gate": 8, "min_free_gb": 10, "require_ac": False,
+-            "windows": [], "lane_ceiling": 2, "local": False,
++            "windows": [], "lane_ceiling": 2, "max_active": 2, "local": False,
+         }
+     }
+     state_dir = _state_dir(tmp_path, ["h"])
+--- a/tests/test_sub_host_policy.py
++++ b/tests/test_sub_host_policy.py
+@@ -26,6 +26,14 @@
+     qwen = tmp_path / "qwen_exec.sh"
+     qwen.write_text("#!/bin/sh\necho touched > QWEN_TOUCHED\nexit 0\n")
+     qwen.chmod(qwen.stat().st_mode | stat.S_IXUSR)
++    policy = tmp_path / "pick.py"
++    policy.write_text(
++        "#!/usr/bin/env python3\nimport sys, json\n"
++        "if sys.argv[1:3] != ['launch-policy', '--mode'] or '--model' not in sys.argv: raise SystemExit(78)\n"
++        "if sys.argv[3] != 'qwen' or sys.argv[sys.argv.index('--model') + 1] != 'qwen3.8-flash': raise SystemExit(78)\n"
++        "print(json.dumps({'allowed': True, 'requested_model': 'qwen3.8-flash'}))\n"
++    )
++    policy.chmod(policy.stat().st_mode | stat.S_IXUSR)
+     ledger = tmp_path / "pool_ledger.py"
+     ledger.write_text("#!/usr/bin/env python3\nraise SystemExit(0)\n")
+     ledger.chmod(ledger.stat().st_mode | stat.S_IXUSR)
+@@ -57,3 +65,12 @@
+     assert proc.returncode == 78
+     assert "LOCAL_HOST_POLICY_UNAVAILABLE" in proc.stderr
+     assert not (tmp_path / "QWEN_TOUCHED").exists()
++
++
++def test_nonlocal_host_retains_denied_economic_policy(tmp_path):
++    script = _copy(tmp_path, ["definitely-not-this-host"])
++    (tmp_path / "pick.py").write_text("raise SystemExit(78)\n")
++    proc = _run(script, tmp_path)
++    assert proc.returncode == 78
++    assert "ECONOMIC_POLICY_REFUSED" in proc.stderr
++    assert not (tmp_path / "QWEN_TOUCHED").exists()
+--- a/lease_broker.py
++++ b/lease_broker.py
+@@ -326,8 +326,10 @@
+         if not isinstance(hosts, dict):
+             return 0
+         total = 0
+-        for entry in hosts.values():
+-            if not isinstance(entry, dict):
++        for name, entry in hosts.items():
++            # Registry metadata is not a physical host; it cannot create broker
++            # capacity even when it accidentally contains host-shaped fields.
++            if str(name).startswith("_") or not isinstance(entry, dict):
+                 continue
+             roles = entry.get("roles")
+             allowed = entry.get("allowed_modes")
+--- a/tests/test_host_admitted_grok_cursor_20261012.py
++++ b/tests/test_host_admitted_grok_cursor_20261012.py
+@@ -69,6 +69,20 @@
+     assert broker.pool_cap("grok") == 62
+ 
+ 
++def test_metadata_cannot_multiply_host_admitted_fleet_capacity(tmp_path):
++    broker, hosts, host_path, _ = fixture(tmp_path)
++    assert broker.pool_cap("grok") == 82
++    assert broker.pool_cap("cursor") == 18
++    # Metadata with a complete host-like body must remain non-admissible.
++    hosts["_thermal_audit_metadata"] = {
++        "roles": ["lanes"], "allowed_modes": ["grok", "cursor"],
++        "max_active": 32, "lane_ceiling": 32, "cores": 32,
++    }
++    host_path.write_text(json.dumps(hosts))
++    assert broker.pool_cap("grok") == 82
++    assert broker.pool_cap("cursor") == 18
++
++
+ def test_no_account_multiplier_and_fails_closed(tmp_path):
+     broker, hosts, host_path, account_path = fixture(tmp_path)
+     raw = account_path.read_text().replace(

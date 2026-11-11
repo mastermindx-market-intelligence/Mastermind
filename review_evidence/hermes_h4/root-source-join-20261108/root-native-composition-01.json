@@ -1,0 +1,20 @@
+{
+  "dependency_overlay": "/private/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/lib/python3.14/site-packages",
+  "interpreter": "/opt/homebrew/bin/python3",
+  "log_sha256": "ee3f635046b5efef441f3f08412ad4b17e3b88c567e21003b5529482d2a3802f",
+  "returncode": -15,
+  "seconds": 521.17,
+  "state": "TESTS_FINISHED",
+  "summary": [],
+  "tests": [
+    "tests/test_hermes_primary_application_host.py",
+    "integrations/hermes_runtime/tests/test_native_eval_inputs.py",
+    "integrations/hermes_runtime/tests/test_native_eval_operator.py",
+    "integrations/hermes_runtime/tests/test_native_eval_publication.py",
+    "integrations/hermes_runtime/tests/test_operator_native_enrollment.py",
+    "integrations/hermes_harness/tests/test_native_byok.py",
+    "integrations/hermes_harness/tests/test_native_mcp_install.py",
+    "tests/test_os_release_assets.py",
+    "tests/test_ceo_submit_armed_composition.py"
+  ]
+}

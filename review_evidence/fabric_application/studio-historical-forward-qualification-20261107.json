@@ -1,0 +1,219 @@
+{
+  "actual_eight_account_preview": {
+    "all_preview_passed": true,
+    "all_runtime_pairs_unchanged": true,
+    "current_unchanged": true,
+    "go_applied": false,
+    "results": [
+      {
+        "account": "admin-business",
+        "rc": 0,
+        "result": {
+          "account": "admin-business",
+          "configSha256": "46b24d094d2a1bf0bd5bf054ac4853af5b395ddb0f78d739e04682dc59402e94",
+          "effect": "NOT_APPLIED",
+          "goPlanSha256": "2817cc5d5f5b5f163a32aaf1ba9369f687a2383f84806f5053c90b4e4158acc3",
+          "manifestSha256": "cc25aca9a79fd7d42fbb89cab55fb565012b229a080bbcc6f3f8e1747ea85d80",
+          "originalPlanSha256": "25870fe238760b16ccc41b005c3a4289b8327dbe5a4d8b10015c00faaac15bac",
+          "phase": "PREVIEW",
+          "planSha256": "43c851ed918845ec695a744948fabca95e988cf90cae0790962cab5df9386d38",
+          "poolBridgeSha256": "e99c71661c116ea2e53511d28ef9fe78c8366c7136831482ad63fad3688ef9bf",
+          "poolChanged": false,
+          "receiptCommitted": false,
+          "schema": "mastermind.studio_native_pool_pin_forward.v1",
+          "serviceStarted": false
+        },
+        "stderr": "",
+        "stdout_sha256": "67d3797ebbea2c325c2d616c273e8f29be6e29c2f3410b6ad2170a890df782f0"
+      },
+      {
+        "account": "chatgpt1",
+        "rc": 0,
+        "result": {
+          "account": "chatgpt1",
+          "configSha256": "978a72ef771b4d1321d7608b7d96ea611f9abdd9796cf67f58d73ee0daad88f6",
+          "effect": "NOT_APPLIED",
+          "goPlanSha256": "2817cc5d5f5b5f163a32aaf1ba9369f687a2383f84806f5053c90b4e4158acc3",
+          "manifestSha256": "26e3154053518e3b731fe2a3c2d7dbdc5f84f202e52775a969febb7a38035d11",
+          "originalPlanSha256": "2423e052716dfb974b2dd0214e29d59cc446a8d84a1bd9cfab26d0725117d299",
+          "phase": "PREVIEW",
+          "planSha256": "97c7ab90590fb05bf60340849a6177965404f6285492bbc9cad160891118e95e",
+          "poolBridgeSha256": "e99c71661c116ea2e53511d28ef9fe78c8366c7136831482ad63fad3688ef9bf",
+          "poolChanged": false,
+          "receiptCommitted": false,
+          "schema": "mastermind.studio_native_pool_pin_forward.v1",
+          "serviceStarted": false
+        },
+        "stderr": "",
+        "stdout_sha256": "4b791adc718a70310d74414ce9e584c019752b0aded0c491c3b50f9c779ba838"
+      },
+      {
+        "account": "chatgpt2-business",
+        "rc": 0,
+        "result": {
+          "account": "chatgpt2-business",
+          "configSha256": "e0b75acce32b24adcb514a7b663c0a732d3d9041efc57d540196990a3e8b041c",
+          "effect": "NOT_APPLIED",
+          "goPlanSha256": "2817cc5d5f5b5f163a32aaf1ba9369f687a2383f84806f5053c90b4e4158acc3",
+          "manifestSha256": "d60b4c0ad2e043be5bde31970d76b562343344aa233ab45664044cafe266bce9",
+          "originalPlanSha256": "6b50eb755bc495cd4f3105c38577102dd05bc6d5cb89fff5fd130369e5e1ce87",
+          "phase": "PREVIEW",
+          "planSha256": "76d70262d84bf67adef5c06ce6dc5a2c9f807e4d2d78ccb00d2a6bdde595f0d6",
+          "poolBridgeSha256": "e99c71661c116ea2e53511d28ef9fe78c8366c7136831482ad63fad3688ef9bf",
+          "poolChanged": false,
+          "receiptCommitted": false,
+          "schema": "mastermind.studio_native_pool_pin_forward.v1",
+          "serviceStarted": false
+        },
+        "stderr": "",
+        "stdout_sha256": "5e7f4a8489b90d7945201c36cc8fb5df3edaa1ac51c4e8576aa80bd545cfa447"
+      },
+      {
+        "account": "chatgpt2-personal",
+        "rc": 0,
+        "result": {
+          "account": "chatgpt2-personal",
+          "configSha256": "69f17195f75db9a6a7e3d54b82b3cd1ec4836f934bab435e822434f9fbd40257",
+          "effect": "NOT_APPLIED",
+          "goPlanSha256": "2817cc5d5f5b5f163a32aaf1ba9369f687a2383f84806f5053c90b4e4158acc3",
+          "manifestSha256": "9b3af3900d9a262f06cc3702d05ef12fa65d50fd9d41b226f8531cf221c3b060",
+          "originalPlanSha256": "ea14ae1e7260e7e63b5a271beec3dda7e51c316074c78f002fb757162faca8bd",
+          "phase": "PREVIEW",
+          "planSha256": "e3e72bf3f502e88d21d1764c579a5215c45ee2fdffc7a110b38583b440657943",
+          "poolBridgeSha256": "e99c71661c116ea2e53511d28ef9fe78c8366c7136831482ad63fad3688ef9bf",
+          "poolChanged": false,
+          "receiptCommitted": false,
+          "schema": "mastermind.studio_native_pool_pin_forward.v1",
+          "serviceStarted": false
+        },
+        "stderr": "",
+        "stdout_sha256": "34f6f6af7a7f9a3b1d2ffbee26d654e045a7188725f8531607b3fffd22065c35"
+      },
+      {
+        "account": "chatgpt3",
+        "rc": 0,
+        "result": {
+          "account": "chatgpt3",
+          "configSha256": "243f715d3bfccd2914868e282999d84ec01e281e6ceda92c4b71815793be9845",
+          "effect": "NOT_APPLIED",
+          "goPlanSha256": "2817cc5d5f5b5f163a32aaf1ba9369f687a2383f84806f5053c90b4e4158acc3",
+          "manifestSha256": "c7f8cb72c764d5bc05cd336f7eaa9374a4bbc875138766b5298008838c6c8e44",
+          "originalPlanSha256": "80f77c187cbdf559287d39d7cdcddf56f6a99a541cec5fefdebf751c60589d25",
+          "phase": "PREVIEW",
+          "planSha256": "d1c59602ea6d6c3e2eb31473d2d56bb36d022cde1d53d21bf1ca0abdd7aa42a1",
+          "poolBridgeSha256": "e99c71661c116ea2e53511d28ef9fe78c8366c7136831482ad63fad3688ef9bf",
+          "poolChanged": false,
+          "receiptCommitted": false,
+          "schema": "mastermind.studio_native_pool_pin_forward.v1",
+          "serviceStarted": false
+        },
+        "stderr": "",
+        "stdout_sha256": "07509720924b88e6ebd1579cd396418af741796c99ceba424c2f5cbed19c3114"
+      },
+      {
+        "account": "chatgpt3-w570f6f34",
+        "rc": 0,
+        "result": {
+          "account": "chatgpt3-w570f6f34",
+          "configSha256": "624b85be238fc5553ed34ffef90fedd21431a09215e6eda3a4550c1361c19f57",
+          "effect": "NOT_APPLIED",
+          "goPlanSha256": "2817cc5d5f5b5f163a32aaf1ba9369f687a2383f84806f5053c90b4e4158acc3",
+          "manifestSha256": "f60c83e67db924124feb4143b9687ff9f2361734a326a1acf41c2ee267ad64c7",
+          "originalPlanSha256": "1239d26202ea93279e356578910fd6ca326006cf39db41b82aefd3fb16213051",
+          "phase": "PREVIEW",
+          "planSha256": "d21a1b16fe823ff293de75fce1e8a6f1caeef6cf8681a95ad136f1409a973d46",
+          "poolBridgeSha256": "e99c71661c116ea2e53511d28ef9fe78c8366c7136831482ad63fad3688ef9bf",
+          "poolChanged": false,
+          "receiptCommitted": false,
+          "schema": "mastermind.studio_native_pool_pin_forward.v1",
+          "serviceStarted": false
+        },
+        "stderr": "",
+        "stdout_sha256": "b1cf75b0a23a5f8796b539c1d6f65c81600511f323ef8d0ff1819e3efd2259b6"
+      },
+      {
+        "account": "chatgpt3-wa2a9e6f9",
+        "rc": 0,
+        "result": {
+          "account": "chatgpt3-wa2a9e6f9",
+          "configSha256": "3b1aaba31b96a1f980e7de67ae82a62cc90295558460302f08b4616df2ecb512",
+          "effect": "NOT_APPLIED",
+          "goPlanSha256": "2817cc5d5f5b5f163a32aaf1ba9369f687a2383f84806f5053c90b4e4158acc3",
+          "manifestSha256": "b971b2e86836aef67139d3559713b1d063537d15808169a0e823b723eef8a4e0",
+          "originalPlanSha256": "bf798b50b2c25df035c6ddd7d4e9a09db8246423a2176c1983fdde56f8c2da45",
+          "phase": "PREVIEW",
+          "planSha256": "1b5dbd3a5868cccfbc9c142506155900a4029d8ec787f1f06fa4188ce65d6890",
+          "poolBridgeSha256": "e99c71661c116ea2e53511d28ef9fe78c8366c7136831482ad63fad3688ef9bf",
+          "poolChanged": false,
+          "receiptCommitted": false,
+          "schema": "mastermind.studio_native_pool_pin_forward.v1",
+          "serviceStarted": false
+        },
+        "stderr": "",
+        "stdout_sha256": "0d55cdd11677f4c85dbfcd6e3ffe8e00d609a08b69af5c675d7e25b300516c18"
+      },
+      {
+        "account": "chatgpt4",
+        "rc": 0,
+        "result": {
+          "account": "chatgpt4",
+          "configSha256": "0126c53f0ccbb4b986720ca8989480985c9a9fc1d7f17b25b77d1698c88d338f",
+          "effect": "NOT_APPLIED",
+          "goPlanSha256": "2817cc5d5f5b5f163a32aaf1ba9369f687a2383f84806f5053c90b4e4158acc3",
+          "manifestSha256": "ef2ea52192bfd25f1f4f05c89c05a8ba2c210c96d4dd7aa7519553c3724aa856",
+          "originalPlanSha256": "4732de6c370ca3385d17749e411f634d149b7701971219baea65707d6c069818",
+          "phase": "PREVIEW",
+          "planSha256": "fe5bb43c08eb7fea88cbe8b874978e63420d80553567476f14fad7087d51ec4d",
+          "poolBridgeSha256": "e99c71661c116ea2e53511d28ef9fe78c8366c7136831482ad63fad3688ef9bf",
+          "poolChanged": false,
+          "receiptCommitted": false,
+          "schema": "mastermind.studio_native_pool_pin_forward.v1",
+          "serviceStarted": false
+        },
+        "stderr": "",
+        "stdout_sha256": "833fb75896e88ffb164dcee2ba71b93a35e7182cb212333c13eea48d1961d387"
+      }
+    ],
+    "schema": "mastermind.studio_eight_account_preview.v2",
+    "source": {
+      "base_preserved": true,
+      "base_source": "84ef19e38c2dcb5d4ba3017812e9c13cd1f9ae2c",
+      "patch_sha256": "bf95fe5edfcd1b5a24b705572facdee52cfcb602841b2adeebe5749228eef5ae",
+      "regular_files_verified": 8604,
+      "schema": "mastermind.studio_historical_source_custody.v2",
+      "source": "/Users/chriswong/mmx-studio-historical-preview-20261107-root-v2/source",
+      "two_file_overlay": {
+        "integrations/studio_direct_mcp/private_service_pin.py": "25847be4a127dbeab91acc07bfc13deeb830b3e101d5d3fb32092f0aac302106",
+        "integrations/studio_direct_mcp/private_service_status_successor.py": "75546132b9187d07bc88d0394f907aacd668affc2ba517668bfb4765707bc389"
+      },
+      "uses_incumbent_verified_loaders": true
+    }
+  },
+  "actual_preview_receipt_sha256": "30c57308e264ad873787b15a238fd07406e0118e53f64580c9db1d70a0c6ea65",
+  "behavior": "Authenticate original -> enrollment/Paper -> status retained history using frozen pair and incumbent verified helper loaders; forward owner retains current phase/CAS/durability",
+  "files": {
+    "integrations/studio_direct_mcp/private_service_pin.py": "25847be4a127dbeab91acc07bfc13deeb830b3e101d5d3fb32092f0aac302106",
+    "integrations/studio_direct_mcp/private_service_status_successor.py": "75546132b9187d07bc88d0394f907aacd668affc2ba517668bfb4765707bc389",
+    "integrations/studio_direct_mcp/private_service_status_successor_test.py": "12c24f7c0c70550482c9af7101a5936ed8f55f0a377a813acd8cfaecd7b37e35"
+  },
+  "focused_tests": {
+    "corrected_io_race_fixture": {
+      "failed": 0,
+      "log_sha256": "43e8a207772d15eaf1c6d862548540f0c5c8786cc7be8b5e7667080534034ead",
+      "passed": 12
+    },
+    "distinct_tests_qualified": 139,
+    "loader_source_run": {
+      "failed": 1,
+      "failure": "Race injection patched a separately loaded module instead of the actual file boundary",
+      "log_sha256": "26571f5b1b493609c85313dc92168e89f5538f6b33a11716a188dec7d12414e7",
+      "passed": 138,
+      "subtests_passed": 120
+    },
+    "subtests_qualified": 120
+  },
+  "remaining": "Refresh retained Go plan after final native source composition/selection; apply only through original owner with exact current plan",
+  "schema": "mastermind.studio_historical_forward_qualification.v1",
+  "source_parent": "f4bd27d91468176ec2fbb0eb83946824f7c35185",
+  "source_selection_or_services_changed": false
+}
