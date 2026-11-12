@@ -376,12 +376,14 @@ class ModuleTiming:
         entry["cases_started"] += 1
         if module == self.module:
             return
-        if self.module is not None:
+        if self.module is not None and not self._controller:
             previous = self._modules[self.module]
             # Serial: the predecessor is complete at this boundary and its
-            # summary fires exactly as before. Under interleaved workers an
-            # in-flight predecessor completes later (at a later boundary or
-            # session finish) instead of emitting a partial summary here.
+            # summary fires exactly as before. On a pytest-xdist controller a
+            # module transition proves nothing: cases_finished can equal
+            # cases_started only because later cases of that module have not
+            # forwarded logstart yet, so every module is summarized once, at
+            # session finish, when its counts are final.
             if previous["cases_finished"] == previous["cases_started"]:
                 self._summarize_module(self.module)
         self.module = module
