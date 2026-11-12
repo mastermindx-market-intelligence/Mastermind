@@ -1976,3 +1976,44 @@ DeepSeek worker with the same eight points.
 1. Memory link repair round: the two items above, the install list rewritten and rehearsed on a faithful copy, the deputy's check, the principal's read, then the install and the Hermes timers one at a time.
 2. Grok Bot link: the rehearsed install list on the merged head, the install, then one sitting with the Chairman.
 3. Browser bridge fix and the computer-use round, as they return.
+
+## 49. Amendment, 2026-11-12 14:30 UTC: the Grok Bot link does not yet carry a job by itself; computer use gets one last round
+
+**What the principal's read found.** The Grok Bot link as merged stores and guards asks correctly, but nothing in it moves a job.
+
+- A delegated job is stored as one board issue assigned to the bridge's own agent. No shipped code hands it to the teammate, and none takes the teammate's answer back.
+- A question from a session to a bot is stored, but the shipped bridge never tells the bot that a question is waiting.
+- Both development proofs passed because the test driver did those steps itself.
+- The planned item for this wiring was never built. Its name was reused for the delivery repair rounds, so the gap dropped out of sight.
+
+**Rules added.**
+
+- A proof in which the test harness performs a step the product must perform does not prove the product. Each proof names every step and who did it.
+- An install list does not go to a Chairman sitting while its main journey contains a harness step.
+- A lane item's name is never reused for different work. An unbuilt item stays listed under its own name until it is built or the principal cuts it.
+
+**Rulings.**
+
+- Reserved port. The link may reach the real board only through a narrow opt-in:
+  - port 3100 only, never 3179;
+  - only from the one spec file in the link's own state folder, owned by this user, mode 0600, not a symlink;
+  - any other case is a typed refusal;
+  - the agent-creating call keeps refusing the real board. The principal creates the bridge agent.
+  - It is a critical surface: a distinct reviewer, then the principal reads the diff.
+- New lane GBL-RETURN builds the missing wiring:
+  - a delegated job reaches the teammate as board work that the installed carrier already wakes on. The teammate is chosen by the server's table, never by the caller;
+  - the answer is taken from the bridge's own read of the board, never from text handed to it by a wake;
+  - a new question sends one notice to the bot, under the same limits as the answer notice;
+  - the message sender names its `t3` program and server port explicitly. Today it runs whichever `t3` is first on the path, with no port;
+  - both proofs are re-run with no harness step except the first call and the reads.
+- Install order. After the port fix, the principal may place the local parts that do nothing by themselves. The tunnel and the Chairman sitting wait for GBL-RETURN.
+- Computer use. The second review found two serious defects and five medium ones. One more repair round is approved, and it is the last:
+  - the layer restrains cooperating sessions and protects against accident. It is not a sandbox against a session that has a shell under the same user, and no separate user or service is built for it;
+  - nothing a session can set by environment or file loosens a rule, and that holds in code, not behind a test flag;
+  - a new serious defect after this round means a proposal to cut scope, not a fourth round.
+
+**Next, in order.**
+
+1. Memory link repair round, then its install and the Hermes timers one at a time.
+2. Grok Bot link: port fix, then GBL-RETURN, then the install and one sitting with the Chairman.
+3. Browser bridge fix and the last computer-use round, as they return.
