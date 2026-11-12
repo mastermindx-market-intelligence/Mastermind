@@ -120,6 +120,33 @@ class InstallChromeGuard(unittest.TestCase):
             self.assertTrue((self.extension_destination() / "instance_config.js").is_file())
             self.assertEqual(len(list((self.chrome / "NativeMessagingHosts").glob("*.json"))), 1)
 
+    # --- BR-MICRO2 item 2 for the native-messaging installer: a registration
+    # --- read error on a named profile refuses the install; never a skip.
+
+    def test_unreadable_registration_refuses_naming_the_profile(self):
+        prefs = self.chrome / "Default" / "Secure Preferences"
+        prefs.write_bytes(b"{corrupt")
+        prefs.chmod(0o600)
+        with patch.object(Path, "home", return_value=self.home):
+            with self.assertRaises(RuntimeError) as caught:
+                self.run_install()
+            message = str(caught.exception)
+            self.assertIn("Default", message)
+            self.assertIn("PROFILE_REGISTRATION_UNAVAILABLE", message)
+            self.assertFalse((self.release / "chrome").exists())
+            self.assertFalse((self.chrome / "NativeMessagingHosts").exists())
+            self.assertFalse((self.base / "deployments.json").exists())
+
+    def test_registration_exception_refuses_naming_the_profile(self):
+        with patch.object(Path, "home", return_value=self.home):
+            with patch.object(routes, "registration",
+                              side_effect=OSError("fixture: prefs read failed")):
+                with self.assertRaises(RuntimeError) as caught:
+                    self.run_install()
+                self.assertIn("Default", str(caught.exception))
+                self.assertFalse((self.release / "chrome").exists())
+                self.assertFalse((self.chrome / "NativeMessagingHosts").exists())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

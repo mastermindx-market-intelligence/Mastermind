@@ -184,6 +184,28 @@ class RuntimePinGuard(unittest.TestCase):
             runtime_pin.migrate(self.mmx, OLD, NEW, path)
         self.assertIn("does not name the new commit", str(caught.exception))
 
+    def test_migrate_checks_both_targets_before_its_first_write(self):
+        # BR-MICRO2 item 1 (plan 48): an apply that can refuse does so before
+        # its first write. NEW is already delivered (e.g. a prior partial
+        # round); the pre-fix code created runtimes/<OLD> before it hit the
+        # NEW refusal, leaving the tree half-migrated. The refusal must fire
+        # with the WHOLE mmx tree unchanged, and a re-run must behave
+        # identically (refuse again, still nothing written).
+        runtime_pin.deliver(self.mmx, NEW, dict(self.flat_pin, release_commit=NEW),
+                            SERVER_BYTES)
+        before = folder_hash(self.mmx)
+        with self.assertRaises(RuntimeError) as caught:
+            self.migrate()
+        self.assertIn("already delivered", str(caught.exception))
+        self.assertEqual(folder_hash(self.mmx), before)
+        self.assertFalse((self.mmx / "runtimes" / OLD).exists())
+        # the re-run behaves correctly: same refusal, tree still untouched
+        with self.assertRaises(RuntimeError) as caught:
+            self.migrate()
+        self.assertIn("already delivered", str(caught.exception))
+        self.assertEqual(folder_hash(self.mmx), before)
+        self.assertFalse((self.mmx / "runtimes" / OLD).exists())
+
     def test_cli_has_no_default_root_and_requires_mmx_root(self):
         # The class rule at the CLI: no default target exists; omitting the
         # root is a usage error that writes nothing.

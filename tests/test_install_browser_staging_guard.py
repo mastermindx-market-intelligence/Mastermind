@@ -276,6 +276,55 @@ class StagingGuard(unittest.TestCase):
             self.assertIn("--staging-root", str(caught.exception))
             self.assertFalse((self.releases[1][0] / "chrome").exists())
 
+    # --- BR-MICRO2 item 2: a registration read error refuses, naming the
+    # --- profile; it is never a silent skip. "No extension loaded" stays a
+    # --- normal answer ONLY when routes.registration returns it as a state.
+
+    def test_unreadable_registration_refuses_naming_the_profile(self):
+        # Corrupt Secure Preferences: registration cannot read the
+        # loaded-folder facts (PROFILE_REGISTRATION_UNAVAILABLE), so the
+        # guard may not skip the profile — Chrome may have loaded anything.
+        prefs = self.chrome / "Default" / "Secure Preferences"
+        prefs.write_bytes(b"{corrupt")
+        prefs.chmod(0o600)
+        fresh = self.home / "Downloads" / "Mastermind-Browser-0.6.0-m2a"
+        with patch.object(Path, "home", return_value=self.home):
+            before = folder_hash(self.root)
+            with self.assertRaises(RuntimeError) as caught:
+                self.install(1, staging_root=fresh, prior_source="1" * 40)
+            message = str(caught.exception)
+            self.assertIn("Default", message)
+            self.assertIn("mastermindx", message)
+            self.assertIn("PROFILE_REGISTRATION_UNAVAILABLE", message)
+            self.assertEqual(folder_hash(self.root), before)
+            self.assertFalse((self.releases[1][0] / "chrome").exists())
+
+    def test_registration_exception_refuses_naming_the_profile(self):
+        fresh = self.home / "Downloads" / "Mastermind-Browser-0.6.0-m2b"
+        with patch.object(Path, "home", return_value=self.home):
+            with patch.object(routes, "registration",
+                              side_effect=OSError("fixture: prefs read failed")):
+                before = folder_hash(self.root)
+                with self.assertRaises(RuntimeError) as caught:
+                    self.install(1, staging_root=fresh, prior_source="1" * 40)
+                message = str(caught.exception)
+                self.assertIn("Default", message)
+                self.assertIn("mastermindx", message)
+                self.assertEqual(folder_hash(self.root), before)
+                self.assertFalse((self.releases[1][0] / "chrome").exists())
+
+    def test_no_extension_loaded_returned_as_a_state_still_installs(self):
+        # Control: no preferences at all is registration RETURNING
+        # CHROME_LOAD_REQUIRED — a normal "nothing loaded" answer, not a
+        # read error; the install proceeds.
+        (self.chrome / "Default" / "Secure Preferences").unlink()
+        fresh = self.home / "Downloads" / "Mastermind-Browser-0.6.0-m2c"
+        with patch.object(Path, "home", return_value=self.home):
+            inventory, receipts = self.install(1, staging_root=fresh, prior_source="1" * 40)
+            # nothing was loaded, so the row asks for the first load, not a reload
+            self.assertEqual(receipts[0]["activation"], "CHROME_LOAD_REQUIRED")
+            self.assertTrue(inventory.is_file())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

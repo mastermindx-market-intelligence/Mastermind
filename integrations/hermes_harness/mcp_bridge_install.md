@@ -320,12 +320,38 @@ Check after every step; every step has a rollback.
    every `runtimes/*/runtime.json` is mode `0600` (server.js refuses
    group/world-writable pins with `NATIVE_SOURCE_UNSAFE`).
 
-   Then edit `mcpServers.mmx-browser.args` in each of the four provider homes
-   (`~/.t3/providers/{experiential-claude,fabric-experiential,fabric-unified-router,fabric-anthropic-oauth}/.claude.json`,
-   backup each first) from `…/mmx-browser/server.js` to
-   `…/mmx-browser/current/server.js`. Check: each `.claude.json` parses and
-   its last arg is `current/server.js`; a fresh session's read-only
-   `browsers` (no probe) still shows `bridge_release_commit` `5aa309692…`.
+   Then switch the registered server path — do NOT hand-edit these files.
+   Running sessions rewrite `.claude.json`, so a hand edit can lose a race
+   either way; no source writer ever registered mmx-browser there. Use the
+   guarded command: it checks all four provider homes
+   (`experiential-claude`, `fabric-experiential`, `fabric-unified-router`,
+   `fabric-anthropic-oauth`) BEFORE the first write — each
+   `mcpServers.mmx-browser.args` must end exactly at the old flat
+   `$MMX/server.js` — and writes through the owned CAS writer, so a file
+   changed since its check refuses alone (`WRITE_RACE`, keeping the session's
+   bytes) and every write leaves a `.claude.json.previous.<16hex>` backup.
+   After a short wait it reads every switched file back, so a session that
+   rewrote a file is reported (`READBACK_RACE_*`), not silently believed. It
+   prints home names and status codes only — never contents. The written arg
+   is the literal `$MMX/current/server.js` symlink path, so later migrations
+   only re-point `current` and never touch these files again. The fifth home
+   (`fabric-unified-router-worker`) carries no entry and is never written; an
+   entry there refuses the whole run.
+
+   ```bash
+   python3 -m integrations.hermes_harness.mmx_provider_registration \
+     --providers-root ~/.t3/providers --mmx-root $MMX
+   ```
+
+   Check: stdout JSON `state` = `PROVIDER_ARGS_SWITCHED`, one row per home
+   (`SWITCHED`, or `ALREADY_SWITCHED` on a re-run — already-switched homes
+   are no-ops, so one re-run after a race is safe). Each `.claude.json`
+   parses and its last arg is `current/server.js`; a fresh session's
+   read-only `browsers` (no probe) still shows `bridge_release_commit`
+   `5aa309692…`. If `state` = `PROVIDER_ARGS_SWITCHED_WITH_RACES`, or the
+   command refuses (it names the home and a code), re-run ONCE when the
+   racing session is idle — do not loop; a refusal means the files are not
+   in the expected state and must be diagnosed, not retried blindly.
    Then the atomic repoint:
 
    ```bash
@@ -339,11 +365,12 @@ Check after every step; every step has a rollback.
    repoint (`logs/rehearsal_switch.log`).
    Rollback: the same `switch` command with `--commit $OLD` — one atomic
    repoint, no rewrite. To undo the whole migration instead: restore the
-   four `.claude.json` backups so spawns use the flat `$MMX/server.js`
-   again, and LEAVE `runtimes/` and `current` in place — deleting them
-   would break any server spawned via `current/server.js`, which
-   re-verifies `runtime.json` from its own folder on every dispatch.
-   Running sessions are untouched either way.
+   four `.claude.json.previous.<16hex>` backups the guarded switch left (one
+   per provider home) so spawns use the flat `$MMX/server.js` again, and
+   LEAVE `runtimes/` and `current` in place — deleting them would break any
+   server spawned via `current/server.js`, which re-verifies `runtime.json`
+   from its own folder on every dispatch. Running sessions are untouched
+   either way.
 
 5. **Verify in a fresh session** (read-only):
    - `browsers` with `probe: true`: the five local profiles `CONNECTED`,
@@ -371,7 +398,7 @@ every undo needs always exist.
 | 1 | Nothing runtime-side: only the curated `BUILD-*.json` in the checkout; the OLD release, OLD pin and all loaded folders are untouched. | Delete the curated `BUILD-*.json`; `git checkout` the work tree back. No installed state exists yet. | Until step 2 consumes the manifest; after step 2, undo step 2 first. |
 | 2 | New release root under `BASE`; every profile's `NativeMessagingHosts` manifest points into `releases/$NEW`, so any host respawn runs new-code (it admits the OLD digest); loaded extension folders are byte-identical; running sessions and old hosts are unchanged. | Restore every `.previous.<16hex>` backup the installer left under `BASE` and under `~/Library/Application Support/Google/Chrome/NativeMessagingHosts` (including `deployments-v2.json`'s own `.previous`), then delete the new-only files: `releases/$NEW/`, `installation-$NEW.json`, `packages/$NEW/`, `STAGING/`. | Only while no profile has been reloaded at step 3. After any step-3 reload, undo step 3 first (reverse reload): restoring the OLD host manifests under a profile running the NEW extension makes the OLD single-digest host refuse its handshake. |
 | 3 | Per reloaded profile: NEW extension bytes plus a new-code host; the profile answers old-pin and new-pin sessions alike (compat admission). Not-yet-reloaded profiles are fully old. Every session keeps working throughout. | The reverse reload: in `chrome://extensions` remove the extension and Load unpacked from its untouched `~/Downloads/Mastermind-Browser-0.5.0/Chrome-<alias>` folder — those bytes were never changed by any step, so they are the working state. | Valid at any later point (the NEW host admits the OLD digest, and after a step-4 rollback the OLD host matches the old extension again); in a full rollback do it after undoing step 4 so the fleet stays uniform. |
-| 4 | New spawns resolve `current` → `runtimes/$NEW` (new commit, `read` present); providers' `.claude.json` args point at `current/server.js`; every running session keeps its already-resolved OLD files and answers unchanged. | The same atomic repoint back: `runtime_pin switch --mmx-root $MMX --commit $OLD`. To undo the whole migration instead, restore the four `.claude.json` backups and LEAVE `runtimes/` and `current` in place — deleting them breaks servers spawned via `current/server.js`, which re-verify their folder's `runtime.json` on every dispatch. | Until step 5 verifies and the fleet has run the release; once the NEXT release replaces the compat-admission window (it admits only one previous digest), `$OLD` is no longer a rollback target and the reverse reload of step 3 must target that release's OLD folders instead. |
+| 4 | New spawns resolve `current` → `runtimes/$NEW` (new commit, `read` present); providers' `.claude.json` args point at `current/server.js`; every running session keeps its already-resolved OLD files and answers unchanged. | The same atomic repoint back: `runtime_pin switch --mmx-root $MMX --commit $OLD`. To undo the whole migration instead, restore the four `.claude.json.previous.<16hex>` backups the guarded switch left (one per provider home) and LEAVE `runtimes/` and `current` in place — deleting them breaks servers spawned via `current/server.js`, which re-verify their folder's `runtime.json` on every dispatch. | Until step 5 verifies and the fleet has run the release; once the NEXT release replaces the compat-admission window (it admits only one previous digest), `$OLD` is no longer a rollback target and the reverse reload of step 3 must target that release's OLD folders instead. |
 | 5 | Everything: all five profiles reloaded, all new spawns on the NEW pin, old sessions draining on their resolved OLD files. | Nothing to undo — step 5 is read-only verification. On a failed check, roll back 4 → 3 → 2 in reverse order as above. | End of the install sitting; afterwards the window table above is history and the next release owns rollback. |
 
 ## The window table (every cell works; `read` appears only where both ends describe it)
