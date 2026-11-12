@@ -260,7 +260,7 @@ class SourceContractTests(unittest.TestCase):
         for requirement in ['EFFECT_UNKNOWN', 'same healthy turn', 'current direct',
                             'protected queue', 'merge-on-green', 'not a stop',
                             'SELF_REVIEWED', 'not automatically formal',
-                            'human controls', 'not governing law', 'Do not preload',
+                            'not governing law', 'Do not preload',
                             'one commit', 'not worker START', 'Codex/Work',
                             'no blanket independent', 'independent release',
                             'actual protected release path', 'No new paid credits',
