@@ -113,3 +113,11 @@ then escalates the disagreement.
     diff. Reason: the second browser bridge release fixed the pin switch but left three
     windows in which operators' sessions would fail, two of them unstated
     (`br-20261111/release2/mcp_bridge_install.md`).
+18. **A build never lands in the app the Chairman is using (2026-11-12).** The Chairman now
+    works in `~/Applications/Mastermind OS.app` against the real team server. Every build a
+    lane makes is a separate app: its own name, its own bundle identifier, its own config
+    folder and its own server target. No lane rebuilds, replaces, quits, relaunches or drives
+    his app, and no lane sends into a conversation he has a run in. A release into his app is
+    the principal's own announced act, with a time he has agreed. Reason: his words, "future
+    builds please launch it in a new app"; the same morning a session of his ran inside
+    Secretary's conversation on the real server.

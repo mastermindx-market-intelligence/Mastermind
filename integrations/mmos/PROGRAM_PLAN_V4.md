@@ -1708,3 +1708,48 @@ review of the tool and my own read of it. Folders that belong to another program
 does not mint a second tree. The harness refuses to enter it and refuses git commands aimed outside
 its own tree; that refusal is a real control. Two branches at once means two children. The recipe
 text in the Macro guard says otherwise and its correction waits for the Chairman's word.
+
+## 41. Amendment, 2026-11-12 08:05 UTC: the Chairman's four orders; carrier installed; E1 decided
+
+**Orders received 07:28–07:30 UTC.** (1) Move every Hermes bot, with its conversation history
+and memory, into Mastermind OS. (2) Link the persistent memory the Hermes bots use (the `omh`
+memory provider) so always-on teammates can reach it. (3) He is now a daily user of the
+Mastermind OS app, so builds launch as a new app (ruling 18). (4) A dedicated Cloudflare tunnel
+is accepted as the public endpoint for the Grok Bot link, and a subagent may create it using
+the Cloudflare session in his personal Chrome profile. He also handed me the E1 decision.
+
+**Lane HM (Hermes bots and memory), one lead for both orders.** Three defaults, mine, which the
+lane may only overturn with census evidence:
+
+| Subject | Default |
+| --- | --- |
+| Bots | Each distinct working profile becomes a teammate through the existing set-up and cut-over tooling, one at a time, by the principal. Duplicate or experimental profiles are listed for a ruling, not moved. This replaces the earlier limit of three teammates. |
+| History | Exported, not transplanted. Each bot's past conversations go into a read-only archive in its own teammate home with a search tool. Nothing is written into the team server's database by hand. If the server has a supported way to create a conversation with earlier messages, the lane proposes it and proves it on a development server. |
+| Memory | One store, not two. Teammates reach the same `omh` memory Hermes uses, through a narrow tool that calls `omh`'s own code. If two writers are not safe, reading is linked first and writing comes back as a design. |
+
+The lane works on copies, in its own folder, and installs nothing. It replaces the Revision 7
+line "do not copy internal session databases into another runtime" only to this extent: a copy
+into the lane's private scratch folder for the export, deleted afterwards.
+
+**Cloudflare tunnel.** One child creates a named tunnel and one hostname and leaves it not
+running. The tunnel client is installed and started by the principal when the bridge is ready.
+The Chairman's sitting for the Grok Bot link loses its tunnel step.
+
+**E1, decided: the two private-network paths stay.** `/studio-fabric` and `/studio-design` are
+the addresses the existing Subagent Fabric gives its remote workers and its operator stop hook
+(`ops/native_fabric/*/native_remote.py`, `integrations/session_bridge/paid_operator/`). Removing
+them would break that Fabric. The exposure is limited to devices on the Chairman's own private
+network. The repair is a credential check inside the gateway; it goes on the later list and is
+not a Paper lane matter. Paper's own remote route does not use these paths.
+
+**Wake carrier.** Installed for all three teammates at 07:15 UTC (old `69846ac9…`, new
+`3b546177…`). Design Lead and Assurance each answered a real task on it. Secretary's proof is
+waiting: a session started from the app inside Secretary's conversation chose another provider,
+and the carrier refuses a conversation whose provider differs from the teammate's binding. That
+is correct behaviour for the carrier and a product gap for the app: a teammate's conversation
+should not offer another provider. It goes to the team-roster work.
+
+**Paper.** New sessions on four more hosts each reached the M2's Paper and read the test file.
+Three of them could not read the text in the returned image; that is the missing auxiliary
+vision, which lane BCU owns, not a Paper fault. The inspect tool takes no file and returns
+whatever file is open on the M2; the skillpack must tell designers to name the file.
