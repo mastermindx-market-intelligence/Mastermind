@@ -892,8 +892,8 @@ def test_an_identical_re_ask_after_the_child_finished_creates_new_work():
     pc.child_rows["is-1"] = [dict(done_child)]
     pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
     ret_op = f"{ask_op}-ret"
-    t3 = FakeT3(messages=[("user", "r1", f"[{ret_op}]\n\nthe ask came back"),
-                          ("assistant", "r1", ASK_REPLY)])  # the re-ask
+    t3 = FakeT3(messages=legacy_turn(
+        ret_op, "MMO-2", done_child["title"], ASK_REPLY))  # the re-ask
     assert run_with_roster(pc, t3, roster) == 0
     assert t3.sends == []                 # the return turn only reconciled
     creates = [c for c in pc.calls if c[0] == "create_issue"]
@@ -1023,6 +1023,22 @@ def atlas_answer(body):
     agent comment carries authorAgentId; the server serves no nested author
     object and no authorId)."""
     return board.served_comment(body, author_agent_id="ag-atlas")
+
+
+def legacy_turn(op, child_ident, child_title, reply=None, run="r1"):
+    """A return turn in the shape the carrier ITSELF sends: the body names
+    the child it answers for — "Their child issue <ident> '<title>' is
+    done." — which is the identifier the Delta-5 D4-1 attribution matches
+    (never issue or comment text). `reply` None leaves the turn pending."""
+    body = (f"[{op}]\n\n"
+            f"The teammate you asked finished. Their child issue "
+            f"{child_ident} '{child_title}' is done.\n\n"
+            "Their answer:\n\nthe asked work is finished\n\n"
+            "Use it to finish your original task.")
+    msgs = [("user", run, body)]
+    if reply is not None:
+        msgs.append(("assistant", run, reply))
+    return msgs
 
 
 def test_return_wake_sends_result_and_finishes_parent():
@@ -1507,8 +1523,8 @@ def test_the_legacy_return_op_is_adopted_by_the_oldest_child():
     pc.comment_rows["ch-2"] = [board.served_comment(
         "the review agrees", author_agent_id="ag-vega")]
     legacy = f"{ask_op}-ret"
-    t3 = FakeT3(messages=[("user", "r1", f"[{legacy}]\n\nthe ask came back"),
-                          ("assistant", "r1", "OLD: the file has 12 lines")],
+    t3 = FakeT3(messages=legacy_turn(
+        legacy, "MMO-2", child1["title"], "OLD: the file has 12 lines"),
                 replies=["SECOND: the review agrees"])
     assert run_with_roster(pc, t3, {}) == 0
     assert len(t3.sends) == 1
@@ -1525,11 +1541,12 @@ def test_equal_createdAt_tie_breaks_on_id_not_served_order():
     # Delta-4 D4-2: two finished children carry the SAME createdAt — the
     # order cannot come from the timestamp, and the children list serves
     # newest-activity-first, so a bare createdAt sort keeps the served
-    # order and hands the legacy unsuffixed op (the true oldest's turn)
-    # to whichever row the board served first. The tie needs a stable
-    # second key — the id — so the legacy op is adopted deterministically
-    # by ch-1, the true oldest under the tie-break, and the newest-served
-    # child's answer is never the one dropped at delivery.
+    # order. The tie needs a stable second key — the id — for the SEND
+    # order (oldest-first turns). Ownership of the legacy unsuffixed op is
+    # no longer derived from order at all (Delta-5 D4-1): the carrier's
+    # own sent body names ch-1, so ch-1 adopts it deterministically and
+    # the newest-served child's answer is never the one dropped at
+    # delivery.
     issues, ask_op, child1 = blocked_parent_with_done_child()
     child1 = dict(child1, createdAt="2026-11-11T10:00:00.000Z")
     child2 = dict(child1, id="ch-2", identifier="MMO-3",
@@ -1542,8 +1559,8 @@ def test_equal_createdAt_tie_breaks_on_id_not_served_order():
     pc.comment_rows["ch-2"] = [board.served_comment(
         "the review agrees", author_agent_id="ag-vega")]
     legacy = f"{ask_op}-ret"
-    t3 = FakeT3(messages=[("user", "r1", f"[{legacy}]\n\nthe ask came back"),
-                          ("assistant", "r1", "OLD: the file has 12 lines")],
+    t3 = FakeT3(messages=legacy_turn(
+        legacy, "MMO-2", child1["title"], "OLD: the file has 12 lines"),
                 replies=["SECOND: the review agrees"])
     assert run_with_roster(pc, t3, {}) == 0
     assert len(t3.sends) == 1
@@ -1916,8 +1933,8 @@ def test_single_to_multi_transition_never_resends_the_first_turn():
     pc.comment_rows["ch-2"] = [board.served_comment(
         "the review agrees", author_agent_id="ag-vega")]
     legacy = f"{ask_op}-ret"           # the single-child era's op, answered
-    t3 = FakeT3(messages=[("user", "r1", f"[{legacy}]\n\nthe ask came back"),
-                          ("assistant", "r1", "OLD: 12 lines")],
+    t3 = FakeT3(messages=legacy_turn(
+        legacy, "MMO-2", child1["title"], "OLD: 12 lines"),
                 replies=["SECOND: the review agrees"])
     assert run_with_roster(pc, t3, {}) == 0
     assert len(t3.sends) == 1          # only the second child's turn
@@ -1934,8 +1951,8 @@ def test_return_replay_never_resends_or_duplicates():
     pc.child_rows["is-1"] = [dict(child)]
     pc.comment_rows["is-1"] = [board.served_comment(
         "FINAL: the file has 12 lines", author_agent_id="ag-1")]
-    t3 = FakeT3(messages=[("user", "r1", f"[{ret_op}]\n\nthe ask came back"),
-                          ("assistant", "r1", "FINAL: the file has 12 lines")],
+    t3 = FakeT3(messages=legacy_turn(
+        ret_op, "MMO-2", child["title"], "FINAL: the file has 12 lines"),
                 replies=["SHOULD NOT SEND"])
     pc.interaction_rows = [{"id": "ix-1", "kind": "request_confirmation",
                             "status": "pending",
@@ -1948,31 +1965,29 @@ def test_return_replay_never_resends_or_duplicates():
 
 
 def test_single_shrink_legacy_collision_refuses_instead_of_delivering():
-    # Delta-4 D4-1: the unsuffixed {ask_op}-ret turn belongs to the family's
-    # TRUE oldest member — over done AND cancelled rows alike, because it was
-    # sent in the single-child era when that child was the family. When the
-    # done family shrinks to exactly ONE child that is NOT the legacy owner
-    # (the older sibling was cancelled here), single=True addresses the
-    # survivor's own turn with the legacy op, the old answered turn
-    # reconciles as the survivor's answer, and the WRONG — cancelled —
-    # child's OLD answer is delivered: exit 0, in_review, no send, no
-    # error. The return edge refuses loudly instead; a deleted (vanished)
-    # sibling is undetectable in the children list and stays a documented
-    # residual.
+    # Delta-5 D4-1: the legacy unsuffixed turn belongs to whichever child
+    # its OWN sent body names. Here that body names the CANCELLED older
+    # sibling (the turn was that child's), while the done family has
+    # shrunk to the survivor — single=True addresses the survivor's turn
+    # with the legacy op and the old answered turn would reconcile as the
+    # survivor's answer: exit 0, in_review, no send, no error. The name
+    # mismatch refuses loudly instead; the same body naming the sole done
+    # child DELIVERS (see the companion test) — the carrier never strands
+    # the turn it just sent.
     issues, ask_op, child1 = blocked_parent_with_done_child()
     child1 = dict(child1, createdAt="2026-11-11T11:00:00.000Z")   # done
     child2 = dict(child1, id="ch-2", identifier="MMO-3",
                   assigneeAgentId="ag-vega", title="Review it",
                   status="cancelled",
-                  createdAt="2026-11-11T10:00:00.000Z")  # the TRUE oldest
+                  createdAt="2026-11-11T10:00:00.000Z")  # the named owner
     issues["is-1"]["blockedBy"] = board.blocked_by(child1, child2)
     pc = FakePaperclip(issues=issues)
     pc.child_rows["is-1"] = [child2, child1]  # served newest-activity-first
     pc.comment_rows["ch-1"] = [atlas_answer("the survivor's own answer")]
     legacy = f"{ask_op}-ret"
-    t3 = FakeT3(messages=[("user", "r1", f"[{legacy}]\n\nthe ask came back"),
-                          ("assistant", "r1",
-                           "OLD: the cancelled child's answer")],
+    t3 = FakeT3(messages=legacy_turn(
+        legacy, "MMO-3", child2["title"],
+        "OLD: the cancelled child's answer"),
                 replies=["SHOULD NOT BE DELIVERED"])
     with pytest.raises(wc.CarrierError):
         run_with_roster(pc, t3, {})
@@ -1984,6 +1999,138 @@ def test_single_shrink_legacy_collision_refuses_instead_of_delivering():
     assert not any(c[0] == "comment" and "OLD:" in c[2] for c in pc.calls)
     assert not any(c[0] == "comment" and "survivor" in c[2] for c in pc.calls)
     assert pc.issues["is-1"]["status"] == "blocked"  # nothing delivered
+
+
+def test_legacy_owner_outside_blocked_by_is_refused_not_adopted():
+    # Delta-5 D4-1, final-check finding 1 route (a) (probe 25): ask #1's
+    # block PATCH failed, so blockedBy records only ask #2's child, while
+    # BOTH children sit in the children list. The legacy turn was sent to
+    # the family's sole done child at the time — the OLDER child, the one
+    # outside blockedBy. The family walk's blocker filter shrinks the
+    # family to the survivor and single=True addresses the survivor's turn
+    # with the legacy op; the age-based guard agreed with the survivor and
+    # the older child's old answer was delivered as the survivor's. The
+    # owner is the identifier the carrier's OWN sent body names: the body
+    # names the older child, the child being processed is not it — refuse
+    # loudly, deliver nothing.
+    issues, ask_op, child1 = blocked_parent_with_done_child()
+    child1 = dict(child1, createdAt="2026-11-11T10:00:00.000Z")   # older,
+    child2 = dict(child1, id="ch-2", identifier="MMO-3",           # the turn's
+                  assigneeAgentId="ag-vega", title="Review it",    # owner
+                  createdAt="2026-11-11T11:00:00.000Z")
+    issues["is-1"]["blockedBy"] = board.blocked_by(child2)  # PATCH #1 failed
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [child2, child1]   # both in the children list
+    pc.comment_rows["ch-1"] = [atlas_answer("the owner's own answer")]
+    legacy = f"{ask_op}-ret"
+    t3 = FakeT3(messages=legacy_turn(
+        legacy, "MMO-2", child1["title"],
+        "OLD: the older child's answer"),
+        replies=["SHOULD NOT BE SENT"])
+    with pytest.raises(wc.CarrierError):
+        run_with_roster(pc, t3, {})
+    assert t3.sends == []                    # nothing sent under any op
+    assert any("did not complete" in (c[2] if c[0] == "comment" else "")
+               for c in pc.calls)            # the loud refusal note
+    assert not any(c[0] == "comment" and "OLD:" in c[2] for c in pc.calls)
+    assert pc.issues["is-1"]["status"] == "blocked"   # nothing delivered
+
+
+def test_legacy_owner_who_finished_last_is_refused_not_adopted():
+    # Delta-5 D4-1, final-check finding 1 route (b) (probe 28): BOTH
+    # children are in blockedBy. The NEWER child finished FIRST — the
+    # legacy turn was sent to it while it was the family's sole done
+    # member — then the OLDER child finished, and the newer one was
+    # cancelled. The done family is [older], single=True addresses it with
+    # the legacy op, and the age-based guard named the oldest — the very
+    # child being processed — so the newer child's old answer was
+    # delivered as the oldest's. The sent body names the newer child;
+    # refuse loudly.
+    issues, ask_op, child1 = blocked_parent_with_done_child()
+    child1 = dict(child1, createdAt="2026-11-11T10:00:00.000Z")  # older,
+    child2 = dict(child1, id="ch-2", identifier="MMO-3",          # finished
+                  assigneeAgentId="ag-vega", title="Review it",   # LAST
+                  status="cancelled",
+                  createdAt="2026-11-11T11:00:00.000Z")
+    issues["is-1"]["blockedBy"] = board.blocked_by(child1, child2)
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [child2, child1]
+    pc.comment_rows["ch-1"] = [atlas_answer("the older child's own answer")]
+    legacy = f"{ask_op}-ret"
+    t3 = FakeT3(messages=legacy_turn(
+        legacy, "MMO-3", child2["title"],
+        "OLD: the newer child's answer"),
+        replies=["SHOULD NOT BE SENT"])
+    with pytest.raises(wc.CarrierError):
+        run_with_roster(pc, t3, {})
+    assert t3.sends == []
+    assert any("did not complete" in (c[2] if c[0] == "comment" else "")
+               for c in pc.calls)
+    assert not any(c[0] == "comment" and "OLD:" in c[2] for c in pc.calls)
+    assert pc.issues["is-1"]["status"] == "blocked"
+
+
+def test_legacy_owner_vanished_from_the_children_list_is_refused():
+    # Delta-5 D4-1, final-check finding 1 route (c) (probe 10): the legacy
+    # turn's child was deleted from the children list but stays in
+    # blockedBy. The family walk cannot see it; the survivor is the
+    # family's only member and single=True addresses it with the legacy
+    # op. Age-based attribution had only the survivor to name, so the
+    # deleted child's old answer was delivered as the survivor's. The
+    # sent body names the deleted child; refuse loudly — a vanished
+    # sibling is no longer a silent-delivery residual.
+    issues, ask_op, child1 = blocked_parent_with_done_child()
+    ghost = dict(child1, id="ch-9", identifier="MMO-9",
+                 assigneeAgentId="ag-vega", title="Review it",
+                 status="cancelled",
+                 createdAt="2026-11-11T09:00:00.000Z")
+    issues["is-1"]["blockedBy"] = board.blocked_by(ghost, child1)
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [dict(child1)]     # the ghost is NOT served
+    pc.comment_rows["ch-1"] = [atlas_answer("the survivor's own answer")]
+    legacy = f"{ask_op}-ret"
+    t3 = FakeT3(messages=legacy_turn(
+        legacy, "MMO-9", ghost["title"],
+        "OLD: the deleted child's answer"),
+        replies=["SHOULD NOT BE SENT"])
+    with pytest.raises(wc.CarrierError):
+        run_with_roster(pc, t3, {})
+    assert t3.sends == []
+    assert any("did not complete" in (c[2] if c[0] == "comment" else "")
+               for c in pc.calls)
+    assert not any(c[0] == "comment" and "OLD:" in c[2] for c in pc.calls)
+    assert pc.issues["is-1"]["status"] == "blocked"
+
+
+def test_the_carriers_own_legacy_turn_to_the_sole_done_child_delivers():
+    # Delta-5 D4-1, final-check finding 2 (probes 30 and 9): the carrier
+    # itself sends the legacy op when exactly one child is done and an
+    # older sibling was cancelled. The next wake must not strand the turn
+    # the carrier just sent: the sent body names the sole done child, the
+    # child being processed IS it, so the answered turn reconciles and
+    # DELIVERS. Age-based attribution named the cancelled sibling and
+    # refused on every wake, forever.
+    issues, ask_op, child1 = blocked_parent_with_done_child()
+    child1 = dict(child1, createdAt="2026-11-11T11:00:00.000Z")  # done,
+    child2 = dict(child1, id="ch-2", identifier="MMO-3",          # the sole
+                  assigneeAgentId="ag-vega", title="Review it",   # done
+                  status="cancelled",                              # child
+                  createdAt="2026-11-11T10:00:00.000Z")   # older, cancelled
+    issues["is-1"]["blockedBy"] = board.blocked_by(child1, child2)
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [child2, child1]
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    legacy = f"{ask_op}-ret"
+    t3 = FakeT3(messages=legacy_turn(
+        legacy, "MMO-2", child1["title"],
+        "FINAL: the sole done child's answer"),
+        replies=["SHOULD NOT BE SENT"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert t3.sends == []        # the carrier's own turn reconciles, no resend
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"
+              and not c[2].startswith("[t2-carrier]")]
+    assert bodies == ["FINAL: the sole done child's answer"]
+    assert pc.issues["is-1"]["status"] == "in_review"
 
 
 def test_blocked_issue_without_ask_child_is_left_alone():
@@ -3261,7 +3408,7 @@ def test_return_wake_waits_with_the_question_too():
     pc.child_rows["is-1"] = [dict(child)]
     # the child's answer is the assignee's own comment (R2a finding 17)
     pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
-    asked = [("user", "r1", f"[{ret_op}]\n\nthe ask came back")]
+    asked = legacy_turn(ret_op, "MMO-2", child["title"])
     answered = asked + [("assistant", "r1", "FINAL: the file has 12 lines")]
     t3 = ScriptedT3(states=[
         (th(pending=0), []),
@@ -4213,7 +4360,7 @@ def test_return_edge_on_an_ask_child_completes_done():
     # the child's answer is the assignee's own comment (R2a finding 17)
     pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
     ret_op = f"{ask_op}-ret"
-    asked = [("user", "r1", f"[{ret_op}]\n\nthe ask came back")]
+    asked = legacy_turn(ret_op, "MMO-2", "Count lines")
     answered = asked + [("assistant", "r1", "FINAL: the file has 12 lines")]
     t3 = ScriptedT3(states=[
         (th(pending=0), []),
@@ -4448,8 +4595,7 @@ def test_return_marker_beyond_the_window_is_found_by_looking_back():
     pc.interaction_rows = [{"id": "ix-1", "kind": "request_confirmation",
                             "status": "pending",
                             "idempotencyKey": f"{ret_op}-confirm"}]
-    msgs = [("user", "r1", f"[{ret_op}]\n\nthe ask came back"),
-            ("assistant", "r1", final)]
+    msgs = legacy_turn(ret_op, "MMO-2", child["title"], final)
     side = [("user", f"s{i}", f"side message {i}") for i in range(61)]
     t3 = WindowedT3(messages=msgs + side)
     assert run_with_roster(pc, t3, {}) == 0

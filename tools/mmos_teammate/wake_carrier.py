@@ -752,22 +752,55 @@ MARKER_LOOKBACK_STEPS = (60, 180, 540, 1620)
 
 
 def scan_marker_deep(t3, op):
-    """(state, reply, thread) with the bounded lookback of finding 16.
+    """(state, reply, thread, marker_body) with the bounded lookback of
+    finding 16.
 
-    Walks MARKER_LOOKBACK_STEPS. A found marker returns its state; a SHORT
-    read means the whole thread was seen, so None is proven absence; a page
-    that stays full to the bound returns "window_exhausted" — absence cannot
-    be proven and the caller must guard its send another way (the send
-    record on the issue)."""
+    Walks MARKER_LOOKBACK_STEPS. A found marker returns its state and the
+    carrier's own sent user body of the FIRST marker for `op`
+    (marker_body — the text a later wake must match an identity against,
+    Delta-5 D4-1); a SHORT read means the whole thread was seen, so None
+    is proven absence; a page that stays full to the bound returns
+    "window_exhausted" — absence cannot be proven and the caller must
+    guard its send another way (the send record on the issue)."""
     thread = None
     for count in MARKER_LOOKBACK_STEPS:
         thread, msgs = t3.messages(count)
         state, existing = scan_marker(msgs, op, thread)
         if state is not None:
-            return state, existing, thread
+            return state, existing, thread, marker_user_body(msgs, op)
         if len(msgs) < count:
-            return None, None, thread
-    return "window_exhausted", None, thread
+            return None, None, thread, None
+    return "window_exhausted", None, thread, None
+
+
+def marker_user_body(messages, op):
+    """The carrier's own sent turn body for `op`: the text of the FIRST
+    user message that begins with exactly "[op]\\n" — the same
+    first-marker-wins law scan_marker applies — or None when no such
+    message is in the window."""
+    tag = f"[{op}]\n"
+    for role, _run, text in messages:
+        if role == "user" and (text or "").startswith(tag):
+            return text
+    return None
+
+
+# Delta-5 D4-1: every return turn the carrier sends names the child it
+# answers for in its own body — "Their child issue MMO-2 '<title>' is
+# done." — so the sent body itself is the attribution signal for the
+# legacy unsuffixed op.
+SENT_CHILD_RE = re.compile(r"Their child issue (\S+) '")
+
+
+def _named_child_identifier(body):
+    """The child identifier a carrier-sent turn body names, or None.
+
+    None means the body is not the carrier's own send shape — it names no
+    child, so the turn it carries can be attributed to nobody."""
+    if not isinstance(body, str):
+        return None
+    found = SENT_CHILD_RE.search(body)
+    return found.group(1) if found else None
 
 
 def scan_marker(messages, op, thread=None):
@@ -1779,14 +1812,6 @@ def handle_return(pc, t3, issue, ask_op, opts, me_id):
         # board-visible, not log-only.
         _blocker_note(pc, issue)
         return 0
-    # Delta-4 D4-1: the unsuffixed {ask_op}-ret turn was addressed when the
-    # family had exactly one member — it belongs to the family's TRUE oldest,
-    # over done and cancelled rows alike. Capture that owner (and the family
-    # it came from) BEFORE the cancelled split drops the cancelled sibling
-    # from view; a single-shrink family must not let the survivor reconcile
-    # the older sibling's answered turn as its own answer.
-    family_all = list(family)
-    legacy_owner_id = _true_oldest_id(family_all)
     # q1-10 (panel 2): a CANCELLED child is terminal too — it is not work in
     # flight, and counting it open held the parent blocked forever. Its
     # cancelled work carries no answer to return, so it neither holds the
@@ -1819,64 +1844,69 @@ def handle_return(pc, t3, issue, ask_op, opts, me_id):
     single = len(done_rows) == 1
     stale_reply = None   # reconciled from a turn an earlier run sent
     fresh_reply = None   # produced by THIS run's send/wait
-    # Delta-3 N2: the children list serves newest-activity-first (captured
-    # children_query_dev.json), so the first row the walk sees is the NEWEST
-    # child. The legacy unsuffixed return op belongs to the OLDEST child —
-    # the single-child era's turn is the first child's answer — so it is
-    # adopted by the earliest createdAt, never by walk position. Delta-4
-    # D4-2: an equal-createdAt tie breaks on the id, the same stable second
-    # key _true_oldest_id uses, so the adoption site and the D4-1 guard can
-    # never disagree about who owns the legacy turn.
-    oldest_id = min(done_rows,
-                    key=lambda row: (row.get("createdAt") or "",
-                                     row.get("id") or "")).get("id")
+    # Delta-5 D4-1 (final check finding 1): the legacy unsuffixed
+    # {ask_op}-ret turn does NOT belong to the family's oldest child. It
+    # was sent when the family had exactly ONE done member — and that can
+    # be ANY child: a failed block PATCH drops the owner from blockedBy
+    # while it stays in the children list, the oldest can finish last
+    # behind a newer sibling that is then cancelled or reopened, a
+    # sibling can vanish from the children list altogether. Age can never
+    # attribute the turn. The carrier's own send body names the child it
+    # answers for — "Their child issue MMO-2 '<title>' is done." — so
+    # ownership is read from THAT body alone (never from issue or comment
+    # text) and only the named child may reconcile or claim the turn. In
+    # single mode the loop scans ret_op (== the legacy op) directly; in
+    # multi mode the legacy turn is read once here for adoption.
+    legacy_op = f"{ask_op}-ret"
+    legacy_probe = None if single else scan_marker_deep(t3, legacy_op)
+    legacy_owner_ident = None
+    if legacy_probe is not None and legacy_probe[0] in ("reply", "pending"):
+        legacy_owner_ident = _named_child_identifier(legacy_probe[3])
     for idx, child in enumerate(done_rows):
         ret_op = _return_op(ask_op, child, single)
-        # The single-child era addressed its return turn with the unsuffixed
-        # op; only the OLDEST child can own that turn. When the per-child op
-        # is absent but the legacy one lives in the thread, reconcile it —
-        # a single-to-multi transition must not resend a duplicate turn.
-        legacy_op = None
-        if (child.get("id") == oldest_id
-                and ret_op != f"{ask_op}-ret"):
-            legacy_op = f"{ask_op}-ret"
         # R2a finding 16: the bounded lookback applies to the return marker.
-        state, existing, thread = scan_marker_deep(t3, ret_op)
-        if state is None and legacy_op:
-            legacy_state, legacy_existing, legacy_thread = scan_marker_deep(
-                t3, legacy_op)
-            if legacy_state == "window_exhausted":
+        state, existing, thread, body = scan_marker_deep(t3, ret_op)
+        if (state is None and ret_op != legacy_op
+                and legacy_probe is not None):
+            # This child's own op is absent. It may adopt the legacy turn
+            # only when that turn's own body names THIS child; a body that
+            # names no child (not the carrier's send shape) can be adopted
+            # by nobody — refuse loudly rather than guess by age.
+            if legacy_probe[0] == "window_exhausted":
                 raise CarrierError(
                     f"return marker {legacy_op} is beyond the lookback "
                     "bound and unreadable this run")
-            if legacy_state is not None:
-                state, existing, thread = (legacy_state, legacy_existing,
-                                           legacy_thread)
-                ret_op = legacy_op
-        if ret_op == f"{ask_op}-ret" and state in ("reply", "pending"):
-            # Delta-4 D4-1: this turn is the family's legacy unsuffixed
-            # return op, and it carries an answer or a pending question. It
-            # belongs to the family's TRUE oldest member — when this child is
-            # not that member, the answered turn is another child's old
-            # answer (single-shrink: the older sibling was cancelled after
-            # the single-child era) and must never be reconciled or claimed
-            # as this child's. Refuse loudly, naming both. A family row
-            # without createdAt cannot attribute the turn at all — refuse
-            # too. A deleted sibling is absent from the children list and
-            # stays a documented residual this guard cannot see.
-            if legacy_owner_id is None:
-                raise CarrierError(
-                    f"legacy return op {ret_op} is answered in the thread, "
-                    f"but a child of {issue.get('identifier')} carries no "
-                    "createdAt; whose answer that is cannot be attributed — "
-                    "refusing instead of delivering it")
-            if legacy_owner_id != child.get("id"):
-                owner = next((r for r in family_all
-                              if r.get("id") == legacy_owner_id), {})
+            if legacy_probe[0] is not None:
+                if legacy_owner_ident is None:
+                    raise CarrierError(
+                        f"legacy return op {legacy_op} on "
+                        f"{issue.get('identifier')} names no child in its "
+                        "own sent body; whose turn it is cannot be "
+                        "attributed — refusing instead of adopting it")
+                if legacy_owner_ident == child.get("identifier"):
+                    state, existing, thread, body = legacy_probe
+                    ret_op = legacy_op
+        if ret_op == legacy_op and state in ("reply", "pending"):
+            # Delta-5 D4-1: the turn this child is about to reconcile or
+            # claim IS the legacy op, and it carries an answer or a pending
+            # question. Its own body names the child it was sent for; this
+            # child must BE that child. A body that names no child, or
+            # names another one, means the answered turn is someone else's
+            # — refuse loudly, never deliver it. This also closes the
+            # self-strand: the turn the carrier itself just sent to the
+            # sole done child names that child, so the next wake matches
+            # and delivers instead of refusing forever.
+            named = _named_child_identifier(body)
+            if named is None:
                 raise CarrierError(
                     f"legacy return op {ret_op} on {issue.get('identifier')} "
-                    f"belongs to the family's oldest ask child "
-                    f"{owner.get('identifier') or legacy_owner_id}, not to "
+                    "names no child in its own sent body; whose answer it "
+                    "is cannot be attributed — refusing instead of "
+                    "delivering it")
+            if named != child.get("identifier"):
+                raise CarrierError(
+                    f"legacy return op {ret_op} on {issue.get('identifier')} "
+                    f"names child {named} in its own sent body, not "
                     f"{child.get('identifier') or child.get('id')}; the old "
                     "answered turn is not this child's answer — refusing "
                     "instead of delivering it")
@@ -2195,23 +2225,6 @@ def ordered_oldest_first(rows):
             "refusing the read")
     rows.sort(key=lambda row: (row["createdAt"], row.get("id") or ""))
     return rows
-
-
-def _true_oldest_id(rows):
-    """The family's TRUE oldest member id — oldest ``createdAt`` first with
-    the id as the stable second key, so an equal-createdAt tie is broken
-    deterministically, never by the served list's newest-activity-first
-    order. Delta-4 D4-1: the legacy unsuffixed return op was addressed when
-    the family had one member, so it belongs to the true oldest over done
-    AND cancelled rows alike.
-
-    Returns None when any row lacks ``createdAt``: the true oldest is then
-    not derivable, and the caller must refuse to attribute the legacy turn
-    to anyone rather than guess."""
-    if any(not (row.get("createdAt") or "").strip() for row in rows):
-        return None
-    return min(rows, key=lambda row: (row["createdAt"],
-                                      row.get("id") or "")).get("id")
 
 
 # The lane line with T4c (R4b findings 4/5): every comment the door or the
@@ -2711,7 +2724,7 @@ def _run_carrier_locked(pc, t3_factory, opts, me, binding, thread_id):
         # R2a finding 16: the bounded lookback walks back past the latest-60
         # window before any first send, so a marker hidden under newer
         # messages cannot cause a second send of the task.
-        state, existing, thread = scan_marker_deep(t3, op)
+        state, existing, thread, _marker_body = scan_marker_deep(t3, op)
         if state == "window_exhausted":
             record = (f"[t2-carrier] sent task {op} to the teammate thread; "
                       "the thread window cannot show this turn, this line is "
