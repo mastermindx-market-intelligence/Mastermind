@@ -213,6 +213,29 @@ def test_bridge_emit_never_fails_on_unencodable_reply_text(monkeypatch):
     assert raw.getvalue()==b'{"state":"RECEIPT","data":{"content":"caf\xc3\xa9 \xf0\x9d\x95\x8f"}}\n'
 
 
+def test_read_contract_states_enforced_limits_and_operator_rules():
+    # p1#1: the read contract must state what is actually enforced (worker
+    # 800,000-byte RESULT_TOO_LARGE; native host 921,600-byte MAX_MESSAGE_BYTES)
+    # instead of the never-enforced 32,768-byte envelope, and carry the three
+    # operator rules: no drift guard across pages, repeated blank lines can
+    # hide a dropped empty line, read the box before sending.
+    schema=bridge.TOOL_SCHEMA["description"]
+    assert "skip or repeat" in schema and "dropped empty line" in schema
+    assert "read the box before sending" in schema
+    assert "32,768" not in schema
+    page=(ROOT/"integrations/chairman_surfaces/web_sol_extension/browser_page.js").read_text()
+    assert "32,768" not in page
+    for ceiling in ("800,000","921,600"):
+        assert ceiling in page,f"the page comment names the enforced ceiling {ceiling}"
+    doc=(ROOT/"integrations/hermes_harness/mcp_bridge_install.md").read_text()
+    assert "32,768-byte envelope" not in doc
+    for phrase in ("skip or repeat","dropped empty line","read the box before sending","800,000","921,600","settle interval"):
+        assert phrase in doc,f"the install doc states {phrase}"
+    for name in ("browser_bridge.py","browser_tool_schema.json"):
+        digest=hashlib.sha256((ROOT/"integrations/hermes_harness"/name).read_bytes()).hexdigest()
+        assert digest in doc,f"the doc pins the wrong hash for {name}"
+
+
 def test_client_stamps_discovered_connection_and_refuses_changed_generation_before_write(monkeypatch):
     writes=[]
     connection=SimpleNamespace(settimeout=lambda _:None,connect=lambda _:None,

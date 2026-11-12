@@ -20,9 +20,12 @@
   // timer callback — so one interval covers both, and a page that changes
   // the box later than the interval is outside the receipt.
   const FILL_SETTLE_MS = 250;
-  // Paged read: one element's full visible text, one page per call. The page
-  // content budget (UTF-8 bytes) leaves the 32,768-byte reply envelope room
-  // for the wrapper, and the extraction is node- and character-bounded so a
+  // Paged read: one element's full visible text, one page per call. The
+  // enforced reply ceilings are the worker service's 800,000-byte reply
+  // refusal (RESULT_TOO_LARGE) and the native host's 921,600-byte frame
+  // limit (MAX_MESSAGE_BYTES); no smaller envelope is enforced. The page
+  // content budget (UTF-8 bytes) keeps every serialized reply far under
+  // both, and the extraction is node- and character-bounded so a
   // pathological subtree cannot hang the read.
   const READ_PAGE_BYTES = 30720;
   const READ_MAX_NODES = 20000;
@@ -153,7 +156,10 @@
     // - innerText of the editor channel: rendered text — a typed space at a
     //   line edge or inside a run renders as U+00A0, runs of spaces and tabs
     //   collapse, spaces at line edges are invisible, an empty block renders
-    //   as a doubled break, and trailing breaks drift.
+    //   as a doubled break, and trailing breaks drift. Runs of blank lines
+    //   collapse to one blank line on both sides, so a dropped empty line
+    //   inside a repeated run is indistinguishable — blank-line-render names
+    //   the collapse when it fires.
     // - textContent of the whole-text fallback: the byte-exact carrier this
     //   code just wrote; it normalizes nothing, so nothing is normalized.
     const CRLF_TO_LF = ["crlf-to-lf", t => t.replace(/\r\n?/g, "\n")];
@@ -457,6 +463,12 @@
         // before the one-mutation consumption below. Offset values that
         // cannot name a page start (negative, non-integer, past the end, or
         // inside a surrogate pair) are a typed READ_OFFSET_INVALID.
+        // Read-contract limits an operator must know: there is no drift
+        // guard across pages — a page that changes during a paged read can
+        // skip or repeat text; repeated blank lines can hide a dropped
+        // empty line; and for fills, read the box before sending — APPLIED
+        // certifies only the re-read after the settle interval, not what
+        // the page does later.
         if (action === "read") {
           const text = elementText(node);
           const total = text.value.length;

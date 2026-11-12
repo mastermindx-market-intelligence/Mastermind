@@ -1,8 +1,9 @@
 # Where the T3 mmx-browser MCP server loads its bridge + install steps
 
-Bridge release candidate for branch `t3/mmos-v4-br`, repair round 4 (items
-A, B1–B4, P, D). This file is the install procedure for the principal; the
-same text lives at `~/.mastermind/mmos_evidence/br-20261111/mcp_bridge_install.md`.
+Bridge release candidate for branch `t3/mmos-v4-br`, repair round 4 plus the
+final round (items p1-1/p1-7 refresh two of the round-4 files). This file is
+the install procedure for the principal; the same text lives at
+`~/.mastermind/mmos_evidence/br-20261111/mcp_bridge_install.md`.
 
 ## Installation facts (unchanged by this release)
 
@@ -19,14 +20,25 @@ same text lives at `~/.mastermind/mmos_evidence/br-20261111/mcp_bridge_install.m
 
 ## What this release changes (3 of the 15 files)
 
-The round-3 edition of this document expected two changed files. Item P (paged
-whole-answer read) adds `browser_tool_schema.json`, so the runtime.json diff for
-this release is `release_commit` plus **three** sha256 lines, nothing else.
+The runtime.json diff for this release is `release_commit` plus **three**
+sha256 lines, nothing else: `web_sol_browser_protocol.py` keeps its round-4
+value, and `browser_bridge.py` + `browser_tool_schema.json` take the final-round
+values below (ruling-13 fill settle, the stdout guard, and the read-contract
+operator sentences in the tool description).
 
 Behavior shipped: honest fill receipt (per-normalization disclosure, mismatch
 never APPLIED), structure-preserving fill (innerText collapse no longer judges
 correct inserts wrong), truthful textContent fallback, fill line cap + time
-bound (no tab freeze), UTF-16-unit fill cap, and the new paged `read` action.
+bound (no tab freeze), UTF-16-unit fill cap, the paged `read` action, the
+ruling-13 fill settle (APPLIED = the box held the asked content at the re-read
+after the page's pending microtasks plus one settle interval of 250 ms; a page
+that changes the box later is outside the receipt), and a stdout guard so a
+reply carrying unencodable text still reaches the operator ASCII-escaped.
+
+The final round also changes extension-side files (`browser_page.js`,
+`browser_control.js` in `integrations/chairman_surfaces/web_sol_extension/`).
+They are **not** part of the 15-file bridge closure; the harness loads them
+from the repository, so the release table below is unaffected.
 
 ## The 15-file sha256 list at head `$NEW`
 
@@ -47,9 +59,9 @@ use the full values already present in runtime.json for those).
 | integrations/chairman_surfaces/web_sol_native_host.py | unchanged (d2379ef5…) |
 | integrations/chairman_surfaces/web_sol_protocol.py | unchanged (c8d276a5…) |
 | integrations/hermes_harness/__init__.py | unchanged (0c924141…) |
-| integrations/hermes_harness/browser_bridge.py | **5e165f7e284f07d62014765c9edad7829c265ab48a44a443564c945aa443b1f0** |
+| integrations/hermes_harness/browser_bridge.py | **b47987fca67521a7647e5c801d6fe60e85a2044ad934b840bdda8c5e76328cd5** |
 | integrations/hermes_harness/browser_routes.py | unchanged (ec58abff…) |
-| integrations/hermes_harness/browser_tool_schema.json | **d55df8def39cd364476c818c355bc2b7b850428b2c50163ab6625630d8b27716** |
+| integrations/hermes_harness/browser_tool_schema.json | **08c4066074d7ac5cbc21943b8bdb4d33262b2291121c30ed493c60c8fd516edb** |
 
 ## Install steps — check after every step, roll back after every step
 
@@ -76,8 +88,11 @@ use the full values already present in runtime.json for those).
 5. **Verify in a fresh session** (server.js spawns a new python per dispatch; no
    daemon restart is needed):
    - `status` on any browser shows `bridge_release_commit: $NEW`.
-   - The paged read below returns pages of a long answer and every reply stays
-     within the 32,768-byte envelope (measured maximum on the round-4 fixture: 31,808 bytes).
+   - The paged read below returns pages of a long answer. No 32,768-byte
+     envelope is enforced anywhere; the enforced ceilings are the worker
+     service's 800,000-byte reply refusal (RESULT_TOO_LARGE) and the native
+     host's 921,600-byte frame limit (MAX_MESSAGE_BYTES). Measured maximum
+     whole reply on the round-4 fixture: 31,808 bytes — far under both.
    - A `fill` whose text has more than 2,000 lines is refused before dispatch
      (protocol gate; the tab never receives it).
    Rollback: step 4's runtime.json restore, taken after closing the fresh session.
@@ -109,3 +124,13 @@ consume the snapshot, mutate, scroll or focus — the same observation still
 authorizes a later mutation. Offsets that are negative, non-integer, past the
 end, or inside a surrogate pair return `READ_OFFSET_INVALID`; a wrong argument
 shape returns `INPUT_REFUSED`.
+
+Read-contract limits, in plain sentences:
+
+- There is no drift guard across pages: a page that changes during a paged
+  read can skip or repeat text.
+- Repeated blank lines can hide a dropped empty line.
+- For fills, read the box before sending: a fill's `APPLIED` means the box
+  held the asked content at the re-read after the page's pending microtasks
+  plus one settle interval (250 ms in this build) — a page that changes the
+  box later is outside the receipt.
