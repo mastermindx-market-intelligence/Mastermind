@@ -2802,8 +2802,11 @@ class TestEnvStrictness(unittest.TestCase):
         # folder outside the checkout and NO environment value moves it —
         # a session cannot redirect or pre-seed the lease/pacing records by
         # env, in either direction. (Constructors here only resolve paths;
-        # nothing is created or written.)
-        fixed = os.path.expanduser("~/.mastermind/mmos_computer_use")
+        # nothing is created or written.) R3-M1: the expected home is the
+        # PASSWORD DATABASE home, the definition the server now uses.
+        import pwd as pwd_db
+        fixed = os.path.join(pwd_db.getpwuid(os.getuid()).pw_dir,
+                             ".mastermind", "mmos_computer_use")
         for env_value in (os.path.join(mmos.HERE, "state-test"),
                           "/tmp/mmos-cu-outside-state"):
             os.environ["MMOS_CU_STATE_DIR"] = env_value
@@ -2814,11 +2817,48 @@ class TestEnvStrictness(unittest.TestCase):
         # M5: the fixed folder is ~/.mastermind/mmos_computer_use — outside
         # the checkout, so a `git clean` or branch switch can never wipe
         # the lease/pacing record (and a worktree copy cannot fork it).
-        self.assertEqual(mmos.STATE_DIR,
-                         os.path.expanduser("~/.mastermind/mmos_computer_use"))
+        # R3-M1: "~" is the pwd-database home, never $HOME.
+        import pwd as pwd_db
+        self.assertEqual(
+            mmos.STATE_DIR,
+            os.path.join(pwd_db.getpwuid(os.getuid()).pw_dir,
+                         ".mastermind", "mmos_computer_use"))
         self.assertFalse(mmos.STATE_DIR.startswith(mmos.HERE))
         self.assertEqual(mmos.Lease().state_dir, mmos.STATE_DIR)
         self.assertEqual(mmos.Pacer().state_dir, mmos.STATE_DIR)
+
+    def test_state_dir_home_comes_from_the_password_database(self):
+        # BCU-MICRO (R3-M1, fail-first on e69774fa6): HOME arrives from
+        # session/provider configuration, so the old expanduser("~") let a
+        # restrained session MOVE the "fixed" state folder by exporting one
+        # variable — forking the lease and resetting pacing with zero
+        # writes inside the checkout. The home now comes from the PASSWORD
+        # DATABASE (pwd.getpwuid), as the GBL gate does. PATH comparison
+        # only: the child just prints the resolved constant; nothing is
+        # created in the real folder (or in the scratch HOME).
+        import pwd as pwd_db
+        real_home = pwd_db.getpwuid(os.getuid()).pw_dir
+        scratch = tempfile.mkdtemp(prefix="mmos-cu-fake-home-")
+        try:
+            env = dict(os.environ)
+            env["HOME"] = scratch
+            env.pop("PYTHONPATH", None)
+            code = ("import sys; sys.path.insert(0, %r); import server; "
+                    "print(server.STATE_DIR)" % TOOL_DIR)
+            proc = subprocess.run([sys.executable, "-c", code],
+                                  stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, env=env,
+                                  text=True, timeout=30)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            resolved = proc.stdout.strip()
+            self.assertEqual(resolved,
+                             os.path.join(real_home, ".mastermind",
+                                          "mmos_computer_use"))
+            self.assertFalse(resolved.startswith(scratch))
+            self.assertFalse(os.path.exists(os.path.join(scratch,
+                                                         ".mastermind")))
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
 
     def test_ensure_state_dir_creates_owner_only(self):
         # M5: the folder is created 0700 — and re-forced to 0700 when it

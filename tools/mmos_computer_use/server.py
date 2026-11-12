@@ -166,6 +166,7 @@ import hashlib
 import json
 import math
 import os
+import pwd
 import re
 import secrets
 import subprocess
@@ -840,17 +841,25 @@ def _lease_remaining(lease, now_wall, now_mono):
     return None
 
 
-# BCU R3 M5: the layer's durable state (lease + pacing) lives OUTSIDE the
-# checkout, in a fixed owner-only folder under ~/.mastermind. No environment
-# variable (the former MMOS_CU_STATE_DIR is gone) and no file moves it; only
-# an explicit launch ARGUMENT (--state-dir, the harness path) or constructor
-# injection redirects state. Known limits of a same-uid layer, recorded in
-# the runbook: a session with a shell can still read/write this folder, and
-# a MISSING pacing file reads as "no record" — after the migration the
-# first act on each window is admitted without a wait. When this layer
-# attaches to a teammate, this folder joins that teammate's write-deny
-# roots (registration note; not done in this round).
-STATE_DIR = os.path.expanduser("~/.mastermind/mmos_computer_use")
+# BCU R3 M5 + BCU-MICRO (R3-M1): the layer's durable state (lease + pacing)
+# lives OUTSIDE the checkout, in a fixed owner-only folder under
+# ~/.mastermind — where the HOME is read from the PASSWORD DATABASE
+# (pwd.getpwuid(os.getuid()).pw_dir, as the GBL gate does), NEVER from
+# os.path.expanduser("~"): HOME arrives from session/provider
+# configuration, so expanduser would let a restrained session move the
+# state with one exported variable — forking the lease (a second holder
+# acquires "the" lease) and resetting pacing (missing file = "no record")
+# with zero writes inside the checkout. No environment variable (the former
+# MMOS_CU_STATE_DIR is gone) and no file moves it; only an explicit launch
+# ARGUMENT (--state-dir, the harness path) or constructor injection
+# redirects state. Known limits of a same-uid layer, recorded in the
+# runbook: a session with a shell can still read/write this folder, and a
+# MISSING pacing file reads as "no record" — after the migration the first
+# act on each window is admitted without a wait. When this layer attaches
+# to a teammate, this folder joins that teammate's write-deny roots
+# (registration note; not done in this round).
+STATE_DIR = os.path.join(pwd.getpwuid(os.getuid()).pw_dir,
+                         ".mastermind", "mmos_computer_use")
 
 
 def ensure_state_dir(path):

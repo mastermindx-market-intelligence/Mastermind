@@ -229,7 +229,10 @@ lease + pacing state is not env-configurable at all (BCU R3 M5): it lives
 in the fixed **0700** folder `~/.mastermind/mmos_computer_use`, OUTSIDE the
 checkout, so a `git clean` or branch switch can never wipe it and a
 worktree copy can never fork it; the former `MMOS_CU_STATE_DIR` variable is
-ignored. A harness subprocess that needs scratch paths passes them as
+ignored. The `~` is the home from the PASSWORD DATABASE
+(`pwd.getpwuid(os.getuid()).pw_dir`), never `$HOME` — a session-exported
+`HOME` cannot move the state folder either (BCU-MICRO R3-M1). A harness
+subprocess that needs scratch paths passes them as
 server launch ARGUMENTS (`--state-dir`, `--runtime`, `--deny`), never as
 environment variables. Known limit of a same-uid layer (runbook): a session
 with a shell can still read/write that folder, and a missing pacing file
