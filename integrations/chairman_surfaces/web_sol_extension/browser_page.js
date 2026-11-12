@@ -13,6 +13,13 @@
   // the tab on hostile or pathological input.
   const MAX_FILL_LINES = 2000;
   const FILL_TIME_BOUND_MS = 1500;
+  // Ruling 13: a fill's APPLIED means the box held the asked content when it
+  // was read again after the page's pending microtasks and one settle
+  // interval (at most 500 ms; this build uses 250). Awaiting a timer drains
+  // the microtask queue first — the platform runs microtasks before any
+  // timer callback — so one interval covers both, and a page that changes
+  // the box later than the interval is outside the receipt.
+  const FILL_SETTLE_MS = 250;
   // Paged read: one element's full visible text, one page per call. The page
   // content budget (UTF-8 bytes) leaves the 32,768-byte reply envelope room
   // for the wrapper, and the extraction is node- and character-bounded so a
@@ -178,6 +185,7 @@
     // payload: either the applied receipt with the fired normalizations, or a
     // FILL_MISMATCH (never APPLIED) with both lengths and the first differing
     // offset of the normalized comparison.
+    const settle = () => new Promise(resolve => { win.setTimeout(resolve, FILL_SETTLE_MS); });
     function fillReceipt(node, asked, path, preFill, stopped) {
       const channel = channelFor(node, path);
       const raw = channel.read(node);
@@ -186,7 +194,7 @@
       const boxNormalized = normalize(channel.steps, raw, fired);
       const normalizations = [...fired];
       const common = {asked_characters: asked.length, box_characters: raw.length,
-        normalizations, insertion_path: path,
+        normalizations, insertion_path: path, settle_interval_ms: FILL_SETTLE_MS,
         read_back: !node.isContentEditable ? "value" : path === "fallback" ? "textContent" : "innerText"};
       const offset = firstDiff(askedNormalized, boxNormalized);
       // A time-bound stop reports how far the insertion got and the honest
@@ -303,6 +311,90 @@
       if (current.url !== win.location.href) return "TARGET_CHANGED";
       return null;
     }
+    // A fill settles before it is answered (ruling 13): the insertion runs,
+    // input/change fire, then the page gets one settle interval — microtasks
+    // drain first, so a model-owning editor that reverts the box on a
+    // microtask is caught by the read-back instead of being answered APPLIED
+    // synchronously. The dispatch returns a promise only for fill; callers
+    // that await the dispatch value (executeScript awaits settled results)
+    // see the receipt after the settle. A failure inside the continuation is
+    // self-caught: a rejected promise must never escape the page module.
+    async function performFill(node, params) {
+      try {
+        node.focus();
+        // The pre-fill reading through both editable channels, captured
+        // before anything is written, so the receipt can name a reverted
+        // write (box still exactly as before) after the path is known.
+        const preEditable = node.isContentEditable ? {
+          innerText: String(typeof node.innerText === "string" ? node.innerText : node.textContent || ""),
+          textContent: String(node.textContent || "")
+        } : null;
+        const preValue = node.isContentEditable ? null : String(node.value || "");
+        let insertionPath = "editor";
+        if (node.isContentEditable) {
+          // A raw textContent write loses line breaks in editors that own
+          // their model (they re-normalize plain \n to spaces). Insert
+          // through the editor's own pipeline instead: select everything,
+          // then insertText per line with insertParagraph between lines, so
+          // paragraphs become the block structure the editor expects. The
+          // insertion feed normalizes CRLF to LF first — execCommand renders
+          // a CR as a paragraph break of its own, which would double every
+          // CRLF into a blank line.
+          const feed = params.text.replace(/\r\n?/g, "\n");
+          // Returns {inserted, timeBound, linesInserted}: timeBound means the
+          // loop stopped itself at the deadline — the box holds a partial
+          // insertion, reported as FILL_TIME_BOUND, never left mid-loop to
+          // freeze the tab on a slow or hostile editor.
+          const insertViaEditor = () => {
+            const selection = win.getSelection();
+            if (!selection || typeof doc.execCommand !== "function") return {inserted: false, linesInserted: 0};
+            selection.selectAllChildren(node);
+            const lines = feed.split("\n");
+            const deadline = Date.now() + FILL_TIME_BOUND_MS;
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i] && !doc.execCommand("insertText", false, lines[i]))
+                return {inserted: false, linesInserted: i};
+              if (i < lines.length - 1 && !doc.execCommand("insertParagraph"))
+                return {inserted: false, linesInserted: i + 1};
+              if ((i & 63) === 63 && Date.now() > deadline)
+                return {inserted: false, timeBound: true, linesInserted: i + 1};
+            }
+            return {inserted: true, linesInserted: lines.length};
+          };
+          let outcome = {inserted: false, linesInserted: 0};
+          try { outcome = insertViaEditor(); } catch (_) { outcome = {inserted: false, linesInserted: 0}; }
+          if (outcome.timeBound) {
+            await settle();
+            return fillReceipt(node, params.text, insertionPath,
+              preEditable ? preEditable.innerText : preValue,
+              {linesInserted: outcome.linesInserted, timeBoundMs: FILL_TIME_BOUND_MS});
+          }
+          // Whole-text fallback ONLY when the editor pipeline genuinely
+          // refused (execCommand returned false or threw). Never as a
+          // length-heuristic second guess: innerText collapses runs of
+          // spaces in the render, so a length check mis-judges correct
+          // insertions and destroys their paragraph structure. The honest
+          // verdict on what the box holds is the receipt comparison.
+          if (!outcome.inserted) {node.textContent = params.text; insertionPath = "fallback";}
+        } else {
+          const proto = node.tagName === "INPUT" ? win.HTMLInputElement.prototype : win.HTMLTextAreaElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+          setter.call(node, params.text);
+        }
+        node.dispatchEvent(new win.Event("input", {bubbles: true}));
+        node.dispatchEvent(new win.Event("change", {bubbles: true}));
+        // The receipt is honest about what the box now holds: compare the
+        // read-back with what was asked, normalizing only what this channel
+        // provably normalizes (listed in the receipt). A mismatch is a typed
+        // FILL_MISMATCH with both lengths and the first differing offset —
+        // never APPLIED.
+        await settle();
+        return fillReceipt(node, params.text, insertionPath,
+          preEditable ? preEditable[insertionPath === "fallback" ? "textContent" : "innerText"] : preValue);
+      } catch (_) {
+        return result(false, "ACTION_EFFECT_UNKNOWN", null, "EFFECT_UNKNOWN");
+      }
+    }
     function dispatch(request) {
       let attempted = false;
       try {
@@ -369,76 +461,7 @@
             url:win.location.href, token:random()};
           return result(true, "OK", {focus_token:prepared.token, snapshot_consumed:true}, "APPLIED");
         }
-        if (action === "fill") {
-          node.focus();
-          // The pre-fill reading through both editable channels, captured
-          // before anything is written, so the receipt can name a reverted
-          // write (box still exactly as before) after the path is known.
-          const preEditable = node.isContentEditable ? {
-            innerText: String(typeof node.innerText === "string" ? node.innerText : node.textContent || ""),
-            textContent: String(node.textContent || "")
-          } : null;
-          const preValue = node.isContentEditable ? null : String(node.value || "");
-          let insertionPath = "editor";
-          if (node.isContentEditable) {
-            // A raw textContent write loses line breaks in editors that own
-            // their model (they re-normalize plain \n to spaces). Insert
-            // through the editor's own pipeline instead: select everything,
-            // then insertText per line with insertParagraph between lines, so
-            // paragraphs become the block structure the editor expects. The
-            // insertion feed normalizes CRLF to LF first — execCommand renders
-            // a CR as a paragraph break of its own, which would double every
-            // CRLF into a blank line.
-            const feed = params.text.replace(/\r\n?/g, "\n");
-            // Returns {inserted, timeBound, linesInserted}: timeBound means the
-            // loop stopped itself at the deadline — the box holds a partial
-            // insertion, reported as FILL_TIME_BOUND, never left mid-loop to
-            // freeze the tab on a slow or hostile editor.
-            const insertViaEditor = () => {
-              const selection = win.getSelection();
-              if (!selection || typeof doc.execCommand !== "function") return {inserted: false, linesInserted: 0};
-              selection.selectAllChildren(node);
-              const lines = feed.split("\n");
-              const deadline = Date.now() + FILL_TIME_BOUND_MS;
-              for (let i = 0; i < lines.length; i++) {
-                if (lines[i] && !doc.execCommand("insertText", false, lines[i]))
-                  return {inserted: false, linesInserted: i};
-                if (i < lines.length - 1 && !doc.execCommand("insertParagraph"))
-                  return {inserted: false, linesInserted: i + 1};
-                if ((i & 63) === 63 && Date.now() > deadline)
-                  return {inserted: false, timeBound: true, linesInserted: i + 1};
-              }
-              return {inserted: true, linesInserted: lines.length};
-            };
-            let outcome = {inserted: false, linesInserted: 0};
-            try { outcome = insertViaEditor(); } catch (_) { outcome = {inserted: false, linesInserted: 0}; }
-            if (outcome.timeBound) {
-              return fillReceipt(node, params.text, insertionPath,
-                preEditable ? preEditable.innerText : preValue,
-                {linesInserted: outcome.linesInserted, timeBoundMs: FILL_TIME_BOUND_MS});
-            }
-            // Whole-text fallback ONLY when the editor pipeline genuinely
-            // refused (execCommand returned false or threw). Never as a
-            // length-heuristic second guess: innerText collapses runs of
-            // spaces in the render, so a length check mis-judges correct
-            // insertions and destroys their paragraph structure. The honest
-            // verdict on what the box holds is the receipt comparison.
-            if (!outcome.inserted) {node.textContent = params.text; insertionPath = "fallback";}
-          } else {
-            const proto = node.tagName === "INPUT" ? win.HTMLInputElement.prototype : win.HTMLTextAreaElement.prototype;
-            const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
-            setter.call(node, params.text);
-          }
-          node.dispatchEvent(new win.Event("input", {bubbles: true}));
-          node.dispatchEvent(new win.Event("change", {bubbles: true}));
-          // The receipt is honest about what the box now holds: compare the
-          // read-back with what was asked, normalizing only what this channel
-          // provably normalizes (listed in the receipt). A mismatch is a typed
-          // FILL_MISMATCH with both lengths and the first differing offset —
-          // never APPLIED.
-          return fillReceipt(node, params.text, insertionPath,
-            preEditable ? preEditable[insertionPath === "fallback" ? "textContent" : "innerText"] : preValue);
-        }
+        if (action === "fill") return performFill(node, params);
         if (action === "select") {
           node.value = params.value;
           node.dispatchEvent(new win.Event("input", {bubbles: true}));
@@ -474,7 +497,11 @@
       chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (!request || request.kind !== KIND || !sender || sender.id !== chrome.runtime.id) return false;
         if (!root.__MMX_BROWSER_PAGE_V1__) return false;
-        sendResponse(root.__MMX_BROWSER_PAGE_V1__.dispatch(request));
+        // Fill answers after a settle interval, so dispatch can return a
+        // promise; returning true holds the channel open until it settles.
+        const reply = root.__MMX_BROWSER_PAGE_V1__.dispatch(request);
+        if (reply && typeof reply.then === "function") { reply.then(sendResponse); return true; }
+        sendResponse(reply);
         return true;
       });
     }

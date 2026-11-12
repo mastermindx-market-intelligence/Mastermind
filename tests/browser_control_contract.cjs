@@ -7,7 +7,7 @@ const {createController,REQUEST_SCHEMA} = require("../integrations/chairman_surf
 const hash = value => createHash("sha256").update(value).digest("hex");
 const INSTANCE = "a".repeat(64), SESSION = "b".repeat(64), BOOT = "connection-generation-one";
 const SNAP = "snapshot-observation-one";
-const pageActions = new Set(["click","fill","select","press","scroll"]);
+const pageActions = new Set(["click","fill","select","press","scroll","read"]);
 function request(action, changes={}) {
   const hasTab = !["status","tabs","open"].includes(action);
   return {schema:REQUEST_SCHEMA,adapter_instance_id:INSTANCE,session_id:SESSION,
@@ -19,8 +19,10 @@ function request(action, changes={}) {
 // The isolated-world page object the real func-injection finds as
 // globalThis.__MMX_BROWSER_PAGE_V1__. Implements the page protocol inline.
 function pageWorldDispatch(f) {
-  // The real browser_page.js dispatch is synchronous and never lets an error
-  // escape; the fake mirrors that so the controller wrapper sees production shape.
+  // The real browser_page.js dispatch never lets an error escape; fill
+  // returns a promise (settled read-back) while everything else answers
+  // synchronously. Chrome's executeScript awaits settled results, and the
+  // scripting stub below mirrors that, so the fake can model both shapes.
   return message => {
     if(f.state.messageHook) f.state.messageHook(message);
     if(message.action==="snapshot") {
@@ -38,6 +40,17 @@ function pageWorldDispatch(f) {
       return {ok:false,code:"STALE_SNAPSHOT",effect:"NOT_APPLIED",data:null};
     if(message.action==="validate")return {ok:true,code:"OK",effect:"NOT_APPLIED",data:{}};
     if(message.action==="validate_focus")return {ok:true,code:"OK",effect:"NOT_APPLIED",data:{}};
+    // Fill answers after a settle in production: model the promise shape the
+    // real page module now returns, so the controller path proves it settles.
+    if(message.action==="fill") {
+      f.state.effects.push(["fill"]);f.state.snapshot=null;
+      return Promise.resolve({ok:true,code:"OK",effect:"APPLIED",
+        data:{refresh_required:true,snapshot_consumed:true,settle_interval_ms:250}});
+    }
+    // read is a pure read: no effect recorded, snapshot not consumed.
+    if(message.action==="read")
+      return {ok:true,code:"OK",effect:"NOT_APPLIED",data:{offset:message.params.offset,
+        total_characters:0,next_offset:null,content:"",content_is_untrusted:true}};
     if(message.action==="focus_ref") {
       f.state.effects.push(["focus"]);
       if(f.state.focusFailure==="lost")throw Error("lost focus reply");
@@ -83,11 +96,15 @@ function fixture() {
       if(state.dispatchFailureOn && options.args[0] && options.args[0].action === state.dispatchFailureOn) {
         try {options.func(...options.args);} finally {throw new Error(state.dispatchFailureText || "frame removed while injecting");}
       }
-      // Real Chrome runs the controller's func wrapper inside the page world;
-      // model that here by installing the fake page object on globalThis.
+      // Real Chrome runs the controller's func wrapper inside the page world
+      // and awaits a promise the func returns (executeScript resolves with
+      // the settled value); model both here.
       globalThis.__MMX_BROWSER_PAGE_V1__ = {dispatch: worldDispatch};
       if(state.worldMissing) delete globalThis.__MMX_BROWSER_PAGE_V1__;
-      try { return [{result: options.func(...options.args)}]; }
+      try {
+        const value = options.func(...options.args);
+        return [{result: (value && typeof value.then === "function") ? await value : value}];
+      }
       finally { if(!state.worldMissing) globalThis.__MMX_BROWSER_PAGE_V1__ = {dispatch: worldDispatch}; }
     }},
     tabs:{
@@ -138,6 +155,17 @@ function fixture() {
     assert.equal((await f.run(click)).status,"NONCE_REUSED");
     assert.equal((await f.run(request("click"))).status,"STALE_SNAPSHOT");
     assert.deepEqual(f.state.effects,[["click"]]);
+  }
+  // Fill answers after a settle interval (ruling 13): the page dispatch
+  // returns a promise, executeScript resolves with the settled receipt, and
+  // the controller forwards it unchanged — no PAGE_RESPONSE_INVALID from an
+  // unresolved thenable, no wedged effect.
+  {
+    const f=fixture();await f.snapshot();
+    const result=await f.run(request("fill",{params:{text:"settled"}}));
+    assert.equal(result.status,"ACTION_DISPATCHED");assert.equal(result.effect,"APPLIED");
+    assert.equal(result.data.settle_interval_ms,250);
+    assert.deepEqual(f.state.effects,[["fill"]]);
   }
   {
     const f=fixture();await f.snapshot();f.tabs.get(1).url="https://allowed.test/changed";
