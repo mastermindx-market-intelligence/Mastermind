@@ -1947,3 +1947,32 @@ DeepSeek worker with the same eight points.
 2. Grok Bot link: the rehearsed install list on the merged head, the install, then one sitting with the Chairman.
 3. Browser bridge fix and the computer-use round, as they return.
 4. Storage: repeat the census once the other session's deletion has ended, then decide whether the orphan tool is still needed.
+
+## 48. Amendment, 2026-11-12 14:10 UTC: memory link merged; its install is held for one repair round
+
+**Done.**
+
+- The memory link's gate, roster and server changes are merged after the principal's read. The suites pass on the merged head.
+- The storage orphan tool is shelved. The other session's deletion ended and both disks are far above the floor, so the tool is not needed now. It was never run for real.
+- The Prophet programme's designer wrote one new page into a Macro design file by mistake. The principal ruled that the designer finishes that one page there and writes nowhere else in that file.
+
+**Why the install is held.** The principal's read found two things the lane's own check and rehearsal did not.
+
+1. The link's redaction removes the label of a secret and leaves the secret itself. "password: X" leaves as "[redacted] X". Several common labels are not matched at all. The tests only checked that the label was gone.
+2. The install list was rehearsed on an empty copy. The real team server is not empty:
+   - its roster record still names each teammate's old conversation;
+   - Secretary's old conversation is on another provider, so the roster step would refuse, and it refuses after it has already written the gate, the limits and the settings;
+   - the other two would be matched to their old conversations, not the ones the board wakes.
+
+**Rules added.**
+
+- A redaction removes the value, not only its label. Its test asserts that the value is absent.
+- An apply that can refuse does so before its first write.
+- A rehearsal starts from a copy that reproduces the real starting state. An empty root is not a rehearsal of an install on a root that has history.
+- A teammate's new conversation is made by the reviewed rebind command, not by hand.
+
+**Next, in order.**
+
+1. Memory link repair round: the two items above, the install list rewritten and rehearsed on a faithful copy, the deputy's check, the principal's read, then the install and the Hermes timers one at a time.
+2. Grok Bot link: the rehearsed install list on the merged head, the install, then one sitting with the Chairman.
+3. Browser bridge fix and the computer-use round, as they return.
