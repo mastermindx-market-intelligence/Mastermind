@@ -2264,3 +2264,189 @@ class TestSpecLoading:
         path.write_text(json.dumps(spec))
         with pytest.raises(ValueError):
             PaperclipAskClient.from_spec(path)
+
+
+class TestDurableLedgerLines:
+    """GBL-5 micro 5a (principal, 11:45Z): a ledger line is ON DISK before
+    the writer that produced it returns.
+
+    Both ledger lines decide what this host must never do again — re-issue
+    a taken number (mint ledger) and hand the same answer out twice
+    (delivery ledger).  A line still sitting in a buffered stream when the
+    process dies cannot make that decision, so each write is followed by
+    flush → ``os.fsync`` → ``F_FULLFSYNC`` (macOS).  A sync that fails
+    refuses typed with the existing ``APPEND_LOCK_UNWRITABLE``: nothing is
+    posted and no answer is handed over.
+    """
+
+    @staticmethod
+    def _boom(*_args, **_kwargs):
+        raise OSError("sync refused (fixture)")
+
+    @staticmethod
+    def _answered(fake):
+        seed = client(fake)
+        row = envelope(ttl_seconds=86400 * 365 * 10)
+        ask_id = row["ask_id"]
+        assert seed.create_ask(row) is None
+        seed.append_ask_event(ask_id, {
+            "type": "answer", "answer_id": "gbm-" + "a" * 32,
+            "idempotency_key": "gb-ans-5a",
+            "text": "A harmless fixture answer."})
+        seed.append_ask_event(ask_id, {"type": "state", "state": "ANSWERED"})
+        return seed, ask_id
+
+    def test_a_failed_mint_sync_refuses_and_posts_nothing(self, fake,
+                                                          monkeypatch):
+        seed = client(fake)
+        row = envelope()
+        assert seed.create_ask(row) is None
+        comments = f"/api/issues/{fake.state.order[0]}/comments"
+        monkeypatch.setattr(pc, "_sync_ledger_line", self._boom,
+                            raising=False)
+
+        with pytest.raises(GblPaperclipError) as caught:
+            seed.append_ask_event(row["ask_id"],
+                                  {"type": "state", "state": "ANSWERED"})
+
+        assert caught.value.code == "APPEND_LOCK_UNWRITABLE"
+        assert count(fake, "POST", comments) == 0
+
+    def test_a_failed_delivery_sync_refuses_and_hands_nothing_over(
+            self, fake, monkeypatch):
+        seed, ask_id = self._answered(fake)
+        comments = f"/api/issues/{fake.state.order[0]}/comments"
+        before = count(fake, "POST", comments)
+        monkeypatch.setattr(pc, "_sync_ledger_line", self._boom,
+                            raising=False)
+
+        with pytest.raises(GblPaperclipError) as caught:
+            bridge_over(client(fake)).fetch_result(principal=PRINCIPAL,
+                                                   ask_id=ask_id)
+
+        assert caught.value.code == "APPEND_LOCK_UNWRITABLE"
+        # No CONSUMED post landed, so nothing was marked *or* handed over.
+        assert count(fake, "POST", comments) == before
+        assert not [event for event in seed.read_ask(ask_id)["events"]
+                    if event.get("type") == "state"
+                    and event.get("state") == "CONSUMED"]
+
+    def test_both_ledger_writes_sync_the_line(self, fake, monkeypatch):
+        original = getattr(pc, "_sync_ledger_line", None)
+        assert original is not None, "ledger writes must sync the line"
+        calls = []
+
+        def recording(handle):
+            calls.append(handle)
+            return original(handle)
+
+        monkeypatch.setattr(pc, "_sync_ledger_line", recording)
+        seed = client(fake)
+        row = envelope(ttl_seconds=86400 * 365 * 10)
+        ask_id = row["ask_id"]
+        assert seed.create_ask(row) is None
+        seed.append_ask_event(ask_id, {"type": "state", "state": "ANSWERED"})
+        seed.record_delivery(ask_id, "gbm-" + "a" * 32)
+
+        assert len(calls) == 2      # one mint line, one delivery line
+
+
+class _RecordingNudgeSender:
+    """A nudge transport that records every call.  The host-record arm
+    under test must never reach it."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, str, str]] = []
+        self.reconcile_calls: list[tuple[str, str, str]] = []
+
+    @staticmethod
+    def _receipt():
+        from control_plane.wake_dispatcher import (
+            TransportOutcome, TransportReceipt)
+        return TransportReceipt(outcome=TransportOutcome.ACCEPTED,
+                                reason_code="accepted",
+                                created_at="2026-11-11T12:00:00Z")
+
+    def send(self, ask_id, state, native_handle):
+        self.calls.append((ask_id, state, native_handle))
+        return self._receipt()
+
+    def reconcile(self, ask_id, state, native_handle):
+        self.reconcile_calls.append((ask_id, state, native_handle))
+        return self._receipt()
+
+
+class TestHostRecordWinsEverywhere:
+    """GBL-5 micro 5b (principal, 11:45Z): once the HOST's delivery record
+    exists for an ask, every later decision reads it — never the listing.
+
+    The listing can lag this host's own writes (``comment_visibility_lag``)
+    and a failed CONSUMED post never lands at all.  Before this fix the
+    record was consulted only by ``fetch_result``: after
+    ``DELIVERY_MARK_POST_FAILED`` that call was CONSUMED while
+    ``ask_status`` still said ANSWER_UNCONSUMED and both nudge arms kept
+    POSTing wakes until the budget was gone.  The record is the one source
+    that cannot lag, so it wins here too.  A store explicitly marked
+    ``GBL_TEST_DOUBLE`` keeps the plain listing read (it keeps no record).
+    """
+
+    @staticmethod
+    def _answered_with_failed_mark(fake):
+        """The report's exact shape: the delivery record is written, then
+        the CONSUMED post fails, so the listing still shows ANSWERED."""
+        seed = client(fake)
+        row = envelope(ttl_seconds=86400 * 365 * 10)
+        ask_id = row["ask_id"]
+        assert seed.create_ask(row) is None
+        seed.append_ask_event(ask_id, {
+            "type": "answer", "answer_id": "gbm-" + "a" * 32,
+            "idempotency_key": "gb-ans-5b",
+            "text": "A harmless fixture answer."})
+        seed.append_ask_event(ask_id, {"type": "state", "state": "ANSWERED"})
+        path = f"/api/issues/{fake.state.order[0]}/comments"
+        fake.state.fail_status[("POST", path)] = 403
+        with pytest.raises(GblBridgeError) as caught:
+            bridge_over(client(fake)).fetch_result(principal=PRINCIPAL,
+                                                   ask_id=ask_id)
+        assert caught.value.code == "DELIVERY_MARK_POST_FAILED"
+        # Later appends succeed again; the CONSUMED post itself never
+        # landed, so the listing is still (truthfully) ANSWERED.
+        fake.state.fail_status.pop(("POST", path))
+        return seed, ask_id
+
+    def test_status_reports_consumed_once_the_record_exists(self, fake):
+        _seed, ask_id = self._answered_with_failed_mark(fake)
+
+        status = bridge_over(client(fake)).ask_status(principal=PRINCIPAL,
+                                                      ask_id=ask_id)
+
+        assert status["status"] == "CONSUMED"
+        assert status["state"] == "CONSUMED"
+
+    def test_renudge_sends_nothing_once_the_record_exists(self, fake):
+        _seed, ask_id = self._answered_with_failed_mark(fake)
+        sender = _RecordingNudgeSender()
+        core = bridge_over(client(fake), nudge_sender=sender,
+                           routine_handle_resolver=lambda _p: "fixture-handle")
+
+        result = core.maybe_renudge(ask_id=ask_id)
+
+        assert result["status"] == "ALREADY_DELIVERED"
+        assert sender.calls == []           # the sender was never called
+
+    def test_reconcile_sends_nothing_once_the_record_exists(self, fake):
+        seed, ask_id = self._answered_with_failed_mark(fake)
+        # An unsettled attempt on the listing: the reconcile lane's whole
+        # job is to observe the transport for it.  A delivered answer owes
+        # no reconcile, so it must not be observed at all.
+        seed.append_ask_event(ask_id, {"type": "nudge_attempt",
+                                       "state": "ANSWERED",
+                                       "at": "2026-11-11T12:00:00Z"})
+        sender = _RecordingNudgeSender()
+        core = bridge_over(client(fake), nudge_sender=sender,
+                           routine_handle_resolver=lambda _p: "fixture-handle")
+
+        result = core.reconcile_nudge(principal=PRINCIPAL, ask_id=ask_id)
+
+        assert result["status"] == "ALREADY_DELIVERED"
+        assert sender.reconcile_calls == []  # the sender was never called
