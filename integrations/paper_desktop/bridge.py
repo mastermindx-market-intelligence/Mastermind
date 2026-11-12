@@ -542,6 +542,272 @@ REVIEWED_TOOL_CONTRACTS = {'arrange_pages': [{'annotations': {'destructiveHint':
                                  'required': ['fileId', 'html', 'mode', 'targetNodeId'],
                                  'type': 'object'}}]}
 
+# Exact f200 (Paper 0.5.18) descriptors retained in
+# tests/fixtures/paper_desktop/f200eaf_artboard_token_descriptors.json. The native
+# catalog spells string|number as a type array; this admits those exact shapes only.
+# Primitive-union equivalence is not generalized to other tools or schemas.
+REVIEWED_TOOL_CONTRACTS['create_artboard'].append(
+{'annotations': {'destructiveHint': True},
+ 'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                 'additionalProperties': False,
+                 'properties': {'fileId': {'description': 'The file ID that the tool should '
+                                                          'operate on.',
+                                           'type': 'string'},
+                                'name': {'description': 'Name for the artboard (shown in the layer '
+                                                        'tree).',
+                                         'type': 'string'},
+                                'pageId': {'description': 'The page ID that the tool should '
+                                                          'operate on. When omitted the active '
+                                                          'page will be used. The active page can '
+                                                          'change between tool calls, prefer '
+                                                          'passing explicit page IDs.',
+                                           'type': 'string'},
+                                'styles': {'additionalProperties': {'type': ['string', 'number']},
+                                           'description': 'CSS styles for the artboard as a JSON '
+                                                          'object. Use camelCase property names.\n'
+                                                          'width and height are required — use '
+                                                          'whole pixel values.\n'
+                                                          'When positioning an artboard make sure '
+                                                          'to give 80px of space between artboards '
+                                                          'to avoid overlaps.\n'
+                                                          'Example: {"display": "flex", '
+                                                          '"flexDirection": "column", "width": '
+                                                          '"1440px", "height": "900px", '
+                                                          '"backgroundColor": "#f5f5f5", '
+                                                          '"padding": "20px"}',
+                                           'properties': {'height': {'description': 'Height of the '
+                                                                                    'artboard as a '
+                                                                                    'whole pixel '
+                                                                                    'value (e.g. '
+                                                                                    '"900px").',
+                                                                     'type': 'string'},
+                                                          'width': {'description': 'Width of the '
+                                                                                   'artboard as a '
+                                                                                   'whole pixel '
+                                                                                   'value (e.g. '
+                                                                                   '"1440px").',
+                                                                    'type': 'string'}},
+                                           'required': ['width', 'height'],
+                                           'type': 'object'}},
+                 'required': ['name', 'styles', 'fileId'],
+                 'type': 'object'}})
+REVIEWED_TOOL_CONTRACTS['create_tokens'].append(
+{'annotations': {'destructiveHint': True},
+ 'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                 'additionalProperties': False,
+                 'properties': {'fileId': {'description': 'The file ID that the tool should '
+                                                          'operate on.',
+                                           'type': 'string'},
+                                'tokens': {'description': 'Design tokens to create. Each entry '
+                                                          'creates a new design token; duplicate '
+                                                          'names are allowed but discouraged.',
+                                           'items': {'additionalProperties': False,
+                                                     'properties': {'description': {'description': 'Optional '
+                                                                                                   'human-readable '
+                                                                                                   'description '
+                                                                                                   'of '
+                                                                                                   'what '
+                                                                                                   'the '
+                                                                                                   'design '
+                                                                                                   'token '
+                                                                                                   'is '
+                                                                                                   'for '
+                                                                                                   'and '
+                                                                                                   'how '
+                                                                                                   'it '
+                                                                                                   'should '
+                                                                                                   'be '
+                                                                                                   'used. '
+                                                                                                   'Max '
+                                                                                                   '1024 '
+                                                                                                   'characters.',
+                                                                                    'maxLength': 1024,
+                                                                                    'type': 'string'},
+                                                                    'name': {'description': 'CSS '
+                                                                                            'custom '
+                                                                                            'property '
+                                                                                            'name. '
+                                                                                            'E.g. '
+                                                                                            '"--color-primary".',
+                                                                             'pattern': '^--[a-zA-Z0-9_-]+$',
+                                                                             'type': 'string'},
+                                                                    'type': {'description': 'Design '
+                                                                                            'token '
+                                                                                            'type/category.',
+                                                                             'enum': ['breakpoint',
+                                                                                      'color',
+                                                                                      'container',
+                                                                                      'fontFamily',
+                                                                                      'fontSize',
+                                                                                      'fontWeight',
+                                                                                      'letterSpacing',
+                                                                                      'lineHeight',
+                                                                                      'opacity',
+                                                                                      'radius',
+                                                                                      'spacing'],
+                                                                             'type': 'string'},
+                                                                    'value': {'description': 'Design '
+                                                                                             'token '
+                                                                                             'value. '
+                                                                                             'For '
+                                                                                             'colors, '
+                                                                                             'use '
+                                                                                             'a '
+                                                                                             'CSS '
+                                                                                             'color '
+                                                                                             'string '
+                                                                                             'like '
+                                                                                             '"#ff0000" '
+                                                                                             'or '
+                                                                                             '"oklch(...)". '
+                                                                                             'For '
+                                                                                             'sizes '
+                                                                                             '(spacing, '
+                                                                                             'radius, '
+                                                                                             'fontSize, '
+                                                                                             'container, '
+                                                                                             'breakpoint), '
+                                                                                             'use '
+                                                                                             'a px '
+                                                                                             'string '
+                                                                                             'like '
+                                                                                             '"8px". '
+                                                                                             'For '
+                                                                                             'fontWeight, '
+                                                                                             'use '
+                                                                                             'a '
+                                                                                             'number '
+                                                                                             '(e.g. '
+                                                                                             '400). '
+                                                                                             'For '
+                                                                                             'lineHeight/letterSpacing, '
+                                                                                             'use '
+                                                                                             'a '
+                                                                                             'string '
+                                                                                             '("1.5px") '
+                                                                                             'or '
+                                                                                             'number. '
+                                                                                             'For '
+                                                                                             'opacity, '
+                                                                                             'use '
+                                                                                             'a '
+                                                                                             '0–1 '
+                                                                                             'number '
+                                                                                             '(e.g. '
+                                                                                             '0.5) '
+                                                                                             'or a '
+                                                                                             'percent '
+                                                                                             'string '
+                                                                                             '(e.g. '
+                                                                                             '"50%"). '
+                                                                                             'To '
+                                                                                             'alias '
+                                                                                             'another '
+                                                                                             'design '
+                                                                                             'token, '
+                                                                                             'use '
+                                                                                             'a '
+                                                                                             'CSS '
+                                                                                             'variable '
+                                                                                             'reference '
+                                                                                             'like '
+                                                                                             '"var(--color-red)".',
+                                                                              'type': ['string',
+                                                                                       'number']}},
+                                                     'required': ['type', 'name', 'value'],
+                                                     'type': 'object'},
+                                           'minItems': 1,
+                                           'type': 'array'}},
+                 'required': ['tokens', 'fileId'],
+                 'type': 'object'}})
+REVIEWED_TOOL_CONTRACTS['set_tokens'].append(
+{'annotations': {'destructiveHint': True},
+ 'inputSchema': {'$schema': 'https://json-schema.org/draft/2020-12/schema',
+                 'additionalProperties': False,
+                 'properties': {'fileId': {'description': 'The file ID that the tool should '
+                                                          'operate on.',
+                                           'type': 'string'},
+                                'tokens': {'description': 'Design tokens to update or delete, '
+                                                          'applied sequentially.',
+                                           'items': {'additionalProperties': False,
+                                                     'properties': {'delete': {'description': 'Optional. '
+                                                                                              'If '
+                                                                                              'true, '
+                                                                                              'deletes '
+                                                                                              'the '
+                                                                                              'design '
+                                                                                              'token '
+                                                                                              'entirely.',
+                                                                               'type': 'boolean'},
+                                                                    'description': {'description': 'Optional '
+                                                                                                   'human-readable '
+                                                                                                   'description '
+                                                                                                   'of '
+                                                                                                   'what '
+                                                                                                   'the '
+                                                                                                   'design '
+                                                                                                   'token '
+                                                                                                   'is '
+                                                                                                   'for '
+                                                                                                   'and '
+                                                                                                   'how '
+                                                                                                   'it '
+                                                                                                   'should '
+                                                                                                   'be '
+                                                                                                   'used. '
+                                                                                                   'Max '
+                                                                                                   '1024 '
+                                                                                                   'characters. '
+                                                                                                   'Pass '
+                                                                                                   'an '
+                                                                                                   'empty '
+                                                                                                   'string '
+                                                                                                   'to '
+                                                                                                   'clear.',
+                                                                                    'maxLength': 1024,
+                                                                                    'type': 'string'},
+                                                                    'name': {'description': 'Target '
+                                                                                            'design '
+                                                                                            'token '
+                                                                                            'by '
+                                                                                            'its '
+                                                                                            'full '
+                                                                                            'CSS '
+                                                                                            'custom '
+                                                                                            'property '
+                                                                                            'name '
+                                                                                            '(e.g. '
+                                                                                            '"--color-primary").',
+                                                                             'pattern': '^--[a-zA-Z0-9_-]+$',
+                                                                             'type': 'string'},
+                                                                    'newName': {'description': 'Optional. '
+                                                                                               'Rename '
+                                                                                               'the '
+                                                                                               'design '
+                                                                                               'token. '
+                                                                                               'Provide '
+                                                                                               'the '
+                                                                                               'full '
+                                                                                               'CSS '
+                                                                                               'custom '
+                                                                                               'property '
+                                                                                               'name '
+                                                                                               '(e.g. '
+                                                                                               '"--color-primary-strong").',
+                                                                                'pattern': '^--[a-zA-Z0-9_-]+$',
+                                                                                'type': 'string'},
+                                                                    'value': {'description': 'Optional. '
+                                                                                             'New '
+                                                                                             'value.',
+                                                                              'type': ['string',
+                                                                                       'number']}},
+                                                     'required': ['name'],
+                                                     'type': 'object'},
+                                           'minItems': 1,
+                                           'type': 'array'}},
+                 'required': ['tokens', 'fileId'],
+                 'type': 'object'}})
+
 SCHEMA_PRESENTATION_KEYS = frozenset({"description", "title", "examples", "$comment"})
 
 
