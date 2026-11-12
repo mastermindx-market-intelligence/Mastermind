@@ -388,7 +388,16 @@
           "PAGE_INJECT_FAILED","PAGE_DISPATCH_FAILED","PAGE_WORLD_UNAVAILABLE"]);
         const code = allowed.has(error && error.message) || /^(CDP_|FRAME_|STALE_NODE_|RESPONSE_|RESULT_|UPLOAD_|DOWNLOAD_|PAGE_|INPUT_|INVALID_|TARGET_OBSCURED|PDF_|EVALUATE_|NETWORK_|ROUTE_|EMULATE_)/.test(error?.message||"")
           ? error.message : "BROWSER_UNAVAILABLE";
-        const possible=attempted&&(!error?.knownNotApplied||error?.committed);
+        // A pure read (snapshot, validate, consume, diagnostics, read)
+        // applies nothing to the page, so even a rejection after the
+        // dispatch was sent can never have changed page state: `committed`
+        // must not wedge it into ACTION_EFFECT_UNKNOWN, or one lost reply
+        // would make the read an "uncertain action" that can never repeat
+        // and pagination would be stuck. A read-classified sub-call inside
+        // a mutation flow (validate_focus after an applied focus_ref) keeps
+        // the committed semantics of its enclosing mutation.
+        const pureRead=/^(snapshot|validate|consume|diagnostics|read)$/.test(r.action);
+        const possible=attempted&&(!error?.knownNotApplied||(error?.committed&&!pureRead));
         // An unexpected error is never again reduced to a bare BROWSER_UNAVAILABLE:
         // the receipt carries a bounded detail and the ring keeps the last 20.
         // A carried detail (CDP can attach one) is bounded and URL-cut here too.

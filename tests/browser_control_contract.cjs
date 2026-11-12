@@ -366,6 +366,19 @@ function fixture() {
     assert.equal(result.status,"PAGE_INJECT_FAILED");
     assert.equal(result.effect,"NOT_APPLIED");
   }
+  // A pure read whose reply is lost after dispatch is never wedged as
+  // EFFECT_UNKNOWN: reads apply nothing, so pagination may safely continue
+  // (a read must not become an "uncertain action" that can never repeat).
+  {
+    const f=fixture();await f.snapshot();
+    f.state.dispatchFailureOn="read";
+    const lost=await f.run(request("read",{params:{offset:0}}));
+    assert.equal(lost.status,"PAGE_INJECT_FAILED");
+    assert.equal(lost.effect,"NOT_APPLIED");
+    f.state.dispatchFailureOn=null;
+    const next=await f.run(request("read",{nonce:randomBytes(24).toString("hex"),params:{offset:0}}));
+    assert.equal(next.status,"ACTION_DISPATCHED","the next page read is not blocked");
+  }
   // The pre-dispatch failures stay NOT_APPLIED (nothing was sent).
   {
     const f=fixture();await f.snapshot();
