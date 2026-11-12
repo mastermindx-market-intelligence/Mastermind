@@ -401,8 +401,29 @@ jobs:
       # Require the positive in an isolated non-root Linux account whose HOME
       # has no ACL, with real /usr/bin/python3.12, real process and observer.
       # This Docker environment has no provider/host credentials or network.
+      # Fixture image acquisition is outage-hardened: since 2026-11-11 the
+      # hosted runners intermittently cannot reach any Ubuntu archive during
+      # docker build (Ign … InRelease, then "E: Unable to locate package
+      # python3.12") while the same archives answer from outside GitHub. The
+      # image is a pure function of the pinned Dockerfile (no COPY, digest-
+      # pinned base), so restore the exact built bytes from the Actions cache
+      # keyed by that Dockerfile's hash. apt runs only on a genuine cache
+      # miss (first build, Dockerfile change or eviction) and then the
+      # original build command runs unchanged. Every event restores read-only;
+      # only a protected master push may save under this key, so a pull
+      # request can never write the cache that master, merge groups and other
+      # pull requests restore (and caches are immutable per key anyway).
+      - name: Restore cached H1 fixture image
+        if: matrix.index == 2
+        id: h1_fixture_image_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/h1-fixture-image.tar
+          key: docker-fixture-h1-${{ runner.arch }}-ubuntu-24.04-68ee22004a91-${{ hashFiles('tests/h1_ci_fixture/Dockerfile') }}
       - name: H1 required real Linux no-ACL positive journey
         if: matrix.index == 2
+        env:
+          H1_FIXTURE_IMAGE_RESTORED: ${{ steps.h1_fixture_image_cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
           H1_CI_SOURCE="$(mktemp -d "${RUNNER_TEMP}/h1-public-source.XXXXXX")"
@@ -410,8 +431,19 @@ jobs:
           # checkout Git metadata and its authentication config stay outside.
           git archive --format=tar HEAD | tar -x -C "$H1_CI_SOURCE"
           chmod 0555 "$H1_CI_SOURCE"
-          docker build --file tests/h1_ci_fixture/Dockerfile \
-            --tag mastermind-h1-noacl:${{ github.sha }} tests/h1_ci_fixture
+          # Identical image bytes either way: the cached tar is a docker save
+          # of an image built from this exact Dockerfile; the load restores
+          # its layer/config unchanged and only the local tag differs. The
+          # run below is byte-identical in both branches.
+          if [ "$H1_FIXTURE_IMAGE_RESTORED" = "true" ]; then
+            docker load --input "$RUNNER_TEMP/h1-fixture-image.tar"
+            docker tag mastermind-h1-noacl:fixture-cache mastermind-h1-noacl:${{ github.sha }}
+          else
+            docker build --file tests/h1_ci_fixture/Dockerfile \
+              --tag mastermind-h1-noacl:${{ github.sha }} \
+              --tag mastermind-h1-noacl:fixture-cache tests/h1_ci_fixture
+            docker save --output "$RUNNER_TEMP/h1-fixture-image.tar" mastermind-h1-noacl:fixture-cache
+          fi
           docker run --rm --network=none --cap-drop=ALL \
             --security-opt=no-new-privileges --read-only \
             --env MMX_H1_CONTROLLED_LINUX_FIXTURE=1 \
@@ -431,6 +463,17 @@ jobs:
               /usr/bin/python3.12 -I -B /repo/tests/h1_ci_fixture/require_provider_entry.py /tmp/h1-provider-entry.xml
               echo "::notice title=H1 isolated provider module fixture proof::all 23 exact nodes passed; zero skipped, failures or errors; CI fixture only"
             '
+
+      # Publish the freshly built fixture image only from protected master
+      # pushes: pull requests and merge groups restore read-only, and a failed
+      # journey step (above) suppresses this save. A duplicate-key save (cache
+      # seeded concurrently) only warns; it cannot fail the shard.
+      - name: Save H1 fixture image for protected runs
+        if: ${{ matrix.index == 2 && github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.h1_fixture_image_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/h1-fixture-image.tar
+          key: docker-fixture-h1-${{ runner.arch }}-ubuntu-24.04-68ee22004a91-${{ hashFiles('tests/h1_ci_fixture/Dockerfile') }}
 
       - name: Prepare fixed test diagnostics
         run: |
@@ -489,8 +532,21 @@ jobs:
 
       # A root-only finite owner must have positive proof, not skipped tests.
       # The container receives only tracked public source and disposable tmpfs.
+      # Same outage hardening as the H1 fixture above: the image is a pure
+      # function of the pinned Dockerfile, so restore the previously built
+      # bytes from the Actions cache and run apt only on a genuine cache miss.
+      # Pull requests restore read-only; only a protected master push saves.
+      - name: Restore cached application transport fixture image
+        if: matrix.index == 0
+        id: application_transport_image_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/application-transport-image.tar
+          key: docker-fixture-application-transport-${{ runner.arch }}-ubuntu-24.04-68ee22004a91-${{ hashFiles('tests/application_tunnel_ci/Dockerfile') }}
       - name: Verify closed application transport in isolated root fixtures
         if: matrix.index == 0
+        env:
+          APPLICATION_TRANSPORT_IMAGE_RESTORED: ${{ steps.application_transport_image_cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
           application_transport_source="$(mktemp -d "${RUNNER_TEMP}/application-transport-source.XXXXXX")"
@@ -498,14 +554,32 @@ jobs:
           git archive --format=tar HEAD | tar -x -C "$application_transport_source"
           # The isolated root has no DAC override; expose only this public archive.
           chmod 0755 "$application_transport_source"
-          docker build --file tests/application_tunnel_ci/Dockerfile \
-            --tag mastermind-application-transport:${{ github.sha }} tests/application_tunnel_ci
+          # Identical image bytes either way (see the H1 fixture note above);
+          # the run below is byte-identical in both branches.
+          if [ "$APPLICATION_TRANSPORT_IMAGE_RESTORED" = "true" ]; then
+            docker load --input "$RUNNER_TEMP/application-transport-image.tar"
+            docker tag mastermind-application-transport:fixture-cache mastermind-application-transport:${{ github.sha }}
+          else
+            docker build --file tests/application_tunnel_ci/Dockerfile \
+              --tag mastermind-application-transport:${{ github.sha }} \
+              --tag mastermind-application-transport:fixture-cache tests/application_tunnel_ci
+            docker save --output "$RUNNER_TEMP/application-transport-image.tar" mastermind-application-transport:fixture-cache
+          fi
           docker run --rm --network=none --cap-drop=ALL \
             --security-opt=no-new-privileges --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777 \
             --tmpfs /fixture:rw,exec,nosuid,nodev,mode=0755 \
             --mount "type=bind,src=${application_transport_source},dst=/repo,readonly" \
             mastermind-application-transport:${{ github.sha }}
+
+      # Publish the freshly built fixture image only from protected master
+      # pushes, mirroring the H1 save gate above.
+      - name: Save application transport fixture image for protected runs
+        if: ${{ matrix.index == 0 && github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.application_transport_image_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/application-transport-image.tar
+          key: docker-fixture-application-transport-${{ runner.arch }}-ubuntu-24.04-68ee22004a91-${{ hashFiles('tests/application_tunnel_ci/Dockerfile') }}
 
       # Use a separate pinned owner fixture; keep the ordinary Macro vendor pin.
       # This executes before any full-suite reuse decision, including merge_group.
@@ -659,7 +733,17 @@ jobs:
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
             -p test_fabric_text_cross_pool_auto.py -v
           python -m pip install --disable-pip-version-check playwright==1.62.0
-          python -m playwright install --with-deps chromium
+          # The hosted Ubuntu 24.04 image ships Chrome/Chromium and therefore
+          # the shared libraries playwright's chromium needs; only the browser
+          # binary itself comes from the Playwright CDN. Prefer the full apt
+          # dependency install, but an Ubuntu archive outage (observed
+          # 2026-11-11) must not block this gate when those libraries already
+          # exist on the image. Nothing is weakened: the browser test below
+          # still has to launch chromium for real, so a genuinely missing
+          # library fails this gate honestly.
+          python -m playwright install --with-deps chromium ||
+            { echo "::warning title=playwright apt dependencies unavailable::using preinstalled runner image libraries";
+              python -m playwright install chromium; }
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
             -p test_fabric_chat_browser.py -v
 
