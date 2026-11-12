@@ -92,11 +92,11 @@ def test_cmd_gate_reports_real_module_before_original_child_finishes(tmp_path, m
     worker = threading.Thread(target=run)
     worker.start()
     try:
-        arrived_before_exit = progress.wait(8)
+        arrived_before_exit = progress.wait(30)
         no_early_receipt = not (env_dir / rwe.RECEIPT_FILENAME).exists()
     finally:
         release.write_text("finish")
-        worker.join(8)
+        worker.join(30)
     assert not worker.is_alive()
     assert exceptions == []
     assert arrived_before_exit

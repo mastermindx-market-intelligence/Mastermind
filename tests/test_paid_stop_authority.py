@@ -763,7 +763,9 @@ def test_authority_retains_its_captured_peer_until_finalization(world,monkeypatc
     assert refs[0]() is None
 
 
-@pytest.mark.parametrize('stamp',[now_stamp(-90000),now_stamp(3600)])
+# Stable ids: each xdist worker collects in its own interpreter, so a
+# time-derived id differs across a second boundary and aborts the shard.
+@pytest.mark.parametrize('stamp',[now_stamp(-90000),now_stamp(3600)],ids=['stale','future'])
 def test_existing_inflight_timestamp_has_no_invented_expiry(world,stamp):
     world.receipt.content=marker_for(world.intent,started=stamp)
     authority=world.qualify()

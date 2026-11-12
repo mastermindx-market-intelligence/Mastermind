@@ -1900,7 +1900,16 @@ def _service_from_config(
     attended_work_placements: tuple = (),
     paid_worker_binding_source: Any | None = None,
     byok_roles_reader: Callable[..., Any] | None = None,
+    capacity_fabric_source: Any | None = None,
 ) -> ExecutiveControlService:
+    # Only the installed owner may inject this existing pure observation
+    # source. Validate before adopting listeners; never select it from JSON,
+    # a browser request, environment, or a guessed host path.
+    if capacity_fabric_source is not None:
+        from control_plane.workspace_capacity_fabric import ExistingCapacityFabricSource
+        if (type(capacity_fabric_source) is not ExistingCapacityFabricSource
+                or "workspace_acquisition" not in raw):
+            raise ServiceError("capacity source requires exact installed Workspace composition")
     if "workspace_acquisition" in raw:
         # Closed unix/launchd stanza only. validate_workspace_control_room
         # refuses the legacy TCP port stanza and accepts no port or
@@ -2633,6 +2642,7 @@ def _service_from_config(
                 # No control.json/browser selection or local M2 fallback. Until a
                 # trusted remote host observer is supplied this remains unbound.
                 byok_roles_reader=byok_roles_reader,
+                capacity_fabric_source=capacity_fabric_source,
                 project_admission_permissions=project_admission_permissions(policy=policy,load_bindings=workspace_acquisition_loader),
                 instruction_admission_permissions=instruction_admission_permissions(policy=policy,load_bindings=workspace_acquisition_loader),
                 authorize_discovery=authorize_discovery, authorize_actions=authorize_actions,

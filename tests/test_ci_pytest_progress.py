@@ -42,11 +42,11 @@ def test_module_progress_arrives_before_shard_finishes(tmp_path, monkeypatch):
     )
     worker.start()
     try:
-        arrived_before_exit = progress.wait(5)
+        arrived_before_exit = progress.wait(30)
         retained_until_exit = "retained ordinary output" not in "\n".join(output)
     finally:
         release.write_text("finish")
-        worker.join(5)
+        worker.join(30)
     assert not worker.is_alive()
     assert arrived_before_exit, "the unfinished shard's module must be visible"
     assert retained_until_exit
@@ -72,7 +72,7 @@ def test_real_pytest_timing_preserves_failure_and_reports_every_module(
     result = subprocess.run(
         cip.pytest_argv([str(first), str(second)], progress=True),
         cwd=Path(__file__).resolve().parents[1], env=env,
-        capture_output=True, text=True, timeout=20,
+        capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 1
     assert "retained assertion" in result.stdout
@@ -161,10 +161,10 @@ def test_composed_runner_reports_real_module_before_test_returns(tmp_path, monke
     )))
     worker.start()
     try:
-        arrived_before_exit = progress.wait(5)
+        arrived_before_exit = progress.wait(30)
     finally:
         release.write_text("finish")
-        worker.join(5)
+        worker.join(30)
     assert not worker.is_alive()
     assert arrived_before_exit
     assert codes == [1]

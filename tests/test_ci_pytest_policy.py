@@ -220,6 +220,7 @@ jobs:
     comments_only = """
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   merge_group:
     types: [checks_requested]
   push:
@@ -256,6 +257,7 @@ def _valid_on_block() -> str:
     return (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -299,6 +301,7 @@ def test_validate_workflow_rejects_missing_event():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  push:\n"
         "    branches:\n"
         "      - master\n"
@@ -338,6 +341,7 @@ def test_validate_workflow_rejects_wrong_merge_group_types():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested, labeled]\n"
         "  push:\n"
@@ -353,6 +357,7 @@ def test_validate_workflow_rejects_wrong_push_branches():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -398,6 +403,7 @@ def test_validate_workflow_rejects_empty_merge_group():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group: {}\n"
         "  push:\n"
         "    branches:\n"
@@ -412,6 +418,7 @@ def test_validate_workflow_rejects_filtered_workflow_dispatch():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -463,6 +470,7 @@ def test_validate_workflow_rejects_merge_key_in_on_block():
         "on:\n"
         "  <<: *hidden_defaults\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -528,6 +536,7 @@ def test_validate_workflow_rejects_duplicate_unquoted_on():
         "name: CI\n"
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "on:\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
@@ -550,6 +559,7 @@ def test_validate_workflow_rejects_duplicate_quoted_on():
         "name: CI\n"
         '"on":\n'
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         '"on":\n'
         "  merge_group:\n"
         "    types: [checks_requested]\n"
@@ -572,6 +582,7 @@ def test_validate_workflow_rejects_quoted_and_unquoted_on():
         "name: CI\n"
         '"on":\n'
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "on:\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
@@ -640,6 +651,7 @@ def test_validate_workflow_rejects_unhashable_event_level_key():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -831,6 +843,7 @@ def test_validate_workflow_rejects_mixed_type_extra_keys():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -1052,8 +1065,9 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     ]
     assert len(test_steps) == 1
     assert test_steps[0]["run"] == (
+        "umask 022\n"
         "python -m scripts.ci_parallel_shard --jobs 6 --index "
-        "${{ matrix.index }}"
+        "${{ matrix.index }}\n"
     )
     assert all(step.get("continue-on-error", False) is False for step in shard_steps)
     # CI Lightning F3: the five qualification gates moved verbatim out of
@@ -1087,9 +1101,10 @@ def test_hosted_gate_stays_a_single_required_check_job():
     assert list(workflow["jobs"]) == ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards", "test"]
     job = workflow["jobs"]["test"]
     assert "strategy" not in job
-    assert job["name"] == "test"
+    from scripts import ci_parallel_shard as fan
+    assert job["name"] == fan._REQUIRED_GATE_NAME
     assert job["runs-on"] == "ubuntu-latest"
-    assert job["if"] == "${{ always() }}"
+    assert job["if"] == fan._REQUIRED_GATE_IF
     assert job["needs"] == ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards"]
     gate_steps = [
         step for step in job["steps"]
@@ -1468,3 +1483,37 @@ def test_source_bound_fast_preflight_regression_rejects_coverage_or_order_loss(c
         steps.append(step)
     with pytest.raises(AssertionError):
         _assert_fast_release_preflight(workflow)
+
+
+def test_in_job_shards_get_disjoint_basetemps(monkeypatch, tmp_path):
+    # run_shards builds every shard argv in one process, so a pid-only
+    # basetemp would be shared and pytest would delete a sibling's tree.
+    monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "rt"))
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmp"))
+    seen: list[str] = []
+
+    class _Done:
+        returncode = 0
+        stdout = iter(())
+
+        def __init__(self, argv, **_kwargs):
+            seen.append(argv[argv.index("--basetemp") + 1])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def wait(self, *_a, **_k):
+            return 0
+
+    monkeypatch.setattr(cip.subprocess, "Popen", _Done)
+    try:
+        cip.run_shards((("tests/a.py",), ("tests/b.py",), ("tests/c.py",)), root=tmp_path)
+    except Exception:
+        pass
+    assert len(seen) == 3
+    assert len(set(seen)) == 3
+    assert {Path(p).name for p in seen} == {f"b{cip.os.getpid()}_{i}" for i in range(3)}
