@@ -304,6 +304,37 @@ def transport_capability_digest() -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+# Transport compatibility with the immediately previous bridge release. The
+# native host admits exactly one previous digest alongside its own so a fleet
+# can cross the release one profile and one session at a time (ruling 16: a
+# method that makes running sessions fail is not installed while other
+# programmes have operators at work). The commit names the release this
+# digest belongs to; there is no wildcard and no "any older".
+PREVIOUS_TRANSPORT_CAPABILITY_RELEASE_COMMIT = (
+    "5aa30969241163b4abb3e025bc9e52123ee4b478"
+)
+PREVIOUS_TRANSPORT_CAPABILITY_DIGEST = (
+    "e0216d3d9e9f05edef32ff642cb82a1281b1a9766d5cc35f694c88e0ef0bb0bb"
+)
+
+
+def transport_capability_action_set(digest_value: Any):
+    """Return the browser action set a peer presenting this digest is held to.
+
+    The current release's digest maps to the current action set; the one
+    previous release's digest maps to that release's set. Any other digest is
+    unknown and the presenting peer is refused: ``None``.
+    """
+
+    from . import web_sol_browser_protocol as browser
+
+    if digest_value == transport_capability_digest():
+        return browser.ACTIONS
+    if digest_value == PREVIOUS_TRANSPORT_CAPABILITY_DIGEST:
+        return browser.PREVIOUS_ACTIONS
+    return None
+
+
 def _validate_transport_message(
     value: Any,
     *,

@@ -156,12 +156,18 @@ def plugin_package(release_root, base, source_commit):
     return package, commit
 
 
-def install_profiles(release_root, manifest, base, python_executable, enrollment, *, prior_source=None):
+def install_profiles(release_root, manifest, base, python_executable, enrollment, *, prior_source=None, staging_root=None, update_loaded=False):
     """Add/update named profiles using observed prior bytes; never rewrite Chrome preferences.
 
     The enrollment is host-owned installation input, not a model tool argument.
     Existing unrelated routes survive. A previous immutable source commit is
     required to replace a native registration or loaded extension's code.
+    By default the bytes of a folder Chrome has already loaded are never
+    changed: ``update_loaded=False`` skips the loaded-folder rewrite entirely
+    and the release is staged under ``staging_root`` (default: the historical
+    0.5.0 Downloads root). The profile is moved to the new bytes by an
+    explicit extension reload from the staging folder, never by an unbidden
+    byte change under a running service worker.
     """
     from integrations.hermes_harness import browser_routes as routes
     from integrations.chairman_surfaces.web_sol_deployment import WebSolRelease, render_census_extension_bundle, _CENSUS_SOURCE_NAMES, verify_deployment_readback
@@ -184,6 +190,8 @@ def install_profiles(release_root, manifest, base, python_executable, enrollment
     assets=release_root/"integrations/chairman_surfaces/web_sol_extension"
     sources={name:read_owned(assets/name) for name in _CENSUS_SOURCE_NAMES}
     expected={name:manifest["files"]["integrations/chairman_surfaces/web_sol_extension/"+name] for name in _CENSUS_SOURCE_NAMES}
+    staging_root_path=(Path(staging_root).expanduser() if staging_root is not None
+                       else Path.home()/"Downloads"/"Mastermind-Browser-0.5.0")
     rows={(r["host_ref"],r["browser_id"]):r for r in document["profiles"]}
     hosts={h["host_ref"]:h for h in document["hosts"]}
     pending=[];receipts=[]
@@ -204,7 +212,7 @@ def install_profiles(release_root, manifest, base, python_executable, enrollment
         bundle=render_census_extension_bundle({},release,source_files=sources,expected_source_digests=expected,instance_id=instance)
         native=next(a for a in bundle.artifacts if a.kind=="native_host_manifest")
         native_path=chrome_root/"NativeMessagingHosts"/native.destination.name
-        extension=Path.home()/"Downloads"/"Mastermind-Browser-0.5.0"/("Chrome-"+supplied["alias"])
+        extension=staging_root_path/("Chrome-"+supplied["alias"])
         row=dict(supplied,host_ref=host_ref,browser_id=instance,manager="chrome",extension_path=str(extension),native_host_manifest=str(native_path))
         # Validate coordinates before constructing any path from an alias.
         routes.validate(dict(schema=routes.SCHEMA,local_host_ref=host_ref,hosts=[hosts[host_ref]],profiles=[row]))
@@ -234,7 +242,13 @@ def install_profiles(release_root, manifest, base, python_executable, enrollment
                 changes.append((prepared,artifact.content,artifact.mode,prepared_prior))
         changes.append((native_path,native.content,0o600,digest(previous_native) if previous_native else None))
         loaded=routes.registration(row)
-        if loaded.get("installed") and loaded.get("loaded_path")!=str(extension):
+        # Default: never change the bytes of a folder Chrome has loaded. The
+        # MV3 service worker re-reads its scripts from disk on every wake, so
+        # rewriting a loaded folder takes effect with no person acting and
+        # can mix an old worker with new page scripts. The reload step moves
+        # the profile to the staged bytes instead; the rewrite exists only
+        # for an explicitly requested in-place update.
+        if update_loaded and loaded.get("installed") and loaded.get("loaded_path")!=str(extension):
             loaded_path=Path(loaded["loaded_path"])
             # Only replace our exact old source assets. Unknown local edits and
             # other extension owners are a reconciliation boundary.
@@ -322,6 +336,10 @@ def main():
     parser.add_argument("--hermes-profile",type=Path,action="append",default=[])
     parser.add_argument("--enrollment",type=Path)
     parser.add_argument("--prior-source")
+    parser.add_argument("--staging-root",type=Path,
+        help="fresh per-release staging root for Chrome-<alias> folders (default: ~/Downloads/Mastermind-Browser-0.5.0)")
+    parser.add_argument("--update-loaded",action="store_true",
+        help="also rewrite extension bytes inside folders Chrome has already loaded (default: never)")
     args=parser.parse_args()
     if sys.platform not in {"darwin","linux"}:
         raise RuntimeError("this installer targets macOS and Linux")
@@ -329,7 +347,8 @@ def main():
     release, manifest=stage_release(args.build_manifest,base)
     if args.enrollment:
         if args.chrome_profile or args.hermes_profile:raise RuntimeError("named enrollment uses the separate native upgrade specification")
-        inventory,chrome=install_profiles(release,manifest,base,args.python.resolve(),json.loads(read_owned(args.enrollment)),prior_source=args.prior_source)
+        inventory,chrome=install_profiles(release,manifest,base,args.python.resolve(),json.loads(read_owned(args.enrollment)),
+            prior_source=args.prior_source,staging_root=args.staging_root,update_loaded=args.update_loaded)
     else:
         if sys.platform!="darwin" or not args.chrome_profile:raise RuntimeError("named enrollment required")
         inventory,chrome=install_chrome(release,manifest,base,args.python.resolve(),args.chrome_profile)
