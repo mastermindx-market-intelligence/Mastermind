@@ -2,15 +2,37 @@
 
 Advisory only: no worker/admission, policy, retry, lease or acceptance authority.
 Exactly one native System One POST per evaluation. No auto-retries.
+
+The transport is owner-selected. Two modes exist and only the second is new:
+
+``direct`` (the default, unchanged)
+    POST the vendor System One endpoint with the vendor key. This is the
+    existing explicit standalone configuration and it stays available.
+
+``shared_gateway`` (optional, default off, fail-closed)
+    POST an owner-run loopback proxy that already holds the vendor key and owns
+    the organization-scoped RPM/credit budget. It is selected only by
+    ``JEV_TRANSPORT=shared_gateway`` and requires ``JEV_GATEWAY_ENDPOINT`` (an
+    exact loopback ``.../v1/systemone`` URL) plus ``JEV_GATEWAY_TOKEN`` (the
+    local scoped bearer that proxy admits). In this mode the advisory never
+    falls back to the direct vendor key, never rotates a credential, never
+    skips the shared budget, never retries and never rewrites the ``jev-latest``
+    slug. A missing or invalid shared-gateway configuration fails closed with a
+    bounded ``JevUnavailable`` code before any socket is opened.
+
+The advisory itself stays default-off and typed-only: the native request
+boundary keeps its own ``FABRIC_JEV_MODE=off`` default, so selecting the
+shared gateway never by itself enables an advisory call.
 """
 from __future__ import annotations
 import http.client
+import ipaddress
 import json
 import math
 import os
 import time
 from typing import Any, Callable
-from urllib import error, request
+from urllib import error, parse, request
 
 ENDPOINT = "https://api.experientiallabs.ai/v1/systemone"
 MODEL = "jev-latest"
@@ -18,6 +40,21 @@ MAX_STATE_BYTES = 30000
 MAX_BODY_BYTES = 48000
 MAX_REPLY_BYTES = 65536
 COMPLEXITIES = ("C0_MECHANICAL", "C1_ROUTINE_BOUNDED", "C2_COMPLEX_BOUNDED", "C3_FRONTIER_JUDGMENT")
+
+DIRECT_TRANSPORT = "direct"
+SHARED_GATEWAY_TRANSPORT = "shared_gateway"
+TRANSPORT_ENV = "JEV_TRANSPORT"
+GATEWAY_ENDPOINT_ENV = "JEV_GATEWAY_ENDPOINT"
+GATEWAY_TOKEN_ENV = "JEV_GATEWAY_TOKEN"
+# The shared proxy serves the System One route at this exact path only.
+GATEWAY_PATH = "/v1/systemone"
+# The incumbent proxy admits a local bearer of at least 24 characters. The
+# client holds the same admission rule so an unusable token is refused before a
+# socket is opened rather than after a refused round trip.
+MIN_GATEWAY_TOKEN_CHARS = 24
+# An owner-approved encrypted tunnel terminates on loopback as well; only the
+# transport scheme differs, never the host, port or path.
+GATEWAY_SCHEMES = ("http", "https")
 
 
 class JevUnavailable(RuntimeError):
@@ -32,13 +69,24 @@ class NoRedirect(request.HTTPRedirectHandler):
         return None
 
 
-def native_post(body: bytes, key: str, timeout: float) -> dict[str, Any]:
+def native_post(body: bytes, key: str, timeout: float, endpoint: str = ENDPOINT,
+               opener: Any = None) -> dict[str, Any]:
+    """Send exactly one bounded System One POST and return the typed reply.
+
+    ``endpoint`` is the direct vendor endpoint unless the owner selected the
+    shared gateway, in which case it is an already validated loopback URL. Any
+    other endpoint is re-validated here, so no caller can reach a non-loopback
+    host through this function. ``opener`` replaces only the urllib opener for
+    offline wire qualification; it never reaches a real socket in this module.
+    """
+    if endpoint != ENDPOINT:
+        endpoint = gateway_endpoint(endpoint)
     http_request = request.Request(
-        ENDPOINT, data=body, method="POST",
+        endpoint, data=body, method="POST",
         headers={"Authorization": "Bearer " + key,
                  "Content-Type": "application/json", "Accept": "application/json"})
     try:
-        with request.build_opener(NoRedirect).open(http_request, timeout=timeout) as response:
+        with (opener or request.build_opener(NoRedirect)).open(http_request, timeout=timeout) as response:
             data = response.read(MAX_REPLY_BYTES + 1)
     except error.HTTPError as exc:
         raise JevUnavailable("HTTP_" + str(exc.code)) from None
@@ -53,6 +101,94 @@ def native_post(body: bytes, key: str, timeout: float) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise JevUnavailable("INVALID_RESPONSE")
     return value
+
+
+def _loopback_literal(host: str) -> str | None:
+    """Return the loopback literal for ``host`` or None when it is not loopback.
+
+    Names are never resolved. A rebound answer can therefore never redirect
+    the advisory, and only an address literal or the reserved loopback name is
+    accepted.
+    """
+    if host.lower() == "localhost":
+        return "127.0.0.1"
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return None
+    if not address.is_loopback:
+        return None
+    return "[" + str(address) + "]" if address.version == 6 else str(address)
+
+
+def gateway_endpoint(raw: str) -> str:
+    """Return the validated loopback gateway endpoint or fail closed.
+
+    The accepted endpoint is exactly ``http://<loopback>:<port>/v1/systemone``
+    (or the same shape over ``https`` for an owner-approved encrypted tunnel
+    that terminates on loopback). Userinfo, a query, a fragment, any other
+    path, a missing or privileged port and any address outside loopback are
+    refused before a socket is opened.
+    """
+    if not isinstance(raw, str):
+        raise JevUnavailable("GATEWAY_ENDPOINT_INVALID")
+    value = raw.strip()
+    if not value or any(ch.isspace() or ord(ch) < 0x21 or ord(ch) == 0x7F for ch in value):
+        raise JevUnavailable("GATEWAY_ENDPOINT_INVALID")
+    try:
+        parts = parse.urlsplit(value)
+        port = parts.port
+    except ValueError:
+        raise JevUnavailable("GATEWAY_ENDPOINT_INVALID") from None
+    if parts.scheme.lower() not in GATEWAY_SCHEMES:
+        raise JevUnavailable("GATEWAY_ENDPOINT_INVALID")
+    if "@" in parts.netloc or parts.username is not None or parts.password is not None:
+        raise JevUnavailable("GATEWAY_ENDPOINT_INVALID")
+    if parts.query or parts.fragment:
+        raise JevUnavailable("GATEWAY_ENDPOINT_INVALID")
+    if parts.path != GATEWAY_PATH:
+        raise JevUnavailable("GATEWAY_ENDPOINT_INVALID")
+    if port is None or not 1024 <= port <= 65535:
+        raise JevUnavailable("GATEWAY_ENDPOINT_INVALID")
+    literal = _loopback_literal(parts.hostname or "")
+    if literal is None:
+        raise JevUnavailable("GATEWAY_ENDPOINT_INVALID")
+    return "%s://%s:%d%s" % (parts.scheme.lower(), literal, port, GATEWAY_PATH)
+
+
+def _shared_gateway_target() -> tuple[str, str]:
+    """Resolve the owner-selected loopback endpoint and its scoped bearer."""
+    endpoint = os.environ.get(GATEWAY_ENDPOINT_ENV)
+    token = os.environ.get(GATEWAY_TOKEN_ENV)
+    if not endpoint or not endpoint.strip() or not token or not token.strip():
+        raise JevUnavailable("GATEWAY_NOT_CONFIGURED")
+    token = token.strip()
+    if len(token) < MIN_GATEWAY_TOKEN_CHARS:
+        raise JevUnavailable("GATEWAY_TOKEN_INVALID")
+    # The bearer is carried in a header. A control character would leave the
+    # request before this module could refuse it, so it is refused here with a
+    # bounded code instead of surfacing as an unwrapped transport error.
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in token):
+        raise JevUnavailable("GATEWAY_TOKEN_INVALID")
+    return gateway_endpoint(endpoint), token
+
+
+def _transport_plan(api_key: str | None) -> tuple[str, str]:
+    """Return the (endpoint, bearer) pair for the owner-selected transport.
+
+    The shared gateway never borrows the direct vendor key: an unusable shared
+    configuration fails closed instead of quietly reaching the vendor directly.
+    """
+    mode = (os.environ.get(TRANSPORT_ENV) or "").strip().lower() or DIRECT_TRANSPORT
+    if mode == SHARED_GATEWAY_TRANSPORT:
+        return _shared_gateway_target()
+    if mode != DIRECT_TRANSPORT:
+        raise JevUnavailable("TRANSPORT_INVALID")
+    key = api_key if api_key is not None else (os.environ.get("EXPERIENTIAL_API_KEY")
+        or os.environ.get("EXPLABS_API_KEY") or os.environ.get("EXPLABS_KEY_1"))
+    if not key:
+        raise JevUnavailable("NOT_CONFIGURED")
+    return ENDPOINT, key
 
 
 TASK_QUESTIONS: dict[str, dict[str, Any]] = {
@@ -152,9 +288,15 @@ def evaluate(kind: str, state: dict[str, Any], *,
              candidates: list[str] | None = None,
              api_key: str | None = None,
              timeout_s: float = 3.0,
-             transport: Callable[[bytes, str, float], dict[str, Any]] | None = None
+             transport: Callable[[bytes, str, float], dict[str, Any]] | None = None,
+             opener: Any = None
              ) -> dict[str, Any]:
-    """Return a validated typed advisory; transport injection is for offline tests."""
+    """Return a validated typed advisory; transport injection is for offline tests.
+
+    ``transport`` replaces the whole send and keeps the incumbent three
+    argument call form. ``opener`` replaces only the urllib opener, so the real
+    endpoint, headers, redirect refusal and error mapping stay qualified.
+    """
     if kind not in ("task", "result", "skills") or not isinstance(state, dict):
         raise JevUnavailable("INVALID_INPUT")
     if not isinstance(timeout_s, (int, float)) or not math.isfinite(timeout_s) or not 0 < timeout_s <= 15:
@@ -185,13 +327,12 @@ def evaluate(kind: str, state: dict[str, Any], *,
                       ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(body) > MAX_BODY_BYTES:
         raise JevUnavailable("BODY_TOO_LARGE")
-    key = api_key if api_key is not None else (os.environ.get("EXPERIENTIAL_API_KEY")
-        or os.environ.get("EXPLABS_API_KEY") or os.environ.get("EXPLABS_KEY_1"))
-    if not key:
-        raise JevUnavailable("NOT_CONFIGURED")
+    endpoint, bearer = _transport_plan(api_key)
     start = time.monotonic()
+    sender = transport or (lambda payload, secret, budget:
+                           native_post(payload, secret, budget, endpoint, opener))
     try:
-        response = (transport or native_post)(body, key, timeout_s)
+        response = sender(body, bearer, timeout_s)
     except (error.URLError, OSError, TimeoutError, http.client.HTTPException):
         # A provider transport failure is an advisory miss with a bounded
         # code. Never let a raw provider exception carry request text or
