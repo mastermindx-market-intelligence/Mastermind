@@ -137,3 +137,15 @@ def test_task_first_direct_execution_is_visible_in_project_and_native_briefs():
     assert "No PR absent" in native
     assert "A failed\n  worker dispatch is not required" in native
     assert "## Keep real boundaries" in native
+
+def test_old_blanket_retry_language_is_not_reintroduced_in_live_source():
+    active = (ROOT / "docs/sol_skills/ACTIVE_EXECUTION.md").read_text()
+    native = (ROOT / "docs/NATIVE_EXECUTION_BRIEF.md").read_text()
+    kernel = _block()
+    for text in (active, native, kernel):
+        normalized = " ".join(text.lower().split())
+        assert "no rephrased request" not in normalized
+        assert "first explicit safety or permission denial ends retry" not in normalized
+        assert "no rephrased/cross-tool/account/provider evasion" not in normalized
+    assert "technical failures must be evaluated separately" in active
+    assert "technical recovery" in kernel
