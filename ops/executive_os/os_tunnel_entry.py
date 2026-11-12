@@ -140,6 +140,51 @@ def application_launch_spec(config: dict, credential: bytes) -> tuple[str, list[
     return binary, argv, {"PATH": "/usr/bin:/bin", "LANG": "C", "AUTH": auth}
 
 
+# ---------------------------------------------------------------- CAPACITY
+# Additive capacity-purpose reverse on the same incumbent transport owner.
+# Everything above this marker is byte-identical to the OS-public and
+# APPLICATION contract; tests/test_capacity_tunnel_entry.py pins that prefix.
+# A collision is refused, never resolved by searching for another port.
+CAPACITY_SCHEMA = "mastermind.capacity_tunnel.v1"
+CAPACITY_AUDIENCE = "mastermind-capacity"
+# The VPS-side listener and the M2-side native target are both 8313: the
+# Capacity Fabric gateway accepts only a loopback peer, so the reverse lands on
+# the M2 loopback address where the unified_router listens.
+CAPACITY_RELAY_PORT = 8313
+CAPACITY_TARGET_PORT = 8313
+CAPACITY_REVERSE = f"R:127.0.0.1:{CAPACITY_RELAY_PORT}"
+CAPACITY_REVERSE_TARGET = f"{CAPACITY_REVERSE}:127.0.0.1:{CAPACITY_TARGET_PORT}"
+CAPACITY_REMOTE_REGEX = r"^R:127\.0\.0\.1:8313$"
+
+
+def capacity_launch_spec(config: dict, credential: bytes) -> tuple[str, list[str], dict[str, str]]:
+    """Closed CAPACITY compiler; purpose, host, listener, target and port are fixed.
+
+    The configuration carries no port, host, executable, command, proxy, SOCKS
+    remote or credential selector: the reverse listener, the native target, the
+    server endpoint and the hash-addressed binary path are source constants.
+    Only the observed binary digest and the independently pinned server
+    fingerprint are supplied. The identity is the dedicated least-privilege
+    mastermind-capacity principal, never the APPLICATION principal.
+    """
+    if (type(config) is not dict or set(config) != {"schema", "binary_sha256", "server_fingerprint"}
+            or config["schema"] != CAPACITY_SCHEMA
+            or type(config["binary_sha256"]) is not str
+            or not re.fullmatch(r"[0-9a-f]{64}", config["binary_sha256"])
+            or type(config["server_fingerprint"]) is not str
+            or not re.fullmatch(r"[A-Za-z0-9+/]{43}=", config["server_fingerprint"])):
+        raise ValueError("capacity tunnel configuration refused")
+    if type(credential) is not bytes or not 32 <= len(credential) <= 1024:
+        raise ValueError("capacity tunnel credential refused")
+    auth = credential.decode("ascii", errors="strict").removesuffix("\n")
+    if not re.fullmatch(r"mastermind-capacity:[A-Za-z0-9_-]{32,128}", auth):
+        raise ValueError("capacity tunnel credential refused")
+    binary = str(ROOT / "transports/chisel" / config["binary_sha256"] / "chisel")
+    argv = [binary, "client", "--fingerprint", config["server_fingerprint"],
+            "--keepalive", "20s", SERVER, CAPACITY_REVERSE_TARGET]
+    return binary, argv, {"PATH": "/usr/bin:/bin", "LANG": "C", "AUTH": auth}
+
+
 def main() -> int:
     try:
         if len(sys.argv) != 1 or not sys.flags.isolated or not sys.dont_write_bytecode or os.geteuid() != 0:
