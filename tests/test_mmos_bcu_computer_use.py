@@ -3282,7 +3282,9 @@ class TestForegroundOptInOnly(unittest.TestCase):
     """M10-CODE: no automatic foreground fallback chosen by error-text
     matching. Foreground is dispatched only because the caller opted in, and
     then as the ONE dispatch; with the flag unset a FOREGROUND_REQUIRED
-    failure is a terminal NOT_APPLIED after exactly one dispatch."""
+    failure is terminal after exactly one dispatch, and its receipt status
+    comes ONLY from peekaboo's structured result (BCU R2 item 3):
+    NOT_APPLIED when nothing was provably dispatched, else EFFECT_UNKNOWN."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="mmos-cu-fg-")
@@ -3291,6 +3293,7 @@ class TestForegroundOptInOnly(unittest.TestCase):
     def tearDown(self):
         for key in ("FAKE_PEEKABOO_IDENTITY", "FAKE_PEEKABOO_LOG",
                     "FAKE_PEEKABOO_FOREGROUND_REQUIRED",
+                    "FAKE_PEEKABOO_FOREGROUND_REFUSED",
                     "FAKE_PEEKABOO_FIXTURES"):
             os.environ.pop(key, None)
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -3332,7 +3335,11 @@ class TestForegroundOptInOnly(unittest.TestCase):
     def test_keys_dispatch_carries_window_selector(self):
         # Targetless background press is refused by peekaboo (rc=1, no
         # structured error — M10 live red); the keys dispatch must carry the
-        # exact --window-id alongside the snapshot receipt.
+        # exact --window-id alongside the snapshot receipt. BCU R2 item 3:
+        # the refusal here is the STRUCTURED shape (mutation_dispatched
+        # false), so the terminal receipt is NOT_APPLIED; the text-only shape
+        # is EFFECT_UNKNOWN (test_unset_flag_is_one_dispatch_effect_unknown).
+        os.environ["FAKE_PEEKABOO_FOREGROUND_REFUSED"] = "1"
         ctx = self._ctx()
         result = mmos.handle_tool_call(ctx, {
             "action": "keys", "window_id": 42, "chord": "return",
