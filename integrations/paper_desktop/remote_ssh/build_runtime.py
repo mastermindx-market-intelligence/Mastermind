@@ -51,7 +51,7 @@ GATE = """#!/bin/sh
 # ignored. The environment is replaced. stdin/stdout carry MCP JSON-RPC only.
 umask 077
 exec /usr/bin/env -i HOME={home} PATH=/usr/bin:/bin LANG=en_US.UTF-8 \\
-  {python} -I {server}{flags}
+  {python} -I -B {server}{flags}
 """
 
 
@@ -116,7 +116,7 @@ def main(argv=None) -> int:
 
     python = str(dest / "venv/bin/python")
     server = str(dest / "source/mcp_server.py")
-    probe = subprocess.run([python, "-I", "-c", "import mcp.server.fastmcp, sys; sys.path.insert(0, sys.argv[1]); import bridge, prepare",
+    probe = subprocess.run([python, "-I", "-B", "-c", "import mcp.server.fastmcp, sys; sys.path.insert(0, sys.argv[1]); import bridge, prepare",
                             str(dest / "source")], capture_output=True, text=True)
     if probe.returncode != 0:
         print(json.dumps({"state": "RUNTIME_IMPORT_FAILED", "stderr": probe.stderr[-400:]}))
@@ -131,8 +131,8 @@ def main(argv=None) -> int:
         "python": subprocess.run([python, "-c", "import sys; print(sys.version.split()[0])"],
                                  capture_output=True, text=True).stdout.strip(),
         "files": {str(p.relative_to(dest)): sha256(p)
-                  for p in sorted((dest / "source").iterdir()) + sorted((dest / "bin").iterdir())
-                  + [dest / LOCK]},
+                  for p in [dest / "source" / n for n in SOURCE]
+                  + [dest / "bin" / f"paper-mcp-{x}" for x in PROFILES] + [dest / LOCK]},
     }
     write(dest / "MANIFEST.json", json.dumps(manifest, indent=1).encode(), 0o600)
     print(json.dumps({"state": "BUILT", "dest": str(dest), **manifest}))
