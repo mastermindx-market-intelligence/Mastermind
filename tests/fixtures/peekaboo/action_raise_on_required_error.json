@@ -1,0 +1,26 @@
+{
+ "effect": "refused",
+ "debug_logs": [],
+ "outcome": {
+  "state": "refused",
+  "evidence": "request_refused",
+  "retry_safe": true,
+  "route": "local",
+  "retry_safety": "safe",
+  "requires_fresh_observation": false,
+  "dispatch_state": "none",
+  "refusal_reason": "invalid_request",
+  "effect": "refused",
+  "escalation": "correct_request",
+  "mutation_dispatched": false
+ },
+ "success": false,
+ "data": null,
+ "error": {
+  "message": "--on is required",
+  "retry_safe": true,
+  "mutation_dispatched": false,
+  "code": "VALIDATION_ERROR"
+ },
+ "note": "real peekaboo 4.2.2, own fixture window 98889, 2026-11-11: elementless action AXRaise always refused \u2014 error.message = \"--on is required\", mutation_dispatched false, rc=1 (with or without --window-id)"
+}

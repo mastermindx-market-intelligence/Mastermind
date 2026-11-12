@@ -1,0 +1,27 @@
+{
+ "outcome": {
+  "refusal_reason": "foreground_consent_required",
+  "evidence": "request_refused",
+  "effect": "refused",
+  "retry_safe": true,
+  "mutation_dispatched": false,
+  "retry_safety": "safe",
+  "state": "refused",
+  "route": "local",
+  "requires_fresh_observation": false,
+  "dispatch_state": "none",
+  "escalation": "correct_request"
+ },
+ "error": {
+  "hint": "Use a fresh exact non-dialog snapshot for background Agent/MCP delivery, an exact window/snapshot receipt where the direct CLI permits it, or re-run with --foreground in the CLI / foreground=true in a foreground-capable MCP session. Prefer a semantic action when one exists.",
+  "retry_safe": true,
+  "message": "Raw key presses require explicit foreground consent unless a fresh exact receipt pins background delivery.",
+  "code": "INTERACTION_FAILED",
+  "mutation_dispatched": false
+ },
+ "effect": "refused",
+ "debug_logs": [],
+ "success": false,
+ "data": null,
+ "note": "real peekaboo 4.2.2 refusal, own fixture pid 49829, 2026-11-11: raw chord press without --foreground and without a fresh window receipt"
+}

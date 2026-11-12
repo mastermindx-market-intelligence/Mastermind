@@ -1,0 +1,46 @@
+{
+ "debug_logs": [
+  "[2026-11-11T13:44:35.417Z] DEBUG: Runtime host: local (in-process)"
+ ],
+ "success": true,
+ "data": {
+  "count": 20,
+  "apps": [
+   {
+    "process_start_identity_decimal": "1792984676513366",
+    "process_start_identity": 1792984676513366,
+    "name": "Finder",
+    "pid": 1102,
+    "bundle_id": "com.apple.finder",
+    "is_active": false,
+    "is_hidden": false
+   },
+   {
+    "process_start_identity_decimal": "1794124472228264",
+    "process_start_identity": 1794124472228264,
+    "name": "Preview",
+    "pid": 57515,
+    "bundle_id": "com.apple.Preview",
+    "is_active": false,
+    "is_hidden": false
+   },
+   {
+    "process_start_identity_decimal": "1794395772541729",
+    "process_start_identity": 1794395772541729,
+    "name": "Python",
+    "pid": 49829,
+    "bundle_id": "com.apple.python3",
+    "is_active": false,
+    "is_hidden": false
+   }
+  ],
+  "warnings": [
+   "Application PID 52025 changed process generation during metadata discovery and was omitted.",
+   "Process-generation identity was unavailable for PID 29564"
+  ],
+  "schema_capabilities": [
+   "processStartIdentityDecimal"
+  ]
+ },
+ "note": "sanitized: filtered to a few innocuous entries; shape is what matters"
+}

@@ -1,0 +1,26 @@
+{
+ "effect": "refused",
+ "outcome": {
+  "retry_safe": true,
+  "refusal_reason": "invalid_request",
+  "route": "local",
+  "mutation_dispatched": false,
+  "requires_fresh_observation": false,
+  "escalation": "correct_request",
+  "evidence": "request_refused",
+  "state": "refused",
+  "effect": "refused",
+  "retry_safety": "safe",
+  "dispatch_state": "none"
+ },
+ "debug_logs": [],
+ "error": {
+  "message": "Missing value for option --text",
+  "retry_safe": true,
+  "mutation_dispatched": false,
+  "code": "INVALID_ARGUMENT"
+ },
+ "success": false,
+ "data": null,
+ "note": "M11 probe A (2026-11-11, own fixture): SPACE form \"--text -dash-probe-A\" \u2014 the dash-prefixed value is consumed as an option token: \"Missing value for option --text\", mutation_dispatched:false. Leading-dash text can NEVER be pasted via the space form; the server must not build that argv."
+}

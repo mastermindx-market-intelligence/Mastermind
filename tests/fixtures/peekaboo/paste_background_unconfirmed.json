@@ -1,0 +1,36 @@
+{
+ "target_receipt": {
+  "pid": 49829,
+  "process_start_identity": 1794395772541729,
+  "process_start_identity_decimal": "1794395772541729",
+  "window_id": 98889
+ },
+ "error": {
+  "code": "INTERACTION_FAILED",
+  "mutation_dispatched": true,
+  "message": "Background text paste did not return a confirmed outcome.",
+  "hint": "Follow the canonical escalation metadata before deciding whether to retry.",
+  "retry_safe": false
+ },
+ "debug_logs": [
+  "[2026-11-11T14:57:55.845Z] DEBUG: Runtime host: local (in-process)"
+ ],
+ "effect": "unverifiable",
+ "outcome": {
+  "delivery_mechanism": "window_targeted_events",
+  "mutation_dispatched": true,
+  "retry_safe": false,
+  "evidence": "delivery_accepted",
+  "retry_safety": "unsafe",
+  "requires_fresh_observation": true,
+  "delivery_mode": "background",
+  "effect": "unverifiable",
+  "state": "dispatched_unverified",
+  "dispatch_state": "dispatched",
+  "escalation": "observe_before_retry",
+  "route": "local"
+ },
+ "success": false,
+ "data": null,
+ "note": "real peekaboo 4.2.2 BACKGROUND paste refusal, own fixture, 2026-11-11: INTERACTION_FAILED, mutation_dispatched:true \u2014 the EFFECT_UNKNOWN shape. Pasteboard WAS restored to prior content after this (M13 evidence)."
+}

@@ -1,0 +1,16 @@
+{
+  "mmos-computer-use": {
+    "command": "/usr/bin/python3",
+    "args": [
+      "/Users/chriswong/.t3/mcp/mmos-computer-use/server.py"
+    ],
+    "type": "stdio"
+  },
+  "mmx-browser": {
+    "command": "/Users/chriswong/.local/share/mastermind-runtime/node/bin/node",
+    "args": [
+      "/Users/chriswong/.t3/mcp/mmx-browser/server.js"
+    ],
+    "type": "stdio"
+  }
+}

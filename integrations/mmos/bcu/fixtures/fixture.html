@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BCU fixture</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; }
+  section[hidden] { display: none; }
+  #status { color: #060; font-weight: 600; }
+</style>
+</head>
+<body>
+  <section id="page1">
+    <h1>BCU_FIXTURE_PAGE1</h1>
+    <form onsubmit="return false;">
+      <label for="note">Note</label>
+      <input id="note" name="note" type="text" placeholder="type here" autocomplete="off">
+      <button id="reveal" type="button">Reveal status</button>
+    </form>
+    <p id="status" hidden>BCU_FIXTURE_STATUS clicked at <span id="ts"></span></p>
+    <p><a id="to-page2" href="#page2">Go to page 2</a></p>
+  </section>
+
+  <section id="page2" hidden>
+    <h1>BCU_FIXTURE_PAGE2</h1>
+    <p>Second-page content: nothing here but static text.</p>
+    <p><a id="to-page1" href="#page1">Back to page 1</a></p>
+  </section>
+
+<script>
+(function () {
+  function route() {
+    var on2 = location.hash === "#page2";
+    document.getElementById("page1").hidden = on2;
+    document.getElementById("page2").hidden = !on2;
+  }
+  window.addEventListener("hashchange", route);
+  route();
+
+  document.getElementById("reveal").addEventListener("click", function () {
+    var status = document.getElementById("status");
+    status.hidden = false;
+    document.getElementById("ts").textContent = new Date().toISOString();
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "_note": "M13 rehearsal round 3: element click (actionOnly) on a Tk Button. peekaboo rc=1 INTERNAL_SWIFT_ERROR 'No accessibility element is available for action invocation', effect unverifiable. Tk buttons are AX-VISIBLE but not AX-ACTIONABLE; nothing was invoked (pre-dispatch refusal) -> maps to typed ELEMENT_NOT_ACTIONABLE / NOT_APPLIED.",
+  "data": null,
+  "debug_logs": [
+    "[2026-11-12T01:59:53.789Z] DEBUG: Runtime host: local (in-process)"
+  ],
+  "effect": "unverifiable",
+  "error": {
+    "code": "INTERNAL_SWIFT_ERROR",
+    "message": "No accessibility element is available for action invocation"
+  },
+  "success": false
+}
