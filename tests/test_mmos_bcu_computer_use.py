@@ -2230,6 +2230,23 @@ class TestDenyHardening(unittest.TestCase):
         for bundle in self.NEW_BUNDLES:
             self.assertIn(bundle, shipped["bundle_ids"])
 
+    def test_shipped_deny_json_refuses_the_two_apps_people_work_in(self):
+        """Principal ruling at registration: the app the Chairman works in
+        and the T3 Code app that carries the programmes are never driven by
+        this layer. A differently named build with its own bundle id is not
+        caught (ruling 18 gives every build its own name and id)."""
+        deny = mmos.DenyList.load(os.path.join(TOOL_DIR, "deny.json"))
+        self.assertEqual(deny.matches(None, "com.mastermind.os", None),
+                         "bundle_id")
+        self.assertEqual(deny.matches(None, "com.t3tools.t3code", None),
+                         "bundle_id")
+        self.assertEqual(deny.matches("Mastermind OS", None, None),
+                         "app_name")
+        self.assertEqual(deny.matches("T3 Code (Beta)", None, None),
+                         "app_name")
+        self.assertIsNone(deny.matches("Mastermind OS T8",
+                                       "com.mastermind.os.t8", "Untitled"))
+
     def test_new_names_refused_on_window_op(self):
         tmp = tempfile.mkdtemp(prefix="mmos-cu-denyh-")
         try:

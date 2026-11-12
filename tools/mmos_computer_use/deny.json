@@ -46,7 +46,13 @@
     "saved passwords",
     "settings/passwords"
   ],
-  "extra_app_names": [],
-  "extra_bundle_ids": [],
+  "extra_app_names": [
+    "Mastermind OS",
+    "T3 Code (Beta)"
+  ],
+  "extra_bundle_ids": [
+    "com.mastermind.os",
+    "com.t3tools.t3code"
+  ],
   "extra_title_regexes": []
 }
