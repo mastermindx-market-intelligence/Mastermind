@@ -158,6 +158,19 @@ def test_sector_rotation_validates_rows_beyond_requested_limit(
     _assert_legacy_rotation_refusal(monkeypatch, central)
 
 
+@pytest.mark.parametrize("collection", ("sectors", "baskets"))
+@pytest.mark.parametrize("overflow_first", (True, False), ids=("leading", "beyond-limit"))
+def test_sector_rotation_refuses_rank_conversion_overflow(
+    monkeypatch, collection, overflow_first
+):
+    leader = {"ticker": "XLK", "rotation": {"rank": 1}, "conviction": {"score": 80}}
+    overflow = {"ticker": "XLB", "rotation": {"rank": 2},
+                "conviction": {"score": 10 ** 400}}
+    central = {"sectors": [leader], "baskets": [leader]}
+    central[collection] = [overflow, leader] if overflow_first else [leader, overflow]
+    _assert_legacy_rotation_refusal(monkeypatch, central)
+
+
 def _assert_legacy_rotation_refusal(monkeypatch, central):
     receipt = {
         "schema": "sector_native_view.receipt.v1", "source": "macro.sector",
@@ -196,11 +209,12 @@ def _assert_legacy_rotation_refusal(monkeypatch, central):
     assert len(encoded.encode("utf-8")) < 7200
 
 
-def test_sector_rotation_preserves_optional_fields_and_tie_breaks(monkeypatch):
+@pytest.mark.parametrize("score", (80, "80"), ids=("numeric", "numeric-string"))
+def test_sector_rotation_preserves_optional_fields_and_tie_breaks(monkeypatch, score):
     central = {
         "sectors": [
             {"ticker": "XLF", "rotation": {"rank": 1}, "conviction": {"score": 70}},
-            {"ticker": "XLK", "rotation": {"rank": 1}, "conviction": {"score": 80}},
+            {"ticker": "XLK", "rotation": {"rank": 1}, "conviction": {"score": score}},
             {"ticker": "XLE", "rotation": {"rank": 1}, "conviction": {"score": 80}},
             {"ticker": "XLB", "rotation": None, "conviction": None},
             {"ticker": "XLC"},

@@ -1945,6 +1945,17 @@ def sector_rotation(limit: int = 6, *, projection: str = "legacy",
         ))
         return [_rotation_row(row) for row in usable[:cap]]
 
+    try:
+        ranked_sectors = ranked(data.get("sectors"))
+        ranked_baskets = ranked(data.get("baskets"))
+    except OverflowError:
+        # A JSON integer can exceed float conversion even in a well-shaped row.
+        # Refuse the whole captured legacy view, including any already-ranked side.
+        data = {}
+        health = {**_psl_health(health), "available": False, "status": "malformed",
+                  "source_reason": "invalid_legacy_rotation_input"}
+        ranked_sectors, ranked_baskets = [], []
+
     market = data.get("market") if isinstance(data.get("market"), dict) else {}
     packet = {
         "schema": "mastermind.portfolio_intelligence.sector_rotation/v1",
@@ -1956,8 +1967,8 @@ def sector_rotation(limit: int = 6, *, projection: str = "legacy",
             "headline_en", "quad", "quad_name", "liquidity", "growth_score", "inflation_score",
             "n_above_trend", "n_sectors",
         )},
-        "sectors": ranked(data.get("sectors")),
-        "baskets": ranked(data.get("baskets")),
+        "sectors": ranked_sectors,
+        "baskets": ranked_baskets,
     }
     if health.get("source_mode") == "selected_generation":
         # The new native receipt must fit with the original legacy fields. Never
