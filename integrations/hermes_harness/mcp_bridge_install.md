@@ -127,12 +127,15 @@ out at `$NEW` (it stages from the checkout; run it as a module, not a path).
        "tests/browser_paste_playwright.cjs",
        "tests/browser_read_paging_playwright.cjs",
        "tests/browser_settings_playwright.cjs"]})
-   json.dump({"schema": "mastermind.browser.build.v1", "source_commit": NEW, "files": files},
-             open(f"BUILD-{NEW[:8]}.json", "w"), indent=2, sort_keys=True)
+   json.dump({"schema": "mastermind.browser_direct_build.v1", "source_commit": NEW, "files": files},
+             open("BUILD-e778e5658.json", "w"), indent=2, sort_keys=True)
    print(len(files), "files")
    EOF
    ```
 
+   The schema string must be exactly `mastermind.browser_direct_build.v1`
+   (`install_browser.py` refuses anything else) and the filename must be
+   `BUILD-e778e5658.json` — steps 4 and 5 read that exact name.
    Check: `64 files`; the three step-1 hashes appear in it.
    Rollback: delete the file.
 
@@ -142,7 +145,8 @@ out at `$NEW` (it stages from the checkout; run it as a module, not a path).
    `fb74011a…/93bfeb4f…` (neither the new pair nor the `OLD` prior) and the
    installer refuses exactly that (`prepared extension changed`, rehearsed run
    B). Copy every file **except `instance_config.js`** from the matching 0.6.0
-   folder over the 0.5.0 one, keeping a backup first:
+   folder over the 0.5.0 one — for **all four** profiles, so every prepared
+   file already equals its render and the installer no-ops the staging side:
 
    ```bash
    for p in chatgpt1 chatgpt2 chatgpt3 chatgpt4; do
@@ -155,36 +159,52 @@ out at `$NEW` (it stages from the checkout; run it as a module, not a path).
    done
    ```
 
-   Check: chatgpt1–3 `browser_control.js` = `72a1ce52…`, chatgpt4 still
-   `9117db2a…` (the `OLD` prior — the guard accepts it and the installer
-   updates it in place). Rollback: `rm -rf` the four folders and `mv` the
+   Check: all four `browser_control.js` = `72a1ce52…` and
+   `browser_page.js` = `49b6f218…`; the pre-release2 state (chatgpt1-3
+   `fb74011a/93bfeb4f`, chatgpt4 `9117db2a/89d5e338`) is preserved in the
+   `.pre-release2` copies. Rollback: `rm -rf` the four folders and `mv` the
    `.pre-release2` copies back.
 
-4. **Run the installer.** This builds the full release folder and re-registers
-   every profile's Chrome `NativeMessagingHosts` manifest into the new release
-   root (inert until each profile's host respawns — see step 7):
+4. **Run the installer.** This builds the full release folder and immediately
+   re-registers every profile's Chrome `NativeMessagingHosts` manifest into the
+   new release root. Those manifests take effect on the **next host spawn**,
+   which can happen at any time (host crash, Chrome restart), so from here do
+   steps 4→6 back to back; between them, a respawned host (new digest) would
+   fail handshakes against still-old-pin servers — the same transient
+   handshake-failed rows as the documented residual, never a page send.
 
    ```bash
    python3 -m integrations.hermes_harness.install_browser \
      --build-manifest BUILD-e778e5658.json \
      --install-base ~/.local/share/mastermind-browser-control \
      --python ~/.hermes/tools/python-3.14.9+20261021-darwin-arm64/bin/python3.14 \
-     --enrollment <enrollment.json> \
+     --enrollment ~/.mastermind/mmos_evidence/br-20261111/release2/enrollment.json \
      --prior-source 5aa30969241163b4abb3e025bc9e52123ee4b478
    ```
 
-   (`<enrollment.json>`: the current local enrollment — 6 local profiles, real
-   `data_directory` values. Ask the lane for the copy used in the scratch
-   rehearsal if unsure.) Check: stdout JSON `state` = `INSTALLED_PENDING_CHROME_LOAD`,
+   The enrollment file must have exactly the keys
+   `{host_ref, label, profiles, remote_hosts, remote_profiles}` (the installer
+   refuses any other set); the one above was derived from the live
+   `deployments-v2.json` rows (6 local profiles, real `data_directory` and
+   `upload_roots`, the two ssh hosts mirrored; sha256
+   `5cef20bf0382127876667cbac4021fc2064dc86394b6346faffc619a5ccf177a`).
+   Check: stdout JSON `state` = `INSTALLED_PENDING_CHROME_LOAD`,
    `source_commit` = `$NEW`, all six `chrome[]` rows `ok: true`; the release
    folder holds ~155 files incl. `BUILD.json` and `chrome/<Profile-N>/`;
-   `bin/<host-id>` scripts `cd` into `releases/$NEW`. Rollback: the installer
-   keeps `.previous.<16hex>` backups beside what it replaced; restore them, or
-   rerun with `--prior-source $NEW` after removing the new release folder —
-   the `OLD` release directory itself is never modified.
+   `bin/<host-id>` scripts `cd` into `releases/$NEW`.
+   Rollback (complete undo — the installer cannot rebuild `OLD` from a `$NEW`
+   checkout, so do not rerun it with `--prior-source $NEW`): for every
+   `.previous.<16hex>` file the installer left under
+   `~/.local/share/mastermind-browser-control` and under
+   `~/Library/Application Support/Google/Chrome/NativeMessagingHosts`, move it
+   back over the file it backs up; then delete the new-only files:
+   `releases/$NEW/`, `installation-$NEW.json`, `packages/$NEW/`. Restore
+   `deployments-v2.json` from its own `.previous` backup the same way. The
+   `OLD` release directory is never modified by any step.
 
 5. **Create the versioned runtime folders; move registrations to `current`.**
-   One-time migration, zero behavior change at this step:
+   One-time migration, zero behavior change at this step. Run the shell block
+   from the repo root (the heredoc reads step 2's `BUILD-e778e5658.json`):
 
    ```bash
    MMX=~/.t3/mcp/mmx-browser
@@ -193,7 +213,7 @@ out at `$NEW` (it stages from the checkout; run it as a module, not a path).
    cp $MMX/server.js $MMX/runtimes/$NEW/server.js      # byte-identical, never edited
    cp $MMX/runtime.json $MMX/runtimes/$OLD/runtime.json  # verbatim live pin
    python3 - <<'EOF'
-   import json, pathlib
+   import json, os, pathlib
    MMX = pathlib.Path.home()/".t3/mcp/mmx-browser"
    NEW = "e778e5658ba7ec9b3ea88223cf0e4d2658e92cbc"
    rt = json.load(open(MMX/"runtime.json"))
@@ -202,7 +222,11 @@ out at `$NEW` (it stages from the checkout; run it as a module, not a path).
    pins = json.load(open("BUILD-e778e5658.json"))["files"]
    for f, h in pins.items():
        if f in rt["source_files"]: rt["source_files"][f] = h
-   json.dump(rt, open(MMX/f"runtimes/{NEW}/runtime.json", "w"), indent=2)
+   out = MMX/f"runtimes/{NEW}/runtime.json"
+   json.dump(rt, open(out, "w"), indent=2)
+   os.chmod(out, 0o600)   # server.js refuses group/world-writable pins (NATIVE_SOURCE_UNSAFE)
+   os.chmod(MMX/"runtime.json", 0o600)  # cp may not have preserved it
+   os.chmod(MMX/f"runtimes/{OLD}/runtime.json", 0o600)
    EOF
    ln -sfn $MMX/runtimes/$OLD $MMX/current   # current -> OLD first: no behavior change yet
    ```
@@ -224,10 +248,13 @@ out at `$NEW` (it stages from the checkout; run it as a module, not a path).
    import os, pathlib
    MMX = pathlib.Path.home()/".t3/mcp/mmx-browser"
    NEW = "e778e5658ba7ec9b3ea88223cf0e4d2658e92cbc"
+   cur = MMX/"current"
+   if cur.exists() and not cur.is_symlink():
+       raise SystemExit("current exists and is not a symlink — resolve manually")
    tmp = MMX/"current.tmp"
    if tmp.is_symlink() or tmp.exists(): tmp.unlink()
    tmp.symlink_to(MMX/f"runtimes/{NEW}")
-   os.replace(tmp, MMX/"current")   # atomic; no running server is disturbed
+   os.replace(tmp, cur)   # atomic; no running server is disturbed
    ```
 
    Check: a fresh probe shows `bridge_release_commit` `e778e5658…` and the
@@ -246,8 +273,12 @@ out at `$NEW` (it stages from the checkout; run it as a module, not a path).
    loaded extension version string stays `0.4.1` (the release process does not
    bump the manifest); the observable change is the `read` action.
    Rollback: point `current` back (step 6), then reload extensions from the
-   `Chrome-$p.pre-release2` staging copies; or rerun the installer with the
-   roles reversed. The `OLD` release root still exists throughout.
+   `Chrome-$p.pre-release2` staging copies. Note this returns chatgpt1-3 to
+   the pre-release2 drift bytes (`fb74011a/93bfeb4f`), not `OLD`'s render
+   (`9117db2a/89d5e338`) — that is today's working state, which is what
+   matters; byte-exact `OLD` renders remain available under
+   `releases/$OLD/chrome/<profile>/extensions/`. The `OLD` release root is
+   never deleted by any step.
 
 8. **Verify in a fresh session** (read-only):
    - `browsers` with `probe: true`: the five local profiles `CONNECTED`
@@ -273,7 +304,7 @@ out at `$NEW` (it stages from the checkout; run it as a module, not a path).
 
 | what | result | log |
 |---|---|---|
-| baseline installer run (fresh staging) | `INSTALLED_PENDING_CHROME_LOAD`, 6/6 rows ok, ~155-file release built | `logs/installer_runA…` |
+| baseline installer run (fresh staging) | `INSTALLED_PENDING_CHROME_LOAD`, 6/6 rows ok, ~155-file release built | session record (same receipts as run C) |
 | drifted staging (real bytes mirrored) | guard refused `prepared extension changed: …Chrome-chatgpt1/browser_control.js` | `logs/installer_runB_refusal.txt` |
 | staging pre-updated from 0.6.0, rerun | 6/6 ok, staging at new bytes | `logs/installer_runC.json` |
 | release structure | BUILD.json (64 files), chrome trees, bin + native-host manifests all inside scratch root | `logs/release_structure.txt` |
