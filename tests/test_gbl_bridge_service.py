@@ -1034,6 +1034,56 @@ class TestRepairRenudge:
                        clock=lambda: tick["now"])
         assert core2.maybe_renudge(ask_id=ASK_ID)["status"] == "RENUDGED"
 
+    def test_a_demoted_nudge_still_burns_the_budget(self):
+        # GBL-5 R2, deputy MED-2: the duplicate law demotes a re-numbered
+        # nudge per event, but the POST really happened — budget, cooldown
+        # and settlement must count it.  Before the fix the demoted row
+        # left the authoritative stream, the budget under-counted, and a
+        # re-nudge slipped past MAX_RENUDGES_PER_ASK.
+        from common.gbl_contract import MAX_RENUDGES_PER_ASK
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        core = bridge(store, sender=sender,
+                      clock=lambda: T0 + timedelta(
+                          seconds=RENUDGE_COOLDOWN_SECONDS + 1))
+        core.submit_ask(**submit())
+        store.seed_answer(ASK_ID)
+        events = store.asks[ASK_ID]["events"]
+        for index in range(MAX_RENUDGES_PER_ASK - 1):  # real, trusted nudges
+            store.append_ask_event(ASK_ID, {
+                "type": "nudge", "state": "ANSWERED",
+                "at": f"2026-11-11T12:00:0{index}Z"})
+        # One more nudge whose number was re-issued: the store surfaces it
+        # exactly like this — trusted: False, defect EVENT_SEQ_DUPLICATE.
+        events.append({"type": "nudge", "state": "ANSWERED",
+                       "at": "2026-11-11T12:00:00Z", "seq": 2,
+                       "trusted": False, "defect": "EVENT_SEQ_DUPLICATE"})
+        with pytest.raises(GblBridgeError) as err:
+            core.maybe_renudge(ask_id=ASK_ID)
+        assert err.value.code == "RENUDGE_BUDGET_EXHAUSTED"
+        assert sender.calls == []              # nothing sent past the cap
+
+    def test_a_demoted_attempt_still_blocks_renudge_until_settled(self):
+        # Deputy MED-2's other half: a demoted nudge_attempt is still an
+        # open, effect-unknown POST — it must keep the lane blocked for
+        # reconcile (NUDGE_ATTEMPT_UNSETTLED) and keep the cooldown
+        # markers alive, never silently vanish from the accounting.
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        core = bridge(store, sender=sender,
+                      clock=lambda: T0 + timedelta(
+                          seconds=RENUDGE_COOLDOWN_SECONDS + 1))
+        core.submit_ask(**submit())
+        store.seed_answer(ASK_ID)
+        store.asks[ASK_ID]["events"].append(
+            {"type": "nudge_attempt", "state": "ANSWERED",
+             "at": "2026-11-11T12:00:00Z", "seq": 1,
+             "trusted": False, "defect": "EVENT_SEQ_DUPLICATE"})
+        with pytest.raises(GblBridgeError) as err:
+            core.maybe_renudge(ask_id=ASK_ID)
+        assert err.value.code == "NUDGE_ATTEMPT_UNSETTLED"
+        assert sender.calls == []              # nothing sent while open
+
     def test_effect_unknown_persists_attempt_and_never_resends(self):
         from control_plane.wake_dispatcher import WakeEffectUnknownError
         store = FakeStore()

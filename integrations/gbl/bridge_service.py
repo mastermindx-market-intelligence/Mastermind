@@ -420,6 +420,25 @@ class GblBridge:
             return {"status": "ASK_NOT_FOUND"}
         return {"status": "OK"}
 
+    @staticmethod
+    def _nudge_markers(record: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """Every nudge-family row the trusted writer really POSTed: the
+        authoritative ones (``trusted``) PLUS rows the GBL-5 R2 duplicate
+        law demoted (``defect: EVENT_SEQ_DUPLICATE`` — the tag verified;
+        only the number was re-issued).  A POST that happened must count
+        for budget, cooldown and settlement however the chain law
+        re-numbered it (deputy MED-2); a FOREIGN row — untrusted with no
+        store defect stamp — counts nothing."""
+        markers: list[dict[str, Any]] = []
+        for event in record.get("events", ()):
+            if event.get("type") not in ("nudge", "nudge_attempt",
+                                         "nudge_settled"):
+                continue
+            if (event.get("trusted") is True
+                    or event.get("defect") == "EVENT_SEQ_DUPLICATE"):
+                markers.append(event)
+        return markers
+
     def maybe_renudge(self, *, ask_id: str) -> dict[str, Any]:
         """One re-nudge per cooldown for an unconsumed answer, bounded by
         the contract budget (MAX_RENUDGES_PER_ASK).  M8: the attempt is
@@ -434,7 +453,12 @@ class GblBridge:
         if state != "ANSWERED":
             return {"status": state, "ask_id": ask_id}
         now = self._now()
-        events = self._ordered_events(record)
+        self._ordered_events(record)   # chain law enforced on the record
+        # Budget, cooldown and settlement count every nudge-family row the
+        # trusted writer really POSTed — including a row the duplicate law
+        # demoted (deputy MED-2: a demoted nudge or attempt must not
+        # silently un-burn budget or re-arm the lane).
+        events = self._nudge_markers(record)
         nudges = [event for event in events if event.get("type") == "nudge"]
         attempts = [event for event in events
                     if event.get("type") == "nudge_attempt"]
@@ -518,7 +542,11 @@ class GblBridge:
         marker so the lane re-arms after cooldown without burning budget."""
         record = self._require_ask(ask_id)
         self._require_party(record, principal)
-        events = self._ordered_events(record)
+        self._ordered_events(record)   # chain law enforced on the record
+        # The same POST-really-happened view as maybe_renudge (deputy
+        # MED-2): a demoted attempt is still an attempt to reconcile, and
+        # a demoted settlement still settles it.
+        events = self._nudge_markers(record)
         attempts = [event for event in events
                     if event.get("type") == "nudge_attempt"]
         nudges = [event for event in events if event.get("type") == "nudge"]
