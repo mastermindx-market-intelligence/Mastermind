@@ -121,3 +121,14 @@ then escalates the disagreement.
     the principal's own announced act, with a time he has agreed. Reason: his words, "future
     builds please launch it in a new app"; the same morning a session of his ran inside
     Secretary's conversation on the real server.
+19. **A delivery mark is permanent, and one lock covers every process (2026-11-12).** Where a
+    log decides whether a result has been handed over: (a) a delivery mark written by the
+    trusted writer is never ignored, demoted or re-derived away by a later reading, whatever
+    its position; a reading that finds the order unclear refuses with a typed error and
+    delivers nothing; (b) numbering and appending are serialised across every process on the
+    host by one lock outside the client object, and the step list states that only one host
+    writes; (c) a test that expects a second delivery is a defect, not a specification; the
+    proof is a two-process test that fails first. When unsure, the layer withholds and
+    reports; it never delivers twice. Reason: the fifth Grok Bot link round passed 420 tests
+    with a lock per client object and a test that codified handing the same answer out twice
+    (`gbl-20261111/gbl5/REVIEW-deputy-deepseek.md`).
