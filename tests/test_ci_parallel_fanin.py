@@ -32,6 +32,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
     assert shards["strategy"]["fail-fast"] is False
     assert shards["strategy"]["max-parallel"] == 6
     assert shards["runs-on"] == "ubuntu-24.04"
+    assert shards["env"] == {"CI_PYTEST_WORKERS": "4"}
     assert type(shards["timeout-minutes"]) is int
     assert 45 <= shards["timeout-minutes"] <= 75
     assert type(data["jobs"]["test"]["timeout-minutes"]) is int
@@ -437,6 +438,98 @@ def test_plan_only_does_not_run_any_test(
     ) == 0
     assert "parallel_shard=3/6" in capsys.readouterr().out
 
+
+def _shard_runner_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    included = _stub_gate(monkeypatch)
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True, exist_ok=True)
+    (workflow / "ci.yml").write_text("fixture", encoding="utf-8")
+    return included
+
+
+def test_worker_switch_runs_shard_pytest_under_loadfile_xdist(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    included = _shard_runner_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
+    recorded: list[list[str]] = []
+    monkeypatch.setattr(
+        fan.subprocess, "run",
+        lambda args, **kwargs: (recorded.append(list(args)),
+                                subprocess.CompletedProcess(args=args, returncode=0))[1],
+    )
+    assert fan.main(["--jobs", "6", "--index", "1", "--root", str(tmp_path)]) == 0
+    assert len(recorded) == 1
+    argv = recorded[0]
+    assert argv[argv.index("-q") + 1:argv.index("-q") + 5] == [
+        "-n", "4", "--dist", "loadfile",
+    ]
+    expected = cip.partition_modules(included, jobs=6)[1]
+    assert argv[-len(expected):] == list(expected)
+    out = capsys.readouterr().out
+    assert "pytest_workers=4 dist=loadfile" in out
+    assert out.index("parallel_shard=2/6") < out.index("pytest_workers=4")
+
+
+def test_worker_switch_serial_rollback_runs_exact_serial_argv(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _shard_runner_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("CI_PYTEST_WORKERS", "1")
+    recorded: list[list[str]] = []
+    monkeypatch.setattr(
+        fan.subprocess, "run",
+        lambda args, **kwargs: (recorded.append(list(args)),
+                                subprocess.CompletedProcess(args=args, returncode=0))[1],
+    )
+    assert fan.main(["--jobs", "6", "--index", "1", "--root", str(tmp_path)]) == 0
+    assert len(recorded) == 1
+    assert "-n" not in recorded[0] and "--dist" not in recorded[0]
+    out = capsys.readouterr().out
+    assert "pytest_workers=" not in out
+
+
+def test_malformed_worker_switch_refuses_before_any_pytest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _shard_runner_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("CI_PYTEST_WORKERS", "many")
+    monkeypatch.setattr(
+        fan.subprocess, "run",
+        lambda *args, **kwargs: pytest.fail("malformed switch must not run pytest"),
+    )
+    assert fan.main(["--jobs", "6", "--index", "1", "--root", str(tmp_path)]) == 2
+
+
+@pytest.mark.parametrize(
+    "env_value",
+    [None, "2", "8", "04", {"CI_PYTEST_WORKERS": "4", "OTHER": "1"}, {"CI_PYTEST_WORKER": "4"}],
+)
+def test_shard_worker_switch_env_is_pinned_by_the_validator(env_value) -> None:
+    import yaml
+
+    payload = yaml.load(
+        _WORKFLOW.read_text(encoding="utf-8"), Loader=cip._WorkflowYAMLLoader
+    )
+    shards = payload["jobs"]["pytest_shards"]
+    if env_value is None:
+        shards.pop("env")
+    else:
+        shards["env"] = env_value
+    with pytest.raises(cip.PolicyError, match="CI_PYTEST_WORKERS"):
+        fan.validate_parallel_workflow(yaml.dump(payload))
+
+
+@pytest.mark.parametrize("rollback", ["0", "1", "4"])
+def test_validator_accepts_only_the_pinned_worker_switch_values(rollback: str) -> None:
+    import copy
+    import yaml
+
+    payload = yaml.load(
+        _WORKFLOW.read_text(encoding="utf-8"), Loader=cip._WorkflowYAMLLoader
+    )
+    payload["jobs"]["pytest_shards"]["env"] = {"CI_PYTEST_WORKERS": rollback}
+    fan.validate_parallel_workflow(yaml.dump(payload))
 
 
 def test_same_sha_reuse_is_step_scoped_and_required_fanin_stays_unconditional() -> None:

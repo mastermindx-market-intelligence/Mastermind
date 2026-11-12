@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
 import subprocess
 import sys
@@ -196,8 +197,34 @@ def format_plan(plan: Mapping[str, int], *, shards: Sequence[Sequence[str]] | No
     return rendered
 
 
+def resolve_pytest_workers() -> int:
+    """Resolve the ``CI_PYTEST_WORKERS`` switch for a shard's pytest argv.
+
+    Unset, ``0`` and ``1`` keep today's exact serial argv. Two or more adds
+    ``-n <N> --dist loadfile`` so the same resolved module set runs under
+    pytest-xdist with every module whole on one worker. Anything else fails
+    closed: a malformed switch must change an expensive hosted run loudly,
+    never silently fall back to another shape.
+    """
+    raw = os.environ.get("CI_PYTEST_WORKERS", "").strip()
+    if raw in ("", "0", "1"):
+        return 1
+    try:
+        workers = int(raw, 10)
+    except ValueError:
+        raise PolicyError(
+            "CI_PYTEST_WORKERS must be 0, 1, or an integer worker count"
+        ) from None
+    if not 2 <= workers <= 64:
+        raise PolicyError(
+            "CI_PYTEST_WORKERS must be 0, 1, or a worker count from 2 to 64"
+        )
+    return workers
+
+
 def pytest_argv(
     included: Sequence[str], *, python: str | None = None, progress: bool = False,
+    basetemp_tag: str = "",
 ) -> list[str]:
     # Observability only: report bounded slowest setup/call/teardown durations
     # without dropping a test, changing its order, or creating new CI contexts.
@@ -207,7 +234,70 @@ def pytest_argv(
     prefix.extend(["-m", "pytest"])
     if progress:
         prefix.extend(["-p", "scripts.ci_pytest_timing"])
-    return [*prefix, "--durations=25", "-q", *included]
+    argv = [*prefix, "--durations=25", "-q"]
+    workers = resolve_pytest_workers()
+    if workers > 1:
+        # Placement of execution only: the same discovered modules run with
+        # the same verdicts, and --dist loadfile keeps each module whole on
+        # one worker (intra-module order preserved). CI_PYTEST_WORKERS=0/1
+        # restores today's exact serial argv.
+        argv.extend(["-n", str(workers), "--dist", "loadfile"])
+        if os.environ.get("RUNNER_TEMP", "").strip():
+            # Placement of the tmp tree only, learned on hosted runners over
+            # four full CI waves. The parallel argv pins basetemp into a
+            # short per-process root under /tmp/mmx and loads the worker-env
+            # plugin, which scopes each process's TMPDIR (and the handful of
+            # deliberately-/tmp'd tempfile calls) into sibling roots.
+            #
+            # Why not pytest's default /tmp/pytest-of-*: every worker's
+            # transient /tmp entries churn /tmp itself, and tests that
+            # hold-and-double-stat their fixture's whole ancestor chain
+            # (acceptance-maintenance, native current-source custody) then
+            # race ("retained supersession entry is unsafe", run 42994920108
+            # shard 0; "changed_during_read", shard 1). Scoping moves that
+            # churn under /tmp/mmx/w<pid>, one level below the shared root.
+            #
+            # Why not RUNNER_TEMP (run 43015530899): "_temp" starts with an
+            # underscore, which the custody component alphabet rejects
+            # outright; RUNNER_TEMP is a second sticky shared root the
+            # capacity ancestor walk does not authenticate; and the prefix
+            # crosses the 103-byte AF_UNIX bound the socket constructors
+            # enforce.
+            #
+            # Why not under $HOME (run 43028788599): the hosted image's
+            # /home carries a default POSIX ACL (system.posix_acl_default),
+            # and the capacity artifact ancestor walk refuses ANY ancestor
+            # xattr name outside its two approved macOS names, so every
+            # home-rooted chain fails wholesale ("SOURCE_METADATA_INVALID"
+            # for the whole capacity module). /home/runner itself would
+            # otherwise pass (control-uid owner, no 022 mode bits, clean
+            # components); only /home kills it.
+            #
+            # /tmp/mmx then satisfies every guard at once: the chain crosses
+            # exactly the one sticky shared root the walk authenticates
+            # (1777 root:root, xattr-free), components are
+            # custody-alphabet-clean, ownership stays at the control uid,
+            # no ancestor carries group/other-write bits, and the short
+            # prefix keeps tmp-derived socket paths far under the 103-byte
+            # bound. The pid component keeps concurrent pytest builders
+            # distinct: pytest removes an explicit --basetemp at session
+            # start, and every nested gate/shard child is its own process
+            # with its own pid. The root honors TMPDIR when set, so a
+            # nested builder spawned by a scoped worker nests its basetemp
+            # inside that worker's own quiet root (the parent blocks while
+            # the child runs) instead of adding entries to the shared
+            # /tmp/mmx level other workers' walks cross. Serial argv (the
+            # rollback) and local runs without RUNNER_TEMP stay unchanged.
+            argv.extend([
+                "-p", "scripts.ci_pytest_worker_env",
+                "--basetemp",
+                # In-job --jobs shards share this builder's pid; the tag
+                # keeps their basetemps disjoint (pytest deletes an
+                # explicit basetemp at session start).
+                str(Path(os.environ.get("TMPDIR") or "/tmp") / "mmx"
+                    / f"b{os.getpid()}{basetemp_tag}"),
+            ])
+    return [*argv, *included]
 
 
 _MEASURED_THREE_JOB_PLACEMENT = {
@@ -493,7 +583,10 @@ def run_shards(
         started = time.monotonic()
         captured: list[str] = []
         with subprocess.Popen(
-            pytest_argv(shards[index], python=python, progress=True),
+            pytest_argv(
+                shards[index], python=python, progress=True,
+                basetemp_tag=f"_{index}",
+            ),
             cwd=root,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -793,6 +886,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.jobs < 1:
             raise PolicyError("jobs must be at least 1")
         gate = resolve_gate(root)
+        # Validate the worker switch before any process starts so a malformed
+        # CI_PYTEST_WORKERS fails closed instead of failing inside a shard.
+        resolve_pytest_workers()
         # jobs=1 keeps the historical module set/order and default argv.
         # Progress is opt-in and changes observability only, never placement.
         shards = (
