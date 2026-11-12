@@ -26,10 +26,11 @@ class FakeT3:
     recorded so a test can prove what was NEVER done."""
 
     def __init__(self, threads=None, new_id=NEW, fail_start=False,
-                 start_rc=0, start_status="completed"):
+                 start_rc=0, start_status="completed", timeout=False):
         self.threads = threads or {}
         self.new_id, self.fail_start = new_id, fail_start
         self.start_rc, self.start_status = start_rc, start_status
+        self.timeout = timeout
         self.calls = []
 
     def proc(self, rc=0, stdout="", stderr=""):
@@ -46,6 +47,8 @@ class FakeT3:
         if args[:2] == ["thread", "start"]:
             if self.fail_start:
                 return self.proc(rc=1, stderr="start refused")
+            if self.timeout:
+                raise subprocess.TimeoutExpired(cmd="t3", timeout=900)
             # the CLI's own law: with --json the payload always reaches
             # stdout, even when the run failed (exit 1) or waits for an
             # answer (exit 2) — so the thread id is never lost.
@@ -482,6 +485,21 @@ def test_instance_of_reads_the_latest_message_like_the_carrier():
                 {"role": "user", "text": "no instance here"},
                 {"providerInstanceId": "capacity_fabric"}]
     assert co.instance_of(thread, messages) == "capacity_fabric"
+
+
+def test_a_start_timeout_says_the_thread_may_exist(rebound, capsys):
+    # delta check MED: with --wait the thread is minted before the turn runs,
+    # so a 900s timeout almost certainly leaves one behind. The refusal must
+    # not tell the operator that nothing exists to reconcile.
+    spec, http, t3 = rebound
+    t3.timeout = True
+    with pytest.raises(SystemExit):
+        co.cmd_rebind_thread(spec)
+    err = capsys.readouterr().err
+    assert "MAY already exist" in err
+    assert "nothing was written" not in err
+    assert live_binding(http)["primaryThreadId"] == OLD
+    assert "rebinds" not in result_doc(spec)
 
 
 def test_a_failed_rollback_record_write_names_the_reconciliation(

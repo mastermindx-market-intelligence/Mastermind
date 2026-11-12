@@ -753,6 +753,17 @@ def cmd_rebind_thread(spec, dry_run=False):
         new_id = (started.get("threadId")
                   if isinstance(started, dict) else None)
         if not new_id:
+            if start_code == "timeout":
+                # The thread is minted BEFORE the turn runs: a --wait that
+                # never answered almost certainly left one behind. Never
+                # tell the operator there is nothing to reconcile (delta
+                # check MED).
+                die(f"t3 thread start did not answer within 900s; a "
+                    f"conversation MAY already exist on provider instance "
+                    f"{live_binding['providerInstanceId']!r} in project "
+                    f"{live_binding['projectId']!r} titled {title!r} — "
+                    "inspect the T3 server before retrying. The binding was "
+                    "NOT written")
             die(f"t3 thread start failed (exit {start_code}) before a thread "
                 f"existed: {str(start_err).strip()[:300]} — nothing was "
                 "written")
