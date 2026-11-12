@@ -1086,21 +1086,25 @@ def pacing_key(window_id, pid=None):
     return "window:%d" % window_id
 
 
-def _window_owner_pid(ctx, window_id, app):
-    """Owning pid of window_id from the app's window list, or None.
+def target_receipt_pid(meta):
+    """THE one pid resolver, used by BOTH pacing and paste targeting
+    (BCU R3 H1). No subprocess reads, no app-list/window-list walk: the
+    handler already holds `meta` — the payload of its own fresh snapshot.
 
-    One read, no pixels (``window list`` never captures). Any failure stays
-    None: the caller's key falls back to the exact window id, never to the
-    app name or title."""
-    if not app:
+    The pid is the one peekaboo itself bound to the window it resolved:
+    the `see` envelope's target_receipt.pid first (real capture
+    see_fixture_window.json: {pid, window_id} as a sibling of "data",
+    preserved into the payload by run_json), falling back to
+    target_application_info.pid (real `window list --pid` envelopes carry
+    the pid only there — window_list_fixture.json; real window ROWS carry
+    no pid at all, which is why the old row-walking resolver could never
+    find one). Returns None when neither holds a positive int."""
+    if not isinstance(meta, dict):
         return None
-    try:
-        windows = ctx.adapter.windows_of_window(window_id, app)
-    except OpError:
-        return None
-    for row in windows:
-        if isinstance(row, dict) and row.get("window_id") == window_id:
-            pid = row.get("owner_pid", row.get("pid"))
+    for container in (meta.get("target_receipt"),
+                      meta.get("target_application_info")):
+        if isinstance(container, dict):
+            pid = container.get("pid")
             if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
                 return pid
     return None
@@ -1429,7 +1433,17 @@ class PeekabooAdapter:
             error = OpError("CLI_ERROR", detail)
             error.dispatched = not _refusal_proven_no_mutation(data)
             raise error
-        return data.get("data", data)
+        payload = data.get("data", data)
+        # BCU R3 H1: the real `see` envelope carries a top-level
+        # target_receipt ({pid, window_id}) as a SIBLING of "data" — the
+        # one identity peekaboo itself bound to the window it resolved
+        # (real capture see_fixture_window.json). run_json must not throw
+        # it away: merge it into the returned payload, setdefault-only so
+        # a key the payload itself carries always wins.
+        receipt = data.get("target_receipt")
+        if isinstance(receipt, dict) and isinstance(payload, dict):
+            payload.setdefault("target_receipt", receipt)
+        return payload
 
     # ── SEE ──
 
@@ -2801,7 +2815,8 @@ PACED_KEY_CHORDS = {"enter", "return"}
 
 def _shared_act_gate(ctx, snap, window_id, op, chord=None):
     """THE single pre-act gate for every act that can change a page or send
-    (H3): challenge scan on the fresh snapshot, then pacing on the M8 key.
+    (H3): challenge scan on the fresh snapshot, then pacing on the R-M3
+    key (pid + exact window id, resolved by target_receipt_pid — H1).
 
     Returns the pacing key when this act is paced (the caller records it
     after the dispatch), else None. A challenge hit or PACING_WAIT raises
@@ -2812,10 +2827,12 @@ def _shared_act_gate(ctx, snap, window_id, op, chord=None):
         op == "keys" and _canonical(chord) in PACED_KEY_CHORDS)
     if not paced:
         return None
-    identity = window_identity(snap)
-    app = identity["app_name"] or identity["bundle_id"] or ""
-    # R-M3: pid + exact window id. A title change never resets the interval.
-    pid = _window_owner_pid(ctx, window_id, app)
+    # R-M3 / BCU R3 H1: pid + exact window id, from THE one resolver — the
+    # target_receipt this act's own fresh snapshot already carries. No
+    # window-list subprocess read. A title change never resets the
+    # interval; a window id recycled by another process cannot inherit a
+    # pace record (different pid).
+    pid = target_receipt_pid(snap)
     key = pacing_key(window_id, pid)
     ctx.pacer.check(key)
     return key
@@ -3123,9 +3140,11 @@ def _op_slice_paste(ctx, args):
                     "--json"], completed, "focus_click:%s" % elem_id)
     # The paste chord is the ONLY key event in the slice; never character
     # keystrokes. Pacing is counted from the dispatch attempt onward.
-    # Targeting resolves the owning PID once, before dispatch (--app is
-    # ambiguous on same-name hosts; unresolvable identity refuses).
-    pid = ctx.adapter.owning_pid(window_id, app_name)
+    # Targeting uses THE one resolver (BCU R3 H1): the target_receipt pid
+    # from the slice's own fresh snapshot — the same pid the pacing key
+    # used, no app-list/window-list subprocess walk (--app is ambiguous on
+    # same-name hosts; unresolvable identity refuses).
+    pid = target_receipt_pid(snap)
     if pid is None:
         raise OpError("WINDOW_IDENTITY_UNKNOWN",
                       "owning pid not resolvable for window %s; paste "
