@@ -23,26 +23,41 @@ const fixture = `<!doctype html><html><head><title>Fill bounds fixture</title></
     await page.addScriptTag({path:path.resolve(__dirname,"../integrations/chairman_surfaces/web_sol_extension/browser_page.js")});
     await page.evaluate(()=>{
       window.browserFixturePage=window.MMXBrowserPageFactory(window);
+      const orig=document.execCommand.bind(document);
       // slow editor: every editor-pipeline execCommand call costs ~4ms, so a
       // few hundred lines outlast the insertion time bound.
       const slow=document.getElementById("slow");
-      const orig=document.execCommand.bind(document);
-      let calls=0;
       document.execCommand=(cmd,ui,val)=>{
         const sel=document.getSelection();
         if((cmd==="insertText"||cmd==="insertParagraph") && sel && slow.contains(sel.anchorNode)){
           const until=performance.now()+4; while(performance.now()<until){/* busy */}
         }
-        // The trickle editor stays fast for the first 1920 lines and then
-        // costs ~12ms per call: every checkpoint up to line 1919 passes well
-        // inside the 1500ms bound, and the bound is only exceeded at the
-        // final checkpoint of line 1983 — after the last line was inserted.
-        // (A literal threshold: page.evaluate carries no Node bindings.)
-        if((cmd==="insertText"||cmd==="insertParagraph") && sel && document.getElementById("trickle").contains(sel.anchorNode)){
-          calls+=1;
-          if(calls>3840){const until=performance.now()+12; while(performance.now()<until){/* busy */}}
-        }
         return orig(cmd,ui,val);
+      };
+      // The trickle editor uses a deterministic synthetic clock, not a busy
+      // wait. Date.now is wrapped: it freezes at the first trickle call
+      // (machine load then cannot leak real elapsed time into the bound) and
+      // the trickle phase (calls past 3840 = lines past 1920) advances it by
+      // exactly 12 synthetic ms per call. Every checkpoint up to line 1920
+      // sees zero added clock, and the final checkpoint — after the last of
+      // 1984 lines was inserted — is the only one past the 1500 ms bound, on
+      // any machine load. (Literals here because page.evaluate carries no
+      // Node bindings.)
+      const trickle=document.getElementById("trickle");
+      const realNow=Date.now.bind(Date);
+      window.__clockExtra=0;
+      window.__clockFrozenAt=0;
+      Date.now=()=>(window.__clockFrozenAt||realNow())+window.__clockExtra;
+      let trickleCalls=0;
+      const slowAwareExec=document.execCommand;
+      document.execCommand=(cmd,ui,val)=>{
+        const sel=document.getSelection();
+        if((cmd==="insertText"||cmd==="insertParagraph") && sel && trickle.contains(sel.anchorNode)){
+          if(!window.__clockFrozenAt)window.__clockFrozenAt=realNow();
+          trickleCalls+=1;
+          if(trickleCalls>3840)window.__clockExtra+=12;
+        }
+        return slowAwareExec(cmd,ui,val);
       };
     });
     const send=async(action,ref=null,text=null,snapshot=null)=>page.evaluate(r=>window.browserFixturePage.dispatch(r),
