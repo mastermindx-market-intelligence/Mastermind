@@ -414,6 +414,74 @@ directory must not be group- or other-writable (`chmod 750`/`755` fine,
 the key file must be a regular file — a symlink, even to a valid key,
 is refused (`HMAC_KEY_IS_SYMLINK`).
 
+## Repair round 2 (deputy ruling 2 under RULING 19, 2026-11-12)
+
+Independent check of the GBL-5 head (`REVIEW-deputy-deepseek.md`): 2 HIGH,
+3 MED, 6 LOW. Both HIGHs verified and fixed at `dd22e755f`…`16ecba69f`.
+
+- **H1 → RULING 19(b): one lock across every process.** The A1/A2 guard
+  was a `threading.Lock` + per-object `_issued_seq` floor — per client
+  OBJECT, so a second client or another process re-issued taken numbers
+  (the failing-first proof: two real child processes, each with its OWN
+  client, both minted seq 3 over a lagging listing). Fix: ONE exclusive
+  flock on `append.lock` in the GBL state dir (the HMAC key's directory),
+  held across the whole allocation+append step of `append_ask_event` —
+  every writer path funnels through that method (the bridge ops, the CLI
+  over the bridge socket, control intake, nudge/reconcile, `from_spec`
+  clients), so every writer takes the same host lock. The lock file
+  doubles as the cross-process mint ledger (append-only JSON lines; the
+  floor is read under the lock before every mint; the line is written at
+  mint time, BEFORE the POST, so a number once minted is never re-issued
+  by any process even when its POST fails — worst case a skipped
+  number). The kernel releases the flock when a holder dies; a torn
+  ledger tail line is ignored on read. Typed errors:
+  `APPEND_LOCK_UNWRITABLE`, `APPEND_LOCK_UNREADABLE`. **ONE HOST WRITES
+  THE STORE**: the lock and ledger are host-local files, so a second host
+  constructing clients against the same board holds a different lock and
+  is OUT OF CONTRACT by construction — never point two hosts' state dirs
+  at one Paperclip store.
+- **H2 → RULING 19(a): a delivery mark is permanent.** The A3 demotion
+  picked the later holder of a duplicate seq by position with no type
+  check — on the MMO-1 shape it dropped the CONSUMED, replay re-derived
+  ANSWERED, and the next `fetch_result` handed the SAME answer out a
+  second time before a "healed" CONSUMED indistinguishable from a first
+  delivery. Fix: a STATE event re-issuing a taken seq is never demoted —
+  the reading refuses typed `EVENT_ORDER_AMBIGUOUS` (both the store's
+  `_chain_verified_events` and the bridge's `_ordered_events`, the same
+  law) and NOTHING is delivered, re-derived or healed forward; the
+  append path refuses the same way, so no blind healing append exists
+  (MED-3 is closed by this refusal: an ambiguous record cannot mint an
+  indistinguishable CONSUMED). Non-state duplicates keep the per-event
+  demotion (first holder authoritative, record readable). The test that
+  expected the second delivery is rewritten to expect the refusal
+  (RULING 19(c): such a test is a defect, not a specification).
+- **MED-1: `seq < last_seq` refuses, never drops.** A strictly lower
+  trusted seq after a higher one (a delayed or torn append) used to be
+  stamped `EVENT_SEQ_DUPLICATE` and vanish; it now refuses
+  `EVENT_ORDER_AMBIGUOUS` on both layers.
+- **MED-2: demoted nudge markers still count.** Budget, cooldown and
+  settlement in `maybe_renudge`/`reconcile_nudge` count every
+  nudge-family row the trusted writer really POSTed — including rows the
+  duplicate law demoted (`defect: EVENT_SEQ_DUPLICATE`; tag verified,
+  only the number re-issued). Foreign rows count nothing.
+- **MED-3: closed by the H2 refusal** (above) — no healing append exists
+  to mask.
+- **6 LOWs wait** (unbounded detail across the typed door, lazy-import
+  serve-loop risk, truncated-key unlink, close-time EIO, idempotency
+  over demoted rows, unbounded floor map / lock-held-across-POST) —
+  later list, per the deputy.
+
+### Install: one host writes — the state dir now holds `append.lock`
+
+The install step gains this line: the GBL state root (the directory
+holding `hmac_v1.key`) now also holds `append.lock`, created on first
+append — the ONE host-wide serialisation point (flock + mint ledger).
+ONLY ONE HOST writes the store: the bridge host's state dir owns that
+file; do not share the state dir or point a second host's clients at the
+same Paperclip store, and do not delete `append.lock` (a lost ledger
+falls back to the server listing, re-opening the lag window between
+processes).
+
 ## Final round (panel B delta 2, ruling 12, 2026-11-11)
 
 Delta check 2 at `337b145d1`: 4/4 delta-1 items CLOSED, no new HIGH,
