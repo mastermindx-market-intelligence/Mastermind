@@ -629,3 +629,97 @@ def test_schema_pattern_and_tag_re_agree(harness: Harness):
     assert not _re.fullmatch(pattern, "--scope-kind")
     assert not _re.fullmatch(pattern, "-x")
 
+
+
+# --- RF-MEMLINK-R1 item 1 (principal ruling 2026-11-12 14:08Z): a label form
+# consumes its VALUE, to the end of the value — not just the label. The
+# round-0 tests asserted only that the label was gone, which is why they
+# passed while "my password: hunter2" came out as "my [redacted] hunter2".
+# Every test here asserts the VALUE itself is absent, and fails first on
+# f4e94ead5.
+
+import importlib.util as _ilu  # noqa: E402
+
+_mod_spec = _ilu.spec_from_file_location("memory_link_server_r1", SERVER)
+memory_link_server = _ilu.module_from_spec(_mod_spec)
+_mod_spec.loader.exec_module(memory_link_server)
+
+R1_LABEL_VALUE_CASES = [
+    ("my password: hunter2", "hunter2"),
+    ("passwd=hunter2", "hunter2"),
+    ("secret: hunter2", "hunter2"),
+    ("token = abc123 for the board", "abc123"),
+    ("API key: abc123", "abc123"),
+    ("api_key=abc123", "abc123"),
+    ("apikey: abc123", "abc123"),
+    ("Authorization: Bearer abc123", "abc123"),
+    ("authorization: basic abc123", "abc123"),
+    ("Bearer abc123", "abc123"),
+]
+
+
+@pytest.mark.parametrize("body,value", R1_LABEL_VALUE_CASES)
+def test_redact_consumes_the_labelled_value(body, value):
+    out = memory_link_server.redact(body)
+    assert value not in out, f"value survived redaction: {out!r}"
+    assert "[redacted]" in out
+
+
+def test_redact_keeps_the_words_after_the_value():
+    out = memory_link_server.redact("token = abc123 for the board")
+    assert "abc123" not in out
+    assert "for the board" in out
+
+
+# The prefix forms and the label-only refusal must not be weakened by the
+# value-consuming pattern: memory_save's refusal keeps using this same regex.
+R1_NOT_WEAKENED_CASES = [
+    "sk-live-abcdef123456",
+    "ghp_abcdefghijklmnopqrstuvwxyz0123",
+    "github_pat_ABC123def",
+    "xoxb-123456-abcdef",
+    "AKIAIOSFODNN7EXAMPLE",
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0",
+    "-----BEGIN RSA PRIVATE KEY-----",
+    "password:",
+    "token =",
+]
+
+
+@pytest.mark.parametrize("text", R1_NOT_WEAKENED_CASES)
+def test_prefix_and_label_only_forms_still_refuse(text):
+    assert memory_link_server.looks_like_credential(text)
+    out = memory_link_server.redact(text)
+    assert "[redacted]" in out
+    assert out != text
+
+
+@pytest.mark.parametrize("body,value", R1_LABEL_VALUE_CASES)
+def test_notes_never_leak_the_labelled_value(harness: Harness, body, value):
+    notes = harness.tmp / "notes"
+    notes.mkdir()
+    (notes / "MEMORY.md").write_text(body + "\n", encoding="utf-8")
+    (notes / "USER.md").write_text("user notes\n", encoding="utf-8")
+    cfg = harness.write_config(profile_memory_dir=str(notes))
+    harness.start(cfg)
+    harness.handshake()
+    text = harness.tool_text(harness.call_tool("memory_notes", {}))
+    assert value not in text, f"value left the link unredacted: {text!r}"
+    assert "[redacted]" in text
+
+
+@pytest.mark.parametrize("summary", [
+    "secret: hunter2",
+    "passwd=hunter2",
+    "API key: abc123",
+    "Authorization: Bearer abc123",
+    "Bearer abc123",
+])
+def test_save_refuses_every_label_form(harness: Harness, summary):
+    cfg = harness.write_config(write_enabled=True)
+    harness.start(cfg)
+    harness.handshake()
+    resp = harness.call_tool(
+        "memory_save", {"summary": summary, "type": "fact"})
+    assert harness.tool_text(resp) == "not saved: looks like a credential"
+    assert not (harness.tmp / "omh_last.json").exists()

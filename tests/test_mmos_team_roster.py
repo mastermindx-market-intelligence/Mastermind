@@ -901,8 +901,14 @@ class TestLimitsPendingRestart:
                             lambda s: "0" * 64)
         threads = {m["name"]: {"threadId": f"t-{m['slug']}", "title": "x",
                                "created": False} for m in spec["teammates"]}
-        monkeypatch.setattr(team_roster, "ensure_threads",
-                            lambda s, p: (threads, "/tmp/state.json"))
+        # cmd_apply calls the split form (RF-MEMLINK-R1 item 2(ii)): resolve
+        # before the first write, commit after the settings are in place
+        monkeypatch.setattr(
+            team_roster, "resolve_threads",
+            lambda s, p: (threads, [], {"teammates": {}}, "/tmp/state.json"))
+        monkeypatch.setattr(
+            team_roster, "commit_threads",
+            lambda s, p, resolved, to_create, state, path: (resolved, path))
         monkeypatch.setattr(team_roster, "rename_threads",
                             lambda s, t: ({n: False for n in t}, []))
         monkeypatch.setattr(team_roster, "write_urls_file",
@@ -1580,6 +1586,11 @@ class TestRepairRound1:
         monkeypatch.setattr(team_roster, "ensure_gate", lambda s: "0" * 64)
         monkeypatch.setattr(team_roster, "session_processes",
                             lambda *paths: [])
+        # RF-MEMLINK-R1 item 2(ii): the conversation checks now run BEFORE
+        # the first write, so this rig needs a (empty) thread db for the
+        # resolve phase to pass; the P16 property under test is unchanged —
+        # the warning prints when a LATER step fails after the limits write.
+        make_db(spec, [])
 
         def die_later(spec, disable=()):
             raise SystemExit("paperclip refusal (simulated)")
@@ -2088,3 +2099,199 @@ class TestNoFetchRoster:
         allow = team_roster.tool_limits(spec, mate)["permissions"]["allow"]
         assert "WebFetch" not in allow
         assert "WebSearch" not in allow
+
+
+# --- RF-MEMLINK-R1 item 2 (principal ruling 2026-11-12 14:08Z) ---
+# (i) The roster's record of a teammate's primary conversation follows the
+#     board binding through the apply COMMAND, never a hand edit of the state
+#     file. A conversation on another provider instance is never adopted;
+#     ambiguity still refuses.
+# (ii) An apply that can refuse does so BEFORE its first write: the
+#     conversation checks run before the gate, the limits and settings.json
+#     are written.
+# Both fail first on f4e94ead5.
+
+
+def binding_raw(tmp_path):
+    raw = make_spec(tmp_path)
+    raw["paperclip_base"] = "http://127.0.0.1:3100"
+    for mate in raw["teammates"]:
+        mate["paperclip_agent_id"] = f"agent-{mate['slug']}"
+    return raw
+
+
+def write_roster_state(spec, teammates):
+    path = os.path.join(spec["server"]["root"], "run",
+                        "team_roster_state.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        json.dump({"teammates": teammates}, fh)
+    return path
+
+
+def state_entry(instance, thread_id):
+    return {"instance": instance, "threadId": thread_id,
+            "title": "x", "threadInstance": instance, "recoveredBy": "state"}
+
+
+class TestRecordFollowsTheBinding:
+    def test_stale_record_follows_the_board_binding(
+            self, tmp_path, fake_t3, monkeypatch):
+        """The real-root Assurance/Design Lead shape: the state file records
+        an OLD conversation, the board binds a newer one on the same
+        instance. The apply command moves the record — no hand edit."""
+        spec = load(tmp_path, binding_raw(tmp_path))
+        make_db(spec, [
+            {"threadId": "t-old", "title": "A — quality", "instance": "a"},
+            {"threadId": "t-new", "title": "A — quality", "instance": "a"},
+            {"threadId": "b-1", "title": "B — design", "instance": "b"},
+        ])
+        state_path = write_roster_state(spec, {
+            "A": state_entry("a", "t-old"),
+            "B": state_entry("b", "b-1"),
+        })
+        monkeypatch.setattr(team_roster, "paperclip_binding",
+                            lambda s, m: "t-new" if m["name"] == "A" else "b-1")
+        threads, _ = team_roster.ensure_threads(spec, PROJECT)
+        assert threads["A"]["threadId"] == "t-new"
+        assert threads["A"]["created"] is False
+        assert threads["A"]["recoveredBy"] == "binding"
+        assert fake_t3.calls == [], "following a binding creates nothing"
+        state = json.load(open(state_path))
+        assert state["teammates"]["A"]["threadId"] == "t-new"
+        assert state["teammates"]["B"]["threadId"] == "b-1"
+
+    def test_binding_beats_a_record_on_a_foreign_instance(
+            self, tmp_path, fake_t3, monkeypatch):
+        """The real-root Secretary shape: the state file records a
+        conversation that lives on capacity_fabric (recovery used to die on
+        it); the board binds the teammate's own-instance conversation. The
+        binding resolves it; the foreign conversation is never adopted."""
+        spec = load(tmp_path, binding_raw(tmp_path))
+        make_db(spec, [
+            {"threadId": "t-cf", "title": "A — quality",
+             "instance": "capacity_fabric"},
+            {"threadId": "t-own", "title": "A — quality", "instance": "a"},
+            {"threadId": "b-1", "title": "B — design", "instance": "b"},
+        ])
+        state_path = write_roster_state(spec, {
+            "A": state_entry("a", "t-cf"),
+            "B": state_entry("b", "b-1"),
+        })
+        monkeypatch.setattr(team_roster, "paperclip_binding",
+                            lambda s, m: "t-own" if m["name"] == "A" else "b-1")
+        threads, _ = team_roster.ensure_threads(spec, PROJECT)
+        assert threads["A"]["threadId"] == "t-own"
+        assert threads["A"]["created"] is False
+        assert fake_t3.calls == []
+        state = json.load(open(state_path))
+        assert state["teammates"]["A"]["threadId"] == "t-own"
+        assert state["teammates"]["A"]["threadInstance"] == "a"
+
+    def test_binding_to_a_thread_on_another_instance_is_never_adopted(
+            self, tmp_path, fake_t3, monkeypatch, capsys):
+        spec = load(tmp_path, binding_raw(tmp_path))
+        make_db(spec, [
+            {"threadId": "t-cf", "title": "A — quality",
+             "instance": "capacity_fabric"},
+            {"threadId": "b-1", "title": "B — design", "instance": "b"},
+        ])
+        write_roster_state(spec, {"B": state_entry("b", "b-1")})
+        monkeypatch.setattr(team_roster, "paperclip_binding",
+                            lambda s, m: "t-cf" if m["name"] == "A" else "b-1")
+        with pytest.raises(SystemExit):
+            team_roster.ensure_threads(spec, PROJECT)
+        err = capsys.readouterr().err
+        assert "capacity_fabric" in err
+        assert fake_t3.calls == []
+
+    def test_binding_recorded_for_another_teammate_still_refuses(
+            self, tmp_path, fake_t3, monkeypatch, capsys):
+        """Ambiguity still refuses: the board binding A to the thread the
+        state records for B is a conflict, not an adoption."""
+        spec = load(tmp_path, binding_raw(tmp_path))
+        make_db(spec, [
+            {"threadId": "t1", "title": "B — design", "instance": "b"},
+        ])
+        write_roster_state(spec, {"B": state_entry("b", "t1")})
+        monkeypatch.setattr(team_roster, "paperclip_binding",
+                            lambda s, m: "t1" if m["name"] == "A" else None)
+        with pytest.raises(SystemExit):
+            team_roster.ensure_threads(spec, PROJECT)
+        err = capsys.readouterr().err
+        assert "t1" in err
+        assert fake_t3.calls == []
+
+    def test_apply_command_moves_the_record_to_the_bound_thread(
+            self, tmp_path, fake_t3, monkeypatch, capsys):
+        """End to end through the command: apply resolves the bound thread,
+        mints nothing, and the state file records the binding afterwards."""
+        home, _settings = fake_home(tmp_path)
+        spec = load(tmp_path, binding_raw(tmp_path))
+        make_db(spec, [
+            {"threadId": "t-old", "title": "A — quality", "instance": "a"},
+            {"threadId": "t-new", "title": "A — quality", "instance": "a"},
+            {"threadId": "b-1", "title": "B — design", "instance": "b"},
+        ])
+        state_path = write_roster_state(spec, {
+            "A": state_entry("a", "t-old"),
+            "B": state_entry("b", "b-1"),
+        })
+        monkeypatch.setattr(team_roster, "acquire_apply_lock", lambda s: None)
+        monkeypatch.setattr(team_roster, "ensure_project", lambda s: PROJECT)
+        monkeypatch.setattr(team_roster, "session_processes", lambda *p: [])
+        monkeypatch.setattr(team_roster, "rename_threads",
+                            lambda s, t: ({n: False for n in t}, []))
+        monkeypatch.setattr(team_roster, "write_urls_file",
+                            lambda s, t: "/tmp/urls.json")
+        monkeypatch.setattr(team_roster, "paperclip_binding",
+                            lambda s, m: "t-new" if m["name"] == "A" else "b-1")
+        assert team_roster.cmd_apply(spec) == 0
+        out = capsys.readouterr().out
+        report = json.loads(out[out.index("{"):])
+        by_name = {r["name"]: r for r in report["teammates"]}
+        assert by_name["A"]["threadId"] == "t-new"
+        assert by_name["A"]["threadCreated"] is False
+        assert by_name["B"]["threadCreated"] is False
+        assert fake_t3.calls == []
+        state = json.load(open(state_path))
+        assert state["teammates"]["A"]["threadId"] == "t-new"
+        assert state["teammates"]["A"]["recoveredBy"] == "binding"
+
+
+class TestRefusalBeforeFirstWrite:
+    def test_refusal_leaves_gate_limits_settings_byte_identical(
+            self, tmp_path, fake_t3, monkeypatch):
+        """item 2(ii): with a binding that cannot be honoured, apply refuses
+        BEFORE its first write — the gate, every tool-limits.json and
+        settings.json stay byte-identical. On f4e94ead5 all three were
+        rewritten before ensure_threads died."""
+        home, settings_path = fake_home(tmp_path)
+        spec = load(tmp_path, binding_raw(tmp_path))
+        monkeypatch.setattr(team_roster, "acquire_apply_lock", lambda s: None)
+        monkeypatch.setattr(team_roster, "ensure_project", lambda s: PROJECT)
+        monkeypatch.setattr(team_roster, "session_processes", lambda *p: [])
+        monkeypatch.setattr(team_roster, "paperclip_binding",
+                            lambda s, m: "mcp:not-live")
+        make_db(spec, [])  # nothing live: the binding cannot be honoured
+        gate_path = team_roster.gate_install_path(spec)
+        os.makedirs(os.path.dirname(gate_path), exist_ok=True)
+        with open(gate_path, "w") as fh:
+            fh.write("SENTINEL-GATE")
+        limits_paths = []
+        for mate in spec["teammates"]:
+            p = os.path.join(team_roster.teammate_home(spec, mate),
+                             "tool-limits.json")
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w") as fh:
+                fh.write("SENTINEL-LIMITS")
+            limits_paths.append(p)
+        watched = [gate_path, str(settings_path), *limits_paths]
+        before = {p: open(p, "rb").read() for p in watched}
+        with pytest.raises(SystemExit):
+            team_roster.cmd_apply(spec)
+        assert fake_t3.calls == [], "no thread may be created by a refusal"
+        after = {p: open(p, "rb").read() for p in watched}
+        assert after == before, (
+            "a refusing apply rewrote gate/limits/settings: "
+            + ", ".join(p for p in watched if before[p] != after[p]))

@@ -32,7 +32,15 @@ CREDENTIAL_RE = re.compile(
     r"|AKIA[A-Z0-9]+"
     r"|eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9._-]*"
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
-    r"|(?i:password|token)\s*[:=])"
+    # A label form consumes its VALUE, to the end of the value — not just the
+    # label (RF-MEMLINK-R1 item 1): "my password: hunter2" must not leave
+    # hunter2 behind. `\S*` (not `\S+`) keeps the bare "password:" label a
+    # match, so memory_save's refusal — the same pattern — is never weakened.
+    # The optional scheme group folds "Authorization: Bearer <token>" into
+    # one match; the bare-bearer branch covers "Bearer <token>" on its own.
+    r"|(?i:password|passwd|secret|token|api[\s_-]?key|authorization|bearer)"
+    r"\s*[:=]\s*(?:(?i:bearer|basic)[ \t]+)?\S*"
+    r"|(?i:bearer)[ \t]+\S+)"
 )
 
 
