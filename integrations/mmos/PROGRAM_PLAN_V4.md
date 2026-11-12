@@ -1484,3 +1484,29 @@ Contract and bridge core passed their panel; the Paperclip client is in its fina
 
 **Macro CI.** A capacity report from Sector Intelligence was forwarded to the CI Lightning
 thread, which owns CI across the three repositories. It is not this programme's work.
+
+## 36. Amendment, 2026-11-12 01:10 UTC: install 3 is live; the web reader comes and goes
+
+**Install 3 is on the real team server.** The three teammates now run under the reviewed
+limits and the gate hook, with no web tools. The server was not restarted; only teammate
+sessions were. `status` went from exit 1 (no gate) to exit 0 with every row true. In each
+teammate's fresh session a read of the server's run folder and a write to its own limits
+file were refused, a write to its notes folder was allowed, and a search rooted at its
+home was refused by the hook under the pinned interpreter. Charters and server settings
+are byte-identical to their backups.
+
+**One step ran differently from the reviewed list.** A web fetch cannot be forced on the
+real seat, because the deny rule removes the tool from what the session is offered. The
+hook's refusal was therefore read from the wired command run directly for each teammate.
+The step list now says: confirm the tool is not offered, and run the wired command.
+
+**The web reader is intermittent, not gone.** Of three sessions started within four
+minutes on the same model and route, one was offered the upstream web reader and two were
+not. A single absent reading proves nothing, so the census is reported as a rate. Install
+3 does not control this tool. The route change that would is still the Chairman's, and the
+question to him stands.
+
+**Remaining order.** Ask-and-return refresh for the three teammates after its final check;
+the browser bridge release after its final check, with one round of extension reloads for
+the Chairman; computer use after I choose its homes; the Grok Bot link install and one
+sitting with the Chairman.
