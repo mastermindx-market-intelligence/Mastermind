@@ -222,7 +222,16 @@ case "$1" in
       echo "stderr-detail-marker" >&2
       exit 0
     fi
+    if [ -n "${FAKE_PEEKABOO_FOREGROUND_REFUSED:-}" ] && ! has --foreground; then
+      # Structured refusal (real capture press_foreground_required_error.json):
+      # peekaboo PROVES nothing was dispatched. Only this shape may become
+      # NOT_APPLIED (BCU R2 item 3 / R-M1).
+      echo '{"success": false, "effect": "refused", "data": null, "outcome": {"state": "refused", "effect": "refused", "mutation_dispatched": false, "dispatch_state": "none", "evidence": "request_refused"}, "error": {"code": "INTERACTION_FAILED", "message": "Raw key presses require explicit foreground consent unless a fresh exact receipt pins background delivery.", "mutation_dispatched": false}}'
+      exit 0
+    fi
     if [ -n "${FAKE_PEEKABOO_FOREGROUND_REQUIRED:-}" ] && ! has --foreground; then
+      # TEXT-ONLY refusal: no structured mutation_dispatched field. A text
+      # mention must never turn a possible dispatch into NOT_APPLIED.
       echo '{"success": false, "errors": ["AXPress requires --foreground for this element"]}'
       exit 0
     fi
@@ -419,7 +428,14 @@ class TestPresenceParser(unittest.TestCase):
         self.assertIsNone(mmos.parse_ioreg_idle(""))
 
     def test_active_below_threshold(self):
-        presence = mmos.Presence(min_idle_seconds=8.0)
+        # BCU R2 item 2: only the in-process harness may set a sub-180 s
+        # threshold (the marker alone is never enough — pytest must also be
+        # the running framework, as it is here).
+        os.environ["MMOS_CU_TEST_MODE"] = "1"
+        try:
+            presence = mmos.Presence(min_idle_seconds=8.0)
+        finally:
+            os.environ.pop("MMOS_CU_TEST_MODE", None)
         self.assertEqual(presence.min_idle, 8.0)
 
 
@@ -773,9 +789,11 @@ class TestActDispatch(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="mmos-cu-dispatch-")
         os.environ.pop("FAKE_PEEKABOO_FOREGROUND_REQUIRED", None)
+        os.environ.pop("FAKE_PEEKABOO_FOREGROUND_REFUSED", None)
 
     def tearDown(self):
         os.environ.pop("FAKE_PEEKABOO_FOREGROUND_REQUIRED", None)
+        os.environ.pop("FAKE_PEEKABOO_FOREGROUND_REFUSED", None)
         os.environ.pop("FAKE_PEEKABOO_IDENTITY", None)
         os.environ.pop("FAKE_PEEKABOO_LOG", None)
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -899,17 +917,36 @@ class TestActDispatch(unittest.TestCase):
         self.assertIn("ELEMENT_NOT_FOUND", payload["cause"])
         self.assertEqual(self._act_calls(ctx), [])
 
-    def test_foreground_required_is_not_applied_and_not_retried(self):
+    def test_foreground_required_text_only_is_effect_unknown_and_not_retried(self):
+        # BCU R2 item 3 (R-M1): the fake emits only a TEXT mention of
+        # "foreground" — no structured mutation_dispatched. Text is evidence of
+        # a failure, never proof that nothing was dispatched, so the receipt is
+        # EFFECT_UNKNOWN. It is still terminal: exactly one dispatch, no retry.
         os.environ["FAKE_PEEKABOO_FOREGROUND_REQUIRED"] = "1"
         ctx = self._ctx()
         result = mmos.handle_tool_call(ctx, {
             "action": "press", "window_id": 42, "element_ref": "btn1",
             "owner": "agent-a", "lease_nonce": ctx.lease_nonce, "lease_nonce": ctx.lease_nonce})
         payload = json.loads(result["content"][0]["text"])
-        self.assertEqual(payload["status"], "NOT_APPLIED")
+        self.assertEqual(payload["status"], "EFFECT_UNKNOWN", payload)
         self.assertIn("FOREGROUND_REQUIRED", payload["cause"])
         self.assertNotIn("foreground", payload)
         # Exactly one act dispatch: the refusal is terminal, never escalated.
+        self.assertEqual(len(self._act_calls(ctx)), 1)
+        self.assertNotIn("--foreground", self._act_calls(ctx)[0])
+
+    def test_foreground_required_structured_refusal_is_not_applied(self):
+        # BCU R2 item 3 (R-M1): with peekaboo's structured proof
+        # (mutation_dispatched false / effect refused) the same failure IS a
+        # NOT_APPLIED — derived from the field, not from the wording.
+        os.environ["FAKE_PEEKABOO_FOREGROUND_REFUSED"] = "1"
+        ctx = self._ctx()
+        result = mmos.handle_tool_call(ctx, {
+            "action": "press", "window_id": 42, "element_ref": "btn1",
+            "owner": "agent-a", "lease_nonce": ctx.lease_nonce, "lease_nonce": ctx.lease_nonce})
+        payload = json.loads(result["content"][0]["text"])
+        self.assertEqual(payload["status"], "NOT_APPLIED", payload)
+        self.assertIn("FOREGROUND_REQUIRED", payload["cause"])
         self.assertEqual(len(self._act_calls(ctx)), 1)
         self.assertNotIn("--foreground", self._act_calls(ctx)[0])
 
@@ -1158,8 +1195,17 @@ class TestMcpFraming(unittest.TestCase):
             "FAKE_PEEKABOO_LOG": log,
             "FAKE_PEEKABOO_IDENTITY": IDENTITY_TEXTEDIT,
         })
+        # BCU R2 item 2: the test harness is only in force when pytest itself
+        # is loaded in the process. This round trip runs the server as a real
+        # child, so the child imports pytest before executing server.py —
+        # MMOS_CU_TEST_MODE=1 alone is deliberately not enough.
+        server_py = os.path.join(TOOL_DIR, "server.py")
+        bootstrap = (
+            "import pytest, sys\n"
+            "__file__ = sys.argv[1]\n"
+            "exec(compile(open(__file__).read(), __file__, 'exec'))\n")
         self.proc = subprocess.Popen(
-            [sys.executable, os.path.join(TOOL_DIR, "server.py")],
+            [sys.executable, "-c", bootstrap, server_py],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, env=self.env, text=True, bufsize=1)
 
@@ -1323,6 +1369,7 @@ class TestSlicePresenceDefaults(unittest.TestCase):
         self.assertEqual(mmos.Presence().min_idle, 45.0)
 
     def test_runtime_key_override(self):
+        os.environ["MMOS_CU_TEST_MODE"] = "1"  # harness escape (BCU R2 item 2)
         presence = mmos.Presence(runtime={"presence_min_idle_seconds": 90})
         self.assertEqual(presence.min_idle, 90.0)
 
@@ -1399,6 +1446,7 @@ class TestPacer(unittest.TestCase):
         self.assertEqual(self._pacer().seconds, 5.0)
 
     def test_runtime_seconds(self):
+        os.environ["MMOS_CU_TEST_MODE"] = "1"  # harness escape (BCU R2 item 2)
         pacer = self._pacer(runtime={"pacing_seconds": 60})
         self.assertEqual(pacer.seconds, 60.0)
 
@@ -2314,8 +2362,9 @@ class TestPasteTruthfulness(unittest.TestCase):
 
     def test_clean_pre_dispatch_refusal_stays_not_applied(self):
         ctx = self._ctx()
-        # M8 key: owning app identity + normalized title (not window id).
-        ctx.pacer.record(mmos.pacing_key("TextEdit", "Untitled", 42))
+        # BCU R2 item 4: the pace is keyed on the owning pid + exact window id
+        # (the fake window list reports owner_pid 101 for window 42).
+        ctx.pacer.record(mmos.pacing_key(42, 101))
         result = self._paste(ctx)
         payload = json.loads(result["content"][0]["text"])
         self.assertEqual(payload["status"], "NOT_APPLIED")
@@ -3246,13 +3295,17 @@ class TestForegroundOptInOnly(unittest.TestCase):
         acquire_lease(ctx)
         return ctx
 
-    def test_unset_flag_is_one_dispatch_not_applied(self):
+    def test_unset_flag_is_one_dispatch_effect_unknown(self):
+        # BCU R2 item 3: the legacy `errors` list carries no structured
+        # mutation_dispatched field, so this is EFFECT_UNKNOWN (terminal, one
+        # dispatch). test_keys_real_error_shape_is_clean_refusal below covers
+        # the structured case that still yields NOT_APPLIED.
         ctx = self._ctx()
         result = mmos.handle_tool_call(ctx, {
             "action": "press", "window_id": 42, "element_ref": "btn1",
             "owner": "agent-a", "lease_nonce": ctx.lease_nonce})
         payload = json.loads(result["content"][0]["text"])
-        self.assertEqual(payload["status"], "NOT_APPLIED", payload)
+        self.assertEqual(payload["status"], "EFFECT_UNKNOWN", payload)
         self.assertIn("FOREGROUND_REQUIRED", payload["cause"])
         actions = [c for c in read_calls(ctx) if c[0] == "action"]
         self.assertEqual(len(actions), 1)  # exactly ONE dispatch, no retry
@@ -3522,14 +3575,19 @@ class TestH6FrontmostGate(unittest.TestCase):
 
 
 class TestPacingKeyIdentity(unittest.TestCase):
-    """M8: the pacing key is (owning app identity + normalized title), not
-    the window id — reopening the window must not reset the interval."""
+    """BCU R2 item 4 (R-M3): the pacing key is (owning pid + exact window id),
+    never app name or window title. A title change on the SAME window must not
+    reset the interval, and an unreadable window id is refused, typed."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="mmos-cu-m8-")
+        for key in ("FAKE_PEEKABOO_IDENTITY", "FAKE_PEEKABOO_LOG",
+                    "FAKE_PEEKABOO_WINDOWS_JSON"):
+            os.environ.pop(key, None)
 
     def tearDown(self):
-        for key in ("FAKE_PEEKABOO_IDENTITY", "FAKE_PEEKABOO_LOG"):
+        for key in ("FAKE_PEEKABOO_IDENTITY", "FAKE_PEEKABOO_LOG",
+                    "FAKE_PEEKABOO_WINDOWS_JSON"):
             os.environ.pop(key, None)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
@@ -3538,32 +3596,53 @@ class TestPacingKeyIdentity(unittest.TestCase):
         acquire_lease(ctx)
         return ctx
 
-    def test_new_window_id_same_app_title_still_waits(self):
+    def _keys(self, ctx, window_id):
+        return json.loads(mmos.handle_tool_call(ctx, {
+            "action": "keys", "window_id": window_id, "chord": "return",
+            "owner": "agent-a", "lease_nonce": ctx.lease_nonce})["content"][0]
+            ["text"])
+
+    def test_title_change_does_not_reset_the_interval(self):
+        os.environ["FAKE_PEEKABOO_IDENTITY"] = IDENTITY_TEXTEDIT
         ctx = self._ctx()
-        first = json.loads(mmos.handle_tool_call(ctx, {
-            "action": "keys", "window_id": 42, "chord": "return",
-            "owner": "agent-a", "lease_nonce": ctx.lease_nonce})["content"][0]
-            ["text"])
+        first = self._keys(ctx, 42)
         self.assertEqual(first["status"], "APPLIED", first)
-        # Same app + title, a DIFFERENT window id (window reopened).
-        second = json.loads(mmos.handle_tool_call(ctx, {
-            "action": "keys", "window_id": 43, "chord": "return",
-            "owner": "agent-a", "lease_nonce": ctx.lease_nonce})["content"][0]
-            ["text"])
+        # Same pid + same window id, DIFFERENT title (the document was saved
+        # under a new name). The pace target did not change.
+        os.environ["FAKE_PEEKABOO_IDENTITY"] = (
+            '"app": "TextEdit", "bundle_id": "com.apple.TextEdit", '
+            '"window_title": "Report.rtf"')
+        second = self._keys(ctx, 42)
         self.assertEqual(second["status"], "NOT_APPLIED", second)
         self.assertIn("PACING_WAIT", second["cause"])
         self.assertEqual(len([c for c in read_calls(ctx) if c[0] == "press"]),
                          1)
-        # The window id is still recorded alongside the M8 key.
-        with open(ctx.pacer.path) as handle:
-            data = json.load(handle)
-        self.assertNotIn("42", data)
-        entry = list(data.values())[0]
-        self.assertEqual(entry.get("window_id"), 42)
 
-    def test_key_ignores_window_id_and_normalizes_title(self):
-        self.assertEqual(mmos.pacing_key("TextEdit", " Readme ", 1),
-                         mmos.pacing_key("textedit", "readme", 2))
+    def test_a_different_window_is_a_different_pace_target(self):
+        os.environ["FAKE_PEEKABOO_WINDOWS_JSON"] = (
+            '[{"window_id": 42, "title": "Untitled", "owner_pid": 101, '
+            '"is_frontmost": true, "window_index": 0, "is_key": true}, '
+            '{"window_id": 43, "title": "Untitled", "owner_pid": 101, '
+            '"is_frontmost": true, "window_index": 1, "is_key": false}]')
+        ctx = self._ctx()
+        self.assertEqual(self._keys(ctx, 42)["status"], "APPLIED")
+        # Exact window id is part of the identity: a different window of the
+        # same app is a different target, so it is not paced against 42.
+        self.assertEqual(self._keys(ctx, 43)["status"], "APPLIED")
+
+    def test_key_is_owning_pid_plus_exact_window_id(self):
+        self.assertEqual(mmos.pacing_key(42, 101), "pid:101|window:42")
+        self.assertNotEqual(mmos.pacing_key(42, 101),
+                            mmos.pacing_key(43, 101))
+        self.assertNotEqual(mmos.pacing_key(42, 101),
+                            mmos.pacing_key(42, 102))
+
+    def test_unreadable_window_id_is_refused_typed(self):
+        for bad in (None, "42", 42.0, True):
+            with self.assertRaises(mmos.OpError) as caught:
+                mmos.pacing_key(bad, 101)
+            self.assertEqual(caught.exception.code, "WINDOW_ID_REQUIRED",
+                             "for %r" % (bad,))
 
 
 class TestSliceStepsAndStateWrite(unittest.TestCase):
@@ -3805,7 +3884,7 @@ class TestLowHardening(unittest.TestCase):
 
     def test_pacing_check_runs_after_lease_check(self):
         ctx = build_ctx(self.tmp)
-        key = mmos.pacing_key("TextEdit", "Untitled", 42)
+        key = mmos.pacing_key(42, 101)
         ctx.pacer.record(key, 42)
         result = mmos.handle_tool_call(ctx, {
             "action": "keys", "window_id": 42, "chord": "return",
@@ -3817,7 +3896,7 @@ class TestLowHardening(unittest.TestCase):
 
     def test_pacer_interval_uses_monotonic_clock(self):
         pacer = mmos.Pacer(state_dir=self.state, seconds=180)
-        key = mmos.pacing_key("TextEdit", "Untitled", 42)
+        key = mmos.pacing_key(42, 101)
         pacer.record(key, 42)
         real_time = mmos.time.time
         mmos.time.time = lambda: real_time() + 10000  # wall clock jumps ahead
@@ -4037,6 +4116,209 @@ class TestDenyBeforePixels(unittest.TestCase):
                 and "--tree" in c]
         self.assertTrue(any("--no-screenshot" in c for c in tree))
         self.assertEqual(self._snapshot_dir_listing(), self._before)
+
+
+class TestSessionCannotLoosenFloors(unittest.TestCase):
+    """BCU R2 item 2 (R-M4 / ESC 12): 180 s is a PRODUCTION FLOOR in code.
+
+    runtime.json, an MMOS_CU_* env value or a constructor argument may make a
+    threshold STRICTER, never looser. Only the unit-test harness may go below
+    it, and the harness is "MMOS_CU_TEST_MODE=1 AND pytest loaded in this
+    process" — an MCP session cannot make pytest load itself.
+    """
+
+    def setUp(self):
+        self.saved = {key: os.environ.pop(key, None)
+                      for key in ("MMOS_CU_TEST_MODE",
+                                  "MMOS_CU_PRESENCE_MIN_IDLE",
+                                  "MMOS_CU_PACING_SECONDS")}
+
+    def tearDown(self):
+        for key, value in self.saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    def _state(self):
+        return os.path.join(self.tmp, "state")
+
+    def test_defaults_are_the_floor(self):
+        self.assertEqual(mmos.DEFAULT_MIN_IDLE_SECONDS, 180.0)
+        self.assertEqual(mmos.DEFAULT_PACING_SECONDS, 180.0)
+        self.assertEqual(mmos.Presence().min_idle, 180.0)
+        self.assertEqual(mmos.Pacer(state_dir=self._state()).seconds, 180.0)
+
+    def test_presence_runtime_key_cannot_lower_the_floor(self):
+        with self.assertRaises(mmos.RefuseError) as caught:
+            mmos.Presence(runtime={"presence_min_idle_seconds": 90})
+        self.assertEqual(caught.exception.code,
+                         "PRESENCE_MIN_IDLE_STRICTER_ONLY")
+
+    def test_presence_env_cannot_lower_the_floor(self):
+        os.environ["MMOS_CU_PRESENCE_MIN_IDLE"] = "45"
+        with self.assertRaises(mmos.RefuseError) as caught:
+            mmos.Presence()
+        self.assertEqual(caught.exception.code,
+                         "PRESENCE_MIN_IDLE_STRICTER_ONLY")
+
+    def test_presence_constructor_cannot_lower_the_floor(self):
+        with self.assertRaises(mmos.RefuseError) as caught:
+            mmos.Presence(min_idle_seconds=8.0)
+        self.assertEqual(caught.exception.code,
+                         "PRESENCE_MIN_IDLE_STRICTER_ONLY")
+
+    def test_pacer_runtime_cannot_lower_the_floor(self):
+        with self.assertRaises(mmos.RefuseError) as caught:
+            mmos.Pacer(state_dir=self._state(),
+                       runtime={"pacing_seconds": 60})
+        self.assertEqual(caught.exception.code, "PACING_SECONDS_STRICTER_ONLY")
+
+    def test_pacer_env_cannot_lower_the_floor(self):
+        os.environ["MMOS_CU_PACING_SECONDS"] = "1"
+        with self.assertRaises(mmos.RefuseError) as caught:
+            mmos.Pacer(state_dir=self._state())
+        self.assertEqual(caught.exception.code, "PACING_SECONDS_STRICTER_ONLY")
+
+    def test_pacer_constructor_cannot_lower_the_floor(self):
+        with self.assertRaises(mmos.RefuseError) as caught:
+            mmos.Pacer(state_dir=self._state(), seconds=10)
+        self.assertEqual(caught.exception.code, "PACING_SECONDS_STRICTER_ONLY")
+
+    def test_stricter_values_are_still_accepted(self):
+        self.assertEqual(mmos.Presence(min_idle_seconds=300).min_idle, 300.0)
+        self.assertEqual(
+            mmos.Pacer(state_dir=self._state(), seconds=600).seconds, 600.0)
+
+    def test_env_marker_alone_does_not_unlock_the_layer(self):
+        # A real server child: no pytest in its process, so MMOS_CU_TEST_MODE=1
+        # (which any session could set) must NOT be test mode. The child's
+        # scratch paths are outside the layer, so startup has to refuse.
+        self.tmp = tempfile.mkdtemp(prefix="mmos-cu-floors-")
+        try:
+            bin_path = make_fake_peekaboo(self.tmp)
+            runtime = write_runtime(self.tmp, bin_path)
+            env = dict(os.environ)
+            env.pop("MMOS_CU_PRESENCE_MIN_IDLE", None)
+            env.pop("MMOS_CU_PACING_SECONDS", None)
+            env.update({
+                "MMOS_CU_TEST_MODE": "1",
+                "MMOS_CU_RUNTIME": runtime,
+                "MMOS_CU_STATE_DIR": os.path.join(self.tmp, "state"),
+                "MMOS_CU_DENY": os.path.join(self.tmp, "deny.json"),
+            })
+            proc = subprocess.run(
+                [sys.executable, os.path.join(TOOL_DIR, "server.py")],
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, env=env, text=True, timeout=30)
+        finally:
+            shutil.rmtree(self.tmp, ignore_errors=True)
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertIn("startup refused", proc.stderr)
+        self.assertIn("ENV_PATH_OUTSIDE_LAYER", proc.stderr)
+        self.assertNotIn("ready", proc.stderr)
+
+
+class TestForegroundPasteGate(unittest.TestCase):
+    """BCU R2 item 5 (R-H1): the opt-in foreground paste re-checks DENY and
+    then FRONTMOST on fresh reads immediately before the chord.
+
+    ``paste --foreground`` delivers Cmd+V to whichever window holds focus, so
+    a deny-listed window (the target itself, or a floating password-manager
+    panel above it) could receive text meant for the target. If either check
+    fails the paste subprocess never starts: nothing is pasted and the
+    pasteboard is unchanged.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mmos-cu-fgpaste-")
+
+    def tearDown(self):
+        for key in ("FAKE_PEEKABOO_IDENTITY", "FAKE_PEEKABOO_LOG",
+                    "FAKE_PEEKABOO_WINDOWS_JSON"):
+            os.environ.pop(key, None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _ctx(self):
+        ctx = build_ctx(self.tmp)
+        acquire_lease(ctx)
+        return ctx
+
+    def _paste(self, ctx, **extra):
+        args = {"action": "slice_paste", "window_id": 42,
+                "text": "hello world", "owner": "agent-a",
+                "lease_nonce": ctx.lease_nonce, "allow_foreground": True}
+        args.update(extra)
+        return json.loads(mmos.handle_tool_call(ctx, args)["content"][0]
+                          ["text"])
+
+    def test_deny_after_the_observe_refuses_before_the_chord(self):
+        ctx = self._ctx()
+        real = ctx.adapter.inspect_window
+
+        def became_denied(window_id):
+            data = real(window_id)
+            out = dict(data) if isinstance(data, dict) else {}
+            out["app"] = "1Password"
+            out["bundle_id"] = "com.1password.1password"
+            return out
+
+        ctx.adapter.inspect_window = became_denied
+        payload = self._paste(ctx)
+        self.assertEqual(payload["status"], "NOT_APPLIED", payload)
+        self.assertIn("DENY_LISTED", payload["cause"])
+        self.assertIs(payload["pasted"], False)
+        self.assertEqual(payload["clipboard_state"], "unchanged")
+        self.assertEqual([c for c in read_calls(ctx) if c[0] == "paste"], [])
+
+    def test_frontmost_lost_refuses_before_the_chord(self):
+        ctx = self._ctx()
+
+        def covered(window_id, app):
+            return [{"window_id": 42, "title": "Untitled", "owner_pid": 101,
+                     "is_frontmost": False, "window_index": 1,
+                     "is_key": True}]
+
+        ctx.adapter.windows_of_window = covered
+        payload = self._paste(ctx)
+        self.assertEqual(payload["status"], "NOT_APPLIED", payload)
+        self.assertIn("WINDOW_NOT_FRONTMOST", payload["cause"])
+        self.assertIs(payload["pasted"], False)
+        self.assertEqual(payload["clipboard_state"], "unchanged")
+        self.assertEqual([c for c in read_calls(ctx) if c[0] == "paste"], [])
+
+    def test_unreadable_gate_evidence_is_a_typed_refusal(self):
+        ctx = self._ctx()
+
+        def unreadable(window_id):
+            raise mmos.OpError("DISPATCH_UNAVAILABLE", "see failed")
+
+        ctx.adapter.inspect_window = unreadable
+        payload = self._paste(ctx)
+        self.assertEqual(payload["status"], "NOT_APPLIED", payload)
+        self.assertIn("PASTE_GATE_UNVERIFIED", payload["cause"])
+        self.assertIs(payload["pasted"], False)
+        self.assertEqual(payload["clipboard_state"], "unchanged")
+        self.assertEqual([c for c in read_calls(ctx) if c[0] == "paste"], [])
+
+    def test_background_paste_is_not_gated_on_frontmost(self):
+        # The gate is scoped to the foreground chord: the background paste is
+        # targeted by pid + exact window id and needs no frontmost window.
+        ctx = self._ctx()
+
+        def covered(window_id, app):
+            return [{"window_id": 42, "title": "Untitled", "owner_pid": 101,
+                     "is_frontmost": False, "window_index": 1,
+                     "is_key": True}]
+
+        ctx.adapter.windows_of_window = covered
+        payload = self._paste(ctx, allow_foreground=False)
+        self.assertEqual(payload["status"], "APPLIED", payload)
+        self.assertNotIn("clipboard_state", payload)
+        self.assertNotIn("pasted", payload)
+        pastes = [c for c in read_calls(ctx) if c[0] == "paste"]
+        self.assertEqual(len(pastes), 1)
+        self.assertNotIn("--foreground", pastes[0])
 
 
 if __name__ == "__main__":

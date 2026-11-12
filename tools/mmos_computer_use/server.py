@@ -44,8 +44,11 @@ tests/test_mmos_bcu_computer_use.py):
     allow_foreground=true AND the lease and presence gates both passed.
     Background delivery preserves the user's frontmost app; focus stealing is
     prohibited by default.
-  * A foreground-required refusal from peekaboo is returned as NOT_APPLIED /
+  * A foreground-required refusal from peekaboo is returned as
     FOREGROUND_REQUIRED. It is NEVER escalated automatically and NEVER retried.
+    Whether it is NOT_APPLIED or EFFECT_UNKNOWN is decided ONLY by peekaboo's
+    structured result (mutation_dispatched / effect): a text-only mention of
+    "foreground" never turns a possible dispatch into NOT_APPLIED (R-M1).
   * SLICE ops (slice_front/click/paste/send/look) drive ONE named window
     end-to-end (observe -> act -> confirm). They are foreground-class by
     design (AXRaise/AXPress-class/paste need the window exposed), which is
@@ -54,13 +57,17 @@ tests/test_mmos_bcu_computer_use.py):
     background first, and is never retried.
   * Slice presence: the human-idle threshold default is 180 s for ALL acts
     (MMOS_CU_PRESENCE_MIN_IDLE env / runtime.json presence_min_idle_seconds).
+    Outside the test harness 180 s is the FLOOR: no configuration source may
+    lower it (the restrained session cannot loosen its own limits).
     Presence is re-checked before EVERY step and between steps of a slice
     sequence; a human becoming active mid-sequence aborts with NOT_APPLIED /
     HUMAN_ACTIVE_MID_SEQUENCE naming exactly which steps completed. Partial
     state is reported truthfully; nothing continues, nothing retries.
-  * Slice pacing: per target window (keyed by window id), a minimum interval
-    (default 180 s; MMOS_CU_PACING_SECONDS env / runtime.json pacing_seconds)
-    between two slice_paste or slice_send sequences, persisted as
+  * Slice pacing: per target (keyed by owning pid + exact window id, never by
+    app name or window title — a title change must not reset the interval), a
+    minimum interval (default and production floor 180 s;
+    MMOS_CU_PACING_SECONDS env / runtime.json pacing_seconds) between two
+    acts that can submit, persisted as
     pacing.json under the state dir. Too soon -> NOT_APPLIED / PACING_WAIT
     with the seconds remaining. The single-holder lease already guarantees
     one worker at a time.
@@ -198,19 +205,24 @@ DISPATCH_ACT_OPS = ACT_OPS | {"slice_front", "slice_click", "slice_paste",
 PACED_SLICE_OPS = {"slice_paste", "slice_send"}
 # Failures that are PROVABLY pre-dispatch (nothing was sent, clipboard
 # untouched) for EVERY act op, not just paste, and may be reported
-# NOT_APPLIED. FOREGROUND_REQUIRED is included: peekaboo reports it without
-# performing the act. Any other dispatch-phase failure maps to EFFECT_UNKNOWN.
+# NOT_APPLIED. Every code here is raised by THIS layer's own gates BEFORE a
+# dispatch, or typed from a structured peekaboo refusal that proves nothing
+# ran. FOREGROUND_REQUIRED is deliberately NOT here (R-M1): it is classified
+# from the error TEXT, so it only earns NOT_APPLIED when the structured
+# result proves nothing was dispatched — that path arrives with
+# dispatched=False and is handled by the receipt's typed list below.
 ACT_CLEAN_PRE_DISPATCH_CODES = {
     "WINDOW_IDENTITY_UNKNOWN", "DENY_LISTED", "LEASE_NOT_HELD",
     "LEASE_NOT_OWNER", "LEASE_OWNER_REQUIRED", "LEASE_NONCE_INVALID",
     "PRESENCE_UNKNOWN", "HUMAN_ACTIVE",
     "HUMAN_ACTIVE_MID_SEQUENCE", "PACING_WAIT", "CHALLENGE_DETECTED",
     "ELEMENT_NOT_FOUND", "ELEMENT_REF_INVALID", "TEXT_REQUIRED",
-    "WINDOW_ID_REQUIRED", "SNAPSHOT_UNAVAILABLE", "FOREGROUND_REQUIRED",
+    "WINDOW_ID_REQUIRED", "SNAPSHOT_UNAVAILABLE",
     "COORDS_REQUIRED", "WINDOW_BOUNDS_UNKNOWN", "POINT_OUTSIDE_WINDOW",
     "SLICE_TARGET_REQUIRED", "SLICE_TARGET_AMBIGUOUS",
     "SLICE_TARGET_NOT_FOUND", "WINDOW_APP_MISMATCH",
-    "DENY_OVERLAY", "DENY_OVERLAY_UNVERIFIED",
+    "DENY_OVERLAY", "DENY_OVERLAY_UNVERIFIED", "WINDOW_NOT_FRONTMOST",
+    "WINDOW_GONE", "PASTE_GATE_UNVERIFIED",
     # Proven pre-dispatch peekaboo refusals (typed from live captures —
     # see _typed_preflight_refusal): nothing was invoked, so NOT_APPLIED.
     "ELEMENT_NOT_ACTIONABLE", "SNAPSHOT_STALE",
@@ -223,11 +235,15 @@ MAX_ERROR_TEXT = 240
 
 DEFAULT_MIN_IDLE_SECONDS = 180.0
 DEFAULT_PACING_SECONDS = 180.0
-# Runtime gate floors (security-fix pass): a presence or pacing threshold
-# below these values would effectively disable the safety gate; both sources
-# (runtime.json and the MMOS_CU_* env overrides) refuse at startup.
+# ABSOLUTE floors: a threshold can never be zero/negative, even under the
+# test harness (a broken test must not disable a gate silently).
 MIN_IDLE_FLOOR_SECONDS = 1.0
 PACING_FLOOR_SECONDS = 1.0
+# BCU repair round 2, item 2 (ruling ESC 12): the 180 s DEFAULTS are also the
+# PRODUCTION floors — in code. Outside the test harness no configuration
+# source (runtime.json, an MMOS_CU_* env override, or a constructor argument)
+# may set a presence or pacing threshold below the default. A restrained
+# session must not be able to loosen the limits that restrain it.
 DEFAULT_LEASE_TTL = 120
 SEE_TIMEOUT_S = 30.0
 ACT_TIMEOUT_S = 15.0
@@ -360,6 +376,10 @@ class OpError(Exception):
         self.code = code
         self.detail = detail[:MAX_ERROR_TEXT]
         self.dispatched = False
+        # Optional truthful receipt fields for a proven pre-dispatch refusal
+        # (e.g. the foreground-paste gate's clipboard_state). Merged into the
+        # receipt by handle_tool_call; never overwrites an existing field.
+        self.extra = None
 
 
 # ── numeric + environment guards ─────────────────────────────────────────────
@@ -379,10 +399,35 @@ def _finite_number(value, code, detail, refuse=False):
 
 
 def _test_mode():
-    """True only when MMOS_CU_TEST_MODE=1 (documented test-only escape:
-    thresholds below the defaults and env paths outside the layer are then
-    accepted so unit tests can wire a scratch state dir / fake runtime)."""
-    return os.environ.get("MMOS_CU_TEST_MODE") == "1"
+    """True only when THIS process is being run by the unit-test harness.
+
+    The decisive flag is the loaded ``pytest`` module: the runner imports the
+    tests in-process, so only the harness can set it. ``MMOS_CU_TEST_MODE=1``
+    alone is NEVER enough — the MCP server's environment comes from the
+    session/provider configuration, so a session can export anything there
+    and must not be able to switch the 180 s floors off or point the state,
+    deny and runtime paths outside this layer.
+
+    A subprocess test that legitimately needs the harness flag starts its
+    child under the test framework itself (see
+    test_mmos_bcu_computer_use.TestTestModeIsHarnessOwned).
+    """
+    return (os.environ.get("MMOS_CU_TEST_MODE") == "1"
+            and "pytest" in sys.modules)
+
+
+def _harness_only_floor(value, default, code, label):
+    """Refuse a threshold LOOSER than the 180 s default outside the harness.
+
+    BCU R2 item 2: the default IS the production floor. Only the in-process
+    test harness (``_test_mode``) may go lower, and never below the absolute
+    floor checked separately by the caller.
+    """
+    if value < default and not _test_mode():
+        raise RefuseError(
+            code,
+            "%s %r is looser than the %.0fs default; only the test harness "
+            "may lower it" % (label, value, default))
 
 
 def _inside_layer(path):
@@ -603,7 +648,9 @@ class Presence:
 
     Threshold priority: explicit constructor argument > MMOS_CU_PRESENCE_MIN_IDLE
     env > runtime.json presence_min_idle_seconds > DEFAULT_MIN_IDLE_SECONDS
-    (180 s for ALL acts, slice and non-slice alike).
+    (180 s for ALL acts, slice and non-slice alike). Outside the test harness
+    180 s is a FLOOR: every lower value refuses at startup, whatever source it
+    came from (BCU R2 item 2).
     """
 
     def __init__(self, min_idle_seconds=None, ioreg_bin=None, runtime=None):
@@ -615,18 +662,22 @@ class Presence:
                                            "PRESENCE_MIN_IDLE_INVALID",
                                            repr(min_idle_seconds),
                                            refuse=True)
+            _harness_only_floor(self.min_idle, DEFAULT_MIN_IDLE_SECONDS,
+                                "PRESENCE_MIN_IDLE_STRICTER_ONLY",
+                                "min_idle_seconds")
+            if self.min_idle < MIN_IDLE_FLOOR_SECONDS:
+                raise RefuseError(
+                    "PRESENCE_MIN_IDLE_FLOOR",
+                    "min_idle_seconds %r is below the %.0fs floor"
+                    % (min_idle_seconds, MIN_IDLE_FLOOR_SECONDS))
         elif raw:
             self.min_idle = _finite_number(
                 raw, "PRESENCE_MIN_IDLE_INVALID",
                 "MMOS_CU_PRESENCE_MIN_IDLE %r is not a finite number" % raw,
                 refuse=True)
-            if self.min_idle < DEFAULT_MIN_IDLE_SECONDS and not _test_mode():
-                # M2: the env override may only make the gate STRICTER than
-                # the default; a lower value refuses at startup.
-                raise RefuseError(
-                    "PRESENCE_MIN_IDLE_STRICTER_ONLY",
-                    "MMOS_CU_PRESENCE_MIN_IDLE %r is below the %.0fs default"
-                    % (raw, DEFAULT_MIN_IDLE_SECONDS))
+            _harness_only_floor(self.min_idle, DEFAULT_MIN_IDLE_SECONDS,
+                                "PRESENCE_MIN_IDLE_STRICTER_ONLY",
+                                "MMOS_CU_PRESENCE_MIN_IDLE %r" % raw)
             if self.min_idle < MIN_IDLE_FLOOR_SECONDS:
                 raise RefuseError(
                     "PRESENCE_MIN_IDLE_FLOOR",
@@ -636,6 +687,10 @@ class Presence:
             self.min_idle = _finite_number(
                 runtime_value, "PRESENCE_MIN_IDLE_INVALID",
                 repr(runtime_value), refuse=True)
+            _harness_only_floor(self.min_idle, DEFAULT_MIN_IDLE_SECONDS,
+                                "PRESENCE_MIN_IDLE_STRICTER_ONLY",
+                                "runtime presence_min_idle_seconds %r"
+                                % (runtime_value,))
             if self.min_idle < MIN_IDLE_FLOOR_SECONDS:
                 raise RefuseError(
                     "PRESENCE_MIN_IDLE_FLOOR",
@@ -1012,31 +1067,60 @@ def _canonical(text):
     return unicodedata.normalize("NFC", text).strip().casefold()
 
 
-def pacing_key(app_name, window_title, window_id=None):
-    """M8 pacing identity: owning app identity + normalized window title.
+def pacing_key(window_id, pid=None):
+    """R-M3 pacing identity: owning pid + exact window id.
 
-    The window id is NOT part of the key (it is only recorded alongside), so
-    closing and reopening the same app window does not reset the interval.
-    Falls back to the window id only when no identity at all is resolvable.
+    The key deliberately carries NO app name and NO window title: a title
+    change (tab switch, new message, a spinner) must not reset the interval,
+    or a caller could send twice inside the 3-minute rule by changing the
+    page title first. The owning pid binds the id to one process, so a window
+    id recycled by another app cannot inherit (or escape) a pace record.
+
+    An unreadable window id is refused, typed — a pace record with no target
+    identity would silently allow everything, which is exactly the hole this
+    closes. An unresolvable pid falls back to the exact id alone.
     """
-    app = _canonical(app_name)
-    title = _canonical(window_title)
-    if app or title:
-        return "app:%s|title:%s" % (app, title)
-    return "window:%s" % window_id
+    if not isinstance(window_id, int) or isinstance(window_id, bool):
+        raise OpError("WINDOW_ID_REQUIRED",
+                      "pacing needs an exact integer window_id, got %r"
+                      % (window_id,))
+    if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
+        return "pid:%d|window:%d" % (pid, window_id)
+    return "window:%d" % window_id
+
+
+def _window_owner_pid(ctx, window_id, app):
+    """Owning pid of window_id from the app's window list, or None.
+
+    One read, no pixels (``window list`` never captures). Any failure stays
+    None: the caller's key falls back to the exact window id, never to the
+    app name or title."""
+    if not app:
+        return None
+    try:
+        windows = ctx.adapter.windows_of_window(window_id, app)
+    except OpError:
+        return None
+    for row in windows:
+        if isinstance(row, dict) and row.get("window_id") == window_id:
+            pid = row.get("owner_pid", row.get("pid"))
+            if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
+                return pid
+    return None
 
 
 class Pacer:
-    """Pacing between acts that can change a page or send, keyed by the M8
-    identity (owning app + normalized window title), never the window id.
+    """Pacing between acts that can change a page or send, keyed by the R-M3
+    identity (owning pid + exact window id), never the app name or title.
 
     The last dispatch time for a key is persisted in pacing.json under the
     state dir; a second act on the SAME key inside the configured interval
     is refused with PACING_WAIT (seconds remaining). The interval defaults
-    to 180 s; priority: explicit constructor argument >
-    MMOS_CU_PACING_SECONDS env > runtime.json pacing_seconds >
-    DEFAULT_PACING_SECONDS. One worker at a time is already guaranteed by
-    the lease; pacing additionally spaces repeated acts on the same target.
+    to 180 s (also the production floor outside the test harness); priority:
+    explicit constructor argument > MMOS_CU_PACING_SECONDS env >
+    runtime.json pacing_seconds > DEFAULT_PACING_SECONDS. One worker at a
+    time is already guaranteed by the lease; pacing additionally spaces
+    repeated acts on the same target.
     """
 
     def __init__(self, state_dir=None, seconds=None, runtime=None):
@@ -1051,18 +1135,22 @@ class Pacer:
         if seconds is not None:
             self.seconds = _finite_number(seconds, "PACING_SECONDS_INVALID",
                                           repr(seconds), refuse=True)
+            _harness_only_floor(self.seconds, DEFAULT_PACING_SECONDS,
+                                "PACING_SECONDS_STRICTER_ONLY",
+                                "pacing seconds")
+            if self.seconds < PACING_FLOOR_SECONDS:
+                raise RefuseError(
+                    "PACING_SECONDS_FLOOR",
+                    "pacing seconds %r is below the %.0fs floor"
+                    % (seconds, PACING_FLOOR_SECONDS))
         elif raw:
             self.seconds = _finite_number(
                 raw, "PACING_SECONDS_INVALID",
                 "MMOS_CU_PACING_SECONDS %r is not a finite number" % raw,
                 refuse=True)
-            if self.seconds < DEFAULT_PACING_SECONDS and not _test_mode():
-                # M2: the env override may only make the gate STRICTER than
-                # the default; a lower value refuses at startup.
-                raise RefuseError(
-                    "PACING_SECONDS_STRICTER_ONLY",
-                    "MMOS_CU_PACING_SECONDS %r is below the %.0fs default"
-                    % (raw, DEFAULT_PACING_SECONDS))
+            _harness_only_floor(self.seconds, DEFAULT_PACING_SECONDS,
+                                "PACING_SECONDS_STRICTER_ONLY",
+                                "MMOS_CU_PACING_SECONDS %r" % raw)
             if self.seconds < PACING_FLOOR_SECONDS:
                 raise RefuseError(
                     "PACING_SECONDS_FLOOR",
@@ -1072,6 +1160,10 @@ class Pacer:
             self.seconds = _finite_number(
                 runtime_value, "PACING_SECONDS_INVALID",
                 repr(runtime_value), refuse=True)
+            _harness_only_floor(self.seconds, DEFAULT_PACING_SECONDS,
+                                "PACING_SECONDS_STRICTER_ONLY",
+                                "runtime pacing_seconds %r"
+                                % (runtime_value,))
             if self.seconds < PACING_FLOOR_SECONDS:
                 raise RefuseError(
                     "PACING_SECONDS_FLOOR",
@@ -1151,10 +1243,15 @@ def _stdout_error_message(data):
 
 
 def _is_foreground_required(text):
-    """True when a peekaboo failure says the element/action needs the app to
-    be frontmost. Detection is intentionally narrow: the message must name
-    foreground AND a requirement/refusal. It never triggers an automatic
-    escalation; the caller decides whether to re-dispatch opt-in foreground."""
+    """True when a peekaboo failure TEXT says the element/action needs the app
+    to be frontmost. Detection is intentionally narrow: the message must name
+    foreground AND a requirement/refusal.
+
+    R-M1: this classifies which typed CODE to report. It never decides the
+    receipt status — whether anything was dispatched is read ONLY from
+    peekaboo's structured result (_refusal_proven_no_mutation). It never
+    triggers an automatic escalation either; the caller decides whether to
+    re-dispatch opt-in foreground."""
     low = (text or "").lower()
     if "foreground" not in low:
         return False
@@ -1302,9 +1399,13 @@ class PeekabooAdapter:
                     _is_foreground_required(message):
                 error = OpError("FOREGROUND_REQUIRED",
                                 _bounded(result.stderr) or _bounded(message))
-                # A consent refusal dispatches nothing by definition (real
-                # capture: mutation_dispatched:false).
-                error.dispatched = False
+                # R-M1: the CODE comes from the text; whether NOTHING was
+                # dispatched comes ONLY from peekaboo's structured result
+                # (error/outcome mutation_dispatched false, or effect
+                # "refused"). A text-only mention of foreground leaves
+                # dispatched=True, so the receipt is EFFECT_UNKNOWN and never
+                # a false NOT_APPLIED.
+                error.dispatched = not _refusal_proven_no_mutation(data)
                 raise error
             preflight = _typed_preflight_refusal(data)
             if preflight is not None:
@@ -1328,7 +1429,8 @@ class PeekabooAdapter:
                 "peekaboo failed"
             if _is_foreground_required(message):
                 error = OpError("FOREGROUND_REQUIRED", detail)
-                error.dispatched = False
+                # R-M1: structured result only (see the rc!=0 branch above).
+                error.dispatched = not _refusal_proven_no_mutation(data)
                 raise error
             preflight = _typed_preflight_refusal(data)
             if preflight is not None:
@@ -2159,6 +2261,57 @@ def _foreground_gate(ctx, args):
     return state
 
 
+PASTE_GATE_UNPASTED = ("nothing was pasted; the pasteboard is unchanged "
+                       "(this layer never writes it — peekaboo's paste is the "
+                       "only clipboard writer and it never ran)")
+
+
+def _paste_foreground_gate(ctx, args, snap, window_id):
+    """R-H1 (BCU R2 item 5): the two checks that run IMMEDIATELY before the
+    opt-in foreground paste chord.
+
+    ``paste --foreground`` delivers Cmd+V to whichever window holds focus, so
+    a deny-listed window — the target itself, or a floating password-manager
+    or Keychain panel above it — could receive text meant for the target.
+
+    Order, both on FRESH reads at this instant:
+      1. DENY   — the target's identity on a screenshot-less observe
+                  (``see --tree --no-screenshot``; no pixels are taken on a
+                  refused window), then no deny-listed app may hold an
+                  on-screen window.
+      2. FRONTMOST — the target window must be the topmost window right now
+                  (``is_frontmost`` true); slice_front raises it when needed.
+
+    Either failure refuses BEFORE the paste subprocess starts: nothing is
+    pasted, the previous pasteboard contents are still in place (the layer
+    never sets the clipboard itself), and the receipt carries
+    ``pasted: false`` / ``clipboard_state: unchanged``. There is no retry and
+    no fallback to a background paste.
+    """
+    def _refuse(code, detail):
+        wrapped = OpError(code, "%s; %s" % (detail, PASTE_GATE_UNPASTED))
+        wrapped.extra = {"pasted": False, "clipboard_state": "unchanged"}
+        return wrapped
+
+    gate_codes = {"DENY_LISTED", "DENY_OVERLAY", "DENY_OVERLAY_UNVERIFIED",
+                  "WINDOW_NOT_FRONTMOST", "WINDOW_GONE",
+                  "WINDOW_IDENTITY_UNKNOWN"}
+    try:
+        fresh = ctx.adapter.inspect_window(window_id)
+        _deny_gate_window(ctx, fresh)          # 1. deny
+        _deny_overlay_gate(ctx)                # 1. deny (floating panels)
+        _frontmost_gate(ctx, fresh, window_id)  # 2. frontmost
+    except OpError as error:
+        if error.code in gate_codes:
+            raise _refuse(error.code, error.detail)
+        # The evidence that would prove the two checks could not be read:
+        # refuse the paste pre-dispatch (typed, never a text heuristic).
+        raise _refuse("PASTE_GATE_UNVERIFIED",
+                      "deny/frontmost evidence unreadable (%s: %s)"
+                      % (error.code, error.detail))
+    return fresh
+
+
 def _act_observe(ctx, args, window_id):
     """Gate, then take the FRESH snapshot every ACT dispatches on.
 
@@ -2193,8 +2346,11 @@ def _dispatch_act(ctx, args, base_argv, dispatcher=None):
     """ONE dispatch whose mode comes from the explicit caller flag ONLY.
 
     M10-CODE: there is no error-text-driven escalation. allow_foreground is
-    false by default -> one background dispatch, and a FOREGROUND_REQUIRED
-    failure is terminal NOT_APPLIED. allow_foreground=true -> the lease and
+    false by default -> one background dispatch. A FOREGROUND_REQUIRED
+    failure is terminal (never retried) and its receipt status is decided
+    ONLY by peekaboo's structured result: NOT_APPLIED when the result proves
+    nothing was dispatched (mutation_dispatched false / effect refused),
+    EFFECT_UNKNOWN otherwise (R-M1). allow_foreground=true -> the lease and
     presence gates are re-run and the SINGLE dispatch carries --foreground
     (never a background attempt first, never a retry).
 
@@ -2280,10 +2436,17 @@ def handle_tool_call(ctx, args):
                           "SLICE_TARGET_AMBIGUOUS", "SLICE_TARGET_NOT_FOUND",
                           "VISION_ENDPOINT_INSECURE", "HINTS_TOO_LONG",
                           "QUESTION_TOO_LONG",
-                          "DENY_OVERLAY", "DENY_OVERLAY_UNVERIFIED"):
+                          "DENY_OVERLAY", "DENY_OVERLAY_UNVERIFIED",
+                          "WINDOW_NOT_FRONTMOST", "WINDOW_GONE",
+                          "PASTE_GATE_UNVERIFIED"):
             payload = receipt(str(action), args.get("window_id"),
                               args.get("element_ref"), "NOT_APPLIED",
                               cause=error)
+            gate_extra = getattr(error, "extra", None)
+            if isinstance(gate_extra, dict) and gate_extra:
+                # Truthful pre-dispatch facts only (never a status override).
+                for key, value in gate_extra.items():
+                    payload.setdefault(key, value)
             return {"content": [{"type": "text",
                                  "text": json.dumps(payload)}],
                     "isError": True}
@@ -2659,7 +2822,10 @@ def _shared_act_gate(ctx, snap, window_id, op, chord=None):
     if not paced:
         return None
     identity = window_identity(snap)
-    key = pacing_key(identity["app_name"], identity["window_title"], window_id)
+    app = identity["app_name"] or identity["bundle_id"] or ""
+    # R-M3: pid + exact window id. A title change never resets the interval.
+    pid = _window_owner_pid(ctx, window_id, app)
+    key = pacing_key(window_id, pid)
     ctx.pacer.check(key)
     return key
 
@@ -2987,6 +3153,10 @@ def _op_slice_paste(ctx, args):
     paste_argv = _paste_argv(ctx, text, app_name, window_id, pid)
     if allow_fg:
         _foreground_gate(ctx, args)
+        # R-H1 (BCU R2 item 5): deny, then frontmost — both on fresh reads
+        # immediately before the chord. A failure here refuses BEFORE the
+        # paste subprocess starts: nothing pasted, pasteboard unchanged.
+        _paste_foreground_gate(ctx, args, snap, window_id)
         paste_argv = paste_argv + ["--foreground"]
     state_write = None
     try:
