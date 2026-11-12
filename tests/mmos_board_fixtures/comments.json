@@ -1,0 +1,397 @@
+[
+ {
+  "authorAgentId": null,
+  "authorType": "user",
+  "authorUserId": "local-board",
+  "body": "<placeholder>",
+  "clientRequestId": "11901a6e-0cd5-4d40-9d59-f5c5dfe1c7f4",
+  "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "conversationSessionGeneration": null,
+  "createdAt": "2026-11-10T10:28:13.581Z",
+  "createdByRunId": null,
+  "deletedAt": null,
+  "deletedByAgentId": null,
+  "deletedByRunId": null,
+  "deletedByType": null,
+  "deletedByUserId": null,
+  "derivedAuthorAgentId": null,
+  "derivedAuthorSource": null,
+  "derivedCreatedByRunId": null,
+  "fastResponseRequestId": null,
+  "id": "c743e55c-ae1e-422e-a18f-41233e2a6810",
+  "issueId": "474dbaf5-ad88-42fc-88e6-8bbbbd120e0f",
+  "metadata": null,
+  "onBehalfOfUserId": null,
+  "origin": "comment",
+  "presentation": null,
+  "sourceTrust": null,
+  "updatedAt": "2026-11-10T10:28:13.581Z"
+ },
+ {
+  "authorAgentId": null,
+  "authorType": "user",
+  "authorUserId": "local-board",
+  "body": "<placeholder>",
+  "clientRequestId": "dcc775ab-2cf8-4982-8d98-52088f9d5bdf",
+  "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "conversationSessionGeneration": null,
+  "createdAt": "2026-11-10T10:28:07.052Z",
+  "createdByRunId": null,
+  "deletedAt": null,
+  "deletedByAgentId": null,
+  "deletedByRunId": null,
+  "deletedByType": null,
+  "deletedByUserId": null,
+  "derivedAuthorAgentId": null,
+  "derivedAuthorSource": null,
+  "derivedCreatedByRunId": null,
+  "fastResponseRequestId": null,
+  "id": "d3d58d46-1af7-4cbf-9635-7cdab20f7d0e",
+  "issueId": "474dbaf5-ad88-42fc-88e6-8bbbbd120e0f",
+  "metadata": null,
+  "onBehalfOfUserId": null,
+  "origin": "comment",
+  "presentation": null,
+  "sourceTrust": null,
+  "updatedAt": "2026-11-10T10:28:07.052Z"
+ },
+ {
+  "authorAgentId": "f3ecbc59-f121-4f1b-95dc-76e297d47fd7",
+  "authorType": "agent",
+  "authorUserId": null,
+  "body": "<placeholder>",
+  "clientRequestId": null,
+  "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "conversationSessionGeneration": null,
+  "createdAt": "2026-11-10T08:31:52.910Z",
+  "createdByRunId": "d044433d-24c9-44ff-a137-452fd98e7c3d",
+  "deletedAt": null,
+  "deletedByAgentId": null,
+  "deletedByRunId": null,
+  "deletedByType": null,
+  "deletedByUserId": null,
+  "derivedAuthorAgentId": null,
+  "derivedAuthorSource": null,
+  "derivedCreatedByRunId": null,
+  "fastResponseRequestId": null,
+  "id": "efa99771-dd88-4b17-9df8-9a5812cbf70e",
+  "issueId": "474dbaf5-ad88-42fc-88e6-8bbbbd120e0f",
+  "metadata": {
+   "authorizationReason": "internal_agent_write",
+   "sections": [
+    {
+     "rows": [
+      {
+       "label": "<placeholder>",
+       "type": "key_value",
+       "value": "<placeholder>"
+      }
+     ],
+     "title": "<placeholder>"
+    }
+   ],
+   "version": 1
+  },
+  "onBehalfOfUserId": "local-board",
+  "origin": "comment",
+  "presentation": null,
+  "sourceTrust": null,
+  "updatedAt": "2026-11-10T08:31:52.910Z"
+ },
+ {
+  "authorAgentId": "f3ecbc59-f121-4f1b-95dc-76e297d47fd7",
+  "authorType": "agent",
+  "authorUserId": null,
+  "body": "<placeholder>",
+  "clientRequestId": null,
+  "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "conversationSessionGeneration": null,
+  "createdAt": "2026-11-10T08:29:58.178Z",
+  "createdByRunId": "1401a80b-614e-40ac-a356-ee8a165b81be",
+  "deletedAt": null,
+  "deletedByAgentId": null,
+  "deletedByRunId": null,
+  "deletedByType": null,
+  "deletedByUserId": null,
+  "derivedAuthorAgentId": null,
+  "derivedAuthorSource": null,
+  "derivedCreatedByRunId": null,
+  "fastResponseRequestId": null,
+  "id": "e5f79b9d-4cd2-45a4-9781-0e18faced44f",
+  "issueId": "474dbaf5-ad88-42fc-88e6-8bbbbd120e0f",
+  "metadata": {
+   "authorizationReason": "internal_agent_write",
+   "sections": [
+    {
+     "rows": [
+      {
+       "label": "<placeholder>",
+       "type": "key_value",
+       "value": "<placeholder>"
+      }
+     ],
+     "title": "<placeholder>"
+    }
+   ],
+   "version": 1
+  },
+  "onBehalfOfUserId": "local-board",
+  "origin": "comment",
+  "presentation": null,
+  "sourceTrust": null,
+  "updatedAt": "2026-11-10T08:29:58.178Z"
+ },
+ {
+  "authorAgentId": "f3ecbc59-f121-4f1b-95dc-76e297d47fd7",
+  "authorType": "agent",
+  "authorUserId": null,
+  "body": "<placeholder>",
+  "clientRequestId": null,
+  "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "conversationSessionGeneration": null,
+  "createdAt": "2026-11-10T08:26:26.677Z",
+  "createdByRunId": "1fe51cd9-d8e8-4ce8-a50a-8fe7ed7d6ef6",
+  "deletedAt": null,
+  "deletedByAgentId": null,
+  "deletedByRunId": null,
+  "deletedByType": null,
+  "deletedByUserId": null,
+  "derivedAuthorAgentId": null,
+  "derivedAuthorSource": null,
+  "derivedCreatedByRunId": null,
+  "fastResponseRequestId": null,
+  "id": "ef6a513d-7c7b-46c1-aae7-7eec8700d71a",
+  "issueId": "474dbaf5-ad88-42fc-88e6-8bbbbd120e0f",
+  "metadata": {
+   "authorizationReason": "internal_agent_write",
+   "sections": [
+    {
+     "rows": [
+      {
+       "label": "<placeholder>",
+       "type": "key_value",
+       "value": "<placeholder>"
+      }
+     ],
+     "title": "<placeholder>"
+    }
+   ],
+   "version": 1
+  },
+  "onBehalfOfUserId": "local-board",
+  "origin": "comment",
+  "presentation": null,
+  "sourceTrust": null,
+  "updatedAt": "2026-11-10T08:26:26.677Z"
+ },
+ {
+  "authorAgentId": "e58d7d45-8863-4d3d-8e16-851f8716fe47",
+  "authorType": "agent",
+  "authorUserId": null,
+  "body": "<placeholder>",
+  "clientRequestId": null,
+  "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "conversationSessionGeneration": null,
+  "createdAt": "2026-11-10T08:25:41.960Z",
+  "createdByRunId": "e1657879-bc64-4bd0-96ac-4e41b93928b0",
+  "deletedAt": null,
+  "deletedByAgentId": null,
+  "deletedByRunId": null,
+  "deletedByType": null,
+  "deletedByUserId": null,
+  "derivedAuthorAgentId": null,
+  "derivedAuthorSource": null,
+  "derivedCreatedByRunId": null,
+  "fastResponseRequestId": null,
+  "id": "5971cbdd-8439-4584-befa-6f5f9139f27b",
+  "issueId": "474dbaf5-ad88-42fc-88e6-8bbbbd120e0f",
+  "metadata": {
+   "authorizationReason": "allow_visible_issue_write",
+   "sections": [
+    {
+     "rows": [
+      {
+       "label": "<placeholder>",
+       "type": "key_value",
+       "value": "<placeholder>"
+      }
+     ],
+     "title": "<placeholder>"
+    }
+   ],
+   "version": 1
+  },
+  "onBehalfOfUserId": "local-board",
+  "origin": "comment",
+  "presentation": null,
+  "sourceTrust": null,
+  "updatedAt": "2026-11-10T08:25:41.960Z"
+ },
+ {
+  "authorAgentId": null,
+  "authorType": "system",
+  "authorUserId": null,
+  "body": "<placeholder>",
+  "clientRequestId": null,
+  "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "conversationSessionGeneration": null,
+  "createdAt": "2026-11-10T08:24:15.578Z",
+  "createdByRunId": null,
+  "deletedAt": null,
+  "deletedByAgentId": null,
+  "deletedByRunId": null,
+  "deletedByType": null,
+  "deletedByUserId": null,
+  "derivedAuthorAgentId": null,
+  "derivedAuthorSource": null,
+  "derivedCreatedByRunId": null,
+  "fastResponseRequestId": null,
+  "id": "1c6764aa-ed26-4697-a931-77be1a8b96ad",
+  "issueId": "474dbaf5-ad88-42fc-88e6-8bbbbd120e0f",
+  "metadata": {
+   "recoveryResponsibility": "system",
+   "sections": [
+    {
+     "rows": [
+      {
+       "label": "<placeholder>",
+       "type": "key_value",
+       "value": "<placeholder>"
+      },
+      {
+       "label": "<placeholder>",
+       "type": "key_value",
+       "value": "<placeholder>"
+      },
+      {
+       "label": "<placeholder>",
+       "type": "key_value",
+       "value": "<placeholder>"
+      }
+     ],
+     "title": "<placeholder>"
+    },
+    {
+     "rows": [
+      {
+       "agentId": "f3ecbc59-f121-4f1b-95dc-76e297d47fd7",
+       "label": "<placeholder>",
+       "runId": "3b1ac73b-f092-4805-a39f-f0c3a8aa190d",
+       "title": "<placeholder>",
+       "type": "run_link"
+      },
+      {
+       "label": "<placeholder>",
+       "type": "key_value",
+       "value": "<placeholder>"
+      },
+      {
+       "label": "<placeholder>",
+       "type": "key_value",
+       "value": "<placeholder>"
+      }
+     ],
+     "title": "<placeholder>"
+    }
+   ],
+   "sourceRunId": "3b1ac73b-f092-4805-a39f-f0c3a8aa190d",
+   "version": 1
+  },
+  "onBehalfOfUserId": null,
+  "origin": "comment",
+  "presentation": {
+   "detailsDefaultOpen": false,
+   "kind": "system_notice",
+   "title": "<placeholder>",
+   "tone": "danger"
+  },
+  "sourceTrust": null,
+  "updatedAt": "2026-11-10T08:24:15.578Z"
+ },
+ {
+  "authorAgentId": "f3ecbc59-f121-4f1b-95dc-76e297d47fd7",
+  "authorType": "agent",
+  "authorUserId": null,
+  "body": "<placeholder>",
+  "clientRequestId": null,
+  "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "conversationSessionGeneration": null,
+  "createdAt": "2026-11-10T08:23:51.914Z",
+  "createdByRunId": "3b1ac73b-f092-4805-a39f-f0c3a8aa190d",
+  "deletedAt": null,
+  "deletedByAgentId": null,
+  "deletedByRunId": null,
+  "deletedByType": null,
+  "deletedByUserId": null,
+  "derivedAuthorAgentId": null,
+  "derivedAuthorSource": null,
+  "derivedCreatedByRunId": null,
+  "fastResponseRequestId": null,
+  "id": "d8f30853-b789-454c-a2a4-a12f25224409",
+  "issueId": "474dbaf5-ad88-42fc-88e6-8bbbbd120e0f",
+  "metadata": {
+   "authorizationReason": "internal_agent_write",
+   "sections": [
+    {
+     "rows": [
+      {
+       "label": "<placeholder>",
+       "type": "key_value",
+       "value": "<placeholder>"
+      }
+     ],
+     "title": "<placeholder>"
+    }
+   ],
+   "version": 1
+  },
+  "onBehalfOfUserId": "local-board",
+  "origin": "comment",
+  "presentation": null,
+  "sourceTrust": null,
+  "updatedAt": "2026-11-10T08:23:51.914Z"
+ },
+ {
+  "authorAgentId": "f3ecbc59-f121-4f1b-95dc-76e297d47fd7",
+  "authorType": "agent",
+  "authorUserId": null,
+  "body": "<placeholder>",
+  "clientRequestId": null,
+  "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "conversationSessionGeneration": null,
+  "createdAt": "2026-11-10T08:13:50.872Z",
+  "createdByRunId": "e34e5717-9dff-46f3-b460-9556be7efeea",
+  "deletedAt": null,
+  "deletedByAgentId": null,
+  "deletedByRunId": null,
+  "deletedByType": null,
+  "deletedByUserId": null,
+  "derivedAuthorAgentId": null,
+  "derivedAuthorSource": null,
+  "derivedCreatedByRunId": null,
+  "fastResponseRequestId": null,
+  "id": "17a0f25c-6725-4324-9a90-5efbca3616e5",
+  "issueId": "474dbaf5-ad88-42fc-88e6-8bbbbd120e0f",
+  "metadata": {
+   "authorizationReason": "internal_agent_write",
+   "sections": [
+    {
+     "rows": [
+      {
+       "label": "<placeholder>",
+       "type": "key_value",
+       "value": "<placeholder>"
+      }
+     ],
+     "title": "<placeholder>"
+    }
+   ],
+   "version": 1
+  },
+  "onBehalfOfUserId": "local-board",
+  "origin": "comment",
+  "presentation": null,
+  "sourceTrust": null,
+  "updatedAt": "2026-11-10T08:13:50.872Z"
+ }
+]

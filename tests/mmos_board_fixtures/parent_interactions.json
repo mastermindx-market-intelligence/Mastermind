@@ -1,0 +1,52 @@
+[
+ {
+  "addresseeAgentId": null,
+  "addresseeUserId": null,
+  "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "continuationPolicy": "none",
+  "createdAt": "2026-11-11T02:15:35.740Z",
+  "createdByAgentId": "e58d7d45-8863-4d3d-8e16-851f8716fe47",
+  "createdByUserId": null,
+  "dismissedAt": null,
+  "dismissedByUserId": null,
+  "effectiveResolverPolicy": "anyone",
+  "effectiveResolverPolicySource": "requested",
+  "id": "a100ec5d-ac1a-4eaa-b048-65a1d733f520",
+  "idempotencyKey": "pc-2ad0bf92-e025-46bb-b315-dc7d0f99f693-b3113842b2-ask-ret-confirm",
+  "issueId": "2ad0bf92-e025-46bb-b315-dc7d0f99f693",
+  "kind": "request_confirmation",
+  "legacyResolverPolicyAliases": {
+   "effective": "board_or_agents",
+   "requested": "board_or_agents"
+  },
+  "originCommentIds": [],
+  "payload": {
+   "allowDeclineReason": true,
+   "prompt": "<placeholder>",
+   "supersedeOnUserComment": false,
+   "target": {
+    "key": "native_completion_review",
+    "type": "custom"
+   },
+   "version": 1
+  },
+  "requestedResolverPolicy": "anyone",
+  "resolvedAt": "2026-11-11T02:16:18.285Z",
+  "resolvedByAgentId": null,
+  "resolvedByRunId": null,
+  "resolvedByUserId": "local-board",
+  "resolverPolicy": "anyone",
+  "resolverPolicyProvenance": "inherited",
+  "result": {
+   "outcome": "accepted",
+   "version": 1
+  },
+  "sourceCommentId": null,
+  "sourceIdentityContextId": "8299f03a-17f2-4535-9425-01f8fdcb0c22",
+  "sourceRunId": "97ab28f1-133e-4399-adba-23a52ac26a40",
+  "status": "accepted",
+  "summary": null,
+  "title": null,
+  "updatedAt": "2026-11-11T02:16:18.285Z"
+ }
+]

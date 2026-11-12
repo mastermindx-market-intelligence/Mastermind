@@ -30,22 +30,32 @@ if REPO not in sys.path:
 
 
 class FakePaperclip:
+    AGENT_ID = "ag-1"
+
     def __init__(self):
         self.comment_rows = {}
         self.comment_calls = []
+
+    def me(self):
+        return {"id": self.AGENT_ID}
 
     def comments(self, issue_id):
         return list(self.comment_rows.get(issue_id, []))
 
     def add_comment(self, issue_id, body):
         self.comment_calls.append((issue_id, body))
-        self.comment_rows.setdefault(issue_id, []).append({"body": body})
+        # the installed board stamps agent-token writes with authorType
+        # "agent" and the agent's own id (fixture comments.json)
+        self.comment_rows.setdefault(issue_id, []).append({
+            "body": body, "authorType": "agent",
+            "authorAgentId": self.AGENT_ID})
 
 
 class FakeDoorServer(threading.Thread):
     """A real AF_UNIX server speaking just enough HTTP for DoorClient."""
 
-    def __init__(self, reply_status=200, reply_body=None, drop=False):
+    def __init__(self, reply_status=200, reply_body=None, drop=False,
+                 raw_reply=None):
         super().__init__(daemon=True)
         self.path = os.path.join(HERE, f"t4b-door-{os.getpid()}.sock")
         if os.path.exists(self.path):
@@ -53,6 +63,7 @@ class FakeDoorServer(threading.Thread):
         self.reply_status = reply_status
         self.reply_body = reply_body or {}
         self.drop = drop
+        self.raw_reply = raw_reply
         self.requests = []
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._sock.bind(self.path)
@@ -76,6 +87,9 @@ class FakeDoorServer(threading.Thread):
                 self.requests.append(data.decode("utf-8", "replace"))
                 if self.drop:
                     conn.close()  # no reply at all
+                    continue
+                if self.raw_reply is not None:
+                    conn.sendall(self.raw_reply)
                     continue
                 body = json.dumps(self.reply_body).encode()
                 conn.sendall(
@@ -256,6 +270,48 @@ def test_second_run_is_idempotent_by_comment_marker(pc):
     assert len(pc.comment_calls) == 1
 
 
+def test_a_person_quoting_a_carrier_note_is_not_the_carriers_marker(pc):
+    # Panel-2 H2: marker authority belongs to the carrier's OWN notes —
+    # authorType "agent" AND this carrier's agent id. A person pasting a
+    # terminal note verbatim (from a chat, another task) must not suppress
+    # the real admit: the job would never run and nothing would say so.
+    server = FakeDoorServer(reply_body={"ok": True, "result": {
+        "state": "ADMITTED", "job_id": "job-42"}})
+    server.start()
+    try:
+        marker = f"coding-job-command: {wc.coding_job_command('iss-7')}"
+        pc.comment_rows["iss-7"] = [{
+            "body": ("[t2-carrier] coding job coding-job-1 ADMITTED — "
+                     f"job `job-42`\n\n{marker}"),
+            "authorType": "user",
+            "authorAgentId": None,
+        }]
+        _run_handle(pc, server)
+    finally:
+        server.stop()
+    assert len(server.requests) == 1, "a pasted note is not the carrier's own"
+    assert "ADMITTED" in pc.comment_calls[0][1]
+
+
+def test_another_agents_note_is_not_the_carriers_marker(pc):
+    # Same rule across agents: a machine-prefixed note by a DIFFERENT agent
+    # (another lane's carrier on the same board) has no authority here.
+    server = FakeDoorServer(reply_body={"ok": True, "result": {
+        "state": "ADMITTED", "job_id": "job-42"}})
+    server.start()
+    try:
+        marker = f"coding-job-command: {wc.coding_job_command('iss-7')}"
+        pc.comment_rows["iss-7"] = [{
+            "body": f"[t2-carrier] coding job coding-job-1 ADMITTED\n\n{marker}",
+            "authorType": "agent",
+            "authorAgentId": "ag-someone-else",
+        }]
+        _run_handle(pc, server)
+    finally:
+        server.stop()
+    assert len(server.requests) == 1, "another agent's note is not ours"
+
+
 def test_no_door_configured_is_a_log_line_not_a_failure(pc):
     wc.handle_coding_job(pc, ISSUE, "the answer", {"key": "coding-job-1"}, {})
     assert pc.comment_calls == []
@@ -350,3 +406,122 @@ def test_f10_example_keys_die_at_the_identifier_regex():
              "key: <only for a second, different job; default coding-job-1>\n"
              "```")
     assert wc.parse_coding_job_block(reply) is None
+
+
+# --------------------------------------------------------------------------
+# panel-2 M8: a non-HTTP door answer is transient, never a dropped job
+# --------------------------------------------------------------------------
+
+def test_a_non_http_door_answer_lands_in_the_transient_path(pc):
+    # The door is a unix socket; anything may be listening behind the path
+    # (a half-started door, a hijacked socket, a plain-text proxy). The
+    # status-line parse used to raise ValueError straight through the
+    # never-raises contract — the run died and the delivered job was
+    # dropped. A non-HTTP answer must land in the TRANSIENT path like any
+    # other unreadable door: one note, a retry line, no raise.
+    server = FakeDoorServer(raw_reply=b"ERR door starting up, try again\r\n\r\n")
+    server.start()
+    try:
+        _run_handle(pc, server)
+    finally:
+        server.stop()
+    assert len(server.requests) == 1
+    assert len(pc.comment_calls) == 1
+    note = pc.comment_calls[0][1]
+    assert "DOOR_MALFORMED" in note
+    assert "coding-job-retry: coding-job-1" in note
+
+
+# --------------------------------------------------------------------------
+# panel-2 M3/M4: retry keys are validated and retries are bounded
+# --------------------------------------------------------------------------
+
+def _carrier_note(body, pc):
+    return {"body": body, "authorType": "agent", "authorAgentId": pc.AGENT_ID}
+
+
+def test_retry_keys_that_are_not_safe_identifiers_never_reach_the_door(pc):
+    # M3: the retry line is comment text; anything may sit behind the
+    # prefix. A key must satisfy the SAME identifier rule as the fresh
+    # path before it can name a command.
+    server = FakeDoorServer(reply_body={"ok": True, "result": {
+        "state": "ADMITTED", "job_id": "job-42"}})
+    server.start()
+    try:
+        pc.comment_rows["iss-7"] = [
+            _carrier_note("[t2-carrier] coding job blocked — WAIT\n\n"
+                          "coding-job-retry: drop table jobs", pc),
+            _carrier_note("[t2-carrier] coding job blocked — WAIT\n\n"
+                          "coding-job-retry: a/b", pc),
+            _carrier_note("[t2-carrier] coding job blocked — WAIT\n\n"
+                          "coding-job-retry: ok-key", pc),
+        ]
+        wc.retry_transient_coding_jobs(
+            pc, ISSUE, {"coding_job_door": server.path})
+    finally:
+        server.stop()
+    assert len(server.requests) == 1, "only the safe key reaches the door"
+    body = json.loads(server.requests[0].split("\r\n\r\n", 1)[1])
+    assert body["command"] == wc.coding_job_command("iss-7", "ok-key")
+
+
+def test_a_retry_line_a_person_wrote_is_not_a_retry(pc):
+    # M3 + H2: the retry line's authority is the carrier's own authorship.
+    server = FakeDoorServer(reply_body={"ok": True, "result": {
+        "state": "ADMITTED", "job_id": "job-42"}})
+    server.start()
+    try:
+        pc.comment_rows["iss-7"] = [{
+            "body": ("[t2-carrier] coding job blocked — WAIT\n\n"
+                     "coding-job-retry: coding-job-1"),
+            "authorType": "user",
+            "authorAgentId": None,
+        }]
+        wc.retry_transient_coding_jobs(
+            pc, ISSUE, {"coding_job_door": server.path})
+    finally:
+        server.stop()
+    assert server.requests == [], "a person's line names no command"
+
+
+def test_retries_are_bounded_per_key_and_end_in_a_note_for_a_person(pc):
+    # M4: a door that keeps answering WAIT would be re-admitted forever,
+    # one comment per wake. After the per-key bound the retry stops and a
+    # person is told plainly.
+    server = FakeDoorServer(reply_body={"ok": True, "result": {
+        "state": "WAIT", "wait_reason": "CHILD_QUEUE_FLEET_READY_FULL",
+        "wait_detail": {"ready": 1, "limit": 1}}})
+    server.start()
+    try:
+        pc.comment_rows["iss-7"] = [
+            _carrier_note("[t2-carrier] coding job blocked — WAIT\n\n"
+                          "coding-job-retry: coding-job-1", pc)
+            for _ in range(3)
+        ]
+        wc.retry_transient_coding_jobs(
+            pc, ISSUE, {"coding_job_door": server.path})
+    finally:
+        server.stop()
+    assert server.requests == [], "the bound must stop the admit loop"
+    assert any("person" in body for _issue, body in pc.comment_calls), \
+        "someone must be told the retries ran out"
+
+
+def test_below_the_bound_the_retry_still_happens(pc):
+    # M4 sanity: two earlier transient notes for the key, bound 3 — the
+    # third admit still goes out.
+    server = FakeDoorServer(reply_body={"ok": True, "result": {
+        "state": "WAIT", "wait_reason": "CHILD_QUEUE_FLEET_READY_FULL",
+        "wait_detail": {"ready": 1, "limit": 1}}})
+    server.start()
+    try:
+        pc.comment_rows["iss-7"] = [
+            _carrier_note("[t2-carrier] coding job blocked — WAIT\n\n"
+                          "coding-job-retry: coding-job-1", pc)
+            for _ in range(2)
+        ]
+        wc.retry_transient_coding_jobs(
+            pc, ISSUE, {"coding_job_door": server.path})
+    finally:
+        server.stop()
+    assert len(server.requests) == 1

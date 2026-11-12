@@ -1,0 +1,46 @@
+{
+ "thread": {
+  "threadId": "mcp:efd0a44f-2984-4522-82d1-4a4821d218d9",
+  "projectId": "dd05e0a4-a9a2-492b-bf9a-596e24fc3791",
+  "title": "rf live proof 3",
+  "link": "https://app.t3.codes/threads/<share-slug>/<thread-id>",
+  "createdBy": "agent",
+  "creationSource": "mcp",
+  "status": "completed",
+  "latestRunId": "run:thread:mcp%3Aefd0a44f-2984-4522-82d1-4a4821d218d9:ordinal:1",
+  "activeRunId": null,
+  "providerInstanceId": "rfSlowProbe",
+  "model": "slow",
+  "runtimeMode": "full-access",
+  "interactionMode": "default",
+  "linkedPullRequest": null,
+  "pullRequests": [],
+  "titleRegeneration": null,
+  "branch": null,
+  "worktreePath": null,
+  "parentThreadId": null,
+  "relationshipToParent": null,
+  "runCount": 1,
+  "itemCount": 4,
+  "pendingRequestCount": 0,
+  "archived": false,
+  "settled": false,
+  "settledAt": null,
+  "snoozed": false,
+  "snoozedUntil": null,
+  "createdAt": "2026-11-11T13:50:19.784Z",
+  "updatedAt": "2026-11-11T13:50:32.284Z"
+ },
+ "messages": [
+  {
+   "role": "user",
+   "runId": "run:thread:mcp%3Aefd0a44f-2984-4522-82d1-4a4821d218d9:ordinal:1",
+   "text": "RF-PROBE one turn please"
+  },
+  {
+   "role": "assistant",
+   "runId": "run:thread:mcp%3Aefd0a44f-2984-4522-82d1-4a4821d218d9:ordinal:1",
+   "text": "RF-PROBE turn started; sleeping 12000ms mid-run.\nRF-PROBE turn finished after the mid-run delay.\n"
+  }
+ ]
+}

@@ -1,0 +1,252 @@
+{
+ "activeRecoveryAction": null,
+ "ancestors": [
+  {
+   "assigneeAgentId": "e58d7d45-8863-4d3d-8e16-851f8716fe47",
+   "description": "<placeholder>",
+   "goal": null,
+   "goalId": null,
+   "id": "2ad0bf92-e025-46bb-b315-dc7d0f99f693",
+   "identifier": "MAS-12",
+   "priority": "medium",
+   "project": null,
+   "projectId": null,
+   "status": "done",
+   "title": "<placeholder>"
+  }
+ ],
+ "assigneeAdapterOverrides": null,
+ "assigneeAgentId": "ca4929d5-a725-4f62-a9c5-d3c66a281e30",
+ "assigneeUserId": null,
+ "billingCode": null,
+ "blockedBy": [],
+ "blockedOwnerNotifiedAt": null,
+ "blockedTransitionAt": null,
+ "blockerAttention": {
+  "attentionBlockerCount": 0,
+  "blockingTreeLive": false,
+  "coveredBlockerCount": 0,
+  "directBlockerIssueId": null,
+  "pendingFinalizeBlockerIssueIds": [],
+  "reason": null,
+  "sampleBlockerIdentifier": null,
+  "sampleStalledBlockerIdentifier": null,
+  "stalledBlockerCount": 0,
+  "state": "none",
+  "terminalBlocker": null,
+  "terminalBlockerIssueId": null,
+  "unresolvedBlockerCount": 0
+ },
+ "blocks": [
+  {
+   "activeRecoveryAction": null,
+   "assigneeAgentId": "e58d7d45-8863-4d3d-8e16-851f8716fe47",
+   "assigneeUserId": null,
+   "id": "2ad0bf92-e025-46bb-b315-dc7d0f99f693",
+   "identifier": "MAS-12",
+   "priority": "medium",
+   "scheduledRetry": null,
+   "status": "done",
+   "title": "<placeholder>"
+  }
+ ],
+ "cancelledAt": null,
+ "checkoutRunId": null,
+ "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+ "completedAt": "2026-11-11T02:15:18.751Z",
+ "continuationIdentityContextId": "13df7531-f9c1-432b-b409-9fed1e5b353a",
+ "conversationAgentId": null,
+ "conversationBoundaryCommentId": null,
+ "conversationSessionGeneration": 0,
+ "conversationState": null,
+ "conversationUserId": null,
+ "createdAt": "2026-11-11T02:14:50.812Z",
+ "createdByAgentId": "e58d7d45-8863-4d3d-8e16-851f8716fe47",
+ "createdByUserId": null,
+ "createdFrom": {
+  "agent": {
+   "id": "e58d7d45-8863-4d3d-8e16-851f8716fe47",
+   "name": "<placeholder>"
+  },
+  "issue": {
+   "id": "2ad0bf92-e025-46bb-b315-dc7d0f99f693",
+   "identifier": "MAS-12",
+   "status": "done",
+   "title": "<placeholder>"
+  },
+  "run": {
+   "agentId": "e58d7d45-8863-4d3d-8e16-851f8716fe47",
+   "id": "a8f44dda-c867-4ff5-b65f-57fa00496947"
+  }
+ },
+ "currentExecutionWorkspace": {
+  "baseRef": null,
+  "branchName": null,
+  "cleanupEligibleAt": null,
+  "cleanupReason": null,
+  "closedAt": null,
+  "companyId": "a5f907fc-c4b1-478c-a1b1-1748d32206dd",
+  "config": {
+   "cleanupCommand": null,
+   "desiredState": null,
+   "environmentId": "7addd6ae-551a-4193-977a-753501c54b77",
+   "provisionCommand": null,
+   "runtimeProvisionCommand": null,
+   "serviceStates": null,
+   "teardownCommand": null,
+   "workspaceRuntime": null
+  },
+  "createdAt": "2026-11-11T02:14:34.844Z",
+  "cwd": "/Users/chriswong/.mastermind/t3-team/teammates/secretary",
+  "deliveryState": "unknown",
+  "derivedFromExecutionWorkspaceId": null,
+  "id": "6fc8c936-b33d-468a-a1d2-acbb999898c6",
+  "lastUsedAt": "2026-11-11T02:15:19.289Z",
+  "metadata": null,
+  "mode": "shared_workspace",
+  "name": "<placeholder>",
+  "openedAt": "2026-11-11T02:14:34.844Z",
+  "projectId": null,
+  "projectWorkspaceId": null,
+  "providerRef": null,
+  "providerType": "local_fs",
+  "repoUrl": null,
+  "runtimeServices": [],
+  "sourceIssueId": "2ad0bf92-e025-46bb-b315-dc7d0f99f693",
+  "status": "active",
+  "strategyType": "project_primary",
+  "updatedAt": "2026-11-11T02:15:19.341Z"
+ },
+ "description": "<placeholder>\n[pc-2ad0bf92-e025-46bb-b315-dc7d0f99f693-b3113842b2-ask]",
+ "documentSummaries": [],
+ "executionAgentNameKey": null,
+ "executionBlocker": null,
+ "executionLockedAt": null,
+ "executionPolicy": null,
+ "executionRunId": null,
+ "executionState": null,
+ "executionWorkspaceId": "6fc8c936-b33d-468a-a1d2-acbb999898c6",
+ "executionWorkspacePreference": "reuse_existing",
+ "executionWorkspaceSettings": {
+  "mode": "shared_workspace"
+ },
+ "externalChannelBinding": null,
+ "externalConversationState": null,
+ "goal": null,
+ "goalId": null,
+ "harnessKind": null,
+ "hiddenAt": null,
+ "id": "1acb93ff-adb9-48ab-82c0-961febf94cac",
+ "identifier": "MAS-13",
+ "interruption": {
+  "canRetry": false,
+  "intentId": null,
+  "nextRetryAt": null,
+  "observedRunId": "43950f4f-c196-4d80-8d20-242968d75da7",
+  "responsibility": "system",
+  "sourceRunIds": [
+   "43950f4f-c196-4d80-8d20-242968d75da7"
+  ],
+  "state": "resolved",
+  "userAction": null
+ },
+ "issueNumber": 13,
+ "labelIds": [],
+ "labels": [],
+ "lastStatusDecisionId": null,
+ "legacyPlanDocument": null,
+ "mentionedProjects": [],
+ "monitorAttemptCount": 0,
+ "monitorLastTriggeredAt": null,
+ "monitorNextCheckAt": null,
+ "monitorNotes": null,
+ "monitorScheduledBy": null,
+ "monitorWakeRequestedAt": null,
+ "originFingerprint": "default",
+ "originId": null,
+ "originIdentityContextId": "dd8872e3-79a9-4ad5-b218-eec58443b303",
+ "originKind": "manual",
+ "originRunId": "a8f44dda-c867-4ff5-b65f-57fa00496947",
+ "parentId": "2ad0bf92-e025-46bb-b315-dc7d0f99f693",
+ "planDocument": null,
+ "priority": "medium",
+ "privacyParentIssueId": "2ad0bf92-e025-46bb-b315-dc7d0f99f693",
+ "privacyRootIssueId": null,
+ "project": null,
+ "projectId": null,
+ "projectWorkspaceId": null,
+ "referencedIssueIdentifiers": [
+  "MAS-12",
+  "MAS-7"
+ ],
+ "relatedWork": {
+  "inbound": [],
+  "outbound": [
+   {
+    "issue": {
+     "assigneeAgentId": "e58d7d45-8863-4d3d-8e16-851f8716fe47",
+     "assigneeUserId": null,
+     "id": "2ad0bf92-e025-46bb-b315-dc7d0f99f693",
+     "identifier": "MAS-12",
+     "priority": "medium",
+     "status": "done",
+     "title": "<placeholder>"
+    },
+    "mentionCount": 1,
+    "sources": [
+     {
+      "kind": "description",
+      "label": "<placeholder>",
+      "matchedText": "MAS-12",
+      "sourceRecordId": null
+     }
+    ]
+   },
+   {
+    "issue": {
+     "assigneeAgentId": "ca4929d5-a725-4f62-a9c5-d3c66a281e30",
+     "assigneeUserId": null,
+     "id": "7897297c-42e6-4afd-b671-edb5b41ec2b3",
+     "identifier": "MAS-7",
+     "priority": "medium",
+     "status": "done",
+     "title": "<placeholder>"
+    },
+    "mentionCount": 1,
+    "sources": [
+     {
+      "kind": "comment",
+      "label": "<placeholder>",
+      "matchedText": "MAS-7",
+      "sourceRecordId": "f8ffaea2-5415-4689-a552-ed689b131dc3"
+     }
+    ]
+   }
+  ]
+ },
+ "requestDepth": 0,
+ "responsibleUserId": "local-board",
+ "reviewAttention": {
+  "paths": [],
+  "reason": null,
+  "state": "none"
+ },
+ "reviewPolicy": null,
+ "scheduledRetry": null,
+ "sourceTrust": null,
+ "startedAt": "2026-11-11T02:14:51.542Z",
+ "status": "done",
+ "statusVersion": 2,
+ "successfulRunHandoff": null,
+ "title": "<placeholder>",
+ "titleNeedsGeneration": false,
+ "unblockDescriptor": null,
+ "updatedAt": "2026-11-11T02:15:18.751Z",
+ "visibility": "open",
+ "watchdog": null,
+ "workMode": "standard",
+ "workProducts": [],
+ "workspaceBindingRevision": 0,
+ "workspacePendingSelection": null,
+ "workspaceSelection": null
+}

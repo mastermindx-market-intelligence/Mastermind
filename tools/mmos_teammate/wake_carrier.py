@@ -37,6 +37,7 @@ carrier's own run budget. An unanswered question ends the run with the issue
 left in_progress — a board comment on the issue wakes it again.
 See T2_TEAMMATE_BINDING_AND_DISPATCH.md.
 """
+import fcntl
 import hashlib
 import json
 import os
@@ -46,6 +47,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -76,10 +78,12 @@ def parse_coding_job_block(reply):
     -> {"key"} or None. The block names WHICH job of this task it is (the
     task's title+description is the brief); a block without a key means the
     default. Malformed -> None (plain answer; a trigger can never fail the
-    run). Blocks count only in the teammate's OWN reply AND only as its LAST
-    word (attack review F9): a block the teammate QUOTED back — from the
-    task description or anywhere else — is followed by the teammate's own
-    prose and is not a trigger. Example `<...>` keys die at the identifier
+    run). This shape test alone does NOT prove the block is the teammate's
+    own: the end-guard rejects only a block followed by more prose, so a
+    quote that ends the reply still passes it. The quote test that completes
+    the rule is block_quoted_from_task(), applied where the issue text is in
+    scope (panel-2 M7): a fenced segment that appears verbatim in the task
+    is a quote, not a trigger. Example `<...>` keys die at the identifier
     regex, never as a trigger."""
     lines = (reply or "").splitlines()
     start = None
@@ -154,11 +158,34 @@ class DoorClient:
             conn.close()
         raw = b"".join(chunks)
         status_line, _, resp = raw.partition(b"\r\n\r\n")
-        status = int(status_line.split(b" ", 2)[1]) if b" " in status_line else 0
+        # Panel-2 M8: the listener behind the socket path may answer in
+        # something that is not HTTP at all. An unparsable status line is
+        # status 0 — never a raised ValueError through the never-raises
+        # contract — and the caller maps 0 onto the TRANSIENT
+        # DOOR_MALFORMED path (retry line, no dropped job).
+        status = 0
+        if b" " in status_line:
+            try:
+                status = int(status_line.split(b" ", 2)[1])
+            except ValueError:
+                status = 0
         try:
             return status, json.loads(resp or b"{}")
         except ValueError:
             return status, {}
+
+
+def _coding_job_transient_note(pc, issue, key, headline, detail):
+    """A TRANSIENT coding-job outcome (WAIT, unreachable or unreadable
+    door). No marker — the admit is not confirmed — but a retry line naming
+    the key, so a later wake on this issue re-issues it (the door is
+    idempotent by command)."""
+    pc.add_comment(issue["id"], (
+        f"[t2-carrier] coding job blocked — {headline}\n\n"
+        f"{detail} The task's governed coding job could not be confirmed "
+        "and will be retried when this issue is next worked (a board reply "
+        f"or a resume wakes it).\n\n"
+        f"coding-job-retry: {key}"))
 
 
 def handle_coding_job(pc, issue, reply, block, opts):
@@ -170,10 +197,10 @@ def handle_coding_job(pc, issue, reply, block, opts):
     admission/replay comment (the job id is the identity the result will
     carry home), or ONE blocker comment with the exact reason (WAIT detail,
     refusal code, unreachable door). Terminal outcomes carry the idempotency
-    marker; TRANSIENT ones (WAIT, unreachable door) deliberately do not, so
-    a later wake retries the one call — the door itself is idempotent by
-    command. Never raises — a blocked job must not fail the delivered
-    answer."""
+    marker; TRANSIENT ones (WAIT, unreachable or unreadable door) carry a
+    retry line instead, and a later wake on the issue re-issues the call —
+    the door itself is idempotent by command. Never raises — a blocked job
+    must not fail the delivered answer."""
     socket_path = (opts.get("coding_job_door") or "").strip()
     if not socket_path:
         log("coding-job block present but no coding_job_door in config; "
@@ -181,13 +208,15 @@ def handle_coding_job(pc, issue, reply, block, opts):
         return
     command = coding_job_command(issue["id"], block["key"])
     marker = f"coding-job-command: {command}"
-    try:
-        rows = pc.comments(issue["id"])
-    except CarrierError:
-        rows = []
-    if isinstance(rows, dict):
-        rows = rows.get("comments") or rows.get("rows") or []
-    if any(marker in (row.get("body") or "") for row in rows):
+    # Panel-2 M5: the dedupe read must not turn an unknown shape (or a
+    # failed read) into "no marker" — that re-admits on guesswork. Raise;
+    # the delivered answer stands (the run's after-delivery guard).
+    rows = served_rows(pc.comments(issue["id"]), "comments", "rows")
+    # Only the carrier's OWN notes carry the marker's authority: a person or
+    # teammate quoting a terminal note's marker text must not suppress a
+    # real admit (the job would never run and nothing would say so).
+    machine_bodies = carrier_note_bodies(pc, rows)
+    if any(marker in body for body in machine_bodies):
         log(f"coding job for {issue.get('identifier')} already surfaced "
             f"({block['key']}); no second call")
         return
@@ -197,14 +226,10 @@ def handle_coding_job(pc, issue, reply, block, opts):
             "POST", "/paperclip/coding-job/admit", {"command": command})
     except OSError as exc:
         # F4 (attack review): DOOR_UNREACHABLE is TRANSIENT — the door may
-        # just be restarting.  The comment deliberately carries NO marker so
-        # the next wake retries the one admit call (the door is idempotent
-        # by command).
-        pc.add_comment(issue["id"], (
-            f"[t2-carrier] coding job blocked — DOOR_UNREACHABLE\n\n"
-            f"The Executive door socket is not answering ({exc}); the task's "
-            f"governed coding job could not be requested and will be "
-            f"retried on the next wake."))
+        # just be restarting.
+        _coding_job_transient_note(
+            pc, issue, block["key"], "DOOR_UNREACHABLE",
+            f"The Executive door socket is not answering ({exc});")
         log(f"coding-job door unreachable for {issue.get('identifier')}")
         return
     result = body.get("result") if isinstance(body, dict) else None
@@ -221,23 +246,87 @@ def handle_coding_job(pc, issue, reply, block, opts):
         log(f"coding job for {issue.get('identifier')} {state} as {job_id}")
         return
     if status == 200 and state == "WAIT":
-        # F4: WAIT is TRANSIENT capacity — no marker, so the next wake
-        # retries when the queue drains; only terminal outcomes suppress.
+        # F4: WAIT is TRANSIENT capacity; only terminal outcomes suppress.
         reason = (result or {}).get("wait_reason") or "queue full"
         detail = (result or {}).get("wait_detail") or {}
-        pc.add_comment(issue["id"], (
-            f"[t2-carrier] coding job blocked — WAIT ({reason})\n\n"
-            f"The Executive ready queue has no capacity for this task's "
-            f"coding job right now{': ' + json.dumps(detail) if detail else ''}"
-            f"; it will be retried on the next wake."))
+        _coding_job_transient_note(
+            pc, issue, block["key"], f"WAIT ({reason})",
+            "The Executive ready queue has no capacity for this task's "
+            f"coding job right now{': ' + json.dumps(detail) if detail else ''};")
         log(f"coding job for {issue.get('identifier')} WAIT: {reason}")
         return
     error = (body.get("error") or {}) if isinstance(body, dict) else {}
+    if not status or (status == 200 and state is None and not error):
+        # No HTTP status line, or a 200 whose body carries neither a
+        # readable result nor an error object: the admit may have executed,
+        # but this run cannot confirm it. A terminal marker would be a lie;
+        # retry is safe (the door is idempotent by command). A 200 WITH an
+        # error object is a readable engine refusal — terminal below.
+        _coding_job_transient_note(
+            pc, issue, block["key"],
+            "UNREADABLE_ANSWER" if status else "DOOR_MALFORMED",
+            "The Executive door answered, but the answer could not be read;")
+        log(f"coding job for {issue.get('identifier')} unreadable door "
+            f"answer (status {status or 'none'})")
+        return
     code = error.get("code") or f"HTTP_{status or 'EMPTY'}"
     message = error.get("message") or "the Executive refused the coding job"
     pc.add_comment(issue["id"], (
         f"[t2-carrier] coding job blocked — {code}\n\n{message}\n\n{marker}"))
     log(f"coding job for {issue.get('identifier')} refused: {code}")
+
+
+def retry_transient_coding_jobs(pc, issue, opts, skip=None):
+    """Re-issue the coding-job admits whose last outcome was TRANSIENT.
+
+    A WAIT, unreachable or unreadable door left a `coding-job-retry: <key>`
+    line in a carrier note instead of a marker. The wake that touches this
+    issue again — the board's comment or rejection wake (the in_review
+    path), a resume, or a later delivery run — asks once more per key: the
+    door is idempotent by command, and a terminal marker in a carrier note
+    still suppresses. Only carrier notes are read, so quoting the line can
+    neither force nor suppress a retry. `skip` names the key THIS run's
+    handle_coding_job just surfaced (a fresh transient outcome does not
+    re-admit within the same wake — the door just told us why)."""
+    if not (opts.get("coding_job_door") or "").strip():
+        return
+    rows = served_rows(pc.comments(issue["id"]), "comments", "rows")
+    # M3 + H2: only THIS carrier's own notes name retries, and a key must
+    # pass the same identifier rule as the fresh path — the line is comment
+    # text, and anything can sit behind the prefix.
+    machine_bodies = carrier_note_bodies(pc, rows)
+    tries = {}  # key -> transient retry lines so far (M4's counter)
+    for body in machine_bodies:
+        for line in body.splitlines():
+            line = line.strip()
+            if line.startswith("coding-job-retry: "):
+                key = line[len("coding-job-retry: "):].strip()
+                if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", key):
+                    log(f"retry line names a key that is not a safe "
+                        f"identifier; ignored: {key!r}")
+                    continue
+                tries[key] = tries.get(key, 0) + 1
+    cap = _retry_cap((opts or {}).get("coding_job_max_retries", 3))
+    for key, count in tries.items():
+        if key == skip:
+            continue
+        marker = f"coding-job-command: {coding_job_command(issue['id'], key)}"
+        if any(marker in body for body in machine_bodies):
+            continue  # a terminal outcome for this key already surfaced
+        if count >= cap:
+            # M4: the bound exists so a permanently-WAITing door cannot
+            # collect one admit and one comment per wake forever. Stop and
+            # say it plainly; a person decides what the task does next.
+            log(f"coding job {key} for {issue.get('identifier')} hit the "
+                f"retry bound ({cap}); leaving it for a person")
+            machine_note_once(pc, issue["id"],
+                              f"[t2-carrier] coding job {key} was retried "
+                              f"{count} times without a confirmed outcome; "
+                              "a person decides what this task does next")
+            continue
+        log(f"retrying transient coding job {key} for "
+            f"{issue.get('identifier')}")
+        handle_coding_job(pc, issue, "", {"key": key}, opts)
 
 
 def parse_ask_block(reply):
@@ -250,7 +339,12 @@ def parse_ask_block(reply):
         ```
 
     -> {"assignee", "title", "description"} or None. Malformed -> None (the
-    reply is delivered as a plain answer; an ask can never fail the run)."""
+    reply is delivered as a plain answer; an ask can never fail the run).
+    This shape test alone does NOT prove the block is the teammate's own:
+    the end-guard rejects only a block followed by more prose, so a quote
+    that ends the reply still passes it. The quote test that completes the
+    rule is block_quoted_from_task(), applied where the issue text is in
+    scope (panel-2 M7)."""
     lines = (reply or "").splitlines()
     start = None
     for idx, line in enumerate(lines):
@@ -260,9 +354,11 @@ def parse_ask_block(reply):
     if start is None:
         return None
     assignee, title, desc_lines, closed = None, None, [], False
-    for line in lines[start + 1:]:
+    close_at = None
+    for off, line in enumerate(lines[start + 1:]):
         if line.strip().startswith("```"):
             closed = True
+            close_at = start + 1 + off
             break
         if assignee is None and line.strip().startswith("assignee:"):
             assignee = line.split(":", 1)[1].strip()
@@ -270,13 +366,53 @@ def parse_ask_block(reply):
         if title is None and line.strip().startswith("title:"):
             title = line.split(":", 1)[1].strip()
             continue
+        # R2a finding 28: the block format shows `description:` as a labeled
+        # field like assignee/title. A first description line that carries
+        # the label loses it — `description: please` -> `please`. Later
+        # lines are kept verbatim; an unlabeled first line is kept verbatim.
+        if not desc_lines and line.strip().startswith("description:"):
+            desc_lines.append(line.split(":", 1)[1].strip())
+            continue
         desc_lines.append(line)
     if not closed or not assignee or not (title or "").strip():
+        return None
+    # R2a finding 18 (the F9 guard): the ask block must END the reply. Words
+    # after the closing fence mean the teammate kept talking past the ask —
+    # a reconsidered or quoted block is not a live ask. Whitespace is fine.
+    if any(line.strip() for line in lines[close_at + 1:]):
         return None
     if title.strip().startswith("<") and title.strip().endswith(">"):
         return None  # the how-to-ask example quoted back, not a real ask
     return {"assignee": assignee, "title": title.strip(),
             "description": "\n".join(desc_lines).strip()}
+
+
+def block_quoted_from_task(reply, issue, block_name):
+    """Panel-2 M7: a well-formed block that ends the reply still is not the
+    teammate's own when the exact fenced segment appears verbatim in the
+    task text (title + description) — the panel's probe: a task whose text
+    ends with a well-formed block and an instruction to echo it back. The
+    end-guard cannot see that; this comparison, at the parse sites where the
+    issue is in scope, refuses the quote. True = quoted, not a trigger."""
+    lines = (reply or "").splitlines()
+    start = None
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```") and block_name in stripped:
+            start = idx
+    if start is None:
+        return False
+    close = None
+    for idx in range(start + 1, len(lines)):
+        if lines[idx].strip().startswith("```"):
+            close = idx
+            break
+    if close is None:
+        return False
+    segment = "\n".join(lines[start:close + 1])
+    task_text = ((issue.get("title") or "") + "\n"
+                 + (issue.get("description") or ""))
+    return segment in task_text
 
 
 def parse_output_block(reply):
@@ -299,9 +435,11 @@ def parse_output_block(reply):
     if start is None:
         return None
     key, title, body_lines, closed = None, None, [], False
-    for line in lines[start + 1:]:
+    close_at = None
+    for off, line in enumerate(lines[start + 1:]):
         if line.strip().startswith("```"):
             closed = True
+            close_at = start + 1 + off
             break
         if key is None and line.strip().startswith("key:"):
             key = line.split(":", 1)[1].strip()
@@ -312,7 +450,15 @@ def parse_output_block(reply):
         body_lines.append(line)
     if not closed or not key:
         return None
-    if not key.replace("-", "").replace("_", "").isalnum():
+    # R2a finding 27 (the F9 guard, as the ask block got it): the output
+    # block must END the reply. Words after the closing fence mean the
+    # teammate kept talking — the block is not written as a document; the
+    # reply is still delivered as a plain comment. Whitespace is fine.
+    if any(line.strip() for line in lines[close_at + 1:]):
+        return None
+    # R2a finding 22: ASCII only — str.isalnum accepts accented letters,
+    # and a document key is a filename-shaped identifier.
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", key):
         return None  # document keys stay safe identifiers
     return {"key": key, "title": title or key,
             "body": "\n".join(body_lines).strip() + "\n"}
@@ -328,14 +474,113 @@ def op_id(issue_id: str, content: str) -> str:
 
 
 # A child issue created by a teammate's ```paperclip-ask block carries its
-# parent's ask op marker in its description: "Asked by X on MMO-17 [pc-…-ask]".
-ASK_CHILD_MARKER_RE = re.compile(r"\[(pc-[A-Za-z0-9-]+-ask)\]")
+# parent's ask op marker at the very END of its description — the carrier
+# writes "Asked by X on MMO-17\n[pc-…-ask]" (children created before
+# 2026-11-11 end with "... on MMO-17 [pc-…-ask]" instead; both end with the
+# marker, which is what the anchored scan reads). A `[pc-…-ask]` token
+# anywhere else in a description is teammate text (R2a finding 3).
+# Attack finding 13: op_id interpolates the raw issue id, so the recognized
+# shape must cover every id it can produce (is_issued_ask_child already
+# escaped the id; the two sites now agree). Equality with the carrier's
+# computed op still gates everything downstream.
+ASK_CHILD_MARKER_RE = re.compile(r"\[(pc-[A-Za-z0-9_.-]+-ask)\]\s*$")
 
 
 def ask_child_op(text: str):
-    """The ask op marker embedded in an issue description, if any."""
-    match = ASK_CHILD_MARKER_RE.search(text or "")
+    """The ask op marker at the very END of an issue description, if any."""
+    match = ASK_CHILD_MARKER_RE.search((text or "").rstrip())
     return match.group(1) if match else None
+
+
+def expected_ask_op(parent):
+    """The ask marker this carrier computes for a child of `parent`: the
+    parent issue's own op with the -ask suffix — exactly what handle_ask
+    writes into the child description."""
+    content = (parent.get("title") or "") + "\n" + (parent.get("description") or "")
+    return f"{op_id(parent['id'], content)}-ask"
+
+
+def is_ask_child_of(row, parent):
+    """True when `row` is an ask child this carrier created under `parent`:
+    parented on it AND ending with exactly the carrier-computed marker.
+    Anything a teammate wrote inside a description cannot satisfy this."""
+    if not parent or row.get("parentId") != parent.get("id"):
+        return False
+    return ask_child_op(row.get("description") or "") == expected_ask_op(parent)
+
+
+def asked_child_of(pc, issue):
+    """The parent issue record when THIS issue is an ask child of it (the
+    structural test of R2a finding 3). None otherwise — including when the
+    parent cannot be read, the parent's content no longer matches the
+    marker, or the parent's recorded blockers do not name this issue (panel-2
+    M6: the marker is computable by any reader of the parent, so only the
+    board's own relation — the parent's blockedBy, which the create+block
+    path records and captured parents still serve after done — makes the
+    child ours). Every None degrades to a plain task rather than a guess."""
+    parent_id = issue.get("parentId")
+    if not parent_id or not ask_child_op(issue.get("description") or ""):
+        return None
+    try:
+        parent = pc.issue(parent_id)
+    except CarrierError as exc:
+        log(f"parent of {issue.get('identifier')} unreadable ({exc}); "
+            "treating the issue as a plain task")
+        return None
+    if not is_ask_child_of(issue, parent):
+        log(f"{issue.get('identifier')} ends with ask-like text but is not the "
+            "carrier's ask child of its parent; plain task")
+        return None
+    if issue.get("id") not in recorded_blocker_ids(parent):
+        log(f"{issue.get('identifier')} carries the right marker but the "
+            "parent's recorded blockers do not name it (panel-2 M6); "
+            "plain task")
+        return None
+    return parent
+
+
+def strip_markers(text: str):
+    """Teammate-written text with any complete `[pc-…]` token removed, so
+    what a teammate wrote can never pose as a carrier marker downstream."""
+    return re.sub(r"\[pc-[^\]\n]*\]", "", text or "").strip()
+
+
+def is_issued_ask_child(row, issue):
+    """True when `row` looks like an ask child the carrier issued from
+    `issue` under ANY content revision: parented on it and ending with a
+    marker of this issue's op family (`pc-<issue id>-<hex10>-ask`). The
+    per-issue ask cap counts these (R2a finding 4); a hand-written child
+    that fits the shape counts too — overcounting only refuses asks."""
+    if row.get("parentId") != issue.get("id"):
+        return False
+    marker = ask_child_op(row.get("description") or "")
+    if not marker:
+        return False
+    return re.fullmatch(
+        rf"pc-{re.escape(str(issue.get('id')))}-[0-9a-f]{{10}}-ask",
+        marker) is not None
+
+
+def _ask_cap(raw):
+    """The per-issue ask cap as one coerced int (attack finding 15): a
+    non-numeric value keeps the default 3; a value below 1 is taken literally
+    as zero asks rather than silently loosening to the default."""
+    try:
+        cap = int(raw)
+    except (TypeError, ValueError):
+        return 3
+    return max(cap, 0)
+
+
+def _retry_cap(raw):
+    """The per-key coding-job retry bound as one coerced int (panel-2 M4):
+    a non-numeric value keeps the default 3; a value below 1 is taken
+    literally — zero retries — rather than silently loosening."""
+    try:
+        cap = int(raw)
+    except (TypeError, ValueError):
+        return 3
+    return max(cap, 0)
 
 
 def issue_link(template, identifier):
@@ -376,7 +621,7 @@ def ask_help(roster, my_agent_id):
 
 def build_message(identifier: str, title: str, body: str, op: str,
                   link: str = None, asking: str = None, job_help: str = None,
-                  notes: list = None) -> str:
+                  notes: list = None, no_ask: str = None) -> str:
     body = (body or "").strip()
     if notes:
         body += ("\n\nNotes the board wrote on the issue before you were "
@@ -386,6 +631,7 @@ def build_message(identifier: str, title: str, body: str, op: str,
              f"{link}\n\n") if link else ""
     how_to_ask = f"\n\n{asking}" if asking else ""
     how_to_job = f"\n\n{job_help}" if job_help else ""
+    why_no_ask = f"\n\n{no_ask}" if no_ask else ""
     return (
         f"[{op}]\n\n"
         f"You were woken for Paperclip issue {identifier}: {title}\n\n"
@@ -395,6 +641,7 @@ def build_message(identifier: str, title: str, body: str, op: str,
         "the issue comment and completes the issue."
         f"{how_to_ask}"
         f"{how_to_job}"
+        f"{why_no_ask}"
     )
 
 
@@ -413,16 +660,23 @@ def coding_job_help(door_socket):
         "The task itself (title + description) is the job's brief. The block "
         "requests ONE governed coding job: the Executive admits it, a worker "
         "runs it, and its verified result (branch evidence included) returns "
-        "to this task as a comment. Do not put the brief in the block."
+        "to this task as a comment. Do not put the brief in the block. A "
+        "block is acted on in your FIRST answer to this task only — a block "
+        "in a revision or later reply is not admitted (panel-2 M15)."
     )
 
 
 def active_run_id(row):
-    """The run id an inbox row names as its active run (str or {id: …})."""
+    """The run id a row names as holding its issue. The inbox projection
+    serves `activeRun` (str or {id: …}); a GET /api/issues/:id serves
+    `checkoutRunId` instead — both are read, so a fresh issue read decides
+    the 409 recheck on a field that GET actually serves."""
     active = row.get("activeRun")
     if isinstance(active, dict):
-        return active.get("id")
-    return active or None
+        active = active.get("id")
+    if active:
+        return active
+    return row.get("checkoutRunId") or None
 
 
 def choose_issue(rows, my_run_id=None):
@@ -460,13 +714,93 @@ def _marker_run_open(marker_run, thread):
     MAS-9 half-finished text of a run still waiting on its question was
     delivered as the answer. The turn is open when it is the thread's active
     run, or when a human question waits and it is the latest run. A thread
-    dict without these fields says nothing (behave as before)."""
+    dict without these fields says nothing (behave as before).
+
+    Attack findings 2 and 3 (attack round on R2a findings 2/3/4): two
+    degraded shapes said "ended" when they could not know. A thread that
+    omits activeRunId entirely while status says the thread is running is a
+    mid-turn read with the field dropped — the turn stays open. A thread
+    that positively reports the marker's own run ended failed/cancelled
+    keeps the turn open too: dead-run prose is never the answer; the carrier
+    waits out and releases the issue for a person instead of delivering it.
+    Both apply only when a LATER run has not superseded the marker's (a
+    newer latestRunId ends the marker's turn whatever the status says)."""
     if not isinstance(thread, dict) or not marker_run:
         return False
     if thread.get("activeRunId") == marker_run:
         return True
-    return _pending_requests(thread) > 0 and \
-        thread.get("latestRunId") == marker_run
+    if _pending_requests(thread) > 0 and \
+            thread.get("latestRunId") == marker_run:
+        return True
+    latest = thread.get("latestRunId")
+    if latest and latest != marker_run:
+        return False  # a later turn superseded the marker's
+    status = str(thread.get("status") or "").lower()
+    if "activeRunId" not in thread and status in ("running", "queued"):
+        return True  # degraded read of a mid-turn thread
+    if thread.get("activeRunId") is None and "activeRunId" in thread \
+            and status in ("running", "queued", "failed", "cancelled",
+                           "error", "stopped"):
+        return True  # the marker's own run ended without completing
+    return False
+
+
+# R2a finding 16: the stated lookback bound before a first send. The thread
+# read serves the latest `count` messages; 61 newer ones hide an older
+# marker, and a second wake would send the task again. Four reads deep.
+MARKER_LOOKBACK_STEPS = (60, 180, 540, 1620)
+
+
+def scan_marker_deep(t3, op):
+    """(state, reply, thread, marker_body) with the bounded lookback of
+    finding 16.
+
+    Walks MARKER_LOOKBACK_STEPS. A found marker returns its state and the
+    carrier's own sent user body of the FIRST marker for `op`
+    (marker_body — the text a later wake must match an identity against,
+    Delta-5 D4-1); a SHORT read means the whole thread was seen, so None
+    is proven absence; a page that stays full to the bound returns
+    "window_exhausted" — absence cannot be proven and the caller must
+    guard its send another way (the send record on the issue)."""
+    thread = None
+    for count in MARKER_LOOKBACK_STEPS:
+        thread, msgs = t3.messages(count)
+        state, existing = scan_marker(msgs, op, thread)
+        if state is not None:
+            return state, existing, thread, marker_user_body(msgs, op)
+        if len(msgs) < count:
+            return None, None, thread, None
+    return "window_exhausted", None, thread, None
+
+
+def marker_user_body(messages, op):
+    """The carrier's own sent turn body for `op`: the text of the FIRST
+    user message that begins with exactly "[op]\\n" — the same
+    first-marker-wins law scan_marker applies — or None when no such
+    message is in the window."""
+    tag = f"[{op}]\n"
+    for role, _run, text in messages:
+        if role == "user" and (text or "").startswith(tag):
+            return text
+    return None
+
+
+# Delta-5 D4-1: every return turn the carrier sends names the child it
+# answers for in its own body — "Their child issue MMO-2 '<title>' is
+# done." — so the sent body itself is the attribution signal for the
+# legacy unsuffixed op.
+SENT_CHILD_RE = re.compile(r"Their child issue (\S+) '")
+
+
+def _named_child_identifier(body):
+    """The child identifier a carrier-sent turn body names, or None.
+
+    None means the body is not the carrier's own send shape — it names no
+    child, so the turn it carries can be attributed to nobody."""
+    if not isinstance(body, str):
+        return None
+    found = SENT_CHILD_RE.search(body)
+    return found.group(1) if found else None
 
 
 def scan_marker(messages, op, thread=None):
@@ -479,14 +813,22 @@ def scan_marker(messages, op, thread=None):
     message — has a different runId and must never replace it). A marker
     whose run has not answered yet is pending — including when its run is
     still open by rule A, even if assistant text of that run exists.
+
+    R2a finding 2: the marker counts ONLY when a user message BEGINS with
+    exactly "[op]" followed by a newline — the shape every carrier message
+    has always had (build_message writes "[op]\\n\\n...") — and the FIRST
+    such message wins. A marker quoted inside other text (a teammate echoing
+    its instructions, a side message) is someone's words, never a task; a
+    later duplicate never replaces the first turn's answer.
     """
-    tag = f"[{op}]"
+    tag = f"[{op}]\n"
     marker_run = None
     seen_at = None
     for idx, (role, run_id, _text) in enumerate(messages):
-        if role == "user" and tag in (_text or ""):
-            marker_run = run_id  # the last marker for this op wins
+        if role == "user" and (_text or "").startswith(tag):
+            marker_run = run_id  # the FIRST marker for this op wins
             seen_at = idx
+            break
     if marker_run is None:
         return None, None
     reply = None
@@ -498,6 +840,34 @@ def scan_marker(messages, op, thread=None):
     return "reply", reply
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse every 3xx: a redirect becomes an HTTPError, never a follow.
+
+    The per-run bearer token is pinned to the loopback base. urllib's default
+    opener follows 3xx and re-sends the Authorization header to the Location
+    target, which would leak the token off-base.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect())
+_STOCK_URLOPEN = urllib.request.urlopen
+
+
+def _open(req, timeout):
+    """Open a request through the no-redirect opener.
+
+    urllib.request.urlopen is the transport seam (an embedder or test may
+    replace it); when it is the stock function, route through _OPENER so a
+    3xx is refused instead of followed.
+    """
+    if urllib.request.urlopen is not _STOCK_URLOPEN:
+        return urllib.request.urlopen(req, timeout=timeout)
+    return _OPENER.open(req, timeout=timeout)
+
+
 class PaperclipClient:
     """Minimal agent-authenticated Paperclip API client (stdlib urllib).
 
@@ -505,11 +875,16 @@ class PaperclipClient:
     never headers or bodies that could echo it back.
     """
 
-    def __init__(self, base_url: str, token: str, run_id: str, timeout: int = 30):
+    def __init__(self, base_url: str, token: str, run_id: str, timeout: int = 30,
+                 budget_left=None):
         self.base = base_url.rstrip("/")
         self._token = token
         self.run_id = run_id
         self._timeout = timeout
+        # R2a finding 8 (addition): a callable returning the seconds this run
+        # may still spend waiting (budget minus the delivery reserve), or
+        # None when unknown. It CAPS every request timeout and retry sleep.
+        self._budget_left = budget_left
 
     def _request(self, method: str, path: str, body=None):
         url = f"{self.base}{path}"
@@ -518,17 +893,33 @@ class PaperclipClient:
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["content-type"] = "application/json"
+        # R2a finding 6: only reads and keyed upserts are retried. A POST
+        # (a create) fails fast — a blind retry is how duplicate children and
+        # duplicate interactions happen; the callers read back instead.
+        retryable = method in ("GET", "PUT", "PATCH")
         last = None
         for attempt in range(3):
+            cap = self._budget_left() if self._budget_left else None
+            timeout = self._timeout
+            if cap is not None:
+                # Floor of 1s: the delivery writes themselves spend the
+                # reserve and must stay alive (loopback answers in far less).
+                timeout = max(1, min(self._timeout, cap))
             req = urllib.request.Request(url, data=data, method=method, headers=headers)
             try:
-                with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                with _open(req, timeout) as resp:
                     raw = resp.read()
                     return json.loads(raw) if raw else {}
             except urllib.error.HTTPError as exc:
-                if exc.code in RETRYABLE_HTTP and attempt < 2:
+                if retryable and exc.code in RETRYABLE_HTTP and attempt < 2:
                     last = exc.code
-                    time.sleep(1.5 * (attempt + 1))
+                    pause = 1.5 * (attempt + 1)
+                    if cap is not None:
+                        # R2a finding 8 (addition): no retry sleep eats the
+                        # delivery reserve; nothing left means retry now.
+                        pause = min(pause, max(0.0, cap))
+                    if pause > 0:
+                        time.sleep(pause)
                     continue
                 detail = ""
                 try:
@@ -537,9 +928,13 @@ class PaperclipClient:
                     pass
                 raise CarrierError(f"{method} {path} -> HTTP {exc.code} {detail}") from None
             except urllib.error.URLError as exc:
-                if attempt < 2:
+                if retryable and attempt < 2:
                     last = str(exc.reason)
-                    time.sleep(1.5 * (attempt + 1))
+                    pause = 1.5 * (attempt + 1)
+                    if cap is not None:
+                        pause = min(pause, max(0.0, cap))
+                    if pause > 0:
+                        time.sleep(pause)
                     continue
                 raise CarrierError(f"{method} {path} unreachable: {exc.reason}") from None
         raise CarrierError(f"{method} {path} failed after retries ({last})")
@@ -615,15 +1010,53 @@ class PaperclipClient:
              "changeSummary": f"teammate output via {OUTPUT_BLOCK} block"})
 
     def children(self, issue_id):
-        """Issues whose parentId is this issue. The OpenAPI lists
-        /api/issues/{id}/children but this build 404s it (verified live
-        2026-11-10); the company issue list filtered by parentId is the
-        implemented surface."""
+        """Issues whose parentId is this issue, PAGED: the old single 50-row
+        page silently hid older children (R2a finding 4 — a cap count or a
+        return scan that stops at 50 is wrong). Attack finding 6: a SHORT
+        page is not proof of the end — a server that clamps `limit` below
+        the request serves short pages forever, and the old walk truncated
+        at the first one. The walk continues on any non-empty page, steps
+        `offset` by what the server actually served, deduplicates by id
+        (offset paging over a list that changes between calls can serve a
+        row twice), and stops at the first EMPTY page, bounded at ten pages
+        — beyond that this returns a truncated set rather than looping
+        forever. Attack finding 7: the query is parentId-filtered
+        server-side, so a row from it belongs to this issue even when the
+        list projection omits the field — the walk stamps it, and the
+        return edge cannot be stranded by a row shape."""
         company_id = os.environ.get("PAPERCLIP_COMPANY_ID", "")
-        rows = self._request(
-            "GET", f"/api/companies/{company_id}/issues?parentId={issue_id}&limit=50")
-        if isinstance(rows, dict):
-            rows = rows.get("issues") or rows.get("children") or rows.get("rows") or []
+        rows = []
+        seen = set()
+        limit = 1000
+        offset = 0
+        for _ in range(10):
+            batch = self._request(
+                "GET",
+                f"/api/companies/{company_id}/issues?parentId={issue_id}"
+                f"&limit={limit}&offset={offset}")
+            if isinstance(batch, dict):
+                # An unrecognised shape is NOT an empty result: a board
+                # answering {"data": …} or {"error": …} must not read as
+                # "no children" (the return edge would see no done child
+                # and the asker would never hear back, exit 0).
+                batch = next((batch[key] for key in ("issues", "children",
+                                                     "rows")
+                              if isinstance(batch.get(key), list)), None)
+            if not isinstance(batch, list):
+                raise CarrierError(
+                    f"children list for {issue_id} came back in an "
+                    "unrecognised shape")
+            for row in batch:
+                row = dict(row)
+                row.setdefault("parentId", issue_id)
+                key = row.get("id")
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(row)
+            if not batch:
+                break
+            offset += len(batch)
         return rows
 
     def create_issue(self, company_id, payload):
@@ -650,7 +1083,7 @@ class T3Thread:
     """
 
     def __init__(self, t3_bin: str, t3_home: str, thread_id: str, scratch_dir: str,
-                 t3_port=None):
+                 t3_port=None, budget_left=None):
         self._bin = os.path.expanduser(t3_bin)
         self._home = os.path.expanduser(t3_home)
         self.thread_id = thread_id
@@ -658,6 +1091,10 @@ class T3Thread:
         # A T3 server that is not on the CLI's default port (the team server)
         # must be named, or the CLI would dial the default port instead.
         self._port = int(t3_port) if t3_port else None
+        # R2a finding 8: the CLI subprocess timeout comes from the run
+        # budget (what is left before the delivery reserve), capped by the
+        # stock 1200s. None when the budget is unknown: the stock 1200s.
+        self._budget_left = budget_left
 
     def _run(self, args, stdin_text=None):
         # The Paperclip run token and run identity stay in this process: the
@@ -667,11 +1104,17 @@ class T3Thread:
         env["T3CODE_HOME"] = self._home
         if self._port:
             env["T3CODE_PORT"] = str(self._port)
+        timeout = 1200
+        if self._budget_left:
+            left = self._budget_left()
+            if left is not None:
+                timeout = max(1, min(1200, int(left)))
         # text=True: subprocess wants str input, not bytes
         proc = subprocess.run(  # noqa: S603 - fixed binary, fixed args
             [self._bin, *args],
             input=stdin_text,
-            capture_output=True, text=True, cwd=self._cwd, env=env, timeout=1200,
+            capture_output=True, text=True, cwd=self._cwd, env=env,
+            timeout=timeout,
         )
         return proc
 
@@ -696,16 +1139,37 @@ class T3Thread:
         return payload
 
     def messages(self, count: int = 60):
-        """Oldest-first [(role, runId, text)] of the latest `count` messages."""
+        """Oldest-first [(role, runId, text)] of the latest `count` messages.
+
+        Proof 3 (captured live 2026-11-11): the CLI serves the latest-N
+        window — min(N, available) rows — and while a run is live the
+        in-flight assistant message is not yet a row, so fewer rows than
+        asked-for is normal, never proof the thread is empty or the run is
+        over. An answer this build cannot shape-read — non-JSON stdout, a
+        non-object payload, a missing ``thread``/``messages`` key, a
+        non-object row — is UNKNOWN (CarrierError), never an empty thread:
+        reading a broken shape as emptiness re-sent tasks on every wake."""
         proc = self._run(["thread", "show", self.thread_id, "--json",
                           "--messages", str(count)])
         if proc.returncode != 0:
             raise CarrierError(f"t3 thread show failed: {proc.stderr.strip()[:300]}")
-        data = json.loads(proc.stdout)
+        try:
+            data = json.loads(proc.stdout)
+        except ValueError as exc:
+            raise CarrierError(
+                f"t3 thread show returned a non-JSON answer ({exc}); "
+                "the thread is unknown this run")
+        if (not isinstance(data, dict)
+                or not isinstance(data.get("messages"), list)
+                or not isinstance(data.get("thread"), dict)
+                or not all(isinstance(item, dict) for item in data["messages"])):
+            raise CarrierError(
+                "t3 thread show returned a shape this build does not read "
+                f"(type {type(data).__name__}); the thread is unknown this run")
         out = []
-        for item in data.get("messages", []):
+        for item in data["messages"]:
             out.append((item.get("role"), item.get("runId"), item.get("text") or ""))
-        return data.get("thread") or {}, out
+        return data["thread"], out
 
 
 def send_once(t3, message):
@@ -760,13 +1224,100 @@ def run_budget_end(opts):
 
 
 def question_wait_deadline(opts):
-    """The earlier of question_wait_sec from now and the run budget's end:
-    no question wait may outlive the carrier's own process limit."""
+    """The earlier of question_wait_sec from now and the run budget's end
+    MINUS the stated delivery reserve: no question wait may outlive the
+    carrier's own process limit, and the budget's tail belongs to delivering
+    the answer, never to more waiting (R2a finding 8 addition)."""
     end = _now(opts) + float(opts.get("question_wait_sec", 900) or 0)
     budget = run_budget_end(opts)
     if budget is not None:
-        end = min(end, budget)
+        end = min(end, budget - float(
+            opts.get("delivery_reserve_sec", DELIVERY_RESERVE_SEC) or 0))
     return end
+
+
+# R2a finding 8 (addition): the delivery reserve — a stated slice of the run
+# budget that no wait, poll, HTTP timeout or retry sleep may eat, so the
+# comment/confirmation/status writes always have time of their own.
+DELIVERY_RESERVE_SEC = 120
+
+
+def budget_left(opts):
+    """Seconds the carrier may still spend WAITING: run budget end minus the
+    delivery reserve, from now. None when the budget is unknown (a test, or
+    an old config): nothing is capped then, as before."""
+    end = run_budget_end(opts)
+    if end is None:
+        return None
+    return end - _now(opts) - float(
+        opts.get("delivery_reserve_sec", DELIVERY_RESERVE_SEC) or 0)
+
+
+# R2a finding 7: the twin-carrier overlap is real. One teammate agent binds
+# ONE t3 thread for every issue it owns, and the installed Paperclip CAN run
+# two processes for one agent at once — per-agent concurrency defaults to 20
+# runs with one child process each (`AGENT_DEFAULT_MAX_CONCURRENT_RUNS` in
+# paperclipai shared/dist/constants.js:61; slot accounting in
+# @paperclipai/server dist/services/heartbeat/queue.js
+# startNextQueuedRunForAgent; the process spawn per run in
+# server/dist/adapters/process/execute.js). Only the per-ISSUE execution run
+# is single-flight. An advisory flock per thread, held from the scan to the
+# end of the run, serializes the two processes on the one shared thread; a
+# runner that cannot take it within its budget leaves the inbox untouched
+# for the next wake (its twin already owns the thread), and a run with no
+# lock directory configured behaves exactly as before.
+THREAD_LOCK_BUSY = object()
+
+
+def thread_lock_path(lock_dir, thread_id):
+    """The advisory lock file for one t3 thread. Thread ids can contain ':'
+    (node:thread:...), so keep only file-system-safe characters."""
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", str(thread_id))
+    return os.path.join(str(lock_dir), f"thread-{safe}.lock")
+
+
+def acquire_thread_lock(lock_dir, thread_id, opts):
+    """Take the advisory lock for the bound thread (R2a finding 7).
+
+    Returns an open file handle held by the caller for the rest of the run,
+    None when no lock can be used at all (no directory configured, or the
+    lock file cannot be opened — the run then proceeds exactly as before
+    this guard existed), or the THREAD_LOCK_BUSY sentinel when a twin
+    carrier holds the lock for longer than this run's budget allows
+    waiting. The file is never removed after use: an unlink would let a
+    third process lock a fresh inode beside a holder that still owns the
+    old one."""
+    if not lock_dir:
+        return None
+    path = thread_lock_path(lock_dir, thread_id)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    except OSError as exc:
+        log(f"thread lock {path} cannot be opened ({exc}); continuing "
+            "without it")
+        return None
+    interval = float(opts.get("poll_interval_sec", 5) or 5)
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return os.fdopen(fd, "a")
+        except OSError:
+            left = budget_left(opts)
+            if left is not None and left <= 0:
+                os.close(fd)
+                return THREAD_LOCK_BUSY
+            _doze(opts, min(interval, left) if left is not None
+                  else interval)
+
+
+def release_thread_lock(handle):
+    """Drop the advisory lock at the end of the run. Closing the file
+    handle releases the flock; a missing handle is a no-op."""
+    if handle is not None:
+        try:
+            handle.close()
+        except OSError:
+            pass
 
 
 def question_waiting(t3):
@@ -783,6 +1334,11 @@ def thread_url(template, thread_id):
     through — never anything from issue text. `{thread}` becomes the thread
     id with `:` written as %3A."""
     if not template or not thread_id:
+        return None
+    # The template is trusted config, but the id substituted into it is
+    # data — same law as the issue link's identifier check: a value with
+    # path pieces, spaces or absurd length never becomes a link.
+    if not re.fullmatch(r"[A-Za-z0-9:_-]{1,128}", str(thread_id)):
         return None
     if not re.match(r"http://(127\.0\.0\.1|localhost):[0-9]{2,5}/", template):
         return None
@@ -957,10 +1513,20 @@ def stay_with_question(pc, t3, issue, op, opts, message=None):
             if reply is None:
                 raise NeedsHuman(_thread_id(t3))
             return reply
+        # The send's own pre-check first (send_once's rule, inlined so the
+        # flag can tell the two apart): a question that landed in the window
+        # between the clear poll and now means NOTHING was sent — R2a
+        # finding 24: sent_here is armed only as the send itself issues.
+        thread = t3.messages(1)[0]
+        if _pending_requests(thread) > 0:
+            log("a question landed again just before the send; staying "
+                "with it")
+            continue
         try:
             log(f"question answered; sending {op} now")
-            sent_here = True  # even a send that stops on a question landed
-            result = send_once(t3, message)
+            sent_here = True  # the send itself is issuing now — even a send
+            # whose turn stops on a question landed (NeedsHuman below)
+            result = t3.send(message)
             return result.get("reply") or ""
         except NeedsHuman:
             continue  # this fresh turn stopped on a question too: stay again
@@ -987,11 +1553,75 @@ def binding_of(agent_record):
     return binding
 
 
+def public_error(exc):
+    """An exception as it may appear ON an issue: the type and the status
+    line only (R2a finding 13). HTTP error bodies and the t3 command's
+    stderr carry server text that never belongs on a person's board — the
+    full message still goes to the carrier log."""
+    text = str(exc)
+    text = re.sub(r"(HTTP \d{3})[\s\S]*", r"\1", text)
+    text = re.sub(r"(exit \d+\)?)[\s\S]*", r"\1", text)
+    text = text.split("\n")[0]
+    return f"{type(exc).__name__}: {text[:200]}"
+
+
+def loopback_base_error(url):
+    """None when `url` is a plain loopback http base; a reason otherwise.
+    Parsed with urlsplit, not hand-split, so a userinfo trick
+    (`http://127.0.0.1:3100@evil.example`) or a subdomain lookalike cannot
+    pass (the carrier-side pin of R2a finding 13; finding 29 states the law
+    for the other tools)."""
+    try:
+        parts = urllib.parse.urlsplit(str(url or ""))
+    except ValueError:
+        return "the base does not parse as a URL"
+    if parts.scheme != "http":
+        return f"the scheme {parts.scheme!r} is not http"
+    if parts.hostname not in ("127.0.0.1", "localhost", "::1"):
+        return "the base is not loopback"
+    if parts.username or parts.password:
+        return "the base carries userinfo"
+    if parts.port is None:
+        return "the base names no port"
+    if parts.path not in ("", "/"):
+        return "the base carries a path"
+    return None
+
+
+def base_pin_error(cfg, env):
+    """The refusal that stops the carrier before its first request when the
+    configured `paperclip_base` (loopback only) and the PAPERCLIP_API_URL the
+    adapter passed disagree (R2a finding 13). Round-3 R11: the pin is
+    REQUIRED kit — a config that pins no base is refused outright instead of
+    trusting the environment's address, and setup refuses to write such a
+    config in the first place."""
+    pinned = str(cfg.get("paperclip_base") or "").strip()
+    if not pinned:
+        return ("paperclip_base is absent from the config: the pinned "
+                "loopback base is required; refusing to run")
+    bad = loopback_base_error(pinned)
+    if bad:
+        return f"paperclip_base in the config is refused: {bad}"
+    given = str(env.get("PAPERCLIP_API_URL") or "").strip()
+    if given.rstrip("/") != pinned.rstrip("/"):
+        return (f"PAPERCLIP_API_URL {given!r} differs from the pinned "
+                f"paperclip_base in the config; refusing to run")
+    return None
+
+
 def release_issue(pc, issue_id, note):
-    """On failure leave the issue visible for a person, never silently held."""
+    """On failure leave the issue visible for a person, never silently held.
+    R2a finding 21: the status write reads the status first — only
+    in_progress moves to todo; a done or cancelled issue keeps its status
+    (the note is still posted)."""
     try:
         pc.add_comment(issue_id, f"[t2-carrier] did not complete this run: {note}")
-        pc.set_status(issue_id, "todo")
+        fresh = pc.issue(issue_id)
+        if fresh.get("status") == "in_progress":
+            pc.set_status(issue_id, "todo")
+        else:
+            log(f"release of {issue_id}: status is {fresh.get('status')!r}; "
+                "left as it is")
     except CarrierError as exc:
         log(f"release of issue {issue_id} also failed: {exc}")
 
@@ -1011,18 +1641,39 @@ def deliver(pc, issue, reply, op, crash_after=None, ask_child=False):
     if crash_after == "pre-comment":
         log(f"CRASH_SWITCH pre-comment (run {pc.run_id}); no comment will be posted")
         os._exit(97)
-    if not comment_already_present(pc, issue["id"], reply):
-        pc.add_comment(issue["id"], reply)
+    # R2a finding 26: a teammate answer that itself begins with a machine
+    # prefix ([t2-carrier]/[coding-job]) would be stored looking like a
+    # machine comment — last_result_comment, board_feedback and board_notes
+    # all skip such bodies, so a later return edge would surface an OLDER
+    # comment as "the answer". Such an answer is posted under one fixed
+    # first line; the wrapper is a pure function of the answer text, so
+    # exact-text dedupe across runs still matches.
+    body = reply
+    if is_machine_comment(reply):
+        body = "Answer:\n\n" + reply
+    if not comment_already_present(pc, issue["id"], body):
+        pc.add_comment(issue["id"], body)
     if ask_child:
         final = "done"
     else:
         if not confirmation_already_present(pc, issue["id"], op):
-            pc.request_confirmation(
-                issue["id"], f"{op}-confirm",
-                "The teammate answered in its T3 thread and the answer is posted as a "
-                "comment. Accept completes this issue; reject with a reason sends it "
-                "back for one revision round.",
-                target={"type": "custom", "key": "native_completion_review"})
+            try:
+                pc.request_confirmation(
+                    issue["id"], f"{op}-confirm",
+                    "The teammate answered in its T3 thread and the answer is posted as a "
+                    "comment. Accept completes this issue; reject with a reason sends it "
+                    "back for one revision round.",
+                    target={"type": "custom", "key": "native_completion_review"})
+            except CarrierError as exc:
+                # R2a finding 6: a 409 means the key exists — this build does
+                # not dedupe a re-POST. When the read-back finds THIS op's
+                # key, the confirmation is already placed: success, not a
+                # failure. Any other 409, or a key that is still absent,
+                # fails the run as before.
+                if "HTTP 409" not in str(exc) or \
+                        not confirmation_already_present(pc, issue["id"], op):
+                    raise
+                log(f"{op}-confirm answered 409 but already exists; continuing")
         final = "in_review"
     doc = parse_output_block(reply)
     if doc:
@@ -1035,78 +1686,340 @@ def deliver(pc, issue, reply, op, crash_after=None, ask_child=False):
                                   doc["title"], doc["body"])
             log(f"output document {doc['key']} written on "
                 f"{issue.get('identifier')}")
-    pc.set_status(issue["id"], final)
+    # R2a finding 21: every status write reads the status first. The board
+    # may already have closed the issue (a replay wake, an accepted answer);
+    # done and cancelled are never left by a delivery.
+    fresh = pc.issue(issue["id"])
+    if fresh.get("status") in ("done", "cancelled"):
+        log(f"{issue.get('identifier')} is already {fresh.get('status')}; "
+            f"the status write to {final} is skipped")
+    else:
+        pc.set_status(issue["id"], final)
     log(f"posted reply as comment on {issue.get('identifier')}; "
         f"status -> {final}")
 
 
-def last_result_comment(pc, issue_id):
-    """The teammate's answer on a child issue: the last comment that is not a
-    machine comment (carrier notes, coding-job results — R4b finding 5).
-    Falls back to a pointer when there is none."""
-    try:
-        rows = pc.comments(issue_id)
-    except CarrierError:
-        rows = []
-    if isinstance(rows, dict):
-        rows = rows.get("comments") or rows.get("rows") or []
+def last_result_comment(pc, child):
+    """The asked teammate's answer on a child issue (R2a finding 17): the
+    LAST comment authored by that child's own assignee (authorType agent and
+    author id equal to the child's assigneeAgentId) that is not a machine
+    comment (carrier notes, coding-job results — R4b finding 5). A newer
+    bystander comment never displaces the assignee's answer — only who was
+    asked is being quoted to the asker. When the assignee wrote nothing
+    readable, the newest non-machine comment is returned under a prefix that
+    says it is NOT the asked teammate's own words; a pointer when there is
+    no comment at all."""
+    issue_id = child["id"] if isinstance(child, dict) else child
+    assignee = child.get("assigneeAgentId") if isinstance(child, dict) else None
+    # An unreadable comments read is NOT "no answer": the swallow below
+    # turned a failed read into "(no answer comment…)" delivered to the
+    # asker as the teammate's answer. The read failure fails the run; the
+    # answer stays unsent and the next wake retries.
+    rows = served_rows(pc.comments(issue_id), "comments", "rows")
+    # Panel-2 H1: the board serves newest-first, so the timeline is the
+    # createdAt order, not list position. Both walks below run newest-first.
+    rows = ordered_oldest_first(rows)
+    if assignee:
+        for row in reversed(rows):
+            body = (row.get("body") or "").strip()
+            # The served comment row carries authorAgentId — the board
+            # serves no nested author object and no authorId (fixture
+            # comments.json / child_comments.json).
+            if (body and row.get("authorType") == "agent"
+                    and row.get("authorAgentId") == assignee
+                    and not is_machine_comment(body)):
+                return body
     for row in reversed(rows):
         body = (row.get("body") or "").strip()
         if body and not is_machine_comment(body):
-            return body
+            return ("(the asked teammate's own comment was not found; this is "
+                    "the newest comment on the child issue, not their "
+                    "answer)\n\n" + body)
     return "(no answer comment on the child issue)"
 
 
-def handle_return(pc, t3, issue, ask_op, opts):
+def _return_op(ask_op, child, single):
+    """The return marker for one ask child (R2a finding 19): the legacy
+    unsuffixed op when this parent has exactly ONE ask child — existing
+    in-flight threads keep their marker identity — else per-child with the
+    child id, so two children of one parent never share a return turn."""
+    if single:
+        return f"{ask_op}-ret"
+    return f"{ask_op}-{child.get('id')}-ret"
+
+
+def recorded_blocker_ids(issue):
+    """The blocker relation the board records for this parent, as a GET
+    serves it. The installed board never serves ``blockedByIssueIds`` on
+    GET /api/issues/:id — the relation arrives as ``blockedBy`` summaries
+    (one projected row per blocker, each with the blocker's ``id``; fixture
+    parent_2ad0bf92…). ``blockedByIssueIds`` is still read when a surface
+    serves it (a PATCH response of a build that echoes the field), but it
+    is never the primary signal again: code that depended on it alone was
+    defending with a field that is always empty in production."""
+    ids = []
+    for row in (issue.get("blockedBy") or []):
+        if isinstance(row, dict) and row.get("id"):
+            ids.append(row["id"])
+    ids.extend(iid for iid in (issue.get("blockedByIssueIds") or [])
+               if isinstance(iid, str))
+    seen = set()
+    out = []
+    for iid in ids:
+        if iid not in seen:
+            seen.add(iid)
+            out.append(iid)
+    return out
+
+
+def handle_return(pc, t3, issue, ask_op, opts, me_id):
     """The issue_blockers_resolved return edge: this teammate's ask came back.
 
     The blocked parent was woken because every blocker (the ask child) reached
     done. Send ONE message with the child's result and link into the asker's
     primary thread — the return op is derived from the ask op, so the marker
     rule makes the send exactly-once across runs — and deliver the asker's
-    final answer on the parent like any task."""
-    child = None
-    for row in pc.children(issue["id"]):
-        if ask_child_op(row.get("description") or "") == ask_op \
-                and row.get("status") == "done":
-            child = row
-            break
-    if child is None:
+    final answer on the parent like any task.
+
+    R2a finding 19: when several asks of one parent are done, every child's
+    answer reaches the asker as its own return turn, OLDEST first (ordered
+    by createdAt — delta-3 N1: the children list itself serves
+    newest-activity-first, captured children_query_dev.json), and the
+    parent's final delivery happens only when no ask child is open; the
+    asker's newest answer is the one delivered."""
+    blocker_ids = set(recorded_blocker_ids(issue))
+    family = []
+    for row in untruncated_children(pc, issue["id"], me_id):
+        # Attack finding 5: the ask marker is derivable from public issue
+        # text, so marker shape alone never selects the child whose answer
+        # enters this authenticated thread. With a recorded blocker set only
+        # a child in it counts; without the field (hand-blocked or legacy
+        # parents) marker shape remains the only signal, as before.
+        # Delta-3 N9: neither the marker nor a recorded relation speaks for
+        # a child someone else created — only a child THIS carrier created
+        # (createdByAgentId == me) can carry a turn into this thread.
+        if blocker_ids and row.get("id") not in blocker_ids:
+            continue
+        if row.get("createdByAgentId") != me_id:
+            continue
+        if is_ask_child_of(row, issue):
+            family.append(row)
+    if not family:
         log(f"return wake on {issue.get('identifier')} but no done child for "
             f"{ask_op}; leaving the issue for a person")
+        # Delta-4 D4-7 (defense in depth — the gate's exits normally fire
+        # earlier in the wake): an empty family over a recorded blocker is
+        # board-visible, not log-only.
+        _blocker_note(pc, issue)
         return 0
-    result_text = last_result_comment(pc, child["id"])
-    ret_op = f"{ask_op}-ret"
-    thread, msgs = t3.messages()
-    state, existing = scan_marker(msgs, ret_op, thread)
-    if state is None:
-        message = (
-            f"[{ret_op}]\n\n"
-            f"The teammate you asked finished. Their child issue "
-            f"{child.get('identifier')} '{child.get('title')}' is done.\n\n"
-            f"Their answer:\n\n{result_text}\n\n"
-            "Use it to finish your original task: your reply to this message "
-            "is posted as the issue comment and completes the issue."
-        )
-        log(f"sending {ret_op} to the asker's thread")
-        reply = send_and_stay(pc, t3, issue, message, ret_op, opts)
-    elif state == "pending":
-        if _pending_requests(thread) > 0:
-            log(f"{ret_op} is pending on a waiting question; staying with it")
-            reply = stay_with_question(pc, t3, issue, ret_op, opts)
-        else:
-            log(f"{ret_op} already in the thread and still pending; waiting, no resend")
-            reply = wait_for_reply(t3, ret_op, opts)
-    else:
-        log(f"{ret_op} already answered in the thread; reconciling, no resend")
-        reply = existing
-    if not reply.strip():
+    # q1-10 (panel 2): a CANCELLED child is terminal too — it is not work in
+    # flight, and counting it open held the parent blocked forever. Its
+    # cancelled work carries no answer to return, so it neither holds the
+    # edge open nor delivers a turn; a family of only cancelled children
+    # still leaves the issue for a person (nothing to deliver).
+    cancelled = [row for row in family if row.get("status") == "cancelled"]
+    family = [row for row in family if row.get("status") != "cancelled"]
+    if cancelled:
+        log(f"return wake on {issue.get('identifier')}: "
+            + ", ".join(r.get("identifier") or r.get("id") for r in cancelled)
+            + " cancelled; not holding the return edge open")
+    if not family:
+        log(f"return wake on {issue.get('identifier')}: every ask child was "
+            f"cancelled; leaving the issue for a person")
+        # Delta-5 D4-7 (final check finding 3): the family was non-empty at
+        # the empty-family check above (so its note did not fire) and the
+        # cancelled split emptied it — this exit was log-only, the parent
+        # blocked forever with no board trace. Same law as the other exits:
+        # one idempotent note over the recorded blockers.
+        _blocker_note(pc, issue)
+        return 0
+    open_rows = [row for row in family if row.get("status") != "done"]
+    if open_rows:
+        # R2a finding 19: the parent delivers only when no ask child is
+        # open — a not-yet-done blocker keeps the parent waiting.
+        log(f"return wake on {issue.get('identifier')} but ask child "
+            f"{open_rows[0].get('identifier')} is still open; the parent "
+            "stays blocked")
+        return 0
+    # Delta-3 N1: the children list serves newest-activity-first (captured),
+    # so the walk orders the done family oldest-first by createdAt — the
+    # turns go out oldest first and the newest child's answer is the asker's
+    # final word. A family row without createdAt is refused (N3's law):
+    # walking the served order instead would silently be the N1 bug.
+    done_rows = ordered_oldest_first(family)
+    single = len(done_rows) == 1
+    stale_reply = None   # reconciled from a turn an earlier run sent
+    fresh_reply = None   # produced by THIS run's send/wait
+    # Delta-5 D4-1 (final check finding 1): the legacy unsuffixed
+    # {ask_op}-ret turn does NOT belong to the family's oldest child. It
+    # was sent when the family had exactly ONE done member — and that can
+    # be ANY child: a failed block PATCH drops the owner from blockedBy
+    # while it stays in the children list, the oldest can finish last
+    # behind a newer sibling that is then cancelled or reopened, a
+    # sibling can vanish from the children list altogether. Age can never
+    # attribute the turn. The carrier's own send body names the child it
+    # answers for — "Their child issue MMO-2 '<title>' is done." — so
+    # ownership is read from THAT body alone (never from issue or comment
+    # text) and only the named child may reconcile or claim the turn. In
+    # single mode the loop scans ret_op (== the legacy op) directly; in
+    # multi mode the legacy turn is read once here for adoption.
+    legacy_op = f"{ask_op}-ret"
+    legacy_probe = None if single else scan_marker_deep(t3, legacy_op)
+    legacy_owner_ident = None
+    if legacy_probe is not None and legacy_probe[0] in ("reply", "pending"):
+        legacy_owner_ident = _named_child_identifier(legacy_probe[3])
+    for idx, child in enumerate(done_rows):
+        ret_op = _return_op(ask_op, child, single)
+        # R2a finding 16: the bounded lookback applies to the return marker.
+        state, existing, thread, body = scan_marker_deep(t3, ret_op)
+        if (state is None and ret_op != legacy_op
+                and legacy_probe is not None):
+            # This child's own op is absent. It may adopt the legacy turn
+            # only when that turn's own body names THIS child; a body that
+            # names no child (not the carrier's send shape) can be adopted
+            # by nobody — refuse loudly rather than guess by age.
+            if legacy_probe[0] == "window_exhausted":
+                raise CarrierError(
+                    f"return marker {legacy_op} is beyond the lookback "
+                    "bound and unreadable this run")
+            if legacy_probe[0] is not None:
+                if legacy_owner_ident is None:
+                    raise CarrierError(
+                        f"legacy return op {legacy_op} on "
+                        f"{issue.get('identifier')} names no child in its "
+                        "own sent body; whose turn it is cannot be "
+                        "attributed — refusing instead of adopting it")
+                if legacy_owner_ident == child.get("identifier"):
+                    state, existing, thread, body = legacy_probe
+                    ret_op = legacy_op
+        if ret_op == legacy_op and state in ("reply", "pending"):
+            # Delta-5 D4-1: the turn this child is about to reconcile or
+            # claim IS the legacy op, and it carries an answer or a pending
+            # question. Its own body names the child it was sent for; this
+            # child must BE that child. A body that names no child, or
+            # names another one, means the answered turn is someone else's
+            # — refuse loudly, never deliver it. This also closes the
+            # self-strand: the turn the carrier itself just sent to the
+            # sole done child names that child, so the next wake matches
+            # and delivers instead of refusing forever.
+            named = _named_child_identifier(body)
+            if named is None:
+                raise CarrierError(
+                    f"legacy return op {ret_op} on {issue.get('identifier')} "
+                    "names no child in its own sent body; whose answer it "
+                    "is cannot be attributed — refusing instead of "
+                    "delivering it")
+            if named != child.get("identifier"):
+                raise CarrierError(
+                    f"legacy return op {ret_op} on {issue.get('identifier')} "
+                    f"names child {named} in its own sent body, not "
+                    f"{child.get('identifier') or child.get('id')}; the old "
+                    "answered turn is not this child's answer — refusing "
+                    "instead of delivering it")
+        if state == "reply":
+            log(f"{ret_op} already answered in the thread; reconciling, "
+                "no resend")
+            # Panel-2 M1: a later reconciled answer is the asker's NEWEST
+            # word — it overwrites an earlier stale one (the docstring's
+            # promise). An answer produced by THIS run still wins at
+            # delivery below.
+            if fresh_reply is None:
+                stale_reply = existing
+            continue
+        if state == "window_exhausted":
+            # beyond the lookback bound without an answer this run can read:
+            # nothing to send under the marker rule, nothing to deliver
+            raise CarrierError(
+                f"return marker {ret_op} is beyond the lookback bound and "
+                "unreadable this run")
+        result_text = last_result_comment(pc, child)
+        if state is None:
+            message = (
+                f"[{ret_op}]\n\n"
+                f"The teammate you asked finished. Their child issue "
+                f"{child.get('identifier')} '{child.get('title')}' is done.\n\n"
+                f"Their answer:\n\n{result_text}\n\n"
+                "Use it to finish your original task: your reply to this message "
+                "is posted as the issue comment and completes the issue."
+            )
+            log(f"sending {ret_op} to the asker's thread")
+            fresh_reply = send_and_stay(pc, t3, issue, message, ret_op, opts)
+        else:  # pending
+            if _pending_requests(thread) > 0:
+                log(f"{ret_op} is pending on a waiting question; staying with it")
+                fresh_reply = stay_with_question(pc, t3, issue, ret_op, opts)
+            else:
+                log(f"{ret_op} already in the thread and still pending; waiting, no resend")
+                fresh_reply = wait_for_reply(t3, ret_op, opts)
+    # An answer produced by THIS run is the asker's newest word; a
+    # reconciled one stands in only when nothing fresh came back.
+    reply = fresh_reply if (fresh_reply or "").strip() else stale_reply
+    if not (reply or "").strip():
         raise CarrierError("thread reply was empty")
-    deliver(pc, issue, reply, ret_op)
+    # Attack finding 12: the asker's post-return reply was never parsed for
+    # an ask block — it was delivered raw with a confirmation and the parent
+    # went in_review, so a teammate could never ask a second question after
+    # a return, even inside the cap. The same ask path runs here first (and
+    # depth one holds: an asked child's return never asks again).
+    is_ask_child = asked_child_of(pc, issue) is not None
+    # Panel-2 M7: a block the task text itself ends with, echoed back as
+    # the reply's last word, passes every shape test — refuse it as a quote.
+    if not is_ask_child and block_quoted_from_task(reply, issue, ASK_BLOCK):
+        log("reply ends with an ask block quoted from the task text; "
+            "not an ask")
+        ask = None
+    else:
+        ask = None if is_ask_child else parse_ask_block(reply)
+    if ask:
+        parent_op = op_id(issue["id"], (issue.get("title") or "")
+                          + "\n" + (issue.get("description") or ""))
+        if handle_ask(pc, issue, reply, ask, parent_op, opts):
+            return 0
+    # R2a finding 5: when the asker is ITSELF an ask child, this delivery
+    # completes with done like any asked child — no board gate above it.
+    deliver(pc, issue, reply, ret_op, ask_child=is_ask_child)
     return 0
 
 
-def handle_ask(pc, issue, reply, ask, op, roster):
+# What an asked child is told instead of the ask help (depth one, R2a
+# finding 4): the chain stops with it, so it must say what it still needs.
+NO_ASK_NOTE = ("Another teammate asked you for this work. You cannot hand it "
+               "on to a third teammate. If you cannot finish part of it "
+               "yourself, say exactly what you still need in your answer.")
+
+
+def machine_note_once(pc, issue_id, note):
+    """One idempotent `[t2-carrier]` line on an issue: exact-text dedupe, so
+    wake replays of a refusal never stack copies of the same note."""
+    try:
+        if not comment_already_present(pc, issue_id, note):
+            pc.add_comment(issue_id, note)
+    except CarrierError as exc:
+        log(f"note on {issue_id} also failed: {exc}")
+
+
+def _blocker_note(pc, issue):
+    """Delta-4 D4-7: the board note for an empty-family exit on an issue
+    that records blockers — ONE idempotent line naming them, so a person
+    sees on the board what every wake was only logging."""
+    names = []
+    for row in (issue.get("blockedBy") or []):
+        if isinstance(row, dict) and row.get("id"):
+            names.append(row.get("identifier") or row["id"])
+    for iid in (issue.get("blockedByIssueIds") or []):
+        if isinstance(iid, str) and iid not in names:
+            names.append(iid)
+    if not names:
+        return None
+    machine_note_once(
+        pc, issue["id"],
+        f"[t2-carrier] blocked issue {issue.get('identifier')} waits on "
+        f"{', '.join(names)}, which is not one of this carrier's ask "
+        "children; a person decides")
+    return names
+
+
+def handle_ask(pc, issue, reply, ask, op, opts):
     """A teammate's reply asked another teammate for work (```paperclip-ask).
 
     Creates the child issue under the current issue for the named teammate
@@ -1114,9 +2027,12 @@ def handle_ask(pc, issue, reply, ask, op, roster):
     on it with an unblock descriptor, and posts the asking reply as the
     parent comment. No confirmation and no in_review: the parent is waiting,
     not ready for review. Idempotent across runs via the ask marker in the
-    child description. Returns True when the ask was placed."""
+    child description. Self-asks and asks past max_asks_per_issue (default
+    3) are refused with one plain line and the reply stands as the answer.
+    Returns True when the ask was placed."""
+    roster = (opts or {}).get("roster") or {}
     ask_op = f"{op}-ask"
-    agent_id = (roster or {}).get(ask["assignee"])
+    agent_id = roster.get(ask["assignee"])
     if not agent_id:
         log(f"ask block names unknown teammate {ask['assignee']!r}; "
             "reply delivered as a plain answer, no child issue")
@@ -1126,21 +2042,94 @@ def handle_ask(pc, issue, reply, ask, op, roster):
         log("no PAPERCLIP_COMPANY_ID; cannot create the child issue")
         return False
     me = pc.me()
+    if agent_id == me.get("id"):
+        # Depth zero of the depth-one rule: a teammate cannot ask itself.
+        machine_note_once(pc, issue["id"],
+                          f"[t2-carrier] ask {ask_op} for {ask['assignee']} "
+                          "refused: a teammate cannot ask itself; the reply "
+                          "stands as the answer")
+        log(f"ask {ask_op} refused: {ask['assignee']} is the asker itself")
+        return False
     child = None
-    for row in pc.children(issue["id"]):
-        if ask_op in (row.get("description") or ""):
+    # Attack finding 16: the marker is the PARENT's content, so two different
+    # asks on one parent share it. Reuse only the child that matches THIS ask
+    # (same assignee, same sanitised title) — a revised ask to another
+    # teammate gets its own child instead of being swallowed by the earlier
+    # one, which left the second teammate never woken.
+    want_title = strip_markers(ask["title"]) or "Asked work"
+    for row in untruncated_children(pc, issue["id"], me.get("id")):
+        # A finished (done/cancelled) child is not work in flight: reusing
+        # it re-blocked the parent on a DONE blocker — the return edge
+        # re-delivered the old answer and the new ask never happened. Only
+        # an OPEN child of this same ask is reusable; otherwise the ask is
+        # new work and gets a new child. Delta-3 N9: reuse trusts the same
+        # identity law as the return edge — a marker-matching child someone
+        # else created is never adopted as this carrier's ask child.
+        if (row.get("createdByAgentId") == me.get("id")
+                and is_ask_child_of(row, issue)
+                and row.get("status") not in ("done", "cancelled")
+                and row.get("assigneeAgentId") == agent_id
+                and (row.get("title") or "") == want_title):
             child = row
             break
     if child is None:
-        child = pc.create_issue(company_id, {
-            "title": ask["title"],
-            "description": (f"{ask['description']}\n\n"
-                            f"Asked by {me.get('name', 'a teammate')} on "
-                            f"{issue.get('identifier')} [{ask_op}]"),
-            "assigneeAgentId": agent_id,
-            "parentId": issue["id"],
-            "status": "todo",
-        })
+        issued = [row for row in untruncated_children(
+                    pc, issue["id"], me.get("id"))
+                  if is_issued_ask_child(row, issue)]
+        # Attack finding 15: the cap comes from config; a non-numeric value
+        # keeps the default (never a mid-handle crash that costs the run its
+        # delivered reply), and a value below 1 is taken literally — zero
+        # asks — instead of silently loosening to the default 3.
+        cap = _ask_cap((opts or {}).get("max_asks_per_issue", 3))
+        if len(issued) >= cap:
+            machine_note_once(pc, issue["id"],
+                              f"[t2-carrier] ask {ask_op} for "
+                              f"{ask['assignee']} refused: the per-issue ask "
+                              f"cap ({cap}) is already reached; the reply "
+                              "stands as the answer")
+            log(f"ask {ask_op} refused: per-issue ask cap ({cap}) reached")
+            return False
+        # The teammate's own words are sanitised first (R2a finding 3): no
+        # `[pc-…` text it wrote can ride into the child description.
+        # Attack finding 14: a title that is ONLY a marker strips to "" — the
+        # fallback is a plain label, never the unsanitised ask text back.
+        title = want_title
+        description = strip_markers(ask["description"])
+        try:
+            child = pc.create_issue(company_id, {
+                "title": title,
+                "description": (f"{description}\n\n"
+                                f"Asked by {me.get('name', 'a teammate')} on "
+                                f"{issue.get('identifier')}\n[{ask_op}]"),
+                "assigneeAgentId": agent_id,
+                "parentId": issue["id"],
+                "status": "todo",
+            })
+        except CarrierError as exc:
+            # R2a finding 6: the create is never retried, but its answer can
+            # be lost while the server executed it — read the children back
+            # for this marker before failing the run (the next wake's reuse
+            # scan would find it too; this run can then finish cleanly).
+            # The marker alone is not this ask's child: the marker is the
+            # PARENT's content, so a sibling of a different ask matches it
+            # too. Adopt only this ask's own child — same assignee, same
+            # title the create would have written. Delta-4 D4-4: "own" also
+            # means created by THIS carrier (createdByAgentId == me, the
+            # N9/D4-6 law — the server stamps create authorship, so a
+            # foreign row is not ours to adopt no matter how well its text
+            # matches); marker, assignee and title are all public text a
+            # teammate can plant.
+            for row in untruncated_children(pc, issue["id"], me.get("id")):
+                if (row.get("createdByAgentId") == me.get("id")
+                        and is_ask_child_of(row, issue)
+                        and row.get("assigneeAgentId") == agent_id
+                        and (row.get("title") or "") == want_title):
+                    log(f"ask create failed ({exc}) but child "
+                        f"{row.get('identifier')} exists; continuing")
+                    child = row
+                    break
+            if child is None:
+                raise
         log(f"child issue created for {ask['assignee']}: "
             f"{child.get('identifier')} under {issue.get('identifier')}")
     else:
@@ -1152,11 +2141,18 @@ def handle_ask(pc, issue, reply, ask, op, roster):
         # This build refuses an agent naming ANOTHER agent as unblock owner
         # (403 "Agents may only name themselves as an unblock owner", live
         # 2026-11-10): the asker owns its own unblock; the action text still
-        # names the teammate whose work it waits for.
+        # names the teammate whose work it waits for. The PATCH carries the
+        # WHOLE blocker set — keep every relation the board already recorded
+        # for this parent (an earlier ask's child still has to wake it
+        # home), plus this child. And the action names the sanitised title:
+        # a marker-shaped or prose-polluted ask title never rides raw into
+        # board text.
+        blocker_ids = list(dict.fromkeys(
+            recorded_blocker_ids(fresh) + [child["id"]]))
         pc.block_issue(
-            issue["id"], [child["id"]], me.get("id"),
+            issue["id"], blocker_ids, me.get("id"),
             f"{ask['assignee']} completes {child.get('identifier')}: "
-            f"{ask['title']}")
+            f"{want_title}")
     if not comment_already_present(pc, issue["id"], reply):
         pc.add_comment(issue["id"], reply)
     log(f"parent {issue.get('identifier')} left blocked on "
@@ -1164,34 +2160,140 @@ def handle_ask(pc, issue, reply, ask, op, roster):
     return True
 
 
+def untruncated_children(pc, issue_id, me_id=None):
+    """The children walk, truncation-aware (proof 2, captured live
+    2026-11-11): the children LIST projection hard-truncates a long
+    description at 1200 chars (``descriptionTruncated: true``), and the ask
+    marker sits at the very END of the description — invisible in a
+    truncated list row. Every truncated row is re-read in full before any
+    marker test, so a long description never costs the carrier its own
+    child (a stranded return edge, or a duplicate ask). Delta-3 N5: the ask
+    marker cannot be tested on a truncated row, so a FAILED full read fails
+    the walk (CarrierError) — keeping the markerless list row made the
+    family look empty and the run end 0 having delivered nothing, a silent
+    strand on every wake. The next wake retries the read. Delta-4 D4-3: the
+    re-read (and its raise) is scoped to rows that can be THIS carrier's —
+    the list row itself carries createdByAgentId, and a truncated row the
+    board attributes to another agent can never pass any caller's identity
+    filter, so it is skipped without the re-read and its failed read never
+    kills the wake. Mine and unattributed truncated rows still re-read."""
+    rows = []
+    for row in pc.children(issue_id):
+        if row.get("descriptionTruncated") and row.get("id"):
+            row_owner = row.get("createdByAgentId")
+            if me_id is not None and row_owner and row_owner != me_id:
+                continue   # foreign: no marker test of ours can use it
+            try:
+                rows.append(pc.issue(row["id"]))
+            except CarrierError as exc:
+                raise CarrierError(
+                    f"full read of truncated child "
+                    f"{row.get('identifier') or row.get('id')} failed "
+                    f"({exc}); the ask marker cannot be tested this run")
+        else:
+            rows.append(row)
+    return rows
+
+
 def comment_rows(pc, issue):
     """An issue's comments, oldest first. Paperclip lists them newest first,
-    so they are ordered here by their own timestamps; rows without one keep
-    the order they came in."""
+    so they are ordered here by their own timestamps; a set of rows where
+    any lacks a timestamp is REFUSED (delta-3 N3 — see
+    ordered_oldest_first). A failed READ is the caller's [] (wake-replay
+    tolerance); an unknown 200 SHAPE raises (panel-2 M5) — it is not
+    emptiness."""
     try:
         rows = pc.comments(issue["id"])
     except CarrierError:
         return []
-    if isinstance(rows, dict):
-        rows = rows.get("comments") or rows.get("rows") or []
+    return ordered_oldest_first(served_rows(rows, "comments", "rows"))
+
+
+def ordered_oldest_first(rows):
+    """Comment rows ordered oldest-first by their own ``createdAt`` — the
+    board's list order is newest-first (fixture comments.json), so position
+    alone is never the timeline. Delta-3 N3: the sort needs a total key; the
+    old fallback — keep the served order when any row lacks createdAt —
+    handed every oldest-first consumer the NEWEST-first order. With two or
+    more rows where any lacks the timestamp the read is refused
+    (CarrierError): an order this code cannot derive fails loudly, it never
+    flows silently newest-first. Fewer than two rows have no order to get
+    wrong and pass through unchanged. Delta-4 D4-2: an equal-createdAt tie
+    is broken by the id as a stable second key, never by the served order."""
     rows = list(rows)
-    if rows and all(row.get("createdAt") for row in rows):
-        rows.sort(key=lambda row: row["createdAt"])
+    if len(rows) < 2:
+        return rows
+    missing = sum(1 for row in rows if not row.get("createdAt"))
+    if missing:
+        raise CarrierError(
+            f"{missing} of {len(rows)} rows carry no createdAt; the served "
+            "newest-first order cannot be corrected to oldest-first, "
+            "refusing the read")
+    rows.sort(key=lambda row: (row["createdAt"], row.get("id") or ""))
     return rows
 
 
 # The lane line with T4c (R4b findings 4/5): every comment the door or the
 # result transport writes starts with `[coding-job]`, every note this carrier
-# writes with `[t2-carrier]`. The installed Paperclip records loopback writes
-# as authorType "user", so the prefix — not authorType — marks machine words.
+# writes with `[t2-carrier]`. The installed Paperclip records agent-token
+# loopback writes as authorType "agent" (live capture 2026-11-11), so
+# authorType would separate them today — but the prefix, not authorType,
+# stays the mark: it holds whatever authorType a row carries, for any
+# transport that writes differently.
 MACHINE_COMMENT_PREFIXES = ("[coding-job]", "[t2-carrier]")
+
+
+def served_rows(raw, *keys):
+    """The rows a 200 body serves, or CarrierError (panel-2 M5).
+
+    A list is the rows. A dict is unwrapped under one of `keys` (default
+    ``comments``/``rows`` for comment reads, ``interactions``/``rows`` for
+    interaction reads). Anything else — a dict with none of the keys, a
+    string, a number — is a surface this build does not know, and reading
+    it as ``[]`` would turn UNKNOWN into EMPTY: a real answer, rejection
+    or marker would be silently missed. It raises; the caller fails the
+    run or catches it as its own policy names. The error names shapes and
+    keys only — never a body."""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, dict):
+        for key in keys or ("comments", "rows"):
+            value = raw.get(key)
+            if isinstance(value, list):
+                return value
+        raise CarrierError(
+            "unreadable rows shape in board answer (dict with keys "
+            f"{sorted(raw)})")
+    raise CarrierError(
+        f"unreadable rows shape in board answer ({type(raw).__name__})")
 
 
 def is_machine_comment(body):
     """True when a comment body was written by a machine, not a person: after
     leading whitespace it starts with a lane prefix. Applied whatever
-    authorType the row carries (R4b 4/5: machine writes come back as "user")."""
+    authorType the row carries (R4b 4/5) — the prefix is the durable mark."""
     return (body or "").lstrip().startswith(MACHINE_COMMENT_PREFIXES)
+
+
+def carrier_note_bodies(pc, rows):
+    """Bodies of the machine-prefixed comments THIS carrier's own agent
+    wrote (panel-2 H2). A prefix alone is not authority: a person can paste
+    a carrier note verbatim, and another lane's carrier writes the same
+    prefixes on the same board. Authority needs ``authorType == "agent"`` and
+    ``authorAgentId`` equal to this carrier's agent id. When the agent id
+    cannot be read, nothing is authoritative (the admit is not suppressed;
+    the door stays idempotent by command, so the cost is one extra call,
+    never a silently-never-running job)."""
+    try:
+        me_id = (pc.me() or {}).get("id")
+    except CarrierError:
+        me_id = None
+    if not me_id:
+        return []
+    return [(row.get("body") or "") for row in rows
+            if is_machine_comment(row.get("body") or "")
+            and row.get("authorType") == "agent"
+            and row.get("authorAgentId") == me_id]
 
 
 def board_feedback(pc, issue):
@@ -1211,12 +2313,12 @@ def board_feedback(pc, issue):
     A system notice is not the board speaking."""
     reason = None
     rejected = False
-    try:
-        rows = pc.interactions(issue["id"])
-    except CarrierError:
-        rows = []
-    if isinstance(rows, dict):
-        rows = rows.get("interactions") or rows.get("rows") or []
+    # An unreadable interaction list must fail the run: reading it as empty
+    # turned a REAL rejection into "nothing to do" — the board's decline
+    # went unanswered while the run exited 0. The board state is unknown,
+    # not empty. (The GET retry law already absorbed transients by here.)
+    rows = served_rows(pc.interactions(issue["id"]),
+                       "interactions", "rows")
     pending = False
     for row in rows:  # oldest-first; the newest rejection wins
         if row.get("kind") != "request_confirmation":
@@ -1255,7 +2357,9 @@ def board_notes(pc, issue, limit=5, max_chars=2000):
     its user comments, oldest first, newest `limit` kept. They go into the
     first task message so a note left while assigning is not lost. Machine
     comments (is_machine_comment) are never board notes, whatever their
-    authorType: the installed Paperclip records loopback writes as "user"."""
+    authorType: the installed Paperclip records agent-token loopback writes
+    as "agent" (live capture 2026-11-11), and the prefix is the durable
+    mark either way."""
     mine = [row for row in comment_rows(pc, issue)
             if row.get("authorType") == "user"
             and (row.get("body") or "").strip()
@@ -1277,11 +2381,16 @@ def handle_feedback(pc, t3, issue, opts):
     if feedback is None:
         log(f"in_review issue {issue.get('identifier')} is bound to this run "
             "but has no board feedback; nothing to do")
+        # This wake is the one a TRANSIENT coding-job outcome (WAIT,
+        # unreachable/unreadable door) was waiting for: re-issue it.
+        retry_transient_coding_jobs(pc, issue, opts)
         return 0
     reason, comment = feedback
     content = (issue.get("title") or "") + "\n" + (issue.get("description") or "")
     op = op_id(issue["id"], content)
-    thread, messages = t3.messages()
+    # R2a finding 16: read the deepest window for the revision scan, so a
+    # round marker hidden under newer messages is still found.
+    thread, messages = t3.messages(MARKER_LOOKBACK_STEPS[-1])
     # A round is closed once its delivery created its confirmation; the live
     # round is the highest numbered one whose marker exists but whose
     # delivery never completed (crash between the thread turn and deliver).
@@ -1329,20 +2438,22 @@ def handle_feedback(pc, t3, issue, opts):
         reply = existing
     if not reply.strip():
         raise CarrierError("thread reply was empty")
-    deliver(pc, issue, reply, rev_op)
+    # R2a finding 5: a revision on an ask CHILD completes with done like any
+    # asked child — re-entering review would strand the asker above it.
+    deliver(pc, issue, reply, rev_op,
+            ask_child=asked_child_of(pc, issue) is not None)
+    # this wake touched the issue: a transient coding job retries now
+    retry_transient_coding_jobs(pc, issue, opts)
     return 0
 
 
 def confirmation_verdict(pc, issue_id, op):
     """The board's verdict on THIS op's confirmation: 'accepted', 'rejected',
-    'pending', or None when the confirmation does not exist yet."""
+    'pending', or None when the confirmation does not exist yet. A failed
+    read or an unknown shape raises (panel-2 M5): an unknown verdict is not
+    a missing one — reading it as None would deliver on guesswork."""
     key = f"{op}-confirm"
-    try:
-        rows = pc.interactions(issue_id)
-    except CarrierError:
-        return None
-    if isinstance(rows, dict):
-        rows = rows.get("interactions") or rows.get("rows") or []
+    rows = served_rows(pc.interactions(issue_id), "interactions", "rows")
     for row in rows:
         if row.get("idempotencyKey") == key:
             return row.get("status")
@@ -1350,14 +2461,65 @@ def confirmation_verdict(pc, issue_id, op):
 
 
 def run_carrier(pc, t3_factory, opts):
-    """One wake. Returns an exit code; raises nothing."""
-    crash_after = opts.get("crash_after")
+    """One wake. Returns an exit code; raises nothing.
+
+    R2a finding 7: before any scan, checkout or send, take the advisory
+    lock for the bound thread and hold it for the whole run, so a second
+    carrier process Paperclip started for the same agent (different issue,
+    same one bound thread) cannot interleave its own send and waiting
+    lines with this one's. A twin that holds the lock past this run's
+    budget ends the run quietly — the twin already owns the thread, and
+    the next wake picks the issue up."""
     me = pc.me()
     if me.get("id") != os.environ.get("PAPERCLIP_AGENT_ID"):
         raise CarrierError("run token is for a different agent")
     binding = binding_of(me)
     thread_id = binding["primaryThreadId"]
+    lock = acquire_thread_lock(opts.get("thread_lock_dir"), thread_id, opts)
+    if lock is THREAD_LOCK_BUSY:
+        log(f"another carrier run holds thread {thread_id}; leaving the "
+            "inbox for the next wake")
+        return 0
+    try:
+        return _run_carrier_locked(pc, t3_factory, opts, me, binding,
+                                   thread_id)
+    finally:
+        release_thread_lock(lock)
+
+
+def _run_carrier_locked(pc, t3_factory, opts, me, binding, thread_id):
+    """The carrier journey, under the thread lock taken by run_carrier."""
+    crash_after = opts.get("crash_after")
+    delivered = False  # R2a finding 22: set once the answer is on the issue
     t3 = t3_factory(thread_id)
+
+    # R2a finding 12: the bound thread must belong to the bound provider
+    # instance. A stale roster or a recovery that minted a second primary
+    # thread on another instance would otherwise have this carrier wake a
+    # DIFFERENT teammate's conversation. The thread record names its
+    # instance (providerInstanceId, or the snake form) when the build
+    # serves it; a mismatch is fatal before any checkout or send. A read
+    # that fails here changes nothing — the normal scan below fails the
+    # same way inside the protected flow — and a record that names no
+    # instance cannot be checked (the journey must not break on a build
+    # that lacks the field).
+    try:
+        first = t3.messages(1)[0] or {}
+        instance = first.get("providerInstanceId") or \
+            first.get("provider_instance_id")
+    except Exception as exc:  # noqa: BLE001 - the scan below fails properly
+        instance = None
+        log(f"thread unreadable before the instance check ({exc}); "
+            "continuing to the normal scan")
+    if instance and binding.get("providerInstanceId") and \
+            instance != binding["providerInstanceId"]:
+        raise CarrierError(
+            f"thread {thread_id} belongs to provider instance "
+            f"{instance!r}, the binding says "
+            f"{binding['providerInstanceId']!r}; refusing to send")
+    if not instance:
+        log("thread record names no provider instance; the instance check "
+            "cannot fire this run")
 
     # An in_review issue is not in the inbox (inbox-lite serves
     # todo/in_progress/blocked only), so a board reply on one reaches this run
@@ -1384,20 +2546,32 @@ def run_carrier(pc, t3_factory, opts):
     issue = None
     for row in candidates:
         full = pc.issue(row["id"])
-        mine = active_run_id(row) == pc.run_id
         try:
             pc.checkout(row["id"], me["id"],
                         allow_blocked=(row.get("status") == "blocked"))
         except CarrierError as exc:
-            if mine and "HTTP 409" in str(exc):
-                # The assignment wake bound this issue to THIS run before the
-                # carrier started; a 409 here means "already checked out" by
-                # us. That is not a refusal — proceed with our own issue.
-                log(f"{row.get('identifier')} already checked out by this run "
-                    f"({pc.run_id}); proceeding")
-            else:
+            if "HTTP 409" not in str(exc):
                 log(f"checkout of {row.get('identifier')} refused ({exc}); next")
                 continue
+            # R2a finding 25: the inbox row can predate the assignment wake
+            # that bound this issue to THIS run — a 409 on a row that still
+            # showed no active run must not read as a refusal. Re-read the
+            # issue; the FRESH row decides: this run holds it -> proceed
+            # with the fresh read; another run holds it -> real refusal.
+            try:
+                fresh = pc.issue(row["id"])
+            except CarrierError as read_exc:
+                log(f"checkout of {row.get('identifier')} got 409 and the "
+                    f"re-read failed ({read_exc}); next")
+                continue
+            if active_run_id(fresh) == pc.run_id:
+                log(f"{row.get('identifier')} already checked out by this run "
+                    f"({pc.run_id}); proceeding")
+                issue = fresh
+                break
+            log(f"checkout of {row.get('identifier')} refused ({exc}); held "
+                f"by run {active_run_id(fresh) or 'unknown'}; next")
+            continue
         issue = full
         break
     if issue is None:
@@ -1407,8 +2581,82 @@ def run_carrier(pc, t3_factory, opts):
         f"activeRun={active_run_id(row) or 'none'}")
 
     try:
-        ask_children = [row for row in pc.children(issue["id"])
-                        if ask_child_op(row.get("description") or "")]
+        # Structural ask children only (R2a finding 3) — and delta-3 N9: the
+        # marker is derivable from public issue text, so anyone who can
+        # create an issue can plant a marker-matching child under an
+        # assigned task, and the old gate (a family it did not create, no
+        # recorded relation, exit 0) let that bystander freeze the task
+        # every wake. A family child is one THIS carrier created
+        # (createdByAgentId, served on list and full rows alike); author
+        # identity decides, not text.
+        # Delta-4 D4-5: the identity gate has an explicit cannot-attribute
+        # arm. A marker-matching row with NO createdByAgentId is neither
+        # mine nor foreign, and this gate runs BEFORE the return edge and
+        # the reuse scan of the same wake — dropping the row silently here
+        # was also the silent drop there (a stranded return edge, or a
+        # duplicate ask over a child that might be the family's). Refuse
+        # loudly instead: a person decides what the unattributed child is.
+        # Delta-5 D4-5 scope (final check finding 4): the arm binds only a
+        # child this wake's RECORDED blockers name. A marker-matching row
+        # outside the blocker relation — a person-created child, which the
+        # board serves with createdByAgentId null by construction — is
+        # neither adopted nor a halt; the carrier's own child is never
+        # unattributed (the server stamps the creating agent, D4-6), so
+        # the scoped arm still catches every row that could be family.
+        # Attack findings 5 and 9 (attack round): the marker is derivable
+        # from public issue text, so a forged or duplicate marker-matching
+        # child can hijack the return edge or hold it shut forever. The
+        # blocker relation the board records (the served blockedBy
+        # summaries) is the binding: only a child in it can satisfy or
+        # suppress the return edge.
+        blocker_ids = recorded_blocker_ids(issue)
+        ask_children = []
+        for row in untruncated_children(pc, issue["id"], me.get("id")):
+            if not is_ask_child_of(row, issue):
+                continue
+            owner = row.get("createdByAgentId")
+            if not owner:
+                if row.get("id") in blocker_ids:
+                    raise CarrierError(
+                        f"ask child {row.get('identifier') or row.get('id')} "
+                        f"of {issue.get('identifier')} carries no "
+                        "createdByAgentId; whose child it is cannot be "
+                        "attributed — refusing loudly instead of dropping "
+                        "or duplicating it")
+                continue   # not a recorded blocker: not this wake's to decide
+            if owner == me.get("id"):
+                ask_children.append(row)
+            # else: another agent's child — not family (N9), never a freeze
+        if ask_children and not blocker_ids:
+            # Panel-2 M2: the create can succeed while the block PATCH fails
+            # — the child is visible, the relation is not — and parking the
+            # family "for a person" stranded it forever (every wake hit this
+            # branch again). Retry the block; if it fails again the run
+            # fails loudly and the next wake retries. Delta-3 N9: every
+            # child here is one this carrier created by construction.
+            roster = opts.get("roster") or {}
+            for row in ask_children:
+                who = next((name for name, aid in roster.items()
+                            if aid == row.get("assigneeAgentId")), None)
+                action = (f"{who or 'the assignee'} completes "
+                          f"{row.get('identifier')}: "
+                          f"{row.get('title') or 'the asked work'}")
+                pc.block_issue(issue["id"], [row["id"]],
+                               me.get("id"), action)
+            log(f"issue {issue.get('identifier')} had carrier-issued "
+                "children with no recorded relation; block retried")
+            blocker_ids = [row["id"] for row in ask_children]
+        if blocker_ids and ask_children:
+            ask_children = [row for row in ask_children
+                            if row.get("id") in blocker_ids]
+            if not ask_children:
+                log(f"blocked issue {issue.get('identifier')} has marker-"
+                    "matching children but none of them is the recorded "
+                    "blocker; leaving it for a person")
+                # Delta-4 D4-7: this exit repeats silently every wake — the
+                # note makes the mismatch board-visible for a person.
+                _blocker_note(pc, issue)
+                return 0
         if issue.get("status") == "blocked" and not ask_children:
             # A blocked task with no ask child was blocked while the
             # teammate's turn may still have been in flight (a person or the
@@ -1426,15 +2674,42 @@ def run_carrier(pc, t3_factory, opts):
                 log(f"blocked issue {issue.get('identifier')} unreadable "
                     f"thread ({exc}); leaving it for a person")
                 return 0
-            if scan_marker(probe_msgs, probe_op, probe_thread)[0] is None:
+            probe_state = scan_marker(probe_msgs, probe_op, probe_thread)[0]
+            if probe_state is None:
                 log(f"blocked issue {issue.get('identifier')} has no ask "
                     "child and no marker in the thread; leaving it for a "
                     "person")
+                # Delta-4 D4-7 (the round-2 P3 shape): a recorded blocker no
+                # wake covers is board-visible, not log-only.
+                _blocker_note(pc, issue)
+                return 0
+            # R2a finding 15: a blocked issue with no ask child was blocked
+            # by a person or the board. An ANSWERED marker alone is not
+            # permission to deliver — the block is a review hold. Delivery
+            # from blocked needs the carrier's own waiting line on the issue
+            # (this task stopped on a question of ours; the MAS-11 journey).
+            # Delta-3 N10: the line counts only from THIS carrier's own
+            # notes (panel-2 H2: machine prefix + authorType agent +
+            # authorAgentId == me) — anyone who can comment can paste the
+            # visible line verbatim, and a paste is not the carrier speaking.
+            # A still-pending marker continues the normal path either way:
+            # a question stay posts the waiting line itself, and the
+            # slow-turn wait ends in a release for a person.
+            if probe_state == "reply" and waiting_note(
+                    opts, thread_id) not in [
+                    body.strip() for body in
+                    carrier_note_bodies(pc, comment_rows(pc, issue))]:
+                log(f"blocked issue {issue.get('identifier')} has an "
+                    "answered marker but no carrier waiting line; a person "
+                    "blocked it — leaving it for the board")
                 return 0
             log(f"blocked issue {issue.get('identifier')} has its marker in "
                 "the thread; continuing the normal path")
-        if ask_children and all(row.get("status") == "done"
+        if ask_children and all(row.get("status") in ("done", "cancelled")
                                 for row in ask_children):
+            # q1-10: a cancelled child is terminal here too — demanding
+            # all-done held a done+cancelled family out of the return edge
+            # forever. handle_return skips the cancelled children inside.
             # The return edge: every ask child reached done, so this build
             # woke the asker (issue_blockers_resolved / issue_children_
             # completed — the latter may have resumed the parent out of
@@ -1442,7 +2717,7 @@ def run_carrier(pc, t3_factory, opts):
             return handle_return(pc, t3, issue,
                                  ask_child_op(ask_children[0]
                                               .get("description") or ""),
-                                 opts)
+                                 opts, me.get("id"))
         # The board sent a rejected answer back (often resuming the issue to
         # todo, which the inbox serves): one revision round, not a resend.
         if board_feedback(pc, issue) is not None:
@@ -1458,10 +2733,31 @@ def run_carrier(pc, t3_factory, opts):
             log(f"board accepted the answer on {issue.get('identifier')}; "
                 "issue done")
             return 0
-        thread, msgs = t3.messages()
-        state, existing = scan_marker(msgs, op, thread)
+        # The structural test (R2a finding 3): one parent read settles
+        # whether THIS issue is an ask child — used by the message build,
+        # the depth-one ask rule and delivery below.
+        ask_parent = asked_child_of(pc, issue)
+        # R2a finding 16: the bounded lookback walks back past the latest-60
+        # window before any first send, so a marker hidden under newer
+        # messages cannot cause a second send of the task.
+        state, existing, thread, _marker_body = scan_marker_deep(t3, op)
+        if state == "window_exhausted":
+            record = (f"[t2-carrier] sent task {op} to the teammate thread; "
+                      "the thread window cannot show this turn, this line is "
+                      "the record of the send")
+            if comment_already_present(pc, issue["id"], record):
+                log(f"{op} recorded as sent on the issue but beyond the "
+                    "lookback bound; not sending again")
+                reply = wait_for_reply(t3, op, opts)
+                if not reply.strip():
+                    raise CarrierError("thread reply was empty")
+                deliver(pc, issue, reply, op,
+                        ask_child=ask_parent is not None)
+                return 0
+            machine_note_once(pc, issue["id"], record)
+            state = None  # send now, under the record
         if state is None:
-            asked_child = bool(ask_child_op(issue.get("description") or ""))
+            asked_child = ask_parent is not None
             message = build_message(
                 issue.get("identifier"), issue.get("title"),
                 issue.get("description"), op,
@@ -1475,7 +2771,10 @@ def run_carrier(pc, t3_factory, opts):
                 # finding 5): the asker owns the job decision.
                 job_help=None if asked_child
                 else coding_job_help(opts.get("coding_job_door")),
-                notes=board_notes(pc, issue))
+                notes=board_notes(pc, issue),
+                # ...and it is told that it cannot ask (R2a finding 4,
+                # depth one): the chain stops with it.
+                no_ask=NO_ASK_NOTE if asked_child else None)
             log(f"sending {op} to thread {thread_id}")
             reply = send_and_stay(pc, t3, issue, message, op, opts)
         elif state == "pending":
@@ -1490,15 +2789,38 @@ def run_carrier(pc, t3_factory, opts):
             reply = existing
         if not reply.strip():
             raise CarrierError("thread reply was empty")
-        ask = parse_ask_block(reply)
-        if ask and handle_ask(pc, issue, reply, ask, op,
-                              opts.get("roster") or {}):
+        # Depth one (R2a finding 4): an asked child's reply is never parsed
+        # for an ask block — the chain stops with it. Panel-2 M7: a block
+        # the task text itself ends with, echoed back, is a quote — refused.
+        if not ask_parent and block_quoted_from_task(reply, issue, ASK_BLOCK):
+            log("reply ends with an ask block quoted from the task text; "
+                "not an ask")
+            ask = None
+        else:
+            ask = None if ask_parent else parse_ask_block(reply)
+        if ask and handle_ask(pc, issue, reply, ask, op, opts):
             return 0
         deliver(pc, issue, reply, op, crash_after,
-                ask_child=bool(ask_child_op(issue.get("description") or "")))
-        job = parse_coding_job_block(reply)
+                ask_child=ask_parent is not None)
+        delivered = True  # the answer is on the issue; nothing may undo it
+        # Attack finding 8: depth one withholds the ask help AND the job help
+        # from an asked child, but the reply was still parsed for a job block
+        # — a block the asked teammate emitted anyway opened a governed door
+        # the asker never authorised. The asker owns the job decision: an
+        # asked child's reply is never parsed for one.
+        job = None if ask_parent else parse_coding_job_block(reply)
+        if job and block_quoted_from_task(reply, issue, CODING_JOB_BLOCK):
+            log("reply ends with a job block quoted from the task text; "
+                "not a job request")
+            job = None
         if job:
             handle_coding_job(pc, issue, reply, job, opts)
+        # a reply with several job blocks across turns, or a transient
+        # outcome from an earlier run: this wake re-issues those keys too
+        # (the key surfaced THIS run is skipped — a fresh transient outcome
+        # does not re-admit within the same wake)
+        retry_transient_coding_jobs(
+            pc, issue, opts, skip=job["key"] if job else None)
         return 0
     except NeedsHuman:
         try:
@@ -1510,7 +2832,18 @@ def run_carrier(pc, t3_factory, opts):
             pass
         raise
     except Exception as exc:  # noqa: BLE001 - ANY failure must release the issue
-        release_issue(pc, issue["id"], f"{type(exc).__name__}: {exc}")
+        if delivered:
+            # R2a finding 22: the answer is already on the issue in its final
+            # state. A later step failing (a coding-job note, say) must never
+            # release it again or move its status: log, one best-effort
+            # machine note, and the delivered answer stands.
+            log(f"after-delivery step failed on {issue.get('identifier')} "
+                f"({public_error(exc)}); the delivered answer stands")
+            machine_note_once(pc, issue["id"],
+                              "[t2-carrier] a later step failed after this "
+                              "answer was delivered; the answer stands")
+            return 0
+        release_issue(pc, issue["id"], public_error(exc))
         raise
 
 
@@ -1526,10 +2859,24 @@ def wait_for_reply(t3, op, opts):
     deadline = _now(opts) + opts.get("pending_timeout_sec", 600)
     budget = run_budget_end(opts)
     if budget is not None:
-        deadline = min(deadline, budget)
+        # Same law as the question wait (R2a finding 8 addition): the tail of
+        # the budget is the delivery reserve, not more waiting.
+        deadline = min(deadline, budget - float(
+            opts.get("delivery_reserve_sec", DELIVERY_RESERVE_SEC) or 0))
+    misses = 0
     while _now(opts) < deadline:
         _doze(opts, opts.get("poll_interval_sec", 5))
-        thread, msgs = t3.messages()
+        try:
+            thread, msgs = t3.messages()
+            misses = 0
+        except CarrierError:
+            # Same law as the question wait (_read_thread_tolerant): one or
+            # two failed reads in a row do not end the wait — the answer
+            # may be one poll away — but the third miss in a row fails it.
+            misses += 1
+            if misses >= 3:
+                raise
+            continue
         state, reply = scan_marker(msgs, op, thread)
         if state == "reply":
             return reply
@@ -1539,12 +2886,14 @@ def wait_for_reply(t3, op, opts):
 
 
 def comment_already_present(pc, issue_id, reply):
-    try:
-        rows = pc.comments(issue_id)
-    except CarrierError:
-        return False
-    if isinstance(rows, dict):
-        rows = rows.get("comments") or rows.get("rows") or []
+    """True when the exact reply text is already a comment on the issue.
+
+    R2a finding 20: a failed comments read is NOT "not present". A comment
+    POST is unkeyed (a fresh clientRequestId each time), so posting on a
+    read failure can duplicate an answer that is already there — the read
+    failure must fail the run before anything is posted (the best-effort
+    note paths wrap this in their own try/except, as before)."""
+    rows = served_rows(pc.comments(issue_id), "comments", "rows")
     for row in rows:
         if (row.get("body") or "").strip() == reply.strip():
             return True
@@ -1553,14 +2902,15 @@ def comment_already_present(pc, issue_id, reply):
 
 def confirmation_already_present(pc, issue_id, op):
     """True if this op's request_confirmation already exists (a re-POST would
-    be 409). An unreadable interaction list degrades to a POST attempt."""
+    be 409). A FAILED read degrades to a POST attempt (the 409 makes that
+    safe); a 200 answer in an unknown shape raises (panel-2 M5) — reading a
+    broken shape as "absent" could double-ask a person."""
     key = f"{op}-confirm"
     try:
-        rows = pc.interactions(issue_id)
+        raw = pc.interactions(issue_id)
     except CarrierError:
         return False
-    if isinstance(rows, dict):
-        rows = rows.get("interactions") or rows.get("rows") or []
+    rows = served_rows(raw, "interactions", "rows")
     for row in rows:
         if row.get("idempotencyKey") == key:
             return True
@@ -1572,7 +2922,7 @@ def load_config(path):
         return json.load(fh)
 
 
-def build_opts(cfg, environ, now):
+def build_opts(cfg, environ, now, config_path=None):
     """One place that turns the carrier config file and the process
     environment into the run opts `run_carrier` takes.
 
@@ -1580,7 +2930,11 @@ def build_opts(cfg, environ, now):
     (`coding_job_door`): absent means dormant — no block taught, no door
     call — exactly as before this key existed. `now` is the process start,
     recorded once by main(); the run budget is measured from it. Tests may
-    override the clock, sleep and start time through these opts."""
+    override the clock, sleep and start time through these opts.
+
+    `config_path` seeds the finding-7 thread-lock directory: the config
+    file lives in the agent's own home, so its directory is the per-agent
+    place for the lock file; an explicit `thread_lock_dir` key wins."""
     return {
         "crash_after": environ.get("MMOS_T2_CARRIER_CRASH_AFTER"),
         "pending_timeout_sec": cfg.get("pending_timeout_sec", 600),
@@ -1595,6 +2949,16 @@ def build_opts(cfg, environ, now):
         # Same-company teammate roster: display name -> agent id. An ask block
         # naming anyone else resolves to nothing (plain reply, no child issue).
         "roster": cfg.get("teammates") or {},
+        # R2a finding 4: the per-issue ask cap; asks beyond it are refused
+        # with one plain line and the reply stands as the answer. Attack
+        # finding 15: coerced once here — a non-numeric value keeps the
+        # default, a value below 1 is zero asks (never a silent loosening).
+        "max_asks_per_issue": _ask_cap(cfg.get("max_asks_per_issue", 3)),
+        # Panel-2 M4: per-key bound on transient coding-job re-admits;
+        # at the bound the retry stops and a person is told. Coerced here
+        # so a config typo can never loosen or crash it.
+        "coding_job_max_retries": _retry_cap(
+            cfg.get("coding_job_max_retries", 3)),
         # Optional: "http://127.0.0.1:<port>/<PREFIX>/issues/{identifier}".
         "issue_url_template": cfg.get("issue_url_template"),
         # Optional, same law: "http://127.0.0.1:<port>/<PREFIX>/{thread}".
@@ -1603,6 +2967,17 @@ def build_opts(cfg, environ, now):
         "coding_job_door": cfg.get("coding_job_door"),
         # The budget clock starts once, at process start.
         "run_start": now,
+        # R2a finding 8 (addition): the stated delivery reserve — the slice
+        # of the run budget no wait, poll, HTTP timeout or retry sleep eats.
+        "delivery_reserve_sec": cfg.get("delivery_reserve_sec",
+                                        DELIVERY_RESERVE_SEC),
+        # R2a finding 7: the directory for the advisory per-thread lock
+        # (thread-<thread id>.lock). Defaults to the config file's own
+        # directory — the agent's home — so two carrier processes Paperclip
+        # starts for this agent on one host contend on one file.
+        "thread_lock_dir": cfg.get("thread_lock_dir") or (
+            os.path.dirname(os.path.abspath(config_path))
+            if config_path else None),
     }
 
 
@@ -1618,13 +2993,23 @@ def main() -> int:
         log("usage: wake_carrier.py <config.json>")
         return 2
     cfg = load_config(argv_config[0])
-    opts = build_opts(cfg, os.environ, time.time())
+    # R2a finding 13: a configured paperclip_base pins the address —
+    # loopback only — and a different PAPERCLIP_API_URL refuses the run
+    # before any request is made. R11: the pin is required; an unpinned
+    # config is refused rather than trusting the environment.
+    pin = base_pin_error(cfg, os.environ)
+    if pin:
+        log(pin)
+        return 2
+    opts = build_opts(cfg, os.environ, time.time(), config_path=argv_config[0])
+    # R2a finding 8: both transports take their waits from the run budget.
     pc = PaperclipClient(os.environ["PAPERCLIP_API_URL"],
                          os.environ["PAPERCLIP_API_KEY"],
-                         os.environ["PAPERCLIP_RUN_ID"])
+                         os.environ["PAPERCLIP_RUN_ID"],
+                         budget_left=lambda: budget_left(opts))
     t3_factory = lambda thread_id: T3Thread(  # noqa: E731
         cfg["t3_bin"], cfg["t3_home"], thread_id, cfg.get("t3_cwd") or "/tmp",
-        t3_port=cfg.get("t3_port"))
+        t3_port=cfg.get("t3_port"), budget_left=lambda: budget_left(opts))
     try:
         return run_carrier(pc, t3_factory, opts)
     except NeedsHuman as nh:

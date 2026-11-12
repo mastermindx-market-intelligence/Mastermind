@@ -23,6 +23,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -39,14 +40,64 @@ def expand(path):
     return os.path.abspath(os.path.expanduser(path))
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A 3xx answer would carry this client's local_trusted header to
+    whatever origin the Location names. Redirects are refused, not
+    followed."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def base_refusal(base):
+    """The loopback law as a reason string (None = sound). R2a finding 29:
+    the base is pinned by the urlsplit law, not string splits — the
+    local_trusted header rides every call these clients make, so the base
+    must be a plain loopback http origin with a port: scheme http, host
+    127.0.0.1/localhost/::1, no username or password, a real port, and no
+    path, query or fragment. Same law as the carrier's loopback_base_error
+    for carrier.json's paperclip_base (R2a finding 13)."""
+    try:
+        parts = urllib.parse.urlsplit(str(base or ""))
+    except ValueError:
+        return f"{base!r} does not parse as a URL"
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    host = (parts.hostname or "").lower()
+    if (parts.scheme != "http" or host not in ("127.0.0.1", "localhost",
+                                               "::1")
+            or parts.username or parts.password or port is None
+            or parts.path not in ("", "/") or parts.query or parts.fragment):
+        return (f"{base!r} is not plain loopback http with a port, like "
+                "http://127.0.0.1:3100")
+    return None
+
+
+def require_paperclip_base(spec):
+    """Round-3 R11: the pinned loopback base is required kit, not an option.
+    A spec without one would write a carrier config the carrier itself
+    refuses to run (an unpinned carrier used to trust the adapter's
+    PAPERCLIP_API_URL); setup refuses first, before any file is written."""
+    base = str(spec.get("paperclip_base") or "").strip()
+    if not base:
+        die("spec has no paperclip_base: the pinned loopback base is required")
+    bad = base_refusal(base)
+    if bad:
+        die(f"spec paperclip_base refused: {bad}")
+    return base
+
+
 class Http:
     """Dev-instance Paperclip client (board actor via local_trusted header)."""
 
     def __init__(self, base):
-        host = base.split("//")[-1].split(":")[0]
-        if host not in ("127.0.0.1", "localhost", "::1"):
-            die(f"refusing non-loopback Paperclip base {base}")
+        bad = base_refusal(base)
+        if bad:
+            die(f"refusing Paperclip base: {bad}")
         self.base = base.rstrip("/")
+        self._opener = urllib.request.build_opener(_NoRedirect)
 
     def call(self, method, path, body=None):
         data = json.dumps(body).encode() if body is not None else None
@@ -56,12 +107,14 @@ class Http:
         req = urllib.request.Request(f"{self.base}{path}", data=data,
                                      method=method, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with self._opener.open(req, timeout=30) as resp:
                 raw = resp.read()
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace")[:400]
-            die(f"{method} {path} -> HTTP {exc.code}: {detail}")
+            # The status is the fact. An error body can quote secrets,
+            # tokens or a person's text, and the failure line goes to a
+            # terminal someone reads — bodies never make it there.
+            die(f"{method} {path} -> HTTP {exc.code}")
 
     def get(self, path):
         return self.call("GET", path)
@@ -105,6 +158,85 @@ def config_revisions(http, agent_id):
     return rows
 
 
+def rows_of(payload):
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for key in ("items", "issues", "rows", "runs"):
+            if isinstance(payload.get(key), list):
+                return payload[key]
+    # R2a finding 30: an unrecognised shape is NOT an empty result. A dict
+    # with no known list key ({"data": ...}, {"error": ...}, {}) — or a
+    # non-object — is a page this tool cannot read; treating it as "no open
+    # issues, no live runs" lets apply and rotate pass their fences on a
+    # misread. Die; every caller changes nothing. Shape only: nothing of
+    # the payload is printed.
+    die("unrecognised response shape from the board (expected a list or an "
+        f"object with one of items/issues/rows/runs, got "
+        f"{type(payload).__name__})")
+
+
+def blockers(spec, agent, open_issues, live_runs):
+    """Reasons this agent must not be moved or rotated right now. Empty
+    list = safe (panel-2 M14: rotate fences with the SAME checks apply and
+    rollback fence with — open issues, and LIVE RUNS: a carrier run in
+    flight used to get its primaryThreadId swapped mid-execution)."""
+    out = []
+    if agent.get("name") != spec.get("agent_name"):
+        out.append(f"agent name is {agent.get('name')!r}, spec says "
+                   f"{spec.get('agent_name')!r}")
+    if agent.get("companyId") != spec["company_id"]:
+        out.append("agent belongs to a different company")
+    if agent.get("status") != "idle":
+        out.append(f"agent status is {agent.get('status')!r}, not idle")
+    heartbeat = (agent.get("runtimeConfig") or {}).get("heartbeat") or {}
+    if heartbeat.get("enabled"):
+        out.append("the agent's timer heartbeat is still on (fence it first)")
+    if open_issues:
+        out.append(f"{len(open_issues)} open issue(s) assigned: "
+                   + ", ".join(str(i.get("identifier")) for i in open_issues[:5]))
+    mine = [r for r in live_runs if r.get("agentId") == agent.get("id")]
+    if mine:
+        out.append(f"{len(mine)} live run(s) for this agent")
+    return out
+
+
+OPEN_WORK_STATES = ("todo", "in_progress", "in_review", "blocked")
+MAX_LIST_PAGES = 10
+
+
+def open_assigned_issues(http, company_id, agent_id,
+                         states=OPEN_WORK_STATES, limit=50):
+    """The agent's open issues across every open state, walking pages.
+
+    The board caps a list page at `limit` rows; a single fixed read of an
+    agent with more open work than one page silently drops the rest (the
+    cutover's read_state and the rotate guard both decide from this list).
+    Pages walk by offset until a short page comes back, bounded so a server
+    that always answers a full page cannot loop the reader."""
+    out = []
+    for state in states:
+        for page_no in range(1, MAX_LIST_PAGES + 1):
+            offset = (page_no - 1) * limit
+            rows = http.get(
+                f"/api/companies/{company_id}/issues"
+                f"?assigneeAgentId={agent_id}&status={state}"
+                f"&limit={limit}&offset={offset}")
+            if isinstance(rows, dict):
+                for key in ("items", "issues", "rows"):
+                    if isinstance(rows.get(key), list):
+                        rows = rows[key]
+                        break
+            if not isinstance(rows, list):
+                # An unrecognised shape is NOT an empty result.
+                die(f"issue list for status {state} came back in an "
+                    "unrecognised shape")
+            out += rows
+            if len(rows) < limit or page_no == MAX_LIST_PAGES:
+                break
+    return out
+
+
 def t3_cli(spec, args, stdin_text=None):
     t3 = spec["t3"]
     env = dict(os.environ)
@@ -136,8 +268,15 @@ def ensure_t3_instance(spec):
         try:
             os.kill(int(pid), 0)
             die("dev T3 server is running; stop it before editing settings.json")
-        except (ValueError, ProcessLookupError, PermissionError):
-            pass
+        except ValueError:
+            pass  # the file does not hold a pid number
+        except ProcessLookupError:
+            pass  # a stale pid file: no such process
+        except PermissionError:
+            # EPERM means the process EXISTS under another user — treat it
+            # as running, never as "safe to edit under".
+            die(f"a process holds pid {pid} that this user cannot signal; "
+                "treat the dev T3 server as running and stop it first")
     settings_path = os.path.join(home, "userdata", "settings.json")
     settings = json.load(open(settings_path))
     source = settings["providerInstances"].get("capacity_fabric") or \
@@ -164,9 +303,26 @@ def ensure_t3_instance(spec):
         },
     }
     settings.setdefault("providerInstances", {})[t3["instance_id"]] = instance
-    with open(settings_path, "w") as fh:
-        json.dump(settings, fh, indent=2)
-    os.chmod(settings_path, 0o600)
+    # R2a finding 11: the dev server watches settings.json and reloads about
+    # 100ms after a change, so the file is swapped in by ONE rename from a
+    # staged file that is 0600 from creation — never truncated in place. A
+    # failed write leaves the original bytes untouched and removes the
+    # staged file; a reader sees the old settings or the new ones, never
+    # half of either.
+    staged = f"{settings_path}.new-{os.getpid()}"
+    fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(settings, fh, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(staged, settings_path)
+    except BaseException:
+        try:
+            os.unlink(staged)
+        except OSError:
+            pass
+        raise
     log(f"provider instance {t3['instance_id']} in {settings_path} "
         f"(home {t3['home_path']})")
 
@@ -214,6 +370,15 @@ def write_carrier_config(spec, agent_dir):
     # ask block; a name not in this map cannot become a child issue.
     if spec.get("teammates"):
         cfg["teammates"] = dict(spec["teammates"])
+    # Optional (R2a finding 4): the carrier defaults to 3 when absent.
+    if spec.get("max_asks_per_issue") is not None:
+        cfg["max_asks_per_issue"] = int(spec["max_asks_per_issue"])
+    # Optional (R2a finding 8 addition): the carrier defaults to 120s absent.
+    if spec.get("delivery_reserve_sec") is not None:
+        cfg["delivery_reserve_sec"] = int(spec["delivery_reserve_sec"])
+    # R11: the pinned loopback base is required kit, written unconditionally
+    # — the carrier refuses to run without it.
+    cfg["paperclip_base"] = require_paperclip_base(spec)
     path = os.path.join(agent_dir, "carrier.json")
     with open(path, "w") as fh:
         json.dump(cfg, fh, indent=2)
@@ -222,6 +387,7 @@ def write_carrier_config(spec, agent_dir):
 
 def cmd_create(spec_path):
     spec = json.load(open(spec_path))
+    require_paperclip_base(spec)     # R11: refuse before any file is written
     write_charter_and_home(spec)
     ensure_t3_instance(spec)
     log("files and provider instance ready; start the dev T3 server, then run "
@@ -233,7 +399,7 @@ def cmd_threads(spec_path):
     """Second step: with the dev T3 server running, mint the primary thread,
     create the Paperclip agent, write the binding (revision discipline)."""
     spec = json.load(open(spec_path))
-    http = Http(spec["paperclip_base"])
+    http = Http(require_paperclip_base(spec))
     t3 = spec["t3"]
     launched = start_primary_thread(spec)
     thread_id = launched["threadId"]
@@ -290,10 +456,21 @@ def cmd_threads(spec_path):
 def cmd_rotate(spec_path, title, message):
     """DONE_WHEN 3: mint a new primary thread, bump the binding revision."""
     spec = json.load(open(spec_path))
-    http = Http(spec["paperclip_base"])
+    http = Http(require_paperclip_base(spec))
     agent_dir = expand(spec["agent_dir"])
     result = json.load(open(os.path.join(agent_dir, "setup_result.json")))
     agent_id = result["agentId"]
+    # The mint is the irreversible step (a live thread, a revision bump).
+    # Panel-2 M14: it fences with the SAME blockers() the cutover apply and
+    # rollback use — open issues AND live runs. Fencing open issues only let
+    # a carrier run in flight get its primaryThreadId swapped
+    # mid-execution.
+    agent = http.get(f"/api/agents/{agent_id}")
+    open_issues = open_assigned_issues(http, spec["company_id"], agent_id)
+    live = rows_of(http.get(f"/api/companies/{spec['company_id']}/live-runs"))
+    found = blockers(spec, agent, open_issues, live)
+    if found:
+        die("not rotating: " + "; ".join(found))
     t3 = dict(spec["t3"])
     rotate_spec = dict(spec)
     rotate_spec["primary_thread"] = {"title": title,
