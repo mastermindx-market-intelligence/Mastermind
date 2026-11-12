@@ -1912,8 +1912,28 @@ def sector_rotation(limit: int = 6, *, projection: str = "legacy",
         return _sector_dossier_projection(data, health)
     cap = min(_clamp_limit(limit, 6), 6)
     data, health = _read_sector_central()
+    invalid_legacy_input = data is not None and not isinstance(data, dict)
     if not isinstance(data, dict):
         data = {}
+
+    # Native admission qualifies preview core; these original legacy fields are
+    # consumed separately. Validate every row before ranking or applying the cap.
+    for collection in ("sectors", "baskets"):
+        rows = data.get(collection)
+        if rows is None:
+            continue
+        if not isinstance(rows, list) or any(
+            not isinstance(row, dict)
+            or any(row.get(field) is not None and not isinstance(row[field], dict)
+                   for field in ("rotation", "conviction"))
+            for row in rows
+        ):
+            invalid_legacy_input = True
+            break
+    if invalid_legacy_input:
+        data = {}
+        health = {**_psl_health(health), "available": False, "status": "malformed",
+                  "source_reason": "invalid_legacy_rotation_input"}
 
     def ranked(rows: Any) -> list[dict]:
         usable = [row for row in (rows or []) if isinstance(row, dict)]

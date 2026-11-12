@@ -114,6 +114,125 @@ def test_sector_rotation_is_ranked_projected_and_bounded(monkeypatch):
     assert result["health"]["status"] == "fresh"
 
 
+@pytest.mark.parametrize("malformed", (1, [], "private-contract-value" * 1000),
+                         ids=("integer", "array", "oversize-string"))
+def test_sector_rotation_refuses_malformed_central(monkeypatch, malformed):
+    _assert_legacy_rotation_refusal(monkeypatch, malformed)
+
+
+@pytest.mark.parametrize("collection", ("sectors", "baskets"))
+@pytest.mark.parametrize("malformed", (1, False, "private-contract-value" * 1000, {}),
+                         ids=("integer", "boolean", "oversize-string", "object"))
+def test_sector_rotation_refuses_malformed_collections(monkeypatch, collection, malformed):
+    central = {"as_of": _day(), "market": {"risk_on": True}, collection: malformed}
+    _assert_legacy_rotation_refusal(monkeypatch, central)
+
+
+@pytest.mark.parametrize("collection", ("sectors", "baskets"))
+@pytest.mark.parametrize("malformed", (1, None, "private-contract-value" * 1000),
+                         ids=("integer", "null", "oversize-string"))
+def test_sector_rotation_refuses_malformed_rows(monkeypatch, collection, malformed):
+    central = {"as_of": _day(), "market": {"risk_on": True}, collection: [malformed]}
+    _assert_legacy_rotation_refusal(monkeypatch, central)
+
+
+@pytest.mark.parametrize("collection", ("sectors", "baskets"))
+@pytest.mark.parametrize("field", ("rotation", "conviction"))
+@pytest.mark.parametrize("malformed", (1, True, [], "private-contract-value" * 1000),
+                         ids=("integer", "boolean", "array", "oversize-string"))
+def test_sector_rotation_refuses_malformed_rank_objects(
+    monkeypatch, collection, field, malformed
+):
+    central = {collection: [{"ticker": "XLK", field: malformed}]}
+    _assert_legacy_rotation_refusal(monkeypatch, central)
+
+
+@pytest.mark.parametrize("collection", ("sectors", "baskets"))
+@pytest.mark.parametrize("malformed", (None, {"rotation": 1}, {"conviction": 1}))
+def test_sector_rotation_validates_rows_beyond_requested_limit(
+    monkeypatch, collection, malformed
+):
+    leader = {"ticker": "XLK", "rotation": {"rank": 1}, "conviction": {"score": 80}}
+    central = {"sectors": [leader], "baskets": [leader]}
+    central[collection] = [leader, malformed]
+    _assert_legacy_rotation_refusal(monkeypatch, central)
+
+
+def _assert_legacy_rotation_refusal(monkeypatch, central):
+    receipt = {
+        "schema": "sector_native_view.receipt.v1", "source": "macro.sector",
+        "generation_id": "captured-generation", "source_session": "2026-11-06",
+        "published_at": "2026-11-06T20:00:00Z", "qualification": "accepted",
+        "input_version": "captured-input", "baseline_session": None,
+        "content_sha256": "a" * 64,
+    }
+    captures = []
+
+    def captured():
+        captures.append(True)
+        return central, {
+            "available": True, "status": "fresh", "as_of": "2026-11-06", "stale": False,
+            "source_mode": "selected_generation", "native_receipt": receipt,
+            "private_extra": "private-contract-value" * 1000,
+        }
+
+    monkeypatch.setattr(pi, "_read_sector_central", captured)
+    result = pi.sector_rotation(limit=1)
+
+    assert captures == [True]
+    assert result["schema"] == "mastermind.portfolio_intelligence.sector_rotation/v1"
+    assert result["context_only"] is True
+    assert result["as_of"] is None
+    assert result["sectors"] == result["baskets"] == []
+    assert all(value is None for value in result["market"].values())
+    assert result["health"]["available"] is False
+    assert result["health"]["status"] == "malformed"
+    assert result["health"]["source_reason"] == "invalid_legacy_rotation_input"
+    assert result["health"]["execution_authority"] is False
+    assert result["health"]["source_mode"] == "selected_generation"
+    assert result["health"]["native_receipt"] == receipt
+    encoded = json.dumps(result, ensure_ascii=False)
+    assert "private-contract-value" not in encoded
+    assert len(encoded.encode("utf-8")) < 7200
+
+
+def test_sector_rotation_preserves_optional_fields_and_tie_breaks(monkeypatch):
+    central = {
+        "sectors": [
+            {"ticker": "XLF", "rotation": {"rank": 1}, "conviction": {"score": 70}},
+            {"ticker": "XLK", "rotation": {"rank": 1}, "conviction": {"score": 80}},
+            {"ticker": "XLE", "rotation": {"rank": 1}, "conviction": {"score": 80}},
+            {"ticker": "XLB", "rotation": None, "conviction": None},
+            {"ticker": "XLC"},
+        ],
+        "baskets": None,
+    }
+    health = {"available": True, "status": "fresh"}
+    monkeypatch.setattr(pi, "_read_sector_central", lambda: (central, health))
+
+    result = pi.sector_rotation()
+
+    assert [row["ticker"] for row in result["sectors"]] == ["XLE", "XLK", "XLF", "XLB", "XLC"]
+    assert result["baskets"] == []
+    assert result["health"] == health
+    assert result["sectors"][-1]["rotation"]["rank"] is None
+    assert result["sectors"][-1]["conviction"]["score"] is None
+
+
+def test_sector_rotation_preserves_unavailable_source_reason(monkeypatch):
+    health = {
+        "available": False, "status": "missing", "source_mode": "selected_generation",
+        "source_reason": "native_generation_not_configured", "execution_authority": False,
+    }
+    monkeypatch.setattr(pi, "_read_sector_central", lambda: (None, health))
+
+    result = pi.sector_rotation()
+
+    assert result["health"] == health
+    assert result["as_of"] is None
+    assert result["sectors"] == result["baskets"] == []
+
+
 def test_technical_packet_combines_typed_sources_and_denies_path_traversal(
     monkeypatch, macro_root
 ):
