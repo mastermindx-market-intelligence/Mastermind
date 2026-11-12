@@ -38,6 +38,7 @@ import stat
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -1427,6 +1428,113 @@ class TestEventSeqAcrossProcesses:
         core = bridge_over(ask_client)
         assert core.fetch_result(principal=PRINCIPAL,
                                  ask_id=ask_id)["status"] == "CONSUMED"
+
+
+class TestOneDeliveryMarkPerAnswer:
+    """GBL-5 micro 3, RULING 19(a): the read/replay and the CONSUMED append
+    are ONE decision under the same host lock the appends already take.
+
+    ``fetch_result`` read the record, replayed it, and only then appended
+    CONSUMED.  The flock serialised the two appends (seq N and N+1) but not
+    the read-then-decide, so two callers on one ANSWERED ask could each
+    observe ANSWERED and each be handed the answer as ANSWER_UNCONSUMED.
+    "One connection at a time" is a property of today's server, not of the
+    layer, so the decision itself must be serialised host-wide.  The
+    read is re-taken INSIDE the lock, so the second caller sees the first
+    caller's mark.
+    """
+
+    class _Shared:
+        def __init__(self):
+            self.lock = threading.Lock()
+            self.readers = 0
+            self.second_read = threading.Event()
+
+    class _RacyStore:
+        """Delegates to a real client but makes the read→mark window
+        observable: the CONSUMED append waits (bounded) until a SECOND
+        reader has read the record, which is exactly the interleaving that
+        hands the same answer out twice.  ``result_delivery_lock`` is
+        forwarded only when the client offers one, so the pre-fix run
+        exercises the plain unlocked read path."""
+
+        def __init__(self, inner, shared):
+            self._inner = inner
+            self._shared = shared
+            self._lock_held = False
+
+        def read_ask(self, ask_id):
+            record = self._inner.read_ask(ask_id)
+            if record is not None:
+                with self._shared.lock:
+                    self._shared.readers += 1
+                    if self._shared.readers >= 2:
+                        self._shared.second_read.set()
+            return record
+
+        def append_ask_event(self, ask_id, event):
+            if (event.get("type") == "state"
+                    and event.get("state") == "CONSUMED"
+                    and not self._lock_held):
+                self._shared.second_read.wait(timeout=5.0)
+            return self._inner.append_ask_event(ask_id, event)
+
+        def __getattr__(self, name):
+            if name == "result_delivery_lock":
+                inner = getattr(self._inner, "result_delivery_lock")
+
+                @contextmanager
+                def _held():
+                    self._lock_held = True
+                    try:
+                        with inner():
+                            yield
+                    finally:
+                        self._lock_held = False
+
+                return _held
+            return getattr(self._inner, name)
+
+    def test_two_callers_share_one_delivery(self, fake):
+        seed = client(fake)
+        row = envelope(ttl_seconds=86400 * 365 * 10)
+        ask_id = row["ask_id"]
+        assert seed.create_ask(row) is None
+        seed.append_ask_event(ask_id, {
+            "type": "answer", "answer_id": "gbm-" + "a" * 32,
+            "idempotency_key": "gb-ans-1",
+            "text": "A harmless fixture answer."})
+        seed.append_ask_event(ask_id, {"type": "state", "state": "ANSWERED"})
+
+        shared = self._Shared()
+        stores = [self._RacyStore(client(fake), shared) for _ in range(2)]
+        cores = [bridge_over(store) for store in stores]
+        barrier = threading.Barrier(2)
+        results: dict[str, dict] = {}
+
+        def fetch(name, core):
+            barrier.wait(timeout=10)
+            results[name] = core.fetch_result(principal=PRINCIPAL,
+                                              ask_id=ask_id)
+
+        workers = [threading.Thread(target=fetch, args=(name, core))
+                   for name, core in zip(("a", "b"), cores)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=60)
+        assert not any(worker.is_alive() for worker in workers), results
+        assert sorted(result["status"] for result in results.values()) == [
+            "ANSWER_UNCONSUMED", "CONSUMED"]
+        assert sum(result["status"] == "ANSWER_UNCONSUMED"
+                   for result in results.values()) == 1
+
+        # The one mark is the store's, and it landed exactly once.
+        marks = [event for event in seed.read_ask(ask_id)["events"]
+                 if event.get("type") == "state"
+                 and event.get("state") == "CONSUMED"]
+        assert len(marks) == 1
+        assert marks[0]["trusted"] is True
 
 
 class TestEventSeqDuplicateLaw:

@@ -26,6 +26,7 @@ thread send is ``integrations/gbl/message_send.py``.
 """
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import dataclasses
 import os
@@ -117,6 +118,22 @@ class GblAskStore(Protocol):
     def read_ask(self, ask_id: str) -> Mapping[str, Any] | None: ...
     def append_ask_event(self, ask_id: str, event: Mapping[str, Any]) -> None: ...
     def count_asks(self, principal: str, since_iso: str) -> int: ...
+
+
+@runtime_checkable
+class GblResultDeliveryLockStore(Protocol):
+    """OPTIONAL capability of a :class:`GblAskStore`: ONE host-wide lock
+    under which a result-delivery decision (read → replay → mark) is
+    serialised, the same lock every append takes.
+
+    GBL-5 micro 3, RULING 19(a): a delivery mark is permanent, so two
+    callers must never both observe ANSWERED.  The Paperclip client
+    implements this with the flock in ``append.lock`` it already holds
+    across appends, re-entrant with :meth:`append_ask_event`.  A store
+    that does not offer it (test doubles) keeps the plain read; the real
+    store always does."""
+
+    def result_delivery_lock(self): ...
 
 
 # ── Admission (RULING §3/§5: the table is the boundary; v1 ships EMPTY) ─────
@@ -377,25 +394,46 @@ class GblBridge:
         return {"status": "ANSWERED", "answer_id": answer_id}
 
     def fetch_result(self, *, principal: str, ask_id: str) -> dict[str, Any]:
-        record = self._require_ask(ask_id)
-        self._require_party(record, principal)
-        now = self._now()
-        if is_expired(record, now):
-            raise GblBridgeError("EXPIRED", ask_id)   # never silence
-        state = self._replay_state(record)
-        answer = self._last_answer(record)
-        if state == "CONSUMED":
-            return {"status": "CONSUMED", "ask_id": ask_id,
-                    "answer": answer.get("text"),
-                    "answer_id": answer.get("answer_id")}
-        if state == "ANSWERED":
-            # The honest surfacing: answered but never fetched.
-            self._store.append_ask_event(ask_id, {"type": "state",
-                                                  "state": "CONSUMED"})
-            return {"status": "ANSWER_UNCONSUMED", "ask_id": ask_id,
-                    "answer": answer.get("text"),
-                    "answer_id": answer.get("answer_id")}
-        return {"status": "NOT_YET", "ask_id": ask_id}
+        """One delivery per answer, host-wide.
+
+        GBL-5 micro 3, RULING 19(a): the read, the replay and the CONSUMED
+        append are ONE decision under the store's host lock (when it
+        offers one — the Paperclip client does).  The record is re-read
+        INSIDE the lock, so a second caller sees the first caller's mark
+        and is told CONSUMED instead of being handed the answer again.
+        Serialising only the appends left the read-then-decide outside
+        them, and "one connection at a time" is a property of today's
+        server, not of this layer."""
+        with self._delivery_lock():
+            record = self._require_ask(ask_id)     # re-read under the lock
+            self._require_party(record, principal)
+            now = self._now()
+            if is_expired(record, now):
+                raise GblBridgeError("EXPIRED", ask_id)   # never silence
+            state = self._replay_state(record)
+            answer = self._last_answer(record)
+            if state == "CONSUMED":
+                return {"status": "CONSUMED", "ask_id": ask_id,
+                        "answer": answer.get("text"),
+                        "answer_id": answer.get("answer_id")}
+            if state == "ANSWERED":
+                # The honest surfacing: answered but never fetched.
+                self._store.append_ask_event(ask_id, {"type": "state",
+                                                      "state": "CONSUMED"})
+                return {"status": "ANSWER_UNCONSUMED", "ask_id": ask_id,
+                        "answer": answer.get("text"),
+                        "answer_id": answer.get("answer_id")}
+            return {"status": "NOT_YET", "ask_id": ask_id}
+
+    def _delivery_lock(self):
+        """The store's host-wide result-delivery lock, when it offers one
+        (:class:`GblResultDeliveryLockStore`); a store without it keeps
+        the plain read — the bridge never invents a lock, and the real
+        Paperclip store always offers it."""
+        lock = getattr(self._store, "result_delivery_lock", None)
+        if lock is None:
+            return contextlib.nullcontext()
+        return lock()
 
     def ask_status(self, *, principal: str, ask_id: str) -> dict[str, Any]:
         record = self._require_ask(ask_id)

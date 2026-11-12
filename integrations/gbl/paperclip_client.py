@@ -472,9 +472,16 @@ class PaperclipAskClient:
         # lock, and every mint is floored at the highest seq THIS client has
         # already issued for the record — a server listing that lags a
         # just-landed append (proof 1) can never make the store re-issue a
-        # number the record has already taken.
-        self._append_lock = threading.Lock()
+        # number the record has already taken.  GBL-5 micro 3: RE-ENTRANT,
+        # because a result-delivery decision holds it and then appends its
+        # CONSUMED mark through append_ask_event on the same thread.
+        self._append_lock = threading.RLock()
         self._issued_seq: dict[str, int] = {}    # ask_id -> highest minted
+        # GBL-5 micro 3: per-thread holder of the host flock, so a delivery
+        # decision that appends can re-enter _host_append_lock instead of
+        # deadlocking on its own lock (flock is per open file description,
+        # so a second open + flock in the same process would block).
+        self._host_lock_state = threading.local()
 
     # -- construction from a roster spec --------------------------------------
 
@@ -582,14 +589,30 @@ class PaperclipAskClient:
     def _host_append_lock(self):
         """An exclusive flock on ``append.lock`` in the GBL state dir (the
         HMAC key's directory), held across the WHOLE allocation+append step
-        of :meth:`append_ask_event`.  One lock file per host serialises
-        every writer process — the bridge, the CLI (over the bridge
-        socket), control intake, nudge/reconcile and any ``from_spec``
-        client — because every append funnels through this method.  The
-        kernel releases the flock when the holder dies, so a crashed
-        writer never wedges the lane.  The lock file doubles as the mint
-        ledger (append-only JSON lines, parsed by :meth:`_ledger_floor`);
-        a torn tail line from a crash is ignored on read."""
+        of :meth:`append_ask_event` — and, since GBL-5 micro 3, across the
+        read→replay→mark decision of :meth:`result_delivery_lock`.  One
+        lock file per host serialises every writer process — the bridge,
+        the CLI (over the bridge socket), control intake, nudge/reconcile
+        and any ``from_spec`` client — because every append funnels
+        through this method.  The kernel releases the flock when the
+        holder dies, so a crashed writer never wedges the lane.  The lock
+        file doubles as the mint ledger (append-only JSON lines, parsed by
+        :meth:`_ledger_floor`); a torn tail line from a crash is ignored
+        on read.
+
+        RE-ENTRANT per thread: a holder that appends (the delivery
+        decision does exactly that) re-enters and receives the SAME open
+        handle instead of a second flock, which would block on the first
+        (flock is per open file description, even within one process)."""
+        state = self._host_lock_state
+        held = getattr(state, "handle", None)
+        if held is not None:
+            state.depth += 1
+            try:
+                yield held
+            finally:
+                state.depth -= 1
+            return
         if self._hmac_key_path is None:
             # Unreachable behind append_ask_event's key-first law; kept as
             # an independent fail-closed door with the canonical code.
@@ -605,12 +628,33 @@ class PaperclipAskClient:
                 "APPEND_LOCK_UNWRITABLE", f"{path}: {exc}") from None
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            state.handle, state.depth = handle, 1
             try:
                 yield handle
             finally:
+                state.handle = None
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         finally:
             handle.close()
+
+    @contextlib.contextmanager
+    def result_delivery_lock(self):
+        """GBL-5 micro 3, RULING 19(a)/19(b): the SAME host lock that
+        serialises appends, held across a result-delivery decision (read →
+        replay → append CONSUMED).
+
+        The mark is permanent, so two callers must never both see
+        ANSWERED: ``fetch_result`` re-reads its record INSIDE this lock
+        and the second caller therefore sees the first caller's mark.
+        Serialising only the appends was not enough — the read-then-decide
+        was outside them, and "one connection at a time" is a property of
+        today's server, not of this layer.  Lock order is always the
+        threading lock first, then the flock, and
+        :meth:`append_ask_event` re-enters both: no deadlock."""
+        with self._append_lock:
+            self._hmac_key()          # key law first: no lock file before it
+            with self._host_append_lock():
+                yield
 
     @staticmethod
     def _ledger_floor(handle: Any, ask_id: str) -> int:
