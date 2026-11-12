@@ -30,6 +30,7 @@ _DAILY_MAX_AGE = 4
 _WEEKLY_MAX_AGE = 9
 _INTRADAY_MAX_AGE = 1
 _MAX_LIMIT = 20
+_PACKET_MAX_BYTES = 7_900
 
 _CHINA_COMPANY_EVIDENCE_ARTIFACT = "site/china_intel/command.json"
 _CHINA_COMMAND_SCHEMA = "china_intel.command.v1"
@@ -181,6 +182,12 @@ def _read_vendor(
 
 def _source_ref(health: dict) -> dict:
     """Token-light provenance/freshness projection for nested packets."""
+    if health.get("source_mode") == "selected_generation":
+        return {
+            **_psl_health(health), "artifact": _PSL_NATIVE_MEMBER,
+            "available": health.get("available") is True, "age_days": None,
+            "authority": "context", "execution_authority": False,
+        }
     return {key: health.get(key) for key in (
         "artifact", "available", "status", "as_of", "age_days", "authority",
         "execution_authority",
@@ -246,19 +253,49 @@ def context_catalog() -> dict:
     The result is intentionally metadata-only.  Callers use the other typed
     functions for content and cannot turn catalog paths into arbitrary reads.
     """
+    sector_health = sector_rotation()["health"]
+    packet = _context_catalog_with_sector_health(sector_health)
+    if sector_health.get("source_mode") != "selected_generation":
+        return packet
+    packet["packet_truncated"] = False
+    if _packet_size(packet) <= _PACKET_MAX_BYTES:
+        return packet
+    refused = _native_packet_refusal(
+        packet["schema"], sector_health, "native_catalog_transport_budget_exceeded")
+    # Fixed catalog identities remain discoverable; none of this oversized
+    # packet's observed health is presented as admitted source evidence.
+    refused.update(
+        generated_at=packet["generated_at"], policy=packet["policy"],
+        surfaces=[{
+            "id": spec["id"], "title": spec["title"],
+            "url": f"{_URL_BASE}/{spec['page']}", "status": "unknown",
+            "available": False, "artifacts": [],
+        } for spec in _SURFACES],
+    )
+    return refused
+
+
+def _context_catalog_with_sector_health(sector_health: dict) -> dict:
+    """Build catalog observations without recapturing the selected Sector source."""
     surfaces: list[dict] = []
     for spec in _SURFACES:
         artifacts = []
         for rel, max_age, cadence, authority in spec["artifacts"]:
-            _, health = _read_vendor(
-                rel,
-                max_age_days=max_age,
-                cadence=cadence,
-                authority=authority,
-            )
+            if spec["id"] == "sector_central":
+                health = sector_health
+            else:
+                _, health = _read_vendor(
+                    rel,
+                    max_age_days=max_age,
+                    cadence=cadence,
+                    authority=authority,
+                )
             artifacts.append(_source_ref(health))
         available = [a for a in artifacts if a["available"]]
-        if any(a["status"] == "fresh" for a in available):
+        if spec["id"] == "sector_central":
+            # A degraded native receipt is unknown, not a temporal stale claim.
+            status = artifacts[0]["status"]
+        elif any(a["status"] == "fresh" for a in available):
             status = "fresh"
         elif any(a["status"] == "undated" for a in available):
             status = "undated"
@@ -344,7 +381,7 @@ def _packet_size(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, default=str).encode("utf-8"))
 
 
-def _fit_packet(packet: dict, *, budget: int = 7_900) -> dict:
+def _fit_packet(packet: dict, *, budget: int = _PACKET_MAX_BYTES) -> dict:
     """Hard transport bound while preserving a valid structural packet."""
     complete = {**packet, "packet_truncated": False}
     if _packet_size(complete) <= budget:
@@ -1065,6 +1102,11 @@ _PSL_NATIVE_REASONS = frozenset((
     "native_generation_unavailable", "native_generation_contract_invalid",
     "native_generation_too_large",
 ))
+_PSL_CONSUMER_REASONS = frozenset((
+    "invalid_legacy_rotation_input", "native_legacy_transport_budget_exceeded",
+    "native_surface_content_budget_exceeded", "native_surface_transport_budget_exceeded",
+    "native_catalog_transport_budget_exceeded", "native_market_transport_budget_exceeded",
+))
 _PSL_RECEIPT_LIMITS = {
     "schema": 32, "source": 32, "generation_id": 128, "source_session": 10,
     "published_at": 32, "qualification": 8, "input_version": 128,
@@ -1169,7 +1211,7 @@ def _psl_health(health: Any) -> dict:
     if health.get("source_mode") == "selected_generation":
         result.update(source_mode="selected_generation", source_member=_PSL_NATIVE_MEMBER)
         reason = health.get("source_reason")
-        if isinstance(reason, str) and reason in _PSL_NATIVE_REASONS:
+        if isinstance(reason, str) and reason in (_PSL_NATIVE_REASONS | _PSL_CONSUMER_REASONS):
             result["source_reason"] = reason
         receipt = health.get("native_receipt")
         # Bound an additive disclosure, not a second source-admission scheme.
@@ -1184,6 +1226,21 @@ def _psl_health(health: Any) -> dict:
                         for key, value in receipt.items())):
             result["native_receipt"] = dict(receipt)
     return result
+
+
+def _native_consumer_refusal(health: dict, reason: str) -> dict:
+    """Preserve the captured receipt while refusing this consumer representation."""
+    return {**_psl_health(health), "available": False, "status": "unknown",
+            "source_reason": reason}
+
+
+def _native_packet_refusal(schema: str, health: dict, reason: str) -> dict:
+    """Whole-packet refusal before generic compaction can remove native evidence."""
+    return {
+        "schema": schema, "status": "unavailable", "consumer_reason": reason,
+        "context_only": True, "execution_authority": False, "packet_truncated": False,
+        "source": _source_ref(_native_consumer_refusal(health, reason)),
+    }
 
 
 def _psl_unavailable(reason: str, health: Any = None) -> dict:
@@ -2470,14 +2527,14 @@ def market_packet(book: str = "autonomous") -> dict:
     regime = regime if isinstance(regime, dict) else {}
     sectors = sector_rotation(limit=2)
     prophet = prophet_board(limit=4, held=held)
-    catalog = context_catalog()
+    catalog = _context_catalog_with_sector_health(sectors["health"])
     status_rows = [
         {"id": row["id"], "status": row["status"], "available": row["available"]}
         for row in catalog["surfaces"]
     ]
     status_counts = {
         key: sum(1 for row in status_rows if row["status"] == key)
-        for key in ("fresh", "stale", "undated", "missing", "malformed")
+        for key in ("fresh", "stale", "undated", "missing", "malformed", "unknown")
     }
 
     def compact_rotation(row: dict) -> dict:
@@ -2515,7 +2572,7 @@ def market_packet(book: str = "autonomous") -> dict:
         "discovery": [compact_plan(row) for row in prophet.get("discovery", [])],
         "management": [compact_plan(row) for row in prophet.get("management", [])],
     }
-    return {
+    packet = {
         "schema": "mastermind.portfolio_intelligence.market_packet/v1",
         "generated_at": datetime.now(UTC).isoformat(),
         "book": current,
@@ -2556,6 +2613,12 @@ def market_packet(book: str = "autonomous") -> dict:
             "signals_are_context_not_orders": True,
         },
     }
+    if sectors["health"].get("source_mode") == "selected_generation":
+        packet["packet_truncated"] = False
+        if _packet_size(packet) > _PACKET_MAX_BYTES:
+            return _native_packet_refusal(
+                packet["schema"], sectors["health"], "native_market_transport_budget_exceeded")
+    return packet
 
 
 _SURFACE_DECISION_KEYS: dict[str, tuple[str, ...]] = {
@@ -2604,8 +2667,6 @@ _SURFACE_DECISION_KEYS: dict[str, tuple[str, ...]] = {
 def _surface_content(surface_id: str, rel: str, payload: Any, limit: int) -> Any:
     if not isinstance(payload, dict):
         return _bounded_value(payload, list_limit=limit, dict_limit=12, max_depth=3)
-    if surface_id == "sector_central":
-        return sector_rotation(limit=limit)
     if surface_id == "prophet":
         return prophet_board(limit=limit)
     if surface_id == "macro_context":
@@ -2712,23 +2773,33 @@ def surface_packet(surface_id: str, limit: int = 6) -> dict:
     per_artifact_limit = max(1, min(cap, 6 // artifact_count))
     per_artifact_budget = max(1_500, 6_300 // artifact_count)
     artifacts = []
+    native_sector = False
     for rel, max_age, cadence, authority in spec["artifacts"]:
-        payload, health = _read_vendor(
-            rel,
-            max_age_days=max_age,
-            cadence=cadence,
-            authority=authority,
-        )
-        content = (
-            _surface_content(requested, rel, payload, per_artifact_limit)
-            if health["available"] else None
-        )
+        if requested == "sector_central":
+            captured_sector = sector_rotation(limit=per_artifact_limit)
+            health = captured_sector["health"]
+            native_sector = health.get("source_mode") == "selected_generation"
+            content = captured_sector if health.get("available") is True else None
+            if native_sector and content is not None and _packet_size(content) > per_artifact_budget:
+                health = _native_consumer_refusal(health, "native_surface_content_budget_exceeded")
+                content = None
+        else:
+            payload, health = _read_vendor(
+                rel,
+                max_age_days=max_age,
+                cadence=cadence,
+                authority=authority,
+            )
+            content = (
+                _surface_content(requested, rel, payload, per_artifact_limit)
+                if health["available"] else None
+            )
         artifacts.append({
             "source": _source_ref(health),
-            "content": _fit_content(content, budget=per_artifact_budget)
-            if content is not None else None,
+            "content": content if native_sector else (
+                _fit_content(content, budget=per_artifact_budget) if content is not None else None),
         })
-    return _fit_packet({
+    packet = {
         "schema": "mastermind.portfolio_intelligence.surface/v1",
         "status": "ok" if any(row["source"]["available"] for row in artifacts) else "unavailable",
         "surface_id": requested,
@@ -2739,4 +2810,13 @@ def surface_packet(surface_id: str, limit: int = 6) -> dict:
         "context_only": True,
         "execution_authority": False,
         "artifacts": artifacts,
-    })
+    }
+    if native_sector:
+        packet["packet_truncated"] = False
+        if _packet_size(packet) > _PACKET_MAX_BYTES:
+            health = _native_consumer_refusal(health, "native_surface_transport_budget_exceeded")
+            packet.update(status="unavailable", artifacts=[{
+                "source": _source_ref(health), "content": None,
+            }])
+        return packet
+    return _fit_packet(packet)

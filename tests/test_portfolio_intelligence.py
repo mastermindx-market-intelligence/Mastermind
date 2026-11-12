@@ -27,10 +27,14 @@ def macro_root(monkeypatch, tmp_path):
     return root
 
 
-def test_context_catalog_maps_surfaces_and_reports_health(macro_root):
+def test_context_catalog_maps_surfaces_and_reports_health(monkeypatch, macro_root):
     _write(macro_root, "data/regime/latest.json", {"asof": _day(), "quad": "Q1"})
-    _write(macro_root, "site/sectordata/sector_central.json", {"as_of": _day(12)})
+    _write(macro_root, "site/sectordata/sector_central.json", {"as_of": _day()})
     _write(macro_root, "site/intelligence/briefing.json", "{not-json")
+    monkeypatch.setattr(pi, "_read_sector_central", lambda: (
+        {"as_of": _day(12), "sectors": [], "baskets": []},
+        {"available": True, "status": "stale", "as_of": _day(12), "stale": True,
+         "source_mode": "selected_generation", "execution_authority": False}))
 
     result = pi.context_catalog()
     by_id = {row["id"]: row for row in result["surfaces"]}
