@@ -56,7 +56,7 @@ def test_default_preserves_real_stops_and_existing_safety_fences():
     for phrase in (
         "a proven ACTIVE_EXECUTION boundary",
         "never pad time",
-        "No denied-effect/EFFECT_UNKNOWN carrier swap",
+        "Tool-specific technical errors require diagnosis; reconcile unknown modifying effects",
         "Restrict only proven denied effects",
         "never self-approve/self-merge/falsify/bypass",
         "Never bulk-arm/clear other holds",
@@ -132,7 +132,7 @@ def test_task_first_direct_execution_is_visible_in_project_and_native_briefs():
     assert "21. Direct principal implementation/test/repair needs no failed Fabric attempt." in block
     assert "Delegate independent leaves if faster end-to-end" in block
     assert "No extra review/handoff ceremony" in block
-    assert "No denied-effect/EFFECT_UNKNOWN carrier swap" in block
+    assert "Tool-specific technical errors require diagnosis; reconcile unknown modifying effects" in block
     assert "Operational repair: use actually authorized host/service tools" in native
     assert "No PR absent" in native
     assert "A failed\n  worker dispatch is not required" in native
