@@ -302,6 +302,12 @@ jobs:
     # requests never leave the hosted image. Any other value, or no variable,
     # selects the literal hosted image below. Rollback: delete the variable.
     runs-on: ${{ (contains(format(',{0},', vars.MM_PYTEST_FLEET_SHARDS), format(',{0},', matrix.index)) && matrix.index != 0 && matrix.index != 2 && (github.event_name != 'merge_group' || vars.MM_PYTEST_FLEET_MERGE_GROUP == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","linux","x64","mastermind-pytest"]') || 'ubuntu-24.04' }}
+    # Each shard's resolved module list runs under pytest-xdist on the same
+    # hosted 4-vCPU runner: identical module set and verdicts, each module
+    # whole on one worker (--dist loadfile, see scripts/ci_pytest.py).
+    # Rollback: set to "1" (or "0") to restore today's exact serial argv.
+    env:
+      CI_PYTEST_WORKERS: "4"
     # Keep every prerequisite and the full 45-minute repository allowance.
     # Actual setup took ~23m; a successful test/upload then crossed job60 in
     # cleanup. Job75 + fan-in8 =83, within the retained 100-minute CI budget.
@@ -689,7 +695,7 @@ jobs:
             tests/integration/test_fabric_regional_portfolio_composition.py \
             tests/integration/test_fabric_chat_browser.py \
             ops/native_fabric/quota_continuity \
-            ops/native_fabric/experiential_proxy/gateway.py |
+            ops/native_fabric/experiential_proxy/gateway.py ops/native_fabric/experiential_proxy/anthropic_policy.py |
             tar -x -C "$brain_composition_root"
           mkdir -p "$brain_composition_root/vendor/macro"
           # Isolate synthetic owner configuration in a copy of the exact source.

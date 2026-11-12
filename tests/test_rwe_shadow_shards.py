@@ -25,6 +25,10 @@ def _arguments(tmp_path, monkeypatch, *, index=2):
     monkeypatch.setattr(rwe, "_venv_python", lambda env: Path(sys.executable))
     monkeypatch.setattr(rwe, "require_supported_interpreter", lambda executable: None)
     monkeypatch.setattr(rwe, "vendor_present", lambda root: True)
+    # The real-canonical-shard child runs the exact serial gate argv under
+    # disabled plugin autoload; the shard job's worker switch must not leak
+    # in and inject xdist flags that child cannot load.
+    monkeypatch.delenv("CI_PYTEST_WORKERS", raising=False)
     return argparse.Namespace(root=str(ROOT), env=str(env_dir), subset=None,
                               shard_index=index), env_dir
 

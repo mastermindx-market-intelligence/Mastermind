@@ -122,8 +122,11 @@ def test_missing_reviewed_model_role_fails_closed(monkeypatch):
 def test_new_byteplus_branded_alias_requires_canonical_router_admission(alias):
     from control_plane.model_router import ModelRouter, RoutingPolicyError
 
+    # Load outside the assertion: a config-loading RoutingPolicyError must fail
+    # honestly instead of masquerading as a regex mismatch here.
+    router = ModelRouter.load()
     with pytest.raises(RoutingPolicyError, match="unknown model alias"):
-        ModelRouter.load().resolve_model_alias(alias)
+        router.resolve_model_alias(alias)
 
 
 def test_preflight_cli_emits_closed_json_without_activation():

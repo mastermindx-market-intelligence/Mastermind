@@ -75,6 +75,55 @@ async function main() {
     assert.equal(observed.capabilities.content, false, 'Prove Executive navigation without Workspace Content');
     const routes = observed.routes;
     for (const route of ['Projects','Inbox','Conversations','Knowledge','Search','Fleet & Capacity']) await navigate(route);
+
+    // Exercise Capacity Fabric through the existing compiled App/MCP path.
+    // This is a synthetic source proof, never an installed capacity canary.
+    assert.equal(await page.getByText('Capacity is not observed', { exact: true }).count(), 1);
+    await act('Read capacity', 'activate');
+    await page.getByText('go:fixture-account', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('meter', { name: 'go:fixture-account Monthly remaining', exact: true }).getAttribute('value'), '0');
+    assert.equal(await page.getByRole('meter', { name: 'go:fixture-account 5 hours remaining', exact: true }).getAttribute('value'), '90');
+    assert.equal(await page.getByRole('meter', { name: /minimax:fixture-account/ }).count(), 0, 'Unknown is not a zero gauge');
+    assert.equal(await page.getByText('Live connection not observed', { exact: true }).count(), 4);
+    await act('Provider', 'select', { value: 'go' });
+    assert.equal(await page.getByText('glm:fixture-account', { exact: true }).count(), 0);
+    assert.equal(await page.getByText('go:fixture-account', { exact: true }).count(), 1);
+    await act('Provider', 'select', { value: '' });
+    await page.getByText('Limits, resets & evidence', { exact: true }).first().click();
+    await page.getByText('glm:fixture-allowance', { exact: true }).waitFor();
+    const setDisplay = async (theme, locale) => {
+      const before = await inspect();
+      const fromZh = before.locale === 'zh-CN';
+      // On narrow viewports the disclosure lives in the closed navigation
+      // drawer: open it first, and close it with the new locale's toggle.
+      const disclosure = fromZh ? '显示设置' : 'Display settings';
+      const drawer = !before.controls.some(row => row.name === disclosure);
+      if (drawer) await act(fromZh ? '打开导航' : 'Open navigation', 'activate');
+      await act(disclosure, 'activate');
+      await act(fromZh ? '主题' : 'Theme', 'select', { value: theme });
+      await act(fromZh ? '语言' : 'Language', 'select', { value: locale });
+      await act(locale === 'zh-CN' ? '显示设置' : 'Display settings', 'activate');
+      if (drawer) await act(locale === 'zh-CN' ? '打开导航' : 'Open navigation', 'activate');
+      const after = await inspect();
+      assert.equal(after.theme, theme); assert.equal(after.locale, locale);
+    };
+    const capacityVariants = [
+      { theme: 'dark', locale: 'en', width: 1440, height: 1000 },
+      { theme: 'light', locale: 'zh-CN', width: 1440, height: 1000 },
+      { theme: 'light', locale: 'en', width: 390, height: 844 },
+      { theme: 'dark', locale: 'zh-CN', width: 390, height: 844 },
+    ];
+    for (const variant of capacityVariants) {
+      await page.setViewportSize({ width: variant.width, height: variant.height });
+      await setDisplay(variant.theme, variant.locale);
+      assert.equal((await call('mastermind_os_check', { route: 'Fleet & Capacity', horizontalOverflowAtMost: 2 })).status, 'PASS');
+      assert.equal(await page.getByRole('heading', { level: 1 }).count(), 1);
+      assert.equal(await page.getByRole('meter', { name: variant.locale === 'en' ? 'go:fixture-account Monthly remaining' : 'go:fixture-account 每月 剩余额度', exact: true }).getAttribute('value'), '0');
+      await page.screenshot({ path: path.join(output, `capacity-${variant.width}-${variant.theme}-${variant.locale}.png`), fullPage: true });
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await setDisplay('dark', 'en');
+
     await navigate('Projects');
     assert.equal((await call('mastermind_os_check', { textIncludes: 'Alpha program' })).status, 'PASS');
     await act('Open project Alpha program', 'activate');
@@ -117,7 +166,9 @@ async function main() {
     const receipt = { schema: 'mastermind.os.app_control_source_proof.v1', passed: true, live_acceptance: false,
       source_revision: process.env.GITHUB_SHA || null, run_id: process.env.GITHUB_RUN_ID || null, run_attempt: process.env.GITHUB_RUN_ATTEMPT || null,
       synthetic_auth: true, synthetic_owners: true, transport: 'MCP_SDK_TO_OWNED_PLAYWRIGHT_CONTEXT',
-      routes, calls: trace.length, checks: ['source catalogue','primary and advanced navigation','Executive without Content','project selection','React search field','theme and locale','stale observation','duplicate refusal','mobile layout','ambiguous app page','sign-out privacy'], registration, trace };
+      capacity: { fixture: 'actual_public_H2_projection', live_acceptance: false, variants: capacityVariants,
+        checks: ['manual read','independent monthly exhaustion','unknown without zero gauge','consumer truth','provider filter','evidence disclosure','single heading','responsive overflow','theme and locale'] },
+      routes, calls: trace.length, checks: ['source catalogue','primary and advanced navigation','Executive without Content','Capacity Fabric rendered source','project selection','React search field','theme and locale','stale observation','duplicate refusal','mobile layout','ambiguous app page','sign-out privacy'], registration, trace };
     fs.writeFileSync(path.join(output, 'proof.json'), JSON.stringify(receipt, null, 2) + '\n');
     console.log(JSON.stringify({ passed: true, live_acceptance: false, calls: trace.length, registration, output }));
   } finally {
