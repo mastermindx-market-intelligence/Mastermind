@@ -1893,3 +1893,33 @@ quota. The storage lane's repair round never started (three refusals); it is re-
 DeepSeek worker with the same eight points.
 
 **Order for the teammates is unchanged** (section 44).
+
+## 46. Amendment, 2026-11-12 12:30 UTC: Secretary rebound and waking on its own instance; DeepSeek Flash degraded; Qwen is the fallback
+
+**Done.**
+
+- The rebind command (`cutover_installed.py rebind-thread` / `rebind-rollback`) is on trunk. The principal read the whole diff and the T3 command line's exit behaviour before the install.
+- Secretary has a fresh primary conversation on its own provider instance. The board binding moved from revision 1 to 2. A real board task (MAS-22) woke it there, it answered, the run ended clean and the agent left `error` without any status written by hand. The old conversation was not touched by the programme.
+- This run was the first success of the repaired build. The lane's rehearsal after the last fix had been stopped by router timeouts.
+
+**Corrections to the step list.**
+
+- A spec must name a model that answers at the time of the run. The step list named the GLM model, which is out. Secretary runs on `qwen3.8-max`.
+- Design Lead and Assurance are on their own instances, but their conversations are pinned to the GLM model, so their wakes fail now. Each gets a rebind to a model that answers. This does not wait for the memory link (ruling 22: a wake is never held back to save a second rebind).
+
+**Capacity.**
+
+- GLM is still out. DeepSeek Flash is degraded: workers in two programmes died on the admission refusal, and a test call took 54 seconds.
+- A lead or worker that dies on that refusal is replaced once on `qwen3.8-max` from its branch, with the same brief and limits. Nobody retries into DeepSeek in a loop. Kimi stays reserved for the hardest problems.
+
+**Storage.**
+
+- Mints were refused for about an hour because both SSD members fell just below the floor. Another session then deleted unregistered leftover trees and free space rose well above the floor. That job is not this programme's.
+- The orphan reclaim tool is on hold. Its target list was measured before that deletion, so the census is repeated before more work is spent on it.
+
+**Next, in order.**
+
+1. Rebind Design Lead, then Assurance, when machine load is under 50. Settle each proof task first. One wake proof each.
+2. The return edge once (Secretary asks Design Lead), then the installed baseline.
+3. Memory link: the lane's patch with the three required fixes, the principal's read of the gate, roster and server changes, then the install and the Hermes timers one at a time.
+4. Grok Bot link: item 5, the rehearsed install list, the install, then one sitting with the Chairman.
