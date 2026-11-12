@@ -76,3 +76,13 @@ then escalates the disagreement.
     The operator rule goes into the install document: read the box before sending. A fill
     that inserted everything but ran past its time bound reports what the read-back saw,
     never NOT_APPLIED.
+14. **Starting a development Paperclip (2026-11-12).** A lane starts a development board only
+    through a launcher that sets the instance home, the database port and the database folder
+    explicitly, and it reads the start banner before doing anything else: a banner naming port
+    54329 or a path under `~/.paperclip/instances/default` means stop the process at once and
+    report. The `paperclipai run` and `test-drive` commands are not used by lanes while the
+    real service is active; their `-d` option does not move the database. A claim that a real
+    store was not written is made from a before-and-after comparison of the whole store (two
+    backups, or every timestamp column), never from a few tables. Reason: an abandoned launch
+    joined the real database for ninety seconds, and the lane's three-table check missed the
+    two rows it touched (`rf-20261111/round5/esc7-reconcile.md`).
