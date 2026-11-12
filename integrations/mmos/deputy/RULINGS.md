@@ -86,3 +86,10 @@ then escalates the disagreement.
     backups, or every timestamp column), never from a few tables. Reason: an abandoned launch
     joined the real database for ninety seconds, and the lane's three-table check missed the
     two rows it touched (`rf-20261111/round5/esc7-reconcile.md`).
+15. **Required items found by the check that ends a loop (2026-11-12).** When that check
+    finds required items in lines the final round changed, the principal may grant one
+    micro-fix: only the named items, a failing test first for each, no other product line
+    touched. The panel lead alone checks it, by reading the diff and running the suites; no
+    blind reviewer is started. If that check is not clean, the principal decides what ships.
+    There is no further round. Applied first to the browser fill (three items of the final
+    check at `768168d40`).
