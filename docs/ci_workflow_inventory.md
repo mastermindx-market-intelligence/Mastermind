@@ -30,7 +30,7 @@ source ownership.
 | I4: real-input proof | I3 | Report current workflows without executing source or changing any routing |
 | I5: source delivery | I4 | Exact-head diff, focused tests and existing protected release checks |
 
-## Intended interface
+## Interface
 
 ```bash
 python -m scripts.ci_workflow_inventory --root /path/to/repository
@@ -40,11 +40,22 @@ The command reads the immediate `.github/workflows/*.yml` and `*.yaml`
 files and prints JSON to stdout. It uses the project's existing PyYAML dependency,
 does not call GitHub, spawn a process, execute workflow expressions, write files,
 follow symlinked workflow paths, or inspect local credential stores.
-Shell redirection is an operator's optional output choice.
+Shell redirection is an operator's optional output choice. Exit status 0 means all
+discovered files were inspected; status 2 means coverage is incomplete. Neither
+status is a migration or release verdict.
+
+The parser preserves the `on` key, detects duplicate keys, bounds file and alias
+sizes, and reports malformed scalar construction without echoing source text.
+Plain step shell names are retained; custom command templates are represented by
+SHA-256 digests. General scripts, environment payloads and checkout credentials
+are omitted. Selected names and selectors still come from source, so the report
+is not a credential sanitizer and needs review before publication.
 
 Static labels are configuration facts, not proof that any runner exists, is
 online, is eligible for a repository/group, has spare capacity, or can run the
-job. Dynamic expressions retain an explicit unresolved state. Matrices are
+job. Dynamic expressions are not evaluated. Nested matrix expressions are marked
+as dynamic, literal dot/bracket axis references retain routing choices, and
+unsupported or missing routing alternatives are marked unresolved. Matrices are
 reported as declared dimensions; the inventory does not infer actual event-time
 expansion, conditional execution, peak concurrency, or billing.
 
@@ -65,3 +76,24 @@ submodules and real machine consumers separately.
 Keep untrusted PR jobs separated from credentialed deployment/production hosts.
 Preserve required check names, existing trust controls and release holds when a
 later, independently qualified routing change is proposed.
+
+## Qualification
+
+The focused unit suite covers valid and incomplete inputs, permission inheritance,
+checkout capability shape, matrix routing, malformed scalar constructors, output
+minimization and local filesystem boundaries. It uses `unittest` and is also
+collectable by the existing pytest suite:
+
+```bash
+python -m unittest discover -s tests -p test_ci_workflow_inventory.py -v
+```
+
+Real-input verification used 186 exact workflow files across six repository
+snapshots, with 388 declared jobs and no inspection errors. Source files were
+checked against their Git blob IDs before the CLI was run. This demonstrates a
+consumer path for the inventory; it does not certify runtime enablement,
+transitive dependencies, runner eligibility or capacity. Matrix instances are
+not expanded into job counts. The tool performs partial structural inspection,
+not full GitHub Actions schema validation. Filesystem checks assume a stable
+snapshot and are not a defense against a concurrent hostile filesystem writer.
+
