@@ -101,3 +101,52 @@ then escalates the disagreement.
     passed every check in its step list and still could not reach a browser profile, and the
     pin change refused browser calls in all running sessions for three minutes until it was
     rolled back (`br-install-20261112/RESULT.md`).
+17. **Two sides that cannot switch together must overlap for one release (2026-11-12).** When
+    a release changes what two parts say to each other at connection time, and the two parts
+    cannot be switched in the same instant (a person's action, a process that restarts on its
+    own, sessions that keep their old copy), the newer part also accepts the one previous
+    release, named exactly, and holds such a connection to the old abilities. The step list
+    carries a table of every moment between steps, for an old session and a new session, and
+    every cell reads "works" apart from the new ability being absent. The step that a person
+    performs comes before the step that makes new sessions depend on it. The change to the
+    acceptance check is a critical surface: independent review, and the principal reads the
+    diff. Reason: the second browser bridge release fixed the pin switch but left three
+    windows in which operators' sessions would fail, two of them unstated
+    (`br-20261111/release2/mcp_bridge_install.md`).
+18. **A build never lands in the app the Chairman is using (2026-11-12).** The Chairman now
+    works in `~/Applications/Mastermind OS.app` against the real team server. Every build a
+    lane makes is a separate app: its own name, its own bundle identifier, its own config
+    folder and its own server target. No lane rebuilds, replaces, quits, relaunches or drives
+    his app, and no lane sends into a conversation he has a run in. A release into his app is
+    the principal's own announced act, with a time he has agreed. Reason: his words, "future
+    builds please launch it in a new app"; the same morning a session of his ran inside
+    Secretary's conversation on the real server.
+19. **A delivery mark is permanent, and one lock covers every process (2026-11-12).** Where a
+    log decides whether a result has been handed over: (a) a delivery mark written by the
+    trusted writer is never ignored, demoted or re-derived away by a later reading, whatever
+    its position; a reading that finds the order unclear refuses with a typed error and
+    delivers nothing; (b) numbering and appending are serialised across every process on the
+    host by one lock outside the client object, and the step list states that only one host
+    writes; (c) a test that expects a second delivery is a defect, not a specification; the
+    proof is a two-process test that fails first. When unsure, the layer withholds and
+    reports; it never delivers twice. Reason: the fifth Grok Bot link round passed 420 tests
+    with a lock per client object and a test that codified handing the same answer out twice
+    (`gbl-20261111/gbl5/REVIEW-deputy-deepseek.md`).
+20. **A teammate is its own provider instance, not its conversation (2026-11-12).** The
+    charter and the tool fence are attached where the teammate's provider instance is
+    launched. A turn run in a teammate's conversation on any other provider instance has
+    neither. So: (a) a wake from the board runs on the teammate's own provider instance or
+    does not run; the carrier's refusal on a mismatch stays, and no lane weakens it;
+    (b) a teammate whose conversation has been moved to another provider gets a fresh primary
+    conversation on its own instance through a reviewed command (refuses with a live run or
+    open work; the old conversation is left exactly as it is); nobody restores a provider by
+    writing the state database or by sending into the old conversation; (c) the product must
+    not offer another provider or model inside a teammate's conversation, and until it does
+    not, the window says in plain words that such a turn is the person's own session without
+    the teammate's charter or limits; (d) a person's turn there is that person's, with that
+    person's authority: it is not a teammate act, is not counted as teammate work, and its
+    children are not ours to stop. Reason: on 2026-11-12 the Chairman's two turns in
+    Secretary's conversation ran on the general provider (runs 11 and 12); that session's own
+    audit shows shell and web fetch worked and four children started, and afterwards the
+    carrier refused every Secretary wake (`rf-carrier-refresh.md` step 2e still owed).
+

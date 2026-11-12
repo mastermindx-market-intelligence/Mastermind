@@ -1606,3 +1606,189 @@ changed by any lane. T3's own worktrees are on the internal disk and are not aff
 pool diagnosis and reclaim. The browser lane's rehearsed release. The ask-and-return micro-fix and
 carrier refresh. The launcher rewrite, then the Grok Bot link proofs and one sitting. Computer-use
 runs, the delta check and my choice of homes.
+
+## 39. Amendment, 2026-11-12 04:10 UTC: Paper is connected, the pool diagnosis is in
+
+**Paper, installed by me (03:41 to 03:57 UTC).** I read every staged script and the source at the
+lane's commit before running anything. Each staged hash matched and each step ran as written.
+
+- The design skillpack is installed in the T3 skill bundle on the M2 and on ubuntu2. It carries the
+  carrier rules, the ten-step studio protocol, the design-memory convention, a batch screenshot
+  exporter and five specialist child briefs (art director, canvas designer, design critic, UI
+  implementer, visual verifier).
+- A new guarded Paper runtime is built on the M2. It replaces nothing.
+- ubuntu2 has one key for the design profile, admitted on the M2 for one fixed command only, and
+  one new MCP entry in its provider home. Checked from ubuntu2 over the real route: five tools
+  listed, the inspect call answered connected, a requested shell command was ignored and a
+  terminal was refused.
+- Both programme leads have the notice: what already lives in Paper for them, how to connect, the
+  one-writer rule, the skills, the specialist briefs, the holds and the limits.
+
+**Not yet proven, so not yet opened.** A read and a screenshot from a new T3 session on ubuntu2
+through the registered entry, and one guarded edit with readback on a throwaway file, including a
+stale-snapshot refusal. Until the lane returns that proof, remote guarded edits stay held; reads
+and screenshots are open. The Prophet lead was told this in the notice and gets one line when it
+changes.
+
+**Still to install.** The read profile on the other linked hosts, one host at a time, after the
+session proof passes. The lane stages a keygen brief and a register brief per host and says which
+hosts cannot take the route as staged. Then the qualification fix for the three tools the guarded
+server does not yet admit, and a guarded local registration on the M2 to replace the vendor relay.
+
+**Two defects in the staged text, returned to the lane.** The notice said two skill folders on the
+M2 are links into the bundle; they are real folders without these skills. The install steps gave
+no way to list the hidden registration backup, and a child rightly stopped there.
+
+**The worktree pool.** The read-only lane found one cause. The scheduled reaper's Python process is
+denied reads on both external volumes by the operating system's privacy control, so every tree is
+judged an error and none is ever safe. Separately, the scheduled job is started with both the apply
+and the dry-run flags, so it could not remove anything even if it could read. Space is going at
+about 11 GiB an hour per volume: 152 new trees were minted in one day and nothing is reclaimed.
+Candidates on the second volume alone: 146 clean, merged, idle trees, about 190 GiB. A further 779
+orphaned folders are outside the reaper's scope and need their own ruled path.
+
+What I do with it: run the incumbent reaper from this session, report-only first, and apply only
+if it classifies and only through its own guards (three days old, content on the remote, clean, no
+process inside, non-force removal, human roots protected). I change neither the floor nor the
+scheduled jobs. The privacy grant for the scheduled process and the job's flags are the storage
+owner's settings; they go to the Chairman as one line with the evidence.
+
+## 40. Amendment, 2026-11-12 07:15 UTC: Paper is proven and read on five hosts; the pool rule for dead folders
+
+**Paper is proven.** From ubuntu2 a session read a file and took a screenshot, made a guarded edit
+on the throwaway file with a readback, and had a stale snapshot refused. I read the proof and
+viewed the image. The hold on Prophet's remote guarded edits is lifted and the Prophet lead was
+told. The read profile (three tools: catalog, inspect, read) is now registered on m1studio,
+ubuntu0, ubuntu3 and mastermind-pc as well. Each host has its own key, made on that host; each key
+line on the M2 is restricted to that host's address and to one fixed command, and was appended with
+a backup. A probe and two refusal checks passed on every host. A new-session proof per host is
+running. ubuntu4 is offline and has nothing.
+
+Next for the lane, all staged for me to install: the three tools the guarded server does not yet
+admit (new artboard, create and set tokens); a guarded local registration for sessions on the M2;
+and the skillpack for the four hosts that have an old one or none.
+
+**Ruling 17 is in force** (section 39 was written before it): two sides that cannot switch in the
+same instant overlap for exactly one release. The bridge release waits on the round built to it.
+
+**The worktree pool: what holds it today.** Three hand runs of the incumbent reaper from this
+session removed 55 trees through its own guards. Margin above the floor is about 49 GiB on the
+first volume and 5.6 GiB on the second. Each further run frees only what has just turned three
+days old, and so far that has all been on the first volume.
+
+**A correction to section 39.** The scheduled job is not denied on every run. The denial comes and
+goes per start; the job's flags still make it report-only. Both are the storage owner's settings.
+
+**What does not hold: 779 dead folders on the second volume.** Their pointer names a worktree entry
+that no longer exists, so the reaper never sees them. They cannot be proven clean the old way: the
+commits they were made from are gone from the store, and the harness writes its own files into
+every tree. The archived-worktrees folder (67.5 GiB) is the same class. The incumbent archive tool
+skips any folder with a git pointer, so it does not cover them either.
+
+**Ruling for the class.** A dead folder is removed only when, immediately before removal, every
+file in it falls in one of three groups:
+
+| Group | Test | What happens |
+|---|---|---|
+| On the remote | The file's bytes are a blob reachable from a remote ref of its store | Nothing kept; it can be fetched again |
+| Regenerable | It sits under a named build or cache folder on a short list I rule | Nothing kept |
+| Unique | Everything else | Copied to an archive, listed back, every hash compared; then the folder goes |
+
+A folder is left and reported when its unique bytes pass a cap, when a process is inside, when it is
+under three days old, when its pointer is in fact live, or when anything is unclear. The run stops
+at the first unclear result. This replaces "prove the whole tree against one commit", which removes
+nothing, with a proof per file that loses nothing.
+
+A lane builds the tool and tests it on fixtures only, reports on a sample of 40 real folders by
+reading, and finishes the first volume's census. Running it for real is mine, after an independent
+review of the tool and my own read of it. Folders that belong to another programme's proof work
+(the first volume's `tmp/`) are asked about, not swept.
+
+**A class rule from another programme's question.** A child that is already isolated in a worktree
+does not mint a second tree. The harness refuses to enter it and refuses git commands aimed outside
+its own tree; that refusal is a real control. Two branches at once means two children. The recipe
+text in the Macro guard says otherwise and its correction waits for the Chairman's word.
+
+## 41. Amendment, 2026-11-12 08:05 UTC: the Chairman's four orders; carrier installed; E1 decided
+
+**Orders received 07:28–07:30 UTC.** (1) Move every Hermes bot, with its conversation history
+and memory, into Mastermind OS. (2) Link the persistent memory the Hermes bots use (the `omh`
+memory provider) so always-on teammates can reach it. (3) He is now a daily user of the
+Mastermind OS app, so builds launch as a new app (ruling 18). (4) A dedicated Cloudflare tunnel
+is accepted as the public endpoint for the Grok Bot link, and a subagent may create it using
+the Cloudflare session in his personal Chrome profile. He also handed me the E1 decision.
+
+**Lane HM (Hermes bots and memory), one lead for both orders.** Three defaults, mine, which the
+lane may only overturn with census evidence:
+
+| Subject | Default |
+| --- | --- |
+| Bots | Each distinct working profile becomes a teammate through the existing set-up and cut-over tooling, one at a time, by the principal. Duplicate or experimental profiles are listed for a ruling, not moved. This replaces the earlier limit of three teammates. |
+| History | Exported, not transplanted. Each bot's past conversations go into a read-only archive in its own teammate home with a search tool. Nothing is written into the team server's database by hand. If the server has a supported way to create a conversation with earlier messages, the lane proposes it and proves it on a development server. |
+| Memory | One store, not two. Teammates reach the same `omh` memory Hermes uses, through a narrow tool that calls `omh`'s own code. If two writers are not safe, reading is linked first and writing comes back as a design. |
+
+The lane works on copies, in its own folder, and installs nothing. It replaces the Revision 7
+line "do not copy internal session databases into another runtime" only to this extent: a copy
+into the lane's private scratch folder for the export, deleted afterwards.
+
+**Cloudflare tunnel.** One child creates a named tunnel and one hostname and leaves it not
+running. The tunnel client is installed and started by the principal when the bridge is ready.
+The Chairman's sitting for the Grok Bot link loses its tunnel step.
+
+**E1, decided: the two private-network paths stay.** `/studio-fabric` and `/studio-design` are
+the addresses the existing Subagent Fabric gives its remote workers and its operator stop hook
+(`ops/native_fabric/*/native_remote.py`, `integrations/session_bridge/paid_operator/`). Removing
+them would break that Fabric. The exposure is limited to devices on the Chairman's own private
+network. The repair is a credential check inside the gateway; it goes on the later list and is
+not a Paper lane matter. Paper's own remote route does not use these paths.
+
+**Wake carrier.** Installed for all three teammates at 07:15 UTC (old `69846ac9…`, new
+`3b546177…`). Design Lead and Assurance each answered a real task on it. Secretary's proof is
+waiting: a session started from the app inside Secretary's conversation chose another provider,
+and the carrier refuses a conversation whose provider differs from the teammate's binding. That
+is correct behaviour for the carrier and a product gap for the app: a teammate's conversation
+should not offer another provider. It goes to the team-roster work.
+
+**Paper.** New sessions on four more hosts each reached the M2's Paper and read the test file.
+Three of them could not read the text in the returned image; that is the missing auxiliary
+vision, which lane BCU owns, not a Paper fault. The inspect tool takes no file and returns
+whatever file is open on the M2; the skillpack must tell designers to name the file.
+
+## 42. Amendment, 2026-11-12 08:45 UTC: a teammate is its provider instance; first census of the Hermes bots
+
+**What happened.** The Chairman used the Mastermind OS window to talk in Secretary's
+conversation and the window let him pick the general provider and another model. Those two
+turns (07:23 to 08:12 UTC) ran without Secretary's charter and without the teammate fence,
+because both are attached to the launch of the `secretary` provider instance and nowhere else.
+The gate file, the limits file and the charter are unchanged; nothing was broken or bypassed by
+a lane. The conversation still points at the general provider, so the wake carrier refuses
+Secretary's board tasks and Secretary's board status reads `error`.
+
+**Ruling 20** (deputy rulings): a teammate is its own provider instance, not its conversation.
+
+| Part | Owner | State |
+| --- | --- | --- |
+| Fresh primary conversation for a cut-over teammate (the existing `rotate` needs a file that cut-over teammates do not have and refuses on status `error`) | lane RF through the deputy; independent review; rehearsed on a dev copy that reproduces the provider switch; the principal installs | ordered |
+| Secretary's task-edge proof, the return edge and the baseline (carrier refresh steps 2e, 3, 4) | principal | waits for the row above |
+| The window must not offer another provider in a teammate's conversation; plain notice until then | team-roster work (release -4 list) | ordered |
+| Findings of the Chairman's own session (preview browser is not disabled; device keys default off; the pinned fetch tool is the one real build; a managed MCP config path; two of its children disagree on whether ambient MCP servers reach a live session) | deputy hands them to BR, BCU and HX so they are not rediscovered | sent |
+
+**Hermes census (lane HM, first file).** Fifteen bots, not fourteen: the default Hermes home is
+itself the Slack "Meta-CEO" and the Chairman's main Hermes chat. Three are moved, nine distinct
+ones are staged next, one is an experiment made today, and two share the Meta-CEO identity.
+5,093 conversations and 209,475 message rows across 15 stores, no conversation in two stores.
+Memory is two layers: small per-bot files, and ONE shared `omh` store outside `~/.hermes` with
+288 approved records. One finding changes the order of work: Secretary was moved on the board
+but ten of its eleven Hermes timers are still armed, so today two systems can act as Secretary.
+That is the "one initiator per effect" rule (plan V3 section 8a) already broken, and the lane's
+install list treats it first. Moving or disarming those timers is a write to Hermes and is the
+principal's act on the lane's rehearsed list.
+
+**Cloudflare tunnel.** The first child stopped cleanly before authorising: the zone
+`mastermindx.ai` was found by rule (one of five zones), but the browser plugin cannot click a
+table row that is not a link or button, and the debugger path is refused in that profile
+because another extension has a frame in the page (not routed around). Nothing was created. A
+second child reads the plugin's own contract first and, if the plugin cannot do it, uses
+Peekaboo on that one window under the idle rule. The plugin gap (clickable rows are not
+offered as elements) goes on lane BR's later list.
+
