@@ -40,6 +40,9 @@ echo $$ > "$FAKE_STATE_DIR/node.pid"
   echo "PAPERCLIP_INSTANCE_ID=$PAPERCLIP_INSTANCE_ID"
   echo "HOME=$HOME"
   echo "launcher_arg=$1"
+  echo "DATABASE_URL=${DATABASE_URL-}"
+  echo "PAPERCLIP_SERVER_PORT=${PAPERCLIP_SERVER_PORT-}"
+  echo "PAPERCLIP_DISABLE_CWD_ENV_FILE=${PAPERCLIP_DISABLE_CWD_ENV_FILE-}"
 } > "$FAKE_STATE_DIR/launch-env"
 mkdir -p "$FAKE_STATE_DIR/cmd" "$FAKE_STATE_DIR/listeners" "$FAKE_STATE_DIR/children" "$FAKE_STATE_DIR/conn"
 echo $$ > "$FAKE_STATE_DIR/listeners/$FAKE_SERVER_PORT"
@@ -52,7 +55,9 @@ if [ "${FAKE_CONN_54329:-0}" = "1" ]; then
   printf 'node  %su  IPv4  TCP 127.0.0.1:%s->127.0.0.1:54329 (ESTABLISHED)\n' "$$" "$FAKE_DB_PORT_EFFECTIVE" \
     > "$FAKE_STATE_DIR/conn/$$-54329"
 fi
-cat "$FAKE_BANNER_FILE"
+if [ "${FAKE_NO_BANNER:-0}" != "1" ]; then
+  cat "$FAKE_BANNER_FILE"
+fi
 touch "$FAKE_STATE_DIR/started"
 trap 'exit 0' TERM INT
 while :; do sleep 0.2 2>/dev/null || sleep 1; done
@@ -100,9 +105,17 @@ NC_STUB = "exit 1\n"
 CURL_STUB = r'''
 case "$*" in
   */api/health*)
-    if [ -f "$FAKE_STATE_DIR/started" ]; then s=1; else s=0; fi
+    s=0
+    if [ -f "$FAKE_STATE_DIR/started" ]; then
+      # Health answers only while the fake server process is alive (or when
+      # no node has ever run in this state dir, i.e. a foreign server).
+      npid="$(cat "$FAKE_STATE_DIR/node.pid" 2>/dev/null || true)"
+      if [ -z "$npid" ] || kill -0 "$npid" 2>/dev/null; then
+        if [ ! -f "$FAKE_STATE_DIR/curl-down" ]; then s=1; fi
+      fi
+    fi
     echo "health started=$s" >> "$FAKE_STATE_DIR/curl-calls"
-    if [ "$s" = "1" ] && [ ! -f "$FAKE_STATE_DIR/curl-down" ]; then
+    if [ "$s" = "1" ]; then
       printf '{"status":"ok"}\n'
       exit 0
     fi
@@ -239,6 +252,16 @@ def run_up(h: Harness, **env_extra) -> subprocess.CompletedProcess:
     )
 
 
+def run_down(h: Harness, **env_extra) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["bash", str(SCRIPT), "down"],
+        env={**h.env, **env_extra},
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
 def assert_process_dead(pid: int) -> None:
     for _ in range(50):
         try:
@@ -256,7 +279,27 @@ def assert_process_dead(pid: int) -> None:
 
 
 def test_up_starts_via_direct_launcher_and_proves_isolation(harness):
-    proc = run_up(harness)
+    # A previous run's log is present and names the REAL store: the new run
+    # must truncate it, not inherit its banner (review findings 1-2).
+    logs_dir = harness.instance_root / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    stale_log = logs_dir / "dev-server.stdout.log"
+    stale_log.write_text(
+        "\n".join([
+            BANNER_RULE,
+            f"Database          /real/home/.paperclip/instances/default/db (pg:54329)",
+            BANNER_RULE,
+            "",
+        ]),
+        encoding="utf-8",
+    )
+
+    # Hostile ambient environment: none of it may reach the launcher.
+    proc = run_up(
+        harness,
+        DATABASE_URL="postgres://127.0.0.1:54329/real-store",
+        PAPERCLIP_SERVER_PORT="3100",
+    )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
     assert "PAPERCLIP-DEV: REAL STORE REFUSED" not in out
@@ -264,6 +307,11 @@ def test_up_starts_via_direct_launcher_and_proves_isolation(harness):
     assert "isolation a:" in out
     assert "isolation b:" in out
     assert "isolation c:" in out
+
+    # The stale real-store bytes are gone: the log holds only this run.
+    log_now = stale_log.read_text(encoding="utf-8")
+    assert "54329" not in log_now
+    assert "instances/default" not in log_now
 
     # The board was started by the node launcher, not by a CLI wrapper.
     launch_env = (harness.state / "launch-env").read_text(encoding="utf-8")
@@ -274,6 +322,11 @@ def test_up_starts_via_direct_launcher_and_proves_isolation(harness):
     assert pins["HOME"] == str(harness.dev_home / "home")
     assert pins["launcher_arg"].endswith("launch-server.mjs")
     assert str(harness.instance_root) in pins["launcher_arg"]
+    # Ambient DATABASE_URL / PAPERCLIP_SERVER_PORT were scrubbed; the cwd
+    # .env loader is disabled (review findings 3-5).
+    assert pins["DATABASE_URL"] == ""
+    assert pins["PAPERCLIP_SERVER_PORT"] == ""
+    assert pins["PAPERCLIP_DISABLE_CWD_ENV_FILE"] == "true"
 
     # The generated launcher imports the server entry and calls startServer().
     launcher = harness.instance_root / "launch-server.mjs"
@@ -360,6 +413,53 @@ def test_foreign_listener_on_our_port_is_refused_not_adopted(harness):
     assert proc.returncode == 1
     assert "foreign" in proc.stderr
     assert not (harness.state / "node.pid").exists()  # nothing was launched
+
+
+def test_stale_banner_from_a_previous_run_does_not_satisfy_the_checks(harness):
+    # The log already holds a previous run's CLEAN dev banner, and this run's
+    # node prints nothing. Without per-run truncation the old bytes would
+    # satisfy banner_present/dev_markers instantly; the script must instead
+    # wait for THIS run's banner, time out and kill the tree (review
+    # findings 1-2).
+    logs_dir = harness.instance_root / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    (logs_dir / "dev-server.stdout.log").write_text(
+        "\n".join([
+            BANNER_RULE,
+            f"Server            {SERVER_PORT}",
+            f"Database          {harness.instance_root / 'db'} (pg:{DB_PORT})",
+            f"Config            {harness.instance_root / 'config.json'}",
+            BANNER_RULE,
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    proc = run_up(harness, FAKE_NO_BANNER="1", MMOS_DEV_START_TIMEOUT="5")
+    assert proc.returncode == 1
+    assert "start banner" in proc.stderr
+    assert_process_dead(harness.node_pid())
+    assert not (harness.instance_root / "dev-controller.pid").exists()
+
+
+def test_down_refuses_to_signal_a_reused_pid(harness):
+    # Bring the board up and down normally, then poison the pidfile with a
+    # live foreign pid. `down` must verify the pid's argv before signalling:
+    # a reused pid (even the real service's) is refused, never killed.
+    assert run_up(harness).returncode == 0
+    assert run_down(harness).returncode == 0
+
+    foreign = subprocess.Popen(["sleep", "60"])
+    try:
+        (harness.instance_root / "dev-controller.pid").write_text(
+            f"{foreign.pid}\n", encoding="utf-8")
+        proc = run_down(harness)
+        assert proc.returncode == 1
+        assert "refusing to signal" in proc.stderr
+        assert foreign.poll() is None, "down killed a foreign pid"
+    finally:
+        if foreign.poll() is None:
+            foreign.kill()
+            foreign.wait()
 
 
 # ---------------------------------------------------------------------------

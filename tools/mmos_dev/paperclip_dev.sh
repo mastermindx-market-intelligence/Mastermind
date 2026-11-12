@@ -38,6 +38,8 @@
 #     request, then proves isolation (below) before calling the instance
 #     ready. The server may silently move the database port when its
 #     configured port is taken — the banner is where that becomes visible.
+#     The server log is TRUNCATED at each launch, so every banner/isolation
+#     grep proves THIS run's process, never a previous run's bytes.
 #   * The embedded PostgreSQL runs as a DIRECT CHILD of the launcher process
 #     (argv: postgres -D <data dir> -p <port>), and startServer() installs
 #     the SIGINT/SIGTERM handlers that stop it in an ordered shutdown.
@@ -433,6 +435,17 @@ server_tree_pids() { # $1=root pid — echoes "root child ..." (best effort)
   printf '%s' "$root$out"
 }
 
+# A pid we are willing to SIGNAL must be provably ours: its argv names the
+# generated launch-server.mjs under this dev instance root. A stale pidfile
+# whose pid was reused by any other process — including the real service —
+# fails this and is refused, never signalled (review finding, 2026-11-12).
+pid_is_ours() { # $1=pid
+  case "$(ps -p "$1" -o command= 2>/dev/null || true)" in
+    *"$LAUNCHER_SCRIPT"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # SIGTERM the whole tree (startServer()'s own handlers stop the embedded
 # PostgreSQL in an ordered shutdown), wait, then SIGKILL stragglers.
 kill_server_tree() { # $1=root pid
@@ -647,12 +660,25 @@ EOF
 # the default-instance identity marker (~/.paperclip/) keeps working.
 ISOLATED_HOME="$DEV_HOME/home"
 # env(1) stops parsing options at the first NAME=VALUE operand, so every -u
-# must come BEFORE the HOME assignment or env treats "-u" as the program to
+# must come BEFORE the assignments or env treats "-u" as the program to
 # exec ("env: -u: No such file or directory").
+#
+# DATABASE_URL / DATABASE_MIGRATION_URL: the server prefers an ambient
+# DATABASE_URL over the pinned embedded cluster (config.js "databaseUrl:
+# process.env.DATABASE_URL ?? fileDbUrl") and would run migrations against
+# it BEFORE printing any banner — never inherit one. PAPERCLIP_SERVER_PORT/
+# HOST (and the PAPERCLIP_BIND pair) override the pinned config on both the
+# server and the CLI's api-base inference. PAPERCLIP_DISABLE_CWD_ENV_FILE
+# stops the server from loading a .env from the controller's cwd (review
+# findings, 2026-11-12).
 SCRUB_ENV=(env -u PORT -u HOST \
     -u PAPERCLIP_HOME -u PAPERCLIP_INSTANCE_ID -u PAPERCLIP_CONFIG \
     -u PAPERCLIP_CONTEXT -u PAPERCLIP_API_URL -u PAPERCLIP_COMPANY_ID \
     -u PAPERCLIP_API_KEY -u PAPERCLIP_RUN_ID \
+    -u DATABASE_URL -u DATABASE_MIGRATION_URL \
+    -u PAPERCLIP_SERVER_PORT -u PAPERCLIP_SERVER_HOST \
+    -u PAPERCLIP_BIND -u PAPERCLIP_BIND_HOST \
+    PAPERCLIP_DISABLE_CWD_ENV_FILE=true \
     HOME="$ISOLATED_HOME")
 
 # Created lazily (never before static_refusal_checks) so a refused target
@@ -667,8 +693,12 @@ seed_company() { # $1=base_url — creates one dev company, records state
   if grep -q '"companyId"' "$STATE_PATH" 2>/dev/null; then
     return 0
   fi
+  # --api-base pins the CLI's target explicitly (top priority in its
+  # resolveApiBase): without it an ambient PAPERCLIP_SERVER_PORT — or a
+  # config its schema rejects — makes the seed fall back to :3100, the real
+  # board (review finding, 2026-11-12).
   if ! out="$(cli_env "$PAPERCLIP_CLI" company create \
-        -d "$DEV_HOME" -c "$CONFIG_PATH" \
+        -d "$DEV_HOME" -c "$CONFIG_PATH" --api-base "$base" \
         --payload-json "{\"name\":\"$COMPANY_NAME\"}" --json 2>&1)"; then
     err "company create failed:"
     printf '%s\n' "$out" >&2
@@ -926,11 +956,25 @@ cmd_up() {
   fi
   { [ -n "$NODE_BIN" ] && [ -x "$NODE_BIN" ]; } || die 1 "node interpreter not found (set MMOS_DEV_NODE)."
 
+  # Fail closed: the ruling-14 isolation proof reads lsof/pgrep/ps. With one
+  # of them missing, check (a) would pass silently on an empty result and the
+  # refusal path would miss tree children — refuse to start degraded.
+  local req_tool
+  for req_tool in lsof pgrep ps; do
+    command -v "$req_tool" >/dev/null 2>&1 \
+      || die 1 "required tool '$req_tool' not found; refusing to start without the isolation checks."
+  done
+
   write_launcher_script
   log "starting dev instance via: $NODE_BIN $LAUNCHER_SCRIPT (direct startServer from $SERVER_ENTRY)"
   log "instance pins: PAPERCLIP_HOME=$DEV_HOME PAPERCLIP_INSTANCE_ID=$INSTANCE_ID PAPERCLIP_CONFIG=$CONFIG_PATH"
   log "server log: $SERVER_LOG"
-  mkdir -p "$ISOLATED_HOME"
+  mkdir -p "$ISOLATED_HOME" "$LOG_DIR"
+  # Fresh log per run: every banner/isolation grep below must read THIS
+  # run's bytes. An append-only log would let a previous run's banner
+  # satisfy the checks before the new process printed anything (review
+  # findings, 2026-11-12).
+  : > "$SERVER_LOG"
   {
     printf '%s [%s] dev controller launching node launcher (direct startServer)\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PROG"
   } >> "$SERVER_LOG"
@@ -1040,6 +1084,18 @@ cmd_down() {
     pid="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
     [ -n "$pid" ] || die 1 "dev instance healthy at $base but no pid found; refusing blind kill."
     log "warning: no pidfile; using listener pid $pid on our dev port $port."
+  fi
+
+  # Never signal a pid we cannot prove is ours (argv must name this dev
+  # instance's launcher). Guards the pidfile, runtime-info and listener
+  # fallbacks alike against pid reuse — including reuse by the real service.
+  if ! kill -0 "$pid" 2>/dev/null; then
+    log "pid $pid is already gone; cleaning up pidfile."
+    rm -f "$PIDFILE" 2>/dev/null || true
+    exit 0
+  fi
+  if ! pid_is_ours "$pid"; then
+    die 1 "pid $pid is not this dev launcher (argv: $(ps -p "$pid" -o command= 2>/dev/null || echo '?')); refusing to signal it. Verify the process manually, then remove $PIDFILE if it is stale."
   fi
 
   log "stopping dev instance pid $pid (SIGTERM)…"

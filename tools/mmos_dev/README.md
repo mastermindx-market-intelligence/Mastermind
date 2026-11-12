@@ -30,6 +30,19 @@ calls the instance ready only after three isolation checks pass:
 - (c) the banner/log names neither port 54329 nor any path under
   `~/.paperclip/instances/default`.
 
+The server log is truncated at each launch, so the banner proof is always
+this run's bytes, never a previous run's. The launch environment also
+scrubs `DATABASE_URL`/`DATABASE_MIGRATION_URL` (the server prefers an
+ambient `DATABASE_URL` over the pinned embedded cluster and would migrate
+it before printing any banner), scrubs `PAPERCLIP_SERVER_PORT`/`HOST` and
+the bind overrides, and sets `PAPERCLIP_DISABLE_CWD_ENV_FILE=true` so no
+`.env` from the caller's cwd leaks in. Company seeding passes
+`--api-base <dev url>` explicitly, and `down` verifies the target pid's
+argv names the dev launcher before signalling it. `up` refuses to start at
+all when `lsof`/`pgrep`/`ps` are missing — the isolation checks never run
+degraded. A log left by a previous run is reset per launch; use
+`logs` before `down` if you need the old output.
+
 Any failure kills the launched process tree, prints exactly one line
 `PAPERCLIP-DEV: REAL STORE REFUSED` (reason on stderr) and exits 3.
 
