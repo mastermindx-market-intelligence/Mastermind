@@ -220,6 +220,7 @@ jobs:
     comments_only = """
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   merge_group:
     types: [checks_requested]
   push:
@@ -256,6 +257,7 @@ def _valid_on_block() -> str:
     return (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -299,6 +301,7 @@ def test_validate_workflow_rejects_missing_event():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  push:\n"
         "    branches:\n"
         "      - master\n"
@@ -338,6 +341,7 @@ def test_validate_workflow_rejects_wrong_merge_group_types():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested, labeled]\n"
         "  push:\n"
@@ -353,6 +357,7 @@ def test_validate_workflow_rejects_wrong_push_branches():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -398,6 +403,7 @@ def test_validate_workflow_rejects_empty_merge_group():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group: {}\n"
         "  push:\n"
         "    branches:\n"
@@ -412,6 +418,7 @@ def test_validate_workflow_rejects_filtered_workflow_dispatch():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -463,6 +470,7 @@ def test_validate_workflow_rejects_merge_key_in_on_block():
         "on:\n"
         "  <<: *hidden_defaults\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -528,6 +536,7 @@ def test_validate_workflow_rejects_duplicate_unquoted_on():
         "name: CI\n"
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "on:\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
@@ -550,6 +559,7 @@ def test_validate_workflow_rejects_duplicate_quoted_on():
         "name: CI\n"
         '"on":\n'
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         '"on":\n'
         "  merge_group:\n"
         "    types: [checks_requested]\n"
@@ -572,6 +582,7 @@ def test_validate_workflow_rejects_quoted_and_unquoted_on():
         "name: CI\n"
         '"on":\n'
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "on:\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
@@ -640,6 +651,7 @@ def test_validate_workflow_rejects_unhashable_event_level_key():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -831,6 +843,7 @@ def test_validate_workflow_rejects_mixed_type_extra_keys():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -866,7 +879,7 @@ def test_all_discovered_tests_are_accounted_for():
 
 
 def test_hosted_full_gate_has_a_bounded_completion_window():
-    """Keep protected 45-minute headroom and a fail-closed bounded fan-in."""
+    """Keep a finite, adequate 75-minute shard window with fail-closed fan-in."""
     import yaml
 
     workflow = yaml.load(
@@ -877,11 +890,13 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     shards = jobs["pytest_shards"]
     gate = jobs["test"]
     assert workflow["permissions"] == {"contents": "read"}
-    assert shards["timeout-minutes"] == 45
+    assert shards["permissions"] == {"contents": "read", "actions": "read"}
+    assert shards["timeout-minutes"] == 75
+    assert shards["timeout-minutes"] + gate["timeout-minutes"] <= 100
     assert gate["timeout-minutes"] == 8
     assert shards["strategy"]["fail-fast"] is False
-    assert shards["strategy"]["max-parallel"] == 3
-    assert shards["strategy"]["matrix"]["index"] == [0, 1, 2]
+    assert shards["strategy"]["max-parallel"] == 6
+    assert shards["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
     assert shards.get("continue-on-error", False) is False
     assert gate.get("continue-on-error", False) is False
 
@@ -892,18 +907,29 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     ]
     assert len(test_steps) == 1
     assert test_steps[0]["run"] == (
-        "python -m scripts.ci_parallel_shard --jobs 3 --index "
-        "${{ matrix.index }}"
+        "umask 022\n"
+        "python -m scripts.ci_parallel_shard --jobs 6 --index "
+        "${{ matrix.index }}\n"
     )
     assert all(step.get("continue-on-error", False) is False for step in shard_steps)
+    # CI Lightning F3: the five qualification gates moved verbatim out of
+    # shard zero into the parallel qualification job; they must no longer
+    # appear inside any shard. The web application typecheck joined that job
+    # later and is owned by it in full mode the same way.
     for name in (
         "Verify Paper direct pinned MCP SDK",
+        "Verify Paper Studio prepare guard",
         "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
         "Compile source",
         "Validate shell scripts",
+        "Typecheck web application",
     ):
-        steps = [step for step in shard_steps if step.get("name") == name]
-        assert len(steps) == 1 and steps[0]["if"] == "matrix.index == 0"
+        assert not [step for step in shard_steps if step.get("name") == name]
+        qual = [
+            step for step in workflow["jobs"]["qualification"]["steps"]
+            if step.get("name") == name
+        ]
+        assert len(qual) == 1 and qual[0].get("if") is None
 
 
 def test_hosted_gate_stays_a_single_required_check_job():
@@ -914,13 +940,14 @@ def test_hosted_gate_stays_a_single_required_check_job():
         (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
         Loader=cip._WorkflowYAMLLoader,
     )
-    assert list(workflow["jobs"]) == ["pytest_shards", "test"]
+    assert list(workflow["jobs"]) == ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards", "test"]
     job = workflow["jobs"]["test"]
     assert "strategy" not in job
-    assert job["name"] == "test"
+    from scripts import ci_parallel_shard as fan
+    assert job["name"] == fan._REQUIRED_GATE_NAME
     assert job["runs-on"] == "ubuntu-latest"
-    assert job["if"] == "${{ always() }}"
-    assert job["needs"] == ["pytest_shards"]
+    assert job["if"] == fan._REQUIRED_GATE_IF
+    assert job["needs"] == ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards"]
     gate_steps = [
         step for step in job["steps"]
         if step.get("name") == "Run repository test gate"
@@ -928,9 +955,16 @@ def test_hosted_gate_stays_a_single_required_check_job():
     assert len(gate_steps) == 1
     gate = gate_steps[0]
     assert gate["env"]["SHARDS_STATUS"] == "${{ needs.pytest_shards.result }}"
-    assert 'if [ "$SHARDS_STATUS" != success ]; then' in gate["run"]
+    assert gate["env"]["GUARDS_STATUS"] == "${{ needs.pin_guards.result }}"
+    assert '[ "$GUARDS_STATUS" != success ]' in gate["run"]
+    assert gate["env"]["QUAL_STATUS"] == "${{ needs.qualification.result }}"
+    assert '[ "$QUAL_STATUS" != success ]' in gate["run"]
+    assert '[ "$QUAL_STATUS" != skipped ]' in gate["run"]
+    assert 'if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then' in gate["run"]
+    assert '[ "$SHARDS_STATUS" != success ]' in gate["run"]
+    assert '[ "$PR_FAST_STATUS" != success ]' in gate["run"]
     assert "exit 1" in gate["run"]
-    assert "python scripts/ci_pytest.py --plan-only --jobs 3" in gate["run"]
+    assert "python scripts/ci_pytest.py --plan-only --jobs 6" in gate["run"]
     assert all(step.get("continue-on-error", False) is False for step in job["steps"])
 
 
@@ -969,6 +1003,12 @@ def test_measured_three_job_pins_preserve_exact_coverage_and_stability() -> None
     gate = cip.resolve_gate(_ROOT)
     included = gate["included"]
     pins = {
+        # Hosted shard 0 exceeded its observed stable duration; these four
+        # pinned moves compensate one another and retain complete coverage.
+        "tests/test_capacity_host_artifacts.py": 1,
+        "tests/test_native_fabric_quota_continuity.py": 0,
+        "tests/test_trend_persistence_walkforward.py": 0,
+        "tests/test_deploy_provenance.py": 0,
         "tests/test_executive_runtime_bounded_acquisition.py": 1,
         "tests/test_mastermind_window_reader_static_fences.py": 1,
         "tests/test_market_view.py": 1,
@@ -1217,3 +1257,67 @@ def test_exit_code_is_the_lowest_failing_shard_not_the_first_to_finish(
 
     monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
     assert cip.run_shards(shards, root=tmp_path) == 3
+
+
+
+# The preflight is a fast witness of incumbent strict gates, not an alternate
+# discovery/exclusion/fan-in owner. A release PR with an illegal EVAL R0
+# surface or changed role source without an updated immutable fixture should
+# fail near checkout instead of consuming all six expensive full shards.
+_FAST_RELEASE_NODES = (
+    "tests/test_agent_eval_inertness.py::test_changed_paths_are_within_the_allowed_r0_surface",
+    "tests/test_agent_eval_inertness.py::test_no_control_plane_config_dependency_or_workflow_file_touched",
+    "tests/test_operator_first_policy.py::test_incumbent_semantic_discriminator_operator_owns_closure",
+)
+
+
+def _assert_fast_release_preflight(workflow: dict) -> None:
+    jobs = workflow["jobs"]
+    shard_job = jobs["pytest_shards"]
+    steps = shard_job["steps"]
+    names = [step.get("name") for step in steps]
+    assert names.count("Fast source-bound release preflight") == 1
+    step = steps[names.index("Fast source-bound release preflight")]
+    assert "if" not in step  # all shards and all event types
+    assert "continue-on-error" not in step
+    command = step["run"]
+    assert command.startswith("python -m pytest -q --tb=short ")
+    for node in _FAST_RELEASE_NODES:
+        assert command.count(node) == 1
+    assert names.index("Install project") < names.index("Fast source-bound release preflight")
+    assert names.index("Fast source-bound release preflight") < names.index("Run repository test shard")
+    assert names.index("Fast source-bound release preflight") < names.index(
+        "H1 required real Linux no-ACL positive journey"
+    )
+    assert shard_job["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
+    assert shard_job["strategy"]["fail-fast"] is False
+    assert "test" in jobs  # existing protected fan-in remains the source of truth
+
+
+def test_source_bound_fast_preflight_runs_for_all_full_shards():
+    source = (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    workflow = cip.yaml.load(source, Loader=cip._WorkflowYAMLLoader)
+    _assert_fast_release_preflight(workflow)
+
+
+@pytest.mark.parametrize("corruption", ["missing", "conditional", "waived", "drop-r0", "drop-role", "late"])
+def test_source_bound_fast_preflight_regression_rejects_coverage_or_order_loss(corruption):
+    source = (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    workflow = cip.yaml.load(source, Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["pytest_shards"]["steps"]
+    step = next(s for s in steps if s.get("name") == "Fast source-bound release preflight")
+    if corruption == "missing":
+        steps.remove(step)
+    elif corruption == "conditional":
+        step["if"] = "matrix.index == 0"
+    elif corruption == "waived":
+        step["continue-on-error"] = True
+    elif corruption == "drop-r0":
+        step["run"] = step["run"].replace(_FAST_RELEASE_NODES[0], "")
+    elif corruption == "drop-role":
+        step["run"] = step["run"].replace(_FAST_RELEASE_NODES[2], "")
+    else:
+        steps.remove(step)
+        steps.append(step)
+    with pytest.raises(AssertionError):
+        _assert_fast_release_preflight(workflow)

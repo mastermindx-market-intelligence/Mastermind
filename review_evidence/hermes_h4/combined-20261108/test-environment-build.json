@@ -1,0 +1,24 @@
+{
+  "command": [
+    "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/def19b3c9d1241239cfb81df97b1f7e4/venv/bin/python",
+    "-I",
+    "-B",
+    "-c",
+    "import sys,runpy;sys.path.insert(0,'/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/hermes-combined');runpy.run_module('pm.build_env',run_name='__main__')",
+    "--source",
+    "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/hermes-combined",
+    "--out",
+    "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/native-test-environment",
+    "--python",
+    "/Users/chriswong/.hermes/installs/ebc1732af730d408/environments/def19b3c9d1241239cfb81df97b1f7e4/venv/bin/python",
+    "--group",
+    "dev",
+    "--group",
+    "test"
+  ],
+  "live_environment_modified": false,
+  "output": "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/native-test-environment",
+  "returncode": 0,
+  "schema": "mastermind.hermes_h4_test_environment_build.v1",
+  "seconds": 12.52
+}

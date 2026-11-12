@@ -502,10 +502,15 @@ class OperatorHarnessOrchestrator:
         operation_id: OperationId,
         cursor: EventCursor | None = None,
         timeout_seconds: float = 30.0,
+        _before_role_seal: Callable[
+            [OperatorTurnReceipt, RawRoleResultObservation], None
+        ] | None = None,
     ) -> OperatorTurnReceipt:
         """Issue one turn and persist only a candidate result, never Job completion."""
 
         self._assert_replayable(operation_id)
+        if _before_role_seal is not None and not callable(_before_role_seal):
+            raise OperatorHarnessOrchestrationError("trusted turn consumer is invalid")
         bounded_timeout = float(timeout_seconds)
         if (
             not math.isfinite(bounded_timeout)
@@ -534,6 +539,14 @@ class OperatorHarnessOrchestrator:
             or any(char not in "0123456789abcdef" for char in initial_plan)
         ):
             raise OperatorHarnessOrchestrationError("interactive plan seal is invalid")
+        if _before_role_seal is not None and (
+            initial_plan is not None
+            or not bool(getattr(self.runtime, "operator_principal_required", lambda _: False)(
+                session.attempt_id))
+        ):
+            raise OperatorHarnessOrchestrationError(
+                "trusted turn consumer requires one unsealed admitted role turn"
+            )
         turn = self.runtime.begin_operator_turn(
             session.attempt_id, session.generation, operation_id
         )
@@ -611,6 +624,14 @@ class OperatorHarnessOrchestrator:
                 error=exc,
             )
             raise OperatorEffectUnknown("turn result effect is unknown") from exc
+        receipt = OperatorTurnReceipt(
+            attempt_id=session.attempt_id,
+            turn=turn,
+            start=started,
+            events=tuple(events),
+            cursor=next_cursor,
+            candidate=candidate,
+        )
         if initial_plan is not None:
             # The follow-up candidate is already recorded by Runtime. It is
             # not a new plan and must not replace the initial accepted seal.
@@ -627,6 +648,11 @@ class OperatorHarnessOrchestrator:
                 )
             try:
                 raw_observation = self.adapter.observe_raw_role_result(turn)
+                # Private normal-factory composition only. The native turn and
+                # candidate are already acquired, while the existing actionable
+                # writer binding still qualifies. This grants no completion.
+                if _before_role_seal is not None:
+                    _before_role_seal(receipt, raw_observation)
                 self.runtime.seal_operator_role_result(
                     session.attempt_id, turn, raw_observation
                 )
@@ -634,14 +660,7 @@ class OperatorHarnessOrchestrator:
                 raise OperatorHarnessOrchestrationError(
                     "orchestration role result could not be sealed"
                 ) from exc
-        return OperatorTurnReceipt(
-            attempt_id=session.attempt_id,
-            turn=turn,
-            start=started,
-            events=tuple(events),
-            cursor=next_cursor,
-            candidate=candidate,
-        )
+        return receipt
 
     def graceful_stop(
         self,

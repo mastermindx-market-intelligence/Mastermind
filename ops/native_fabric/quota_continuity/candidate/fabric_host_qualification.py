@@ -8,9 +8,10 @@ import pick
 def qualification_route(host, *, task_class, complexity, reason, subject_pool=None,
                         root=None, parent=None, registry=None, state_dir=None, now=None,
                         pool="grok"):
-    # The sole added first-worker lane is MiniMax on the named held hosts.
-    # Preserve the existing Grok qualification scope and every other host gate.
-    authorized = {"grok": {"mb": "darwin", "m1": "darwin"},
+    # Ubuntu4 may explicitly qualify Grok or MiniMax only as a first worker.
+    # Normal routing remains held until a real provider START, settled result,
+    # and original-parent acceptance. Preserve all other host/provider gates.
+    authorized = {"grok": {"mb": "darwin", "m1": "darwin", "ubuntu4": "linux"},
                   "minimax": {"m1": "darwin", "ubuntu4": "linux"}}
     platform = authorized.get(pool, {}).get(host)
     if platform is None or not root or not parent:

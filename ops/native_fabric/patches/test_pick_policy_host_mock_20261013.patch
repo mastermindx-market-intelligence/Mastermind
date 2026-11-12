@@ -1,0 +1,7 @@
+--- a/ext/tests/test_pick_policy.py
++++ b/ext/tests/test_pick_policy.py
+@@ -415,3 +415,3 @@
+     monkeypatch.setattr(
+-        pick, "_eligible_host_routes", lambda host: {"minimax": ("host", "minimax")}
++        pick, "_eligible_host_routes", lambda host, **_kwargs: {"minimax": ("host", "minimax")}
+     )

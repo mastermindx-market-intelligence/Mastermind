@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import inspect
+import dataclasses
+from control_plane.executive_runtime import orchestration_digest
 
 import pytest
 
@@ -49,6 +51,9 @@ def _attempt(
     checkpoint=None,
     grant: bool = True,
 ) -> Attempt:
+    placement = {"worker_id": worker_id, "quota_class": "default",
+        "provider": "anthropic" if worker_id == "worker-a" else "openai-codex",
+        "account_label": "realm-a" if worker_id == "worker-a" else "realm-b"}
     return Attempt(
         attempt_id=attempt_id,
         job_id="JOB-002",
@@ -78,6 +83,7 @@ def _attempt(
         result_path=None,
         exit_code=None,
         launch_metadata={},
+        placement_snapshot=placement, placement_snapshot_digest=orchestration_digest(placement),
         effective_grant={"schema_version": "mastermind.executive_effective_grant/v1"} if grant else None,
         effective_grant_digest=GRANT_DIGEST if grant else None,
     )
@@ -228,8 +234,11 @@ def test_refuses_same_realm_claim():
             "worker-b": _worker("worker-b", "anthropic", "realm-a"),
         }
     )
-    # Same provider/account is enough to prove there was no realm change even if
-    # an implementation materializes a different Worker identity.
+    target = runtime.attempts.values[TARGET_ID]
+    placement = dict(target.placement_snapshot, provider="anthropic", account_label="realm-a")
+    runtime.attempts.values[TARGET_ID] = dataclasses.replace(target,
+        placement_snapshot=placement, placement_snapshot_digest=orchestration_digest(placement))
+    # The admitted placement, rather than mutable Worker metadata, owns realm.
     with pytest.raises(StateConflict, match="cross-realm claim"):
         build_current_continuation_draft(
             runtime, source_attempt_id=SOURCE_ID, target_attempt_id=TARGET_ID, refs=_refs()
@@ -280,3 +289,25 @@ def test_accepts_complete_git_object_identity(head_sha):
         ),
     )
     assert draft.github_state["head_sha"] == head_sha
+
+
+def test_admitted_cross_realm_placement_survives_mutable_worker_metadata_drift():
+    runtime = _runtime()
+    runtime.workers = _Registry({
+        "worker-a": _worker("worker-a", "anthropic", "realm-a"),
+        "worker-b": _worker("worker-b", "anthropic", "realm-a"),
+    })
+    draft = build_current_continuation_draft(runtime,
+        source_attempt_id=SOURCE_ID, target_attempt_id=TARGET_ID, refs=_refs())
+    assert draft.source_attempt_id == SOURCE_ID and draft.target_attempt_id == TARGET_ID
+
+
+def test_admitted_same_realm_placement_cannot_borrow_rotated_worker_metadata():
+    runtime = _runtime()  # Worker registry says cross-realm; admission says same.
+    target = runtime.attempts.values[TARGET_ID]
+    placement = dict(target.placement_snapshot, provider="anthropic", account_label="realm-a")
+    runtime.attempts.values[TARGET_ID] = dataclasses.replace(target,
+        placement_snapshot=placement, placement_snapshot_digest=orchestration_digest(placement))
+    with pytest.raises(StateConflict, match="cross-realm claim"):
+        build_current_continuation_draft(runtime,
+            source_attempt_id=SOURCE_ID, target_attempt_id=TARGET_ID, refs=_refs())

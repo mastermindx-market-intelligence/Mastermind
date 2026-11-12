@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+from functools import partial
 import hashlib
 import hmac
 import json
@@ -10,7 +11,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from control_plane.browser_resource_contract import ALLOWED_BROWSER_TOOLS, BrowserMode
+from control_plane.browser_resource_contract import ALLOWED_BROWSER_TOOLS, APP_CONTROL_TOOLS, BrowserMode
+from .credential_use import CREDENTIAL_ACTION_SCHEMA, CREDENTIAL_TOOL
 
 
 START_SCHEMA = "mastermind.workbench_browser_start.v1"
@@ -292,13 +294,14 @@ def canonical_browser_arguments(value: object) -> str:
 
 
 def validate_prepared_browser_action(
-    value: object, *, now_ms: int, require_fresh: bool = True
+    value: object, *, now_ms: int, require_fresh: bool = True,
+    allowed_tools: frozenset[str] = ALLOWED_BROWSER_TOOLS,
 ) -> PreparedBrowserAction:
     if type(value) is not PreparedBrowserAction:
         raise BrowserContractError("invalid browser action reference")
     _common(
         schema=value.schema,
-        expected_schema=ACTION_SCHEMA,
+        expected_schema=CREDENTIAL_ACTION_SCHEMA if value.schema == CREDENTIAL_ACTION_SCHEMA else ACTION_SCHEMA,
         subject_digest=value.subject_digest,
         client_ref=value.client_ref,
         resource=value.resource,
@@ -317,7 +320,9 @@ def validate_prepared_browser_action(
     )
     _hex(value.action_id, _HEX32, "action_id")
     _hex(value.browser_ref_sha256, _HEX64, "browser_ref_sha256")
-    if value.tool_name not in ALLOWED_BROWSER_TOOLS:
+    credential = value.schema == CREDENTIAL_ACTION_SCHEMA
+    if ((credential and value.tool_name != CREDENTIAL_TOOL)
+            or (not credential and value.tool_name not in allowed_tools)):
         raise BrowserContractError("browser tool is not granted")
     try:
         parsed = json.loads(value.arguments_json)
@@ -325,6 +330,12 @@ def validate_prepared_browser_action(
         raise BrowserContractError("browser arguments are invalid") from error
     if canonical_browser_arguments(parsed) != value.arguments_json:
         raise BrowserContractError("browser arguments are not canonical")
+    if credential and (type(parsed) is not dict or set(parsed) != {"grant_ref", "selection_sha256"}
+            or type(parsed["grant_ref"]) is not str
+            or re.fullmatch(r"credential:[a-f0-9]{32}", parsed["grant_ref"]) is None
+            or type(parsed["selection_sha256"]) is not str
+            or _HEX64.fullmatch(parsed["selection_sha256"]) is None):
+        raise BrowserContractError("credential action is not closed")
     return value
 
 
@@ -373,10 +384,14 @@ def _strict_json(raw: bytes) -> Any:
 class BrowserRefCodec:
     """Domain-separated HMAC references using an owner-provisioned Workbench key."""
 
-    def __init__(self, key: bytes) -> None:
+    def __init__(self, key: bytes, *, allowed_tools: frozenset[str] = ALLOWED_BROWSER_TOOLS) -> None:
         if type(key) is not bytes or len(key) < 32:
             raise ValueError("browser reference key must contain at least 32 bytes")
         self._key = bytes(key)
+        if type(allowed_tools) is not frozenset or allowed_tools not in (ALLOWED_BROWSER_TOOLS, ALLOWED_BROWSER_TOOLS | APP_CONTROL_TOOLS):
+            raise ValueError("browser tool profile is not qualified")
+        self.allowed_tools = allowed_tools
+        self._validate_action = partial(validate_prepared_browser_action, allowed_tools=allowed_tools)
 
     def _encode(
         self,
@@ -463,7 +478,7 @@ class BrowserRefCodec:
         )
 
     def encode_action(self, value: PreparedBrowserAction) -> str:
-        return self._encode(value, purpose=_ACTION_PURPOSE, validate=validate_prepared_browser_action)
+        return self._encode(value, purpose=_ACTION_PURPOSE, validate=self._validate_action)
 
     def decode_action(
         self, token: object, *, now_ms: int, require_fresh: bool = True
@@ -472,9 +487,25 @@ class BrowserRefCodec:
             token,
             purpose=_ACTION_PURPOSE,
             cls=PreparedBrowserAction,
-            validate=validate_prepared_browser_action,
+            validate=self._validate_action,
             now_ms=now_ms,
             require_fresh=require_fresh,
+        )
+
+    def decode_recovery_action(self, token: object, *, now_ms: int) -> PreparedBrowserAction:
+        """Read a known historical signed identity without granting dispatch.
+
+        Disabling an opt-in profile cannot erase its original action receipts.
+        The port still checks the signed resource's profile and owner, and must
+        use decode_action with the active allowlist before any new dispatch.
+        """
+        return self._decode(
+            token,
+            purpose=_ACTION_PURPOSE,
+            cls=PreparedBrowserAction,
+            validate=partial(validate_prepared_browser_action, allowed_tools=ALLOWED_BROWSER_TOOLS | APP_CONTROL_TOOLS),
+            now_ms=now_ms,
+            require_fresh=False,
         )
 
 

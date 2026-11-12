@@ -1,0 +1,43 @@
+{
+  "schema": "mastermind.workspace_project_direction.v1",
+  "selection": {
+    "work_ref": "WS:EXECUTIVE-ECOSYSTEM-COMPLETION"
+  },
+  "availability": "AVAILABLE",
+  "source": {
+    "repository": "mastermindx-market-intelligence/macro",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "path": "agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md",
+    "content_sha256": "b7903fc9c35ee0e1389ecb615d22b09222a40c3c902a9b7c001f9359ab08e521"
+  },
+  "direction": {
+    "work_ref": "WS:EXECUTIVE-ECOSYSTEM-COMPLETION",
+    "workstream_source": {
+      "repository": "mastermindx-market-intelligence/macro",
+      "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "path": "agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md",
+      "content_sha256": "b7903fc9c35ee0e1389ecb615d22b09222a40c3c902a9b7c001f9359ab08e521"
+    },
+    "current": {
+      "decision_ref": "DEC:EXECUTIVE-ECOSYSTEM-CURRENT-DIRECTION-20261104",
+      "answer": "Complete full canonical Paper feature and design parity and the authenticated app to admitted worker to retained result to original-parent consumption journey, including interrupted, corrected and reopened journeys and all original Executive Ecosystem acceptance obligations.",
+      "rationale": "The delegated Root reaffirmed the existing North Star on 2026-11-04. Authored objectives and plan revisions do not by themselves record an accepted Direction. Source qualification, CI, merge, installation and a dashboard demonstration each prove their own layer; the programme retains its complete original real-journey and product acceptance obligations. The original09b protected administrator read and the actual Chrome capture refusal remain binding on their specific effects. This decision records the current Direction; it does not grant Runtime execution, app permissions, plan adoption, host acquisition or service changes.",
+      "decided_by": "astra-meta-ceo (root 01a15741-5e68-7803-8eb4-ccac74a6c04b)",
+      "decided_at": "2026-11-04",
+      "date_precision": "DAY",
+      "predecessor": null,
+      "source": {
+        "repository": "mastermindx-market-intelligence/macro",
+        "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "path": "agentos/decisions/DEC-EXECUTIVE-ECOSYSTEM-CURRENT-DIRECTION-20261104.md",
+        "content_sha256": "9173b17da715afff88d210722e8568f6a7ae2e41019a1ef2b583bcb41ac1a809"
+      }
+    },
+    "history": {
+      "revisions": [],
+      "has_more": false,
+      "total_count": 1
+    }
+  },
+  "reason_codes": []
+}

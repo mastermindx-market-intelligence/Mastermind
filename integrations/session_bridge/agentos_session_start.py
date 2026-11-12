@@ -54,7 +54,8 @@ def _directory(value) -> Path:
 
 
 def session_start_context(event, *, workspace_root, workstream, owner_root=OWNER_ROOT,
-                          budget=4000, reader=read_context) -> dict:
+                          budget=4000, reader=read_context, charter_root=None,
+                          owner_session=None, owner=None) -> dict:
     """Expand one explicit context focus; workspace equality grants no authority."""
     if (type(workstream) is not str or not WORKSTREAM.fullmatch(workstream)
             or type(budget) is not int or not 800 <= budget <= 12000):
@@ -66,6 +67,20 @@ def session_start_context(event, *, workspace_root, workstream, owner_root=OWNER
         raise LaunchInputError("SESSION_CONTEXT_EVENT_INVALID")
     if _directory(event.get("cwd")) != _directory(workspace_root):
         return {}
+    if any(value is not None for value in (charter_root, owner_session, owner)):
+        # Opt-in original-owner resume only. This never invokes Stop, starts a
+        # task, initiates a turn, or promotes the organizational bundle to a grant.
+        if event['source'] != 'resume' or any(value is None for value in
+                (charter_root, owner_session, owner)):
+            return {}
+        from integrations.session_bridge.project_owner_continuation import collect_context, bounded_json
+        result = collect_context(workspace_root=workspace_root,
+            observed_workspace=event['cwd'], owner_session=owner_session,
+            observed_session=event['session_id'], workstream=workstream,
+            owner=owner, charter_root=charter_root, macro_root=owner_root,
+            budget=budget, reader=reader)
+        result['entrypoint'] = 'original_owner_resume'
+        return _output(bounded_json(result))
     try:
         owner = _directory(owner_root)
         raw, observation = reader(
@@ -131,6 +146,9 @@ def main(argv=None, *, stdin=None, stdout=None, stderr=None, reader=read_context
     parser.add_argument("--workstream", required=True)
     parser.add_argument("--macro-root", default=OWNER_ROOT, type=Path)
     parser.add_argument("--budget", default=4000, type=int)
+    parser.add_argument("--charter-root", type=Path)
+    parser.add_argument("--owner-session")
+    parser.add_argument("--owner")
     stream = sys.stdin.buffer if stdin is None else stdin
     out = sys.stdout if stdout is None else stdout
     err = sys.stderr if stderr is None else stderr
@@ -143,7 +161,8 @@ def main(argv=None, *, stdin=None, stdout=None, stderr=None, reader=read_context
                            parse_constant=_nonfinite)
         result = session_start_context(event, workspace_root=args.workspace_root,
             workstream=args.workstream, owner_root=args.macro_root,
-            budget=args.budget, reader=reader)
+            budget=args.budget, reader=reader, charter_root=args.charter_root,
+            owner_session=args.owner_session, owner=args.owner)
     except (LaunchInputError, OSError, ValueError, TypeError, RecursionError) as exc:
         reason = str(exc)
         err.write((reason if SAFE_REASON.fullmatch(reason)

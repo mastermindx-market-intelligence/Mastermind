@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 // Real-engine acceptance for the dedicated, private loopback listener. No keys,
 // grants, metadata impersonation, retries, or public DNS overrides are involved.
+//
+// The harness owns its own bounded temporary marker instead of reading a system file:
+// Darwin keeps host temporary files under /private/tmp and Linux under /tmp. Any other
+// platform is refused explicitly; there is no system-file fallback.
+const MARKER_ROOTS = { darwin: '/private/tmp', linux: '/tmp' };
+const markerRoot = MARKER_ROOTS[process.platform];
 const url = new URL(process.argv[2] || 'http://127.0.0.1:45018/mcp');
 assert.equal(url.protocol, 'http:');
 assert.equal(url.hostname, '127.0.0.1');
@@ -14,6 +22,7 @@ const transport = new StreamableHTTPClientTransport(url);
 const receipt = { kind: 'installed-loopback-real-engine', nativeChatGPT: false,
   at: new Date().toISOString(), endpoint: url.href, measurements: [] };
 let initialized = false;
+let fixtureDir = null;
 const measure = async (name, fn) => {
   const start = performance.now();
   const result = await fn();
@@ -22,6 +31,9 @@ const measure = async (name, fn) => {
   return result;
 };
 try {
+  if (!markerRoot)
+    throw new Error(`unsupported acceptance platform: ${process.platform}`);
+  receipt.markerRoot = markerRoot;
   for (const path of ['/.well-known/oauth-protected-resource',
     '/.well-known/oauth-protected-resource/mcp', '/.well-known/oauth-authorization-server']) {
     const response = await fetch(new URL(path, url), { signal: AbortSignal.timeout(5000) });
@@ -42,10 +54,15 @@ try {
     assert.ok(tools.some(t => t.name === required), `${required} exposed`);
   const ping = await measure('studio_ping', () => client.callTool({ name: 'studio_ping', arguments: {} }));
   receipt.ping = ping;
+  fixtureDir = await mkdtemp(`${markerRoot}/studio-private-acceptance-`);
+  const fixturePath = join(fixtureDir, 'read-marker.txt');
+  const fixtureMarker = `STUDIO_PRIVATE_READ_${Date.now()}`;
+  await writeFile(fixturePath, `${fixtureMarker}\n`, { encoding: 'utf8', mode: 0o600 });
   for (let i = 0; i < 3; i++) {
     const read = await measure('read_file', () => client.callTool({ name: 'read_file', arguments: {
-      path: '/System/Library/CoreServices/SystemVersion.plist', offset: 0, length: 8 } }));
-    assert.ok(read.content.some(c => c.type === 'text' && c.text.includes('plist')), 'real system file read');
+      path: fixturePath, offset: 0, length: 8 } }));
+    assert.ok(read.content.some(c => c.type === 'text' && c.text.includes(fixtureMarker)),
+      'bounded acceptance marker read');
   }
   const marker = `STUDIO_PRIVATE_ACCEPTANCE_${Date.now()}`;
   const command = await measure('start_process', () => client.callTool({ name: 'start_process', arguments: {
@@ -58,10 +75,22 @@ try {
   receipt.error = error.message;
   process.exitCode = 1;
 } finally {
+  // Each finalization step is attempted independently: one failing cleanup must not skip the
+  // others, and any cleanup failure must leave the receipt FAIL rather than PASS.
+  const cleanupFailure = (name, error) => {
+    receipt[name] = error instanceof Error ? error.message : String(error);
+    receipt.status = 'FAIL';
+    process.exitCode = 1;
+  };
   if (initialized) {
     try { await transport.terminateSession(); receipt.sessionDeleted = true; }
-    catch (error) { receipt.cleanupError = error.message; process.exitCode = 1; }
+    catch (error) { cleanupFailure('cleanupError', error); }
   }
-  await client.close();
+  try { await client.close(); }
+  catch (error) { cleanupFailure('clientCloseError', error); }
+  if (fixtureDir) {
+    try { await rm(fixtureDir, { recursive: true, force: true }); receipt.fixtureDeleted = true; }
+    catch (error) { cleanupFailure('fixtureCleanupError', error); }
+  }
   console.log(JSON.stringify(receipt, null, 2));
 }

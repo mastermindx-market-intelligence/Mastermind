@@ -18,12 +18,19 @@ import pytest
 from control_plane import executive_backup as b
 from ops.executive_os import acceptance_maintenance as m
 from ops.executive_os import schema_upgrade_evidence as evidence
+from tests.test_executive_persistent_origin import filesystem
 from tests.test_executive_spent_ctime_qualification import _spent_fixture, _no_external_effects
 from tests.test_executive_precensus_joined_acceptance import _control_boundary
 from tests.test_executive_acceptance_v5_to_v7 import (
     SUCCESSOR, MIDDLE, _issued, _admitted, _actual_proof_delta,
     _proof_backup_chain, _write_proof_receipts, _real_pass_summary, _write_receipt,
 )
+
+
+@pytest.fixture(autouse=True)
+def _current_data_anchor_fixture(filesystem):
+    """Explicit raw Root/Darwin facts; real held anchor predicates execute."""
+    yield filesystem
 
 
 def test_genuine_three_executor_chain_reaches_finish_and_future_carry(tmp_path,monkeypatch):

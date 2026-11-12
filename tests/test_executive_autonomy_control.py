@@ -158,10 +158,16 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "a2-restored-readside-preflight",
         "finite-control-stage",
         "finite-control-stage-reconcile",
+        "finite-control-retire",
+        "finite-control-retire-reconcile",
         "paid-control-stage",
         "paid-control-stage-reconcile",
         "publish-os-gateway",
         "reconcile-os-gateway",
+        "plan-control-component",
+        "apply-control-component",
+        "reconcile-control-component",
+        "resume-control-component",
     }
     # The OS gateway publication domain: the two closed verbs carry only the
     # bounded digests and the original transaction id, and never accept a
@@ -182,6 +188,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "expected_mcp_plist_sha256": "c" * 64,
         "expected_grant_sha256": None,
         "expected_grant_absent": True,
+        "expected_predecessor_receipt_sha256": None,
     }
     digest_publish = list(publish_argv)
     digest_publish[-1:] = ["--expected-grant-sha256", "d" * 64]
@@ -232,10 +239,11 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         with pytest.raises(SystemExit):
             parser.parse_args([command, "--expected-sha", SHA, "--service-label", "foreign"])
 
-    for command in ("finite-control-stage", "finite-control-stage-reconcile"):
+    for command in ("finite-control-stage", "finite-control-stage-reconcile",
+                    "finite-control-retire", "finite-control-retire-reconcile"):
         argv = [command, "--expected-sha", SHA]
         expected = {"command": command, "expected_sha": SHA}
-        if command == "finite-control-stage":
+        if command in {"finite-control-stage", "finite-control-retire"}:
             with pytest.raises(SystemExit):
                 parser.parse_args(argv)
             argv += ["--expected-control-sha256", "a" * 64]
@@ -4298,6 +4306,9 @@ def test_transaction_owner_claim_refuses_a_competing_writer_and_closes_its_fd(
         st_ino=73,
     )
     ledger = []
+    # Do not patch process-global os.fstat/open/close: pytest and Path use them.
+    # The production module resolves its own os binding, so isolate its test seam.
+    monkeypatch.setattr(control, "os", types.SimpleNamespace(**vars(control.os)))
     monkeypatch.setattr(host, "_config_root_safe", lambda: ledger.append("root"))
     monkeypatch.setattr(
         host, "_transaction_present", lambda: ledger.append("marker") or True
@@ -4397,6 +4408,8 @@ def test_transaction_owner_directory_lock_excludes_competing_process_carriers(
     for host in (first, second):
         monkeypatch.setattr(host, "_config_root_safe", lambda: None)
         monkeypatch.setattr(host, "_transaction_present", lambda: True)
+    # os.fstat is used by pytest internals; patch only this owner's module binding.
+    monkeypatch.setattr(control, "os", types.SimpleNamespace(**vars(control.os)))
     monkeypatch.setattr(control, "AUTONOMY_TRANSACTION", marker)
     monkeypatch.setattr(control.os, "fstat", lambda _fd: safe)
     monkeypatch.setattr(control.Path, "lstat", lambda _path: safe)
@@ -7733,7 +7746,15 @@ def _marker_adapter_bindings():
                 info.st_atime,
                 info.st_mtime,
                 info.st_ctime,
-            )
+            ),
+            # This adapter changes only privilege ownership. Keep the real
+            # high-resolution metadata so descriptor/path coherence checks in
+            # unrelated readers do not observe a fabricated file movement.
+            {
+                "st_atime_ns": info.st_atime_ns,
+                "st_mtime_ns": info.st_mtime_ns,
+                "st_ctime_ns": info.st_ctime_ns,
+            },
         )
 
     def privileged_fstat(descriptor):
@@ -9041,9 +9062,14 @@ def test_production_arm_requires_optional_maintenance_carry_pass(tmp_path,monkey
     root=tmp_path/"control/acceptance"/SHA
     root.mkdir(parents=True)
     root.chmod(0o700)
+    # POSIX directories can inherit the parent's group rather than the
+    # process's primary group (for example /private/tmp on macOS). Bind the
+    # fixture account to the actual fixture directory; production still checks
+    # the exact configured owner/group and mode without an exemption.
+    fixture_identity=root.lstat()
     monkeypatch.setattr(control,"RUNTIME_ROOT",tmp_path)
-    monkeypatch.setattr(control.pwd,"getpwnam",lambda name:types.SimpleNamespace(pw_uid=os.getuid()))
-    monkeypatch.setattr(control.grp,"getgrnam",lambda name:types.SimpleNamespace(gr_gid=os.getgid()))
+    monkeypatch.setattr(control.pwd,"getpwnam",lambda name:types.SimpleNamespace(pw_uid=fixture_identity.st_uid))
+    monkeypatch.setattr(control.grp,"getgrnam",lambda name:types.SimpleNamespace(gr_gid=fixture_identity.st_gid))
     monkeypatch.setattr(control,"_has_acl",lambda path:False)
     raw=b"existing full acceptance receipt"
     monkeypatch.setattr(control,"_root_json",lambda *args,**kwargs:({},raw))

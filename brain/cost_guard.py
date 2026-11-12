@@ -47,6 +47,8 @@ from __future__ import annotations
 
 import json
 import os
+import math
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
@@ -242,11 +244,11 @@ def cap() -> float:
         return 0.0
 
 
-def record(book: str, usd, asof: str | None = None, *,
+def _record_unlocked(book: str, usd, asof: str | None = None, *,
            seat: str | None = None, model: str | None = None,
            input_tokens: int = 0, output_tokens: int = 0,
            cache_read_tokens: int = 0, cache_creation_tokens: int = 0,
-           key_id: str | None = None) -> None:
+           key_id: str | None = None, _snapshot=None) -> None:
     """Add ``usd`` to ``book``'s running spend for ``asof`` (default today).
 
     Optional keyword args enable per-seat, per-model, and per-token-type granularity:
@@ -290,7 +292,9 @@ def record(book: str, usd, asof: str | None = None, *,
 
     try:
         b = _book(book)
-        cur = _load(asof)
+        if _snapshot is None:
+            raise ValueError("strict cost snapshot required")
+        original_raw, cur = _snapshot
         bk = _ensure_book_dict(cur.get(b))
 
         # accumulate book-level totals
@@ -339,7 +343,10 @@ def record(book: str, usd, asof: str | None = None, *,
 
         cur[b] = bk
         _DIR.mkdir(parents=True, exist_ok=True)
-        _path(asof).write_text(json.dumps(cur, sort_keys=True))
+        from brain import runlog
+        path = _path(asof)
+        runlog.durable_replace(path, runlog.canonical(cur),
+                               expected=original_raw)
     except Exception:  # noqa: BLE001 — defensive; never raise
         pass
 
@@ -576,3 +583,130 @@ def write_cost_summary(dest: "Path | str | None" = None,
         return p
     except Exception:  # noqa: BLE001
         return None
+
+
+@contextmanager
+def _cost_receipt_lock(asof: str):
+    from brain import runlog
+    from control_plane import locks
+    if type(asof) is not str or date.fromisoformat(asof).isoformat() != asof:
+        raise runlog.PortfolioRunError("fabric_cost_date_invalid")
+    lock = locks.acquire("global:brain_cost:" + asof, root=_ROOT)
+    if lock is None:
+        raise runlog.PortfolioRunError("fabric_cost_ledger_busy")
+    with lock:
+        yield
+
+
+def _strict_cost(asof: str) -> tuple[bytes | None, dict]:
+    from brain import runlog
+    raw = runlog.strict_read(_path(asof), absent=True)
+    value = runlog.strict_json(raw) if raw is not None else {}
+    if type(value) is not dict:
+        raise runlog.PortfolioRunError("fabric_cost_ledger_invalid")
+    for book, row in value.items():
+        if type(row) not in {dict, int, float} or type(row) in {int, float} and (
+                not math.isfinite(row) or row < 0):
+            raise runlog.PortfolioRunError("fabric_cost_ledger_invalid")
+        if type(row) is dict:
+            for key in ("usd", "input_tokens", "output_tokens", "calls"):
+                amount = row.get(key, 0)
+                if type(amount) not in {int, float} or not math.isfinite(amount) or amount < 0:
+                    raise runlog.PortfolioRunError("fabric_cost_ledger_invalid")
+            operations = row.get("fabric_operations", {})
+            if type(operations) is not dict:
+                raise runlog.PortfolioRunError("fabric_cost_receipts_invalid")
+            for ident, receipt in operations.items():
+                if (type(receipt) is not dict or receipt.get("schema") != "mastermind.book_cost.v1"
+                        or receipt.get("operation_id") != ident or receipt.get("book") != book
+                        or receipt.get("asof") != asof
+                        or receipt.get("digest") != runlog.digest(receipt.get("observations"))):
+                    raise runlog.PortfolioRunError("fabric_cost_receipt_invalid")
+    return raw, value
+
+
+def record(book: str, usd, asof: str | None = None, *,
+           seat: str | None = None, model: str | None = None,
+           input_tokens: int = 0, output_tokens: int = 0,
+           cache_read_tokens: int = 0, cache_creation_tokens: int = 0,
+           key_id: str | None = None) -> None:
+    """Legacy fail-soft API, now sharing the same date-file transaction."""
+    try:
+        day = _asof(asof)
+        with _cost_receipt_lock(day):
+            snapshot = _strict_cost(day)  # This exact validated snapshot owns the write.
+            _record_unlocked(book, usd, day, seat=seat, model=model,
+                input_tokens=input_tokens, output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens, cache_creation_tokens=cache_creation_tokens,
+                key_id=key_id, _snapshot=snapshot)
+    except Exception:
+        pass
+
+
+def fabric_over_budget(book: str, asof: str) -> bool:
+    """The existing cap, with strict selected reads; no reservation is invented."""
+    with _cost_receipt_lock(asof):
+        _, current = _strict_cost(asof)
+        return cap() > 0 and _book_usd(current.get(_book(book))) >= cap()
+
+
+def record_fabric(book: str, operation_id: str, asof: str, observations: list[dict]) -> dict:
+    """One original observation set and its contribution in the same book ledger."""
+    from brain import runlog
+    operation_id = runlog.portfolio_id(operation_id)
+    book = runlog.portfolio_book(book)
+    if type(observations) is not list or len(observations) > 32:
+        raise runlog.PortfolioRunError("fabric_cost_observations_invalid")
+    ids = set()
+    for observation in observations:
+        if (type(observation) is not dict
+                or set(observation) != {"request_id", "model", "pool", "input_tokens", "output_tokens"}
+                or observation["request_id"] in ids
+                or not observation["request_id"].startswith(operation_id + ":brain:")
+                or any(observation[key] is not None and (
+                    type(observation[key]) is not int or not 0 <= observation[key] <= 100_000_000)
+                    for key in ("input_tokens", "output_tokens"))
+                or any(observation[key] is not None and (
+                    type(observation[key]) is not str or len(observation[key]) > 200)
+                    for key in ("model", "pool"))):
+            raise runlog.PortfolioRunError("fabric_cost_observations_invalid")
+        ids.add(observation["request_id"])
+    receipt = {"schema": "mastermind.book_cost.v1", "operation_id": operation_id,
+               "book": book, "asof": asof, "observations": observations,
+               "digest": runlog.digest(observations), "cost_usd": None, "cost_basis": "unknown"}
+    with _cost_receipt_lock(asof):
+        raw, current = _strict_cost(asof)
+        for other_book, other in current.items():
+            if (other_book != book and isinstance(other, dict)
+                    and operation_id in (other.get("fabric_operations") or {})):
+                raise runlog.PortfolioRunError("fabric_cost_book_conflict")
+        row = _ensure_book_dict(current.get(book))
+        operations = row.setdefault("fabric_operations", {})
+        prior = operations.get(operation_id)
+        if prior is not None:
+            if prior != receipt:
+                raise runlog.PortfolioRunError("fabric_cost_identity_conflict")
+            runlog.durable_existing(_path(asof), raw)
+            return prior
+        if len(operations) >= 4096:
+            raise runlog.PortfolioRunError("fabric_cost_receipt_limit")
+        operations[operation_id] = receipt
+        if observations:
+            known = {key: sum(item[key] for item in observations if item[key] is not None)
+                     for key in ("input_tokens", "output_tokens")}
+            for key, value in known.items():
+                row[key] = int(row.get(key, 0)) + value
+            row["calls"] = int(row.get("calls", 0)) + 1
+            row["unpriced_provider_calls"] = int(row.get("unpriced_provider_calls", 0)) + len(observations)
+            row["unknown_usage_calls"] = int(row.get("unknown_usage_calls", 0)) + sum(
+                item["input_tokens"] is None or item["output_tokens"] is None for item in observations)
+            seat = row.setdefault("seats", {}).setdefault(book + "_brain", {})
+            for key, value in known.items():
+                seat[key] = int(seat.get(key, 0)) + value
+            seat["calls"] = int(seat.get("calls", 0)) + 1
+        current[book] = row
+        runlog.durable_replace(_path(asof), runlog.canonical(current), expected=raw)
+        _, checked = _strict_cost(asof)
+        if checked[book]["fabric_operations"][operation_id] != receipt:
+            raise runlog.PortfolioRunError("fabric_cost_readback_failed")
+        return receipt

@@ -1,0 +1,40 @@
+{
+  "schema": "mastermind.ci.measured_single_module_forward_pin.v1",
+  "source_run": 42540190617,
+  "event": "merge_group",
+  "head": "a40e48ef38f8b1afa1a69776711a9dae9a07ea19",
+  "artifact_id": 13643271710,
+  "archive_sha256": "2c4060e828f768920bda9b4c583f24b3dd6f0f7b1b5f828bcf29da3deb591868",
+  "snapshot_sha256": "db1abbd9ecc4180a8801eeebf33aefb8439031e41713acd82e29516ea95e7676",
+  "observation": {
+    "cases_finished": 44,
+    "cases_started": 44,
+    "event": "summary",
+    "module": "tests/test_hermes_primary_application_enrollment.py",
+    "reported_seconds": 156.989826
+  },
+  "retention": {
+    "progress_rows": 512,
+    "summary_rows": 256,
+    "truncated": true,
+    "scope": "Partial successful setup/call/teardown report durations; not complete process/collection/wall attribution."
+  },
+  "repository_step_seconds": {
+    "3": 1498.0,
+    "1": 1787.0,
+    "2": 1688.0,
+    "0": 2101.0,
+    "5": 1381.0,
+    "4": 1346.0
+  },
+  "placement": {
+    "module": "tests/test_hermes_primary_application_enrollment.py",
+    "before": 0,
+    "after": 4,
+    "reason": "Current unpinned module hashes to0; same-run shard4 repository step is lightest. Preserve all other150historicalpins and every other hash; preserve jobs/assertions/coverage/caps."
+  },
+  "historical_map_sha256": "eb8af32eaaab6403554719ca32fe7e0fa495fd92ba081badcc2f5e688474c2c2",
+  "historical_map_count": 150,
+  "whole_run_speedup_measured": false,
+  "limits": "This is one timing-backed forward placement, not a complete LPT recomputation, native-setup optimization or measured speedup. New integrated CI qualifies behavior; no diagnostic rerun or runtime effect."
+}

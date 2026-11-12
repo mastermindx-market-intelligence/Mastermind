@@ -1,7 +1,9 @@
 """Hermetic source/adversarial tests for the picker-only interim. No M2 effect."""
 import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -19,10 +21,65 @@ class R28InterimGen22Test(unittest.TestCase):
         self.assertNotIn("ext/host_pull_launchd.plist.template",manifest)
 
     def test_provenance_links_genuine_protected_git_source(self):
-        raw=(interim.REPO / interim.SRC).read_bytes()
+        # Historical gen22 provenance binds genuine protected objects, not
+        # the evolving CURRENT candidate used by later ordinary generations.
+        raw=subprocess.check_output(['git','-C',str(interim.REPO),'show',
+            interim.PIN+':'+interim.SRC],timeout=15)
         self.assertEqual(hashlib.sha256(raw).hexdigest(),interim.R28)
         for _,new in interim.HUNKS:
             self.assertEqual(raw.count(new),1)
+        fused=subprocess.check_output(['git','-C',str(interim.REPO),'show',
+            '9f65957e29eba92245d78609f032aaea523b7cb4:'+interim.SRC],timeout=15)
+        self.assertEqual(hashlib.sha256(fused).hexdigest(),interim.FUSED)
+        self.assertNotEqual(raw,fused)
+        # Recover only the exact two reviewed hunks and prove the authentic
+        # baseline+protected R28 source still yields the immutable gen22 fuse.
+        baseline=fused
+        for old,new in interim.HUNKS:
+            self.assertEqual(baseline.count(new),1)
+            baseline=baseline.replace(new,old,1)
+        self.assertEqual(hashlib.sha256(baseline).hexdigest(),interim.BASE_PICK)
+        self.assertEqual(interim.fuse(baseline,raw),fused)
+
+    def test_reviewed_source_accepts_exact_pinned_bytes(self):
+        raw=subprocess.check_output(["git","-C",str(interim.REPO),"show",
+            interim.PIN+":"+interim.SRC],timeout=15)
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),interim.R28)
+        git_dir=subprocess.check_output(["git","-C",str(interim.REPO),
+            "rev-parse","--absolute-git-dir"],text=True,timeout=15).strip()
+        with tempfile.TemporaryDirectory() as tmp:
+            repo=Path(tmp)
+            candidate=repo/interim.SRC
+            candidate.parent.mkdir(parents=True)
+            candidate.write_bytes(raw)
+            with (mock.patch.object(interim,"REPO",repo),
+                  mock.patch.dict(os.environ,{"GIT_DIR":git_dir,
+                    "GIT_NO_LAZY_FETCH":"1","GIT_NO_REPLACE_OBJECTS":"1",
+                    "GIT_OPTIONAL_LOCKS":"0"})):
+                self.assertEqual(interim.reviewed_source(),raw)
+
+    def test_reviewed_source_refuses_fused_current_bytes(self):
+        raw=subprocess.check_output(["git","-C",str(interim.REPO),"show",
+            interim.PIN+":"+interim.SRC],timeout=15)
+        fused=subprocess.check_output(["git","-C",str(interim.REPO),"show",
+            "9f65957e29eba92245d78609f032aaea523b7cb4:"+interim.SRC],timeout=15)
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),interim.R28)
+        self.assertEqual(hashlib.sha256(fused).hexdigest(),interim.FUSED)
+        self.assertNotEqual(raw,fused)
+        git_dir=subprocess.check_output(["git","-C",str(interim.REPO),
+            "rev-parse","--absolute-git-dir"],text=True,timeout=15).strip()
+        with tempfile.TemporaryDirectory() as tmp:
+            repo=Path(tmp)
+            candidate=repo/interim.SRC
+            candidate.parent.mkdir(parents=True)
+            candidate.write_bytes(fused)
+            with (mock.patch.object(interim,"REPO",repo),
+                  mock.patch.dict(os.environ,{"GIT_DIR":git_dir,
+                    "GIT_NO_LAZY_FETCH":"1","GIT_NO_REPLACE_OBJECTS":"1",
+                    "GIT_OPTIONAL_LOCKS":"0"})):
+                with self.assertRaisesRegex(ValueError,
+                        "^R28_INTERIM_REFUSED:PROTECTED_MERGED_SOURCE_DRIFT$"):
+                    interim.reviewed_source()
 
     def test_exact_target_descriptor(self):
         proposed=interim.contract()

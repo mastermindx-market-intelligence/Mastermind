@@ -44,7 +44,7 @@ LEAF_TASK_CLASSES = frozenset(
 )
 TASK_COMPLEXITIES = frozenset(("C0_MECHANICAL", "C1_ROUTINE_BOUNDED"))
 ALLOWED_POOL_MODEL = frozenset((("glm", "glm-5.3"), ("glm-frontier", "glm-5.3"), ("grok", "grok-4.6"), ("grok", "grok-4.7")))
-MAX_GRANT_SECONDS = 7200
+MAX_GRANT_SECONDS = 14400
 MIN_CHILD_BUDGET = 1
 MAX_CHILD_BUDGET = 64
 MIN_PACKET_BYTES = 1

@@ -206,6 +206,23 @@ def execution_binding(receipt: dict) -> dict | None:
     }
 
 
+def transport_diagnostic(receipt: dict) -> dict | None:
+    """Non-secret, NON-AUTHORIZING route attribution for the enrolled seat.
+
+    This is diagnostic metadata from the already-verified immutable install.
+    No host identity, tunnel credential, permission or effect/custody right is
+    inferred from it. Legacy unlabelled bundles intentionally omit it.
+    """
+    if receipt.get("schema") not in {SCHEMA_V3, SCHEMA_V4}:
+        return None
+    return {
+        "schema": "mastermind.paper_transport_diagnostic.v1",
+        "seat_id": _seat_id(receipt["seat_id"]),
+        "source_revision": receipt["source_revision"],
+        "bridge_sha256": receipt["files"]["runtime/bridge.py"],
+    }
+
+
 def service_label(receipt: dict) -> str:
     if receipt.get("schema") in {SCHEMA_V3, SCHEMA_V4}:
         return f"{LABEL}.{_seat_id(receipt.get('seat_id'))}"
@@ -573,7 +590,8 @@ def serve(root: Path) -> None:
     sys.path.insert(0, str(root / "runtime"))
     from mcp_server import build_server
     build_server(receipt["allow_write"], receipt["allow_prepare"],
-                 execution_binding=execution_binding(receipt)).run(transport="stdio")
+                 execution_binding=execution_binding(receipt),
+                 transport_diagnostic=transport_diagnostic(receipt)).run(transport="stdio")
 
 
 async def probe(root: Path) -> dict:

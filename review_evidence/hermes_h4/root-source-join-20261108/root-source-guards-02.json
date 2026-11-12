@@ -1,0 +1,21 @@
+{
+  "dependency_overlay": "/private/tmp/mmx-d5-brain-composition-x6ymwpln/.proof-venv/lib/python3.14/site-packages",
+  "interpreter": "/opt/homebrew/bin/python3",
+  "log_sha256": "41857e972a97c84fda8f0bb976a38cd539b49a3db4a62cad732a4e934e98eb4a",
+  "returncode": 0,
+  "seconds": 41.56,
+  "state": "TESTS_FINISHED",
+  "summary": [
+    {
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "559",
+      "time": "40.576"
+    }
+  ],
+  "tests": [
+    "tests/test_ceo_submit_armed_composition.py",
+    "tests/test_executive_fabric_release_identity_review.py"
+  ]
+}

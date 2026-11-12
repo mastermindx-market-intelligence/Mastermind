@@ -369,16 +369,16 @@ def _primary_records(primary_evidence: Sequence[Mapping]) -> tuple[list[dict], i
     ``published_at``/``published``, else ``available_at``: a release's
     publication *is* its event when no separate event date is stated.
 
-    Returns ``(records, classless_record_count)``.
+    Returns ``(records, excluded_non_primary_record_count)``.
     """
     out: list[dict] = []
-    classless = 0
+    excluded_non_primary = 0
     for raw in primary_evidence or ():
         if not isinstance(raw, Mapping):
             continue
         source_class = str(raw.get("source_class") or "").strip()
         if source_class not in PRIMARY_EVIDENCE_CLASSES:
-            classless += 1
+            excluded_non_primary += 1
             continue
         event = _parse_date(
             raw.get("event_date")
@@ -397,7 +397,7 @@ def _primary_records(primary_evidence: Sequence[Mapping]) -> tuple[list[dict], i
                 "source_ref": str(raw.get("source_ref") or raw.get("url") or ""),
             }
         )
-    return out, classless
+    return out, excluded_non_primary
 
 
 def _band(config: Mapping) -> tuple[float, float]:
@@ -434,7 +434,7 @@ def _basis_matches(fact: Mapping, mark: Mapping) -> tuple[bool, str]:
 
 
 def _verify_event_date(
-    fact: Mapping, primary: list[dict], classless_record_count: int
+    fact: Mapping, primary: list[dict], excluded_non_primary_record_count: int
 ) -> Outcome:
     """Rule (i): a primary record of the SAME event dated <= asof contradicts a forward claim.
 
@@ -484,7 +484,7 @@ def _verify_event_date(
         "matched_record_count": len(matched),
         "other_identity_record_count": len(other_identity),
         "unidentified_record_count": len(unidentified),
-        "classless_record_count": classless_record_count,
+        "excluded_non_primary_record_count": excluded_non_primary_record_count,
     }
 
     def _reason(verdict: str, reason: str, detail: str) -> Outcome:
@@ -717,8 +717,10 @@ def verify_fact(
                 raise ValueError(f"{kind} facts require a basis mapping")
 
     if kind == "event_date":
-        primary, classless_count = _primary_records(primary_evidence)
-        return _verify_event_date(fact, primary, classless_count)
+        primary, excluded_non_primary_record_count = _primary_records(
+            primary_evidence
+        )
+        return _verify_event_date(fact, primary, excluded_non_primary_record_count)
     if kind in ("price_level", "price_target"):
         return _verify_price_basis(fact, reference_mark, config)
     if kind == "metric":

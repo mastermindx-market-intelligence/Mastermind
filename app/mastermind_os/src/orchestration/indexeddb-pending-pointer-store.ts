@@ -1,5 +1,12 @@
+import { readCompanyPending } from "../company/pending";
+import { parseProjectSourceWriteTarget, projectSourceWriteKeyMatches } from "./project-source-write-target";
+import { parseInstructionAdmissionTarget } from "./instruction-admission-target";
 import type { OperationPointer } from "./operation-controller";
+import { readNativePending } from "../hermes-native/pending-pointer";
 import { parseDirectConsumeTarget } from "../direct-native-result";
+import { canonicalJson, sha256Hex } from "./operation-key";
+import {parseFreshConversationTarget} from './fresh-conversation-target';
+import {parsePlanProposalTarget} from '../planning/project-plan-proposal';
 
 export interface DurablePendingPointerStore {
   read(scope: string, signal?: AbortSignal): Promise<OperationPointer | null>;
@@ -32,12 +39,49 @@ export const PENDING_POINTER_ERRORS = {
   CANCELLED: "PENDING_POINTER_CANCELLED",
 } as const;
 
-interface ClosedRecord {
-  readonly v: 1;
-  readonly operationKey: string;
-  readonly kind: "launch" | "consume";
-  readonly targetKey: string;
-}
+type SourceOperationKind = "project_create" | "project_adopt" | "direction_accept";
+type StoredKind = "launch" | "consume" | "project_pause" | "project_resume" | SourceOperationKind | "project_source_write" | "instruction_pause" | "conversation_create" | "conversation_consume" | "conversation_turn";
+type ClosedRecord = {
+  readonly v: 1; readonly operationKey: string; readonly kind: "launch" | "consume"; readonly targetKey: string;
+} | {
+  readonly v: 2; readonly operationKey: string; readonly kind: "project_pause"; readonly targetKey: string;
+} | {
+  readonly v: 3; readonly operationKey: string; readonly kind: "project_resume"; readonly targetKey: string;
+} | {
+  /** Source operations retain only a candidate/work lookup, never payload or authority. */
+  readonly v: 4; readonly operationKey: string; readonly kind: SourceOperationKind; readonly targetKey: string;
+} | {
+  readonly v: 5; readonly operationKey: string; readonly kind: "project_source_write"; readonly targetKey: string;
+} | {
+  readonly v: 6; readonly operationKey: string; readonly kind: "instruction_pause"; readonly targetKey: string;
+} | {
+  /** Fresh-conversation original lookup only; no message, preview or authority. */
+  readonly v: 7; readonly operationKey: string; readonly kind: "conversation_create"; readonly targetKey: string;
+} | {
+  /** Journey CREATE retains only the original request/work lookup, never a goal or payload. */
+  readonly v: 8; readonly operationKey: string; readonly kind: "project_create"; readonly targetKey: string;
+} | {
+  /** Planning launch retains only the opaque status lookup; its key binding stays port-owned. */
+  readonly v: 9; readonly operationKey: string; readonly kind: "launch"; readonly targetKey: string;
+} | {
+  readonly v: 10; readonly operationKey: string; readonly kind: "conversation_consume"; readonly targetKey: string;
+} | {
+  readonly v: 11; readonly operationKey: string; readonly kind: "conversation_turn"; readonly targetKey: string;
+} | {
+  /** Project execution keeps only the original opaque operation lookup. */
+  readonly v: 12; readonly operationKey: string; readonly kind: "launch"; readonly targetKey: string;
+} | {
+  /** Same local native request only; no prompt, ticket or execution state. */
+  readonly v: 13; readonly operationKey: string; readonly kind: "conversation_create"; readonly targetKey: string;
+} | {
+  readonly v: 14; readonly operationKey: string; readonly kind: "conversation_turn"; readonly targetKey: string;
+} | {
+  /** Original PLAN publication lookup only; no private body or preview witness. */
+  readonly v: 15; readonly operationKey: string; readonly kind: "project_source_write"; readonly targetKey: string;
+} | {
+  /** Paperclip original request lookup; no task body, token or execution state. */
+  readonly v: 16; readonly operationKey: string; readonly kind: "project_source_write"; readonly targetKey: string;
+};
 
 type DurableReservation =
   | { readonly reserved: true }
@@ -47,7 +91,20 @@ type DurableReservation =
 const SCOPE_RE = /^[0-9a-f]{64}$/;
 const LAUNCH_KEY_RE = /^mmos-launch-[0-9a-f]{40}$/;
 const CONSUME_KEY_RE = /^mmos-consume-[0-9a-f]{40}$/;
+export const PROJECT_PAUSE_KEY_PREFIX = "mmos-project-pause-";
+export const CONVERSATION_CREATE_KEY_PREFIX = "mmos-conversation-create-";
+const CONVERSATION_CREATE_KEY_RE = /^mmos-conversation-create-[0-9a-f]{40}$/;
+const CONVERSATION_WORK_RE = /^WS:[A-Za-z0-9][A-Za-z0-9._-]{0,68}$/;
+const PROJECT_PAUSE_KEY_RE = /^mmos-project-pause-[0-9a-f]{40}$/;
 const TARGET_KEY_RE = /^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/;
+// ── Exact issued pointer variants (key-shape discriminated, own record version) ──
+const JOURNEY_CREATE_KEY_RE = /^mmos-journey-create-[0-9a-f]{40}$/;
+/** Journey request ids keep the incumbent publish_project_proposal id grammar. */
+const CREATE_REQUEST_ID_RE = /^mmos-project-create-[0-9a-f]{40}$/;
+const CREATE_WORK_RE = /^WS:[A-Z0-9]+(?:-[A-Z0-9]+)*$/;
+const PLANNING_KEY_RE = /^mmos-project-planning-[0-9a-f]{40}$/;
+const PLANNING_TARGET_PREFIX = "project-initial-planning.v1:";
+const PLANNING_WORK_RE = /^WS:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const POINTER_INPUT_KEYS: ReadonlySet<string> = new Set(["operationKey", "kind", "targetKey"]);
 const RECORD_KEYS: ReadonlyArray<string> = ["v", "operationKey", "kind", "targetKey"];
 
@@ -74,55 +131,125 @@ function assertScope(scope: string): void {
   }
 }
 
-function parsePointer(pointer: unknown): ClosedRecord {
-  if (!isPlainObject(pointer)) fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
-  const raw = pointer;
-  const keys = Object.keys(raw);
-  if (keys.length !== POINTER_INPUT_KEYS.size) fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
-  for (const key of keys) {
-    if (!POINTER_INPUT_KEYS.has(key)) fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
+const KIND_RECORDS = {
+  launch: { v: 1, key: LAUNCH_KEY_RE, consume: false },
+  consume: { v: 1, key: CONSUME_KEY_RE, consume: true },
+  project_pause: { v: 2, key: PROJECT_PAUSE_KEY_RE, consume: false },
+  project_resume: { v: 3, key: /^mmos-project-resume-[0-9a-f]{40}$/, consume: false },
+  project_create: { v: 4, key: /^mmos-project-create-[0-9a-f]{40}$/, consume: false },
+  project_adopt: { v: 4, key: /^mmos-project-adopt-[0-9a-f]{40}$/, consume: false },
+  direction_accept: { v: 4, key: /^mmos-direction-accept-[0-9a-f]{40}$/, consume: false },
+  project_source_write: { v: 5, key: /^mmos-project-(?:file-add|preference-set|discovery-correct)-[0-9a-f]{40}$/, consume: false },
+  instruction_pause: { v: 6, key: /^mmos-instruction-pause-[0-9a-f]{40}$/, consume: false },
+  conversation_create: { v: 7, key: CONVERSATION_CREATE_KEY_RE, consume: false },
+  conversation_consume: { v: 10, key: /^mmos-conversation-consume-[0-9a-f]{40}$/, consume: false },
+  conversation_turn: { v: 11, key: /^mmos-conversation-turn-[0-9a-f]{40}$/, consume: false },
+} as const;
+/**
+ * Extra closed shapes of an EXISTING kind, discriminated by the exact issued
+ * operation-key prefix. Each variant carries its own record version, so no
+ * v1-v7 record can ever decode as (or be confused with) a variant and vice
+ * versa; the prefix grammars are disjoint from every legacy key grammar.
+ */
+const KIND_VARIANTS = {
+  conversation_create: [{ v: 13, key: /^mmos-hermes-create-[0-9a-f]{32}$/, consume: false }],
+  conversation_turn: [{ v: 14, key: /^mmos-hermes-send-[0-9a-f]{32}$/, consume: false }],
+  project_source_write: [{v:15,key:/^mmos-project-plan-proposal-[0-9a-f]{40}$/,consume:false},
+    {v:16,key:/^mmos-paperclip-backlog-[0-9a-f]{32}$/,consume:false}],
+  project_create: [{ v: 8, key: JOURNEY_CREATE_KEY_RE, consume: false }],
+  launch: [{ v: 9, key: PLANNING_KEY_RE, consume: false },
+    { v: 12, key: /^mmos-project-execute-[0-9a-f]{40}$/, consume: false }],
+} as const;
+function recordSpec(kind: unknown, operationKey?: unknown) {
+  if (typeof kind !== "string" || !Object.hasOwn(KIND_RECORDS, kind)) return null;
+  const variants = KIND_VARIANTS[kind as keyof typeof KIND_VARIANTS];
+  if (variants !== undefined && typeof operationKey === "string") {
+    for (const variant of variants) if (variant.key.test(operationKey)) return variant;
   }
-  if (raw.kind !== "launch" && raw.kind !== "consume") fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
-  if (typeof raw.operationKey !== "string" || !(raw.kind === "consume" ? CONSUME_KEY_RE : LAUNCH_KEY_RE).test(raw.operationKey)) {
-    fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
-  }
-  if (typeof raw.targetKey !== "string" || !(raw.kind === "consume" ? parseDirectConsumeTarget(raw.targetKey) : TARGET_KEY_RE.test(raw.targetKey))) {
-    fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
-  }
-  return {
-    v: 1,
-    operationKey: raw.operationKey,
-    kind: raw.kind,
-    targetKey: raw.targetKey,
-  };
+  return KIND_RECORDS[kind as StoredKind];
 }
-
-function decodeRecord(value: unknown): OperationPointer {
+/** The exact journey CREATE target: canonical closed `{request_id, work_ref}` bytes. */
+function createTargetRecord(targetKey: unknown): { request_id: string; work_ref: string | null } | null {
+  // Bound parsing before JSON allocation; original request + canonical WS
+  // identity fits this cap. The current status/URL owner bounds WS keys at64.
+  if (typeof targetKey !== "string" || targetKey.length > 256) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(targetKey);
+  } catch {
+    return null;
+  }
+  if (!isPlainObject(parsed) || Object.keys(parsed).length !== 2
+      || !Object.hasOwn(parsed, "request_id") || !Object.hasOwn(parsed, "work_ref")) return null;
+  if (typeof parsed.request_id !== "string" || !CREATE_REQUEST_ID_RE.test(parsed.request_id)) return null;
+  if (parsed.work_ref !== null && (typeof parsed.work_ref !== "string" || parsed.work_ref.length > 67
+      || !CREATE_WORK_RE.test(parsed.work_ref))) {
+    return null;
+  }
+  if (canonicalJson(parsed) !== targetKey) return null;
+  return { request_id: parsed.request_id, work_ref: parsed.work_ref as string | null };
+}
+/** The journey key binds the actual scope, request id and work ref derivation. */
+function journeyCreateKeyMatches(operationKey: string, scope: string,
+    target: { request_id: string; work_ref: string | null }): boolean {
+  return operationKey === `mmos-journey-create-${sha256Hex(
+    canonicalJson({ v: 1, principalScope: scope, request_id: target.request_id, work_ref: target.work_ref }),
+  ).slice(0, 40)}`;
+}
+/** Exact issued planning target grammar; no suffix wildcard is accepted. */
+function planningTargetMatches(targetKey: unknown): boolean {
+  if (typeof targetKey !== "string" || !targetKey.startsWith(PLANNING_TARGET_PREFIX)) return false;
+  const workRef = targetKey.slice(PLANNING_TARGET_PREFIX.length);
+  return PLANNING_WORK_RE.exec(workRef)?.[0] === workRef;
+}
+function validFields(raw: Record<string, unknown>, spec: NonNullable<ReturnType<typeof recordSpec>>, scope: string): boolean {
+  if (typeof raw.operationKey !== "string" || !spec.key.test(raw.operationKey)
+      || (spec.v !== 1 && spec.key.exec(raw.operationKey)?.[0] !== raw.operationKey)) return false;
+  if (spec.v === 13 || spec.v === 14) {
+    return readNativePending(raw as unknown as OperationPointer) !== null;
+  }
+  if (spec.v === 16) return readCompanyPending(raw as unknown as OperationPointer, scope) !== null;
+  if (spec.v === 15) {
+    const target=parsePlanProposalTarget(raw.targetKey);
+    return target!==null && target.request_id===raw.operationKey && target.principal_scope===scope;
+  }
+  if (spec.v === 5) {
+    if (typeof raw.targetKey !== "string") return false;
+    const target = parseProjectSourceWriteTarget(raw.targetKey);
+    return target !== null && projectSourceWriteKeyMatches(raw.operationKey, target);
+  }
+  if (spec.v === 6) return parseInstructionAdmissionTarget(raw.targetKey) !== null;
+  if (spec.v === 7) return typeof raw.targetKey === "string" && CONVERSATION_WORK_RE.exec(raw.targetKey)?.[0] === raw.targetKey;
+  if (spec.v === 8) {
+    const target = createTargetRecord(raw.targetKey);
+    return target !== null && journeyCreateKeyMatches(raw.operationKey, scope, target);
+  }
+  // The planning launch key commits the whole private request, so it cannot be
+  // recomputed from the pointer alone; the issuing port's prepare owns that
+  // binding and this store enforces only the exact issued key/target grammar.
+  if (spec.v === 9) return planningTargetMatches(raw.targetKey);
+  if (spec.v === 12) return typeof raw.targetKey === "string" && raw.targetKey.length >= 5 && raw.targetKey.length <= 67
+    && CREATE_WORK_RE.exec(raw.targetKey)?.[0] === raw.targetKey;
+  if (spec.v === 10 || spec.v === 11) return parseFreshConversationTarget(raw.targetKey)!==null;
+  return typeof raw.targetKey === "string"
+    && (spec.consume ? parseDirectConsumeTarget(raw.targetKey) !== null : TARGET_KEY_RE.test(raw.targetKey))
+    && (spec.v === 1 || TARGET_KEY_RE.exec(raw.targetKey)?.[0] === raw.targetKey);
+}
+function parsePointer(pointer: unknown, scope: string): ClosedRecord {
+  if (!isPlainObject(pointer)) fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
+  const keys = Object.keys(pointer), spec = recordSpec(pointer.kind, pointer.operationKey);
+  if (keys.length !== POINTER_INPUT_KEYS.size || keys.some(key => !POINTER_INPUT_KEYS.has(key))
+      || spec === null || !validFields(pointer, spec, scope)) fail(PENDING_POINTER_ERRORS.INVALID_POINTER);
+  // The closed kind-to-version map above is the sole source of this version.
+  return {v:spec.v,operationKey:pointer.operationKey,kind:pointer.kind,targetKey:pointer.targetKey} as ClosedRecord;
+}
+function decodeRecord(value: unknown, scope: string): OperationPointer {
   if (!isPlainObject(value)) fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  const raw = value;
-  const keys = Object.keys(raw);
-  if (keys.length !== RECORD_KEYS.length) fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  for (const key of RECORD_KEYS) {
-    if (!Object.prototype.hasOwnProperty.call(raw, key)) {
-      fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-    }
-  }
-  for (const key of keys) {
-    if (!RECORD_KEYS.includes(key)) fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  }
-  if (raw.v !== 1) fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  if (raw.kind !== "launch" && raw.kind !== "consume") fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  if (typeof raw.operationKey !== "string" || !(raw.kind === "consume" ? CONSUME_KEY_RE : LAUNCH_KEY_RE).test(raw.operationKey)) {
-    fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  }
-  if (typeof raw.targetKey !== "string" || !(raw.kind === "consume" ? parseDirectConsumeTarget(raw.targetKey) : TARGET_KEY_RE.test(raw.targetKey))) {
-    fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
-  }
-  return {
-    operationKey: raw.operationKey,
-    kind: raw.kind,
-    targetKey: raw.targetKey,
-  };
+  const keys = Object.keys(value), spec = recordSpec(value.kind, value.operationKey);
+  if (keys.length !== RECORD_KEYS.length || RECORD_KEYS.some(key => !Object.hasOwn(value,key))
+      || keys.some(key => !RECORD_KEYS.includes(key)) || spec === null || value.v !== spec.v
+      || !validFields(value,spec,scope)) fail(PENDING_POINTER_ERRORS.CORRUPT_RECORD);
+  return {operationKey:value.operationKey as string,kind:value.kind as StoredKind,targetKey:value.targetKey as string};
 }
 
 function canonicalFieldsEqual(a: ClosedRecord, b: OperationPointer): boolean {
@@ -343,7 +470,7 @@ async function readInStore(
 ): Promise<OperationPointer | null> {
   const value = await requestToPromise(store.get(scope) as IDBRequest<unknown>);
   if (value === undefined) return null;
-  return decodeRecord(value);
+  return decodeRecord(value, scope);
 }
 
 async function reserveInStore(
@@ -353,7 +480,7 @@ async function reserveInStore(
 ): Promise<DurableReservation> {
   const value = await requestToPromise(store.get(scope) as IDBRequest<unknown>);
   if (value !== undefined) {
-    const existing = decodeRecord(value);
+    const existing = decodeRecord(value, scope);
     return { reserved: false, pointer: existing };
   }
   await requestToPromise(store.add(record, scope) as IDBRequest<IDBValidKey>);
@@ -367,7 +494,7 @@ async function clearIfEqualInStore(
 ): Promise<boolean> {
   const value = await requestToPromise(store.get(scope) as IDBRequest<unknown>);
   if (value === undefined) return false;
-  const existing = decodeRecord(value);
+  const existing = decodeRecord(value, scope);
   if (!canonicalFieldsEqual(record, existing)) return false;
   await requestToPromise(store.delete(scope) as IDBRequest<undefined>);
   return true;
@@ -397,7 +524,7 @@ export function createIndexedDbPendingPointerStore(
 
     async reserve(scope: string, pointer: OperationPointer, signal?: AbortSignal): Promise<DurableReservation> {
       assertScope(scope);
-      const record = parsePointer(pointer);
+      const record = parsePointer(pointer, scope);
       const idb = requireFactory();
       const db = await openDatabase(idb, signal);
       try {
@@ -409,7 +536,7 @@ export function createIndexedDbPendingPointerStore(
 
     async clearIfEqual(scope: string, pointer: OperationPointer, signal?: AbortSignal): Promise<boolean> {
       assertScope(scope);
-      const record = parsePointer(pointer);
+      const record = parsePointer(pointer, scope);
       const idb = requireFactory();
       const db = await openDatabase(idb, signal);
       try {

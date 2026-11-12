@@ -11,6 +11,7 @@ import argparse
 import contextlib
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -29,6 +30,41 @@ HEX = re.compile(r"[0-9a-f]{64}\Z")
 NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\Z")
 ENTRYPOINTS = {"pool": "pool", "task": "ext/fabric_task.py",
               "remote": "ext/remote_sub.sh"}
+GO_ENTRY = "ext/native_go_entry.py"
+GO_HANDLER = "ext/go_application_handler.py"
+HTTP_REQUIRED = frozenset({"ext/application_http_transports.py",
+    "ext/application_http_realm_projection.py", "ext/application_http_realms.v1.json"})
+_GO_ENTRY_MODULE = None
+GO_REQUIRED = frozenset({GO_ENTRY, GO_HANDLER,
+    "ext/pick.py", "ext/pool_ledger.py",
+    "ext/native_runtime_bindings.py", "ext/lease_broker.py",
+    "ext/go_lease_gateway.py", "ext/go_lease_capability.py",
+    "ext/commission_deadline.py", "ext/quota_circuit.py",
+    "ext/provider_outcome.py", "ext/pool_status.py", "ext/model_tier.py",
+    "ext/paid_yaml_runtime.py", "ext/paid_pyyaml_6_0_3.zip",
+    "ext/paid_pyyaml_provenance.json"})
+
+
+GLM_HTTP_REQUIRED = frozenset({"ext/glm_application_adapter.py", "ext/application_http_realms.v2.json"})
+
+
+def _entrypoints_for(files):
+    """Old releases retain their exact descriptor and content identity."""
+    glm_present = set(files) & GLM_HTTP_REQUIRED
+    if glm_present and (glm_present != GLM_HTTP_REQUIRED or
+                        not HTTP_REQUIRED.issubset(files) or
+                        not GO_REQUIRED.issubset(files) or "ext/glm_keys.py" not in files):
+        raise ValueError("incomplete native GLM application HTTP closure")
+    http_present = HTTP_REQUIRED & set(files)
+    if http_present and (http_present != HTTP_REQUIRED or not GO_REQUIRED.issubset(files)
+                         or "ext/bailian_keys.py" not in files):
+        raise ValueError("incomplete native application HTTP closure")
+    present = {GO_ENTRY, GO_HANDLER} & set(files)
+    if not present:
+        return dict(ENTRYPOINTS)
+    if not GO_REQUIRED.issubset(files):
+        raise ValueError("incomplete native Go application closure")
+    return dict(ENTRYPOINTS, go=GO_ENTRY)
 
 # Fixed references to existing owners. No target contents are read or copied.
 # The final native closure audit may require additions to this REVIEWED list.
@@ -104,6 +140,12 @@ def regular_bytes(path, limit=MAX_FILE, *, bind_path=True):
 def file_name(relative):
     if relative == "pool":
         return
+    # One vetted flat plist. Not a suffix rule and not a directory walk.
+    if relative == "ext/host_pull_launchd.plist.template":
+        return
+    # One source-sealed HTTP realm projection; no general JSON admission.
+    if relative in {"ext/application_http_realms.v1.json", "ext/application_http_realms.v2.json"}:
+        return
     parts = relative.split("/") if isinstance(relative, str) else []
     if (len(parts) != 2 or parts[0] != "ext" or not NAME.fullmatch(parts[1])
             or not (parts[1].endswith((".py", ".sh"))
@@ -124,6 +166,7 @@ def manifest_files(value):
             raise ValueError("invalid code hash")
     if not set(ENTRYPOINTS.values()).issubset(value):
         raise ValueError("all three native ingress artifacts are required")
+    _entrypoints_for(value)
     return dict(value)
 
 
@@ -137,7 +180,7 @@ def bindings(stable_ext):
 def descriptor(files, stable_ext):
     return {"schema": SCHEMA, "files": manifest_files(files),
             "stable_ext": str(stable_ext), "links": bindings(stable_ext),
-            "entrypoints": ENTRYPOINTS}
+            "entrypoints": _entrypoints_for(files)}
 
 
 def store_path(stable_ext, create=False):
@@ -349,14 +392,15 @@ def select(store, generation, expected):
 
 
 def launch(store, entry, args):
+    global _GO_ENTRY_MODULE
     store = check_store(store)
     selected = current(store)  # Read ONCE, then use an immutable real directory.
     if selected is None:
         raise ValueError("no native generation selected")
-    root, _ = verify(store, selected["generation"])
-    if entry not in ENTRYPOINTS:
+    root, meta = verify(store, selected["generation"])
+    if entry not in meta["entrypoints"]:
         raise ValueError("unknown native entrypoint")
-    target = root / ENTRYPOINTS[entry]
+    target = root / meta["entrypoints"][entry]
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["FABRIC_NATIVE_CODE_GENERATION"] = selected["generation"]
@@ -366,6 +410,41 @@ def launch(store, entry, args):
     override = env.pop("REMOTE_SUB_HERE", None)
     if override and Path(override).resolve() != root / "ext":
         raise ValueError("source-directory override conflicts with selected generation")
+    if entry == "go":
+        # The original go_ctl observes Python + its ORIGINAL go_shim filename.
+        # Do not exec a different script, rewrite argv/__file__, or start a
+        # second service. The verified entry calls the incumbent B.main once.
+        original = Path(meta["stable_ext"]) / "go_shim/go_shim.py"
+        if (os.path.abspath(sys.argv[0]) != str(original)
+                or list(args) != sys.argv[1:]):
+            raise ValueError("native Go requires the original process ingress")
+        name = "native_go_entry"
+        loaded = sys.modules.get(name)
+        if loaded is not None:
+            if (loaded is not _GO_ENTRY_MODULE
+                    or getattr(loaded, "__file__", None) != str(target)
+                    or getattr(loaded, "_native_generation_digest", None) != selected["generation"]):
+                raise ValueError("native Go entry module conflict")
+        else:
+            spec = importlib.util.spec_from_file_location(name, target)
+            if spec is None or spec.loader is None:
+                raise ValueError("native Go entry unavailable")
+            loaded = importlib.util.module_from_spec(spec)
+            sys.modules[name] = loaded
+            try:
+                sys.dont_write_bytecode = True
+                raw = regular_bytes(target)
+                if digest(raw) != meta["files"][GO_ENTRY]:
+                    raise ValueError("native Go entry source changed")
+                exec(compile(raw, str(target), "exec"), loaded.__dict__)
+                loaded._native_generation_digest = selected["generation"]
+                _GO_ENTRY_MODULE = loaded
+            except BaseException:
+                sys.modules.pop(name, None)
+                raise
+        os.environ.pop("REMOTE_SUB_HERE", None)
+        os.environ["FABRIC_NATIVE_CODE_GENERATION"] = selected["generation"]
+        return loaded.main(verified_root=root, verified_metadata=meta)
     interpreter = sys.executable if entry == "task" else "/bin/bash"
     os.execve(interpreter, [interpreter, str(target), *args], env)
 
@@ -385,7 +464,7 @@ def main():
             sub.add_argument("--expect", required=True, help="exact prior digest, or absent")
     run = commands.add_parser("exec")
     run.add_argument("--store", type=Path, required=True)
-    run.add_argument("--entry", choices=ENTRYPOINTS, required=True)
+    run.add_argument("--entry", choices=(*ENTRYPOINTS, "go"), required=True)
     run.add_argument("args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.command == "publish":

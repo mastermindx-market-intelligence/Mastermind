@@ -1,0 +1,82 @@
+{
+  "external_provider": "synthetic",
+  "head": "e623fb16dc663be5cebe73431a9e75edf0f644ed",
+  "host_authority": "fixture",
+  "jobs": [
+    {
+      "job_id": 128344049442,
+      "lines": [
+        "2026-11-07T07:47:08.7503958Z HEAD is now at 562d122 Merge e623fb16dc663be5cebe73431a9e75edf0f644ed into 5199647e89166d163392905574097b2cfa16ca5b",
+        "2026-11-07T07:47:13.9181241Z HEAD is now at 1c0cd667 chore: map contributor email for nezovskii",
+        "2026-11-07T07:47:15.7126968Z HEAD is now at 669f2f1 Join Hermes primary client with published APPLICATION owner revision",
+        "2026-11-07T07:47:27.6385228Z {\"candidate\": \"562d122cb354b79361e7db3924abf7e01c714f7c\", \"hermes\": \"1c0cd667746d3395fe9e1b6c74f8f85952486f18\", \"owner\": \"669f2f185c86c4a2a8e9466deef051c01677ed4a\", \"owner_source_verified\": true, \"python\": \"3.14.10\", \"jsonschema\": \"4.26.0\", \"mode\": \"installed-native-loopback-fixture\", \"live_provider_acceptance\": false}",
+        "2026-11-07T07:47:38.5425780Z Ran 69 tests in 10.761s",
+        "2026-11-07T07:47:38.5426725Z {\"tests_run\": 69, \"failures\": 0, \"errors\": 0, \"skips\": 0, \"sdk_constructions\": [], \"blocked_external_connections\": 0, \"live_provider_acceptance\": false}"
+      ]
+    },
+    {
+      "job_id": 128344049634,
+      "lines": [
+        "2026-11-07T07:47:08.2263263Z HEAD is now at 562d122 Merge e623fb16dc663be5cebe73431a9e75edf0f644ed into 5199647e89166d163392905574097b2cfa16ca5b",
+        "2026-11-07T07:48:04.0721964Z 51 passed in 21.18s"
+      ]
+    },
+    {
+      "job_id": 128344049656,
+      "lines": [
+        "2026-11-07T07:47:08.5813674Z HEAD is now at 562d122 Merge e623fb16dc663be5cebe73431a9e75edf0f644ed into 5199647e89166d163392905574097b2cfa16ca5b",
+        "2026-11-07T07:47:10.7638767Z HEAD is now at 669f2f1 Join Hermes primary client with published APPLICATION owner revision",
+        "2026-11-07T07:47:13.9622736Z Ran 54 tests in 0.516s",
+        "2026-11-07T07:47:13.9626885Z {\"blocked_external_connections\": 0, \"errors\": 0, \"failures\": 0, \"jsonschema\": \"4.26.0\", \"live_provider_acceptance\": false, \"mode\": \"offline-original-client-loopback-fixture\", \"owner\": \"669f2f185c86c4a2a8e9466deef051c01677ed4a\", \"owner_client_sha256\": \"70fb47f5e44cfebbed86709fedc2ae0fa816a96763fc497dc5c55df82f2604f0\", \"python\": \"3.13.18\", \"skips\": 0, \"tests_run\": 54}"
+      ]
+    },
+    {
+      "job_id": 128344049675,
+      "lines": [
+        "2026-11-07T07:47:08.2555839Z HEAD is now at 562d122 Merge e623fb16dc663be5cebe73431a9e75edf0f644ed into 5199647e89166d163392905574097b2cfa16ca5b",
+        "2026-11-07T07:47:57.9842082Z 170 passed in 30.37s"
+      ]
+    },
+    {
+      "job_id": 128344049767,
+      "lines": [
+        "2026-11-07T07:47:08.4902073Z HEAD is now at 562d122 Merge e623fb16dc663be5cebe73431a9e75edf0f644ed into 5199647e89166d163392905574097b2cfa16ca5b",
+        "2026-11-07T07:47:13.3801658Z HEAD is now at 1c0cd667 chore: map contributor email for nezovskii",
+        "2026-11-07T07:47:18.8405767Z HEAD is now at 669f2f1 Join Hermes primary client with published APPLICATION owner revision",
+        "2026-11-07T07:47:20.5221983Z HEAD is now at 5fcb76e Join Hermes v9 enrollment to S3's complete APPLICATION release cohort",
+        "2026-11-07T07:48:34.5303093Z Ran 9 tests in 63.531s",
+        "2026-11-07T07:48:34.5305889Z {\"sources\": {\"macro_root\": \"669f2f185c86c4a2a8e9466deef051c01677ed4a\", \"native_owner_root\": \"5fcb76e8274d28f37da6bb06583343c57fcdfc47\", \"hermes_root\": \"1c0cd667746d3395fe9e1b6c74f8f85952486f18\"}, \"tests_run\": 9, \"failures\": 0, \"errors\": 0, \"skips\": 0, \"blocked_external_connections\": 0, \"provider_sdk_constructions\": 0, \"real_application_handler\": true, \"real_broker\": true, \"provider_is_fixture\": true, \"live_provider_acceptance\": false, \"monetary_acceptance\": false}"
+      ]
+    },
+    {
+      "job_id": 128344049771,
+      "lines": [
+        "2026-11-07T07:47:09.3679978Z HEAD is now at 562d122 Merge e623fb16dc663be5cebe73431a9e75edf0f644ed into 5199647e89166d163392905574097b2cfa16ca5b",
+        "2026-11-07T07:47:10.9803314Z HEAD is now at 669f2f1 Join Hermes primary client with published APPLICATION owner revision",
+        "2026-11-07T07:47:17.9076894Z Ran 54 tests in 0.473s",
+        "2026-11-07T07:47:17.9080165Z {\"blocked_external_connections\": 0, \"errors\": 0, \"failures\": 0, \"jsonschema\": \"4.26.0\", \"live_provider_acceptance\": false, \"mode\": \"offline-original-client-loopback-fixture\", \"owner\": \"669f2f185c86c4a2a8e9466deef051c01677ed4a\", \"owner_client_sha256\": \"70fb47f5e44cfebbed86709fedc2ae0fa816a96763fc497dc5c55df82f2604f0\", \"python\": \"3.12.16\", \"skips\": 0, \"tests_run\": 54}"
+      ]
+    }
+  ],
+  "live_provider_acceptance": false,
+  "macro": "669f2f185c86c4a2a8e9466deef051c01677ed4a",
+  "macro_role_suite": {
+    "base": "3c510817d9543b5b124a1b73277aa115883c7da7",
+    "elapsed_seconds": 2.78,
+    "head": "669f2f185c86c4a2a8e9466deef051c01677ed4a",
+    "job_id": 128342932681,
+    "passed": 62,
+    "run_id": 42352331675
+  },
+  "monetary_acceptance": false,
+  "native_owner": "5fcb76e8274d28f37da6bb06583343c57fcdfc47",
+  "production_install_proven": false,
+  "protected_base": "5199647e89166d163392905574097b2cfa16ca5b",
+  "run_id": 42352701618,
+  "runtime_package_sha256": "1ae0d8967b7a59c92735271999ef6c79d29a1c28594b7abd59d35da5e98ee38d",
+  "schema": "mastermind.hermes_primary_composed_ci/v1",
+  "separate_harness_run": 42352701585,
+  "separate_runtime_run": 42352701564,
+  "suite_counts_are_overlapping": true,
+  "tested_merge": "562d122cb354b79361e7db3924abf7e01c714f7c"
+}

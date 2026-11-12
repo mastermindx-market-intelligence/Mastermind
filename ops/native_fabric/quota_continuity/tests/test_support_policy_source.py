@@ -93,7 +93,7 @@ class SupportPolicySource(unittest.TestCase):
 
 
 class CurrentGenerationClosure(unittest.TestCase):
-    def test_actual_95_member_builder_uses_ordinary_verified_selection(self):
+    def test_actual_current_builder_uses_ordinary_verified_selection(self):
         import contextlib
         import io
         import os
@@ -104,6 +104,7 @@ class CurrentGenerationClosure(unittest.TestCase):
         import build_review_stage as builder
         import native_generation as generation
         import native_install as installer
+        import test_native_current_source as current_source
 
         temporary=tempfile.TemporaryDirectory(prefix='support-current-generation-',dir=harness.ROOT/'tests')
         root=Path(temporary.name)
@@ -114,14 +115,22 @@ class CurrentGenerationClosure(unittest.TestCase):
         built=root/'built'
         with mock.patch.object(sys,'argv',['builder','--output',str(built)]),contextlib.redirect_stdout(io.StringIO()):
             builder.main()
-        raw=(built/'native-manifest.json').read_bytes()
-        self.assertEqual(raw,(rollout/'native-manifest.json').read_bytes())
-        self.assertEqual((built/'native-source-inventory.json').read_bytes(),
-                         (rollout/'native-source-inventory.json').read_bytes())
-        manifest=json.loads(raw)
-        self.assertEqual(len(manifest),95)
-        self.assertEqual(hashlib.sha256(raw).hexdigest(),
-                         '6e4ec147a3f2d941ab835ea74d86ae7a5367d10dd092d1d47304d54739378c2e')
+        manifest=current_source.verify_current_stage(
+            built,harness.ROOT,{"ext/"+name for name in builder.BASE_FILES|builder.ADDITIONS}|{"pool"})
+        self.assertEqual(hashlib.sha256((rollout/'native-manifest.json').read_bytes()).hexdigest(),
+                         '22905ae361e7076226aa239e947553433274c56f0c3db73c51cad0a317754ada')
+        inventory=json.loads((built/'native-source-inventory.json').read_bytes())
+        predecessor=json.loads((rollout/'native-preimages.json').read_bytes())
+        for name in ('host_pull.sh','host_pull_backend.py','host_pull_daemon.sh'):
+            relative='ext/'+name
+            source=(harness.ROOT/'candidate'/name).read_bytes()
+            staged=(built/'native-code-stage'/relative).read_bytes()
+            self.assertEqual(staged,source)
+            self.assertEqual(manifest[relative],hashlib.sha256(source).hexdigest())
+            self.assertEqual(inventory['files'][relative],{
+                'source':'candidate/'+name,'sha256':hashlib.sha256(source).hexdigest(),
+                'bytes':len(source),'installed_preimage_sha256':predecessor['files'].get(name),
+            })
         controller=(built/'native-code-stage/ext/remote_sub.sh').read_bytes()
         self.assertEqual(controller,(harness.ROOT/'candidate/remote_sub.sh').read_bytes())
         self.assertEqual(hashlib.sha256(controller).hexdigest(),manifest['ext/remote_sub.sh'])

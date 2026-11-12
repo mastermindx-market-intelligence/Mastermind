@@ -5755,6 +5755,11 @@ def test_cap_s1_observer_temp_root_normalizes_only_verified_descriptor(
     monkeypatch,
 ) -> None:
     import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+    from types import SimpleNamespace
+
+    # The fixture deliberately exhausts two fstat results. Scope the fake to
+    # the code under test, never the os module used by pytest during cleanup.
+    monkeypatch.setattr(canary_module, "os", SimpleNamespace(**vars(canary_module.os)))
 
     def _state(gid):
         return os.stat_result(
