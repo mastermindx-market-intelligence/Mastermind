@@ -213,7 +213,7 @@ pin, and serves MCP over stdio (newline-delimited JSON-RPC 2.0:
 | Variable                   | Meaning                                        |
 |----------------------------|------------------------------------------------|
 | `MMOS_CU_RUNTIME`          | runtime.json path override (must be inside this tool's folder) |
-| `MMOS_CU_STATE_DIR`        | lease + pacing directory, default `<here>/state/` (must be inside this tool's folder) |
+| `MMOS_CU_STATE_DIR`        | **REMOVED (BCU R3 M5) — ignored entirely.** Lease + pacing state lives in the fixed 0700 folder `~/.mastermind/mmos_computer_use`, outside the checkout; only the `--state-dir` launch argument (harness path) redirects it |
 | `MMOS_CU_PRESENCE_MIN_IDLE`| human-idle threshold seconds; default 180, values below it refuse UNCONDITIONALLY |
 | `MMOS_CU_PACING_SECONDS`   | minimum interval between input-delivering acts; default 180, values below it refuse UNCONDITIONALLY |
 | `MMOS_CU_DENY`             | deny.json path override (must be inside this tool's folder) |
@@ -221,13 +221,19 @@ pin, and serves MCP over stdio (newline-delimited JSON-RPC 2.0:
 | `ANTHROPIC_BASE_URL`       | **NOT an endpoint source** (BCU R3 L6): the endpoint is pinned in code to the router (`DEFAULT_VISION_BASE_URL`, optionally named by the runtime descriptor's loopback-only `vision_base_url` key). A set value that differs from the pin refuses every vision call `VISION_ENDPOINT_INSECURE` — even another loopback port |
 | `ANTHROPIC_AUTH_TOKEN`     | vision token, read at call time only           |
 
-`MMOS_CU_STATE_DIR`, `MMOS_CU_DENY` and `MMOS_CU_RUNTIME` are layer-scoped:
-they must resolve inside `tools/mmos_computer_use/` (or a subdirectory).
-Anything outside refuses at startup UNCONDITIONALLY, so an environment
-change cannot silently move the lease, deny list or pinned binary out from
-under the layer. A harness subprocess that needs scratch paths passes them
-as server launch ARGUMENTS (`--state-dir`, `--runtime`, `--deny`), never as
-environment variables.
+`MMOS_CU_DENY` and `MMOS_CU_RUNTIME` are layer-scoped: they must resolve
+inside `tools/mmos_computer_use/` (or a subdirectory). Anything outside
+refuses at startup UNCONDITIONALLY, so an environment change cannot
+silently move the deny list or pinned binary out from under the layer. The
+lease + pacing state is not env-configurable at all (BCU R3 M5): it lives
+in the fixed **0700** folder `~/.mastermind/mmos_computer_use`, OUTSIDE the
+checkout, so a `git clean` or branch switch can never wipe it and a
+worktree copy can never fork it; the former `MMOS_CU_STATE_DIR` variable is
+ignored. A harness subprocess that needs scratch paths passes them as
+server launch ARGUMENTS (`--state-dir`, `--runtime`, `--deny`), never as
+environment variables. Known limit of a same-uid layer (runbook): a session
+with a shell can still read/write that folder, and a missing pacing file
+reads as "no record".
 
 runtime.json (schema `mmos.computer_use.runtime/v1`) additionally accepts the
 optional keys `presence_min_idle_seconds`, `pacing_seconds`,

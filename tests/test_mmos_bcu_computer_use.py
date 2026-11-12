@@ -21,6 +21,7 @@ import io
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -2794,17 +2795,45 @@ class TestEnvStrictness(unittest.TestCase):
         os.environ["MMOS_CU_PACING_SECONDS"] = "180"
         self.assertEqual(mmos.Pacer().seconds, 180.0)
 
-    def test_state_dir_outside_layer_refused(self):
-        os.environ["MMOS_CU_STATE_DIR"] = "/tmp/mmos-cu-outside-state"
-        with self.assertRaises(mmos.RefuseError):
-            mmos.Lease()
+    def test_state_dir_env_cannot_move_state(self):
+        # BCU R3 M5 (fail-first on 1ae3e29e6): MMOS_CU_STATE_DIR is GONE.
+        # The old server let an in-layer env path move the lease/pacing
+        # state (and refused outside ones); the state folder is now a FIXED
+        # folder outside the checkout and NO environment value moves it —
+        # a session cannot redirect or pre-seed the lease/pacing records by
+        # env, in either direction. (Constructors here only resolve paths;
+        # nothing is created or written.)
+        fixed = os.path.expanduser("~/.mastermind/mmos_computer_use")
+        for env_value in (os.path.join(mmos.HERE, "state-test"),
+                          "/tmp/mmos-cu-outside-state"):
+            os.environ["MMOS_CU_STATE_DIR"] = env_value
+            self.assertEqual(mmos.Lease().state_dir, fixed)
+            self.assertEqual(mmos.Pacer().state_dir, fixed)
 
-    def test_state_dir_inside_layer_ok(self):
-        os.environ["MMOS_CU_STATE_DIR"] = os.path.join(
-            mmos.HERE, "state-test")
-        lease = mmos.Lease()
-        self.assertTrue(lease.state_dir.startswith(mmos.HERE))
-        shutil.rmtree(lease.state_dir, ignore_errors=True)
+    def test_state_dir_is_the_fixed_folder_outside_the_checkout(self):
+        # M5: the fixed folder is ~/.mastermind/mmos_computer_use — outside
+        # the checkout, so a `git clean` or branch switch can never wipe
+        # the lease/pacing record (and a worktree copy cannot fork it).
+        self.assertEqual(mmos.STATE_DIR,
+                         os.path.expanduser("~/.mastermind/mmos_computer_use"))
+        self.assertFalse(mmos.STATE_DIR.startswith(mmos.HERE))
+        self.assertEqual(mmos.Lease().state_dir, mmos.STATE_DIR)
+        self.assertEqual(mmos.Pacer().state_dir, mmos.STATE_DIR)
+
+    def test_ensure_state_dir_creates_owner_only(self):
+        # M5: the folder is created 0700 — and re-forced to 0700 when it
+        # already exists with looser mode (the lease/pacing records are
+        # not world-readable).
+        parent = tempfile.mkdtemp(prefix="mmos-cu-m5-")
+        try:
+            target = os.path.join(parent, "nested", "state")
+            mmos.ensure_state_dir(target)
+            self.assertEqual(stat.S_IMODE(os.stat(target).st_mode), 0o700)
+            os.chmod(target, 0o755)
+            mmos.ensure_state_dir(target)  # idempotent, re-forces 0700
+            self.assertEqual(stat.S_IMODE(os.stat(target).st_mode), 0o700)
+        finally:
+            shutil.rmtree(parent, ignore_errors=True)
 
     def test_deny_outside_layer_refused(self):
         os.environ["MMOS_CU_DENY"] = "/tmp/other-deny.json"
@@ -4464,7 +4493,9 @@ class TestSessionCannotLoosenFloors(unittest.TestCase):
     def test_env_marker_alone_does_not_unlock_the_layer(self):
         # A real server child: no pytest in its process, so MMOS_CU_TEST_MODE=1
         # (which any session could set) must NOT be test mode. The child's
-        # scratch paths are outside the layer, so startup has to refuse.
+        # scratch runtime/deny env paths are outside the layer, so startup
+        # has to refuse (MMOS_CU_STATE_DIR is inert since M5 — state cannot
+        # be moved by env at all).
         bin_path = make_fake_peekaboo(self.tmp)
         runtime = write_runtime(self.tmp, bin_path)
         env = dict(os.environ)

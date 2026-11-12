@@ -840,6 +840,28 @@ def _lease_remaining(lease, now_wall, now_mono):
     return None
 
 
+# BCU R3 M5: the layer's durable state (lease + pacing) lives OUTSIDE the
+# checkout, in a fixed owner-only folder under ~/.mastermind. No environment
+# variable (the former MMOS_CU_STATE_DIR is gone) and no file moves it; only
+# an explicit launch ARGUMENT (--state-dir, the harness path) or constructor
+# injection redirects state. Known limits of a same-uid layer, recorded in
+# the runbook: a session with a shell can still read/write this folder, and
+# a MISSING pacing file reads as "no record" — after the migration the
+# first act on each window is admitted without a wait. When this layer
+# attaches to a teammate, this folder joins that teammate's write-deny
+# roots (registration note; not done in this round).
+STATE_DIR = os.path.expanduser("~/.mastermind/mmos_computer_use")
+
+
+def ensure_state_dir(path):
+    """Create the state folder (and parents) owner-only, and force the mode
+    even when the folder already exists (0700: the lease/pacing records are
+    not world-readable)."""
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    os.chmod(path, 0o700)
+    return path
+
+
 class Lease:
     """Single-holder advisory lease persisted as JSON next to a lock file.
 
@@ -853,10 +875,11 @@ class Lease:
     """
 
     def __init__(self, state_dir=None):
-        override = os.environ.get("MMOS_CU_STATE_DIR")
-        if override:
-            override = _env_path_override("MMOS_CU_STATE_DIR", override)
-        self.state_dir = state_dir or override or os.path.join(HERE, "state")
+        # BCU R3 M5: FIXED folder outside the checkout (STATE_DIR, 0700).
+        # The MMOS_CU_STATE_DIR env override is removed — no environment
+        # value moves the lease state; only a launch argument / constructor
+        # injection (the harness path) redirects it.
+        self.state_dir = state_dir or STATE_DIR
         self.lease_path = os.path.join(self.state_dir, "lease.json")
         self.lock_path = os.path.join(self.state_dir, "lease.lock")
 
@@ -897,7 +920,7 @@ class Lease:
         INTERNAL). If it is provably stale (recorded pid gone, or older than
         STALE_LOCK_SECONDS) it is recovered once and the exclusivity retried.
         """
-        os.makedirs(self.state_dir, exist_ok=True)
+        ensure_state_dir(self.state_dir)
         for attempt in (0, 1):
             try:
                 fd = os.open(self.lock_path,
@@ -953,7 +976,7 @@ class Lease:
                              repr(ttl_seconds))
         if ttl < 5 or ttl > 3600:
             raise OpError("LEASE_TTL_INVALID", repr(ttl_seconds))
-        os.makedirs(self.state_dir, exist_ok=True)
+        ensure_state_dir(self.state_dir)
         now = time.time()
         now_mono = time.monotonic()
         nonce = secrets.token_hex(16)
@@ -1171,10 +1194,9 @@ class Pacer:
     """
 
     def __init__(self, state_dir=None, seconds=None, runtime=None):
-        override = os.environ.get("MMOS_CU_STATE_DIR")
-        if override:
-            override = _env_path_override("MMOS_CU_STATE_DIR", override)
-        self.state_dir = state_dir or override or os.path.join(HERE, "state")
+        # BCU R3 M5: the same FIXED out-of-checkout state folder as Lease;
+        # no environment value moves it.
+        self.state_dir = state_dir or STATE_DIR
         self.path = os.path.join(self.state_dir, "pacing.json")
         raw = os.environ.get("MMOS_CU_PACING_SECONDS")
         runtime_value = runtime.get("pacing_seconds") \
@@ -1251,7 +1273,7 @@ class Pacer:
         if window_id is not None:
             entry["window_id"] = window_id
         data[str(key)] = entry
-        os.makedirs(self.state_dir, exist_ok=True)
+        ensure_state_dir(self.state_dir)
         _atomic_write(self.path, data)
 
 
@@ -3653,8 +3675,9 @@ def main(argv=None):
         prog=SERVER_NAME,
         description="Restrained computer-use MCP server (stdio).")
     parser.add_argument("--state-dir", default=None,
-                        help="lease/pacing state folder (default: the "
-                             "built-in state folder)")
+                        help="lease/pacing state folder (default: the FIXED "
+                             "0700 folder ~/.mastermind/mmos_computer_use, "
+                             "M5 — no environment override exists)")
     parser.add_argument("--runtime", default=None,
                         help="runtime descriptor path (default: the pinned "
                              "in-layer runtime.json / runtime.json.dev)")

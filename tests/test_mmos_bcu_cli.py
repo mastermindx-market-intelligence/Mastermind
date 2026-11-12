@@ -43,9 +43,10 @@ class FakeAdapter(object):
         return [{"window_id": 11, "title": "Fixtured main"}]
 
 
-# State dirs created by make_ctx (Lease/Pacer default to the REAL
-# tools/mmos_computer_use/state — a live proof lease there must never be
-# visible to, or mutated by, a unit test). Cleaned in tearDown.
+# State dirs created by make_ctx (Lease/Pacer default to the REAL fixed
+# state folder ~/.mastermind/mmos_computer_use, M5 — a live proof lease
+# there must never be visible to, or mutated by, a unit test). Cleaned in
+# tearDown.
 _STATE_DIRS = []
 
 

@@ -24,11 +24,16 @@ Environment (M2 hardening; BCU R3 H2 — unconditional, in code):
     escape of any kind (the former MMOS_CU_TEST_MODE flag was removed:
     anything a session can set by environment or file is unconditionally
     floored in code). Unit tests use constructor injection instead.
-  MMOS_CU_STATE_DIR / MMOS_CU_DENY / MMOS_CU_RUNTIME may only point
-    INSIDE this tool's own folder (tools/mmos_computer_use/ or a subdir);
-    anything outside refuses at startup, unconditionally. A harness
-    subprocess that needs scratch paths passes them as server launch
-    ARGUMENTS (--state-dir/--runtime/--deny), never as env vars.
+  MMOS_CU_DENY / MMOS_CU_RUNTIME may only point INSIDE this tool's own
+    folder (tools/mmos_computer_use/ or a subdir); anything outside refuses
+    at startup, unconditionally. A harness subprocess that needs scratch
+    paths passes them as server launch ARGUMENTS
+    (--state-dir/--runtime/--deny), never as env vars.
+  The state folder is NOT env-configurable at all (BCU R3 M5): the former
+    MMOS_CU_STATE_DIR is ignored entirely; lease + pacing state lives in
+    the fixed 0700 folder ~/.mastermind/mmos_computer_use, outside the
+    checkout. Only the --state-dir launch argument (harness path)
+    redirects it.
 """
 import argparse
 import json
