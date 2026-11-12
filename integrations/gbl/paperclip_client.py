@@ -54,6 +54,8 @@ Boundary law (ADDENDUM §1/§3, BUILD_PLAN GBL-4; repair round 1, panel B):
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import hmac
 import http.client
@@ -159,6 +161,17 @@ _ASK_MARKER_LINE = (
 HMAC_TAG_VERSION = "v1"
 HMAC_KEY_BYTES = 32
 _HEX64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
+
+# GBL-5 R2, RULING 19(b): seq numbering and append are serialised across
+# EVERY process on the host by ONE lock OUTSIDE the client object — an
+# exclusive flock on this fixed file under the GBL state dir (the HMAC
+# key's directory).  The same file is the cross-process mint ledger: one
+# JSON line per minted number, so a listing that lags a just-landed
+# append cannot make another PROCESS re-issue the number the way it once
+# made another thread do it.  Only ONE host writes the store (GBL4_NOTES
+# install steps); a second host holds a different lock file and is out of
+# contract by construction.
+APPEND_LOCK_NAME = "append.lock"
 
 
 class GblPaperclipError(Exception):
@@ -548,6 +561,85 @@ class PaperclipAskClient:
                                         ask_id)
         return record
 
+    # -- the ONE host-wide append lock (GBL-5 R2, RULING 19b) -------------------
+
+    @contextlib.contextmanager
+    def _host_append_lock(self):
+        """An exclusive flock on ``append.lock`` in the GBL state dir (the
+        HMAC key's directory), held across the WHOLE allocation+append step
+        of :meth:`append_ask_event`.  One lock file per host serialises
+        every writer process — the bridge, the CLI (over the bridge
+        socket), control intake, nudge/reconcile and any ``from_spec``
+        client — because every append funnels through this method.  The
+        kernel releases the flock when the holder dies, so a crashed
+        writer never wedges the lane.  The lock file doubles as the mint
+        ledger (append-only JSON lines, parsed by :meth:`_ledger_floor`);
+        a torn tail line from a crash is ignored on read."""
+        if self._hmac_key_path is None:
+            # Unreachable behind append_ask_event's key-first law; kept as
+            # an independent fail-closed door with the canonical code.
+            raise GblPaperclipError(
+                "HMAC_KEY_NOT_CONFIGURED",
+                "this client holds no hmac_key_path; a spec always "
+                "configures one")
+        path = self._hmac_key_path.parent / APPEND_LOCK_NAME
+        try:
+            handle = open(path, "a+", encoding="utf-8")
+        except OSError as exc:
+            raise GblPaperclipError(
+                "APPEND_LOCK_UNWRITABLE", f"{path}: {exc}") from None
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield handle
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+    @staticmethod
+    def _ledger_floor(handle: Any, ask_id: str) -> int:
+        """The highest seq the ledger has EVER minted for the ask — the
+        cross-process floor.  Only complete JSON lines count (a torn tail
+        line from a crashed writer is skipped); any line that is not a
+        ``{"ask_id": …, "seq": int}`` shape is ignored, never fatal: the
+        ledger may only RAISE the floor, and a lost line falls back to the
+        listing, which reflects whatever POSTs landed."""
+        floor = 0
+        try:
+            handle.seek(0)
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue               # torn tail: skipped, not fatal
+                if (isinstance(row, dict) and row.get("ask_id") == ask_id
+                        and type(row.get("seq")) is int):
+                    floor = max(floor, row["seq"])
+        except OSError as exc:
+            raise GblPaperclipError(
+                "APPEND_LOCK_UNREADABLE",
+                f"mint ledger unreadable: {exc}") from None
+        return floor
+
+    @staticmethod
+    def _ledger_mint(handle: Any, ask_id: str, seq: int) -> None:
+        """Record a minted number BEFORE the POST: a number, once minted,
+        is never re-issued by any process on this host even when its POST
+        then fails (the worst case is a skipped number, never a
+        duplicate).  Refuses typed rather than appending outside the
+        serialised discipline."""
+        try:
+            handle.write(json.dumps({"ask_id": ask_id, "seq": seq}) + "\n")
+            handle.flush()
+        except OSError as exc:
+            raise GblPaperclipError(
+                "APPEND_LOCK_UNWRITABLE",
+                f"mint ledger write refused: {exc}") from None
+
     def append_ask_event(self, ask_id: str,
                          event: Mapping[str, Any]) -> None:
         """Append ONE comment carrying the event, stamped by the store
@@ -571,40 +663,56 @@ class PaperclipAskClient:
         nudge had already taken it.  A number, once minted, is never
         re-issued even if its POST then fails (the floor is set at mint
         time, inside the lock); the worst case is a skipped number, never
-        a duplicate."""
+        a duplicate.
+
+        GBL-5 R2, RULING 19(b) (the H1 residue): the A2 lock and floor were
+        per client OBJECT.  Numbering and append are now serialised across
+        every PROCESS on this host by ONE flock on ``append.lock`` in the
+        GBL state dir, and the floor is also read from that file's mint
+        ledger — a second client object, or the same store reached from
+        another process (nudge lane, control intake), can no more re-issue
+        a taken number than a second thread can.  Only ONE host writes the
+        store; a second host holds a different lock file and is out of
+        contract by construction."""
         core = {key: value for key, value in dict(event).items()
                 if key not in ("seq", "tag", "trusted")}
         with self._append_lock:
-            issue = self._issue_for(ask_id)
-            if issue is None:
-                raise GblPaperclipError("ASK_ISSUE_NOT_FOUND", ask_id)
-            seg = self._issue_seg(issue.get("id"))
-            verified = [(event, trusted) for _row, event, trusted
-                        in self._chain_verified_events(seg, ask_id)]
-            next_seq = 1
-            for _event, trusted in verified:
-                if trusted is True and type(_event.get("seq")) is int:
-                    next_seq = max(next_seq, _event["seq"] + 1)
-            floor = self._issued_seq.get(ask_id, 0)
-            if next_seq <= floor:
-                next_seq = floor + 1
-            core_json = _canonical(core)
-            for _event, trusted in verified:
-                # Idempotent only on a TRUSTED match: a forged copy of our
-                # core (untrusted) must not suppress the real append.
-                if trusted is True:
-                    stored_core = {k: v for k, v in _event.items()
-                                   if k not in ("seq", "trusted")}
-                    if _canonical(stored_core) == core_json:
-                        return              # already appended; no duplicate
-            self._issued_seq[ask_id] = next_seq    # minted: never re-issued
-            stamped = {**core, "seq": next_seq}
-            tagged = dict(stamped)
-            tagged["tag"] = _event_tag(self._hmac_key(), ask_id, next_seq,
-                                       stamped)
-            body = f"{EVENT_MARKER} {_canonical(tagged)}"
-            self._request("POST", f"/api/issues/{seg}/comments",
-                          {"clientRequestId": str(uuid.uuid4()), "body": body})
+            self._hmac_key()   # key law first: no lock file before the key
+            with self._host_append_lock() as lock:
+                issue = self._issue_for(ask_id)
+                if issue is None:
+                    raise GblPaperclipError("ASK_ISSUE_NOT_FOUND", ask_id)
+                seg = self._issue_seg(issue.get("id"))
+                verified = [(event, trusted) for _row, event, trusted
+                            in self._chain_verified_events(seg, ask_id)]
+                next_seq = 1
+                for _event, trusted in verified:
+                    if trusted is True and type(_event.get("seq")) is int:
+                        next_seq = max(next_seq, _event["seq"] + 1)
+                floor = max(self._issued_seq.get(ask_id, 0),
+                            self._ledger_floor(lock, ask_id))
+                if next_seq <= floor:
+                    next_seq = floor + 1
+                core_json = _canonical(core)
+                for _event, trusted in verified:
+                    # Idempotent only on a TRUSTED match: a forged copy of
+                    # our core (untrusted) must not suppress the real
+                    # append.
+                    if trusted is True:
+                        stored_core = {k: v for k, v in _event.items()
+                                       if k not in ("seq", "trusted")}
+                        if _canonical(stored_core) == core_json:
+                            return          # already appended; no duplicate
+                self._issued_seq[ask_id] = next_seq    # minted in-process…
+                self._ledger_mint(lock, ask_id, next_seq)   # …and host-wide
+                stamped = {**core, "seq": next_seq}
+                tagged = dict(stamped)
+                tagged["tag"] = _event_tag(self._hmac_key(), ask_id, next_seq,
+                                           stamped)
+                body = f"{EVENT_MARKER} {_canonical(tagged)}"
+                self._request("POST", f"/api/issues/{seg}/comments",
+                              {"clientRequestId": str(uuid.uuid4()),
+                               "body": body})
 
     def count_asks(self, principal: str, since_iso: str) -> int:
         """That principal's asks created at or after ``since_iso`` (UTC ISO),

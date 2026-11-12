@@ -1365,6 +1365,69 @@ class TestEventSeqAllocation:
         assert seqs == [1, 2]
 
 
+class TestEventSeqAcrossProcesses:
+    """GBL-5 R2, RULING 19(b) (deputy round 2, H1): the A1/A2 lock and the
+    ``_issued_seq`` floor were per client OBJECT — a second client, or the
+    same store reached from a second PROCESS, could still mint the number
+    another writer had just taken.  Numbering and append are serialised
+    across every process on the host by ONE lock OUTSIDE the client object
+    (flock on a fixed path under the GBL state dir, with a cross-process
+    mint ledger for the listing-lag window).  Two real child processes,
+    each with its OWN client, append to ONE ask over a lagging listing;
+    the seqs come out distinct and the CONSUMED is never lost."""
+
+    def test_two_processes_never_share_a_seq(self, fake):
+        import subprocess
+        import sys as _sys
+        repo_root = str(Path(__file__).resolve().parent.parent)
+        ask_client = client(fake)
+        row = envelope(ttl_seconds=86400 * 365 * 10)   # never expires here
+        ask_id = row["ask_id"]
+        assert ask_client.create_ask(row) is None
+        ask_client.append_ask_event(ask_id, {          # seq 1 (+ first-use key)
+            "type": "answer", "answer_id": "gbm-" + "a" * 32,
+            "idempotency_key": "gb-ans-1",
+            "text": "A harmless fixture answer."})
+        ask_client.append_ask_event(ask_id, {          # seq 2
+            "type": "state", "state": "ANSWERED"})
+        # The listing lags BOTH children's writes: each child's allocation
+        # read cannot see the other child's just-landed comment — the exact
+        # window in which per-object state re-issues a taken number.
+        fake.state.comment_visibility_lag = 2
+        cfg = {"base_url": fake.base, "company_id": COMPANY_ID,
+               "agent_id": AGENT_ID, "hmac_key_path": str(HMAC_KEY_PATH),
+               "ask_id": ask_id}
+        events = ({"type": "state", "state": "CONSUMED"},
+                  {"type": "nudge", "state": "ANSWERED"})
+        children = [subprocess.Popen(
+            [_sys.executable, "tests/gbl_append_child.py",
+             json.dumps({**cfg, "event": event})],
+            cwd=repo_root, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True) for event in events]
+        try:
+            outs = [child.communicate(timeout=60) for child in children]
+        finally:
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+        assert all(child.returncode == 0 for child in children), outs
+        assert all('"ok": true' in out for out, _err in outs), outs
+
+        fake.state.reveal_lagged_comments()
+        record = ask_client.read_ask(ask_id)           # replays readable
+        seqs = [event["seq"] for event in record["events"]]
+        assert sorted(seqs) == [1, 2, 3, 4]            # distinct: no re-issue
+        consumed = [event for event in record["events"]
+                    if event.get("type") == "state"
+                    and event.get("state") == "CONSUMED"]
+        assert len(consumed) == 1                      # the mark is never lost
+        assert consumed[0]["trusted"] is True
+        assert not any("defect" in event for event in record["events"])
+        core = bridge_over(ask_client)
+        assert core.fetch_result(principal=PRINCIPAL,
+                                 ask_id=ask_id)["status"] == "CONSUMED"
+
+
 class TestEventSeqDuplicateDemoted:
     """GBL-5 A3 (proof 1's bricked record): a duplicate seq found ON READ
     is a typed defect FOR THAT EVENT — ``trusted: False`` with
