@@ -62,6 +62,7 @@ import os
 import re
 import secrets
 import stat
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -423,6 +424,13 @@ class PaperclipAskClient:
         self._host = split.hostname or ""
         self._port = split.port
         self._issue_ids: dict[str, str] = {}     # ask_id -> issue_id cache
+        # GBL-5 A2: seq allocation and append are ONE atomic step under this
+        # lock, and every mint is floored at the highest seq THIS client has
+        # already issued for the record — a server listing that lags a
+        # just-landed append (proof 1) can never make the store re-issue a
+        # number the record has already taken.
+        self._append_lock = threading.Lock()
+        self._issued_seq: dict[str, int] = {}    # ask_id -> highest minted
 
     # -- construction from a roster spec --------------------------------------
 
@@ -536,35 +544,51 @@ class PaperclipAskClient:
         keys are never written through.  ``seq`` is
         ``max(seq of VERIFIED events) + 1`` — derived solely from
         tag-verified events, so a foreign or untrusted comment can never
-        move or block the sequence (deputy steer, round 2)."""
-        issue = self._issue_for(ask_id)
-        if issue is None:
-            raise GblPaperclipError("ASK_ISSUE_NOT_FOUND", ask_id)
-        seg = self._issue_seg(issue.get("id"))
+        move or block the sequence (deputy steer, round 2).
+
+        GBL-5 A2 (proof 1's defect): allocation and append are ONE atomic
+        step under the store's own append lock, and every mint is floored
+        at the highest seq this client has already issued for the record.
+        Two appender threads can never take the same number (the lock), and
+        neither can a listing that lags a just-landed append — proof 1's
+        1.8 s read lag re-issued seq 3 for the CONSUMED append after the
+        nudge had already taken it.  A number, once minted, is never
+        re-issued even if its POST then fails (the floor is set at mint
+        time, inside the lock); the worst case is a skipped number, never
+        a duplicate."""
         core = {key: value for key, value in dict(event).items()
                 if key not in ("seq", "tag", "trusted")}
-        verified = [self._verified_event(stored, ask_id)
-                    for stored in self._stored_events(seg)]
-        next_seq = 1
-        for _event, trusted in verified:
-            if trusted is True and type(_event.get("seq")) is int:
-                next_seq = max(next_seq, _event["seq"] + 1)
-        core_json = _canonical(core)
-        for _event, trusted in verified:
-            # Idempotent only on a TRUSTED match: a forged copy of our core
-            # (untrusted) must not suppress the real append.
-            if trusted is True:
-                stored_core = {k: v for k, v in _event.items()
-                               if k not in ("seq", "trusted")}
-                if _canonical(stored_core) == core_json:
-                    return                  # already appended; no duplicate
-        stamped = {**core, "seq": next_seq}
-        tagged = dict(stamped)
-        tagged["tag"] = _event_tag(self._hmac_key(), ask_id, next_seq,
-                                   stamped)
-        body = f"{EVENT_MARKER} {_canonical(tagged)}"
-        self._request("POST", f"/api/issues/{seg}/comments",
-                      {"clientRequestId": str(uuid.uuid4()), "body": body})
+        with self._append_lock:
+            issue = self._issue_for(ask_id)
+            if issue is None:
+                raise GblPaperclipError("ASK_ISSUE_NOT_FOUND", ask_id)
+            seg = self._issue_seg(issue.get("id"))
+            verified = [self._verified_event(stored, ask_id)
+                        for stored in self._stored_events(seg)]
+            next_seq = 1
+            for _event, trusted in verified:
+                if trusted is True and type(_event.get("seq")) is int:
+                    next_seq = max(next_seq, _event["seq"] + 1)
+            floor = self._issued_seq.get(ask_id, 0)
+            if next_seq <= floor:
+                next_seq = floor + 1
+            core_json = _canonical(core)
+            for _event, trusted in verified:
+                # Idempotent only on a TRUSTED match: a forged copy of our
+                # core (untrusted) must not suppress the real append.
+                if trusted is True:
+                    stored_core = {k: v for k, v in _event.items()
+                                   if k not in ("seq", "trusted")}
+                    if _canonical(stored_core) == core_json:
+                        return              # already appended; no duplicate
+            self._issued_seq[ask_id] = next_seq    # minted: never re-issued
+            stamped = {**core, "seq": next_seq}
+            tagged = dict(stamped)
+            tagged["tag"] = _event_tag(self._hmac_key(), ask_id, next_seq,
+                                       stamped)
+            body = f"{EVENT_MARKER} {_canonical(tagged)}"
+            self._request("POST", f"/api/issues/{seg}/comments",
+                          {"clientRequestId": str(uuid.uuid4()), "body": body})
 
     def count_asks(self, principal: str, since_iso: str) -> int:
         """That principal's asks created at or after ``since_iso`` (UTC ISO),

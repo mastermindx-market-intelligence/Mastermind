@@ -111,7 +111,16 @@ class FakePaperclipState:
         self.comments_envelope = "dict"     # dict | bare | unknown
         self.redirects: dict[tuple[str, str], str] = {}      # (m, path)→url
         self.comment_author = AGENT_ID      # authorAgentId on new comments
+        # GBL-5 A1 knobs: the server's comment LISTING lags its own writes
+        # (proof 1's 1.8 s read-your-write lag) — the next N posted comments
+        # land but stay hidden from GET until reveal_lagged_comments().
+        self.comment_visibility_lag = 0
+        self.lagged_comment_ids: set[str] = set()
         self._clock = itertools.count(1)    # strictly increasing timestamps
+
+    def reveal_lagged_comments(self) -> None:
+        """The listing catches up with the writes it had hidden."""
+        self.lagged_comment_ids.clear()
 
     def touch(self, method: str, path: str, headers: dict) -> None:
         clean = path.split("?")[0]
@@ -204,7 +213,8 @@ class FakePaperclipState:
             if rows is None:
                 return 404, {"error": "gone"}
             if method == "GET":
-                served = list(reversed(rows))          # newest first
+                served = [row for row in reversed(rows)   # newest first
+                          if row["id"] not in self.lagged_comment_ids]
                 if self.comments_envelope == "bare":
                     return 200, served
                 if self.comments_envelope == "unknown":
@@ -215,7 +225,10 @@ class FakePaperclipState:
                 row.update({"id": str(uuid.uuid4()),
                             "authorAgentId": self.comment_author,
                             "createdAt": self.now_iso()})
-                rows.append(row)
+                rows.append(row)                    # the write LANDS…
+                if self.comment_visibility_lag > 0:
+                    self.comment_visibility_lag -= 1
+                    self.lagged_comment_ids.add(row["id"])   # …but hides
                 return 200, row
         return 404, {"error": "no such route"}
 
@@ -1283,6 +1296,73 @@ class TestEventSeqAndTrust:
                            in fake.state.comments[issue_id])
         assert KEY_BYTES.decode() not in wire          # never on the wire
         assert KEY_BYTES.decode() not in stored        # never in Paperclip
+
+
+# ── GBL-5 A: seq allocation is one atomic step ───────────────────────────────
+
+
+class TestEventSeqAllocation:
+    """GBL-5 A1 (proof 1's defect): the allocation read and the append POST
+    were two separate steps, so two appenders could take the SAME number.
+    In proof 1 the CONSUMED append re-issued seq 3 because its allocation
+    read had not yet seen the nudge comment written 1.8 s earlier — every
+    later read of that record then raised EVENT_SEQ_INVALID.  Both shapes
+    are reproduced here: the read-lag interleave (proof 1) and two truly
+    concurrent appender threads."""
+
+    def seed_ask(self, fake, key: str = "k-1") -> tuple[PaperclipAskClient, dict]:
+        ask_client = client(fake)
+        row = envelope(key=key)
+        assert ask_client.create_ask(row) is None
+        return ask_client, row
+
+    def test_read_lag_cannot_reissue_a_taken_seq(self, fake):
+        # Proof 1's exact interleave: the server's comment listing lags its
+        # own write, so the SECOND append's allocation read misses the FIRST
+        # append's just-landed comment and derives the same next seq.
+        ask_client, row = self.seed_ask(fake)
+        ask_client.append_ask_event(row["ask_id"],
+                                    {"type": "state", "state": "ANSWERED"})
+        fake.state.comment_visibility_lag = 1        # the nudge write hides
+        ask_client.append_ask_event(row["ask_id"],
+                                    {"type": "state", "state": "NUDGED"})
+        ask_client.append_ask_event(row["ask_id"],   # reads the stale list
+                                    {"type": "state", "state": "CONSUMED"})
+        fake.state.reveal_lagged_comments()
+        issue_id = fake.state.order[0]
+        seqs = [stored_comment(fake, issue_id, i)["seq"] for i in range(3)]
+        assert seqs == [1, 2, 3]
+
+    def test_concurrent_appenders_never_share_a_seq(self, fake):
+        # The lock's own guarantee: two appender threads on one store
+        # client take DIFFERENT numbers even while the first append's POST
+        # is still in flight (its comment not yet landed).
+        ask_client, row = self.seed_ask(fake)
+        issue_id = fake.state.order[0]
+        fake.state.slow_paths[
+            ("POST", f"/api/issues/{issue_id}/comments")] = 0.3
+        failures: list[BaseException | None] = [None, None]
+
+        def appender(index: int, state: str) -> None:
+            try:
+                ask_client.append_ask_event(row["ask_id"],
+                                            {"type": "state", "state": state})
+            except BaseException as exc:              # recorded, re-raised
+                failures[index] = exc
+
+        first = threading.Thread(target=appender, args=(0, "ANSWERED"))
+        first.start()
+        time.sleep(0.1)          # the first append's POST is mid-flight
+        second = threading.Thread(target=appender, args=(1, "CONSUMED"))
+        second.start()
+        first.join(timeout=5)
+        second.join(timeout=5)
+        assert failures == [None, None]
+        fake.state.slow_paths.clear()
+        stored = fake.state.comments[issue_id]
+        seqs = sorted(json.loads(str(c["body"])[len(pc.EVENT_MARKER) + 1:])
+                      ["seq"] for c in stored)
+        assert seqs == [1, 2]
 
 
 # ── Panel B delta 1, D1 + D2: no forged body can crash the record ────────────
