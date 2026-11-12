@@ -914,7 +914,7 @@ cmd_up() {
   [ -x "$PAPERCLIP_CLI" ] || die 1 "Paperclip CLI not executable at $PAPERCLIP_CLI (set MMOS_DEV_PAPERCLIP_CLI)."
   if [ -z "$SERVER_ENTRY" ]; then
     local cli_modules
-    cli_modules="$(cd "$(dirname "$PAPERCLIP_CLI")/../.." 2>/dev/null && pwd)" || cli_modules=""
+    cli_modules="$(cd "$(dirname "$PAPERCLIP_CLI")/.." 2>/dev/null && pwd)" || cli_modules=""
     if [ -n "$cli_modules" ]; then
       SERVER_ENTRY="$cli_modules/@paperclipai/server/dist/index.js"
     fi
