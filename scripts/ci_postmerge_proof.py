@@ -30,6 +30,7 @@ _JOB_CONCLUSIONS = {
     "test": "success",
     "PR test scope": "success",
     "Pin and identity guards": "success",
+    "Non-pytest qualification gates": "success",
     "PR fast checks": "skipped",
 }
 _JOB_NAMES = set(_JOB_CONCLUSIONS)
@@ -217,11 +218,15 @@ def find_reusable_run(
             if name == "PR test scope"
             else {"Run pinned source-identity guard suite"}
             if name == "Pin and identity guards"
+            else {"Verify Paper direct pinned MCP SDK"}
+            if name == "Non-pytest qualification gates"
             else {"Run repository test shard", "Fast source-bound release preflight"}
         )
-        if name == "pytest shard 0":
+        # CI Lightning F3: the five non-pytest qualification gates moved from
+        # shard zero into the parallel qualification job; a reuse proof must
+        # still verify each gate actually executed successfully there.
+        if name == "Non-pytest qualification gates":
             required |= {
-                "Verify Paper direct pinned MCP SDK",
                 "Verify Paper Studio prepare guard",
                 "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
                 "Compile source",

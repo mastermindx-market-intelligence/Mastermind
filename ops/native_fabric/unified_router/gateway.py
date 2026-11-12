@@ -68,6 +68,9 @@ ALLOWED = {("POST", "v1/messages"), ("POST", "v1/messages/count_tokens"),
 
 _log = logging.getLogger(__name__)
 
+# One shared bound for request cleanup and the existing service drain contract.
+UPSTREAM_CLEANUP_TIMEOUT_S = 5.0
+
 # Public exception reasons are a closed set of router-authored literals. Return
 # the registered literal, never exception text merely matching a FABRIC_* shape.
 _PUBLIC_REFUSAL_CODES = (
@@ -653,7 +656,7 @@ class _RequestLifecycle:
         try:
             # Starlette may cancel the entire stream task scope on disconnect.
             # Cleanup also runs when its generator has never been advanced.
-            with anyio.move_on_after(5, shield=True) as cleanup_scope:
+            with anyio.move_on_after(UPSTREAM_CLEANUP_TIMEOUT_S, shield=True) as cleanup_scope:
                 if self.upstream_response is not None:
                     await self.upstream_response.aclose()
             if cleanup_scope.cancel_called:

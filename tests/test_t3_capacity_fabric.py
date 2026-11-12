@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from integrations.t3_capacity_fabric import t3_config
-from integrations.t3_capacity_fabric.endpoints import FabricEndpoint, load_proxy_token
+from integrations.t3_capacity_fabric.endpoints import FabricEndpoint, default_endpoints, load_proxy_token
 from integrations.t3_capacity_fabric.registration import (
     apply_registration,
     build_provider_instance,
@@ -200,3 +200,38 @@ def test_load_proxy_token_requires_fabric_token(tmp_path):
     ep.env_file.write_text("OTHER=x\n")
     with pytest.raises(ValueError):
         load_proxy_token(ep.env_file)
+
+
+@pytest.mark.parametrize("existing_unified", [False, True])
+def test_default_registration_keeps_existing_gateway_owners_and_unrelated_entries(
+        tmp_path, monkeypatch, existing_unified):
+    home = userhome(tmp_path)
+    userdata = home / ".t3" / "userdata"
+    settings_path = t3_config.settings_path(userdata)
+    before = json.loads(settings_path.read_text())
+    if existing_unified:
+        before["providerInstances"]["capacity_fabric"] = {
+            "driver": "claudeAgent", "enabled": True,
+            "displayName": "Existing owner entry", "config": {"retained": "original"}}
+        settings_path.write_text(json.dumps(before))
+    endpoints = default_endpoints(tmp_path / "gateway-fixtures")
+    for ep in endpoints:
+        ep.env_file.parent.mkdir(parents=True)
+        ep.env_file.write_text(
+            f"{ep.token_env_name}={TOKEN}\nEXPLABS_ANTHROPIC_MODELS={','.join(CATALOG)}\n")
+    healthy(monkeypatch)
+    reports = apply_registration(endpoints, userdata=userdata,
+        home_root=home / ".t3" / "providers",
+        catalogues={ep.endpoint_id: CATALOG for ep in endpoints})
+    assert len(reports) == 2 and all(row.refusal is None for row in reports)
+    after = json.loads(settings_path.read_text())
+    assert after["defaultModelSelection"] == before["defaultModelSelection"]
+    assert set(after["providerInstances"]) - set(before["providerInstances"]) == {
+        "fabric_claude", "fabric_experiential"}
+    for instance_id, original in before["providerInstances"].items():
+        assert after["providerInstances"][instance_id] == original
+    for instance_id, expected in [("fabric_claude", "http://127.0.0.1:8312"),
+                                  ("fabric_experiential", "http://127.0.0.1:8311")]:
+        env = {row["name"]: row["value"] for row in after["providerInstances"][instance_id]["environment"]}
+        assert env["ANTHROPIC_BASE_URL"] == expected
+        assert env["ANTHROPIC_AUTH_TOKEN"] == TOKEN

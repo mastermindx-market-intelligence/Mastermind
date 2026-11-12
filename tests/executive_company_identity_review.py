@@ -50,7 +50,7 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                                   456,
                                                   '0o710'))},
  '_handle_ceo_ingress_connection': {'node_type': 'AsyncFunctionDef',
-                                    'source_sha256': '9c4c7709f65002e7618286bb3b7e1c413c6d9a6e7763782ea0f3711a47900e57',
+                                    'source_sha256': '2a4b7858ab2cdf874ad8fb029374050521f0732e82296d32ffcca679faaf37ce',
                                     'ast_sha256': '27f53e5690ad71c86f01f2ad657535aa022e0565472fef95ee773fc8c7837eaf',
                                     'sites': ((('body',
                                                 3,
@@ -154,7 +154,10 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
 # complete AST paths and token spans, remain unchanged. Only the exact whole
 # source and enclosing ingress-method digests change for this composition.
 
-# Capacity READ composition at a58c34f1: the complete Company listener and
-# protected 136-node Fabric response subtree remain byte-identical. Only the
-# enclosing source/AST and statement-index mapping change. Parent source checks
-# preserve all literal values and negative controls; this grants no runtime authority.
+# WO13 admission repair: the complete Company listener and ingress ASTs,
+# all six original operands and their AST paths remain exact to accepted e4cd.
+# Only this qualified whole-source hash and mapped catalog positions change.
+# No new identity exemption or installed/runtime acceptance is granted.
+
+# Capacity Fabric adds one fixed read before the catalog. The original Company
+# listener, catalog response branch and six qualified literals are preserved.

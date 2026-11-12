@@ -220,6 +220,7 @@ jobs:
     comments_only = """
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   merge_group:
     types: [checks_requested]
   push:
@@ -256,6 +257,7 @@ def _valid_on_block() -> str:
     return (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -299,6 +301,7 @@ def test_validate_workflow_rejects_missing_event():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  push:\n"
         "    branches:\n"
         "      - master\n"
@@ -338,6 +341,7 @@ def test_validate_workflow_rejects_wrong_merge_group_types():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested, labeled]\n"
         "  push:\n"
@@ -353,6 +357,7 @@ def test_validate_workflow_rejects_wrong_push_branches():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -398,6 +403,7 @@ def test_validate_workflow_rejects_empty_merge_group():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group: {}\n"
         "  push:\n"
         "    branches:\n"
@@ -412,6 +418,7 @@ def test_validate_workflow_rejects_filtered_workflow_dispatch():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -463,6 +470,7 @@ def test_validate_workflow_rejects_merge_key_in_on_block():
         "on:\n"
         "  <<: *hidden_defaults\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -528,6 +536,7 @@ def test_validate_workflow_rejects_duplicate_unquoted_on():
         "name: CI\n"
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "on:\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
@@ -550,6 +559,7 @@ def test_validate_workflow_rejects_duplicate_quoted_on():
         "name: CI\n"
         '"on":\n'
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         '"on":\n'
         "  merge_group:\n"
         "    types: [checks_requested]\n"
@@ -572,6 +582,7 @@ def test_validate_workflow_rejects_quoted_and_unquoted_on():
         "name: CI\n"
         '"on":\n'
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "on:\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
@@ -640,6 +651,7 @@ def test_validate_workflow_rejects_unhashable_event_level_key():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -831,6 +843,7 @@ def test_validate_workflow_rejects_mixed_type_extra_keys():
     on_block = (
         "on:\n"
         "  pull_request:\n"
+        "    types: [opened, synchronize, reopened, edited]\n"
         "  merge_group:\n"
         "    types: [checks_requested]\n"
         "  push:\n"
@@ -843,7 +856,10 @@ def test_validate_workflow_rejects_mixed_type_extra_keys():
         cip.validate_workflow(_workflow_text(on_block))
 
 
-def test_all_discovered_tests_are_accounted_for():
+def test_all_discovered_tests_are_accounted_for(monkeypatch):
+    # The exact serial argv contract is asserted without any worker override:
+    # CI exports CI_PYTEST_WORKERS on the shard jobs that run these tests.
+    monkeypatch.delenv("CI_PYTEST_WORKERS", raising=False)
     gate = cip.resolve_gate(_ROOT)
     discovered = set(gate["discovered"])
     excluded = set(gate["excluded"])
@@ -865,6 +881,160 @@ def test_all_discovered_tests_are_accounted_for():
     assert argv.count("--durations=25") == 1
 
 
+@pytest.mark.parametrize("switch", [None, "", "0", "1", " 1 "])
+def test_worker_switch_serial_values_keep_the_exact_serial_argv(monkeypatch, switch):
+    if switch is None:
+        monkeypatch.delenv("CI_PYTEST_WORKERS", raising=False)
+    else:
+        monkeypatch.setenv("CI_PYTEST_WORKERS", switch)
+    monkeypatch.delenv("RUNNER_TEMP", raising=False)
+    modules = ("tests/test_fixture_a.py", "tests/test_fixture_b.py")
+    assert cip.pytest_argv(modules) == [
+        cip.sys.executable, "-m", "pytest", "--durations=25", "-q", *modules,
+    ]
+    assert cip.resolve_pytest_workers() == 1
+
+
+@pytest.mark.parametrize("switch", ["2", "4", " 4 "])
+def test_worker_switch_parallel_values_add_loadfile_xdist(monkeypatch, switch):
+    monkeypatch.setenv("CI_PYTEST_WORKERS", switch)
+    # Without RUNNER_TEMP (local runs) the parallel argv is just the xdist
+    # placement flags.
+    monkeypatch.delenv("RUNNER_TEMP", raising=False)
+    modules = ("tests/test_fixture_a.py",)
+    argv = cip.pytest_argv(modules)
+    assert argv == [
+        cip.sys.executable, "-m", "pytest", "--durations=25", "-q",
+        "-n", "4" if "4" in switch else "2", "--dist", "loadfile", *modules,
+    ]
+    # Same module set, only placement of execution changes.
+    assert argv[-len(modules):] == list(modules)
+
+
+@pytest.mark.parametrize("runner_temp", ["/home/runner/work/_temp", "  /home/runner/work/_temp  "])
+def test_worker_switch_on_runner_pins_short_unique_basetemp(
+        tmp_path, monkeypatch, runner_temp):
+    # On hosted runners the parallel argv also pins --basetemp into a short
+    # per-process root under <TMPDIR>/mmx and loads the worker-env plugin.
+    # Three placements were refused by real validators on hosted runners:
+    # the default tmp root (/tmp/pytest-of-*, churned by all four workers
+    # under -n 4 and crossed by the hold-and-double-stat custody guards, CI
+    # run 42994920108); RUNNER_TEMP itself ("_temp" fails the custody
+    # component alphabet, a second sticky shared root the capacity walk
+    # does not authenticate, and the prefix crosses the 103-byte AF_UNIX
+    # bound, CI run 43015530899); and $HOME (the hosted image's /home
+    # carries system.posix_acl_default, and the capacity ancestor walk
+    # refuses any ancestor xattr name outside its two approved macOS names,
+    # so every home-rooted chain fails wholesale, CI run 43028788599).
+    # <TMPDIR>/mmx/b<pid> crosses exactly the one authenticated sticky
+    # root, keeps components custody-alphabet-clean and socket paths short,
+    # and keeps concurrent pytest builders distinct -- pytest removes an
+    # explicit --basetemp at session start. Serial values never add either.
+    tmp = tmp_path / "tmp"
+    monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
+    monkeypatch.setenv("RUNNER_TEMP", runner_temp)
+    monkeypatch.setenv("TMPDIR", str(tmp))
+    modules = ("tests/test_fixture_a.py",)
+    argv = cip.pytest_argv(modules)
+    assert argv == [
+        cip.sys.executable, "-m", "pytest", "--durations=25", "-q",
+        "-n", "4", "--dist", "loadfile",
+        "-p", "scripts.ci_pytest_worker_env",
+        "--basetemp", str(tmp / "mmx" / f"b{cip.os.getpid()}"), *modules,
+    ]
+    monkeypatch.setenv("CI_PYTEST_WORKERS", "1")
+    assert cip.pytest_argv(modules) == [
+        cip.sys.executable, "-m", "pytest", "--durations=25", "-q", *modules,
+    ]
+    # Without TMPDIR the root falls back to /tmp (never $HOME or RUNNER_TEMP).
+    monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
+    monkeypatch.delenv("TMPDIR", raising=False)
+    argv = cip.pytest_argv(modules)
+    assert argv == [
+        cip.sys.executable, "-m", "pytest", "--durations=25", "-q",
+        "-n", "4", "--dist", "loadfile",
+        "-p", "scripts.ci_pytest_worker_env",
+        "--basetemp", f"/tmp/mmx/b{cip.os.getpid()}", *modules,
+    ]
+
+
+def test_worker_env_plugin_scopes_tmpdir_per_process(tmp_path, monkeypatch):
+    # The -p plugin applies at import time, before any test asks tempfile for
+    # a directory: every process (each xdist worker) gets its own TMPDIR root
+    # under <TMPDIR>/mmx, created at bring-up, so no sibling ever creates an
+    # entry inside another worker's ancestor chain. The few deliberate
+    # dir="/tmp" tempfile calls (short AF_UNIX socket roots) are redirected
+    # into the same quiet root while scoping is active, so /tmp itself never
+    # churns mid-run; nothing else about tempfile behavior changes.
+    import importlib
+    import tempfile as tempfile_stdlib
+
+    import scripts.ci_pytest_worker_env as worker_env
+
+    tmp = tmp_path / "tmp"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    saved_mkdtemp = tempfile_stdlib.mkdtemp
+    saved_tempdir_class = tempfile_stdlib.TemporaryDirectory
+    saved_cache = tempfile_stdlib.tempdir
+    monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "runner-temp"))
+    monkeypatch.setenv("TMPDIR", str(tmp))
+    reloaded = importlib.reload(worker_env)
+    try:
+        root = reloaded._ROOT
+        assert root is not None
+        assert root.is_dir()
+        assert root == tmp / "mmx" / f"w{cip.os.getpid()}"
+        assert cip.os.environ["TMPDIR"] == str(root)
+        # dir=None honors the pinned cache; the exact literal "/tmp" is
+        # redirected; every other dir passes through untouched.
+        assert Path(tempfile_stdlib.mkdtemp(prefix="plain-")).parent == root
+        assert Path(tempfile_stdlib.mkdtemp(prefix="lit-", dir="/tmp")).parent == root
+        assert Path(
+            tempfile_stdlib.mkdtemp(prefix="other-", dir=str(elsewhere))
+        ).parent == elsewhere
+        with tempfile_stdlib.TemporaryDirectory(prefix="td-", dir="/tmp") as d:
+            assert Path(d).parent == root
+        # The redirect must keep TemporaryDirectory's class surface: tests
+        # read and monkeypatch .cleanup on it (CI run 43038560847 shard 5
+        # failed with "'function' object has no attribute 'cleanup'" when the
+        # redirect was a function wrapper instead of a subclass).
+        assert hasattr(tempfile_stdlib.TemporaryDirectory, "cleanup")
+        tempfile_stdlib.TemporaryDirectory.cleanup  # unbound attribute access
+        instance = tempfile_stdlib.TemporaryDirectory(prefix="td2-", dir="/tmp")
+        try:
+            assert Path(instance.name).parent == root
+            assert isinstance(instance, saved_tempdir_class)
+        finally:
+            instance.cleanup()
+        # Serial switch values and missing RUNNER_TEMP never scope, and never
+        # disturb an already-scoped TMPDIR.
+        monkeypatch.setenv("CI_PYTEST_WORKERS", "1")
+        assert importlib.reload(worker_env)._ROOT is None
+        monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
+        monkeypatch.delenv("RUNNER_TEMP", raising=False)
+        assert importlib.reload(worker_env)._ROOT is None
+        assert cip.os.environ["TMPDIR"] == str(root)
+    finally:
+        # Leave stdlib tempfile and the module inert for later importers.
+        tempfile_stdlib.mkdtemp = saved_mkdtemp
+        tempfile_stdlib.TemporaryDirectory = saved_tempdir_class
+        tempfile_stdlib.tempdir = saved_cache
+        monkeypatch.setenv("CI_PYTEST_WORKERS", "1")
+        importlib.reload(worker_env)
+        assert tempfile_stdlib.mkdtemp is saved_mkdtemp
+
+
+@pytest.mark.parametrize("switch", ["x", "-1", "1.5", "02x", "0x4", "65", "1000000"])
+def test_worker_switch_malformed_values_fail_closed(monkeypatch, switch):
+    monkeypatch.setenv("CI_PYTEST_WORKERS", switch)
+    with pytest.raises(cip.PolicyError, match="CI_PYTEST_WORKERS"):
+        cip.pytest_argv(("tests/test_fixture_a.py",))
+    with pytest.raises(cip.PolicyError, match="CI_PYTEST_WORKERS"):
+        cip.resolve_pytest_workers()
+
+
 def test_hosted_full_gate_has_a_bounded_completion_window():
     """Keep a finite, adequate 75-minute shard window with fail-closed fan-in."""
     import yaml
@@ -878,6 +1048,7 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     gate = jobs["test"]
     assert workflow["permissions"] == {"contents": "read"}
     assert shards["permissions"] == {"contents": "read", "actions": "read"}
+    assert shards["env"] == {"CI_PYTEST_WORKERS": "4"}
     assert shards["timeout-minutes"] == 75
     assert shards["timeout-minutes"] + gate["timeout-minutes"] <= 100
     assert gate["timeout-minutes"] == 8
@@ -894,18 +1065,29 @@ def test_hosted_full_gate_has_a_bounded_completion_window():
     ]
     assert len(test_steps) == 1
     assert test_steps[0]["run"] == (
+        "umask 022\n"
         "python -m scripts.ci_parallel_shard --jobs 6 --index "
-        "${{ matrix.index }}"
+        "${{ matrix.index }}\n"
     )
     assert all(step.get("continue-on-error", False) is False for step in shard_steps)
+    # CI Lightning F3: the five qualification gates moved verbatim out of
+    # shard zero into the parallel qualification job; they must no longer
+    # appear inside any shard. The web application typecheck joined that job
+    # later and is owned by it in full mode the same way.
     for name in (
         "Verify Paper direct pinned MCP SDK",
+        "Verify Paper Studio prepare guard",
         "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
         "Compile source",
         "Validate shell scripts",
+        "Typecheck web application",
     ):
-        steps = [step for step in shard_steps if step.get("name") == name]
-        assert len(steps) == 1 and steps[0]["if"] == "matrix.index == 0"
+        assert not [step for step in shard_steps if step.get("name") == name]
+        qual = [
+            step for step in workflow["jobs"]["qualification"]["steps"]
+            if step.get("name") == name
+        ]
+        assert len(qual) == 1 and qual[0].get("if") is None
 
 
 def test_hosted_gate_stays_a_single_required_check_job():
@@ -916,13 +1098,14 @@ def test_hosted_gate_stays_a_single_required_check_job():
         (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
         Loader=cip._WorkflowYAMLLoader,
     )
-    assert list(workflow["jobs"]) == ["pr_scope", "pr_fast", "pin_guards", "pytest_shards", "test"]
+    assert list(workflow["jobs"]) == ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards", "test"]
     job = workflow["jobs"]["test"]
     assert "strategy" not in job
-    assert job["name"] == "test"
+    from scripts import ci_parallel_shard as fan
+    assert job["name"] == fan._REQUIRED_GATE_NAME
     assert job["runs-on"] == "ubuntu-latest"
-    assert job["if"] == "${{ always() }}"
-    assert job["needs"] == ["pr_scope", "pr_fast", "pin_guards", "pytest_shards"]
+    assert job["if"] == fan._REQUIRED_GATE_IF
+    assert job["needs"] == ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards"]
     gate_steps = [
         step for step in job["steps"]
         if step.get("name") == "Run repository test gate"
@@ -932,6 +1115,9 @@ def test_hosted_gate_stays_a_single_required_check_job():
     assert gate["env"]["SHARDS_STATUS"] == "${{ needs.pytest_shards.result }}"
     assert gate["env"]["GUARDS_STATUS"] == "${{ needs.pin_guards.result }}"
     assert '[ "$GUARDS_STATUS" != success ]' in gate["run"]
+    assert gate["env"]["QUAL_STATUS"] == "${{ needs.qualification.result }}"
+    assert '[ "$QUAL_STATUS" != success ]' in gate["run"]
+    assert '[ "$QUAL_STATUS" != skipped ]' in gate["run"]
     assert 'if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then' in gate["run"]
     assert '[ "$SHARDS_STATUS" != success ]' in gate["run"]
     assert '[ "$PR_FAST_STATUS" != success ]' in gate["run"]
@@ -1132,6 +1318,10 @@ def test_plan_line_reports_shard_sizes_and_default_omits_them():
 def test_sharded_gate_runs_every_resolved_module_once(tmp_path, monkeypatch):
     included = tuple(f"tests/test_m{index}.py" for index in range(10))
     shards = cip.partition_modules(included, jobs=3)
+    # This asserts the serial argv shape (everything after -q is a module);
+    # a shard job exporting CI_PYTEST_WORKERS would add xdist flags that the
+    # positional slice would misread as modules.
+    monkeypatch.delenv("CI_PYTEST_WORKERS", raising=False)
     seen: list[str] = []
 
     def fake_popen(argv, **kwargs):
@@ -1293,3 +1483,37 @@ def test_source_bound_fast_preflight_regression_rejects_coverage_or_order_loss(c
         steps.append(step)
     with pytest.raises(AssertionError):
         _assert_fast_release_preflight(workflow)
+
+
+def test_in_job_shards_get_disjoint_basetemps(monkeypatch, tmp_path):
+    # run_shards builds every shard argv in one process, so a pid-only
+    # basetemp would be shared and pytest would delete a sibling's tree.
+    monkeypatch.setenv("CI_PYTEST_WORKERS", "4")
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "rt"))
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmp"))
+    seen: list[str] = []
+
+    class _Done:
+        returncode = 0
+        stdout = iter(())
+
+        def __init__(self, argv, **_kwargs):
+            seen.append(argv[argv.index("--basetemp") + 1])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def wait(self, *_a, **_k):
+            return 0
+
+    monkeypatch.setattr(cip.subprocess, "Popen", _Done)
+    try:
+        cip.run_shards((("tests/a.py",), ("tests/b.py",), ("tests/c.py",)), root=tmp_path)
+    except Exception:
+        pass
+    assert len(seen) == 3
+    assert len(set(seen)) == 3
+    assert {Path(p).name for p in seen} == {f"b{cip.os.getpid()}_{i}" for i in range(3)}

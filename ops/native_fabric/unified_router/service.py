@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import math
 import os
 from pathlib import Path
 import stat
@@ -83,24 +84,34 @@ def main(argv=None):
     import socket as _socket
     import uvicorn
 
-    # Zero-downtime reload: bind the listener with SO_REUSEPORT so a
-    # replacement process can bind the same port while this one drains
-    # in-flight streams. On SIGTERM uvicorn closes this listener and
-    # finishes active responses (bounded by timeout_graceful_shutdown)
-    # before exiting. launchd must also allow the old process enough
-    # ExitTimeOut to finish its drain.
-    sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-    sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEPORT, 1)
-    sock.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_NODELAY, 1)
-    sock.bind(("127.0.0.1", args.port))
-    sock.listen(2048)
-    config = uvicorn.Config(
-        "ops.native_fabric.unified_router.gateway:create_app", factory=True,
-        host="127.0.0.1", port=args.port, workers=1, access_log=False,
-        log_config=logging_config(),
-        timeout_graceful_shutdown=25,
+    from ops.native_fabric.unified_router.gateway import (
+        UPSTREAM_CLEANUP_TIMEOUT_S, create_app, settings_from_env,
     )
-    uvicorn.Server(config).run(sockets=[sock])
+
+    # Validate and freeze the actual request bounds before opening a listener.
+    # The existing gateway owns routing and its single process-local bulkhead.
+    settings = settings_from_env()
+    shutdown_timeout = math.ceil(
+        settings.request_timeout_s + UPSTREAM_CLEANUP_TIMEOUT_S)
+    sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    try:
+        # SO_REUSEPORT would allow two independent process-local bulkheads to
+        # accept concurrently. Rebind only after the incumbent listener closes;
+        # an occupied listener refuses without stopping or replacing its owner.
+        sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+        sock.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_NODELAY, 1)
+        sock.bind(("127.0.0.1", args.port))
+        sock.listen(2048)
+        config = uvicorn.Config(
+            lambda: create_app(settings), factory=True,
+            host="127.0.0.1", port=args.port, workers=1, access_log=False,
+            log_config=logging_config(),
+            timeout_graceful_shutdown=shutdown_timeout,
+        )
+        uvicorn.Server(config).run(sockets=[sock])
+    finally:
+        sock.close()
+
 
 
 if __name__ == "__main__":

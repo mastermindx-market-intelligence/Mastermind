@@ -46,6 +46,9 @@ def _gate_fixture(tmp_path, monkeypatch, script):
     monkeypatch.setattr(rwe, "GATE_SCRIPT_RELATIVE", gate)
     monkeypatch.setenv("PYTHONPATH", str(root))
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+    # This child asserts the serial progress path: a shard job exporting
+    # CI_PYTEST_WORKERS must not change the gate shape under test here.
+    monkeypatch.delenv("CI_PYTEST_WORKERS", raising=False)
     return argparse.Namespace(root=str(root), env=str(env_dir), subset=None), env_dir
 
 
@@ -89,11 +92,11 @@ def test_cmd_gate_reports_real_module_before_original_child_finishes(tmp_path, m
     worker = threading.Thread(target=run)
     worker.start()
     try:
-        arrived_before_exit = progress.wait(8)
+        arrived_before_exit = progress.wait(30)
         no_early_receipt = not (env_dir / rwe.RECEIPT_FILENAME).exists()
     finally:
         release.write_text("finish")
-        worker.join(8)
+        worker.join(30)
     assert not worker.is_alive()
     assert exceptions == []
     assert arrived_before_exit

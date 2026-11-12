@@ -2247,7 +2247,11 @@ def _recompute_receipt_digest(receipt):
     )
 
 
-@pytest.mark.parametrize("field", control._CEO_SUBMIT_RECEIPT_FIELDS)
+# sorted(): _CEO_SUBMIT_RECEIPT_FIELDS is a frozenset, so its iteration order
+# varies per process (string hash randomization) and every pytest-xdist worker
+# would collect a differently ordered (same-set) test list, aborting the shard
+# at the cross-worker collection check.
+@pytest.mark.parametrize("field", sorted(control._CEO_SUBMIT_RECEIPT_FIELDS))
 def test_missing_top_level_field_is_refused_at_every_level(field, capsys):
     host, binding, worker, worker_sha = _sealed_ceo_submit_evidence()
     receipt = copy.deepcopy(host.receipt)

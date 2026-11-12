@@ -259,3 +259,132 @@ def test_raced_incumbent_singleton_refuses_before_any_credential_read():
     with pytest.raises(IncumbentBusy):
         scope['build_canonical_incumbent_context'](fixed)
     assert calls == [('singleton', fixed+'/glm_shim/shim.lock')]
+
+
+# --- WO-05 (census C4.4): server-derived admitted class projection -------------
+
+def admitted_record(p=None,**overrides):
+    from control_plane.child_execution_contracts import C2_COMPLEX_BOUNDED, POLICY_REVISION
+    p=p if p is not None else material()[0]
+    record=dict(schema=backend.PAID_CHILD_ADMISSION_SCHEMA,binding=dict(p['binding']),
+        task_kind='research',effective_complexity=C2_COMPLEX_BOUNDED,
+        witness_disposition='not_required',policy_revision=POLICY_REVISION)
+    record.update(overrides);record.pop('admission_digest',None)
+    return dict(record,admission_digest=backend.admitted_class_digest(record))
+
+
+def _clear_pool_env(monkeypatch):
+    for name in backend._ADMITTED_POOL_ENV_NAMES:
+        monkeypatch.delenv(name,raising=False)
+
+
+def test_admitted_class_projection_replaces_blanket_stamp(monkeypatch):
+    _clear_pool_env(monkeypatch)
+    from control_plane.child_execution_contracts import C2_COMPLEX_BOUNDED, POLICY_REVISION
+    p,*_=material()
+    env=backend.admitted_pool_class_env({**p,'paid_child_admission':admitted_record(p)})
+    assert env==dict(POOL_TASK_CLASS='research',POOL_TASK_COMPLEXITY=C2_COMPLEX_BOUNDED,
+        POOL_WITNESS_DISPOSITION='not_required',POOL_POLICY_REVISION=POLICY_REVISION)
+
+
+def test_operator_task_class_keeps_legacy_domain_orchestration(monkeypatch):
+    _clear_pool_env(monkeypatch)
+    p,*_=material()
+    record=admitted_record(p,task_kind='domain_orchestration',
+        effective_complexity='C3_FRONTIER_JUDGMENT',witness_disposition='accepted')
+    env=backend.admitted_pool_class_env({**p,'paid_child_admission':record})
+    # Legacy consumers require exactly this value for the operator role.
+    assert env['POOL_TASK_CLASS']=='domain_orchestration'
+    assert env['POOL_TASK_COMPLEXITY']=='C3_FRONTIER_JUDGMENT'
+
+
+def test_non_operator_task_kind_projects_verbatim(monkeypatch):
+    _clear_pool_env(monkeypatch)
+    p,*_=material()
+    record=admitted_record(p,task_kind='repair')
+    assert backend.admitted_pool_class_env(
+        {**p,'paid_child_admission':record})['POOL_TASK_CLASS']=='repair'
+
+
+def test_missing_admitted_record_refuses_instead_of_default(monkeypatch):
+    _clear_pool_env(monkeypatch)
+    p,*_=material()
+    with pytest.raises(backend.PaidOwnerRefused):backend.admitted_pool_class_env(dict(p))
+
+
+@pytest.mark.parametrize('name,value', [
+    ('POOL_TASK_CLASS','domain_orchestration'),
+    ('POOL_TASK_COMPLEXITY','C3_FRONTIER_JUDGMENT'),
+    ('POOL_WITNESS_DISPOSITION','accepted'),
+    ('POOL_POLICY_REVISION','unrelated-policy'),
+])
+def test_env_value_disagreeing_with_admitted_digest_refuses(monkeypatch,name,value):
+    _clear_pool_env(monkeypatch)
+    p,*_=material()
+    payload={**p,'paid_child_admission':admitted_record(p)}
+    expected=backend.admitted_pool_class_env(payload)
+    # Isolate each field: another disagreeing field must not make this pass.
+    monkeypatch.setenv(name,value)
+    with pytest.raises(backend.PaidOwnerRefused):
+        backend.admitted_pool_class_env(payload)
+    for field,admitted in expected.items():
+        monkeypatch.setenv(field,admitted)
+    assert backend.admitted_pool_class_env(payload)==expected
+
+
+def test_restamped_admission_cannot_reuse_original_control_launch_pin():
+    from control_plane import fabric_control_start as command
+    p,*_=material()
+    payload={**p,'paid_child_admission':admitted_record(p)}
+    # Pure projection validation; this is not an authenticated Control owner.
+    projection=dict(schema_version=command.SCHEMA,
+        attempt_id=p['binding']['attempt_id'],fence_generation=1,pin_version=2,
+        pin_identity_sha256=launch_identity(payload),
+        lease_expires_at='2099-01-01T00:00:00Z')
+    assert command._validate(projection,payload)>0
+    changed=deepcopy(payload)
+    record=changed['paid_child_admission']
+    record.update(effective_complexity='C3_FRONTIER_JUDGMENT',
+                  witness_disposition='accepted')
+    record['admission_digest']=backend.admitted_class_digest(record)
+    assert backend.admitted_child_class_record(changed)[1]=='C3_FRONTIER_JUDGMENT'
+    assert launch_identity(changed)!=projection['pin_identity_sha256']
+    with pytest.raises(command.ControlStartRefused,
+                       match='control_start_projection_mismatch'):
+        command._validate(projection,changed)
+
+
+def test_restamped_record_cannot_self_promote_past_digest(monkeypatch):
+    _clear_pool_env(monkeypatch)
+    p,*_=material()
+    record=admitted_record(p)
+    inflated=dict(record,effective_complexity='C3_FRONTIER_JUDGMENT')
+    with pytest.raises(backend.PaidOwnerRefused):
+        backend.admitted_pool_class_env({**p,'paid_child_admission':inflated})
+    repointed=dict(record,binding=dict(p['binding'],attempt_id='ATT-other'))
+    with pytest.raises(backend.PaidOwnerRefused):
+        backend.admitted_pool_class_env({**p,'paid_child_admission':repointed})
+    drifted=dict(record,policy_revision='0.9.0')
+    with pytest.raises(backend.PaidOwnerRefused):
+        backend.admitted_pool_class_env({**p,'paid_child_admission':drifted})
+    fabricated=dict(record,witness_disposition='fabricated')
+    with pytest.raises(backend.PaidOwnerRefused):
+        backend.admitted_pool_class_env({**p,'paid_child_admission':fabricated})
+    reviewer_lane=dict(record,effective_complexity='REVIEWER')
+    with pytest.raises(backend.PaidOwnerRefused):
+        backend.admitted_pool_class_env({**p,'paid_child_admission':reviewer_lane})
+
+
+def test_no_blanket_c2_default_remains_in_backend_source():
+    source=(ROOT/'control_plane/paid_fabric_backend.py').read_text()
+    assert 'C2_COMPLEX_BOUNDED' not in source
+    assert "POOL_TASK_CLASS='research'" not in source
+    assert '**class_env,' in source
+
+
+def test_admitted_record_rides_closed_control_payload():
+    from control_plane import paid_model_execution_contract as contract
+    p,*_=material()
+    assert contract.compile_request({**p,'paid_child_admission':admitted_record(p)})
+    with pytest.raises(contract.PaidModelContractRefused):
+        contract.compile_request({**p,'unrelated_key':'refused'})

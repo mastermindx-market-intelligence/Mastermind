@@ -2761,6 +2761,7 @@ def api_self_directed() -> JSONResponse:
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001 — never 500 the dashboard
+        _log.warning("Self-Directed book unavailable: %s", type(exc).__name__)
         # A read we could not perform renders `unavailable` — never a fabricated funded book
         # (a $1M all-cash, 0%-return book would be indistinguishable from a real one).
         try:
@@ -2772,7 +2773,8 @@ def api_self_directed() -> JSONResponse:
                    "reason_code": "self_directed_book_unreadable",
                    "nav": None, "cash": None, "invested": None,
                    "starting_nav": None, "positions": [], "pending": [],
-                   "allocation": None, "market": market, "error": str(exc)}
+                   "allocation": None, "market": market, "valuation_complete": False,
+                   "error": "self_directed_unavailable"}
         # E13: the typed invalid-account error keeps its own reason code and evidence instead
         # of collapsing into the generic unreadable string.
         reason_code = getattr(exc, "reason_code", None)
@@ -3634,7 +3636,7 @@ def api_runs() -> JSONResponse:
     """
     try:
         from brain import runlog
-        runs = runlog.list_runs()
+        runs = runlog.list_runs(strict=True)
         for r in runs:
             tz = _cached_zh(r.get("title") or "")
             if tz:
@@ -3644,7 +3646,9 @@ def api_runs() -> JSONResponse:
                 r["summary_zh"] = sz
         return JSONResponse(runs)
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        _log.warning("run history unavailable (%s)", type(exc).__name__)
+        return JSONResponse({"run_status": "unavailable", "runs": None,
+                             "error": "run_history_unavailable"}, status_code=500)
 
 
 @router.get("/api/runlog")
@@ -3654,10 +3658,17 @@ def api_runlog(run_id: str | None = None) -> JSONResponse:
     Returns {run_id, ts, kind, title, steps: [{ts, type, title, detail, ...}]}."""
     try:
         from brain import runlog
-        return JSONResponse(runlog.read_run(run_id or None))
-    except Exception:
-        _log.exception("runlog read failed")
-        return JSONResponse({"run_id": run_id, "steps": [], "error": "runlog unavailable"}, status_code=500)
+        if run_id:
+            try:
+                runlog.validate_run_id(run_id)
+            except ValueError:
+                return JSONResponse({"run_id": None, "trace_status": "unavailable",
+                                     "steps": None, "error": "invalid run_id"}, status_code=400)
+        return JSONResponse(runlog.read_run(run_id or None, strict=True))
+    except Exception as exc:
+        _log.warning("runlog unavailable (%s)", type(exc).__name__)
+        return JSONResponse({"trace_status": "unavailable", "steps": None,
+                             "error": "runlog unavailable"}, status_code=500)
 
 
 # ---------------------------------------------------------------------------
@@ -3697,28 +3708,50 @@ def _is_date_dir(name: str) -> bool:
     return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", name or ""))
 
 
+def _desk_artifact_path(root: Path, *parts: str) -> Path:
+    """Confine Desk reads below their fixed owner root, including resolved links.
+
+    The configured owner root may itself be a mount or symlink. Descendants
+    must remain inside that root. This is a read boundary, not a writer lock.
+    """
+    owner = root.resolve()
+    path = owner.joinpath(*parts).resolve()
+    if not path.is_relative_to(owner):
+        raise ValueError("Desk artifact path escapes its owner root")
+    return path
+
+
+def _desk_ticker(value: Any) -> str:
+    """A ticker from an artifact is one path component, never a path."""
+    ticker = str(value or "").upper().strip()
+    if ticker in {".", ".."} or any(char in ticker for char in ("/", "\\", "\x00")):
+        raise ValueError("Desk ticker must be a single path component")
+    return ticker
+
+
 def _latest_asof(*roots: Path) -> str | None:
     """The most-recent ISO-date subdir name across one or more artifact roots ({} → None)."""
     dates: set[str] = set()
     for root in roots:
         try:
-            for p in root.iterdir():
-                if p.is_dir() and _is_date_dir(p.name):
+            for p in _desk_artifact_path(root).iterdir():
+                if _is_date_dir(p.name) and _desk_artifact_path(root, p.name).is_dir():
                     dates.add(p.name)
-        except Exception:  # noqa: BLE001
+        except FileNotFoundError:
             continue
     return max(dates) if dates else None
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    """Parse a JSON file → dict; {} on any failure (missing / malformed)."""
+def _read_json(root: Path, *parts: str) -> dict[str, Any]:
+    """Read a confined Desk artifact; only actual absence is ordinary missing data."""
+    path = _desk_artifact_path(root, *parts)
     try:
-        if path.exists():
-            d = json.loads(path.read_text())
-            return d if isinstance(d, dict) else {}
-    except Exception:  # noqa: BLE001
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
         return {}
-    return {}
+    if not isinstance(value, dict):
+        raise ValueError("Desk artifact must be a JSON object")
+    return value
 
 
 @router.get("/api/desk/strategist")
@@ -3732,7 +3765,7 @@ def api_desk_strategist(asof: str = "") -> JSONResponse:
             asof = _latest_asof(_committee_dir())
         if not asof:
             return JSONResponse({"status": "building", "asof": None})
-        j = _read_json(_committee_dir() / asof / "_FLAGSHIP" / "strategist.json")
+        j = _read_json(_committee_dir(), asof, "_FLAGSHIP", "strategist.json")
         verdict = j.get("verdict") or {}
         if not verdict:
             return JSONResponse({"status": "building", "asof": asof})
@@ -3760,8 +3793,10 @@ def api_desk_strategist(asof: str = "") -> JSONResponse:
             "rationale": (verdict.get("rationale") or "")[:1600],
             "calibration_multiplier": verdict.get("calibration_multiplier"),
         })
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to building
-        return JSONResponse({"status": "building", "asof": None, "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("desk_strategist_unavailable: %s", type(exc).__name__)
+        return JSONResponse({"status": "unavailable", "asof": None,
+                             "error": "desk_strategist_unavailable"})
 
 
 @router.get("/api/desk/decisions")
@@ -3779,10 +3814,10 @@ def api_desk_decisions(asof: str = "") -> JSONResponse:
 
         # Gate + Risk per-name decisions (keyed by ticker) for the date
         def _by_ticker(root: Path) -> dict[str, dict]:
-            j = _read_json(root / asof / "decisions.json")
+            j = _read_json(root, asof, "decisions.json")
             out: dict[str, dict] = {}
             for dec in ((j.get("result") or {}).get("decisions") or []):
-                tk = str(dec.get("ticker") or "").upper().strip()
+                tk = _desk_ticker(dec.get("ticker"))
                 if tk:
                     out[tk] = {"action": str(dec.get("action") or "").lower(),
                                "scale": dec.get("scale"),
@@ -3792,14 +3827,15 @@ def api_desk_decisions(asof: str = "") -> JSONResponse:
         gate = _by_ticker(_gate_officer_dir())
         risk = _by_ticker(_risk_officer_dir())
 
-        cdir = _committee_dir() / asof
+        committee = _committee_dir()
+        cdir = _desk_artifact_path(committee, asof)
         rows: list[dict[str, Any]] = []
         tickers: list[str] = []
         try:
-            if cdir.exists():
-                tickers = sorted(p.name for p in cdir.iterdir()
-                                 if p.is_dir() and p.name != "_FLAGSHIP")
-        except Exception:  # noqa: BLE001
+            tickers = sorted(p.name for p in cdir.iterdir()
+                             if p.name != "_FLAGSHIP"
+                             and _desk_artifact_path(committee, asof, p.name).is_dir())
+        except FileNotFoundError:
             tickers = []
         # also surface gate/risk-only names (e.g. a withheld name with no committee folder)
         for tk in sorted(set(gate) | set(risk)):
@@ -3807,9 +3843,9 @@ def api_desk_decisions(asof: str = "") -> JSONResponse:
                 tickers.append(tk)
 
         for tk in tickers[:120]:
-            forge = _read_json(cdir / tk / "forge.json")
-            sentinel = _read_json(cdir / tk / "sentinel.json")
-            nexus = _read_json(cdir / tk / "nexus.json")
+            forge = _read_json(committee, asof, tk, "forge.json")
+            sentinel = _read_json(committee, asof, tk, "sentinel.json")
+            nexus = _read_json(committee, asof, tk, "nexus.json")
             g = gate.get(tk) or {}
             r = risk.get(tk) or {}
             rows.append({
@@ -3831,7 +3867,9 @@ def api_desk_decisions(asof: str = "") -> JSONResponse:
         return JSONResponse({"status": "scoring" if rows else "building",
                              "asof": asof, "decisions": rows})
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"status": "building", "asof": None, "decisions": [], "error": str(exc)})
+        _log.warning("desk_decisions_unavailable: %s", type(exc).__name__)
+        return JSONResponse({"status": "unavailable", "asof": None, "decisions": None,
+                             "error": "desk_decisions_unavailable"})
 
 
 @router.get("/api/desk/watchlist")
@@ -3973,7 +4011,7 @@ def api_desk_macro_risk(asof: str = "") -> JSONResponse:
     + per-axis fragility (vol / credit-USD / liquidity / crowding / dealer-gamma), the leading-edge
     fragile DRIVER chains, the hard gross cap + add-block (the teeth), the driver-aware defensive tilt,
     and the falsifier. Reads the persisted artifact; falls back to a fresh deterministic compute (no
-    LLM) so the card is never blank. Never 500s."""
+    LLM) when no state is stored. Failed reads are unavailable; never 500s."""
     def _shape(st: dict) -> dict:
         st = st or {}
         return {
@@ -3997,18 +4035,20 @@ def api_desk_macro_risk(asof: str = "") -> JSONResponse:
         if not (asof and _is_date_dir(asof)):
             asof = _latest_asof(_macro_risk_dir())
         if asof:
-            j = _read_json(_macro_risk_dir() / asof / "state.json")
+            j = _read_json(_macro_risk_dir(), asof, "state.json")
             st = j.get("state") or {}
             if st:
                 return JSONResponse({"status": "scoring", **_shape(st)})
         # nothing persisted yet — compute the deterministic state LIVE (no LLM) so the card renders
         from brain import macro_risk
-        reg = _read_json(Path(_data().parent / "vendor" / "macro" / "data" / "regime" / "latest.json")) \
-            if (_data().parent / "vendor" / "macro" / "data" / "regime" / "latest.json").exists() else {}
+        regime_root = _data().parent / "vendor" / "macro" / "data" / "regime"
+        reg = _read_json(regime_root, "latest.json")
         st = macro_risk.risk_state(reg.get("date") or "", reg or None)
         return JSONResponse({"status": "scoring" if st.get("state") else "building", **_shape(st)})
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to building
-        return JSONResponse({"status": "building", "state": None, "error": str(exc)})
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("desk_macro_risk_unavailable: %s", type(exc).__name__)
+        return JSONResponse({"status": "unavailable", "state": None,
+                             "error": "desk_macro_risk_unavailable"})
 
 
 @router.get("/api/desk/firm-exposure")
@@ -4016,14 +4056,17 @@ def api_desk_firm_exposure() -> JSONResponse:
     """READ-ONLY firm-level cross-book exposure monitor — where the independent books (flagship,
     heavyweight, US/CN/HK/ETF Brains) have piled into the SAME names / sectors. Surfaces the flagged
     concentrations + the top firm-wide exposures + a sector rollup. A MONITOR only: it never changes
-    any allocation or trades. Degrades to an honest empty payload; never 500s."""
+    any allocation or trades. Failed reads retain unknown exposure; never 500s."""
     try:
         from portfolio import firm_exposure
         return JSONResponse(firm_exposure.summary())
-    except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
-        return JSONResponse({"as_of": None, "books": [], "n_books": 0, "top_exposures": [],
-                             "flags": [], "by_sector": {}, "by_chain": {}, "thresholds": {},
-                             "currency_clean": False, "note": f"Firm exposure unavailable: {exc}"})
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("desk_firm_exposure_unavailable: %s", type(exc).__name__)
+        return JSONResponse({"status": "unavailable", "as_of": None, "books": None,
+                             "n_books": None, "top_exposures": None, "flags": None,
+                             "by_sector": None, "by_chain": None, "thresholds": None,
+                             "currency_clean": None, "note": None,
+                             "error": "desk_firm_exposure_unavailable"})
 
 
 @router.get("/api/firm_allocator")

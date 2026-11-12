@@ -25,6 +25,10 @@ def _arguments(tmp_path, monkeypatch, *, index=2):
     monkeypatch.setattr(rwe, "_venv_python", lambda env: Path(sys.executable))
     monkeypatch.setattr(rwe, "require_supported_interpreter", lambda executable: None)
     monkeypatch.setattr(rwe, "vendor_present", lambda root: True)
+    # The real-canonical-shard child runs the exact serial gate argv under
+    # disabled plugin autoload; the shard job's worker switch must not leak
+    # in and inject xdist flags that child cannot load.
+    monkeypatch.delenv("CI_PYTEST_WORKERS", raising=False)
     return argparse.Namespace(root=str(ROOT), env=str(env_dir), subset=None,
                               shard_index=index), env_dir
 
@@ -160,7 +164,7 @@ def test_shadow_uses_six_hosted_indices_and_one_common_lock_owner():
     assert shards["needs"] == ["prepare-lock"]
     assert shards["strategy"] == {"fail-fast": False, "max-parallel": 6,
                                    "matrix": {"index": list(range(6))}}
-    assert shards["runs-on"] == "ubuntu-latest"
+    assert shards["runs-on"] == "ubuntu-24.04"
     macro_checkout = next(step["with"] for step in shards["steps"]
                           if step.get("with", {}).get("repository") ==
                           "mastermindx-market-intelligence/macro")
@@ -189,12 +193,13 @@ def test_shadow_uses_six_hosted_indices_and_one_common_lock_owner():
     runners = [s for s in shards["steps"] if "--shard-index" in s.get("run", "")]
     assert len(runners) == 1
     assert runners[0]["run"] == (
-        "python scripts/rwe_env.py gate --env /tmp/rwe-env --shard-index ${{ matrix.index }}"
+        'python scripts/rwe_env.py gate --env "${MMX_RWE_SHADOW_ENV:?}" --shard-index ${{ matrix.index }}'
     )
     receipts = [s for s in shards["steps"] if s.get("uses") == "actions/upload-artifact@v4"
                 and s.get("name") == "Upload receipt"]
     assert len(receipts) == 1
-    assert receipts[0]["if"] == "always()"
+    assert receipts[0]["if"] == "${{ always() && env.MMX_RWE_SHADOW_ENV != '' }}"
+    assert receipts[0]["with"]["path"] == "${{ env.MMX_RWE_SHADOW_ENV }}/rwe_receipt.json"
     assert receipts[0]["with"]["name"] == "rwe-receipt-linux-${{ matrix.index }}"
     assert final["needs"] == ["prepare-lock", "shadow-shards"]
     assert final["if"] == "${{ always() }}"
@@ -213,3 +218,71 @@ def test_actual_shadow_fan_in_accepts_only_complete_success(lock_result, shards_
                             env={"LOCK_RESULT": lock_result, "SHARDS_RESULT": shards_result},
                             capture_output=True, text=True)
     assert (result.returncode == 0) is (lock_result == shards_result == "success")
+
+
+def test_workflow_isolates_consecutive_jobs_and_reuses_only_own_environment(tmp_path):
+    """Execute actual step arguments with inert realization and gate commands."""
+    import os
+
+    steps = _workflow()['jobs']['shadow-shards']['steps']
+    realize = next(s for s in steps if s.get('name') == 'Realize hash-locked environment')
+    gate = next(s for s in steps if s.get('name') == 'Run canonical test shard inside the realized environment')
+    runner_temp = tmp_path / 'runner temp'
+    runner_temp.mkdir()
+    stale = tmp_path / 'original-environment'
+    stale.mkdir()
+    (stale / 'rwe_receipt.json').write_text('prior receipt')
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    shim = bin_dir / 'python'
+    shim.write_text(f'#!{sys.executable}\n' + '''
+import json
+import os
+import sys
+from pathlib import Path
+
+script, command, flag, value, *rest = sys.argv[1:]
+assert script == 'scripts/rwe_env.py'
+path = Path(value) if value != '/tmp/rwe-env' else Path(os.environ['FIXTURE_STALE'])
+if command == 'realize':
+    assert flag == '--dest' and not rest
+    if path.exists():
+        sys.exit(2)
+    path.mkdir()
+    (path / 'rwe_receipt.json').write_text('current receipt')
+else:
+    assert command == 'gate' and flag == '--env' and rest == ['--shard-index', '0']
+    assert (path / 'rwe_receipt.json').read_text() == 'current receipt'
+with open(os.environ['FIXTURE_TRACE'], 'a') as stream:
+    stream.write(json.dumps([command, str(path)]) + '\\n')
+''')
+    shim.chmod(0o700)
+    trace = tmp_path / 'calls.jsonl'
+    destinations = []
+    for index in range(2):
+        env_file = tmp_path / f'github-env-{index}'
+        env_file.touch()
+        env = {**os.environ, 'PATH': str(bin_dir) + os.pathsep + os.environ['PATH'],
+               'RUNNER_TEMP': str(runner_temp), 'GITHUB_ENV': str(env_file),
+               'FIXTURE_STALE': str(stale), 'FIXTURE_TRACE': str(trace)}
+        env.pop('MMX_RWE_SHADOW_ENV', None)
+        proc = subprocess.run(['/bin/bash', '-e', '-c', realize['run']], env=env,
+                              capture_output=True, text=True, timeout=10)
+        assert proc.returncode == 0, proc.stderr
+        lines = env_file.read_text().splitlines()
+        assert len(lines) == 1
+        key, path = lines[0].split('=', 1)
+        assert key == 'MMX_RWE_SHADOW_ENV'
+        destination = Path(path)
+        assert destination.parent.parent == runner_temp
+        assert destination.parent.stat().st_mode & 0o777 == 0o700
+        env[key] = path
+        gate_run = gate['run'].replace('${{ matrix.index }}', '0')
+        proc = subprocess.run(['/bin/bash', '-e', '-c', gate_run], env=env,
+                              capture_output=True, text=True, timeout=10)
+        assert proc.returncode == 0, proc.stderr
+        destinations.append(path)
+    assert destinations[0] != destinations[1]
+    assert [json.loads(line) for line in trace.read_text().splitlines()] == [
+        [command, path] for path in destinations for command in ('realize', 'gate')]
+    assert (stale / 'rwe_receipt.json').read_text() == 'prior receipt'

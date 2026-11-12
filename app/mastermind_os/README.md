@@ -89,9 +89,14 @@ Acquisition requests use only audience
 `mastermind.workspace.read`. Content uses a separate token for audience
 `https://mcp.mastermind-x.com/workspace/window/current` and scope
 `mastermind.workspace.content.read`. The baseline acquisition/content flow
-requests no OIDC identity scopes or
-refresh tokens. The separately described opt-in native persistence candidate
-has its own qualification boundary. Each audience requires its corresponding
+requests no OIDC identity scopes. Since the 2026-11-09 native persistence
+rollout, the packaged native app compiles the rotating Keychain refresh path
+(`MM_NATIVE_REFRESH_ENABLED=1` at build). A client-configured install then
+requests `offline_access` for Acquisition and Content and silently renews
+across restarts without re-login; see
+[the rollout record](docs/native-persistence-rollout-20261109.md) for the
+tenant requirements and honest limits. Executive remains non-persistent by
+design. Each audience requires its corresponding
 enrolled service permission; a content refusal can leave acquisition usable.
 
 The web client opens one popup directly in the user gesture, reuses it for two
@@ -377,8 +382,11 @@ blocking, Auth0 session expiration, tenant iframe restrictions, revocation, and
 browser profile cleanup can require interactive sign-in. Full persistence across
 those conditions requires a separately reviewed first-party/BFF session owner or
 qualified rotating refresh-token implementation, with explicit revoke/logout,
-rotation and server-side revocation guarantees. Native macOS Keychain renewal is a
-separate implementation. Source tests do not prove live Auth0 tenant behavior.
+rotation and server-side revocation guarantees. Native macOS Keychain renewal is
+the implemented first-party path for the installed app since the 2026-11-09
+rollout (see `docs/native-persistence-rollout-20261109.md`); the browser web
+client remains on in-memory SSO restoration. Source tests do not prove live
+Auth0 tenant behavior.
 
 ## Same-tab fallback when the live edge forbids silent frames (stacked draft)
 
