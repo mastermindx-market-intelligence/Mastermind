@@ -2146,3 +2146,31 @@ DeepSeek worker with the same eight points.
 **Limits that stay.** A secret in plain prose with no label cannot be recognised. Conversations made before today never gain the link. Secretary's archive stops at the cut; its Slack watch and heartbeat keep writing in Hermes.
 
 **Next, in order.** Secretary's seven timers, one at a time, only after the replacement path is rehearsed. Then the other ten bots. The bridge still waits on the Chairman's five reloads. The other lanes are unchanged from section 49.
+
+## 56. Amendment, 2026-11-12 20:26 UTC: computer-use layer merged and registered in one provider home
+
+**What changed.** The restrained computer-use layer is on the trunk and a new session on the Capacity Fabric provider can call it. It is one tool with an action field. It reads one named window, acts only under a lease, waits for three minutes of human idle, paces input per window, returns a receipt for every act and never returns an image.
+
+**The principal's read before the merge.** The entry point takes no argument. The state folder comes from the password database. A pacing record is written at the focus click. The 21 functions on the deny-before-capture path were recomputed and are identical to the reviewed commit. 433 tests pass on the merged tree.
+
+**Scope cut at the merge.** The branch also changed the roster tool, which another lane owns and which has moved a long way since. Trunk's roster tool and its tests were kept as they are. Attaching the layer to a teammate is not built; it goes through the roster lane when a teammate needs it.
+
+**Registration, with who did each step.** Every step was the principal's.
+
+- Four files were copied into a new folder under the T3 MCP folder. The Peekaboo pin matches the installed binary.
+- The entry was written by the product's own command into one provider home, the only enabled one. The command was rehearsed first on a scratch folder with the same path shape. Before and after, the file has the same keys and every earlier server entry is unchanged.
+- A fresh child session saw the tool. Presence and lease status answered. A window list for the Chairman's app and for T3 Code was refused. A window list for Finder answered.
+- Nothing was restarted. Sessions started before the registration do not see the tool.
+
+**Added at registration.** The deny list now names the Chairman's Mastermind OS app and the T3 Code app, by bundle id and by name. No session drives either through this layer.
+
+**Class rules.**
+
+- A lane's change to a file another lane owns is not merged with the lane. It goes through the owner.
+- A registration in a config file that running sessions rewrite is written by the product's own command, rehearsed on a copy with the same path shape.
+- A layer that drives windows refuses the apps people are working in.
+- A guidance text is not installed while it names tools that do not exist.
+
+**Limits that stay.** It restrains cooperating sessions; a session with a shell can write its files. Other provider homes and the worker home do not have it. No teammate has it. An upgrade of Peekaboo stops the server until the principal re-pins it. The vision relay was proven by the lane on its fixture and not re-run on the installed copy. The lane is closed for code; its eight low findings stay on the later list.
+
+**Next, in order.** Unchanged from section 55. The bridge still waits on the Chairman's five reloads.
