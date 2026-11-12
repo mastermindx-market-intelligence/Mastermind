@@ -7,9 +7,21 @@
 #   stops, inspects and seeds that isolated instance, installs modules into
 #   it from a local source path, and triggers module worker reloads.
 #
-# INSTANCE/PORT MECHANISM (Paperclip CLI 2026.1106.0, verified by lane L9)
-#   * `paperclipai run -d <home> -i <id>` sets PAPERCLIP_HOME=<home> and
-#     PAPERCLIP_INSTANCE_ID=<id>; the instance lives at
+# INSTANCE/PORT MECHANISM (Paperclip CLI 2026.1106.0; direct-start launcher
+#   per deputy ruling 14, 2026-11-12)
+#   * `up` NEVER invokes the CLI's server-wrapper commands: their doctor
+#     step resolves store paths against the DEFAULT instance home, and one
+#     abandoned launch joined the real database for 90 seconds. Instead `up`
+#     writes a launch-server.mjs into the instance dir and runs it with
+#     node; it imports startServer() from the managed CLI install's
+#     @paperclipai/server package and calls it directly, with the instance
+#     pinned from this script's environment:
+#       PAPERCLIP_HOME=<dev home>            (instance home)
+#       PAPERCLIP_INSTANCE_ID=<instance id>  (never "default")
+#       PAPERCLIP_CONFIG=<instance config>   (ports + dirs, pinned)
+#     With none of those set the server falls back to ~/.paperclip/instances/
+#     default — the real instance — so the pins are not optional.
+#   * The instance lives at
 #     <home>/instances/<id>/ (config.json, db/, logs/, data/, secrets/,
 #     runtime-info.json). State is fully isolated from ~/.paperclip.
 #   * Ports come from the instance config file, NOT from a CLI flag:
@@ -20,7 +32,18 @@
 #     config would point the dev instance's embedded Postgres data dir at
 #     the DEFAULT instance's db/. This script therefore always writes a
 #     COMPLETE config.json with explicit absolute paths under the dev root.
-#   * This build's `run` does NOT write runtime-info.json; stop/status rely
+#   * The server prints its startup banner to stdout (captured in the server
+#     log) naming the config path, the database data dir and the database
+#     port as "<dir> (pg:<port>)". `up` reads the banner BEFORE making any
+#     request, then proves isolation (below) before calling the instance
+#     ready. The server may silently move the database port when its
+#     configured port is taken — the banner is where that becomes visible.
+#     The server log is TRUNCATED at each launch, so every banner/isolation
+#     grep proves THIS run's process, never a previous run's bytes.
+#   * The embedded PostgreSQL runs as a DIRECT CHILD of the launcher process
+#     (argv: postgres -D <data dir> -p <port>), and startServer() installs
+#     the SIGINT/SIGTERM handlers that stop it in an ordered shutdown.
+#   * This server path does not write runtime-info.json; stop/status rely
 #     on the controller pidfile plus the port listener (see identity below).
 #   * Plugin install: POST <url>/api/plugins/install with
 #     {"packageName":"<abs dir>","isLocalPath":true}. local_trusted mode
@@ -42,10 +65,12 @@
 #   banner holding the backup dir, not the health body). A path marker can
 #   prove "default" but never "dev". Positive dev identity is therefore
 #   argv-based: the process LISTENING on our config port was launched as
-#   `paperclipai run -d <DEV_HOME> -i <INSTANCE_ID>`, so its command line
-#   contains DEV_HOME (see listener_is_ours). That survives controller
-#   restarts and a pidfile wipe; a foreign instance rebinding our port shows
-#   a different argv and is refused as "unknown".
+#   `<node> <DEV_HOME>/instances/<id>/launch-server.mjs` (the direct
+#   startServer() launcher), so its command line contains DEV_HOME (see
+#   listener_is_ours). That survives controller restarts and a pidfile
+#   wipe; a foreign instance rebinding our port — including one started
+#   through the CLI wrapper — shows a different argv and is refused as
+#   "unknown".
 #
 # BOUNDARIES ENFORCED (refusal = exit 3, before any mutation or HTTP write)
 #   - dev home must not be ~/.paperclip or anything under it
@@ -54,6 +79,16 @@
 #     (neither explicit env/config values nor auto-picked ports)
 #   - API host must be loopback
 #   - health body at the resolved URL must not carry the default-home marker
+#   - after start, before the instance is called ready, three isolation
+#     checks (deputy ruling 14). Any failure kills the launched process
+#     tree, prints exactly one line "PAPERCLIP-DEV: REAL STORE REFUSED"
+#     (reason on stderr) and exits 3:
+#       (a) no socket on TCP:54329 held by the launcher pid or any of its
+#           children (the dev embedded PostgreSQL is a child)
+#       (b) the database listener is the configured dev port, serving the
+#           dev data dir, and the start banner names that same port
+#       (c) the start banner and log name neither port 54329 nor any path
+#           under ~/.paperclip/instances/default
 #
 # USAGE
 #   paperclip_dev.sh up | down | status | url | logs | reset
@@ -93,7 +128,14 @@
 #   MMOS_DEV_DB_PORT         preferred embedded-Postgres port (default 54390;
 #                            must not be 54329)
 #   MMOS_DEV_COMPANY_NAME    seed company name (default "MMOS Dev")
-#   MMOS_DEV_PAPERCLIP_CLI   CLI path (default the managed paperclipai binary)
+#   MMOS_DEV_PAPERCLIP_CLI   CLI path (default the managed paperclipai binary;
+#                            used for `company create` seeding and to derive
+#                            the server entry below)
+#   MMOS_DEV_NODE            node interpreter for the direct-start launcher
+#                            (default: `command -v node`)
+#   MMOS_DEV_SERVER_ENTRY    server entry .js whose startServer() the launcher
+#                            imports (default: derived from the CLI install —
+#                            <cli dir>/../@paperclipai/server/dist/index.js)
 #   MMOS_DEV_START_TIMEOUT   health wait seconds (default 240 — the CLI wait
 #                            may time out ~70s in while the server becomes
 #                            healthy ~100s in; we reconcile real health and
@@ -120,6 +162,8 @@ PREF_SERVER_PORT="${MMOS_DEV_SERVER_PORT:-3190}"
 PREF_DB_PORT="${MMOS_DEV_DB_PORT:-54390}"
 COMPANY_NAME="${MMOS_DEV_COMPANY_NAME:-MMOS Dev}"
 PAPERCLIP_CLI="${MMOS_DEV_PAPERCLIP_CLI:-$HOME/.paperclip/cli/current/node_modules/.bin/paperclipai}"
+NODE_BIN="${MMOS_DEV_NODE:-}"
+SERVER_ENTRY="${MMOS_DEV_SERVER_ENTRY:-}"
 START_TIMEOUT="${MMOS_DEV_START_TIMEOUT:-240}"
 STOP_TIMEOUT="${MMOS_DEV_STOP_TIMEOUT:-60}"
 CURL_TIMEOUT="${MMOS_DEV_CURL_TIMEOUT:-5}"
@@ -209,7 +253,7 @@ http_post_json() {
 }
 
 usage() {
-  sed -n '2,100p' "$0" | grep -E '^#( |$)' | sed 's/^# \{0,1\}//'
+  sed -n '2,/^set -euo pipefail$/p' "$0" | grep -E '^#( |$)' | sed 's/^# \{0,1\}//'
   exit 1
 }
 
@@ -224,6 +268,7 @@ PIDFILE="$INSTANCE_ROOT/dev-controller.pid"
 RUNTIME_INFO="$INSTANCE_ROOT/runtime-info.json"
 LOG_DIR="$INSTANCE_ROOT/logs"
 SERVER_LOG="$LOG_DIR/dev-server.stdout.log"
+LAUNCHER_SCRIPT="$INSTANCE_ROOT/launch-server.mjs"
 
 # --------------------------------------------------------------------------- #
 # Refusal checks
@@ -316,10 +361,12 @@ health_ok() { # $1=body
 }
 
 # True when the process LISTENING on $port was launched for THIS dev home.
-# The server runs as: paperclipai run -d <DEV_HOME> -i <INSTANCE_ID>, so its
-# argv contains DEV_HOME. This is the positive dev identity in a build whose
+# The server runs as: <node> <DEV_HOME>/instances/<id>/launch-server.mjs (the
+# direct startServer() launcher), so its argv contains the launcher path —
+# and with it DEV_HOME. This is the positive dev identity in a build whose
 # health body carries no instance paths; it survives controller restarts and
-# pidfile wipes, and a foreign instance rebinding our port fails it.
+# pidfile wipes, and a foreign instance rebinding our port (including one
+# started through the CLI wrapper) fails it.
 listener_is_ours() { # $1=port
   local port="$1" pid cmd
   pid="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
@@ -327,7 +374,7 @@ listener_is_ours() { # $1=port
   cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
   [ -n "$cmd" ] || return 1
   case "$cmd" in
-    *"$DEV_HOME"*) return 0 ;;
+    *"$LAUNCHER_SCRIPT"*) return 0 ;;
   esac
   return 1
 }
@@ -363,6 +410,177 @@ dynamic_identity_check() { # $1=base_url
     return 0
   fi
   echo "unknown"
+}
+
+# --------------------------------------------------------------------------- #
+# Direct-start launcher and ruling-14 isolation proof
+# --------------------------------------------------------------------------- #
+# All pids in the launcher's process tree (launcher + descendants). The dev
+# embedded PostgreSQL runs as a direct child of the launcher process.
+server_tree_pids() { # $1=root pid — echoes "root child ..." (best effort)
+  local root="$1" out="" next pid kid
+  local frontier="$root" seen=" $root "
+  while [ -n "$frontier" ]; do
+    next=""
+    for pid in $frontier; do
+      for kid in $(pgrep -P "$pid" 2>/dev/null || true); do
+        case "$seen" in *" $kid "*) continue ;; esac
+        seen="$seen$kid "
+        out="$out $kid"
+        next="$next $kid"
+      done
+    done
+    frontier="$next"
+  done
+  printf '%s' "$root$out"
+}
+
+# A pid we are willing to SIGNAL must be provably ours: its argv names the
+# generated launch-server.mjs under this dev instance root. A stale pidfile
+# whose pid was reused by any other process — including the real service —
+# fails this and is refused, never signalled (review finding, 2026-11-12).
+pid_is_ours() { # $1=pid
+  case "$(ps -p "$1" -o command= 2>/dev/null || true)" in
+    *"$LAUNCHER_SCRIPT"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# SIGTERM the whole tree (startServer()'s own handlers stop the embedded
+# PostgreSQL in an ordered shutdown), wait, then SIGKILL stragglers.
+kill_server_tree() { # $1=root pid
+  local pid pids alive grace
+  pids="$(server_tree_pids "$1")"
+  [ -n "$pids" ] || pids="$1"
+  for pid in $pids; do kill "$pid" 2>/dev/null || true; done
+  grace=$(( SECONDS + 10 ))
+  while [ "$SECONDS" -lt "$grace" ]; do
+    alive=0
+    for pid in $pids; do
+      if kill -0 "$pid" 2>/dev/null; then alive=1; fi
+    done
+    [ "$alive" = "0" ] && break
+    sleep 1
+  done
+  for pid in $pids; do kill -9 "$pid" 2>/dev/null || true; done
+}
+
+# Deputy ruling 14 refusal: kill the started process tree first, then print
+# EXACTLY one line on stdout (reason goes to stderr) and exit non-zero.
+real_store_refused() { # $1=launcher_pid $2=reason
+  kill_server_tree "$1"
+  rm -f "$PIDFILE" 2>/dev/null || true
+  printf 'PAPERCLIP-DEV: REAL STORE REFUSED\n'
+  err "REAL STORE REFUSED: $2"
+  err "The dev process tree was terminated before any further action; nothing was mutated."
+  exit 3
+}
+
+# First lines of the server log naming the REAL store: the default
+# instance's embedded-Postgres port or any path under ~/.paperclip (which
+# covers ~/.paperclip/instances/default). Empty output = clean.
+banner_real_store_markers() {
+  grep -aF -e "54329" -e "$DEFAULT_HOME/" -e "instances/default" "$SERVER_LOG" 2>/dev/null | head -n 3 || true
+}
+
+# True once the startup banner has been printed. The banner's box-drawing
+# rule is printed by nothing else in the server's log output.
+banner_present() {
+  grep -aq '──────────' "$SERVER_LOG" 2>/dev/null && return 0
+  return 1
+}
+
+# True once the banner names OUR config path, OUR database data dir and a
+# database port — the positive proof that the pinned instance answered.
+banner_has_dev_markers() {
+  grep -aqF -- "$CONFIG_PATH" "$SERVER_LOG" 2>/dev/null || return 1
+  grep -aqF -- "$INSTANCE_ROOT/db" "$SERVER_LOG" 2>/dev/null || return 1
+  grep -aq -- "pg:" "$SERVER_LOG" 2>/dev/null || return 1
+  return 0
+}
+
+# Ruling-14 isolation proof. Runs after the banner check and the health
+# identity, BEFORE the instance is called ready; any failure refuses.
+isolation_checks() { # $1=launcher_pid $2=configured_db_port
+  local pid="$1" db_port="$2" tree t out pg_pid pg_cmd
+
+  # (a) No connection to the default instance's embedded-Postgres port by
+  #     the launcher or any of its children (the dev Postgres is a child).
+  tree="$(server_tree_pids "$pid")"
+  for t in $tree; do
+    out="$(lsof -a -p "$t" -iTCP:54329 2>/dev/null || true)"
+    if [ -n "$out" ]; then
+      real_store_refused "$pid" "pid $t in the launcher tree holds a socket on TCP:54329 (the default instance's database port): $(printf '%s' "$out" | head -n 1)"
+    fi
+  done
+  log "isolation a: no TCP:54329 socket held by launcher tree pid(s):$(printf ' %s' $tree)"
+
+  # (b) The database listener is the configured dev port, serving the dev
+  #     data dir, and the banner names that same port.
+  pg_pid="$(lsof -tiTCP:"$db_port" -sTCP:LISTEN 2>/dev/null | head -n 1 || true)"
+  if [ -z "$pg_pid" ]; then
+    real_store_refused "$pid" "nothing listens on the configured database port $db_port."
+  fi
+  pg_cmd="$(ps -p "$pg_pid" -o command= 2>/dev/null || true)"
+  case "$pg_cmd" in
+    *"-D $INSTANCE_ROOT/db"*) : ;;
+    *) real_store_refused "$pid" "the listener on database port $db_port (pid ${pg_pid:-?}) is not the dev embedded cluster: ${pg_cmd:-<no argv>}" ;;
+  esac
+  if ! grep -aq -- "pg:$db_port" "$SERVER_LOG" 2>/dev/null; then
+    real_store_refused "$pid" "the start banner does not name the configured database port $db_port."
+  fi
+  log "isolation b: database listener pid $pg_pid on port $db_port serves $INSTANCE_ROOT/db; banner names pg:$db_port"
+
+  # (c) The start banner and log name neither the real database port nor
+  #     any path under the default instance root.
+  out="$(banner_real_store_markers)"
+  if [ -n "$out" ]; then
+    real_store_refused "$pid" "server log names the real store: $(printf '%s' "$out" | head -n 1)"
+  fi
+  log "isolation c: banner/log names neither port 54329 nor any $DEFAULT_HOME/instances/default path"
+}
+
+# The generated direct-start launcher. Fully static: the server entry is
+# handed in through MMOS_DEV_SERVER_ENTRY by the caller's environment, and
+# every instance path is pinned by PAPERCLIP_HOME / PAPERCLIP_INSTANCE_ID /
+# PAPERCLIP_CONFIG (deputy ruling 14).
+write_launcher_script() {
+  cat > "$LAUNCHER_SCRIPT" <<'LAUNCHER_EOF'
+// launch-server.mjs — generated by tools/mmos_dev/paperclip_dev.sh. Do not
+// edit. Deputy ruling 14 (2026-11-12): a lane starts a development board
+// only through a launcher that sets the instance home, the database port and
+// the database folder explicitly. This script imports the managed CLI
+// install's @paperclipai/server entry and calls startServer() directly; the
+// CLI's server-wrapper commands (whose doctor step resolves store paths
+// against the DEFAULT instance home) are never executed.
+const entry = process.env.MMOS_DEV_SERVER_ENTRY;
+if (!entry) {
+  console.error("launch-server: MMOS_DEV_SERVER_ENTRY is not set");
+  process.exit(1);
+}
+const { pathToFileURL } = await import("node:url");
+let mod;
+try {
+  mod = await import(pathToFileURL(entry).href);
+} catch (err) {
+  console.error(`launch-server: cannot import server entry ${entry}: ${err?.stack || err}`);
+  process.exit(1);
+}
+if (typeof mod.startServer !== "function") {
+  console.error(`launch-server: ${entry} exports no startServer()`);
+  process.exit(1);
+}
+try {
+  const started = await mod.startServer();
+  console.log(`launch-server: server listening on ${started.host}:${started.listenPort}`);
+} catch (err) {
+  console.error(`launch-server: startServer failed: ${err?.stack || err}`);
+  process.exit(1);
+}
+// startServer() installs its own SIGINT/SIGTERM handlers; they perform the
+// ordered shutdown, including the embedded PostgreSQL child process. The
+// HTTP listener keeps this process alive.
+LAUNCHER_EOF
 }
 
 # --------------------------------------------------------------------------- #
@@ -433,25 +651,34 @@ EOF
 # Scrub list as an array so the launch path can hand it to nohup(1), which
 # cannot exec a shell function ("nohup cli_env …" dies with ENOENT).
 #
-# HOME is redirected to an empty dir under the dev home. The CLI doctor's
-# resolveInstallStorePaths() computes shimPath as $HOME/.local/bin/paperclipai
-# (USER-GLOBAL, not per -d home), and hasManagedArtifacts() treats an existing
-# shim as "managed install artifacts exist". On this machine the Chairman's
-# managed install created that shim, so without the redirect the doctor demands
-# <dev-home>/cli/install.json for every fresh dev home ("Re-run paperclipai
-# install") and refuses to start. With an empty HOME the probe honestly
-# reports "Not present (optional)" — correct, since we invoke the CLI by its
-# absolute installed path. Instance paths all come from -d and config.json,
-# never from HOME. The script's OWN $HOME stays the real user home, so the
-# default-instance identity marker (~/.paperclip/) keeps working.
+# The server launch runs NO CLI command at all (deputy ruling 14): `up`
+# imports startServer() directly via the generated launcher. cli_env remains
+# for `company create` (seeding) only. HOME is still redirected to an empty
+# dir under the dev home for that call: the CLI's install-store probes
+# resolve against $HOME, not against the -d home, and an empty HOME keeps
+# them honestly empty. The script's OWN $HOME stays the real user home, so
+# the default-instance identity marker (~/.paperclip/) keeps working.
 ISOLATED_HOME="$DEV_HOME/home"
 # env(1) stops parsing options at the first NAME=VALUE operand, so every -u
-# must come BEFORE the HOME assignment or env treats "-u" as the program to
+# must come BEFORE the assignments or env treats "-u" as the program to
 # exec ("env: -u: No such file or directory").
+#
+# DATABASE_URL / DATABASE_MIGRATION_URL: the server prefers an ambient
+# DATABASE_URL over the pinned embedded cluster (config.js "databaseUrl:
+# process.env.DATABASE_URL ?? fileDbUrl") and would run migrations against
+# it BEFORE printing any banner — never inherit one. PAPERCLIP_SERVER_PORT/
+# HOST (and the PAPERCLIP_BIND pair) override the pinned config on both the
+# server and the CLI's api-base inference. PAPERCLIP_DISABLE_CWD_ENV_FILE
+# stops the server from loading a .env from the controller's cwd (review
+# findings, 2026-11-12).
 SCRUB_ENV=(env -u PORT -u HOST \
     -u PAPERCLIP_HOME -u PAPERCLIP_INSTANCE_ID -u PAPERCLIP_CONFIG \
     -u PAPERCLIP_CONTEXT -u PAPERCLIP_API_URL -u PAPERCLIP_COMPANY_ID \
     -u PAPERCLIP_API_KEY -u PAPERCLIP_RUN_ID \
+    -u DATABASE_URL -u DATABASE_MIGRATION_URL \
+    -u PAPERCLIP_SERVER_PORT -u PAPERCLIP_SERVER_HOST \
+    -u PAPERCLIP_BIND -u PAPERCLIP_BIND_HOST \
+    PAPERCLIP_DISABLE_CWD_ENV_FILE=true \
     HOME="$ISOLATED_HOME")
 
 # Created lazily (never before static_refusal_checks) so a refused target
@@ -466,8 +693,12 @@ seed_company() { # $1=base_url — creates one dev company, records state
   if grep -q '"companyId"' "$STATE_PATH" 2>/dev/null; then
     return 0
   fi
+  # --api-base pins the CLI's target explicitly (top priority in its
+  # resolveApiBase): without it an ambient PAPERCLIP_SERVER_PORT — or a
+  # config its schema rejects — makes the seed fall back to :3100, the real
+  # board (review finding, 2026-11-12).
   if ! out="$(cli_env "$PAPERCLIP_CLI" company create \
-        -d "$DEV_HOME" -c "$CONFIG_PATH" \
+        -d "$DEV_HOME" -c "$CONFIG_PATH" --api-base "$base" \
         --payload-json "{\"name\":\"$COMPANY_NAME\"}" --json 2>&1)"; then
     err "company create failed:"
     printf '%s\n' "$out" >&2
@@ -673,6 +904,7 @@ cmd_up() {
   RUNTIME_INFO="$INSTANCE_ROOT/runtime-info.json"
   LOG_DIR="$INSTANCE_ROOT/logs"
   SERVER_LOG="$LOG_DIR/dev-server.stdout.log"
+  LAUNCHER_SCRIPT="$INSTANCE_ROOT/launch-server.mjs"
   static_refusal_checks
 
   local server_port db_port base identity
@@ -683,6 +915,13 @@ cmd_up() {
     write_dev_config "$server_port" "$db_port"
     log "wrote dev config $CONFIG_PATH (server port $server_port, embedded-Postgres port $db_port)"
   fi
+
+  # The configured database port is what every isolation check compares
+  # against; read it from the config we just wrote/verified.
+  local ports_line
+  ports_line="$(read_config_ports 2>/dev/null)" || die 1 "cannot parse config at $CONFIG_PATH."
+  read -r server_port db_port _ <<<"$ports_line" || true
+  [ -n "$db_port" ] || die 1 "config at $CONFIG_PATH pins no database.embeddedPostgresPort."
 
   base="$(api_base)" || die 1 "cannot determine api base from $CONFIG_PATH."
   identity="$(dynamic_identity_check "$base")"
@@ -700,53 +939,126 @@ cmd_up() {
     die 1 "port from $CONFIG_PATH is already serving a foreign/unhealthy Paperclip instance at $base (identity: $identity); refusing to launch."
   fi
 
-  # identity = down → launch
+  # identity = down → launch. Deputy ruling 14: start the board through the
+  # direct-start launcher only — never through the CLI's wrapper commands.
   [ -x "$PAPERCLIP_CLI" ] || die 1 "Paperclip CLI not executable at $PAPERCLIP_CLI (set MMOS_DEV_PAPERCLIP_CLI)."
-  log "starting dev instance via: $PAPERCLIP_CLI run -d $DEV_HOME -i $INSTANCE_ID"
-  log "server log: $SERVER_LOG"
-  {
-    printf '%s [%s] dev controller launching paperclipai run\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PROG"
-  } >> "$SERVER_LOG"
-  nohup "${SCRUB_ENV[@]}" "$PAPERCLIP_CLI" run -d "$DEV_HOME" -i "$INSTANCE_ID" \
-      </dev/null >>"$SERVER_LOG" 2>&1 &
-  local cli_pid=$!
-  echo "$cli_pid" > "$PIDFILE"
+  if [ -z "$SERVER_ENTRY" ]; then
+    local cli_modules
+    cli_modules="$(cd "$(dirname "$PAPERCLIP_CLI")/.." 2>/dev/null && pwd)" || cli_modules=""
+    if [ -n "$cli_modules" ]; then
+      SERVER_ENTRY="$cli_modules/@paperclipai/server/dist/index.js"
+    fi
+  fi
+  [ -n "$SERVER_ENTRY" ] || die 1 "cannot derive the server entry from $PAPERCLIP_CLI; set MMOS_DEV_SERVER_ENTRY."
+  [ -f "$SERVER_ENTRY" ] || die 1 "server entry not found at $SERVER_ENTRY (set MMOS_DEV_SERVER_ENTRY)."
+  if [ -z "$NODE_BIN" ]; then
+    NODE_BIN="$(command -v node || true)"
+  fi
+  { [ -n "$NODE_BIN" ] && [ -x "$NODE_BIN" ]; } || die 1 "node interpreter not found (set MMOS_DEV_NODE)."
 
-  local deadline=$(( SECONDS + START_TIMEOUT )) verdict
+  # Fail closed: the ruling-14 isolation proof reads lsof/pgrep/ps. With one
+  # of them missing, check (a) would pass silently on an empty result and the
+  # refusal path would miss tree children — refuse to start degraded.
+  local req_tool
+  for req_tool in lsof pgrep ps; do
+    command -v "$req_tool" >/dev/null 2>&1 \
+      || die 1 "required tool '$req_tool' not found; refusing to start without the isolation checks."
+  done
+
+  write_launcher_script
+  log "starting dev instance via: $NODE_BIN $LAUNCHER_SCRIPT (direct startServer from $SERVER_ENTRY)"
+  log "instance pins: PAPERCLIP_HOME=$DEV_HOME PAPERCLIP_INSTANCE_ID=$INSTANCE_ID PAPERCLIP_CONFIG=$CONFIG_PATH"
+  log "server log: $SERVER_LOG"
+  mkdir -p "$ISOLATED_HOME" "$LOG_DIR"
+  # Fresh log per run: every banner/isolation grep below must read THIS
+  # run's bytes. An append-only log would let a previous run's banner
+  # satisfy the checks before the new process printed anything (review
+  # findings, 2026-11-12).
+  : > "$SERVER_LOG"
+  {
+    printf '%s [%s] dev controller launching node launcher (direct startServer)\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PROG"
+  } >> "$SERVER_LOG"
+  local launch_env=( "${SCRUB_ENV[@]}" \
+      PAPERCLIP_HOME="$DEV_HOME" \
+      PAPERCLIP_INSTANCE_ID="$INSTANCE_ID" \
+      PAPERCLIP_CONFIG="$CONFIG_PATH" \
+      MMOS_DEV_SERVER_ENTRY="$SERVER_ENTRY" )
+  nohup "${launch_env[@]}" "$NODE_BIN" "$LAUNCHER_SCRIPT" \
+      </dev/null >>"$SERVER_LOG" 2>&1 &
+  local srv_pid=$!
+  echo "$srv_pid" > "$PIDFILE"
+
+  # Ruling 14: read the start banner BEFORE making any request. Wait for the
+  # banner without any HTTP; its Database row names the data dir and port.
+  local deadline=$(( SECONDS + START_TIMEOUT )) markers verdict
   while :; do
-    verdict="$(dynamic_identity_check "$base" 2>/dev/null || echo down)"
-    if [ "$verdict" = "dev" ]; then
+    if banner_present; then
       break
     fi
-    if ! kill -0 "$cli_pid" 2>/dev/null; then
-      # CLI process gone. Known quirk: a start/wait path may report failure
-      # while the server still comes up; give health a moment, then judge.
+    if ! kill -0 "$srv_pid" 2>/dev/null; then
       sleep 3
-      verdict="$(dynamic_identity_check "$base" 2>/dev/null || echo down)"
-      if [ "$verdict" = "dev" ]; then
+      if banner_present; then
         break
       fi
-      err "paperclipai run exited before the instance became healthy. Last log lines:"
+      err "launcher exited before printing the start banner. Last log lines:"
       tail -n 30 "$SERVER_LOG" >&2 || true
       rm -f "$PIDFILE"
       die 1 "dev instance failed to start."
     fi
     [ "$SECONDS" -lt "$deadline" ] || {
-      err "not healthy after ${START_TIMEOUT}s. Terminating the launched process; last log lines:"
+      err "no start banner after ${START_TIMEOUT}s. Terminating; last log lines:"
       tail -n 30 "$SERVER_LOG" >&2 || true
-      kill "$cli_pid" 2>/dev/null || true
-      local grace=$(( SECONDS + 10 ))
-      while kill -0 "$cli_pid" 2>/dev/null && [ "$SECONDS" -lt "$grace" ]; do sleep 1; done
-      kill -9 "$cli_pid" 2>/dev/null || true
+      kill_server_tree "$srv_pid"
+      rm -f "$PIDFILE"
+      die 1 "dev instance did not print its start banner in ${START_TIMEOUT}s."
+    }
+    sleep 1
+  done
+
+  # Banner read. A banner naming the real database port or a path under the
+  # default instance root means stop the process at once and report.
+  markers="$(banner_real_store_markers)"
+  if [ -n "$markers" ]; then
+    real_store_refused "$srv_pid" "start banner names the real store: $(printf '%s' "$markers" | head -n 1)"
+  fi
+  if ! banner_has_dev_markers; then
+    kill_server_tree "$srv_pid"
+    rm -f "$PIDFILE"
+    err "the start banner does not name this dev instance's config, data dir and database port. Banner:"
+    grep -a "Config\|Database\|Server" "$SERVER_LOG" 2>/dev/null | tail -n 6 >&2 || true
+    die 1 "dev instance did not prove its dev identity in the start banner."
+  fi
+
+  # Banner is clean and ours. Now wait for health identity.
+  deadline=$(( SECONDS + START_TIMEOUT ))
+  while :; do
+    verdict="$(dynamic_identity_check "$base" 2>/dev/null || echo down)"
+    if [ "$verdict" = "dev" ]; then
+      break
+    fi
+    if ! kill -0 "$srv_pid" 2>/dev/null; then
+      err "launcher exited after the start banner. Last log lines:"
+      tail -n 30 "$SERVER_LOG" >&2 || true
+      kill_server_tree "$srv_pid"
+      rm -f "$PIDFILE"
+      die 1 "dev instance failed to start."
+    fi
+    [ "$SECONDS" -lt "$deadline" ] || {
+      err "not healthy after ${START_TIMEOUT}s (identity: $verdict). Terminating; last log lines:"
+      tail -n 30 "$SERVER_LOG" >&2 || true
+      kill_server_tree "$srv_pid"
       rm -f "$PIDFILE"
       die 1 "dev instance did not become healthy in ${START_TIMEOUT}s."
     }
     sleep 2
   done
 
+  # Ruling 14: prove isolation before calling the instance ready.
+  isolation_checks "$srv_pid" "$db_port"
+
   seed_company "$base" || die 1 "instance healthy but company seeding failed; instance left running — retry 'up'."
-  log "dev instance is healthy."
-  print_info_block "$base" "healthy (identity: dev)" "$cli_pid (pidfile)"
+  log "dev instance is healthy and isolated."
+  print_info_block "$base" "healthy (identity: dev)" "$srv_pid (pidfile)"
   log "dashboard: use '$0 url'"
   exit 0
 }
@@ -774,7 +1086,23 @@ cmd_down() {
     log "warning: no pidfile; using listener pid $pid on our dev port $port."
   fi
 
+  # Never signal a pid we cannot prove is ours (argv must name this dev
+  # instance's launcher). Guards the pidfile, runtime-info and listener
+  # fallbacks alike against pid reuse — including reuse by the real service.
+  if ! kill -0 "$pid" 2>/dev/null; then
+    log "pid $pid is already gone; cleaning up pidfile."
+    rm -f "$PIDFILE" 2>/dev/null || true
+    exit 0
+  fi
+  if ! pid_is_ours "$pid"; then
+    die 1 "pid $pid is not this dev launcher (argv: $(ps -p "$pid" -o command= 2>/dev/null || echo '?')); refusing to signal it. Verify the process manually, then remove $PIDFILE if it is stale."
+  fi
+
   log "stopping dev instance pid $pid (SIGTERM)…"
+  # Collect the tree (embedded PostgreSQL is a child) BEFORE signalling, so
+  # an ordered shutdown that does not reach the child can still be finished.
+  local tree_pids pid2
+  tree_pids="$(server_tree_pids "$pid")"
   kill "$pid" 2>/dev/null || true
   local deadline=$(( SECONDS + STOP_TIMEOUT ))
   while kill -0 "$pid" 2>/dev/null; do
@@ -786,6 +1114,18 @@ cmd_down() {
     kill -9 "$pid" 2>/dev/null || true
     sleep 2
   fi
+  for pid2 in $tree_pids; do
+    if [ "$pid2" != "$pid" ] && kill -0 "$pid2" 2>/dev/null; then
+      log "stopping orphaned child pid $pid2"
+      kill "$pid2" 2>/dev/null || true
+    fi
+  done
+  sleep 1
+  for pid2 in $tree_pids; do
+    if [ "$pid2" != "$pid" ] && kill -0 "$pid2" 2>/dev/null; then
+      kill -9 "$pid2" 2>/dev/null || true
+    fi
+  done
   rm -f "$PIDFILE"
   # Clean stale runtime-info written by the server (inside the dev dir only).
   if [ -f "$RUNTIME_INFO" ]; then
