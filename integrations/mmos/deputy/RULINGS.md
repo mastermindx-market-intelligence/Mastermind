@@ -57,3 +57,22 @@ then escalates the disagreement.
     The deputy also reads the status of anything it has waited on for more than 45
     minutes, and lists under "Needs principal read" what it cannot read. An interim note
     is never a turn's end.
+12. **The last round of a stopped lane (2026-11-11).** A lane stopped under ruling 2 or 10
+    gets one final round when the panel's required list is short, named, and inside files
+    the lane owns. The deputy starts that round and its narrow check of the changed lines
+    without escalating. That check ends the loop. A HIGH or required MED in lines the final
+    round changed stops the lane for the principal. Anything the check first finds in
+    unchanged code comes to the principal as one list with the cost of each fix; it does
+    not start another round by itself, and ruling 9 does not apply to it. Reason: blind
+    reviewers find something new in old code every round, and the installed code is worse
+    than every head under review. Applied first to ask-and-return (D4-1 to D4-5 and D4-7,
+    plus the D4-6 probe on the dev board before any refresh), the browser fill (the five
+    required items of delta check 3) and the Grok Bot link client (F1; F3 if it is a few
+    lines).
+13. **What a fill receipt claims (2026-11-11).** APPLIED means the box held the asked
+    content when it was read again after the page's pending microtasks and one settle
+    interval; the lane picks the interval, at most 500 ms, and the receipt states it. A
+    page that changes the box later than that is outside the receipt and is not a finding.
+    The operator rule goes into the install document: read the box before sending. A fill
+    that inserted everything but ran past its time bound reports what the read-back saw,
+    never NOT_APPLIED.
