@@ -30,7 +30,11 @@
   const ACTIONS = new Set(["snapshot", "validate", "consume", "validate_focus", "focus_ref", "click", "fill",
     "select", "scroll", "read", "diagnostics"]);
   const MUTATIONS = new Set(["focus_ref", "click", "fill", "select", "scroll"]);
-  const SELECTOR = "a[href],button,input,textarea,select,[role],[contenteditable='true'],[tabindex]";
+  // Every contenteditable variant is an editor: the enumerated values are
+  // case-insensitive "true"/"plaintext-only" plus the empty string (which
+  // means true). Discovery must match all of them, not the literal "true".
+  const EDITABLE = ":is([contenteditable=''],[contenteditable='true' i],[contenteditable='plaintext-only' i])";
+  const SELECTOR = `a[href],button,input,textarea,select,[role],${EDITABLE},[tabindex]`;
   const text = (v, n = 160) => String(v || "").replace(/\s+/g, " ").trim().slice(0, n);
   const result = (ok, code, data = null, effect = "NOT_APPLIED") => ({ok, code, data, effect});
 
@@ -88,7 +92,7 @@
       let length = 0, count = 0, node;
       while ((node = walker.nextNode()) && count++ < MAX_NODES && length < MAX_TEXT) {
         const parent = node.parentElement;
-        if (!parent || parent.closest("script,style,noscript,input,textarea,select,[contenteditable='true']") || !visible(parent)) continue;
+        if (!parent || parent.closest("script,style,noscript,input,textarea,select,[contenteditable]") || !visible(parent)) continue;
         const part = text(node.nodeValue, MAX_TEXT - length);
         if (part) {parts.push(part); length += part.length + 1;}
       }
@@ -247,12 +251,15 @@
           if (child.nodeType === 3) {
             const parent = child.parentElement;
             if (!parent || !visible(parent) ||
-                parent.closest("script,style,noscript,template,input,textarea,select,[contenteditable='true']")) continue;
+                parent.closest("script,style,noscript,template,input,textarea,select,[contenteditable]")) continue;
             const value = child.nodeValue || "";
             if (!value.trim()) continue;
             parts.push(parent.closest("pre") ? value : value.replace(/\s+/g, " "));
           } else if (child.nodeType === 1) {
-            if (SKIP.test(child.tagName) || child.getAttribute("contenteditable") === "true" || !visible(child)) continue;
+            // Any contenteditable ancestor-or-self marks editor territory
+            // (every enumerated variant, and false islands inside an editor):
+            // an editor box is not page content.
+            if (SKIP.test(child.tagName) || child.closest("[contenteditable]") || !visible(child)) continue;
             if (child.tagName === "BR") {parts.push("\n"); continue;}
             if (BLOCK.test(child.tagName)) {parts.push("\n"); walk(child); parts.push("\n"); continue;}
             walk(child);
