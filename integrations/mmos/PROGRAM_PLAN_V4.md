@@ -2120,3 +2120,29 @@ DeepSeek worker with the same eight points.
 - An over-removal is never traded for a leak.
 
 **Next, in order.** The principal installs the memory link for Secretary, Assurance and Design Lead from the rewritten list, one change at a time, with any restart announced to the Chairman first. The bridge still waits on the Chairman's five reloads. The other lanes are unchanged from section 49.
+
+## 55. Amendment, 2026-11-12 19:39 UTC: memory link installed for the three teammates
+
+**What changed.** Secretary, Assurance and Design Lead each have a new primary conversation on the team server with the memory link attached and their Hermes history in their home. The team server was not restarted. The default model for new conversations is now `qwen3.8-max`.
+
+**Proof, with who did each step.** Every step was the principal's, by command; no harness step and no hand edit.
+
+- Each new conversation called the memory tool and read its own history count (3292, 17 and 12 sessions). The server's own record names the tool call.
+- A board task woke each teammate in its new conversation and came back answered (MAS-27, MAS-28, MAS-29, settled).
+- The gate refused 27 of 27 forbidden calls and allowed 9 of 9 permitted ones.
+- History counts match the source for all three.
+
+**Where the real run differed from the list.**
+
+- The history step as written is refused on the real root: the export tool refuses to write under the team server's folder, and the rehearsal ran on a development root where that guard does not fire. The principal exported into a private folder beside the root and moved each finished archive in. The list is corrected before the next ten bots.
+- The roster's title rename was left out. It would have driven a browser to rename three live conversations, a step never rehearsed with the titles the rebind command gives. The apply therefore ends with a title warning. Which tool owns a teammate conversation's title is on the later list.
+- The list's digest for the settings file was stale, because a setting was switched in the app after the list was written.
+
+**Class rules.**
+
+- A rehearsal runs the list's exact command against a root with the real root's path shape. A guard that keys on a path is part of what is rehearsed.
+- A list records a digest of a file a person can change at the time of the install, not at the time of writing.
+
+**Limits that stay.** A secret in plain prose with no label cannot be recognised. Conversations made before today never gain the link. Secretary's archive stops at the cut; its Slack watch and heartbeat keep writing in Hermes.
+
+**Next, in order.** Secretary's seven timers, one at a time, only after the replacement path is rehearsed. Then the other ten bots. The bridge still waits on the Chairman's five reloads. The other lanes are unchanged from section 49.
