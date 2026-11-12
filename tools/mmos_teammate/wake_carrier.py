@@ -1775,6 +1775,14 @@ def handle_return(pc, t3, issue, ask_op, opts, me_id):
         log(f"return wake on {issue.get('identifier')} but no done child for "
             f"{ask_op}; leaving the issue for a person")
         return 0
+    # Delta-4 D4-1: the unsuffixed {ask_op}-ret turn was addressed when the
+    # family had exactly one member — it belongs to the family's TRUE oldest,
+    # over done and cancelled rows alike. Capture that owner (and the family
+    # it came from) BEFORE the cancelled split drops the cancelled sibling
+    # from view; a single-shrink family must not let the survivor reconcile
+    # the older sibling's answered turn as its own answer.
+    family_all = list(family)
+    legacy_owner_id = _true_oldest_id(family_all)
     # q1-10 (panel 2): a CANCELLED child is terminal too — it is not work in
     # flight, and counting it open held the parent blocked forever. Its
     # cancelled work carries no answer to return, so it neither holds the
@@ -1837,6 +1845,33 @@ def handle_return(pc, t3, issue, ask_op, opts, me_id):
                 state, existing, thread = (legacy_state, legacy_existing,
                                            legacy_thread)
                 ret_op = legacy_op
+        if ret_op == f"{ask_op}-ret" and state in ("reply", "pending"):
+            # Delta-4 D4-1: this turn is the family's legacy unsuffixed
+            # return op, and it carries an answer or a pending question. It
+            # belongs to the family's TRUE oldest member — when this child is
+            # not that member, the answered turn is another child's old
+            # answer (single-shrink: the older sibling was cancelled after
+            # the single-child era) and must never be reconciled or claimed
+            # as this child's. Refuse loudly, naming both. A family row
+            # without createdAt cannot attribute the turn at all — refuse
+            # too. A deleted sibling is absent from the children list and
+            # stays a documented residual this guard cannot see.
+            if legacy_owner_id is None:
+                raise CarrierError(
+                    f"legacy return op {ret_op} is answered in the thread, "
+                    f"but a child of {issue.get('identifier')} carries no "
+                    "createdAt; whose answer that is cannot be attributed — "
+                    "refusing instead of delivering it")
+            if legacy_owner_id != child.get("id"):
+                owner = next((r for r in family_all
+                              if r.get("id") == legacy_owner_id), {})
+                raise CarrierError(
+                    f"legacy return op {ret_op} on {issue.get('identifier')} "
+                    f"belongs to the family's oldest ask child "
+                    f"{owner.get('identifier') or legacy_owner_id}, not to "
+                    f"{child.get('identifier') or child.get('id')}; the old "
+                    "answered turn is not this child's answer — refusing "
+                    "instead of delivering it")
         if state == "reply":
             log(f"{ret_op} already answered in the thread; reconciling, "
                 "no resend")
@@ -2115,6 +2150,23 @@ def ordered_oldest_first(rows):
             "refusing the read")
     rows.sort(key=lambda row: row["createdAt"])
     return rows
+
+
+def _true_oldest_id(rows):
+    """The family's TRUE oldest member id — oldest ``createdAt`` first with
+    the id as the stable second key, so an equal-createdAt tie is broken
+    deterministically, never by the served list's newest-activity-first
+    order. Delta-4 D4-1: the legacy unsuffixed return op was addressed when
+    the family had one member, so it belongs to the true oldest over done
+    AND cancelled rows alike.
+
+    Returns None when any row lacks ``createdAt``: the true oldest is then
+    not derivable, and the caller must refuse to attribute the legacy turn
+    to anyone rather than guess."""
+    if any(not (row.get("createdAt") or "").strip() for row in rows):
+        return None
+    return min(rows, key=lambda row: (row["createdAt"],
+                                      row.get("id") or "")).get("id")
 
 
 # The lane line with T4c (R4b findings 4/5): every comment the door or the

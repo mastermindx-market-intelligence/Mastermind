@@ -1771,6 +1771,45 @@ def test_return_replay_never_resends_or_duplicates():
     assert pc.issues["is-1"]["status"] == "in_review"
 
 
+def test_single_shrink_legacy_collision_refuses_instead_of_delivering():
+    # Delta-4 D4-1: the unsuffixed {ask_op}-ret turn belongs to the family's
+    # TRUE oldest member — over done AND cancelled rows alike, because it was
+    # sent in the single-child era when that child was the family. When the
+    # done family shrinks to exactly ONE child that is NOT the legacy owner
+    # (the older sibling was cancelled here), single=True addresses the
+    # survivor's own turn with the legacy op, the old answered turn
+    # reconciles as the survivor's answer, and the WRONG — cancelled —
+    # child's OLD answer is delivered: exit 0, in_review, no send, no
+    # error. The return edge refuses loudly instead; a deleted (vanished)
+    # sibling is undetectable in the children list and stays a documented
+    # residual.
+    issues, ask_op, child1 = blocked_parent_with_done_child()
+    child1 = dict(child1, createdAt="2026-11-11T11:00:00.000Z")   # done
+    child2 = dict(child1, id="ch-2", identifier="MMO-3",
+                  assigneeAgentId="ag-vega", title="Review it",
+                  status="cancelled",
+                  createdAt="2026-11-11T10:00:00.000Z")  # the TRUE oldest
+    issues["is-1"]["blockedBy"] = board.blocked_by(child1, child2)
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [child2, child1]  # served newest-activity-first
+    pc.comment_rows["ch-1"] = [atlas_answer("the survivor's own answer")]
+    legacy = f"{ask_op}-ret"
+    t3 = FakeT3(messages=[("user", "r1", f"[{legacy}]\n\nthe ask came back"),
+                          ("assistant", "r1",
+                           "OLD: the cancelled child's answer")],
+                replies=["SHOULD NOT BE DELIVERED"])
+    with pytest.raises(wc.CarrierError):
+        run_with_roster(pc, t3, {})
+    assert t3.sends == []                    # nothing sent under any op
+    # the only comment is the carrier's own refusal/release note; no answer
+    # comment, no OLD text anywhere on the board
+    assert any("did not complete" in (c[2] if c[0] == "comment" else "")
+               for c in pc.calls)
+    assert not any(c[0] == "comment" and "OLD:" in c[2] for c in pc.calls)
+    assert not any(c[0] == "comment" and "survivor" in c[2] for c in pc.calls)
+    assert pc.issues["is-1"]["status"] == "blocked"  # nothing delivered
+
+
 def test_blocked_issue_without_ask_child_is_left_alone():
     issues = {"is-1": {"identifier": "MMO-1", "status": "blocked",
                        "dependencyReady": True, "title": "Wait on infra",
