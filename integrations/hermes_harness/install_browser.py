@@ -135,6 +135,13 @@ def loaded_extension_roots(profile_rows):
     Rows need only ``data_directory`` and ``profile_directory``. Every
     registration state that names a ``loaded_path`` protects it: an
     unverified or identity-mismatched load is still a load.
+
+    A read error on an enrolled profile is a refusal, never a skip
+    (BR-MICRO2 item 2): an unreadable registration cannot prove which
+    folders Chrome has loaded, so it proves no target safe. "No extension
+    loaded" is a normal answer only when ``routes.registration`` returns it
+    as a state (``CHROME_LOAD_REQUIRED``, ``PROFILE_DIRECTORY_MISSING``),
+    never when the read raises or comes back ``PROFILE_REGISTRATION_UNAVAILABLE``.
     """
     from integrations.hermes_harness import browser_routes as routes
     roots = []
@@ -145,6 +152,8 @@ def loaded_extension_roots(profile_rows):
         directory = row.get("profile_directory")
         if not isinstance(data_directory, (str, Path)) or not isinstance(directory, str):
             continue
+        alias = row.get("alias")
+        who = directory + (" (alias " + alias + ")" if isinstance(alias, str) and alias else "")
         try:
             # A synthetic browser_id: registration compares it against the
             # loaded folder's instance_config.js, and the guard protects every
@@ -152,8 +161,19 @@ def loaded_extension_roots(profile_rows):
             state = routes.registration({"data_directory": str(data_directory),
                                          "profile_directory": directory,
                                          "browser_id": ""})
-        except (OSError, ValueError, KeyError):
-            continue
+        except Exception as error:
+            raise RuntimeError(
+                "loaded-extension check refused: the registration read for profile " + who
+                + " failed (" + type(error).__name__ + ": " + str(error) + "); an enrolled"
+                " profile whose registration cannot be read proves no install target safe,"
+                " so the install is refused") from error
+        if state.get("activation") == "PROFILE_REGISTRATION_UNAVAILABLE":
+            raise RuntimeError(
+                "loaded-extension check refused: the registration read for profile " + who
+                + " returned PROFILE_REGISTRATION_UNAVAILABLE — its Chrome preferences could"
+                " not be read, so nothing proves which folders Chrome has loaded for it;"
+                " 'no extension loaded' is a normal answer only when the registration read"
+                " returns it as a state, never when it fails")
         loaded_path = state.get("loaded_path")
         if isinstance(loaded_path, str) and loaded_path:
             roots.append((loaded_path, _resolved(loaded_path),
