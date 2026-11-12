@@ -538,6 +538,10 @@ jobs:
 
       # A root-only finite owner must have positive proof, not skipped tests.
       # The container receives only tracked public source and disposable tmpfs.
+      # The same isolated root fixture proves BOTH the application transport
+      # and the capacity transport: require_proof.py lists both suites and
+      # requires every root-gated capacity install/rollback node, so a skipped
+      # capacity mutation can no longer pass as green CI.
       # Same outage hardening as the H1 fixture above: the image is a pure
       # function of the pinned Dockerfile, so restore the previously built
       # bytes from the Actions cache and run apt only on a genuine cache miss.
@@ -549,7 +553,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/application-transport-image.tar
           key: docker-fixture-application-transport-${{ runner.arch }}-ubuntu-24.04-68ee22004a91-${{ hashFiles('tests/application_tunnel_ci/Dockerfile') }}
-      - name: Verify closed application transport in isolated root fixtures
+      - name: Verify closed application and capacity transports in isolated root fixtures
         if: matrix.index == 0
         env:
           APPLICATION_TRANSPORT_IMAGE_RESTORED: ${{ steps.application_transport_image_cache.outputs.cache-hit }}

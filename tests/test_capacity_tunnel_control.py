@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 
 import pytest
 
@@ -105,6 +106,16 @@ def test_capacity_flows_are_its_own_not_the_application_flows():
         assert getattr(control, name) is not getattr(application, name, None), name
 
 
+def _code_text(code):
+    """Every name and string constant a code object references, nested included."""
+    text = set(code.co_names) | {code.co_name}
+    text |= {value for value in code.co_consts if isinstance(value, str)}
+    for value in code.co_consts:
+        if isinstance(value, types.CodeType):
+            text |= _code_text(value)
+    return text
+
+
 def _referenced_text(callable_object):
     if isinstance(callable_object, type):
         parts = []
@@ -114,8 +125,14 @@ def _referenced_text(callable_object):
             if callable(getattr(attribute, "__code__", None)):
                 parts.append(_referenced_text(attribute))
         return set().union(*parts) if parts else set()
-    code = callable_object.__code__
-    return set(code.co_names) | {value for value in code.co_consts if isinstance(value, str)}
+    return _code_text(callable_object.__code__)
+
+
+def test_structural_probe_descends_into_nested_functions():
+    # _sealed_path is referenced only from _install's nested check_parent; a
+    # top-level-only probe would miss coupling hidden one level down.
+    text = _referenced_text(control._install)
+    assert "_sealed_path" in text and "check_parent" in text
 
 
 def test_reused_primitives_carry_no_application_purpose_constant():
@@ -156,10 +173,19 @@ def test_the_capacity_acl_is_anchored_exact_and_re2_safe():
 
 
 def test_go_unsafe_incumbent_rules_are_refused_before_any_merge():
-    for pattern in ("(?=x)", "(?<!y)", "\\1", "(?P<n>x)", "(?>x)"):
+    for pattern in ("(?=x)", "(?<!y)", "\\1", "(?P<n>x)", "(?>x)", "a*+", "a++",
+                    "a?+", "a{2,3}+"):
         raw = json.dumps({"operator:opsecret": [pattern]}).encode()
         with pytest.raises(ValueError):
             control._merge_authfile(raw, "mastermind-capacity:" + "q" * 48)
+
+
+def test_possessive_quantifiers_are_refused_but_literal_pluses_are_not():
+    for pattern in ("a*+", "a++", "a?+", "a{2,3}+", "(?:a)++"):
+        assert control._go_regex_safe(pattern) is False, pattern
+    for pattern in (control.REMOTE_REGEX, r"a\+b", r"[\++]x", r"^0\.0\.0\.0:3000$",
+                    r"a{b}c"):
+        assert control._go_regex_safe(pattern) is True, pattern
 
 
 def test_authfile_wildcards_are_refused():
@@ -231,6 +257,17 @@ def test_the_capacity_plist_compiles_the_fixed_root_transport_and_no_secret():
     assert control.AUDIENCE not in text and "AUTH" not in text
     assert CAPACITY_SECRET.decode() not in text
     assert "__" not in text
+
+
+def test_the_capacity_plist_xml_escapes_every_substituted_value():
+    template = (REPO / control.TEMPLATE_PATH).read_bytes()
+    release_root = "/release/rock&roll<1>"
+    plist = control._render_plist(template, python="/usr/bin/python3",
+                                  release_root=release_root)
+    assert b"rock&amp;roll&lt;1&gt;" in plist
+    arguments = control._plist_arguments(plist)
+    assert arguments == ["/usr/bin/python3", "-I", "-B",
+                         release_root + "/ops/executive_os/capacity_tunnel_entry.py"]
 
 
 def test_the_capacity_plist_refuses_an_unresolved_placeholder():
@@ -576,6 +613,29 @@ def test_apply_server_adds_one_capacity_acl_and_preserves_the_incumbent(harness)
 
 
 @requires_root
+def test_apply_server_is_serialized_on_the_incumbent_application_server_lock(harness):
+    harness.write_authfile()
+    harness.stage()
+    raw, expected = harness.bundle()
+    bundle_path = harness.root / "bundle.json"
+    bundle_path.write_bytes(raw)
+    _own(bundle_path, 0o600)
+    system = FakeSystem(unit={"active": True, "main_pid": 4242,
+                              "argv": control._server_expected_argv(harness.paths)})
+    shared = application.Paths.fixture(harness.root / "host")
+    with application._PurposeLock(shared, create=True, server=True):
+        with pytest.raises(ValueError, match="purpose custody is busy"):
+            control.apply_server(bundle_path=bundle_path, expected_digest=expected,
+                                 paths=harness.paths, system=system)
+    assert json.loads(harness.paths.server_authfile.read_bytes()) == INCUMBENT
+    control.apply_server(bundle_path=bundle_path, expected_digest=expected,
+                         paths=harness.paths, system=system)
+    credential = harness.credential().decode()
+    assert json.loads(harness.paths.server_authfile.read_bytes())[credential] == [
+        control.REMOTE_REGEX]
+
+
+@requires_root
 def test_apply_client_installs_only_capacity_targets_and_lifecycle_is_proven(harness):
     harness.stage()
     request = harness.server_receipt()
@@ -641,9 +701,13 @@ def test_rollback_restores_the_incumbent_authfile_and_removes_only_capacity_file
     assert again["state"] == "ALREADY_ROLLED_BACK"
 
 
+APPLICATION_AUTH = "mastermind-fabric-app:appsecret"
+APPLICATION_ACL = [r"^R:127\.0\.0\.1:50142$"]
+
+
 @requires_root
 def test_rollback_never_touches_an_application_owned_authfile_entry(harness):
-    incumbent = {**INCUMBENT, "mastermind-fabric-app:appsecret": [r"^R:127\.0\.0\.1:59142$"]}
+    incumbent = {**INCUMBENT, APPLICATION_AUTH: APPLICATION_ACL}
     harness.write_authfile(incumbent)
     harness.stage()
     raw, expected = harness.bundle()
@@ -655,7 +719,42 @@ def test_rollback_never_touches_an_application_owned_authfile_entry(harness):
     control.apply_server(bundle_path=bundle_path, expected_digest=expected,
                          paths=harness.paths, system=system)
     applied = json.loads(harness.paths.server_authfile.read_bytes())
-    assert "mastermind-fabric-app:appsecret" in applied
+    assert APPLICATION_AUTH in applied
     control.rollback_server(bundle_path=bundle_path, expected_digest=expected,
                             paths=harness.paths, system=FakeSystem())
     assert json.loads(harness.paths.server_authfile.read_bytes()) == incumbent
+
+
+@requires_root
+def test_rollback_preserves_an_application_grant_added_after_the_capacity_apply(harness):
+    harness.stage()
+    harness.server_receipt()
+    _, expected = harness.bundle()
+    # The APPLICATION owner installs its own grant only after the capacity
+    # grant settled; the surgical rollback must preserve it.
+    applied = json.loads(harness.paths.server_authfile.read_bytes())
+    applied[APPLICATION_AUTH] = APPLICATION_ACL
+    harness.write_authfile(applied)
+    result = control.rollback_server(bundle_path=harness.root / "bundle.json",
+                                     expected_digest=expected, paths=harness.paths,
+                                     system=FakeSystem())
+    assert result["state"] == "GRANT_FILE_ROLLED_BACK"
+    assert result["preserved_entries"] == len(INCUMBENT) + 1
+    assert json.loads(harness.paths.server_authfile.read_bytes()) == {
+        **INCUMBENT, APPLICATION_AUTH: APPLICATION_ACL}
+
+
+@requires_root
+def test_rollback_refuses_when_the_capacity_entry_itself_drifted(harness):
+    harness.stage()
+    harness.server_receipt()
+    _, expected = harness.bundle()
+    credential = harness.credential().decode()
+    drifted = json.loads(harness.paths.server_authfile.read_bytes())
+    drifted[credential] = [r"^R:127\.0\.0\.1:9000$"]
+    harness.write_authfile(drifted)
+    with pytest.raises(ValueError, match="capacity grant itself drifted"):
+        control.rollback_server(bundle_path=harness.root / "bundle.json",
+                                expected_digest=expected, paths=harness.paths,
+                                system=FakeSystem())
+    assert json.loads(harness.paths.server_authfile.read_bytes()) == drifted

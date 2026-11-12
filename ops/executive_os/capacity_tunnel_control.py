@@ -11,6 +11,16 @@ reverse listener that lands on the M2 loopback address. The port pair is a
 source constant; a collision is refused, never resolved by choosing another
 port.
 
+LOOPBACK TRUST, ANSWERED (verified against the deployed gateway, not assumed).
+Tunnelling does not by itself admit arbitrary VPS processes to the router: the
+deployed gateway's ``/v1/messages`` handler requires BOTH a loopback peer AND
+the ``FABRIC_ROUTER_TOKEN`` credential (gateway.py:748-751 -- a non-loopback
+peer is refused 403 before the token check, and a loopback peer without the
+token is refused 401). Only ``/healthz`` is loopback-only, and it returns
+``{"ok": true}`` with no inference. The reverse therefore exposes exactly one
+port to the incumbent server and every inference request still needs the
+separately held token.
+
 REUSE DECISION. The purpose-BOUND machinery of
 ``ops/executive_os/application_tunnel_control.py`` -- its flow functions, server
 transaction, authfile merge, plist compiler and its role-alias and chisel-home
@@ -48,6 +58,7 @@ import stat
 import subprocess
 import sys
 import xml.etree.ElementTree as ElementTree
+from xml.sax.saxutils import escape as _xml_escape
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -119,20 +130,49 @@ _capture_preimage = _neutral._capture_preimage
 _install = _neutral._install
 _write_once = _neutral._write_once
 _parse_launchd = _neutral._parse_launchd
-_go_regex_safe = _neutral._go_regex_safe
 _authfile_entries = _neutral._authfile_entries
 _PurposeLock = _neutral._PurposeLock
 
 REUSED_PRIMITIVES = (
     "require", "canonical", "digest", "decode", "_version_at_least", "_file_identity",
     "_read_root_private", "_make_private_directory", "_capture_preimage", "_install",
-    "_write_once", "_parse_launchd", "_go_regex_safe", "_authfile_entries", "_PurposeLock",
+    "_write_once", "_parse_launchd", "_authfile_entries", "_PurposeLock",
 )
 # A reused primitive that carried any of these would let the capacity transport
 # acquire the application purpose, label, ports or ACL by import.
 _APPLICATION_TOKENS = ("PURPOSE", "LABEL", "AUDIENCE", "REMOTE_ADDRESS", "REMOTE_REGEX",
                        "REVERSE_TARGET", "APPLICATION_", "STAGE_FILES", "TEMPLATE_PATH",
                        "ROLE_", "HOME_", "SERVER_CUSTODY", "IDENTITY_KEYS")
+
+
+def _go_regex_safe(pattern):
+    """Refuse every rule Go RE2 rejects, including Python-only possessive forms.
+
+    The shared probe covers lookarounds, named groups, atomic groups and
+    backreferences. Python 3.11+ additionally accepts possessive quantifiers
+    (``a++``, ``a*+``, ``a?+``, ``a{2,3}+``) that Go RE2 rejects, so this
+    capacity copy adds them to the refused set: an incumbent authfile entry can
+    never carry a rule the incumbent server would refuse to compile.
+    """
+    if not _neutral._go_regex_safe(pattern):
+        return False
+    escaped = False
+    in_class = False
+    for index, char in enumerate(pattern):
+        following = pattern[index + 1] if index + 1 < len(pattern) else ""
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == "[" and not in_class:
+            in_class = True
+        elif char == "]" and in_class:
+            in_class = False
+        elif not in_class and char in "*+?" and following == "+":
+            return False
+        elif not in_class and char == "}" and following == "+" and "{" in pattern[:index]:
+            return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -319,6 +359,11 @@ def _merge_authfile(raw, auth):
     unanchored or wildcard incumbent rule are refused, never rewritten.
     """
     entries = _authfile_entries(raw)
+    # The shared decoder rejects the Go-unsupported tokens it knows; this
+    # capacity flow additionally refuses possessive quantifiers that Python
+    # accepts and Go RE2 rejects, before any merge can preserve them.
+    require(all(_go_regex_safe(pattern) for patterns in entries.values()
+                for pattern in patterns), "authfile pattern refused")
     remotes, regexes, _ = _remotes()
     require(_go_regex_safe(REMOTE_REGEX), "the capacity ACL is not RE2-safe")
     require(REMOTE_REGEX.startswith("^") and REMOTE_REGEX.endswith("$"),
@@ -345,6 +390,13 @@ def _merge_authfile(raw, auth):
 
 
 def _render_plist(template, *, python, release_root):
+    """Compile the fixed plist; every substituted value is XML-escaped.
+
+    A release root containing ``&``, ``<`` or ``>`` must not be able to break
+    the document or inject a sibling key, so each value enters the template as
+    escaped text and is unescaped only when launchd (or the parser here) reads
+    it back.
+    """
     text = template.decode("utf-8")
     values = {
         "__LABEL__": LABEL,
@@ -353,7 +405,7 @@ def _render_plist(template, *, python, release_root):
         "__ENTRYPOINT__": str(Path(release_root) / "ops/executive_os/capacity_tunnel_entry.py"),
     }
     for key, value in values.items():
-        text = text.replace(key, value)
+        text = text.replace(key, _xml_escape(value))
     require(not re.search(r"__[A-Z_]+__", text), "unresolved plist placeholder refused")
     require(AUDIENCE not in text and "AUTH" not in text,
             "the plist must not carry credential material")
@@ -756,7 +808,55 @@ def _server_receipt(intent, bundle, qualification, after):
     }
 
 
-def _server_transaction(bundle_path, expected_digest, paths, system, lock, *, apply):
+# The incumbent authfile /etc/chisel/users.json is written by two server
+# owners: this capacity control and the APPLICATION server control. Each has
+# its own purpose lock, so the capacity lock alone cannot serialize a
+# concurrent APPLICATION grant write. The APPLICATION server lock lives in its
+# own operation root beside the same authfile; taking it here (in addition to
+# the capacity lock) makes the whole read -> merge -> atomic install span
+# exclusive for both writers.
+APPLICATION_SERVER_LOCK_ROOT = "application-tunnel"
+
+
+class _LockRoot:
+    """Minimal path shape accepted by the reused purpose lock."""
+
+    def __init__(self, server_operation_root):
+        self.server_operation_root = Path(server_operation_root)
+
+
+class _ApplicationServerLock:
+    """The incumbent APPLICATION server lock over the shared authfile."""
+
+    def __init__(self, paths):
+        self.root = paths.server_authfile.parent / APPLICATION_SERVER_LOCK_ROOT
+        self.lock = None
+
+    def __enter__(self):
+        shim = _LockRoot(self.root)
+        try:
+            self.lock = _neutral._PurposeLock(shim, create=True, server=True)
+            self.lock.__enter__()
+        except FileExistsError:
+            # Another root writer created the shared lock root between the
+            # absence check and the mkdir; open the existing one instead.
+            self.lock = _neutral._PurposeLock(shim, create=False, server=True)
+            self.lock.__enter__()
+        return self.lock
+
+    def __exit__(self, *exception):
+        if self.lock is not None:
+            return self.lock.__exit__(*exception)
+        return False
+
+
+def _lock_check(lock, shared=None):
+    lock.check()
+    if shared is not None:
+        shared.check()
+
+
+def _server_transaction(bundle_path, expected_digest, paths, system, lock, *, apply, shared=None):
     """One fixed server owner, retained preimage and candidate, and physical lock.
 
     Reconciliation can finish an exact missing receipt, never another grant
@@ -800,7 +900,7 @@ def _server_transaction(bundle_path, expected_digest, paths, system, lock, *, ap
                 "server_process": unit["live_image"],
                 "custody": CUSTODY,
             }
-            lock.check()
+            _lock_check(lock, shared)
             operation.write("server-intent.json", canonical(intent))
         names = operation.names()
         complete = {"bundle.json", "preimage.json", "candidate.json"} <= names
@@ -811,7 +911,7 @@ def _server_transaction(bundle_path, expected_digest, paths, system, lock, *, ap
             candidate = canonical(merged)
             require(changed and digest(candidate) == intent["candidate_sha256"],
                     "server staging differs from the original intent")
-            lock.check()
+            _lock_check(lock, shared)
             _write_once(operation, "bundle.json", raw)
             _write_once(operation, "preimage.json", current)
             _write_once(operation, "candidate.json", candidate)
@@ -847,7 +947,7 @@ def _server_transaction(bundle_path, expected_digest, paths, system, lock, *, ap
             require(not system.listeners(RELAY_PORT), "capacity listener appeared before publication")
             require(_read_root_private(Path(bundle_path), MAX_BYTES) == raw, "server bundle changed")
             operation.check()
-            lock.check()
+            _lock_check(lock, shared)
             _install(authfile, candidate, intent["preimage"]["mode"], replace=True,
                      expect=intent["preimage"])
         require(_read_root_private(authfile, MAX_BYTES) == candidate, "the authfile readback differs")
@@ -856,7 +956,7 @@ def _server_transaction(bundle_path, expected_digest, paths, system, lock, *, ap
                 and (after["uid"], after["gid"]) == (intent["preimage"]["uid"], intent["preimage"]["gid"]),
                 "server authfile custody differs")
         receipt = _server_receipt(intent, bundle, qualification, after)
-        lock.check()
+        _lock_check(lock, shared)
         _write_once(operation, "server-receipt.json", canonical(receipt))
     return receipt
 
@@ -865,9 +965,10 @@ def apply_server(*, bundle_path, expected_digest, paths=None, system=None):
     _root()
     paths = paths or Paths()
     with _PurposeLock(paths, create=True, server=True) as lock:
-        lock.check()
-        return _server_transaction(bundle_path, expected_digest, paths, system or System(),
-                                   lock, apply=True)
+        with _ApplicationServerLock(paths) as shared:
+            _lock_check(lock, shared)
+            return _server_transaction(bundle_path, expected_digest, paths, system or System(),
+                                       lock, apply=True, shared=shared)
 
 
 def reconcile_server(*, bundle_path, expected_digest, paths=None, system=None):
@@ -879,44 +980,77 @@ def reconcile_server(*, bundle_path, expected_digest, paths=None, system=None):
                                    lock, apply=False)
 
 
+def _rollback_candidate(raw, auth):
+    """Remove only this operation's capacity grant from the current authfile.
+
+    Every other entry -- including grants another owner added after this
+    operation applied -- is preserved byte-for-byte through the decoder and
+    re-encoder. ``None`` means the grant is already absent.
+    """
+    entries = _authfile_entries(raw)
+    ours = entries.get(auth)
+    if ours is None:
+        return None, len(entries)
+    require(ours == list(_remotes()[1]),
+            "the capacity grant itself drifted; refusing to remove it")
+    merged = dict(entries)
+    del merged[auth]
+    return canonical(merged), len(merged)
+
+
 def rollback_server(*, bundle_path, expected_digest, paths=None, system=None):
-    """Restore the retained authfile preimage. Never writes a new grant or port."""
+    """Remove only this operation's capacity grant. Never writes a new grant or port.
+
+    The rollback is surgical: it edits the CURRENT authfile, so a grant an
+    APPLICATION owner added after the capacity apply survives. It still refuses
+    when the capacity entry itself was modified by another writer, and it never
+    names an application path or port. Both server writers are serialized on
+    the shared application lock for the whole read -> build -> install span.
+    """
     _root()
     paths = paths or Paths()
     with _PurposeLock(paths, server=True) as lock:
-        lock.check()
-        raw, bundle, _ = _server_bundle(bundle_path, expected_digest, paths)
-        operation_directory = paths.server_operation_root / "operation"
-        require(os.path.lexists(operation_directory), "no original server operation is retained")
-        with publication.private(operation_directory) as operation:
-            require({"server-intent.json", "preimage.json", "candidate.json"}
-                    <= set(operation.names()), "the original server operation is incomplete")
-            intent = decode(operation.read("server-intent.json"))
-            require(type(intent) is dict and intent.get("operation_id") == bundle["operation_id"]
-                    and intent.get("bundle_digest") == expected_digest
-                    and intent.get("authfile") == str(paths.server_authfile)
-                    and intent.get("custody") == CUSTODY, "the retained server intent differs")
-            preimage = operation.read("preimage.json")
-            candidate = operation.read("candidate.json")
-            require(digest(preimage) == intent["preimage"]["sha256"]
-                    and digest(candidate) == intent["candidate_sha256"],
-                    "retained server payload differs")
-            current = _capture_preimage(paths.server_authfile)
-            live = _read_root_private(paths.server_authfile, MAX_BYTES)
-            if live == preimage:
-                return {"schema": RECEIPT_SCHEMA, "state": "ALREADY_ROLLED_BACK",
-                        "operation_id": bundle["operation_id"], "grant_file_applied": False,
+        with _ApplicationServerLock(paths) as shared:
+            _lock_check(lock, shared)
+            raw, bundle, _ = _server_bundle(bundle_path, expected_digest, paths)
+            operation_directory = paths.server_operation_root / "operation"
+            require(os.path.lexists(operation_directory),
+                    "no original server operation is retained")
+            with publication.private(operation_directory) as operation:
+                require({"server-intent.json", "preimage.json", "candidate.json"}
+                        <= set(operation.names()), "the original server operation is incomplete")
+                intent = decode(operation.read("server-intent.json"))
+                require(type(intent) is dict and intent.get("operation_id") == bundle["operation_id"]
+                        and intent.get("bundle_digest") == expected_digest
+                        and intent.get("authfile") == str(paths.server_authfile)
+                        and intent.get("custody") == CUSTODY, "the retained server intent differs")
+                preimage = operation.read("preimage.json")
+                candidate = operation.read("candidate.json")
+                require(digest(preimage) == intent["preimage"]["sha256"]
+                        and digest(candidate) == intent["candidate_sha256"],
+                        "retained server payload differs")
+                current = _capture_preimage(paths.server_authfile)
+                live = _read_root_private(paths.server_authfile, MAX_BYTES)
+                rolled, preserved = _rollback_candidate(live, bundle["auth"])
+                if rolled is None:
+                    return {"schema": RECEIPT_SCHEMA, "state": "ALREADY_ROLLED_BACK",
+                            "operation_id": bundle["operation_id"], "grant_file_applied": False,
+                            "preserved_entries": preserved, "custody": SERVER_CUSTODY}
+                require(current["state"] == "PRESENT"
+                        and current["mode"] == intent["preimage"]["mode"]
+                        and (current["uid"], current["gid"]) == (intent["preimage"]["uid"],
+                                                                 intent["preimage"]["gid"]),
+                        "server authfile custody differs")
+                operation.check()
+                _lock_check(lock, shared)
+                _install(paths.server_authfile, rolled, current["mode"],
+                         replace=True, expect=current)
+                require(_read_root_private(paths.server_authfile, MAX_BYTES) == rolled,
+                        "the rolled-back authfile readback differs")
+                return {"schema": RECEIPT_SCHEMA, "state": "GRANT_FILE_ROLLED_BACK",
+                        "operation_id": bundle["operation_id"], "authfile_sha256": digest(rolled),
+                        "preserved_entries": preserved, "grant_file_applied": False,
                         "custody": SERVER_CUSTODY}
-            require(live == candidate, "the server authfile drifted; refusing to overwrite it")
-            operation.check()
-            lock.check()
-            _install(paths.server_authfile, preimage, intent["preimage"]["mode"],
-                     replace=True, expect=current)
-            require(_read_root_private(paths.server_authfile, MAX_BYTES) == preimage,
-                    "the rolled-back authfile readback differs")
-            return {"schema": RECEIPT_SCHEMA, "state": "GRANT_FILE_ROLLED_BACK",
-                    "operation_id": bundle["operation_id"], "authfile_sha256": digest(preimage),
-                    "grant_file_applied": False, "custody": SERVER_CUSTODY}
 
 
 # -------------------------------------------------------------- apply client

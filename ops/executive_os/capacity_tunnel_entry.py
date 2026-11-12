@@ -8,6 +8,12 @@ constants; the credential is read only from the fixed root-private capacity
 file and reaches Chisel only through the AUTH environment, never through argv,
 the plist, a receipt, a log or an error.
 
+The reverse exists only because the router gateway accepts a loopback peer, and
+it does not widen that trust: the deployed gateway's messages path also
+requires the FABRIC_ROUTER_TOKEN (gateway.py:748-751 -- loopback is checked
+before the token, so a non-loopback peer is refused and a loopback peer without
+the token is refused), and only /healthz is loopback-only with no inference.
+
 The existing OS-public and APPLICATION transport files are never opened here.
 """
 from __future__ import annotations

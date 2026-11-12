@@ -19,6 +19,11 @@
   <string>wheel</string>
   <key>RunAtLoad</key>
   <true/>
+  <!-- KeepAlive is intentional here and differs from the application transport
+       deliberately: this reverse transport must reconnect automatically after
+       a network loss. A restart loop is safe because the entry refuses with one
+       fixed string and the configuration pins the binary hash, so no restart
+       can ever authorize a different binary, listener or destination. -->
   <key>KeepAlive</key>
   <true/>
   <key>ThrottleInterval</key>
