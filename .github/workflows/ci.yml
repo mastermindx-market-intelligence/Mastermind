@@ -271,6 +271,157 @@ jobs:
           npm ci --prefix app/mastermind_os --ignore-scripts --no-audit --no-fund
           npm --prefix app/mastermind_os run typecheck
 
+  # Full-mode native admission runs in parallel with every pytest shard.
+  # The same exact gate stays mandatory; no reuse, scope, or verdict bypass.
+  native_admission:
+    name: Native application admission gates
+    needs: [pr_scope]
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}
+    permissions:
+      contents: read
+      actions: read
+    runs-on: ubuntu-24.04
+    env:
+      CI_PYTEST_WORKERS: "4"
+    timeout-minutes: 45
+    steps:
+      - name: Acquire immutable corpus fixture anchor
+        uses: actions/checkout@v4
+        with:
+          ref: edd30b4686d3aaf358b4ca6ebd9485b04d15751d
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout event source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify event source and immutable fixture anchor
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git cat-file -e 'edd30b4686d3aaf358b4ca6ebd9485b04d15751d^{commit}'
+
+      # `vendor/macro` is a tracked developer symlink to `vendor/macro_src`.
+      # A clean hosted runner lacks the local sibling checkout; pin exactly
+      # the importable Macro engine revision, not VPS-owned runtime data.
+      # DEC:B1-MACRO-PRIVATE-CUTOVER -- github.token is scoped to THIS repo
+      # and can currently read Macro only because Macro is public. When the
+      # upstream repository becomes private, the owner must first install a
+      # read-only MACRO_CI_READ_TOKEN (fine-grained PAT or GitHub App token
+      # with Contents: Read on mastermindx-market-intelligence/macro).
+      # The `secrets.MACRO_CI_READ_TOKEN || github.token` fallback keeps CI
+      # working before that admission; no privilege expansion or anonymous
+      # fallback is allowed after private cutover.
+      - name: Checkout pinned Macro engine
+        uses: actions/checkout@v4
+        with:
+          repository: mastermindx-market-intelligence/macro
+          ref: 268a89e3828d848848c77dfe69191c3fa7319361
+          path: vendor/macro_src
+          sparse-checkout: |
+            engine
+            lib
+            config
+          persist-credentials: false
+          token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: app/mastermind_os/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci --prefix app/mastermind_os
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # Isolated CAP-S1 observers must see every installed pytest dependency.
+      # Ignore runner user-site packages during dependency resolution.
+      - name: Install project
+        run: |
+          python -I -m pip install --upgrade pip
+          python -I -m pip install -e ".[dev]"
+
+      - name: Fast source-bound release preflight
+        run: >-
+          python -m pytest -q --tb=short
+          tests/test_agent_eval_inertness.py::test_changed_paths_are_within_the_allowed_r0_surface
+          tests/test_agent_eval_inertness.py::test_no_control_plane_config_dependency_or_workflow_file_touched
+          tests/test_operator_first_policy.py::test_incumbent_semantic_discriminator_operator_owns_closure
+
+      - name: Prepare fixed test diagnostics
+        run: |
+          diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
+          chmod 0700 "$diagnostic_dir"
+          printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
+
+      - name: Verify native application admission and dispatch custody
+        run: |
+          python - <<'PYTEST'
+          import unittest
+          suite = unittest.TestSuite()
+          for pattern in (
+              "test_application_turn_*.py", "test_go_application_*.py", "test_application_http_transports.py", "test_quota_continuity.py",
+              "test_application_http_admission.py", "test_application_http_realm_projection.py",
+              "test_application_auto_request.py", "test_application_cross_pool_auto.py",
+              "test_application_registered_pool_selection.py", "test_application_registered_pool_composition.py",
+              "test_bailian_application_handler_composition.py",
+              "test_broker_prelease_deadline.py", "test_slot_release_custody.py",
+              "test_qwen_account_eligibility.py", "test_qwen_429_account_priority.py",
+          ):
+              suite.addTests(unittest.defaultTestLoader.discover(
+                  "ops/native_fabric/quota_continuity/tests", pattern=pattern))
+          from scripts.ci_native_preflight import unittest_runner
+          result = unittest_runner(verbosity=2).run(suite)
+          raise SystemExit(not result.wasSuccessful())
+          PYTEST
+          native_rollout_test_root="$(mktemp -d "$HOME/mmx-native-rollout.XXXXXX")"
+          trap 'rm -rf "$native_rollout_test_root"' EXIT
+          NATIVE_ROLLOUT_TEST_ROOT="$native_rollout_test_root" python -m pytest -q -o addopts= --noconftest \
+            -p scripts.ci_native_preflight \
+            --junitxml="$native_rollout_test_root/native-proof.xml" \
+            ops/native_fabric/quota_continuity/tests/test_go_native_stage.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_release.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_entry.py \
+            ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
+            ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py \
+            ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py \
+            ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py \
+            ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
+            ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
+            ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_generation.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_launcher_upgrade.py \
+            ops/native_fabric/quota_continuity/rollout/test_native_runtime_bindings.py \
+            tests/test_native_launcher_successor_transition.py
+          python - "$native_rollout_test_root/native-proof.xml" <<'PROOF'
+          import json, sys, xml.etree.ElementTree as ET
+          suites = list(ET.parse(sys.argv[1]).getroot().iter("testsuite"))
+          totals = {key: sum(int(s.get(key, "0")) for s in suites)
+                    for key in ("tests", "failures", "errors", "skipped")}
+          assert totals["tests"] > 0 and all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals
+          print("NATIVE_GO_RELEASE_PROOF " + json.dumps(totals, sort_keys=True))
+          PROOF
+
+      - name: Upload native admission diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-admission-fixed-diagnostics
+          path: |
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-unit/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-rollout/ci-fixed-diagnostics.json
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 0
+
   # Run each canonical, disjoint pytest shard on a separate hosted runner.
   # This changes placement only, not discovery, exclusions, selected modules
   # or the repository's one protected status context named "test".
@@ -486,55 +637,6 @@ jobs:
           diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
           chmod 0700 "$diagnostic_dir"
           printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
-
-      - name: Verify native application admission and dispatch custody
-        if: matrix.index == 5
-        run: |
-          python - <<'PYTEST'
-          import unittest
-          suite = unittest.TestSuite()
-          for pattern in (
-              "test_application_turn_*.py", "test_go_application_*.py", "test_application_http_transports.py", "test_quota_continuity.py",
-              "test_application_http_admission.py", "test_application_http_realm_projection.py",
-              "test_application_auto_request.py", "test_application_cross_pool_auto.py",
-              "test_application_registered_pool_selection.py", "test_application_registered_pool_composition.py",
-              "test_bailian_application_handler_composition.py",
-              "test_broker_prelease_deadline.py", "test_slot_release_custody.py",
-              "test_qwen_account_eligibility.py", "test_qwen_429_account_priority.py",
-          ):
-              suite.addTests(unittest.defaultTestLoader.discover(
-                  "ops/native_fabric/quota_continuity/tests", pattern=pattern))
-          from scripts.ci_native_preflight import unittest_runner
-          result = unittest_runner(verbosity=2).run(suite)
-          raise SystemExit(not result.wasSuccessful())
-          PYTEST
-          native_rollout_test_root="$(mktemp -d "$HOME/mmx-native-rollout.XXXXXX")"
-          trap 'rm -rf "$native_rollout_test_root"' EXIT
-          NATIVE_ROLLOUT_TEST_ROOT="$native_rollout_test_root" python -m pytest -q -o addopts= --noconftest \
-            -p scripts.ci_native_preflight \
-            --junitxml="$native_rollout_test_root/native-proof.xml" \
-            ops/native_fabric/quota_continuity/tests/test_go_native_stage.py \
-            ops/native_fabric/quota_continuity/tests/test_go_native_release.py \
-            ops/native_fabric/quota_continuity/tests/test_go_native_entry.py \
-            ops/native_fabric/quota_continuity/tests/test_go_native_install.py \
-            ops/native_fabric/quota_continuity/tests/test_provider_application_transition.py \
-            ops/native_fabric/quota_continuity/tests/test_quota_reset_native_stage.py \
-            ops/native_fabric/quota_continuity/tests/test_quota_reset_native_entry.py \
-            ops/native_fabric/quota_continuity/tests/test_go_service_enrollment.py \
-            ops/native_fabric/quota_continuity/tests/test_go_service_startup.py \
-            ops/native_fabric/quota_continuity/tests/test_application_http_native_startup.py \
-            ops/native_fabric/quota_continuity/rollout/test_native_generation.py \
-            ops/native_fabric/quota_continuity/rollout/test_native_launcher_upgrade.py \
-            ops/native_fabric/quota_continuity/rollout/test_native_runtime_bindings.py \
-            tests/test_native_launcher_successor_transition.py
-          python - "$native_rollout_test_root/native-proof.xml" <<'PROOF'
-          import json, sys, xml.etree.ElementTree as ET
-          suites = list(ET.parse(sys.argv[1]).getroot().iter("testsuite"))
-          totals = {key: sum(int(s.get(key, "0")) for s in suites)
-                    for key in ("tests", "failures", "errors", "skipped")}
-          assert totals["tests"] > 0 and all(totals[k] == 0 for k in ("failures", "errors", "skipped")), totals
-          print("NATIVE_GO_RELEASE_PROOF " + json.dumps(totals, sort_keys=True))
-          PROOF
 
       # A root-only finite owner must have positive proof, not skipped tests.
       # The container receives only tracked public source and disposable tmpfs.
@@ -785,8 +887,6 @@ jobs:
           name: ci-fixed-diagnostics-${{ matrix.index }}
           path: |
             ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json
-            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-unit/ci-fixed-diagnostics.json
-            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-rollout/ci-fixed-diagnostics.json
           if-no-files-found: warn
           retention-days: 3
           compression-level: 0
@@ -798,7 +898,7 @@ jobs:
     # Metadata-only edits publish no required test result, even a skipped one.
     # Real source/base events retain the same name and strict always() fan-in.
     name: ${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) && 'PR metadata edit' || 'test' }}
-    needs: [pr_scope, pr_fast, pin_guards, qualification, pytest_shards]
+    needs: [pr_scope, pr_fast, pin_guards, qualification, native_admission, pytest_shards]
     if: ${{ always() && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -818,6 +918,7 @@ jobs:
           PR_FAST_STATUS: ${{ needs.pr_fast.result }}
           GUARDS_STATUS: ${{ needs.pin_guards.result }}
           QUAL_STATUS: ${{ needs.qualification.result }}
+          NATIVE_STATUS: ${{ needs.native_admission.result }}
           SHARDS_STATUS: ${{ needs.pytest_shards.result }}
         run: |
           set -euo pipefail
@@ -832,13 +933,13 @@ jobs:
             fi
             case "$PR_SCOPE_MODE" in
               full)
-                if [ "$SHARDS_STATUS" != success ] || [ "$QUAL_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then
+                if [ "$SHARDS_STATUS" != success ] || [ "$QUAL_STATUS" != success ] || [ "$NATIVE_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then
                   echo "critical/unqualified source must pass all six pytest shards"
                   exit 1
                 fi
                 ;;
               fast|smoke)
-                if [ "$PR_FAST_STATUS" != success ] || [ "$SHARDS_STATUS" != skipped ] || [ "$QUAL_STATUS" != skipped ]; then
+                if [ "$PR_FAST_STATUS" != success ] || [ "$SHARDS_STATUS" != skipped ] || [ "$QUAL_STATUS" != skipped ] || [ "$NATIVE_STATUS" != skipped ]; then
                   echo "eligible source must pass its exact fast/smoke check"
                   exit 1
                 fi
@@ -855,7 +956,7 @@ jobs:
             # proof still require complete coverage.
             if [ "$SHARDS_STATUS" != success ] || [ "$QUAL_STATUS" != success ] ||
                [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ] ||
-               [ "$GUARDS_STATUS" != success ]; then
+               [ "$GUARDS_STATUS" != success ] || [ "$NATIVE_STATUS" != success ]; then
               echo "integration/release CI must pass the full matrix"
               exit 1
             fi

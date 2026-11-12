@@ -27,7 +27,7 @@ def _replace_in_job(text, job, old, new):
     return text[:start] + section.replace(old, new) + text[end:]
 
 
-@pytest.mark.parametrize("job", ["pr_fast", "pytest_shards", "qualification"])
+@pytest.mark.parametrize("job", ["pr_fast", "pytest_shards", "qualification", "native_admission"])
 @pytest.mark.parametrize("unsafe_status", ["always()", "true"])
 def test_work_job_cannot_ignore_workflow_cancellation(job, unsafe_status):
     text = _WORKFLOW.read_text(encoding="utf-8")

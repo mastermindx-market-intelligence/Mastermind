@@ -31,6 +31,7 @@ _JOB_CONCLUSIONS = {
     "PR test scope": "success",
     "Pin and identity guards": "success",
     "Non-pytest qualification gates": "success",
+    "Native application admission gates": "success",
     "PR fast checks": "skipped",
 }
 _JOB_NAMES = set(_JOB_CONCLUSIONS)
@@ -220,6 +221,8 @@ def find_reusable_run(
             if name == "Pin and identity guards"
             else {"Verify Paper direct pinned MCP SDK"}
             if name == "Non-pytest qualification gates"
+            else {"Verify native application admission and dispatch custody", "Fast source-bound release preflight"}
+            if name == "Native application admission gates"
             else {"Run repository test shard", "Fast source-bound release preflight"}
         )
         # CI Lightning F3: the five non-pytest qualification gates moved from

@@ -991,11 +991,11 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     text=(Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml').read_text()
     fan.validate_parallel_workflow(text)
     value=yaml.load(text,Loader=policy._WorkflowYAMLLoader)
-    # PR qualification, early pin guards and the non-pytest qualification
-    # lane add four jobs; full-mode H1 security checks and the required fan-in
-    # remain enforced by the validator.
-    assert set(value['jobs'])=={'pr_scope','pr_fast','pin_guards','qualification','pytest_shards','test'}
-    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pin_guards','qualification','pytest_shards']
+    # Every full-mode gate remains required: a separate native-admission job
+    # now runs beside the six shards, without changing the H1 security checks.
+    assert set(value['jobs'])=={'pr_scope','pr_fast','pin_guards','qualification','native_admission','pytest_shards','test'}
+    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pin_guards','qualification','native_admission','pytest_shards']
+    assert value['jobs']['native_admission']['if']==fan._REQUIRED_SHARDS_IF
     steps=value['jobs']['pytest_shards']['steps']
     preflight=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 initializer Linux fast preflight']
     positive=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 required real Linux no-ACL positive journey']

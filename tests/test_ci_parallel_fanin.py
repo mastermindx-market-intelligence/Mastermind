@@ -26,7 +26,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
         "push": {"branches": ["master"]},
         "workflow_dispatch": None,
     }
-    assert set(data["jobs"]) == {"pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards", "test"}
+    assert set(data["jobs"]) == {"pr_scope", "pr_fast", "pin_guards", "qualification", "native_admission", "pytest_shards", "test"}
     shards = data["jobs"]["pytest_shards"]
     assert shards["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
     assert shards["strategy"]["fail-fast"] is False
@@ -38,7 +38,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
     assert type(data["jobs"]["test"]["timeout-minutes"]) is int
     assert shards["timeout-minutes"] + data["jobs"]["test"]["timeout-minutes"] <= 100
     assert data["jobs"]["test"]["name"] == fan._REQUIRED_GATE_NAME
-    assert data["jobs"]["test"]["needs"] == ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards"]
+    assert data["jobs"]["test"]["needs"] == ["pr_scope", "pr_fast", "pin_guards", "qualification", "native_admission", "pytest_shards"]
 
 
 def test_smoke_checkout_uses_the_full_shard_pinned_fixture_without_credentials():
@@ -144,7 +144,7 @@ def test_smoke_dependency_checkout_cannot_drift_or_bypass_its_boundary(mutation)
             "index: [0, 1, 2, 3, 4, 5]",
             "index: [0, 1, 2, 3, 4, 5]\n        python: [3.12]",
         ),
-        ("needs: [pr_scope, pr_fast, pin_guards, qualification, pytest_shards]", "needs: []"),
+        ("needs: [pr_scope, pr_fast, pin_guards, qualification, native_admission, pytest_shards]", "needs: []"),
         ("if: " + fan._REQUIRED_GATE_IF, "if: false"),
         ("SHARDS_STATUS: ${{ needs.pytest_shards.result }}", "SHARDS_STATUS: wrong"),
         ('if [ "$PR_SCOPE_STATUS" != success ]; then', "if [ \"$PR_SCOPE_STATUS\" = failure ]; then"),
@@ -1225,3 +1225,20 @@ def test_actual_shard_shell_preserves_requested_modes_and_runner_exit(tmp_path, 
     )
     assert stat.S_IMODE((tmp_path / "created-directory").stat().st_mode) == 0o755
     assert stat.S_IMODE((tmp_path / "created-file").stat().st_mode) == 0o644
+
+
+def test_native_admission_separate_job_and_fanin_are_pinned():
+    import yaml
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    native = workflow['jobs']['native_admission']
+    assert native['if'] == fan._REQUIRED_SHARDS_IF
+    assert native['needs'] == ['pr_scope']
+    assert native['name'] == 'Native application admission gates'
+    gate = workflow['jobs']['test']['steps'][-1]
+    assert gate['env']['NATIVE_STATUS'] == '${{ needs.native_admission.result }}'
+    assert '[ "$NATIVE_STATUS" != success ]' in gate['run']
+    assert '[ "$NATIVE_STATUS" != skipped ]' in gate['run']
+    mutated = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    mutated['jobs']['test']['steps'][-1]['env'].pop('NATIVE_STATUS')
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(mutated, sort_keys=False))

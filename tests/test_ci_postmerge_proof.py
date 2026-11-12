@@ -95,9 +95,10 @@ def _jobs() -> dict:
     names = [f"pytest shard {index}" for index in range(6)] + [
         "test", "PR test scope", "Pin and identity guards",
         "Non-pytest qualification gates", "PR fast checks",
+        "Native application admission gates",
     ]
     return {
-        "total_count": 11,
+        "total_count": 12,
         "jobs": [
             {
                 "id": 117196531521 + index,
@@ -119,7 +120,11 @@ def _jobs() -> dict:
                       "status": "completed", "conclusion": "success"}]
                     if name == "Pin and identity guards" else
                     _qualification_steps()
-                    if name == "Non-pytest qualification gates" else _steps(index)
+                    if name == "Non-pytest qualification gates" else
+                    [{"name": n, "status": "completed", "conclusion": "success"} for n in
+                     ("Fast source-bound release preflight",
+                      "Verify native application admission and dispatch custody")]
+                    if name == "Native application admission gates" else _steps(index)
                 ),
                 "check_run_url": f"https://api.github.com{_PREFIX}/check-runs/{117196531521 + index}",
             }
@@ -402,6 +407,9 @@ _REQUIRED_STEPS = [
 ] + [
     # Every one of the five qualification gates is individually mandatory.
     (9, step["name"]) for step in _qualification_steps()
+] + [
+    (11, "Fast source-bound release preflight"),
+    (11, "Verify native application admission and dispatch custody"),
 ]
 
 
@@ -420,24 +428,24 @@ def test_all_jobs_require_unique_successful_mandatory_steps(index, name, mode):
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
 
 
-@pytest.mark.parametrize("index", range(11))
+@pytest.mark.parametrize("index", range(12))
 def test_each_job_is_mandatory_even_when_the_reported_count_matches(index):
     subject = _subject()
     subject["jobs"]["jobs"].pop(index)
-    subject["jobs"]["total_count"] = 10
+    subject["jobs"]["total_count"] = 11
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
 
 
 @pytest.mark.parametrize("case", ["old-three-shard-proof", "incomplete-page", "noninteger-count"])
-def test_eleven_job_proof_refuses_legacy_or_incomplete_job_shape(case):
+def test_twelve_job_proof_refuses_legacy_or_incomplete_job_shape(case):
     subject = _subject()
     if case == "old-three-shard-proof":
         subject["jobs"]["jobs"] = subject["jobs"]["jobs"][:3] + subject["jobs"]["jobs"][6:]
         subject["jobs"]["total_count"] = len(subject["jobs"]["jobs"])
     elif case == "incomplete-page":
-        subject["jobs"]["total_count"] = 12
+        subject["jobs"]["total_count"] = 13
     else:
-        subject["jobs"]["total_count"] = 11.0
+        subject["jobs"]["total_count"] = 12.0
     assert proof.find_reusable_run(_env(), read_json=_read(subject)) is None
 
 
