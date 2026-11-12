@@ -1753,3 +1753,42 @@ should not offer another provider. It goes to the team-roster work.
 Three of them could not read the text in the returned image; that is the missing auxiliary
 vision, which lane BCU owns, not a Paper fault. The inspect tool takes no file and returns
 whatever file is open on the M2; the skillpack must tell designers to name the file.
+
+## 42. Amendment, 2026-11-12 08:45 UTC: a teammate is its provider instance; first census of the Hermes bots
+
+**What happened.** The Chairman used the Mastermind OS window to talk in Secretary's
+conversation and the window let him pick the general provider and another model. Those two
+turns (07:23 to 08:12 UTC) ran without Secretary's charter and without the teammate fence,
+because both are attached to the launch of the `secretary` provider instance and nowhere else.
+The gate file, the limits file and the charter are unchanged; nothing was broken or bypassed by
+a lane. The conversation still points at the general provider, so the wake carrier refuses
+Secretary's board tasks and Secretary's board status reads `error`.
+
+**Ruling 20** (deputy rulings): a teammate is its own provider instance, not its conversation.
+
+| Part | Owner | State |
+| --- | --- | --- |
+| Fresh primary conversation for a cut-over teammate (the existing `rotate` needs a file that cut-over teammates do not have and refuses on status `error`) | lane RF through the deputy; independent review; rehearsed on a dev copy that reproduces the provider switch; the principal installs | ordered |
+| Secretary's task-edge proof, the return edge and the baseline (carrier refresh steps 2e, 3, 4) | principal | waits for the row above |
+| The window must not offer another provider in a teammate's conversation; plain notice until then | team-roster work (release -4 list) | ordered |
+| Findings of the Chairman's own session (preview browser is not disabled; device keys default off; the pinned fetch tool is the one real build; a managed MCP config path; two of its children disagree on whether ambient MCP servers reach a live session) | deputy hands them to BR, BCU and HX so they are not rediscovered | sent |
+
+**Hermes census (lane HM, first file).** Fifteen bots, not fourteen: the default Hermes home is
+itself the Slack "Meta-CEO" and the Chairman's main Hermes chat. Three are moved, nine distinct
+ones are staged next, one is an experiment made today, and two share the Meta-CEO identity.
+5,093 conversations and 209,475 message rows across 15 stores, no conversation in two stores.
+Memory is two layers: small per-bot files, and ONE shared `omh` store outside `~/.hermes` with
+288 approved records. One finding changes the order of work: Secretary was moved on the board
+but ten of its eleven Hermes timers are still armed, so today two systems can act as Secretary.
+That is the "one initiator per effect" rule (plan V3 section 8a) already broken, and the lane's
+install list treats it first. Moving or disarming those timers is a write to Hermes and is the
+principal's act on the lane's rehearsed list.
+
+**Cloudflare tunnel.** The first child stopped cleanly before authorising: the zone
+`mastermindx.ai` was found by rule (one of five zones), but the browser plugin cannot click a
+table row that is not a link or button, and the debugger path is refused in that profile
+because another extension has a frame in the page (not routed around). Nothing was created. A
+second child reads the plugin's own contract first and, if the plugin cannot do it, uses
+Peekaboo on that one window under the idle rule. The plugin gap (clickable rows are not
+offered as elements) goes on lane BR's later list.
+

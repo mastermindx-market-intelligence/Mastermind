@@ -132,3 +132,21 @@ then escalates the disagreement.
     reports; it never delivers twice. Reason: the fifth Grok Bot link round passed 420 tests
     with a lock per client object and a test that codified handing the same answer out twice
     (`gbl-20261111/gbl5/REVIEW-deputy-deepseek.md`).
+20. **A teammate is its own provider instance, not its conversation (2026-11-12).** The
+    charter and the tool fence are attached where the teammate's provider instance is
+    launched. A turn run in a teammate's conversation on any other provider instance has
+    neither. So: (a) a wake from the board runs on the teammate's own provider instance or
+    does not run; the carrier's refusal on a mismatch stays, and no lane weakens it;
+    (b) a teammate whose conversation has been moved to another provider gets a fresh primary
+    conversation on its own instance through a reviewed command (refuses with a live run or
+    open work; the old conversation is left exactly as it is); nobody restores a provider by
+    writing the state database or by sending into the old conversation; (c) the product must
+    not offer another provider or model inside a teammate's conversation, and until it does
+    not, the window says in plain words that such a turn is the person's own session without
+    the teammate's charter or limits; (d) a person's turn there is that person's, with that
+    person's authority: it is not a teammate act, is not counted as teammate work, and its
+    children are not ours to stop. Reason: on 2026-11-12 the Chairman's two turns in
+    Secretary's conversation ran on the general provider (runs 11 and 12); that session's own
+    audit shows shell and web fetch worked and four children started, and afterwards the
+    carrier refused every Secretary wake (`rf-carrier-refresh.md` step 2e still owed).
+
