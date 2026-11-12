@@ -2083,3 +2083,19 @@ DeepSeek worker with the same eight points.
 - One final install list for the trunk commit that holds that round. The Chairman sitting request is sent only after the installer step has run on the real root.
 
 **Next, in order.** Unchanged from section 49.
+
+## 53. Amendment, 2026-11-12 18:27 UTC: bridge release staged on the real machine; the Chairman's reloads are next
+
+**What changed.** The last bridge round is merged as source at `b640dec14`. The principal ran the installer step on the real machine for that commit. The new release is built and the browser host registrations point at it. The running sessions, the live pin and every folder Chrome has loaded are unchanged, and all five profiles stayed connected.
+
+**What the principal's check found.** Two of the five profiles are loaded from an older folder than the install list assumed. Both present the one accepted previous digest, so they keep working. The undo folders for those two were corrected in the request to the Chairman.
+
+**Class rule.** A per-profile undo names the folder the profile is loaded from, read from the live registration, not the folder of the last release.
+
+**Rulings.**
+
+- The bridge lane is closed for code. Open points go to the later list.
+- Memory link: round 3 is not merged. The label words matched as the start of ordinary words, so a line beginning with a teammate's name was removed. One last pattern fix is out. A redaction test has two lists: values that must be gone, and ordinary team text that must survive.
+- Computer use: three medium findings from the last review are fixed in one small round, then the principal reads the entry point and decides the merge. The shipped entry point of a restraining layer takes no argument that chooses its rules, its binary or its state.
+
+**Next, in order.** The Chairman reloads the extension in five Chrome profiles. Then the principal switches the pin and verifies with a fresh session. The other lanes are unchanged from section 49.
