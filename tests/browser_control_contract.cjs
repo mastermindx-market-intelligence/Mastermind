@@ -7,7 +7,7 @@ const {createController,REQUEST_SCHEMA} = require("../integrations/chairman_surf
 const hash = value => createHash("sha256").update(value).digest("hex");
 const INSTANCE = "a".repeat(64), SESSION = "b".repeat(64), BOOT = "connection-generation-one";
 const SNAP = "snapshot-observation-one";
-const pageActions = new Set(["click","fill","select","press","scroll"]);
+const pageActions = new Set(["click","fill","select","press","scroll","read"]);
 function request(action, changes={}) {
   const hasTab = !["status","tabs","open"].includes(action);
   return {schema:REQUEST_SCHEMA,adapter_instance_id:INSTANCE,session_id:SESSION,
@@ -19,10 +19,16 @@ function request(action, changes={}) {
 // The isolated-world page object the real func-injection finds as
 // globalThis.__MMX_BROWSER_PAGE_V1__. Implements the page protocol inline.
 function pageWorldDispatch(f) {
-  // The real browser_page.js dispatch is synchronous and never lets an error
-  // escape; the fake mirrors that so the controller wrapper sees production shape.
+  // The real browser_page.js dispatch never lets an error escape; fill
+  // returns a promise (settled read-back) while everything else answers
+  // synchronously. Chrome's executeScript awaits settled results, and the
+  // scripting stub below mirrors that, so the fake can model both shapes.
   return message => {
     if(f.state.messageHook) f.state.messageHook(message);
+    // A malformed page reply (ok is not a boolean): the controller's own
+    // validation throws a bare PAGE_RESPONSE_INVALID — no flags attached.
+    if(f.state.invalidResponseOn && message.action===f.state.invalidResponseOn)
+      return {ok:"yes",code:"OK"};
     if(message.action==="snapshot") {
       f.state.session=message.session_id;f.state.snapshot=SNAP;f.state.snapshotCount++;
       return {ok:true,code:"OK",effect:"NOT_APPLIED",data:{snapshot_id:SNAP}};
@@ -38,6 +44,17 @@ function pageWorldDispatch(f) {
       return {ok:false,code:"STALE_SNAPSHOT",effect:"NOT_APPLIED",data:null};
     if(message.action==="validate")return {ok:true,code:"OK",effect:"NOT_APPLIED",data:{}};
     if(message.action==="validate_focus")return {ok:true,code:"OK",effect:"NOT_APPLIED",data:{}};
+    // Fill answers after a settle in production: model the promise shape the
+    // real page module now returns, so the controller path proves it settles.
+    if(message.action==="fill") {
+      f.state.effects.push(["fill"]);f.state.snapshot=null;
+      return Promise.resolve({ok:true,code:"OK",effect:"APPLIED",
+        data:{refresh_required:true,snapshot_consumed:true,settle_interval_ms:250}});
+    }
+    // read is a pure read: no effect recorded, snapshot not consumed.
+    if(message.action==="read")
+      return {ok:true,code:"OK",effect:"NOT_APPLIED",data:{offset:message.params.offset,
+        total_characters:0,next_offset:null,content:"",content_is_untrusted:true}};
     if(message.action==="focus_ref") {
       f.state.effects.push(["focus"]);
       if(f.state.focusFailure==="lost")throw Error("lost focus reply");
@@ -53,7 +70,7 @@ function fixture() {
   const state = {boot:BOOT, effects:[], permissions:new Set(["tabs","scripting","debugger"]),
     sites:new Set(["https://allowed.test/*"]), document:"document-one", session:SESSION, snapshot:null,
     snapshotCount:0, messageHook:null, permissionHook:null, focusFailure:null, detachFailure:false,
-    injectFailure:null, filesFailure:null, worldMissing:false, dispatchFailureOn:null, dispatchFailureText:null,
+    injectFailure:null, filesFailure:null, worldMissing:false, dispatchFailureOn:null, dispatchFailureText:null, invalidResponseOn:null,
     keyEventDetail:null, captureFunc:false, lastFunc:null, filesInstalls:0,
     history:{currentIndex:1,entries:[{id:10,url:"https://denied.test/"},{id:11,url:"https://allowed.test/page"}]}};
   const f = {state};
@@ -83,11 +100,15 @@ function fixture() {
       if(state.dispatchFailureOn && options.args[0] && options.args[0].action === state.dispatchFailureOn) {
         try {options.func(...options.args);} finally {throw new Error(state.dispatchFailureText || "frame removed while injecting");}
       }
-      // Real Chrome runs the controller's func wrapper inside the page world;
-      // model that here by installing the fake page object on globalThis.
+      // Real Chrome runs the controller's func wrapper inside the page world
+      // and awaits a promise the func returns (executeScript resolves with
+      // the settled value); model both here.
       globalThis.__MMX_BROWSER_PAGE_V1__ = {dispatch: worldDispatch};
       if(state.worldMissing) delete globalThis.__MMX_BROWSER_PAGE_V1__;
-      try { return [{result: options.func(...options.args)}]; }
+      try {
+        const value = options.func(...options.args);
+        return [{result: (value && typeof value.then === "function") ? await value : value}];
+      }
       finally { if(!state.worldMissing) globalThis.__MMX_BROWSER_PAGE_V1__ = {dispatch: worldDispatch}; }
     }},
     tabs:{
@@ -138,6 +159,17 @@ function fixture() {
     assert.equal((await f.run(click)).status,"NONCE_REUSED");
     assert.equal((await f.run(request("click"))).status,"STALE_SNAPSHOT");
     assert.deepEqual(f.state.effects,[["click"]]);
+  }
+  // Fill answers after a settle interval (ruling 13): the page dispatch
+  // returns a promise, executeScript resolves with the settled receipt, and
+  // the controller forwards it unchanged — no PAGE_RESPONSE_INVALID from an
+  // unresolved thenable, no wedged effect.
+  {
+    const f=fixture();await f.snapshot();
+    const result=await f.run(request("fill",{params:{text:"settled"}}));
+    assert.equal(result.status,"ACTION_DISPATCHED");assert.equal(result.effect,"APPLIED");
+    assert.equal(result.data.settle_interval_ms,250);
+    assert.deepEqual(f.state.effects,[["fill"]]);
   }
   {
     const f=fixture();await f.snapshot();f.tabs.get(1).url="https://allowed.test/changed";
@@ -337,6 +369,42 @@ function fixture() {
     const result=await f.snapshot();
     assert.equal(result.status,"PAGE_INJECT_FAILED");
     assert.equal(result.effect,"NOT_APPLIED");
+  }
+  // A pure read whose reply is lost after dispatch is never wedged as
+  // EFFECT_UNKNOWN: reads apply nothing, so pagination may safely continue
+  // (a read must not become an "uncertain action" that can never repeat).
+  {
+    const f=fixture();await f.snapshot();
+    f.state.dispatchFailureOn="read";
+    const lost=await f.run(request("read",{params:{offset:0}}));
+    assert.equal(lost.status,"PAGE_INJECT_FAILED");
+    assert.equal(lost.effect,"NOT_APPLIED");
+    f.state.dispatchFailureOn=null;
+    const next=await f.run(request("read",{nonce:randomBytes(24).toString("hex"),params:{offset:0}}));
+    assert.equal(next.status,"ACTION_DISPATCHED","the next page read is not blocked");
+  }
+  // Ruling 15 item 1: the bare PAGE_RESPONSE_INVALID rethrow (the page
+  // replied, but the reply shape is invalid — for example a frame swapped
+  // between send and answer) carries neither flag, and `possible` must not
+  // wedge a pure read as an uncertain action: reads apply nothing, so the
+  // read stays NOT_APPLIED and retryable. A write hitting the same rethrow
+  // keeps the conservative uncertain verdict.
+  {
+    const f=fixture();await f.snapshot();
+    f.state.invalidResponseOn="read";
+    const bad=await f.run(request("read",{params:{offset:0}}));
+    assert.equal(bad.status,"PAGE_RESPONSE_INVALID");
+    assert.equal(bad.effect,"NOT_APPLIED","a pure read is never uncertain on an invalid reply");
+    f.state.invalidResponseOn=null;
+    const next=await f.run(request("read",{nonce:randomBytes(24).toString("hex"),params:{offset:0}}));
+    assert.equal(next.status,"ACTION_DISPATCHED","the read can be retried at once");
+  }
+  {
+    const f=fixture();await f.snapshot();
+    f.state.invalidResponseOn="fill";
+    const bad=await f.run(request("fill",{params:{text:"x"}}));
+    assert.equal(bad.status,"ACTION_EFFECT_UNKNOWN");
+    assert.equal(bad.effect,"EFFECT_UNKNOWN","a write stays conservative on an invalid reply");
   }
   // The pre-dispatch failures stay NOT_APPLIED (nothing was sent).
   {

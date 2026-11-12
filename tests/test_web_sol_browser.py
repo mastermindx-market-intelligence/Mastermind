@@ -38,6 +38,10 @@ def request(action="click", **changes):
         value.update(snapshot_id=None, ref=None)
     elif action not in protocol.PAGE_ACTIONS:
         value.update(ref=None)
+    # Snapshot-free reads (0b5edb927) take no snapshot id; diagnostics alone
+    # also accepts the last observation's id, so keep its string to cover that.
+    if action in protocol.NO_SNAPSHOT and action != "diagnostics":
+        value.update(snapshot_id=None)
     value.update(changes)
     return value
 
@@ -46,7 +50,16 @@ def request(action="click", **changes):
 def test_closed_actions_round_trip(action):
     params = {"open":{"url":"https://example.test/"}, "navigate":{"url":"http://localhost:8080/page"},
         "fill":{"text":"Hello\nworld"}, "select":{"value":"one"}, "press":{"key":"Enter"},
-        "scroll":{"x":0,"y":700}}.get(action,{})
+        "scroll":{"x":0,"y":700}, "read":{"offset":0},
+        # Advanced actions carry their payload in params; each needs its own
+        # minimal valid shape to round-trip validate_window.
+        "cdp":{"method":"Page.enable"}, "evaluate":{"expression":"1+1"},
+        "interact":{"ref":"n"+"a"*24,"kind":"click"}, "locate":{"locator":{"css":"div"}},
+        "wait":{"locator":{"css":"div"}},
+        "download":{"url":"https://example.test/file.bin"},
+        "response_body":{"request_id":"request-one"}, "result":{"result_id":"result-one"},
+        "route":{"rules":[{"url_pattern":"https://example.test/","action":"continue"}]},
+        "upload":{"ref":"n"+"a"*24,"files":["/tmp/upload.txt"]}}.get(action,{})
     original=request(action,params=params)
     accepted=protocol.validate_window(original)
     assert accepted == original and accepted is not original
@@ -69,6 +82,48 @@ def test_invalid_stale_or_extended_messages_fail_closed(changes):
     "https://user:secret@example.test/", "https://example.test:0/", "https://example.test/ a"])
 def test_navigation_has_no_privileged_or_credential_urls(url):
     with pytest.raises(legacy.WebSolProtocolError):protocol.validate_request(request("navigate",params={"url":url}))
+
+
+def test_read_pages_one_elements_text_by_ref():
+    # read is a snapshot-ref read: it needs the observation's element ref and
+    # takes exactly one integer offset (character position for paging).
+    accepted = protocol.validate_window(request("read", params={"offset": 12345}))
+    assert accepted["params"] == {"offset": 12345}
+    assert accepted["ref"] == "e1"
+    for bad in ({"offset": -1}, {"offset": 2000001}, {"offset": "0"}, {"offset": 0, "extra": 1}, {}):
+        with pytest.raises(legacy.WebSolProtocolError):
+            protocol.validate_window(request("read", params=bad))
+
+
+def test_fill_cap_counts_utf16_units_not_code_points():
+    # Every JavaScript layer of the pipeline caps fill length in UTF-16 code
+    # units; Python's len() counts code points. Astral characters are two
+    # units each, so 15,001 of them passed the protocol's 30,000 cap while the
+    # page refused the dispatch. The protocol gate must count the same units.
+    with pytest.raises(legacy.WebSolProtocolError):
+        protocol.validate_window(request("fill", params={"text": "\U0001D54F" * 15001}))
+    accepted = protocol.validate_window(request("fill", params={"text": "\U0001D54F" * 15000}))
+    assert accepted["params"]["text"] == "\U0001D54F" * 15000
+    # Lone surrogates are one UTF-16 unit each and must not crash the gate.
+    with pytest.raises(legacy.WebSolProtocolError):
+        protocol.validate_window(request("fill", params={"text": "\uD800" * 30001}))
+
+
+def test_fill_refuses_line_counts_that_freeze_the_editor_pipeline():
+    # The editor pipeline issues one execCommand pair per line; a 30,000-newline
+    # fill used to reach the page and freeze the tab (SCORE e2#2). The protocol
+    # refuses normalized line counts above the cap before any dispatch; the cap
+    # boundary itself still validates.
+    with pytest.raises(legacy.WebSolProtocolError):
+        protocol.validate_window(request("fill", params={"text": "a\n" * 15000}))
+    with pytest.raises(legacy.WebSolProtocolError):
+        protocol.validate_window(request("fill", params={"text": "\n" * 2001}))
+    accepted = protocol.validate_window(request("fill", params={"text": "\n" * 2000}))
+    assert accepted["params"]["text"] == "\n" * 2000
+    # Lone CR normalizes to a line break on the insertion feed, so it counts
+    # toward the cap rather than sneaking lines past it.
+    with pytest.raises(legacy.WebSolProtocolError):
+        protocol.validate_window(request("fill", params={"text": "\r" * 2001}))
 
 
 def test_bounded_receipts_reject_nonfinite_mutable_and_wrong_effect_values():
@@ -137,6 +192,58 @@ def test_native_tool_schema_matches_consumer():
     assert "session_id" not in bridge.TOOL_SCHEMA["parameters"]["properties"]
 
 
+def test_bridge_emit_never_fails_on_unencodable_reply_text(monkeypatch):
+    # p1#7 + ruling 15 item 4: page-produced text can reach the reply
+    # carrying lone surrogates — high (\ud800) or low (\udc80) — and the
+    # operator's only reply channel is stdout. The bridge encodes strictly
+    # itself and writes bytes through sys.stdout.buffer: a text layer with
+    # errors="surrogateescape" (the default for the spawned subprocess under
+    # plain, PYTHONUTF8=1 and LC_ALL=C) passes low surrogates through as raw
+    # bytes and would emit an invalid UTF-8 line without raising. One
+    # parseable reply always arrives.
+    raw=io.BytesIO()
+    stream=io.TextIOWrapper(raw,encoding="utf-8",errors="surrogateescape",newline="")
+    monkeypatch.setattr(bridge.sys,"stdout",stream)
+    bridge._emit({"state":"RECEIPT","data":{"content":"end \ud800 tail"}})
+    bridge._emit({"state":"RECEIPT","data":{"content":"low \udc80 tail"}})
+    stream.flush()
+    lines=raw.getvalue().split(b"\n")
+    assert lines[-1]==b""
+    for line in lines[:-1]:
+        json.loads(line.decode("utf-8"))
+    assert all(line for line in lines[:-1]),"every emitted line is strict-valid UTF-8"
+    assert json.loads(lines[0].decode("utf-8"))["data"]["content"]=="end \ud800 tail"
+    assert json.loads(lines[1].decode("utf-8"))["data"]["content"]=="low \udc80 tail"
+    # An ordinary non-ASCII payload keeps the compact unescaped channel.
+    raw.seek(0); raw.truncate()
+    bridge._emit({"state":"RECEIPT","data":{"content":"café 𝕏"}})
+    stream.flush()
+    assert raw.getvalue()==b'{"state":"RECEIPT","data":{"content":"caf\xc3\xa9 \xf0\x9d\x95\x8f"}}\n'
+
+
+def test_read_contract_states_enforced_limits_and_operator_rules():
+    # p1#1: the read contract must state what is actually enforced (worker
+    # 800,000-byte RESULT_TOO_LARGE; native host 921,600-byte MAX_MESSAGE_BYTES)
+    # instead of the never-enforced 32,768-byte envelope, and carry the three
+    # operator rules: no drift guard across pages, repeated blank lines can
+    # hide a dropped empty line, read the box before sending.
+    schema=bridge.TOOL_SCHEMA["description"]
+    assert "skip or repeat" in schema and "dropped empty line" in schema
+    assert "read the box before sending" in schema
+    assert "32,768" not in schema
+    page=(ROOT/"integrations/chairman_surfaces/web_sol_extension/browser_page.js").read_text()
+    assert "32,768" not in page
+    for ceiling in ("800,000","921,600"):
+        assert ceiling in page,f"the page comment names the enforced ceiling {ceiling}"
+    doc=(ROOT/"integrations/hermes_harness/mcp_bridge_install.md").read_text()
+    assert "32,768-byte envelope" not in doc
+    for phrase in ("skip or repeat","dropped empty line","read the box before sending","800,000","921,600","settle interval"):
+        assert phrase in doc,f"the install doc states {phrase}"
+    for name in ("browser_bridge.py","browser_tool_schema.json"):
+        digest=hashlib.sha256((ROOT/"integrations/hermes_harness"/name).read_bytes()).hexdigest()
+        assert digest in doc,f"the doc pins the wrong hash for {name}"
+
+
 def test_client_stamps_discovered_connection_and_refuses_changed_generation_before_write(monkeypatch):
     writes=[]
     connection=SimpleNamespace(settimeout=lambda _:None,connect=lambda _:None,
@@ -201,6 +308,30 @@ def test_unknown_argument_name_is_reported_without_its_value(tmp_path,monkeypatc
     assert refused["reason"]=="INVALID_ARGUMENTS"
     assert "bogus" in str(refused.get("detail"))
     assert "value-never-shown" not in str(refused.get("detail"))
+
+
+def test_read_takes_offset_with_ref_and_snapshot(tmp_path,monkeypatch):
+    monkeypatch.setattr(bridge,"inventory",lambda _: [{"browser_id":"a"*64}])
+    monkeypatch.setattr(bridge.routes,"load",lambda _: None)
+    seen=[]
+    def exchange(browser_id,session_id,operation_key,action,connection_id,tab_id,
+                 url_fingerprint,snapshot_id,ref,params,nonce):
+        seen.append({"browser_id":browser_id,"action":action,"connection_id":connection_id,
+            "tab_id":tab_id,"url_fingerprint":url_fingerprint,"snapshot_id":snapshot_id,
+            "ref":ref,"params":params})
+        return {"status":"OK","effect":"NOT_APPLIED","data":{"offset":params.get("offset")}}
+    out=bridge.execute({"action":"read","browser_id":"a"*64,"connection_id":"conn-1","tab_id":3,
+        "url_fingerprint":"c"*64,"snapshot_id":"snapshot-observation-001","ref":"e7","offset":4096},
+        native_session_id="s",profile_ref="/profile",bindings_path=tmp_path/"bindings",exchange=exchange)
+    assert out["state"]=="RECEIPT", out
+    assert seen==[{"browser_id":"a"*64,"action":"read","connection_id":"conn-1","tab_id":3,
+        "url_fingerprint":"c"*64,"snapshot_id":"snapshot-observation-001","ref":"e7",
+        "params":{"offset":4096}}]
+    # Without offset the bridge names it missing instead of dispatching.
+    missing=bridge.execute({"action":"read","browser_id":"a"*64,"connection_id":"conn-1","tab_id":3,
+        "url_fingerprint":"c"*64,"snapshot_id":"snapshot-observation-001","ref":"e7"},
+        native_session_id="s",profile_ref="/profile",bindings_path=tmp_path/"bindings")
+    assert missing["reason"]=="INVALID_ARGUMENTS" and "offset" in str(missing.get("detail"))
 
 
 def test_diagnostics_is_callable_without_a_snapshot_id(tmp_path,monkeypatch):

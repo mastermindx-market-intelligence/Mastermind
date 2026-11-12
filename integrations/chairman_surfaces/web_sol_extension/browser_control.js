@@ -7,8 +7,8 @@
   const IDENTITY = ["adapter_instance_id", "session_id", "operation_key", "nonce", "transport_boot_nonce", "action"];
   const FIELDS = ["schema", ...IDENTITY, "tab_id", "url_fingerprint", "snapshot_id", "ref", "params", "issued_at", "expires_at"];
   const CDP = root.MMXBrowserCDP;
-  const READ = new Set(["status", "tabs", "snapshot", "screenshot", "diagnostics", ...(CDP ? CDP.READ : [])]);
-  const PAGE = new Set(["click", "fill", "select", "press", "scroll"]);
+  const READ = new Set(["status", "tabs", "snapshot", "screenshot", "diagnostics", "read", ...(CDP ? CDP.READ : [])]);
+  const PAGE = new Set(["click", "fill", "select", "press", "scroll", "read"]);
   const ACTIONS = new Set([...READ, ...PAGE, "open", "navigate", "reload", "back", "forward", "close", "focus", ...(CDP ? CDP.ACTIONS : [])]);
   const NO_SNAPSHOT = new Set(["snapshot", "diagnostics", ...(CDP ? CDP.NO_SNAPSHOT : [])]);
   const TAB = new Set([...ACTIONS].filter(a => !["status", "tabs", "open"].includes(a)));
@@ -53,7 +53,8 @@
     const p = r.params;
     if (CDP && CDP.ACTIONS.has(r.action)) {if (!CDP.validate(r.action,p)) return false;}
     else if (["open", "navigate"].includes(r.action)) {if (!exact(p,["url"]) || !url(p.url)) return false;}
-    else if (r.action === "fill") {if (!exact(p,["text"]) || typeof p.text !== "string" || p.text.length > 8000 || p.text.includes("\u0000")) return false;}
+    else if (r.action === "read") {if (!exact(p,["offset"]) || !Number.isInteger(p.offset) || p.offset < 0 || p.offset > 2000000) return false;}
+    else if (r.action === "fill") {if (!exact(p,["text"]) || typeof p.text !== "string" || p.text.length > 30000 || p.text.includes("\u0000")) return false;}
     else if (r.action === "select") {if (!exact(p,["value"]) || !bounded(p.value,0,512)) return false;}
     else if (r.action === "press") {if (!exact(p,["key"]) || !Object.hasOwn(KEY_CODES,p.key)) return false;}
     else if (r.action === "scroll") {if (!exact(p,["x","y"]) || ![p.x,p.y].every(x=>Number.isInteger(x)&&Math.abs(x)<=3000)) return false;}
@@ -144,7 +145,7 @@
               // this net into the very ReferenceError it exists to report.
               // A dispatch that died mid-flight cannot prove NOT_APPLIED for a
               // mutation; report it as uncertain, reads as safely unapplied.
-              const read = /^(snapshot|validate|validate_focus|consume|diagnostics)$/.test((ds && ds.action) || "");
+              const read = /^(snapshot|validate|validate_focus|consume|diagnostics|read)$/.test((ds && ds.action) || "");
               const cut = /(https?:\/\/[^\s"'<>\\]{1,300})/g;
               const bound = String((e && e.message) || e)
                 .replace(cut, m => {
@@ -165,7 +166,7 @@
       // func already ran (tab closed, frame removed or navigated by the very
       // click it performed). Only failures proven to precede dispatch are
       // knownNotApplied; the rest surface as ACTION_EFFECT_UNKNOWN.
-      const read = /^(snapshot|validate|validate_focus|consume|diagnostics)$/.test(action);
+      const read = /^(snapshot|validate|validate_focus|consume|diagnostics|read)$/.test(action);
       let sent = false;
       try {
         // Reads re-inject the page world; a mutation without a live world
@@ -387,7 +388,17 @@
           "PAGE_INJECT_FAILED","PAGE_DISPATCH_FAILED","PAGE_WORLD_UNAVAILABLE"]);
         const code = allowed.has(error && error.message) || /^(CDP_|FRAME_|STALE_NODE_|RESPONSE_|RESULT_|UPLOAD_|DOWNLOAD_|PAGE_|INPUT_|INVALID_|TARGET_OBSCURED|PDF_|EVALUATE_|NETWORK_|ROUTE_|EMULATE_)/.test(error?.message||"")
           ? error.message : "BROWSER_UNAVAILABLE";
-        const possible=attempted&&(!error?.knownNotApplied||error?.committed);
+        // A pure read (snapshot, validate, consume, diagnostics, read)
+        // applies nothing to the page, so no failure after the dispatch was
+        // sent can ever have changed page state — not a `committed` dispatch
+        // and not the bare PAGE_RESPONSE_INVALID rethrow, which carries
+        // neither flag. Either would wedge the read into
+        // ACTION_EFFECT_UNKNOWN, an "uncertain action" that can never repeat,
+        // and pagination would be stuck. A read-classified sub-call inside a
+        // mutation flow (validate_focus after an applied focus_ref) keeps
+        // the committed semantics of its enclosing mutation.
+        const pureRead=/^(snapshot|validate|consume|diagnostics|read)$/.test(r.action);
+        const possible=attempted&&!pureRead&&(!error?.knownNotApplied||error?.committed);
         // An unexpected error is never again reduced to a bare BROWSER_UNAVAILABLE:
         // the receipt carries a bounded detail and the ring keeps the last 20.
         // A carried detail (CDP can attach one) is bounded and URL-cut here too.
