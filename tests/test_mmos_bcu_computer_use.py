@@ -214,9 +214,17 @@ case "$1" in
     fi
     if [ -n "${FAKE_PEEKABOO_NO_AX_ACTION:-}" ]; then
       # Real capture (click_actiononly_no_ax_element.json): a Tk button is
-      # AX-VISIBLE but not AX-ACTIONABLE; peekaboo found nothing to invoke.
-      # Pre-dispatch -> typed ELEMENT_NOT_ACTIONABLE / NOT_APPLIED.
+      # AX-VISIBLE but not AX-ACTIONABLE; rc=1 INTERNAL_SWIFT_ERROR with
+      # effect "unverifiable" and NO mutation_dispatched proof. BCU R3 M4:
+      # unproven -> EFFECT_UNKNOWN, never a typed NOT_APPLIED.
       echo '{"success": false, "error": {"code": "INTERNAL_SWIFT_ERROR", "message": "No accessibility element is available for action invocation"}, "effect": "unverifiable", "data": null}'
+      exit 0
+    fi
+    if [ -n "${FAKE_PEEKABOO_NO_AX_ACTION_PROVEN:-}" ]; then
+      # The SAME refusal WITH peekaboo's structured no-dispatch proof
+      # (mutation_dispatched false) — only this shape earns the typed
+      # ELEMENT_NOT_ACTIONABLE / NOT_APPLIED (BCU R3 M4).
+      echo '{"success": false, "error": {"code": "INTERNAL_SWIFT_ERROR", "message": "No accessibility element is available for action invocation", "mutation_dispatched": false}, "outcome": {"state": "refused", "mutation_dispatched": false}, "effect": "unverifiable", "data": null}'
       exit 0
     fi
     if [ -n "${FAKE_PEEKABOO_SNAPSHOT_STALE:-}" ]; then
@@ -3886,19 +3894,36 @@ class TestDispatchFailureEffectUnknown(unittest.TestCase):
                     "FAKE_PEEKABOO_ACT_FAIL", "FAKE_PEEKABOO_PASTE_FAIL",
                     "FAKE_PEEKABOO_REFUSAL_NO_MUTATION",
                     "FAKE_PEEKABOO_NO_AX_ACTION",
+                    "FAKE_PEEKABOO_NO_AX_ACTION_PROVEN",
                     "FAKE_PEEKABOO_SNAPSHOT_STALE"):
             os.environ.pop(key, None)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def test_ax_visible_but_not_actionable_is_typed_not_applied(self):
-        # Live red (rehearsal round 3, 2026-11-12): the Tk Send button is
-        # AX-VISIBLE but not AX-ACTIONABLE; peekaboo returns rc=1
-        # INTERNAL_SWIFT_ERROR "No accessibility element is available for
-        # action invocation" — nothing was invoked. The receipt said
-        # EFFECT_UNKNOWN (uncertain effect for a refusal that dispatched
-        # nothing); it must be a typed ELEMENT_NOT_ACTIONABLE NOT_APPLIED.
+    def test_ax_not_actionable_without_proof_is_effect_unknown(self):
+        # BCU R3 M4 (fail-first on 1ae3e29e6): the live capture
+        # (click_actiononly_no_ax_element.json) carries effect
+        # "unverifiable" and NO mutation_dispatched proof — "nothing was
+        # invoked" was an inference from the message TEXT. Without the
+        # structured no-dispatch proof the receipt must be EFFECT_UNKNOWN;
+        # ELEMENT_NOT_ACTIONABLE only earns NOT_APPLIED when peekaboo's
+        # structured result proves nothing ran (next test).
         os.environ.pop("FAKE_PEEKABOO_ACT_FAIL", None)
         os.environ["FAKE_PEEKABOO_NO_AX_ACTION"] = "1"
+        ctx = build_ctx(self.tmp)
+        acquire_lease(ctx)
+        result = mmos.handle_tool_call(ctx, {
+            "action": "slice_send", "window_id": 42, "element_ref": "btn1",
+            "owner": "agent-a", "lease_nonce": ctx.lease_nonce})
+        payload = json.loads(result["content"][0]["text"])
+        self.assertEqual(payload["status"], "EFFECT_UNKNOWN", payload)
+        self.assertIn("ELEMENT_NOT_ACTIONABLE", payload["cause"])
+
+    def test_ax_not_actionable_with_structured_proof_is_not_applied(self):
+        # BCU R3 M4, proof branch: the SAME refusal shape WITH peekaboo's
+        # structured no-dispatch proof (error.mutation_dispatched false +
+        # outcome) is the typed ELEMENT_NOT_ACTIONABLE NOT_APPLIED.
+        os.environ.pop("FAKE_PEEKABOO_ACT_FAIL", None)
+        os.environ["FAKE_PEEKABOO_NO_AX_ACTION_PROVEN"] = "1"
         ctx = build_ctx(self.tmp)
         acquire_lease(ctx)
         result = mmos.handle_tool_call(ctx, {

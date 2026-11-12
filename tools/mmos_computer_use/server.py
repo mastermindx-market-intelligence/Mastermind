@@ -208,10 +208,12 @@ PACED_SLICE_OPS = {"slice_paste", "slice_send"}
 # untouched) for EVERY act op, not just paste, and may be reported
 # NOT_APPLIED. Every code here is raised by THIS layer's own gates BEFORE a
 # dispatch, or typed from a structured peekaboo refusal that proves nothing
-# ran. FOREGROUND_REQUIRED is deliberately NOT here (R-M1): it is classified
-# from the error TEXT, so it only earns NOT_APPLIED when the structured
-# result proves nothing was dispatched — that path arrives with
-# dispatched=False and is handled by the receipt's typed list below.
+# ran. FOREGROUND_REQUIRED is deliberately NOT here (R-M1), and neither is
+# ELEMENT_NOT_ACTIONABLE (BCU R3 M4): both are classified from the error
+# TEXT/message, so the status comes ONLY from peekaboo's structured result —
+# a proven no-dispatch refusal arrives dispatched=False and falls through to
+# the handler's default NOT_APPLIED; an unproven one stays dispatched=True
+# and the H1 mapping below makes it EFFECT_UNKNOWN.
 ACT_CLEAN_PRE_DISPATCH_CODES = {
     "WINDOW_IDENTITY_UNKNOWN", "DENY_LISTED", "LEASE_NOT_HELD",
     "LEASE_NOT_OWNER", "LEASE_OWNER_REQUIRED", "LEASE_NONCE_INVALID",
@@ -224,9 +226,11 @@ ACT_CLEAN_PRE_DISPATCH_CODES = {
     "SLICE_TARGET_NOT_FOUND", "WINDOW_APP_MISMATCH",
     "DENY_OVERLAY", "DENY_OVERLAY_UNVERIFIED", "WINDOW_NOT_FRONTMOST",
     "WINDOW_GONE", "PASTE_GATE_UNVERIFIED",
-    # Proven pre-dispatch peekaboo refusals (typed from live captures —
-    # see _typed_preflight_refusal): nothing was invoked, so NOT_APPLIED.
-    "ELEMENT_NOT_ACTIONABLE", "SNAPSHOT_STALE",
+    # SNAPSHOT_STALE stays (typed from the live capture
+    # click_snapshot_stale_refused.json): _typed_preflight_refusal types it
+    # ONLY when peekaboo's own marker (effect "refused") proves the click
+    # never ran, and it always arrives dispatched=False.
+    "SNAPSHOT_STALE",
 }
 
 MAX_TREELINES = 400
@@ -1284,18 +1288,25 @@ def _refusal_proven_no_mutation(data):
 
 
 def _typed_preflight_refusal(data):
-    """Typed clean refusal for structured errors peekaboo raised BEFORE any
-    dispatch, proven by live captures (tests/fixtures/peekaboo/):
+    """Typed refusal for structured peekaboo errors this layer recognizes
+    from live captures (tests/fixtures/peekaboo/):
 
     - INTERNAL_SWIFT_ERROR "No accessibility element is available for
       action invocation" (click_actiononly_no_ax_element.json): the target
-      element is AX-VISIBLE but not AX-ACTIONABLE (Tk buttons); peekaboo
-      found nothing to invoke → nothing dispatched → ELEMENT_NOT_ACTIONABLE.
+      element is AX-VISIBLE but not AX-ACTIONABLE (Tk buttons) →
+      ELEMENT_NOT_ACTIONABLE. BCU R3 M4: that capture carries effect
+      "unverifiable" and NO mutation_dispatched proof — "nothing was
+      invoked" was an inference from the message TEXT. So `dispatched` is
+      read ONLY from peekaboo's structured result
+      (_refusal_proven_no_mutation): proven → dispatched=False → the
+      handler's default NOT_APPLIED; unproven → dispatched=True → the H1
+      mapping's EFFECT_UNKNOWN. The detail text claims nothing either way.
     - SNAPSHOT_STALE with effect "refused"
-      (click_snapshot_stale_refused.json): the click never ran.
+      (click_snapshot_stale_refused.json): peekaboo's explicit pre-dispatch
+      refusal marker proves the click never ran → dispatched=False.
 
-    Returns an OpError (dispatched=False) or None when the payload is not
-    one of these proven shapes."""
+    Returns an OpError (raised as-is by the caller) or None when the
+    payload is not one of these recognized shapes."""
     if not isinstance(data, dict):
         return None
     error = data.get("error")
@@ -1307,9 +1318,8 @@ def _typed_preflight_refusal(data):
             "no accessibility element is available" in message:
         refused = OpError(
             "ELEMENT_NOT_ACTIONABLE",
-            "target element is AX-visible but not AX-actionable; nothing "
-            "was invoked")
-        refused.dispatched = False
+            "target element is AX-visible but not AX-actionable")
+        refused.dispatched = not _refusal_proven_no_mutation(data)
         return refused
     if code == "SNAPSHOT_STALE" and data.get("effect") == "refused":
         refused = OpError("SNAPSHOT_STALE",
