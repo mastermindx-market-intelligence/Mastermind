@@ -172,6 +172,8 @@ _AMBIENT_IDENTITY_FIELDS = frozenset(
 BROKER_UNAVAILABLE_ERROR_CODE = "BrokerUnavailableError"
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+# WO-15: enrolled host identity roster (m2-studio, ubuntu0-4, m1-studio).
+_HOST_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _OHF_OPERATIONS = frozenset(
     {
@@ -4987,6 +4989,9 @@ class RemoteWorkerBrokerEndpoint:
     # Fixed by trusted endpoint construction, never a broker request selector.
     # Keep the legacy default without making native Claude use the Codex facade.
     adapter_id: str = "codex-cli"
+    # WO-15: the enrolled host identity this endpoint's worker runs on.
+    # ``None`` keeps the endpoint un-enrolled (no HostExecutor attaches).
+    host_id: str | None = None
 
     def __post_init__(self) -> None:
         if type(self.adapter_id) is not str or self.adapter_id not in (
@@ -5005,8 +5010,14 @@ class RemoteWorkerBrokerEndpoint:
             raise WorkerBrokerError("remote worker endpoint has invalid worker_gid")
         if not isinstance(self.secret_canary_verdict, Mapping):
             raise WorkerBrokerError("remote worker endpoint canary verdict must be a mapping")
+        host_id = self.host_id
+        if host_id is not None:
+            host_id = str(host_id).strip()
+            if not _HOST_ID_RE.fullmatch(host_id):
+                raise WorkerBrokerError("remote worker endpoint has invalid host_id")
         object.__setattr__(self, "worker_id", worker_id)
         object.__setattr__(self, "worker_user", worker_user)
+        object.__setattr__(self, "host_id", host_id or None)
         object.__setattr__(
             self,
             "secret_canary_verdict",
@@ -5147,6 +5158,12 @@ class RemoteWorkerBrokerFleet:
         worker_ids = tuple(row.worker_id for row in rows)
         if len(worker_ids) != len(set(worker_ids)):
             raise WorkerBrokerError("remote worker broker fleet has duplicate worker_id")
+        # WO-15: exactly ONE supervised executor per enrolled host.  Two
+        # endpoints on the same host identity would be two executors pulling
+        # claims for one machine -- refused at construction, not at runtime.
+        enrolled_hosts = tuple(row.host_id for row in rows if row.host_id is not None)
+        if len(enrolled_hosts) != len(set(enrolled_hosts)):
+            raise WorkerBrokerError("remote worker broker fleet has duplicate enrolled host_id")
         validation_resolver = validation_commands_for_spec or (lambda _spec: ())
         if adapter_factory is None:
             def adapter_factory(row: RemoteWorkerBrokerEndpoint) -> RemoteCodexWorkerAdapter:
@@ -5180,6 +5197,24 @@ class RemoteWorkerBrokerFleet:
     @property
     def worker_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._endpoints))
+
+    @property
+    def enrolled_host_ids(self) -> tuple[str, ...]:
+        """WO-15: hosts with exactly one enrolled executor endpoint each."""
+
+        return tuple(sorted(
+            row.host_id for row in self._endpoints.values() if row.host_id is not None
+        ))
+
+    def host_executor_endpoint(self, host_id: str) -> RemoteWorkerBrokerEndpoint:
+        """The fixed endpoint of the ONE executor enrolled for ``host_id``."""
+
+        if not isinstance(host_id, str) or not _HOST_ID_RE.fullmatch(host_id):
+            raise WorkerBrokerError("host executor lookup has invalid host_id")
+        for row in self._endpoints.values():
+            if row.host_id == host_id:
+                return row
+        raise BrokerStateError("host has no enrolled executor endpoint")
 
     def _endpoint_for_worker(self, worker_id: str) -> RemoteWorkerBrokerEndpoint:
         try:
@@ -5395,4 +5430,56 @@ __all__ = [
     "WorkerBrokerError",
     "activate_launchd_socket",
     "get_peer_credentials",
+    # WO-15 HostExecutor role + heartbeat pull (executive_host_executor)
+    "ClaimAssignment",
+    "HEARTBEAT_PULL_OPERATION",
+    "HEARTBEAT_OPERATION",
+    "HOST_READINESS_SNAPSHOT_SCHEMA",
+    "HOST_EXECUTOR_REQUEST_SCHEMA",
+    "HOST_EXECUTOR_RESPONSE_SCHEMA",
+    "HostExecutor",
+    "HostExecutorError",
+    "HostHeartbeatIntake",
+    "LeaseExpiryDisposition",
+    "PullOutcome",
+    "RELEASE_UNSTARTED_OPERATION",
+    "build_request",
+    "decode_frame",
+    "encode_frame",
+    "probe_host_readiness",
+    "validate_host_readiness_snapshot",
+    "validate_request",
+    "validate_response",
 ]
+
+# WO-15: the HostExecutor role extends this worker runtime.  The role body is
+# stdlib-only (control_plane.executive_host_executor) so it can run verbatim
+# on an enrolled remote host with a plain interpreter; the fleet re-exports it
+# here to keep executive_worker_broker the single attach surface.
+from control_plane.executive_host_executor import (  # noqa: E402  (deliberate tail import)
+    ClaimAssignment,
+    HEARTBEAT_OPERATION,
+    HEARTBEAT_PULL_OPERATION,
+    HOST_READINESS_SNAPSHOT_SCHEMA,
+    HOST_EXECUTOR_REQUEST_SCHEMA,
+    HOST_EXECUTOR_RESPONSE_SCHEMA,
+    HostExecutor,
+    HostExecutorError,
+    HostHeartbeatIntake,
+    LeaseExpiryDisposition,
+    PullOutcome,
+    RELEASE_UNSTARTED_OPERATION,
+    build_request as _hx_build_request,
+    decode_frame as _hx_decode_frame,
+    encode_frame as _hx_encode_frame,
+    probe_host_readiness,
+    validate_host_readiness_snapshot,
+    validate_request as _hx_validate_request,
+    validate_response as _hx_validate_response,
+)
+
+build_request = _hx_build_request
+decode_frame = _hx_decode_frame
+encode_frame = _hx_encode_frame
+validate_request = _hx_validate_request
+validate_response = _hx_validate_response

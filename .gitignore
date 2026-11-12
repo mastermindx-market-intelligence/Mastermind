@@ -104,3 +104,7 @@ research/evidence/ohf_p0/**
 
 # Pinned Rakazo qualification installs its exact contract deps locally.
 integrations/rakazo_qualification/node_modules/
+
+# Worker Browser Runtime dependencies are installed from the committed lockfiles.
+/integrations/worker_browser_runtime/node_modules/
+/integrations/worker_browser_runtime/app-control/node_modules/

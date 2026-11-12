@@ -215,6 +215,42 @@ def test_repository_package_validation_isolated_from_unrelated_source_root_churn
     assert (source_root / "unrelated-ci-output").is_file()
 
 
+def test_repository_package_validation_ignores_supplied_root_listing_churn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sibling CI shards may create and remove root-level entries mid-validation.
+
+    The supplied root's own listing and metadata carry no package-trust signal:
+    only the root's identity (replacement) and the .agents/plugins subtrees
+    below it are strict. Regresses merge-group run 43228085827, where sibling
+    pytest shards' tmpdir fixtures flipped the validator's exit code.
+    """
+    _copy_package(tmp_path)
+    original_stat = plugin_validator.os.stat
+    injected = False
+
+    def create_and_remove_sibling_entry(
+        name: object, *args: object, **kwargs: object
+    ) -> os.stat_result:
+        nonlocal injected
+        if (
+            not injected
+            and name == ".agents"
+            and kwargs.get("follow_symlinks") is False
+        ):
+            sibling = tmp_path / "sibling-shard-output"
+            sibling.mkdir()
+            sibling.rmdir()
+            injected = True
+        return original_stat(name, *args, **kwargs)
+
+    _preserve_capability_membership(monkeypatch, "stat", create_and_remove_sibling_entry)
+    result = _validate_repository_twice_without_exception(tmp_path)
+
+    assert injected is True
+    assert result["ok"] is True, result
+
+
 @pytest.mark.parametrize(
     "relative", (".agents", "plugins", "plugins/mastermind-sol/.codex-plugin/plugin.json")
 )
