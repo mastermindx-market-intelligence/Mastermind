@@ -1015,6 +1015,24 @@ class TestRepairRenudge:
         return TransportReceipt(outcome=TransportOutcome(outcome),
                                 reason_code="fixture", created_at="2026-11-11T12:00:00Z")
 
+    @pytest.mark.parametrize("marker", [
+        {"type": "nudge", "state": "ANSWERED"},
+        {"type": "nudge", "state": "ANSWERED", "at": "not-a-date"},
+    ])
+    def test_a_marker_without_a_usable_timestamp_refuses_typed(self, marker):
+        # GBL-5 micro 2: a counted marker with no "at" (or an unparseable
+        # one) raised a raw KeyError/ValueError out of maybe_renudge.  Over
+        # the socket door that became an untyped INTERNAL_ERROR and every
+        # later re-nudge for the ask repeated it forever.  The layer
+        # withholds and reports with a TYPED code instead.
+        store = FakeStore()
+        core = bridge(store, sender=FakeNudgeSender())
+        self._answered(store)
+        store.append_ask_event(ASK_ID, dict(marker))
+        with pytest.raises(GblBridgeError) as err:
+            core.maybe_renudge(ask_id=ASK_ID)
+        assert err.value.code == "NUDGE_MARKER_TIMESTAMP_INVALID"
+
     def test_definite_no_start_is_typed_no_nudge(self):
         store = FakeStore()
         sender = FakeNudgeSender()

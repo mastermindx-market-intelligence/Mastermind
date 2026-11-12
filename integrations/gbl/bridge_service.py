@@ -447,6 +447,24 @@ class GblBridge:
                 markers.append(event)
         return markers
 
+    @staticmethod
+    def _marker_time(event: Mapping[str, Any], ask_id: str) -> datetime:
+        """A counted marker's ``at`` as an aware datetime.
+
+        GBL-5 micro 2: a counted marker without a usable timestamp used to
+        escape as a raw ``KeyError``/``ValueError`` — an untyped
+        INTERNAL_ERROR over the socket door, repeated on every later
+        re-nudge for the ask.  It is now a TYPED refusal: the layer
+        withholds (nothing is sent) and reports exactly why."""
+        try:
+            return _parse_iso(event["at"])
+        except (KeyError, TypeError, ValueError):
+            raise GblBridgeError(
+                "NUDGE_MARKER_TIMESTAMP_INVALID",
+                f"ask {ask_id}: a counted nudge marker carries no usable "
+                f"'at'; cooldown and settlement cannot be derived — "
+                f"nothing is sent") from None
+
     def maybe_renudge(self, *, ask_id: str) -> dict[str, Any]:
         """One re-nudge per cooldown for an unconsumed answer, bounded by
         the contract budget (MAX_RENUDGES_PER_ASK).  M8: the attempt is
@@ -495,7 +513,7 @@ class GblBridge:
             event for event in events
             if event.get("type") == "nudge_settled"]
         if markers:
-            last = max(_parse_iso(event["at"]) for event in markers)
+            last = max(self._marker_time(event, ask_id) for event in markers)
             elapsed = (now - last).total_seconds()
             if elapsed < RENUDGE_COOLDOWN_SECONDS:
                 raise GblBridgeError(
@@ -568,6 +586,11 @@ class GblBridge:
                 settled_after_last_attempt = True
         if settled_after_last_attempt:
             raise GblBridgeError("NUDGE_ALREADY_SETTLED", ask_id)
+        # The settlement row reuses the attempt's timestamp; validate it
+        # BEFORE any transport call so a malformed attempt refuses typed
+        # instead of sending a wake whose settlement it could not record.
+        self._marker_time(attempts[-1], ask_id)
+        attempt_at = attempts[-1]["at"]
         if self._nudge_sender is None or self._resolve_handle is None:
             raise GblBridgeError("NUDGE_SENDER_UNAVAILABLE", ask_id)
         native_handle = self._resolve_handle(record["principal"])
@@ -579,7 +602,7 @@ class GblBridge:
         except WakePreSubmitError as exc:
             self._store.append_ask_event(ask_id, {
                 "type": "nudge_settled", "outcome": "NOT_DELIVERED",
-                "state": "ANSWERED", "at": attempts[-1]["at"]})
+                "state": "ANSWERED", "at": attempt_at})
             return {"status": "RECONCILED_NOT_DELIVERED", "ask_id": ask_id,
                     "reason_code": str(getattr(exc, "reason_code", ""))}
         except WakeDispatchError as exc:
@@ -590,14 +613,14 @@ class GblBridge:
         if outcome in (TransportOutcome.ACCEPTED, TransportOutcome.DELIVERED):
             self._store.append_ask_event(ask_id, {
                 "type": "nudge", "state": "ANSWERED",
-                "at": attempts[-1]["at"]})
+                "at": attempt_at})
             return {"status": "RECONCILED_DELIVERED", "ask_id": ask_id,
                     "nudge_count": len(nudges) + 1}
         if outcome in (TransportOutcome.TARGET_UNAVAILABLE,
                        TransportOutcome.FAILED):
             self._store.append_ask_event(ask_id, {
                 "type": "nudge_settled", "outcome": "NOT_DELIVERED",
-                "state": "ANSWERED", "at": attempts[-1]["at"]})
+                "state": "ANSWERED", "at": attempt_at})
             return {"status": "RECONCILED_NOT_DELIVERED", "ask_id": ask_id,
                     "reason_code": str(getattr(receipt, "reason_code", ""))}
         raise GblBridgeError("NUDGE_RECEIPT_INVALID",
