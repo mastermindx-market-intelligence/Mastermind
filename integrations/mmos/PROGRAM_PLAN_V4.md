@@ -1862,3 +1862,34 @@ running program has loaded). Storage reclaim tool: the independent reviewer fail
 a gateway error; repair round 1 runs on the principal's own eight points. Sector reported a
 browser tool defect (tab close refused; chat row menu not offered) — recorded as HARNESS 15
 for the browser lane.
+
+## 45. Amendment, 2026-11-12 11:45 UTC: Grok Bot link delivery fix merged; Paper branch merged; GLM is out
+
+**Grok Bot link.** Micro items 1, 2 and 4 are accepted and the branch is merged (code only;
+nothing is installed, the tunnel is not running). A result is now handed over from the host's
+own delivery record first: the record is written under the host lock before the board mark is
+posted, so a board listing that is behind cannot hand one answer out twice. A failed mark post
+returns a typed error and the next call reports the answer as already delivered.
+
+Two points remain before the bridge is installed (micro item 5, each with a failing test first):
+
+1. Both ledger lines (number minted, answer delivered) are synced to disk before the call
+   returns. A failed sync refuses and nothing is posted or handed over.
+2. Once the host's delivery record exists for a request, status reports it as delivered and no
+   reminder is sent, whatever the board listing shows.
+
+In parallel the bridge install list is staged and rehearsed against a copy (ruling 16). The
+install, the tunnel config, the tunnel start and the launch job stay the principal's acts.
+
+**Paper.** The corrections ("name every file by id", "say what you cannot see") are installed
+on all six hosts; the principal installed the M2 copy at 11:31 UTC. The lane's branch is
+merged. Sessions read the three design skills by path from the Mastermind bundle. Later list:
+the M1 bundle lacks the design-system skill, and no host lists the skills automatically.
+
+**Capacity.** GLM is out on the router. Five of its six keys are at their weekly limit until
+14 and 17 November. The sixth is cycling five-hour windows; its next reset is 12:31 UTC today.
+Until GLM returns, lane drivers run on DeepSeek Flash. Nobody retries into the exhausted
+quota. The storage lane's repair round never started (three refusals); it is re-issued to a
+DeepSeek worker with the same eight points.
+
+**Order for the teammates is unchanged** (section 44).
