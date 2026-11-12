@@ -578,3 +578,44 @@ listener left on 3191/54391. The default Paperclip (127.0.0.1:3100,
 `~/.paperclip`) was never contacted; no request went to
 3773/3774/3780/3100/3190/3796/3800; no Grok/xAI/Cursor/Slack/tunnel
 service was contacted.
+
+## Micro round (GBL-5 review r2, 2026-11-12)
+
+The independent r2 review of `eb5a5754a` → `cf93a832f` (HIGH 0, MED 3, LOW 7,
+ruling 19 met) left three MEDs on the delivery layer; its 7 LOWs wait on the
+later list (`~/.mastermind/mmos_evidence/gbl-20261111/LATER.md`). Each fix has
+a test that fails first at `cf93a832f` (red output in
+`~/.mastermind/mmos_evidence/gbl-20261111/gbl5/micro/`).
+
+- **MED-1: a marking only the store may set.** `_verified_event` stripped
+  only `tag`/`trusted`, so a foreign comment carrying
+  `"defect": "EVENT_SEQ_DUPLICATE"` survived the read and counted as a real
+  POST for the re-nudge budget, cooldown and settlement: three forged
+  comments drove an ask the writer does not own into
+  `RENUDGE_BUDGET_EXHAUSTED`. Every key only the store may set is now one
+  named constant, `STORE_ONLY_EVENT_KEYS` (`tag`, `trusted`, `defect`,
+  `comment_id`, `comment_author`, `comment_created_at`, `comment_order`),
+  removed from the parsed body BEFORE verification; the demotion stamp is
+  re-attached only by the chain law, after the tag verified. `seq` stays: it
+  is signed v1 content and is consulted only on a tag-verified event.
+- **MED-2: a counted marker needs a usable timestamp.** A counted marker
+  with no `at` (or an unparseable one) raised a raw `KeyError`/`ValueError`
+  out of `maybe_renudge` — an untyped `INTERNAL_ERROR` at the socket door,
+  repeated forever. It now refuses with the typed
+  `NUDGE_MARKER_TIMESTAMP_INVALID` and sends nothing; `reconcile_nudge`
+  validates the attempt's timestamp the same way before any transport call,
+  so it cannot send a wake whose settlement row is unwritable.
+- **MED-3: the delivery decision is under the host lock.** `fetch_result`
+  read, replayed and appended `CONSUMED` outside the append lock, so two
+  callers could each see `ANSWERED` and each be handed the answer as
+  `ANSWER_UNCONSUMED`. The client now exposes `result_delivery_lock()` — the
+  same flock on `append.lock`, same order (threading lock, then flock) and
+  re-entrant with `append_ask_event`, which reuses the thread's open handle
+  instead of deadlocking on a second flock — and `fetch_result` re-reads its
+  record inside it. The bridge uses it when the store offers it
+  (`GblResultDeliveryLockStore`) and keeps the plain read for test doubles.
+
+Install is unchanged: no new state file, no new configuration, no restart
+step beyond the ordinary bridge restart for the new code. Suites at this
+round: admission 23, ask_cli 44, bridge 72, mcp_server 28, message_send 27,
+nudge 12, paperclip_client 146 — 352 passed (348 before the four new tests).
