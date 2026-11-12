@@ -5,11 +5,15 @@ import dataclasses
 import pytest
 
 from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+from control_plane.executive_runtime import Runtime
 from tests.test_executive_coo_host import setup, mandate, MISSION_AUTHORITY_VERSION
 
 
 def prepared(tmp_path, monkeypatch):
     host, config, _, _ = setup(tmp_path)
+    # The real guard first checks for a live write scope on its own Runtime.
+    # With no active transaction it then reads the ordinary Mission fixture.
+    host.workspace.runtime = Runtime.at(tmp_path / "dialogue-runtime")
     row = config["missions"][0]
     row.update(authority_version=MISSION_AUTHORITY_VERSION,
                principal_actions=["bounded_intent", "governed_orchestration"])

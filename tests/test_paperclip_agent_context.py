@@ -15,6 +15,23 @@ def read(source=None, *, work_ref="WS:ORIGINAL-PROJECT", now=NOW):
     return company_context(snapshot() if source is None else source, work_ref=work_ref, now=now)
 
 
+def test_common_validator_preserves_integration_exports_and_error_identity():
+    from common import paperclip_contract as shared
+    from integrations.paperclip_control import agent_context, connections, contract
+
+    assert agent_context.validate_context is shared.validate_context
+    assert agent_context.unavailable_company is shared.unavailable_company
+    assert connections.KINDS is agent_context.KINDS is shared.KINDS
+    assert contract.identifier is agent_context.identifier is shared.identifier
+    assert contract.PaperclipError is agent_context.PaperclipError is shared.PaperclipError
+    value = read()
+    assert shared.validate_context(value, work_ref="WS:ORIGINAL-PROJECT") is value
+    value["companyId"] = "invalid-company"
+    with pytest.raises(contract.PaperclipError) as error:
+        shared.validate_context(value, work_ref="WS:ORIGINAL-PROJECT")
+    assert error.value.code == "INVALID_SELECTION" and error.value.status == 400
+
+
 def test_bounded_real_fields_preserve_three_owner_boundaries():
     value = read()
     assert value["state"] == "AVAILABLE" and value["newWorkAuthorized"] is False

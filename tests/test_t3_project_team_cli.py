@@ -112,6 +112,7 @@ def test_packaged_fresh_process_runs_without_source_checkout_or_dependencies(def
     assert archive_bytes(root)[0] == payload
     with zipfile.ZipFile(BytesIO(payload)) as archive:
         assert {"common/coo_project_help_contract.py", "common/project_task_contract.py",
+                "common/paperclip_contract.py",
                 "common/workspace_project_plan_contract.py",
                 "integrations/session_bridge/project_task_context.py"} <= set(archive.namelist())
         assert not any(name.startswith("control_plane/") for name in archive.namelist())
@@ -122,6 +123,19 @@ def test_packaged_fresh_process_runs_without_source_checkout_or_dependencies(def
     result = subprocess.run([sys.executable, "-I", str(app), "check", str(definition)],
                             cwd=tmp_path, capture_output=True, text=True, timeout=20, check=True)
     assert json.loads(result.stdout)["team_sha256"] == team_fixture().fingerprint
+
+    # Exercise the shared contract in the isolated archive as well as the CLI.
+    # Its integration producer is deliberately absent from this package.
+    program = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from common.paperclip_contract import unavailable_company, validate_context
+value = unavailable_company("company_not_composed")
+assert validate_context(value, work_ref="WS:ORIGINAL-PROJECT") is value
+assert "integrations.paperclip_control" not in sys.modules
+"""
+    subprocess.run([sys.executable, "-I", "-S", "-c", program, str(app)],
+                   cwd=tmp_path, capture_output=True, text=True, timeout=20, check=True)
 
 
 def test_exact_package_revision_is_verified_inside_public_builder_and_uses_captured_bytes(tmp_path, monkeypatch):

@@ -272,7 +272,7 @@ def validate_result(value, *, expected_context, capability_profile_digest,
         _refuse()
     if execution != (mission["qualification"] == EXECUTION_READ_QUALIFICATION):
         _refuse()
-    from integrations.paperclip_control.agent_context import validate_context
+    from common.paperclip_contract import validate_context
     validate_context(value["relationships"], work_ref=expected_context["work_ref"])
     routes = value["execution_routes"]
     _shape(routes, {"state", "reason_codes", "capacity", "scope", "task_placement", "new_execution_authorized"})

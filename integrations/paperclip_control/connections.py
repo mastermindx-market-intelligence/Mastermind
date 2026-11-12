@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import re
 
+from common.paperclip_contract import KINDS
 from .contract import PAGE_SIZE, PaperclipError, identifier
 
-KINDS = {"people": "agent", "projects": "project", "goals": "goal", "work": "issue"}
 RELATIONS = (
     ("people", "reportsTo", "reports_to", "agent"),
     ("projects", "goalId", "project_goal", "goal"),

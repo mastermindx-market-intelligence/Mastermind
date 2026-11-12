@@ -7,30 +7,17 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
+from common.paperclip_contract import DONOR_REVISION, UUID, PaperclipError, identifier
+
 SCHEMA = "mastermind.paperclip_workspace.v1"
 COMMAND_SCHEMA = "mastermind.paperclip_command.v1"
 CONFIG_SCHEMA = "mastermind.paperclip_binding.v1"
-DONOR_REVISION = "d69631b01b9c658f80bf8bed389863dce82643e1"
 MAX_RESPONSE_BYTES = 2_097_152
 MAX_REQUEST_BYTES = 32_768
 PAGE_SIZE = 50
-UUID = re.compile(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}", re.I)
 DIGEST = re.compile(r"[0-9a-f]{64}")
 VIEWS = frozenset({"overview", "people", "projects", "goals", "work", "routines", "artifacts", "activity", "task", "routine", "runtime", "receipt"})
 STATUSES = frozenset({"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"})
-
-
-class PaperclipError(Exception):
-    """Public codes only. Never put an upstream URL, token or body into errors."""
-    def __init__(self, code: str, *, effect: str = "NOT_APPLIED", status: int = 503):
-        super().__init__(code)
-        self.code, self.effect, self.status = code, effect, status
-
-
-def identifier(value: object) -> str:
-    if not isinstance(value, str) or UUID.fullmatch(value) is None:
-        raise PaperclipError("INVALID_SELECTION", status=400)
-    return value.lower()
 
 
 def canonical(value: object) -> str:

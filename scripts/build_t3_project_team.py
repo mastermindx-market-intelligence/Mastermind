@@ -14,6 +14,7 @@ import zipfile
 
 FILES = (
     "common/coo_project_help_contract.py",
+    "common/paperclip_contract.py",
     "common/project_task_contract.py",
     "common/workspace_project_plan_contract.py",
     "integrations/session_bridge/project_task_context.py",
