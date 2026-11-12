@@ -1756,7 +1756,7 @@ def handle_return(pc, t3, issue, ask_op, opts, me_id):
     asker's newest answer is the one delivered."""
     blocker_ids = set(recorded_blocker_ids(issue))
     family = []
-    for row in untruncated_children(pc, issue["id"]):
+    for row in untruncated_children(pc, issue["id"], me_id):
         # Attack finding 5: the ask marker is derivable from public issue
         # text, so marker shape alone never selects the child whose answer
         # enters this authenticated thread. With a recorded blocker set only
@@ -1996,7 +1996,7 @@ def handle_ask(pc, issue, reply, ask, op, opts):
     # teammate gets its own child instead of being swallowed by the earlier
     # one, which left the second teammate never woken.
     want_title = strip_markers(ask["title"]) or "Asked work"
-    for row in untruncated_children(pc, issue["id"]):
+    for row in untruncated_children(pc, issue["id"], me.get("id")):
         # A finished (done/cancelled) child is not work in flight: reusing
         # it re-blocked the parent on a DONE blocker — the return edge
         # re-delivered the old answer and the new ask never happened. Only
@@ -2012,7 +2012,8 @@ def handle_ask(pc, issue, reply, ask, op, opts):
             child = row
             break
     if child is None:
-        issued = [row for row in untruncated_children(pc, issue["id"])
+        issued = [row for row in untruncated_children(
+                    pc, issue["id"], me.get("id"))
                   if is_issued_ask_child(row, issue)]
         # Attack finding 15: the cap comes from config; a non-numeric value
         # keeps the default (never a mid-handle crash that costs the run its
@@ -2052,7 +2053,7 @@ def handle_ask(pc, issue, reply, ask, op, opts):
             # PARENT's content, so a sibling of a different ask matches it
             # too. Adopt only this ask's own child — same assignee, same
             # title the create would have written.
-            for row in untruncated_children(pc, issue["id"]):
+            for row in untruncated_children(pc, issue["id"], me.get("id")):
                 if (is_ask_child_of(row, issue)
                         and row.get("assigneeAgentId") == agent_id
                         and (row.get("title") or "") == want_title):
@@ -2092,7 +2093,7 @@ def handle_ask(pc, issue, reply, ask, op, opts):
     return True
 
 
-def untruncated_children(pc, issue_id):
+def untruncated_children(pc, issue_id, me_id=None):
     """The children walk, truncation-aware (proof 2, captured live
     2026-11-11): the children LIST projection hard-truncates a long
     description at 1200 chars (``descriptionTruncated: true``), and the ask
@@ -2103,10 +2104,18 @@ def untruncated_children(pc, issue_id):
     marker cannot be tested on a truncated row, so a FAILED full read fails
     the walk (CarrierError) — keeping the markerless list row made the
     family look empty and the run end 0 having delivered nothing, a silent
-    strand on every wake. The next wake retries the read."""
+    strand on every wake. The next wake retries the read. Delta-4 D4-3: the
+    re-read (and its raise) is scoped to rows that can be THIS carrier's —
+    the list row itself carries createdByAgentId, and a truncated row the
+    board attributes to another agent can never pass any caller's identity
+    filter, so it is skipped without the re-read and its failed read never
+    kills the wake. Mine and unattributed truncated rows still re-read."""
     rows = []
     for row in pc.children(issue_id):
         if row.get("descriptionTruncated") and row.get("id"):
+            row_owner = row.get("createdByAgentId")
+            if me_id is not None and row_owner and row_owner != me_id:
+                continue   # foreign: no marker test of ours can use it
             try:
                 rows.append(pc.issue(row["id"]))
             except CarrierError as exc:
@@ -2530,7 +2539,8 @@ def _run_carrier_locked(pc, t3_factory, opts, me, binding, thread_id):
         # every wake. A family child is one THIS carrier created
         # (createdByAgentId, served on list and full rows alike); author
         # identity decides, not text.
-        ask_children = [row for row in untruncated_children(pc, issue["id"])
+        ask_children = [row for row in untruncated_children(
+                            pc, issue["id"], me.get("id"))
                         if row.get("createdByAgentId") == me.get("id")
                         and is_ask_child_of(row, issue)]
         # Attack findings 5 and 9 (attack round): the marker is derivable

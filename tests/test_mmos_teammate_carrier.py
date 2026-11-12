@@ -1177,6 +1177,40 @@ def test_a_failed_full_read_of_a_truncated_child_fails_loudly():
     assert t3.sends == []          # nothing delivered, nothing invented
 
 
+def test_a_foreign_truncated_childs_failed_read_never_kills_the_wake():
+    # Delta-4 D4-3: N5's raise is scoped to children that can be THIS
+    # carrier's. A truncated list row the server attributes to another agent
+    # (createdByAgentId != me, served on the list row) can never pass the
+    # identity filter of the family walk, the gate or the reuse scan, so its
+    # full re-read is wasted — and a FAILED one killed the whole wake: the
+    # own done child's answer never reached the asker. A foreign truncated
+    # row is skipped without the re-read; mine and unattributed truncated
+    # rows still re-read with the N5 raise.
+    import copy as _copy
+    issues, ask_op, own = blocked_parent_with_done_child()  # ch-1, done, mine
+    foreign = _copy.deepcopy(board.CHILDREN_DEV[2])         # truncated in list
+    foreign.update(id="ch-9", identifier="MMO-99", parentId="is-1",
+                   assigneeAgentId="ag-vega", status="done",
+                   createdByAgentId="ag-anyone")            # NOT this carrier
+    assert foreign.get("descriptionTruncated") is True
+    issues["is-1"]["blockedBy"] = board.blocked_by(own)     # only the own child
+    pc = FakePaperclip(issues=issues)   # no full row for ch-9 served
+
+    def failing_full_read(issue_id):
+        if issue_id == "ch-9":
+            raise wc.CarrierError("GET /api/issues/ch-9 -> HTTP 503 (fake)")
+        return FakePaperclip.issue(pc, issue_id)
+
+    pc.issue = failing_full_read
+    pc.child_rows["is-1"] = [foreign, own]
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    t3 = FakeT3(replies=["FINAL: the file has 12 lines"])
+    assert run_with_roster(pc, t3, {}) == 0   # the foreign row never stopped it
+    assert len(t3.sends) == 1 and f"[{ask_op}-ret]" in t3.sends[0]
+    assert "12 lines" in t3.sends[0] and "MMO-99" not in t3.sends[0]
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
 def test_a_done_child_with_no_recorded_relation_is_left_for_a_person():
     # Delta-3 N9 wording of the old law: the board records a blocker
     # relation for every parent this carrier asked on (block_issue writes
