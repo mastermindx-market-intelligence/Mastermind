@@ -2266,6 +2266,196 @@ class TestSpecLoading:
             PaperclipAskClient.from_spec(path)
 
 
+# ── P0-2 option (a): the production-board opt-in ─────────────────────────────
+# Principal ruling 2026-11-12 14:13Z (narrow): validate_paperclip_base_url
+# grows a keyword-only production_board=False; the default law is UNCHANGED
+# (3100 and 3179 refuse); True admits EXACTLY port 3100 and nothing else —
+# 3179 is never admitted by anything.  Only PaperclipAskClient.from_spec may
+# pass True, and only for the ONE canonical production spec: realpath ==
+# <home>/.mastermind/gbl/spec.json with home from the PASSWORD DATABASE for
+# the current uid (never $HOME), a regular non-symlink file owned by the
+# current uid, mode exactly 0600.  The field anywhere else — any other path,
+# mode, owner, or a non-true value — is the typed refusal
+# PRODUCTION_BOARD_NOT_ALLOWED_HERE; it never silently falls back.
+# create_service_agent and every other direct caller keep refusing 3100.
+
+
+def _prod_spec(base_url="http://127.0.0.1:3100", *, flag=True,
+               key="/tmp/gpb-unused-k.key"):
+    block = {"base_url": base_url, "company_id": COMPANY_ID,
+             "agent_id": AGENT_ID, "hmac_key_path": key}
+    if flag is not None:
+        block["production_board"] = flag
+    return {"paperclip": block}
+
+
+class TestProductionBoardOptIn:
+    def _place_canonical(self, tmp_path, monkeypatch, spec, *, mode=0o600):
+        """Write the spec at <injected-home>/.mastermind/gbl/spec.json and
+        point the module's home lookup at that temp root (test injection of
+        the pwd lookup ONLY — never an env var the server reads)."""
+        home = tmp_path / "home"
+        spec_dir = home / ".mastermind" / "gbl"
+        spec_dir.mkdir(parents=True)
+        spec_path = spec_dir / "spec.json"
+        spec_path.write_text(json.dumps(spec))
+        spec_path.chmod(mode)
+        monkeypatch.setattr(pc, "_current_home", lambda: str(home))
+        return spec_path
+
+    # -- the URL law itself ---------------------------------------------------
+
+    def test_default_still_refuses_3100_and_3179(self):
+        for port in (3100, 3179):
+            with pytest.raises(ValueError):
+                pc.validate_paperclip_base_url(f"http://127.0.0.1:{port}",
+                                               production_board=False)
+
+    def test_opt_in_admits_exactly_3100(self):
+        assert pc.validate_paperclip_base_url(
+            "http://127.0.0.1:3100", production_board=True
+        ) == "http://127.0.0.1:3100"
+        # every OTHER rule of the law still holds under the opt-in
+        with pytest.raises(ValueError):
+            pc.validate_paperclip_base_url("http://example.invalid:3100",
+                                           production_board=True)
+        with pytest.raises(ValueError):
+            pc.validate_paperclip_base_url("https://127.0.0.1:3100",
+                                           production_board=True)
+
+    def test_opt_in_never_admits_3179(self):
+        with pytest.raises(ValueError):
+            pc.validate_paperclip_base_url("http://127.0.0.1:3179",
+                                           production_board=True)
+
+    def test_opt_in_flag_must_be_a_real_bool(self):
+        for truthy in ("true", 1, [3100]):
+            with pytest.raises(ValueError):
+                pc.validate_paperclip_base_url("http://127.0.0.1:3100",
+                                               production_board=truthy)
+
+    # -- the from_spec gate ---------------------------------------------------
+
+    def test_from_spec_admits_3100_at_the_canonical_spec(self, tmp_path,
+                                                         monkeypatch):
+        spec_path = self._place_canonical(
+            tmp_path, monkeypatch, _prod_spec(key=str(tmp_path / "k.key")))
+        ask_client = pc.PaperclipAskClient.from_spec(spec_path)
+        # construction only — NO request was made to 3100 (nothing to make
+        # one to: the fixture board does not exist here)
+        assert ask_client._port == 3100
+
+    def test_from_spec_opt_in_still_refuses_3179(self, tmp_path, monkeypatch):
+        spec_path = self._place_canonical(
+            tmp_path, monkeypatch,
+            _prod_spec("http://127.0.0.1:3179", key=str(tmp_path / "k.key")))
+        with pytest.raises(ValueError):
+            pc.PaperclipAskClient.from_spec(spec_path)
+
+    def test_field_at_another_path_is_a_typed_refusal(self, tmp_path,
+                                                      monkeypatch):
+        # a perfect 0600 uid-owned regular file — just NOT the canonical path
+        spec_path = tmp_path / "spec.json"
+        spec_path.write_text(json.dumps(_prod_spec()))
+        spec_path.chmod(0o600)
+        monkeypatch.setattr(pc, "_current_home",
+                            lambda: str(tmp_path / "home"))
+        with pytest.raises(GblPaperclipError) as err:
+            pc.PaperclipAskClient.from_spec(spec_path)
+        assert err.value.code == "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+
+    def test_wrong_mode_is_a_typed_refusal(self, tmp_path, monkeypatch):
+        spec_path = self._place_canonical(tmp_path, monkeypatch, _prod_spec(),
+                                          mode=0o644)
+        with pytest.raises(GblPaperclipError) as err:
+            pc.PaperclipAskClient.from_spec(spec_path)
+        assert err.value.code == "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+
+    def test_symlink_is_a_typed_refusal(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        spec_dir = home / ".mastermind" / "gbl"
+        spec_dir.mkdir(parents=True)
+        real = tmp_path / "real-spec.json"
+        real.write_text(json.dumps(_prod_spec()))
+        real.chmod(0o600)
+        (spec_dir / "spec.json").symlink_to(real)
+        monkeypatch.setattr(pc, "_current_home", lambda: str(home))
+        with pytest.raises(GblPaperclipError) as err:
+            pc.PaperclipAskClient.from_spec(spec_dir / "spec.json")
+        assert err.value.code == "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+
+    def test_wrong_owner_is_a_typed_refusal(self, tmp_path, monkeypatch):
+        spec_path = self._place_canonical(tmp_path, monkeypatch, _prod_spec())
+        monkeypatch.setattr(pc, "_current_uid", lambda: os.getuid() + 1)
+        with pytest.raises(GblPaperclipError) as err:
+            pc.PaperclipAskClient.from_spec(spec_path)
+        assert err.value.code == "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+
+    def test_non_true_flag_value_is_a_typed_refusal(self, tmp_path,
+                                                    monkeypatch):
+        spec_path = self._place_canonical(tmp_path, monkeypatch,
+                                          _prod_spec(flag="true"))
+        with pytest.raises(GblPaperclipError) as err:
+            pc.PaperclipAskClient.from_spec(spec_path)
+        assert err.value.code == "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+
+    def test_env_home_never_opts_in(self, tmp_path, monkeypatch):
+        # $HOME is NOT the home lookup: a spec under an env-var home is just
+        # "another path" — typed refusal, no fallback, no admission.
+        envhome = tmp_path / "envhome"
+        spec_dir = envhome / ".mastermind" / "gbl"
+        spec_dir.mkdir(parents=True)
+        spec_path = spec_dir / "spec.json"
+        spec_path.write_text(json.dumps(_prod_spec()))
+        spec_path.chmod(0o600)
+        monkeypatch.setenv("HOME", str(envhome))
+        with pytest.raises(GblPaperclipError) as err:
+            pc.PaperclipAskClient.from_spec(spec_path)
+        assert err.value.code == "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+
+    def test_no_flag_keeps_the_default_law_at_the_canonical_path(
+            self, tmp_path, monkeypatch):
+        spec_path = self._place_canonical(
+            tmp_path, monkeypatch, _prod_spec(flag=None,
+                                              key=str(tmp_path / "k.key")))
+        with pytest.raises(ValueError):
+            pc.PaperclipAskClient.from_spec(spec_path)
+
+    # -- other callers keep refusing ------------------------------------------
+
+    def test_create_service_agent_still_refuses_3100(self):
+        # the principal creates the production agent BY HAND (install step 4)
+        with pytest.raises(ValueError):
+            pc.create_service_agent("http://127.0.0.1:3100", COMPANY_ID,
+                                    name="Grok Bridge")
+
+    def test_direct_construction_still_refuses_3100(self):
+        with pytest.raises(ValueError):
+            pc.PaperclipAskClient("http://127.0.0.1:3100", COMPANY_ID,
+                                  AGENT_ID)
+
+    # -- no spec in the repo opts in ------------------------------------------
+
+    def test_no_repo_spec_carries_the_field(self):
+        specs_root = (Path(__file__).resolve().parents[1]
+                      / "tools" / "gbl" / "specs")
+        assert specs_root.is_dir(), f"{specs_root} missing"
+        found = sorted(specs_root.rglob("*.json"))
+        assert found, "no spec files scanned"
+        for spec_file in found:
+            stack = [json.loads(spec_file.read_text(encoding="utf-8"))]
+            while stack:
+                node = stack.pop()
+                if isinstance(node, dict):
+                    assert pc.PRODUCTION_BOARD_FIELD not in node, (
+                        f"{spec_file} carries {pc.PRODUCTION_BOARD_FIELD} — "
+                        "only the principal adds it, when placing the real "
+                        "spec at ~/.mastermind/gbl/spec.json")
+                    stack.extend(node.values())
+                elif isinstance(node, list):
+                    stack.extend(node)
+
+
 class TestDurableLedgerLines:
     """GBL-5 micro 5a (principal, 11:45Z): a ledger line is ON DISK before
     the writer that produced it returns.

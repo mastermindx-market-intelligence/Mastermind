@@ -290,19 +290,29 @@ class BridgeClient:
         except HostFrameError:
             raise GblEdgeError("FRAME_TOO_LARGE",
                                "bridge request exceeds the frame cap") from None
-        with socket_module.socket(socket_module.AF_UNIX,
-                                  socket_module.SOCK_STREAM) as connection:
-            connection.settimeout(BRIDGE_TIMEOUT_SECONDS)
-            connection.connect(str(self._path))
-            connection.sendall(frame)
-            buffer = b""
-            while not buffer.endswith(b"\n"):
-                chunk = connection.recv(4096)
-                if not chunk:
-                    break
-                buffer += chunk
-                if len(buffer) > MAX_BRIDGE_RESPONSE_BYTES:
-                    raise GblEdgeError("BRIDGE_RESPONSE_TOO_LARGE")
+        try:
+            with socket_module.socket(socket_module.AF_UNIX,
+                                      socket_module.SOCK_STREAM) as connection:
+                connection.settimeout(BRIDGE_TIMEOUT_SECONDS)
+                connection.connect(str(self._path))
+                connection.sendall(frame)
+                buffer = b""
+                while not buffer.endswith(b"\n"):
+                    chunk = connection.recv(4096)
+                    if not chunk:
+                        break
+                    buffer += chunk
+                    if len(buffer) > MAX_BRIDGE_RESPONSE_BYTES:
+                        raise GblEdgeError("BRIDGE_RESPONSE_TOO_LARGE")
+        except OSError as exc:
+            # LATER.md (principal 13:27Z): the door refuses BEFORE it reads
+            # and closes, so a send/recv can race a closed socket
+            # (EPIPE/ECONNRESET); connect itself can refuse (ENOENT/EACCES);
+            # socket.timeout is an OSError too.  Every one surfaces as a
+            # typed edge error — never a raw OSError escaping the edge.  The
+            # detail carries only the bounded exception class name.
+            raise GblEdgeError("BRIDGE_UNREACHABLE",
+                               type(exc).__name__) from None
         try:
             response = decode_gbl_frame(buffer)
         except HostFrameError:

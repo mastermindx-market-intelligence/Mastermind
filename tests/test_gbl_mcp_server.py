@@ -49,6 +49,7 @@ from integrations.gbl.mcp_server import (
     TOOL_SCHEMA_DIGEST,
     TOOL_SPECS,
     BridgeClient,
+    GblEdgeError,
     create_gbl_mcp_app,
     tool_schema_digest,
     tool_schema_snapshot,
@@ -659,6 +660,60 @@ class TestRealBridgeSocket(unittest.IsolatedAsyncioTestCase):
             token=self.harness.token()))
         assert result["result"]["status"] == "ANSWER_UNCONSUMED"
         assert result["result"]["answer"] == "The bot's harmless fixture answer."
+
+
+# ── Door transport failures surface typed (LATER.md, principal 13:27Z) ──────
+
+
+class TestBridgeClientTransportErrors(unittest.TestCase):
+    """The door refuses BEFORE it reads and may close mid-exchange, so a
+    send/recv can meet a closed or missing socket.  Every such OSError must
+    surface as the typed BRIDGE_UNREACHABLE — never a raw OSError escaping
+    the edge."""
+
+    def test_missing_socket_is_typed_bridge_unreachable(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            client = BridgeClient(Path(tmp) / "no-such.sock")
+            with self.assertRaises(GblEdgeError) as ctx:
+                client.call("status", {"principal": "probe",
+                                       "ask_id": "gb-fixture-1"})
+            self.assertEqual(ctx.exception.code, "BRIDGE_UNREACHABLE")
+            self.assertEqual(ctx.exception.detail, "FileNotFoundError")
+
+    def test_silent_door_times_out_typed(self):
+        # A door that accepts and then never replies raises socket.timeout
+        # (an OSError) on recv — it must surface typed too.  Deterministic
+        # stand-in for the close-races (EPIPE/ECONNRESET), whose outcome
+        # depends on kernel timing and would make THIS test the flaky one.
+        import tempfile
+        from integrations.gbl import mcp_server
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "gbl.sock")
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            server.bind(path)
+            server.listen(1)
+            held = []
+
+            def _accept_and_hold():
+                connection, _ = server.accept()
+                held.append(connection)      # never reply, never close
+
+            threading.Thread(target=_accept_and_hold, daemon=True).start()
+            original = mcp_server.BRIDGE_TIMEOUT_SECONDS
+            mcp_server.BRIDGE_TIMEOUT_SECONDS = 0.2
+            try:
+                client = BridgeClient(path)
+                with self.assertRaises(GblEdgeError) as ctx:
+                    client.call("status", {"principal": "probe",
+                                           "ask_id": "gb-fixture-2"})
+                self.assertEqual(ctx.exception.code, "BRIDGE_UNREACHABLE")
+                self.assertEqual(ctx.exception.detail, "TimeoutError")
+            finally:
+                mcp_server.BRIDGE_TIMEOUT_SECONDS = original
+                for connection in held:
+                    connection.close()
+                server.close()
 
 
 # ── One real HTTP listener on 127.0.0.1, ephemeral, stopped in the test ─────
