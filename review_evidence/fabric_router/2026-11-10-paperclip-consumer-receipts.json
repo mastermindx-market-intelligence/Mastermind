@@ -1,0 +1,53 @@
+{
+  "schema": "mastermind.fabric.router.source_qualification/v1",
+  "candidate_parent": "894b0cff9ed31f2e6ef2bb57742d3b30f2bb462b",
+  "protected_parent": "fd9f414bf63b3a2e059d192ce580c5754aababcd",
+  "boundary": "source qualification; protected acceptance and installed consumer proof are not claimed",
+  "completed": "2026-11-10T07:45:12.030370+00:00",
+  "python": "3.14.7",
+  "dependency_owner": "existing installed fabric-router virtualenv",
+  "pytest_owner": "existing pure-Python pytest packages from native user Python3.12; plugin autoload disabled; no package installation",
+  "tests": {
+    "passed": 295,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 1,
+    "warning": "Existing Starlette httpx TestClient deprecation"
+  },
+  "files": {
+    "ops/native_fabric/unified_router/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "ops/native_fabric/unified_router/codex_oauth.py": "af3f6a219aaaee1c6df1baa7355b2ab5aed1a01855149cc767957be128c091cb",
+    "ops/native_fabric/unified_router/gateway.py": "2a9dd516ef1b8fa675957c5b600d1312d7adce7621bc4754b5a2a3e8c44f315b",
+    "ops/native_fabric/unified_router/routes.py": "bb6150b51e850a684f5e3f9d67528af7dba35531935398b8d742b6086371a38c",
+    "ops/native_fabric/unified_router/service.py": "a934cbc2ea03408efbb613d5e41881bedea60a3180f35c16bc813a65b9fe6071",
+    "ops/native_fabric/unified_router/streaming.py": "f64514c69bea5ad3954f0c9e2c0f0f5cc907ea523488f97e8124937710224aea",
+    "ops/native_fabric/unified_router/test_codex_route.py": "508939237089f1cf420a4ec2a415433e8216acba12e29ab4bec1a9a12a15bb55",
+    "ops/native_fabric/unified_router/wire.py": "1b137aa6ddc5895b4ed8023f09b7edfe126134cc0de5ce7d7cdd8e87fce30e0f",
+    "tests/test_unified_fabric_router.py": "d73a05487d0b786390c6c0160855e54e0b5fed0ed99aa17a70570eb2b42436fc",
+    "tests/test_unified_router_error_privacy.py": "33ba01bde7260a9e00d04cca19c07848b45682ce9dfd4ae63fe18483b44719e1",
+    "tests/test_unified_router_resilience.py": "a210727706e56f5e9d2baf2f37435288c9c78f49010d301111b26f74448ef732"
+  },
+  "native_artifact": "paperclip-hermes-installed-composition-xlnk184e/router-terminal-receipt-894b0c",
+  "log_sha256": "f3575f1759fd9040edfcbbe0c53bd95b782ac409e93174d87f0d53b6589d4e99",
+  "junit_sha256": "d42b662e3d41b22e20f58f3daf5b83a9b6734b2c6538b62b39df83e59a9bf745",
+  "source_files_changed": 6,
+  "whitespace_findings": 0,
+  "runtime_changed": false,
+  "live_provider_calls": false,
+  "preserved": {
+    "source_carrier": "PR2367 / fabric-router-codex-oauth-dsh",
+    "strict_argument_parsers": 5,
+    "original_auto_merge_disarmed": "2026-11-10T07:15:08Z"
+  },
+  "scope": [
+    "Terminal request correlation through existing lifecycle/logger",
+    "Completed text MCP history on existing translation paths",
+    "Merge protected base preserving both exact registry entries"
+  ],
+  "remaining": [
+    "Required exact-head CI/protected acceptance",
+    "Current installed-source and controller custody",
+    "Effective shared ingress hold and terminal drain",
+    "Actual Hermes/Paperclip/T3/DSH consumer proof"
+  ]
+}
