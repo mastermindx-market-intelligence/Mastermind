@@ -355,6 +355,25 @@ Check after every step; every step has a rollback.
      correct for its pin.
    Rollback: steps 4 → 3 → 2 in reverse order.
 
+## Rollback window
+
+Per step: what is actually live once the step is done, how to undo exactly
+that step, and until when that undo is the right one (MED-2: a bare pin
+rollback with no procedure strands every profile reloaded at step 3 — after
+the reload those extensions present the NEW digest, and the OLD host is
+single-digest-strict, so the truthful rollback names the reverse reload and
+the order). Roll back in reverse step order; the OLD release directory and
+the old loaded `0.5.0` folders are never modified by any step, so the bytes
+every undo needs always exist.
+
+| Step | What is live | How to undo | Until when |
+| --- | --- | --- | --- |
+| 1 | Nothing runtime-side: only the curated `BUILD-*.json` in the checkout; the OLD release, OLD pin and all loaded folders are untouched. | Delete the curated `BUILD-*.json`; `git checkout` the work tree back. No installed state exists yet. | Until step 2 consumes the manifest; after step 2, undo step 2 first. |
+| 2 | New release root under `BASE`; every profile's `NativeMessagingHosts` manifest points into `releases/$NEW`, so any host respawn runs new-code (it admits the OLD digest); loaded extension folders are byte-identical; running sessions and old hosts are unchanged. | Restore every `.previous.<16hex>` backup the installer left under `BASE` and under `~/Library/Application Support/Google/Chrome/NativeMessagingHosts` (including `deployments-v2.json`'s own `.previous`), then delete the new-only files: `releases/$NEW/`, `installation-$NEW.json`, `packages/$NEW/`, `STAGING/`. | Only while no profile has been reloaded at step 3. After any step-3 reload, undo step 3 first (reverse reload): restoring the OLD host manifests under a profile running the NEW extension makes the OLD single-digest host refuse its handshake. |
+| 3 | Per reloaded profile: NEW extension bytes plus a new-code host; the profile answers old-pin and new-pin sessions alike (compat admission). Not-yet-reloaded profiles are fully old. Every session keeps working throughout. | The reverse reload: in `chrome://extensions` remove the extension and Load unpacked from its untouched `~/Downloads/Mastermind-Browser-0.5.0/Chrome-<alias>` folder — those bytes were never changed by any step, so they are the working state. | Valid at any later point (the NEW host admits the OLD digest, and after a step-4 rollback the OLD host matches the old extension again); in a full rollback do it after undoing step 4 so the fleet stays uniform. |
+| 4 | New spawns resolve `current` → `runtimes/$NEW` (new commit, `read` present); providers' `.claude.json` args point at `current/server.js`; every running session keeps its already-resolved OLD files and answers unchanged. | The same atomic repoint back: `runtime_pin switch --mmx-root $MMX --commit $OLD`. To undo the whole migration instead, restore the four `.claude.json` backups and LEAVE `runtimes/` and `current` in place — deleting them breaks servers spawned via `current/server.js`, which re-verify their folder's `runtime.json` on every dispatch. | Until step 5 verifies and the fleet has run the release; once the NEXT release replaces the compat-admission window (it admits only one previous digest), `$OLD` is no longer a rollback target and the reverse reload of step 3 must target that release's OLD folders instead. |
+| 5 | Everything: all five profiles reloaded, all new spawns on the NEW pin, old sessions draining on their resolved OLD files. | Nothing to undo — step 5 is read-only verification. On a failed check, roll back 4 → 3 → 2 in reverse order as above. | End of the install sitting; afterwards the window table above is history and the next release owns rollback. |
+
 ## The window table (every cell works; `read` appears only where both ends describe it)
 
 "Old-pin session" = any session whose server resolved `current` (or the direct
