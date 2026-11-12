@@ -101,3 +101,15 @@ then escalates the disagreement.
     passed every check in its step list and still could not reach a browser profile, and the
     pin change refused browser calls in all running sessions for three minutes until it was
     rolled back (`br-install-20261112/RESULT.md`).
+17. **Two sides that cannot switch together must overlap for one release (2026-11-12).** When
+    a release changes what two parts say to each other at connection time, and the two parts
+    cannot be switched in the same instant (a person's action, a process that restarts on its
+    own, sessions that keep their old copy), the newer part also accepts the one previous
+    release, named exactly, and holds such a connection to the old abilities. The step list
+    carries a table of every moment between steps, for an old session and a new session, and
+    every cell reads "works" apart from the new ability being absent. The step that a person
+    performs comes before the step that makes new sessions depend on it. The change to the
+    acceptance check is a critical surface: independent review, and the principal reads the
+    diff. Reason: the second browser bridge release fixed the pin switch but left three
+    windows in which operators' sessions would fail, two of them unstated
+    (`br-20261111/release2/mcp_bridge_install.md`).
