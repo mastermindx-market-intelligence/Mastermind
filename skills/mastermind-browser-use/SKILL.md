@@ -88,3 +88,85 @@ Distinguish offline host, closed browser, unconnected extension, missing site pe
 Extension-owned **Load unpacked**, page-controls/site-access and browser/OS permission ceremonies must use their legitimate owner. Report only the exact missing step after exhausting useful independent work. A stale installed environment note is not a live fleet census.
 
 Clean up only tabs/artifacts this task created, and only after the outcome is verified. Leave pre-existing tabs, other agents' work and the user's browser session intact.
+
+## ChatGPT web sessions: the MastermindX Project
+
+Research sessions belong **inside** the ChatGPT Project displayed as **"MastermindX"**
+(folder icon), not in the plain account, so the project's instructions are included
+automatically. A project conversation URL looks like
+`https://chatgpt.com/g/g-p-<projectId>-mastermindx/c/<conversationId>`.
+
+Observed in a live `chatgpt4` sidebar (2026-11-11): `MastermindX` appears as a **pinned
+project row** with `Project actions for MastermindX` and `New chat in MastermindX`, and a
+`Chats in MastermindX` list beneath it. The collapsible **"Projects"** section can
+simultaneously read **"No projects"** — that section is not the source of truth for a
+pinned project. Do not click to expand a collapsed sidebar to look for the project; if the
+row is not in the snapshot, record "not visible in snapshot".
+
+The project page has two tabs, **Chat** and **Work**; research uses **Chat**. The composer
+placeholder reads **"New chat in MastermindX"** — identical wording to the sidebar button of
+that name, so do not confuse the two. (Tab layout and placeholder come from the Chairman's
+launch-screen description; the pinned-row placement above is observed.)
+
+## Pro mode is the Thinking-effort control, not a model
+
+Pro is **not** a model-picker entry. It is the **"Thinking effort" dropdown inside the
+composer**: a slider whose far-right position the Chairman described as **"Pro"**. In the one readable
+live snapshot the label `Pro` appeared in the "Latest response" bar; the composer control
+itself was not captured because the element list truncated at 120.
+
+Setting it, from the tool schema only (verify live, then re-snapshot):
+
+- `interact` with `kind:"drag"` and `target_ref` (or `x`/`y`) — direct slider action.
+- `interact` with `kind:"click"` on the slider ref, then `press` with `key:"ArrowRight"` —
+  keyboard alternative.
+- `select` applies only to a `<select>` element; a slider is not one, so `select` does not
+  set it.
+
+Confirm by position/value, not by a badge alone.
+
+## Text entry: one operation, never per-character
+
+A long research prompt must enter the composer in **one** paste/insert operation. Typing it
+per character invites autocomplete, partial sends and rate-limit damage.
+
+The documented path is `fill` with the fresh snapshot's `ref` (see "Perform one grounded
+action" above). What the schema offers:
+
+| Path | Status |
+|---|---|
+| `fill` | top-level action; the documented ordinary-form input |
+| `interact` `kind:"fill"` | `{ref,kind:...,text?,...}` |
+| `interact` `kind:"type"` | `{ref,kind:...,text?,...}`; conventionally per-character — **treat as unverified** |
+| `press` | with `key`; could send Cmd+V **but** no clipboard-write action exists, so paste cannot be composed from the schema |
+| `evaluate` | `{expression,frame_id?,world:isolated|page,await_promise?}`; can set a value but is not a paste and may not update composer state |
+
+There is **no** `paste`, `insertText` or clipboard-write action, and the schema does not
+state which of `fill` / `type` is atomic. Before relying on a long prompt, prove on a
+throwaway target that `fill` inserts the whole string in one operation and leaves a coherent
+composer; if it does not, stop and report — do not fall back to per-character `type`.
+
+## Reasoning mode for manual handoffs
+
+Manual handoff turns default to `NON_PRO_DEFAULT`. Use the [routing procedure](../../docs/sol_skills/WORKER_AVENUE_ROUTING.md#11-chat-web-reasoning-mode-barrier-for-every-manual-handoff-turn) for the eligible substantive task classes, justifications and stop condition. Routine handoffs, status updates and mechanical work stay on the default. Short substantive work can qualify. For automated routing, the 1–1440 minute estimate is a planning input. Attended turns follow the attended mode procedure.
+
+## Returning the result to GitHub
+
+[Browser worker admission](../../docs/browser_worker_admission.md) describes a candidate for Slice A. Production activation and a verified GitHub return still need their own evidence. The [capacity operating playbook](../../research/CHATGPT_PRO_CAPACITY_OPERATING_PLAYBOOK_2026-09-05.md) records research.
+
+A previous conversation displayed an assistant's report of GitHub and Subagent Fabric use. Check which actions the current session exposes and what repository permissions it has before relying on either connector.
+
+Record the conversation URL on the assigned carrier. If submission is the last observed event, report `PROMPT_SUBMITTED_UNKNOWN_RETURN`. Claim delivery to GitHub only after reading the expected result back from the assigned repository, PR or issue.
+
+## Known read defect (observed 2026-11-11)
+
+`status` and `tabs` succeed on all four ChatGPT profiles, but `snapshot` returned
+`{"status":"BROWSER_UNAVAILABLE","data":{"reason":"BROWSER_UNAVAILABLE"}}` on `chatgpt1`,
+`chatgpt2` and `chatgpt3` while succeeding on `chatgpt4`. The extension is connected for all
+four. Report this as an open read defect; do not paper over it by relaunching the profile,
+re-enrolling, or switching to another carrier.
+
+Also note: passing `options` or `accessibility` on the same call as `snapshot`, or omitting
+`url_fingerprint`, returns `{"state":"REFUSED","reason":"INVALID_ARGUMENTS"}` and never
+reaches a page. Treat `INVALID_ARGUMENTS` as a client-shape error to fix, not a permission
+denial.

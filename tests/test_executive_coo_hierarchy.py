@@ -459,3 +459,201 @@ def test_finite_halt_root_aggregation_replay_keeps_original_root(tmp_path,monkey
     monkeypatch.setattr(cycle,'_finite_incumbent_allowed',lambda *args:(True,None))
     result=cycle._finite_halt_outcome(root.job_id,object(),HIERARCHY_POLICY_SHA256)
     assert result.action=='DISPATCHED' and seen==[(root.job_id,command)]
+
+
+# ---------------------------------------------------------------------------
+# WO-13: the child-request admission lane's bounded ready queue (pure law)
+# ---------------------------------------------------------------------------
+
+
+def _request(key="child-0001", *, root="ROOT-A", parent="RUN-P", complexity="C2_COMPLEX_BOUNDED",
+             task_kind="research", brief_digest="a" * 64):
+    from control_plane.child_execution_contracts import ChildExecutionRequest
+
+    return ChildExecutionRequest(
+        root_ref=root, immediate_parent_run_ref=parent, logical_child_key=key,
+        task_kind=task_kind, requested_complexity=complexity,
+        brief_digest=brief_digest,
+    )
+
+
+def test_child_request_queue_defaults_are_512_fleet_and_32_per_root():
+    from control_plane.child_request_admission import ReadyQueuePolicy
+
+    policy = ReadyQueuePolicy()
+    assert policy.fleet_limit == 512
+    assert policy.root_limit == 32
+    # The defaults stay configurable through the documented environment.
+    override = ReadyQueuePolicy.from_env({
+        "MMOS_CHILD_FLEET_READY_LIMIT": "7",
+        "MMOS_CHILD_ROOT_READY_LIMIT": "3",
+    })
+    assert (override.fleet_limit, override.root_limit) == (7, 3)
+    assert ReadyQueuePolicy.from_env({}).fleet_limit == 512
+    with pytest.raises(ValueError):
+        ReadyQueuePolicy(fleet_limit=0)
+    with pytest.raises(ValueError):
+        ReadyQueuePolicy(root_limit=0)
+    with pytest.raises(ValueError):
+        ReadyQueuePolicy.from_env({"MMOS_CHILD_ROOT_READY_LIMIT": "many"})
+
+
+def test_child_request_queue_wait_reason_is_precise_per_bound():
+    from control_plane.executive_coo_hierarchy import child_request_queue_wait
+    from control_plane.child_request_admission import ReadyQueuePolicy
+
+    policy = ReadyQueuePolicy()
+    # Root cap reached (default 32): the precise wait reason names the root.
+    wait = child_request_queue_wait(32, 40, policy=policy, root_ref="ROOT-A")
+    assert wait["reason"] == "CHILD_QUEUE_ROOT_READY_FULL"
+    assert wait == {
+        "reason": "CHILD_QUEUE_ROOT_READY_FULL", "root_ref": "ROOT-A",
+        "root_ready": 32, "root_limit": 32, "fleet_ready": 40, "fleet_limit": 512,
+    }
+    # Root below cap but fleet at cap: fleet backpressure.
+    wait = child_request_queue_wait(3, 512, policy=policy, root_ref="ROOT-A")
+    assert wait["reason"] == "CHILD_QUEUE_FLEET_READY_FULL"
+    assert wait["fleet_ready"] == 512 and wait["fleet_limit"] == 512
+    assert wait["root_ready"] == 3 and wait["root_limit"] == 32
+    # Configurable bounds move the trigger exactly.
+    smaller = ReadyQueuePolicy(fleet_limit=2, root_limit=1)
+    assert child_request_queue_wait(
+        1, 1, policy=smaller, root_ref="R")["reason"] == "CHILD_QUEUE_ROOT_READY_FULL"
+    assert child_request_queue_wait(
+        0, 2, policy=smaller, root_ref="R")["reason"] == "CHILD_QUEUE_FLEET_READY_FULL"
+    assert child_request_queue_wait(0, 1, policy=smaller, root_ref="R") is None
+
+
+def test_child_request_decide_admission_replay_conflict_wait_order():
+    from control_plane.child_request_admission import (
+        ChildRequestAdmissionConflict, ReadyQueuePolicy, decide_admission,
+    )
+
+    request = _request()
+    digest = request.request_digest
+    policy = ReadyQueuePolicy()
+    # Fresh admission with room.
+    outcome = decide_admission(
+        request, existing=None, root_ready=0, fleet_ready=0, policy=policy)
+    assert outcome.state == "ADMITTED" and outcome.job_id is None
+    # Duplicate-key replay with the same digest returns the same Job handle.
+    replay = decide_admission(
+        request, existing=("JOB-1", digest), root_ready=32, fleet_ready=512,
+        policy=policy)
+    assert replay.state == "REPLAY" and replay.job_id == "JOB-1"
+    assert replay.wait_reason is None
+    # The same key with a different digest is a conflict, never a new Job —
+    # even when the queue has room.
+    with pytest.raises(ChildRequestAdmissionConflict, match="CHILD_REQUEST_DIGEST_CONFLICT"):
+        decide_admission(
+            request, existing=("JOB-1", "f" * 64), root_ready=0, fleet_ready=0,
+            policy=policy)
+    # Queue-full is precise backpressure with no Job handle.
+    root_full = decide_admission(
+        _request(key="other"), existing=None, root_ready=32, fleet_ready=40,
+        policy=policy)
+    assert root_full.state == "WAIT"
+    assert root_full.wait_reason == "CHILD_QUEUE_ROOT_READY_FULL"
+    assert root_full.job_id is None
+    assert root_full.wait_detail["root_ready"] == 32
+    fleet_full = decide_admission(
+        _request(key="other"), existing=None, root_ready=3, fleet_ready=512,
+        policy=policy)
+    assert fleet_full.wait_reason == "CHILD_QUEUE_FLEET_READY_FULL"
+    assert fleet_full.wait_detail["fleet_limit"] == 512
+
+
+def test_child_request_queue_orders_by_priority_aging_and_root_fairness():
+    from control_plane.child_request_admission import (
+        ReadyQueueEntry, ReadyQueuePolicy, select_next_ready,
+    )
+
+    policy = ReadyQueuePolicy(
+        aging_interval_seconds=1800, aging_priority_step=1, aging_priority_cap=3)
+    now = 10_000_000_000  # ms
+    hour = 3_600_000
+    entries = [
+        # root A floods the queue with low-priority work
+        ReadyQueueEntry("A-low-1", "ROOT-A", 0, now - 4 * hour),
+        ReadyQueueEntry("A-low-2", "ROOT-A", 0, now - hour),
+        ReadyQueueEntry("A-low-3", "ROOT-A", 0, now),
+        # root B has one higher-priority child
+        ReadyQueueEntry("B-high", "ROOT-B", 2, now - hour),
+    ]
+    ordered, skipped = select_next_ready(entries, now_ms=now, policy=policy)
+    assert skipped == ()
+    # B's higher effective priority leads; root fairness then interleaves
+    # A's entries behind it instead of serving the whole A flood in a row.
+    assert [item.job_id for item in ordered] == ["B-high", "A-low-1", "A-low-2", "A-low-3"]
+    # Aging is capped: 4 hours at one step per 30 minutes would be +8,
+    # the cap holds it at +3; this is bounded additive aging.
+    a_low_1 = ordered[1]
+    assert a_low_1.priority == 0
+    # Skip-ineligible: a future entry never blocks the queue behind it.
+    future = ReadyQueueEntry("C-future", "ROOT-C", 4, now + hour)
+    ordered, skipped = select_next_ready(
+        [*entries, future], now_ms=now, policy=policy)
+    assert [item.job_id for item in skipped] == ["C-future"]
+    assert ordered[0].job_id == "B-high"
+    # The optional eligibility predicate is another skip-ineligible source.
+    ordered, skipped = select_next_ready(
+        entries, now_ms=now, policy=policy,
+        eligible=lambda item: item.root_ref != "ROOT-B")
+    assert [item.job_id for item in skipped] == ["B-high"]
+    assert ordered[0].job_id == "A-low-1"
+    # Root fairness off: pure priority order, deterministic by age then id.
+    flat, _ = select_next_ready(
+        entries, now_ms=now, policy=ReadyQueuePolicy(root_fairness=False))
+    assert [item.job_id for item in flat][:2] == ["B-high", "A-low-1"]
+
+
+def test_child_request_command_id_preserves_tuple_boundaries():
+    from control_plane.child_request_admission import admission_command_id
+
+    first = _request("K", root="R", parent="P\x1fX")
+    second = _request("X\x1fK", root="R", parent="P")
+    assert first.idempotency_key() != second.idempotency_key()
+    assert admission_command_id(first) != admission_command_id(second)
+    assert admission_command_id(first) == admission_command_id(
+        _request("K", root="R", parent="P\x1fX"))
+
+
+def test_child_request_snapshot_fairness_interleaves_tied_roots():
+    from control_plane.child_request_admission import (
+        ReadyQueueEntry, ReadyQueuePolicy, select_next_ready,
+    )
+
+    entries = [ReadyQueueEntry(name, name[0], 2, 0)
+               for name in ("A1", "A2", "A3", "B1", "B2")]
+    entries += [ReadyQueueEntry("C-future", "C", 4, 200),
+                ReadyQueueEntry("D-ineligible", "D", 4, 0)]
+    ordered, skipped = select_next_ready(
+        entries, now_ms=100, eligible=lambda entry: entry.root_ref != "D")
+    assert [entry.job_id for entry in ordered] == ["A1", "B1", "A2", "B2", "A3"]
+    assert [entry.job_id for entry in skipped] == ["C-future", "D-ineligible"]
+    flat, _ = select_next_ready(
+        entries, now_ms=100, policy=ReadyQueuePolicy(root_fairness=False),
+        eligible=lambda entry: entry.root_ref != "D")
+    assert [entry.job_id for entry in flat] == ["A1", "A2", "A3", "B1", "B2"]
+
+
+def test_child_request_aging_is_a_capped_additive_priority_boost():
+    from control_plane.child_request_admission import ReadyQueueEntry, select_next_ready
+
+    now = 20_000_000
+    ordered, skipped = select_next_ready([
+        ReadyQueueEntry("old", "A", 0, 0),
+        ReadyQueueEntry("bounded", "B", 2, now),
+        ReadyQueueEntry("frontier", "C", 4, now),
+    ], now_ms=now)
+    assert [entry.job_id for entry in ordered] == ["frontier", "old", "bounded"]
+    assert skipped == ()
+
+
+def test_child_request_ordinary_command_spelling_is_unchanged():
+    from hashlib import sha256
+    from control_plane.child_request_admission import admission_command_id
+
+    request = _request("K", root="R", parent="P")
+    original = "child-request:" + sha256(b"R\x1fP\x1fK").hexdigest()
+    assert admission_command_id(request) == original

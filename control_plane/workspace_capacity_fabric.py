@@ -231,7 +231,7 @@ def project_capacity_fabric(preview, *, binding, account_views=None, consumer_vi
     if preview.get("registry_revision") != binding["registry_revision"]:
         raise CapacitySourceError("SOURCE_CHANGED")
     asof, expiry = _stamp(preview.get("as_of")), _stamp(preview.get("expires_at"))
-    if asof is None or expiry is None or not 0 < expiry - asof <= 900 or asof > now:
+    if asof is None or expiry is None or not 0 < expiry - asof <= wire.MAX_PREVIEW_LIFETIME_SECONDS or asof > now:
         raise CapacitySourceError()
     if now >= expiry:
         raise CapacitySourceError("SOURCE_EXPIRED")
@@ -274,7 +274,7 @@ def project_capacity_fabric(preview, *, binding, account_views=None, consumer_vi
         evidence = consumer_views.get(name)
         if type(evidence) is dict:
             stamp, until = _stamp(evidence.get("observed_at")), _stamp(evidence.get("expires_at"))
-            if (stamp is not None and until is not None and stamp <= now < until and 0 < until - stamp <= 900
+            if (stamp is not None and until is not None and stamp <= now < until and 0 < until - stamp <= wire.MAX_CONSUMER_RECEIPT_SECONDS
                     and binding["consumer_revision"] is not None
                     and evidence.get("source_revision") == binding["consumer_revision"]
                     and evidence.get("runtime_state") in wire.RUNTIME_STATES - {"NOT_OBSERVED"}

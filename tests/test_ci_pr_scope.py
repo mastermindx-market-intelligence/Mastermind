@@ -194,14 +194,17 @@ def test_merge_group_inert_docs_uses_fast_on_exact_integrated_head(tmp_path):
     assert result.source_head == pr["pull_request"]["head"]["sha"]
 
 
-def test_merge_group_ordinary_code_requires_source_proximate_smoke(tmp_path):
+def test_merge_group_ordinary_code_requires_the_full_suite(tmp_path):
     root, pr = setup(tmp_path, "app/mastermind_os/src/components/Widget.tsx",
                      b"export const x = 1;\n", b"export const x = 2;\n")
     event, protected = merge_event(root, pr)
     from scripts.ci_pr_scope import classify_merge_group
+    assert classify(root, pr, expected_repository=REPO).mode == "smoke"
     result = classify_merge_group(root, event, expected_repository=REPO,
                                   protected_base_sha=protected)
-    assert result.mode == "smoke" and result.needs_node is True
+    assert result.mode == "full" and result.tier == "STANDARD"
+    assert result.reason == "MERGE_GROUP_STANDARD_REQUIRES_FULL"
+    assert result.needs_node is True
 
 
 @pytest.mark.parametrize("path", [
@@ -319,49 +322,142 @@ def ordinary_module_group(tmp_path, count, *, owners=False, oversized=False):
     return root, pr, event, protected
 
 
-@pytest.mark.parametrize("count,expected", [(3, "smoke"), (4, "full")])
-def test_merge_group_complete_module_budget_preserves_pr_fast_feedback(tmp_path, count, expected):
+# A STANDARD merge group is full whatever its smoke selection would have
+# been: inside the former module budget (3), over it (4), with ownership
+# tests, or with an unselectable mapped module. The PR event keeps smoke.
+@pytest.mark.parametrize("count", [3, 4])
+def test_merge_group_complete_module_budget_preserves_pr_fast_feedback(tmp_path, count):
     from scripts.ci_pr_scope import classify_merge_group
     root, pr, event, protected = ordinary_module_group(tmp_path, count)
     assert classify(root, pr, expected_repository=REPO).mode == "smoke"
     result = classify_merge_group(root, event, expected_repository=REPO,
                                   protected_base_sha=protected)
-    assert result.mode == expected and result.tier == "STANDARD"
+    assert result.mode == "full" and result.tier == "STANDARD"
     assert result.source_base == protected and result.source_head == pr["pull_request"]["head"]["sha"]
     assert result.file_count == count + 1
-    assert result.reason == ("SMOKE_SELECTION_EXCEEDS_BUDGET" if count == 4 else "SOURCE_VERIFIED")
+    assert result.reason == "MERGE_GROUP_STANDARD_REQUIRES_FULL"
 
 
-@pytest.mark.parametrize("count,expected", [(0, "smoke"), (1, "full")])
-def test_merge_group_ownership_tests_cannot_hide_an_ordinary_module(tmp_path, count, expected):
+@pytest.mark.parametrize("count", [0, 1])
+def test_merge_group_ownership_tests_cannot_hide_an_ordinary_module(tmp_path, count):
     from scripts.ci_pr_scope import classify_merge_group
-    root, _, event, protected = ordinary_module_group(tmp_path, count, owners=True)
+    root, pr, event, protected = ordinary_module_group(tmp_path, count, owners=True)
+    assert classify(root, pr, expected_repository=REPO).mode == "smoke"
     result = classify_merge_group(root, event, expected_repository=REPO,
                                   protected_base_sha=protected)
-    assert result.mode == expected and result.tier == "STANDARD"
-    if count:
-        assert result.reason == "SMOKE_SELECTION_EXCEEDS_BUDGET"
+    assert result.mode == "full" and result.tier == "STANDARD"
+    assert result.reason == "MERGE_GROUP_STANDARD_REQUIRES_FULL"
 
 
 def test_merge_group_oversized_mapped_module_escalates_instead_of_disappearing(tmp_path):
     from scripts.ci_pr_scope import classify_merge_group
-    root, _, event, protected = ordinary_module_group(tmp_path, 0, oversized=True)
+    root, pr, event, protected = ordinary_module_group(tmp_path, 0, oversized=True)
+    assert classify(root, pr, expected_repository=REPO).mode == "smoke"
     result = classify_merge_group(root, event, expected_repository=REPO,
                                   protected_base_sha=protected)
     assert result.mode == "full" and result.tier == "STANDARD"
-    assert result.reason == "SMOKE_APPLICABLE_TEST_UNAVAILABLE"
+    assert result.reason == "MERGE_GROUP_STANDARD_REQUIRES_FULL"
+
+
+@pytest.mark.parametrize("module", [
+    "integrations/quota_feed.py", "ops/quota_feed.py",
+])
+def test_standard_only_merge_group_cannot_certify_on_smoke(tmp_path, module):
+    """2026-11-10 incident shape: a PR ejected from a failed full group
+    re-entered in a STANDARD-only group, certified on smoke and merged
+    without re-running the tests that had just failed. Those tests (a
+    cross-repository pin, a package-membership count) are ones no path
+    selection maps, so the same diff must be full in the queue and smoke
+    only as a pull request.
+    """
+    root, pr = setup(tmp_path, module, b"value = 1\n", b"value = 2\n")
+    same_stem = root / "tests" / "test_quota_feed.py"
+    same_stem.parent.mkdir()
+    same_stem.write_text("def test_quota_feed(): assert True\n")
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "same-stem test")
+    pr["pull_request"]["head"]["sha"] = git(root, "rev-parse", "HEAD")
+    as_pr = classify(root, pr, expected_repository=REPO)
+    assert (as_pr.mode, as_pr.tier, as_pr.reason) == ("smoke", "STANDARD", "SOURCE_VERIFIED")
+    event, protected = merge_event(root, pr)
+    payload = tmp_path / "merge-group.json"
+    payload.write_text(json.dumps(event))
+    queued = select_scope(root, payload, expected_repository=REPO,
+                          event_type="merge_group", protected_base_sha=protected)
+    assert (queued.mode, queued.tier) == ("full", "STANDARD")
+    assert queued.reason == "MERGE_GROUP_STANDARD_REQUIRES_FULL"
+    assert queued.file_count == as_pr.file_count == 2
+    assert queued.source_head == pr["pull_request"]["head"]["sha"]
+
+
+@pytest.mark.parametrize("change", ["delete", "rename", "executable"])
+def test_fail_closed_merge_group_reports_no_node_need_for_a_web_app_change(
+    tmp_path, change,
+):
+    """Why the full-mode typecheck cannot be conditioned on ``needs_node``.
+
+    Every fail-closed decision is full/HOLD with the default
+    ``needs_node=False``, and deletes, renames and mode changes under
+    ``app/mastermind_os`` are exactly such decisions. The qualification job
+    therefore typechecks unconditionally (tests/test_ci_qualification_lane.py).
+    """
+    root, pr = setup(tmp_path, "app/mastermind_os/src/components/Widget.tsx",
+                     b"export const x = 1;\n", b"export const x = 2;\n")
+    widget = root / "app/mastermind_os/src/components/Widget.tsx"
+    if change == "delete":
+        git(root, "rm", "-q", "app/mastermind_os/src/components/Widget.tsx")
+    elif change == "rename":
+        git(root, "mv", "app/mastermind_os/src/components/Widget.tsx",
+            "app/mastermind_os/src/components/Renamed.tsx")
+    else:
+        widget.chmod(0o755)
+        git(root, "add", ".")
+    git(root, "commit", "-qm", "web application change the classifier refuses")
+    pr["pull_request"]["head"]["sha"] = git(root, "rev-parse", "HEAD")
+    event, protected = merge_event(root, pr)
+    payload = tmp_path / "merge-group.json"
+    payload.write_text(json.dumps(event))
+    scope = select_scope(root, payload, expected_repository=REPO,
+                         event_type="merge_group", protected_base_sha=protected)
+    assert (scope.mode, scope.tier) == ("full", "HOLD")
+    assert scope.needs_node is False
+
+
+def _run_scope_step(tmp_path, root, protected, head):
+    import yaml
+    source = Path(__file__).resolve().parents[1]
+    event = {"repository": {"full_name": REPO}, "pull_request": {
+        "number": 42, "base": {"sha": protected, "repo": {"full_name": REPO}},
+        "head": {"sha": head, "repo": {"full_name": REPO}},
+    }}
+    payload, output = tmp_path / "event.json", tmp_path / "output"
+    payload.write_text(json.dumps(event))
+    workflow = yaml.safe_load((source / ".github/workflows/ci.yml").read_text())
+    (scope_step,) = (
+        step for step in workflow["jobs"]["pr_scope"]["steps"]
+        if step.get("id") == "scope"
+    )
+    result = subprocess.run(["bash", "-c", scope_step["run"]], cwd=root, env={
+        **os.environ, "RUNNER_TEMP": str(tmp_path), "PR_BASE_SHA": protected,
+        "GITHUB_EVENT_NAME": "pull_request", "GITHUB_WORKSPACE": str(root),
+        "GITHUB_EVENT_PATH": str(payload), "GITHUB_REPOSITORY": REPO,
+        "GITHUB_OUTPUT": str(output),
+    }, capture_output=True, text=True, timeout=15)
+    return result, output
 
 
 def test_workflow_uses_complete_protected_archive_despite_candidate_package_poison(tmp_path):
-    import yaml
     source = Path(__file__).resolve().parents[1]
     root = tmp_path / "repository"
     root.mkdir()
     git(root, "init", "-q")
     git(root, "config", "user.email", "example@example.test")
     git(root, "config", "user.name", "Test")
-    paths = ("scripts/__init__.py", "scripts/ci_pr_scope.py", "scripts/ci_pr_smoke.py",
+    # The current classifier's whole import closure: the smoke selector is
+    # not part of it, so it is neither required in the base nor extracted.
+    paths = ("scripts/__init__.py", "scripts/ci_pr_scope.py",
              "control_plane/__init__.py", "control_plane/github_review_risk_policy.py")
+    assert "ci_pr_smoke" not in (source / "scripts/ci_pr_scope.py").read_text()
     for name in paths:
         dest = root / name
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -374,26 +470,101 @@ def test_workflow_uses_complete_protected_archive_despite_candidate_package_pois
     git(root, "add", ".")
     git(root, "commit", "-qm", "poison candidate packages")
     head = git(root, "rev-parse", "HEAD")
-    event = {"repository": {"full_name": REPO}, "pull_request": {
-        "number": 42, "base": {"sha": protected, "repo": {"full_name": REPO}},
-        "head": {"sha": head, "repo": {"full_name": REPO}},
-    }}
-    payload, output = tmp_path / "event.json", tmp_path / "output"
-    payload.write_text(json.dumps(event))
-    workflow = yaml.safe_load((source / ".github/workflows/ci.yml").read_text())
-    (scope_step,) = (
-        step for step in workflow["jobs"]["pr_scope"]["steps"]
-        if step.get("id") == "scope"
-    )
-    command = scope_step["run"]
-    result = subprocess.run(["bash", "-c", command], cwd=root, env={
-        **os.environ, "RUNNER_TEMP": str(tmp_path), "PR_BASE_SHA": protected,
-        "GITHUB_EVENT_NAME": "pull_request", "GITHUB_WORKSPACE": str(root),
-        "GITHUB_EVENT_PATH": str(payload), "GITHUB_REPOSITORY": REPO,
-        "GITHUB_OUTPUT": str(output),
-    }, capture_output=True, text=True, timeout=15)
+    result, output = _run_scope_step(tmp_path, root, protected, head)
     assert result.returncode == 0, result.stderr
     assert "mode=full" in output.read_text().splitlines()
     assert "CANDIDATE_PACKAGE_EXECUTED" not in result.stdout + result.stderr
+    trusted = tmp_path / "ci-trusted-base"
     for name in paths:
-        assert (tmp_path / "ci-trusted-base" / name).read_bytes() == (source / name).read_bytes()
+        assert (trusted / name).read_bytes() == (source / name).read_bytes()
+    extracted = sorted(
+        str(path.relative_to(trusted)) for path in trusted.rglob("*")
+        if path.is_file() and "__pycache__" not in path.parts
+    )
+    assert extracted == sorted(paths)
+    assert not (trusted / "scripts/ci_pr_smoke.py").exists()
+
+
+def test_workflow_gives_a_legacy_protected_classifier_its_protected_smoke_selector(tmp_path):
+    """A PR whose recorded base predates #2439 keeps classifying.
+
+    ``pull_request.base.sha`` is the base recorded for the PR, not the
+    current protected tip, while the workflow text comes from the current
+    merge ref. Protected classifiers between #2380 and #2439 import the smoke
+    selector, so the new workflow must still hand such a classifier its own
+    protected-base copy -- never the candidate's.
+    """
+    root = tmp_path / "repository"
+    root.mkdir()
+    git(root, "init", "-q")
+    git(root, "config", "user.email", "example@example.test")
+    git(root, "config", "user.name", "Test")
+    legacy_smoke = "MARKER = 'PROTECTED_BASE_SMOKE_SELECTOR'\n"
+    files = {
+        "scripts/__init__.py": "",
+        "control_plane/__init__.py": "",
+        "control_plane/github_review_risk_policy.py": "",
+        "scripts/ci_pr_smoke.py": legacy_smoke,
+        "scripts/ci_pr_scope.py": (
+            "import argparse\n"
+            "from scripts.ci_pr_smoke import MARKER\n"
+            "parser = argparse.ArgumentParser()\n"
+            "for flag in ('--repo', '--event', '--repository', '--output'):\n"
+            "    parser.add_argument(flag)\n"
+            "args = parser.parse_args()\n"
+            "with open(args.output, 'a') as handle:\n"
+            "    handle.write('mode=full\\ntier=CRITICAL\\nneeds_node=false\\n')\n"
+            "print(MARKER)\n"
+        ),
+    }
+    for name, text in files.items():
+        dest = root / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text)
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "protected legacy qualifier closure")
+    protected = git(root, "rev-parse", "HEAD")
+    (root / "scripts/ci_pr_smoke.py").write_text(
+        "raise RuntimeError('CANDIDATE_PACKAGE_EXECUTED')\n")
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "poison candidate smoke selector")
+    head = git(root, "rev-parse", "HEAD")
+    result, output = _run_scope_step(tmp_path, root, protected, head)
+    assert result.returncode == 0, result.stderr
+    assert "PROTECTED_BASE_SMOKE_SELECTOR" in result.stdout
+    assert "CANDIDATE_PACKAGE_EXECUTED" not in result.stdout + result.stderr
+    assert output.read_text().splitlines() == [
+        "mode=full", "tier=CRITICAL", "needs_node=false",
+    ]
+    trusted = tmp_path / "ci-trusted-base"
+    assert (trusted / "scripts/ci_pr_smoke.py").read_text() == legacy_smoke
+
+
+def test_workflow_fails_closed_when_a_legacy_classifier_lacks_its_smoke_selector(tmp_path):
+    root = tmp_path / "repository"
+    root.mkdir()
+    git(root, "init", "-q")
+    git(root, "config", "user.email", "example@example.test")
+    git(root, "config", "user.name", "Test")
+    files = {
+        "scripts/__init__.py": "",
+        "control_plane/__init__.py": "",
+        "control_plane/github_review_risk_policy.py": "",
+        "scripts/ci_pr_scope.py": "from scripts.ci_pr_smoke import MARKER\n",
+    }
+    for name, text in files.items():
+        dest = root / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text)
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "protected base without the selector")
+    protected = git(root, "rev-parse", "HEAD")
+    (root / "scripts/ci_pr_smoke.py").write_text("MARKER = 'CANDIDATE_ONLY'\n")
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "candidate supplies the selector")
+    head = git(root, "rev-parse", "HEAD")
+    result, output = _run_scope_step(tmp_path, root, protected, head)
+    # No scope output at all: the required fan-in refuses a failed pr_scope.
+    assert result.returncode != 0
+    assert "CANDIDATE_ONLY" not in result.stdout + result.stderr
+    assert not output.exists() or "mode=" not in output.read_text()

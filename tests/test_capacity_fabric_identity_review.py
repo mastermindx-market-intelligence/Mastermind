@@ -1,17 +1,17 @@
-"""Exact Capacity freshness tokens; no generic duration or identity exemption."""
+"""Capacity freshness uses accepted contract constants, not identity exemptions."""
+import ast
 from pathlib import Path
-import hashlib
 
 import pytest
 
+from common import workspace_capacity_fabric_contract as wire
 from tests.executive_fabric_release_identity_review import REVIEWED_FILES
 from tests.executive_identity_review import reviewed_literal_spans
 from tests.test_ceo_submit_armed_composition import _d8_frozen_source_diff, _scan_added_identity_diff
 
 PATH = "control_plane/workspace_capacity_fabric.py"
 SOURCE = (Path(__file__).resolve().parents[1] / PATH).read_text()
-SITES = ((234, 66, 69, "int", "900"), (277, 106, 109, "int", "900"))
-DIGEST = "f48347aa98d894368e7e175263427c55f79c066cb3c7dfd7f32ea4253db53892"
+REFERENCES = ("wire.MAX_PREVIEW_LIFETIME_SECONDS", "wire.MAX_CONSUMER_RECEIPT_SECONDS")
 
 
 def scan(source, path=PATH):
@@ -19,32 +19,42 @@ def scan(source, path=PATH):
                                     source_postimages={path: source})
 
 
-def test_only_exact_capacity_freshness_tokens_are_reviewed():
-    assert hashlib.sha256(SOURCE.encode()).hexdigest() == DIGEST
-    assert REVIEWED_FILES[PATH] == {"sha256": DIGEST, "sites": SITES}
-    assert reviewed_literal_spans(PATH, SOURCE) == tuple(row[:4] for row in SITES)
+def test_capacity_freshness_uses_contract_constants_without_identity_exemptions():
+    assert wire.MAX_PREVIEW_LIFETIME_SECONDS == 900
+    assert wire.MAX_CONSUMER_RECEIPT_SECONDS == 900
+    tree = ast.parse(SOURCE)
+    for reference in REFERENCES:
+        _, attribute = reference.split(".")
+        uses = [node for node in ast.walk(tree)
+                if isinstance(node, ast.Attribute) and node.attr == attribute
+                and isinstance(node.value, ast.Name) and node.value.id == "wire"]
+        assert len(uses) == 1
+        assert any(isinstance(node, ast.Compare) and uses[0] in node.comparators
+                   for node in ast.walk(tree))
+    assert PATH not in REVIEWED_FILES
+    assert reviewed_literal_spans(PATH, SOURCE) == ()
     assert scan(SOURCE) == []
 
 
-@pytest.mark.parametrize("site", SITES)
+@pytest.mark.parametrize("reference", REFERENCES)
 @pytest.mark.parametrize("literal", ["901", "0x384", "9_00"])
-def test_changed_value_or_spelling_restores_capacity_source_scrutiny(site, literal):
-    line, start, end, *_ = site
-    lines = SOURCE.splitlines(keepends=True)
-    assert lines[line - 1][start:end] == "900"
-    lines[line - 1] = lines[line - 1][:start] + literal + lines[line - 1][end:]
-    changed = "".join(lines)
+def test_inline_duration_or_identity_remains_under_source_scrutiny(reference, literal):
+    assert SOURCE.count(reference) == 1
+    changed = SOURCE.replace(reference, literal, 1)
     assert reviewed_literal_spans(PATH, changed) == ()
     assert literal in scan(changed)
 
 
-def test_changed_source_or_foreign_path_cannot_reuse_capacity_review():
+def test_changed_source_or_foreign_path_cannot_inherit_a_removed_exemption():
     changed = SOURCE + "\n"
     assert reviewed_literal_spans(PATH, changed) == ()
-    assert scan(changed) == ["900", "900"]
+    assert scan(changed) == []
     foreign = "control_plane/copied_workspace_capacity_fabric.py"
     assert reviewed_literal_spans(foreign, SOURCE) == ()
-    assert scan(SOURCE, foreign) == ["900", "900"]
+    for path in (PATH, foreign):
+        injected = SOURCE + "\npeer_uid = 471\n"
+        assert reviewed_literal_spans(path, injected) == ()
+        assert "471" in scan(injected, path)
 
 
 def test_adjacent_identity_remains_visible():

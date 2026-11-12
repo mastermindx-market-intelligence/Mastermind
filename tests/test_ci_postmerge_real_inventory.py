@@ -1,4 +1,4 @@
-"""Real ten-job regression and adversarial auxiliary-proof cases.
+"""Real eleven-job regression and adversarial auxiliary-proof cases.
 
 The fixture projects values captured from GitHub; the API reader is replaced,
 not the public verifier. These checks do not qualify a live protected push.
@@ -6,11 +6,13 @@ not the public verifier. These checks do not qualify a live protected push.
 from copy import deepcopy
 import json
 from pathlib import Path
+import runpy
 
 import pytest
 import yaml
 
 from scripts import ci_postmerge_proof as proof
+from scripts import ci_parallel_shard as fan
 
 FIXTURE = Path(__file__).with_name("fixtures") / "ci_postmerge_full_nine_jobs.json"
 # Real capture of the scoped four-job shape that certified #2365's tree
@@ -21,20 +23,29 @@ FIXTURE = Path(__file__).with_name("fixtures") / "ci_postmerge_full_nine_jobs.js
 SCOPED_FIXTURE = Path(__file__).with_name("fixtures") / "ci_postmerge_scoped_group.json"
 
 
-def test_proof_inventory_matches_the_actual_workflow():
+@pytest.mark.parametrize("event", ["merge_group", "push"])
+def test_proof_inventory_matches_the_actual_workflow(event):
     """A workflow change must update the closed proof contract atomically."""
     workflow = Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml"
     jobs = yaml.safe_load(workflow.read_text())["jobs"]
     # Expand only the current, explicitly qualified matrix; no generic workflow
     # interpreter or permissive support for future qualification lanes.
-    assert set(jobs) == {"pr_scope", "pr_fast", "pin_guards", "pytest_shards", "test"}
+    assert set(jobs) == {"pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards", "test"}
     matrix = jobs["pytest_shards"]["strategy"]["matrix"]
     assert matrix == {"index": [0, 1, 2, 3, 4, 5]}
     assert jobs["pytest_shards"]["name"] == "pytest shard ${{ matrix.index }}"
     names = [f"pytest shard {index}" for index in matrix["index"]]
-    for key in ("pr_scope", "pr_fast", "pin_guards", "test"):
+    for key in ("pr_scope", "pr_fast", "pin_guards", "qualification", "test"):
         assert "strategy" not in jobs[key]
-        names.append(jobs[key]["name"])
+        name = jobs[key]["name"]
+        if key == "test":
+            assert name == fan._REQUIRED_GATE_NAME
+            # Reuse the bounded real-expression evaluator, not a second parser.
+            expression = runpy.run_path(str(Path(__file__).with_name(
+                "test_ci_pr_retarget.py")))["_expression"]
+            name = expression(name, {"event_name": event, "event": {}})
+            assert name == "test"
+        names.append(name)
     assert len(names) == len(set(names))
     assert set(names) == proof._JOB_NAMES
     assert set(names) == {job["name"] for job in subject()["jobs"]["jobs"]}
@@ -88,14 +99,14 @@ def auxiliary(data, name="PR fast checks"):
     return next(job for job in data["jobs"]["jobs"] if job["name"] == name)
 
 
-def test_captured_full_ten_job_run_qualifies():
+def test_captured_full_eleven_job_run_qualifies():
     data = subject()
     result, reads = evaluate(data)
     assert result == 42548210214
     assert len(reads) == 5
 
 
-@pytest.mark.parametrize("name", [f"pytest shard {i}" for i in range(6)] + ["test", "PR test scope", "Pin and identity guards", "PR fast checks"])
+@pytest.mark.parametrize("name", [f"pytest shard {i}" for i in range(6)] + ["test", "PR test scope", "Pin and identity guards", "Non-pytest qualification gates", "PR fast checks"])
 def test_every_job_is_required_even_when_total_count_matches_the_missing_inventory(name):
     data = subject()
     data["jobs"]["jobs"] = [job for job in data["jobs"]["jobs"] if job["name"] != name]
@@ -237,3 +248,16 @@ def test_scoped_capture_documents_the_unexecuted_shard_evidence():
     assert 'pytest shard ${{ matrix.index }}' not in proof._JOB_NAMES
     for index in range(6):
         assert f"pytest shard {index}" in proof._JOB_NAMES
+
+
+def test_metadata_edit_name_cannot_qualify_a_prior_source_run():
+    expression = runpy.run_path(str(Path(__file__).with_name(
+        "test_ci_pr_retarget.py")))["_expression"]
+    name = expression(fan._REQUIRED_GATE_NAME, {
+        "event_name": "pull_request",
+        "event": {"action": "edited", "changes": {"body": {"from": "old"}}},
+    })
+    assert name == "PR metadata edit"
+    data = subject()
+    auxiliary(data, "test")["name"] = name
+    assert evaluate(data)[0] is None

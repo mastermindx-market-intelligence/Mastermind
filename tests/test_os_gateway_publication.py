@@ -209,10 +209,16 @@ def test_compile_performs_no_global_io(monkeypatch):
     # Warm every lazily imported owner first: a fresh module import stats
     # import-machinery paths by design. Everything after this point must
     # touch no filesystem, socket, process or environment authority.
+    # mcp_component_update (lazily imported by _proposed_mcp, and itself
+    # importing gateway_refresh_preflight) is warmed explicitly: under
+    # pytest-xdist --dist loadfile this module can land on a worker where no
+    # earlier module imported it, and its module-level Path(__file__).resolve
+    # stats during the test body (serial shard order had always warmed it).
     for name in ("integrations.studio_direct_mcp.private_service",
                  "integrations.executive_mcp.schemas",
                  "integrations.business_mcp_auth.contracts",
-                 "control_plane.executive_peer_identity"):
+                 "control_plane.executive_peer_identity",
+                 "ops.executive_os.mcp_component_update"):
         importlib.import_module(name)
     calls = []
     _guard_io(monkeypatch, calls, stat_too=True)

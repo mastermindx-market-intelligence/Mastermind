@@ -19,7 +19,14 @@ except ImportError:
     acp = None
 
 from control_plane.codex_worker import ProcessInspector
+from control_plane.child_execution_contracts import ExecutionBinding
 from control_plane.executive_worker_broker import BrokerEffectUnknownError, BrokerStateError
+from control_plane.execution_binding_compat import (
+    BINDING_IDENTITY_MISMATCH, BINDING_REQUIRED, ExecutionBindingCompatError,
+)
+from control_plane.opencode_worker import (
+    OpenCodeLifecycleUnavailable, OpenCodeWorkerAdapter, OpenCodeWorkerConfiguration,
+)
 from control_plane.worker_execution_contract import BinaryAttestation, CancelReceipt, WorkerLaunchSpec, WorkerRunStatus
 from integrations.acp_worker.adapter import AcpProcessCompletion, AcpRunResources, AcpWorkerAdapter
 from integrations.acp_worker.turn import AcpProfile
@@ -252,6 +259,144 @@ class AcpBrokerTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(receipt.stdout_sha256, hashlib.sha256(b"").hexdigest())
             self.assertEqual(receipt.stderr_sha256, hashlib.sha256(b"").hexdigest())
             self.assertIsNone(owner._active)
+            self.assertFalse(adapter.unsettled_tasks)
+        finally:
+            tmp.cleanup()
+
+
+class _PlacementSpecStub:
+    """Duck-typed launch identity; binding checks are attribute-based by design."""
+
+    def __init__(self, job_id="job-dsh", run_id="attempt-dsh", worker_id="worker-dsh"):
+        self.job_id, self.run_id, self.worker_id = job_id, run_id, worker_id
+
+
+def _admitted_binding(spec, **changes):
+    payload = {
+        "root_run_ref": "hermes-root-1", "immediate_parent_run_ref": "hermes-run-7",
+        "logical_child_key": "child-1", "request_digest": "a" * 64,
+        "effective_complexity": "C2_COMPLEX_BOUNDED",
+        "job_ref": spec.job_id, "attempt_ref": spec.run_id,
+        "worker_id": spec.worker_id,
+    }
+    payload.update(changes)
+    return ExecutionBinding.from_dict(payload)
+
+
+def _opencode_configuration(**changes):
+    binary = BinaryAttestation("/fixture/opencode", "/fixture/opencode", "1.18.31",
+        "a" * 64, None, 1, 1, 1, 0o755, 0, 0, 1)
+    return OpenCodeWorkerConfiguration(binary, Path("/fixture/private-home"),
+        "opencode/mimo-v2.5-free", **changes)
+
+
+class OpenCodeDeepSeekBindingCompatTests(unittest.IsolatedAsyncioTestCase):
+    """WO-16 (OQ-11): the DeepSeek adapter is ``OpenCodeWorkerAdapter``.
+
+    It accepts the broker-issued ``ExecutionBinding.v1`` and the admitted class
+    (refusals precede every effect) while the lane stays explicitly unavailable
+    — compatibility, never full DeepSeek desktop activation.
+    """
+
+    async def test_binding_required_start_refuses_without_binding(self):
+        adapter = OpenCodeWorkerAdapter(_opencode_configuration(), binding_required=True)
+        with self.assertRaises(ExecutionBindingCompatError) as ctx:
+            await adapter.start(_PlacementSpecStub())
+        self.assertEqual(ctx.exception.code, BINDING_REQUIRED)
+        self.assertIsNone(adapter.admitted_binding)
+        self.assertEqual(adapter.admitted_class, "")
+
+    async def test_admitted_binding_and_class_accepted_while_lane_stays_unavailable(self):
+        spec = _PlacementSpecStub()
+        binding = _admitted_binding(spec)
+        for payload in (binding, binding.to_dict()):  # record and wire shape
+            adapter = OpenCodeWorkerAdapter(_opencode_configuration())
+            with self.assertRaises(OpenCodeLifecycleUnavailable) as unavailable:
+                await adapter.start(spec, binding=payload)
+            self.assertEqual(unavailable.exception.effect, "NO_EFFECT")
+            self.assertEqual(adapter.admitted_binding, binding)
+            self.assertEqual(adapter.admitted_class, "C2_COMPLEX_BOUNDED")
+
+    async def test_foreign_binding_is_refused_before_any_effect(self):
+        adapter = OpenCodeWorkerAdapter(_opencode_configuration())
+        spec = _PlacementSpecStub()
+        with self.assertRaises(ExecutionBindingCompatError) as ctx:
+            await adapter.start(spec, binding=_admitted_binding(spec, attempt_ref="other-attempt"))
+        self.assertEqual(ctx.exception.code, BINDING_IDENTITY_MISMATCH)
+        self.assertIsNone(adapter.admitted_binding)
+        with self.assertRaises(ExecutionBindingCompatError) as ctx:
+            await adapter.start(spec, binding=_admitted_binding(spec, job_ref="another-job"))
+        self.assertEqual(ctx.exception.code, BINDING_IDENTITY_MISMATCH)
+        self.assertIsNone(adapter.admitted_binding)
+
+
+@unittest.skipIf(acp is None, "optional ACP SDK absent; no ACP qualification")
+class AcpBindingRequiredTests(unittest.IsolatedAsyncioTestCase):
+    """WO-16: the ACP lane accepts the admitted binding before any effect."""
+
+    async def test_binding_required_lane_refuses_start_without_or_with_foreign_binding(self):
+        async def open_run(spec):
+            raise AssertionError("open_run must not run without the admitted binding")
+        adapter = AcpWorkerAdapter(AcpProfile("fixture", "1"), inspector=ProcessInspector(),
+                                   open_run=open_run, binding_required=True)
+        spec = _PlacementSpecStub()
+        with self.assertRaises(ExecutionBindingCompatError) as ctx:
+            await adapter.start(spec)
+        self.assertEqual(ctx.exception.code, BINDING_REQUIRED)
+        with self.assertRaises(ExecutionBindingCompatError) as ctx:
+            await adapter.start(spec, binding=_admitted_binding(spec, attempt_ref="other-attempt"))
+        self.assertEqual(ctx.exception.code, BINDING_IDENTITY_MISMATCH)
+        self.assertEqual(adapter._runs, {})
+
+    async def test_binding_required_lane_executes_only_under_the_admitted_binding(self):
+        tmp = tempfile.TemporaryDirectory(prefix="mmx-acp-binding-", dir="/private/tmp" if os.uname().sysname == "Darwin" else None)
+        root = Path(tmp.name).resolve()
+        workspace, run_dir = root / "workspace", root / "run"
+        workspace.mkdir(mode=0o700)
+        run_dir.mkdir(mode=0o700)
+        (run_dir / "input").mkdir(mode=0o700)
+        env = {"PATH": os.defpath, "HOME": str(root), "GIT_CONFIG_GLOBAL": os.devnull,
+               "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=workspace, env=env,
+                capture_output=True, text=True, timeout=10, check=True).stdout.strip()
+        git("init", "--template=", "-q")
+        git("-c", "user.name=ACP Binding", "-c", "user.email=binding@example.invalid",
+            "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "fixture base")
+        schema_path = run_dir / "input" / "result.schema.json"
+        schema_path.write_text(json.dumps({"type": "object", "properties": {"answer": {"type": "integer"}},
+            "required": ["answer"]}), encoding="utf-8")
+        binary = Path(sys.executable).resolve(strict=True)
+        info = binary.stat()
+        attestation = BinaryAttestation(
+            str(binary), str(binary), f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            hashlib.sha256(binary.read_bytes()).hexdigest(), None, info.st_size, info.st_dev,
+            info.st_ino, info.st_mode & 0o7777, info.st_uid, info.st_gid, info.st_mtime_ns)
+        peer = Path(__file__).parent / "fixtures" / "acp_native_peer.py"
+        native_profile = AcpNativeProfile("fixture-native", attestation,
+            (str(binary), "-B", str(peer)))
+        owner = AcpNativeProcessOwner(native_profile,
+            environment_loader=lambda: {"PATH": os.defpath, "HOME": str(root), "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1", "PYTHONPATH": str(Path(acp.__file__).resolve().parents[1])})
+        spec = WorkerLaunchSpec(
+            "run-bound", "job-bound", "worker-bound", workspace, run_dir,
+            "Return the required answer.", schema_path, authorities=("READ",), model="model-a",
+            timeout_seconds=3.0, cancel_grace_seconds=1.0, expected_base_sha=git("rev-parse", "HEAD"),
+            expected_worker_uid=os.geteuid(), expected_worker_gid=os.getegid())
+        adapter = AcpWorkerAdapter(AcpProfile("fixture-native", "1"), inspector=owner.inspector,
+                                   open_run=owner.open_run, binding_required=True)
+        binding = _admitted_binding(spec)
+        try:
+            with self.assertRaises(ExecutionBindingCompatError) as ctx:
+                await adapter.start(spec)
+            self.assertEqual(ctx.exception.code, BINDING_REQUIRED)
+            self.assertIsNone(owner._active)  # no native child was ever opened
+            ref = await adapter.start(spec, binding=binding)
+            run = adapter._runs[spec.run_id]
+            self.assertEqual(run.binding, binding)
+            self.assertEqual(run.binding.effective_complexity, "C2_COMPLEX_BOUNDED")
+            receipt = await asyncio.wait_for(adapter.collect_result(ref), 5)
+            self.assertIs(receipt.result.status, WorkerRunStatus.SUCCEEDED)
+            self.assertEqual(dict(receipt.result.structured_output), {"answer": 42})
             self.assertFalse(adapter.unsettled_tasks)
         finally:
             tmp.cleanup()

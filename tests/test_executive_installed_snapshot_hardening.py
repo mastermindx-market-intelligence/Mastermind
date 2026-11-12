@@ -21,6 +21,15 @@ def _clean_repo(tmp_path: Path) -> tuple[Path, Path]:
     tracked = repo / "tracked.txt"
     tracked.write_text("original\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    # A fixture repo must be quiescent when the test walks it: git's commit
+    # can leave a detached auto-maintenance process holding the transient
+    # .git/objects/maintenance.lock after the fixture returns, and under
+    # parallel-shard CPU contention that window stretches into the walk
+    # (listing sees the lock, open misses it). Disabling auto-maintenance
+    # for this throwaway repo removes the background writer entirely; the
+    # assertions are unchanged.
+    _git(repo, "config", "gc.auto", "0")
+    _git(repo, "config", "maintenance.auto", "false")
     _git(repo, "config", "user.email", "test@example.invalid")
     _git(repo, "config", "user.name", "Test")
     _git(repo, "add", "tracked.txt")

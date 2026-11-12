@@ -27,6 +27,25 @@ def commitment():
 def selectors():return dict(host_ref='ubuntu2',transport_alias='ubuntu2',python_path='/usr/bin/python3',capture_root='/home/worker/lanes/ext/lanes')
 
 
+def _fixture_bootstrap(executable):
+    # Canonicalize runner-owned ancestors, retaining the real python3 selector.
+    return Path(executable).parent.resolve(strict=True)/'python3'
+
+
+def test_fixture_bootstrap_parent_alias_keeps_real_getpath(tmp_path):
+    executable=Path(sys.executable)
+    alias=tmp_path/'interpreter-parent'
+    alias.symlink_to(executable.parent,target_is_directory=True)
+    direct=_fixture_bootstrap(executable)
+    selected=_fixture_bootstrap(alias/executable.name)
+    assert selected==direct
+    assert selected.name=='python3'
+    assert selected.resolve(strict=True)==direct.resolve(strict=True)
+    code='import json,sys;print(json.dumps({k:getattr(sys,k) for k in ("executable","prefix","exec_prefix","base_prefix","base_exec_prefix")}))'
+    def observe(path):
+        return json.loads(subprocess.check_output([str(path),'-I','-S','-B','-c',code],timeout=10))
+    assert observe(selected)==observe(direct)
+
 
 def _preserving_stat_view(info,*,uid=None,mode=None):
     values=list(info)
@@ -429,8 +448,9 @@ def test_actual_pinned_image_exec_matches_normal_isolated_venv_startup(tmp_path,
 
 
 @pytest.mark.skipif(sys.platform!='linux' or sys.version_info[:2]!=(3,12),reason='requires actual Linux CPython3.12 initializer/getpath')
+@pytest.mark.parametrize('bootstrap_parent_alias',[False,True])
 @pytest.mark.parametrize('fixture_umask',[0o002,0o022])
-def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,monkeypatch,request,fixture_umask):
+def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,monkeypatch,request,bootstrap_parent_alias,fixture_umask):
     """Real FD/snapshot/Bash/getpath; trusted-platform metadata is simulated.
 
     No remote/system mutation, credential read or provider is used. This does
@@ -446,9 +466,13 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     for key in tuple(os.environ):
         if key.startswith(('LD_','BASH_FUNC_')) or key in ('BASH_ENV','ENV','PYTHONHOME','PYTHONEXECUTABLE','__PYVENV_LAUNCHER__'):
             monkeypatch.delenv(key)
-    # Canonicalize only the fixture directory. Keep python3's final selector
-    # symlink so the real owner still checks its image and alias identity.
-    bootstrap=Path(sys.executable).parent.resolve(strict=True)/'python3'
+    executable=Path(sys.executable)
+    if bootstrap_parent_alias:
+        alias=tmp_path/'bootstrap-parent'
+        alias.symlink_to(executable.parent,target_is_directory=True)
+        executable=alias/executable.name
+    bootstrap=_fixture_bootstrap(executable)
+    assert bootstrap.resolve(strict=True)==Path(sys.executable).resolve(strict=True)
     system_launch=_system_fixture_launch()
     logical=system_launch or bootstrap
     monkeypatch.setenv('PATH',str(logical.parent)+':/usr/bin:/bin')
@@ -738,7 +762,8 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
     try:
         (lane/'ext/lanes').mkdir(parents=True,mode=0o700)
         (lane/'venv/bin').mkdir(parents=True,mode=0o700)
-        bootstrap=Path(sys.executable).with_name('python3')
+        bootstrap=_fixture_bootstrap(sys.executable)
+        assert bootstrap.resolve(strict=True)==Path(sys.executable).resolve(strict=True)
         system_launch=_system_fixture_launch();real=(system_launch or bootstrap).resolve()
         monkeypatch.setenv('PATH','/usr/bin:/bin')
         logical=lane/'venv/bin/python3';logical.symlink_to(real)
@@ -966,10 +991,11 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
     text=(Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml').read_text()
     fan.validate_parallel_workflow(text)
     value=yaml.load(text,Loader=policy._WorkflowYAMLLoader)
-    # PR qualification and early pin guards add three jobs; full-mode H1
-    # security checks and the required fan-in remain enforced by the validator.
-    assert set(value['jobs'])=={'pr_scope','pr_fast','pin_guards','pytest_shards','test'}
-    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pin_guards','pytest_shards']
+    # PR qualification, early pin guards and the non-pytest qualification
+    # lane add four jobs; full-mode H1 security checks and the required fan-in
+    # remain enforced by the validator.
+    assert set(value['jobs'])=={'pr_scope','pr_fast','pin_guards','qualification','pytest_shards','test'}
+    assert value['jobs']['test']['needs']==['pr_scope','pr_fast','pin_guards','qualification','pytest_shards']
     steps=value['jobs']['pytest_shards']['steps']
     preflight=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 initializer Linux fast preflight']
     positive=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 required real Linux no-ACL positive journey']
@@ -1003,7 +1029,10 @@ def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
         'tests/test_paid_initializer_sysconfig.py',
         'tests/test_paid_initializer_runtime_library.py::test_actual_two_fixed_links_and_ordinary_library_are_held_and_closed',
         'tests/test_paid_provider_entry_linux.py']
-    assert full[0][1]['run']=='python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}'
+    assert full[0][1]['run'] == (
+        'umask 022\n'
+        'python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}\n'
+    )
     # Only full pytest may reuse the exact prior proof; both H1 gates above
     # still execute on shard two before the proof/pytest steps.
     assert full[0][1].get('if') == "${{ steps.previous_ci.outputs.reuse != 'true' }}"

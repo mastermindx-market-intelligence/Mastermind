@@ -19,8 +19,8 @@ def test_heavy_jobs_cancel_and_final_gate_keeps_aggregating():
     from scripts import ci_parallel_shard as fan
     assert jobs["pr_fast"]["if"] == fan._REQUIRED_PR_FAST_IF
     assert jobs["pytest_shards"]["if"] == fan._REQUIRED_SHARDS_IF
-    assert jobs["test"]["if"] == "${{ always() }}"
-    assert jobs["test"]["needs"] == ["pr_scope", "pr_fast", "pin_guards", "pytest_shards"]
+    assert jobs["test"]["if"] == fan._REQUIRED_GATE_IF
+    assert jobs["test"]["needs"] == ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards"]
 
 
 @pytest.mark.parametrize("job", ["pr_fast", "pytest_shards"])
@@ -36,6 +36,8 @@ def test_validator_rejects_uncancellable_or_incomplete_heavy_job_selector(job, r
 
 def test_final_gate_cannot_disappear_on_cancelled_dependencies():
     source = WORKFLOW.read_text(encoding="utf-8")
-    mutated = source.replace("if: ${{ always() }}", "if: ${{ !cancelled() }}", 1)
+    from scripts import ci_parallel_shard as fan
+    assert source.count(fan._REQUIRED_GATE_IF) == 1
+    mutated = source.replace(fan._REQUIRED_GATE_IF, fan._REQUIRED_GATE_IF.replace("always()", "!cancelled()"), 1)
     with pytest.raises(PolicyError):
         validate_parallel_workflow(mutated)

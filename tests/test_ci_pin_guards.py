@@ -90,6 +90,7 @@ def test_workflow_pin_guards_lane_is_pinned_by_the_validator() -> None:
     "wrong-if", "pr-and-merge-group-only", "needs-scope", "timeout",
     "continue-on-error", "missing-step",
     "wrong-command", "conditional-step", "permissions", "extra-step",
+    "job-env", "job-defaults", "container", "strategy",
 ])
 def test_validator_rejects_pin_guards_lane_drift(mutation: str) -> None:
     import copy
@@ -119,6 +120,14 @@ def test_validator_rejects_pin_guards_lane_drift(mutation: str) -> None:
         job["steps"][3]["if"] = "${{ always() }}"
     elif mutation == "permissions":
         job["permissions"] = {"contents": "write"}
+    elif mutation == "job-env":
+        job["env"] = {"PYTHONPATH": "/tmp/shadow"}
+    elif mutation == "job-defaults":
+        job["defaults"] = {"run": {"working-directory": "scripts"}}
+    elif mutation == "container":
+        job["container"] = "ubuntu:24.04"
+    elif mutation == "strategy":
+        job["strategy"] = {"matrix": {"index": [0, 1]}}
     else:
         job["steps"].append({"run": "echo extra"})
     with pytest.raises(cip.PolicyError):

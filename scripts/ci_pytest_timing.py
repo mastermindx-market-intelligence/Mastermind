@@ -282,31 +282,52 @@ def _h1_metadata_is_safe(value):
 
 
 class ModuleTiming:
-    def __init__(self, reporter, diagnostics=None):
+    def __init__(self, reporter, diagnostics=None, controller=False):
         self.reporter = reporter
         self.diagnostics = diagnostics
+        # Accounting is per module, not per transition: under pytest-xdist the
+        # controller receives forwarded logstart/logreport/logfinish events for
+        # modules that interleave across workers, so a single "current module"
+        # would emit repeated partial summaries and drop durations. In a serial
+        # session only one module is ever in flight and the emitted record
+        # sequence is exactly the historical one.
+        self._modules = {}
         self.module = None
-        self.cases_started = 0
-        self.cases_finished = 0
-        self.reported_seconds = 0.0
+        self._controller = controller
 
-    def _emit(self, event, **fields):
+    def _entry(self, module):
+        entry = self._modules.get(module)
+        if entry is None:
+            entry = {"cases_started": 0, "cases_finished": 0,
+                     "reported_seconds": 0.0,
+                     "start_emitted": False, "summarized": False}
+            self._modules[module] = entry
+        return entry
+
+    def _emit(self, event, module, **fields):
         # Pytest's quiet progress dots can leave an unterminated line. Keep
         # each record independently parseable without touching that output.
         self.reporter.write_line("\nCI_MODULE " + json.dumps(
-            {"event": event, "module": self.module, **fields}, sort_keys=True,
+            {"event": event, "module": module, **fields}, sort_keys=True,
         ))
         if self.diagnostics is not None:
-            try:self.diagnostics.progress_record(event,self.module,**fields)
+            try:self.diagnostics.progress_record(event,module,**fields)
             except Exception:pass
 
-    def _summarize(self):
-        if self.module is not None:
+    def _summarize_module(self, module):
+        entry = self._modules.get(module)
+        if module is not None and entry is not None and not entry["summarized"]:
+            entry["summarized"] = True
             self._emit(
-                "summary", cases_started=self.cases_started,
-                cases_finished=self.cases_finished,
-                reported_seconds=round(self.reported_seconds, 6),
+                "summary", module,
+                cases_started=entry["cases_started"],
+                cases_finished=entry["cases_finished"],
+                reported_seconds=round(entry["reported_seconds"], 6),
             )
+
+    def _summarize(self):
+        for module in self._modules:
+            self._summarize_module(module)
 
     def _h1_failure(self,nodeid,phase,*,error=None,crash=None):
         if self.diagnostics is not None:
@@ -351,21 +372,39 @@ class ModuleTiming:
 
     def pytest_runtest_logstart(self, nodeid, location):
         module = nodeid.split("::", 1)[0]
-        if module != self.module:
-            self._summarize()
-            self.module = module
-            self.cases_started = self.cases_finished = 0
-            self.reported_seconds = 0.0
-            self._emit("start")
-        self.cases_started += 1
+        entry = self._entry(module)
+        entry["cases_started"] += 1
+        if module == self.module:
+            return
+        if self.module is not None and not self._controller:
+            previous = self._modules[self.module]
+            # Serial: the predecessor is complete at this boundary and its
+            # summary fires exactly as before. On a pytest-xdist controller a
+            # module transition proves nothing: cases_finished can equal
+            # cases_started only because later cases of that module have not
+            # forwarded logstart yet, so every module is summarized once, at
+            # session finish, when its counts are final.
+            if previous["cases_finished"] == previous["cases_started"]:
+                self._summarize_module(self.module)
+        self.module = module
+        if not entry["start_emitted"]:
+            entry["start_emitted"] = True
+            self._emit("start", module)
 
     def pytest_runtest_logreport(self, report):
-        if report.nodeid.split("::", 1)[0] == self.module:
-            self.reported_seconds += report.duration
+        entry = self._entry(report.nodeid.split("::", 1)[0])
+        entry["reported_seconds"] += report.duration
+        if report.failed and self._controller:
+            # pytest-xdist controller: pytest_runtest_makereport runs only in
+            # workers, so recover the fixed H1 metadata from the forwarded
+            # report's serialized crash location. Serial sessions keep using
+            # the live exception in the makereport wrapper below.
+            self._h1_failure(report.nodeid, report.when,
+                             crash=getattr(report.longrepr, "reprcrash", None))
 
     def pytest_runtest_logfinish(self, nodeid, location):
-        if nodeid.split("::", 1)[0] == self.module:
-            self.cases_finished += 1
+        entry = self._entry(nodeid.split("::", 1)[0])
+        entry["cases_finished"] += 1
 
     def _exit_observation(self, event, exitstatus):
         if self.diagnostics is not None:
@@ -400,7 +439,14 @@ def pytest_sessionstart(session):
             try:
                 from pathlib import Path
                 from scripts.ci_fixed_diagnostics import PublicCatalog,FixedDiagnostics
+                # Under pytest-xdist the controller session starts before any
+                # worker boots, so only the controller owns the diagnostics
+                # file; workers find it already present and stay inert.
                 diagnostics=FixedDiagnostics(PublicCatalog(Path(__file__).resolve().parents[1]),
                     os.environ['MMX_CI_FIXED_DIAGNOSTICS_DIR'])
             except Exception:pass
-        session.config.pluginmanager.register(ModuleTiming(reporter,diagnostics), "ci-module-timing")
+        # The dsession plugin exists only on an xdist controller (workers and
+        # serial sessions do not register it), which is where forwarded
+        # reports need the makereport fallback.
+        session.config.pluginmanager.register(ModuleTiming(reporter,diagnostics,
+            controller=session.config.pluginmanager.hasplugin('dsession')), "ci-module-timing")

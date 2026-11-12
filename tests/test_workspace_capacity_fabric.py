@@ -7,7 +7,8 @@ import asyncio
 import copy
 import json
 from dataclasses import replace
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
+from functools import partial
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -314,7 +315,7 @@ def test_public_contract_refuses_evidence_that_expires_before_response(case):
 
 
 @asynccontextmanager
-async def in_process_transport(owner, key, tmp_path, socket_root, *, after_app=None):
+async def in_process_transport(owner, key, tmp_path, socket_root, *, after_app=None, mount_parent=False):
     """Actual signed HTTP and Workspace dispatcher; no claim of Unix proof."""
     auth = _authenticator(key)
     token = _workspace_token(key)
@@ -333,13 +334,32 @@ async def in_process_transport(owner, key, tmp_path, socket_root, *, after_app=N
             return result
     app = create_workspace_app(WorkspaceAppConfig(authenticator=auth, now=lambda: clock[0],
         authorize_principal=app_auth, client=Client()))
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://mcp.mastermind-x.com") as http:
-        yield http, token, slots, seen
+    if mount_parent:
+        class Sink:
+            def __init__(self): self.events = []
+            def emit(self, event): self.events.append(event)
+        sink = Sink()
+        verifier = transport_suite.MastermindTokenVerifier(
+            authenticator=auth, policy=auth.policy, now=lambda: clock[0], audit_sink=sink)
+        app = transport_suite.build_executive_mcp_app(transport_suite.AppSettings(
+            policies=transport_suite.AppPolicies(
+                read=transport_suite._read_policy(), submit=transport_suite._submit_policy()),
+            mastermind_root=tmp_path, macro_root_flag=None, environ={},
+            ceo_ingress_socket_path=tmp_path / "unused-test-ingress.sock", read_from_ceo_ingress=True,
+            jwks_cache=transport_suite._FakeJwksCache(key), clock=lambda: clock[0]),
+            audit_sink=sink, workspace_app=transport_suite.AuditedWorkspaceApp(app, verifier))
+    async with AsyncExitStack() as owners:
+        if mount_parent:
+            await owners.enter_async_context(transport_suite._mounted_lifespan(app))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://mcp.mastermind-x.com") as http:
+            yield http, token, slots, seen
 
 
-@pytest.fixture(params=["asgi", "unix"])
+@pytest.fixture(params=["asgi", "mounted_asgi", "unix"])
 def bridge(request):
-    return in_process_transport if request.param == "asgi" else transport_suite.transport
+    return {"asgi": in_process_transport,
+            "mounted_asgi": partial(in_process_transport, mount_parent=True),
+            "unix": transport_suite.transport}[request.param]
 
 
 @pytest.fixture

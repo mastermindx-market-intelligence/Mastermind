@@ -27,7 +27,7 @@ from brain import client, cli_bridge, fabric_inference, thinking_log
 MODEL = "composition-text-model"
 PROXY_TOKEN = "synthetic-composition-proxy-token"
 # Exact candidate gateway; the paired test executes its legacy-compatible path.
-GATEWAY_BLOB = "81ef8b392bb653a4488e1a7332e20e8f5714b261"
+GATEWAY_BLOB = "ceb47c662784f24929d980d2ff2c39cf89653308"
 
 
 class DispatcherTests(unittest.TestCase):

@@ -23,6 +23,9 @@ PICKERS = (
     SOURCE / "pick.py",
     ROOT / "quota_continuity" / "candidate" / "pick.py",
 )
+# The AUTO pre-release busy picker is a busy-scoped source; the reviewed
+# default candidate keeps the pre-busy application picker.
+BUSY_PICKER = ROOT / "quota_continuity" / "candidate" / "broker_busy_2121" / "pick.py"
 ALIAS = "cursor-grok-4.6-high"
 POLICY = {
     "pools": {
@@ -91,6 +94,44 @@ class Cursor46ExplicitPin(unittest.TestCase):
                     result = pick._format_pick(
                         "review", pool="cursor", requested_model="grok-4.7-high")
                 self.assertTrue(result.startswith("NONE reason="), result)
+
+    # Converge 2121 broker-busy epoch coverage (relocated per probe law: the
+    # upstream application-picker tests below stay byte-identical to master).
+    def test_broker_busy_branch_preserves_explicit_observation_and_no_ambient_read(self):
+        path = BUSY_PICKER
+        raw = path.read_bytes()
+        self.assertEqual(qualifier.sha(raw), qualifier.BROKER_BUSY_PICKER_SHA256)
+        qualified = load(path)
+        spec = importlib.util.spec_from_file_location("original_busy_picker", path)
+        original = importlib.util.module_from_spec(spec)
+        exec(compile(raw, str(path), "exec"), original.__dict__)
+        for model in (ALIAS, "composer-2.5"):
+            for task in ("review", "high_level", "fix_build", "orchestration"):
+                for exhausted in (None, False, True):
+                    with self.subTest(model=model, task=task, exhausted=exhausted):
+                        with patch.object(original, "_grok_exhausted", side_effect=AssertionError("ambient observation")), \
+                             patch.object(qualified, "_grok_exhausted", side_effect=AssertionError("ambient observation")):
+                            self.assertEqual(
+                                qualified._cursor_grok_quota_affinity(model, task, POLICY,
+                                    exhausted=exhausted, application=True),
+                                original._cursor_grok_quota_affinity(model, task, POLICY,
+                                    exhausted=exhausted, application=True))
+
+    def test_broker_busy_qualification_refuses_source_drift_and_sealed_relabel(self):
+        raw = BUSY_PICKER.read_bytes()
+        with self.assertRaisesRegex(ValueError, "reviewed_selector_hunk_identity_mismatch"):
+            qualifier.apply_reviewed_hunks(raw + b"\n# unqualified change\n")
+        for predecessor in qualifier.SEALED_PREDECESSORS:
+            with self.assertRaisesRegex(ValueError, "sealed_picker_preimage_changed"):
+                qualifier.patched(raw, predecessor)
+
+    def test_broker_busy_picker_takes_application_affinity_transform(self):
+        raw = BUSY_PICKER.read_bytes()
+        candidate = qualifier.apply_reviewed_hunks(raw)
+        self.assertNotEqual(candidate, raw)
+        self.assertEqual(BUSY_PICKER.read_bytes(), raw)
+        self.assertIn(qualifier.APPLICATION_AFFINITY_BEFORE.encode(), raw)
+        self.assertIn(qualifier.APPLICATION_AFFINITY_AFTER.encode(), candidate)
 
     def test_grok_class_policy_and_alias_identity_are_still_binding(self):
         for source in PICKERS:
