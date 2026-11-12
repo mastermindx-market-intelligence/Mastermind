@@ -25,9 +25,11 @@ class FakeT3:
     scriptable thread table, `thread start` mints the next id. Every argv is
     recorded so a test can prove what was NEVER done."""
 
-    def __init__(self, threads=None, new_id=NEW, fail_start=False):
+    def __init__(self, threads=None, new_id=NEW, fail_start=False,
+                 start_rc=0, start_status="completed"):
         self.threads = threads or {}
         self.new_id, self.fail_start = new_id, fail_start
+        self.start_rc, self.start_status = start_rc, start_status
         self.calls = []
 
     def proc(self, rc=0, stdout="", stderr=""):
@@ -44,8 +46,17 @@ class FakeT3:
         if args[:2] == ["thread", "start"]:
             if self.fail_start:
                 return self.proc(rc=1, stderr="start refused")
-            return self.proc(stdout=json.dumps(
-                {"threadId": self.new_id, "status": "completed"}) + "\n")
+            # the CLI's own law: with --json the payload always reaches
+            # stdout, even when the run failed (exit 1) or waits for an
+            # answer (exit 2) — so the thread id is never lost.
+            return self.proc(
+                rc=self.start_rc, stderr="" if self.start_rc == 0 else
+                f"Thread {self.new_id} failed",
+                stdout=json.dumps(
+                    {"threadId": self.new_id, "runId": "r-new",
+                     "status": self.start_status, "reply": None,
+                     "error": None if self.start_rc == 0
+                     else "provider down"}) + "\n")
         return self.proc(rc=2, stderr=f"unexpected argv {args}")
 
 
@@ -342,10 +353,6 @@ def test_rebind_rollback_refuses_when_the_binding_moved_on(rebound):
     with pytest.raises(SystemExit):
         co.cmd_rebind_rollback(spec)
     assert live_binding(http)["primaryThreadId"] == "mcp:rotated"
-    # open work refuses the rollback too
-    http2 = http
-    co.cmd_rebind_rollback  # noqa: B018 - the next fence arm
-    http2.issues.append({"identifier": "MAS-4", "status": "blocked"})
 
 
 def test_rebind_rollback_open_work_refuses(rebound):
@@ -382,3 +389,116 @@ def test_a_failed_thread_start_writes_nothing(rebound):
         co.cmd_rebind_thread(spec)
     assert live_binding(http)["primaryThreadId"] == OLD
     assert "rebinds" not in result_doc(spec)
+
+
+# --- review repairs (panel b97648f92: 1 HIGH, 2 MED, 3 LOW) ---------------
+
+@pytest.mark.parametrize("key,value", [("providerInstanceId", "capacity_fabric"),
+                                       ("projectId", "mcp:other-project")])
+def test_a_foreign_instance_or_project_on_a_recorded_rebind_refuses(
+        rebound, capsys, key, value):
+    # review HIGH: after a rebind the record explains the moved THREAD ID and
+    # nothing else. A live binding that keeps the recorded id but changes the
+    # instance or the project is a rotate/foreign write — a rebind started on
+    # it would run the teammate on a provider that is not its own.
+    spec, http, t3 = rebound
+    assert co.cmd_rebind_thread(spec) == 0
+    capsys.readouterr()
+    st.write_binding(http, AID, dict(live_binding(http), **{key: value}))
+    started = len([a for a in t3.calls if a[:2] == ["thread", "start"]])
+    with pytest.raises(SystemExit):
+        co.cmd_rebind_thread(spec)
+    assert "refresh the spec" in capsys.readouterr().err
+    assert len([a for a in t3.calls
+                if a[:2] == ["thread", "start"]]) == started
+    assert live_binding(http)[key] == value       # nothing was written by us
+
+
+@pytest.mark.parametrize("rc,status", [(1, "failed"), (2, "waiting")])
+def test_a_failed_or_waiting_start_names_the_stray_thread(
+        rebound, capsys, rc, status):
+    # review MED: the thread EXISTS on either exit code (the CLI prints the
+    # id with --json even then). Losing the id leaves a stray conversation
+    # with no record; the binding must not move on an unproven start.
+    spec, http, t3 = rebound
+    t3.start_rc, t3.start_status = rc, status
+    with pytest.raises(SystemExit):
+        co.cmd_rebind_thread(spec)
+    captured = capsys.readouterr()
+    assert NEW in captured.err and "NOT writing the binding" in captured.err
+    assert printed_json(captured.out)["newThreadId"] == NEW
+    assert live_binding(http)["primaryThreadId"] == OLD
+    assert "rebinds" not in result_doc(spec)
+
+
+class LiveAfter(FakeHttp):
+    """live-runs answers empty for the first `quiet` reads, then one run:
+    a wake that starts while the rebind is being prepared."""
+
+    def __init__(self, agent, quiet, run):
+        super().__init__(agent)
+        self.reads, self.quiet, self.run = 0, quiet, run
+
+    def get(self, path):
+        if "/live-runs" in path:
+            self.reads += 1
+            return [] if self.reads <= self.quiet else [self.run]
+        return super().get(path)
+
+
+def test_a_run_that_starts_after_the_first_look_refuses_before_the_start(
+        rebound, monkeypatch):
+    # review MED: the fence is read once at the top and must be read again
+    # immediately before the irreversible steps.
+    spec, http, t3 = rebound
+    flaky = LiveAfter(http.agent, quiet=1, run={"agentId": "another-agent"})
+    flaky.issues = http.issues
+    monkeypatch.setattr(co, "Http", lambda base: flaky)
+    with pytest.raises(SystemExit):
+        co.cmd_rebind_thread(spec)
+    assert not [a for a in t3.calls if a[:2] == ["thread", "start"]]
+    assert live_binding(http)["primaryThreadId"] == OLD
+
+
+def test_a_run_that_starts_during_the_start_stops_the_write(
+        rebound, monkeypatch, capsys):
+    spec, http, t3 = rebound
+    flaky = LiveAfter(http.agent, quiet=2, run={"agentId": "another-agent"})
+    flaky.issues = http.issues
+    monkeypatch.setattr(co, "Http", lambda base: flaky)
+    with pytest.raises(SystemExit):
+        co.cmd_rebind_thread(spec)
+    assert NEW in capsys.readouterr().err
+    assert live_binding(http)["primaryThreadId"] == OLD
+    assert "rebinds" not in result_doc(spec)
+
+
+def test_instance_of_reads_the_latest_message_like_the_carrier():
+    # review LOW: the carrier checks the LATEST message (a conversation
+    # moved mid-way is its newest turn); reading the first would report a
+    # stale instance.
+    thread = {"providerInstanceId": "capacity_fabric"}
+    messages = [{"providerInstanceId": "assurance"},
+                {"role": "user", "text": "no instance here"},
+                {"providerInstanceId": "capacity_fabric"}]
+    assert co.instance_of(thread, messages) == "capacity_fabric"
+
+
+def test_a_failed_rollback_record_write_names_the_reconciliation(
+        rebound, monkeypatch, capsys):
+    # review LOW: the rebind path logs before dying when its record write
+    # fails; the rollback path must say what state it left behind too.
+    spec, http, t3 = rebound
+    assert co.cmd_rebind_thread(spec) == 0
+    capsys.readouterr()
+
+    def boom(path, doc):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(co, "write_config_file", boom)
+    with pytest.raises(OSError):
+        co.cmd_rebind_rollback(spec)
+    said = capsys.readouterr().out
+    assert "was NOT written" in said and "rolledBackAt" in said
+    # the binding write did happen: the file is what needs reconciling
+    assert live_binding(http)["primaryThreadId"] == OLD

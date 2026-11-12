@@ -522,6 +522,33 @@ def t3_installed(spec, args):
                           timeout=900)
 
 
+def t3_start_json(spec, args):
+    """Run `t3 thread start … --wait --json` and keep the answer whatever
+    the exit code is.
+
+    The CLI's own law (apps/server/src/cli/thread.ts): with --json the
+    result always reaches stdout, so the thread id survives a failed run
+    (exit 1) or a turn waiting for an answer (exit 2). Losing that id would
+    leave a stray conversation on the teammate's instance with no record
+    (review MED). Returns (payload, exit code, detail)."""
+    try:
+        proc = t3_installed(spec, args)
+        out, code, err = proc.stdout, proc.returncode, proc.stderr or ""
+    except subprocess.TimeoutExpired as exc:
+        out = exc.stdout or ""
+        if isinstance(out, bytes):
+            out = out.decode("utf-8", "replace")
+        code, err = "timeout", "the t3 CLI did not answer within 900s"
+    payload = None
+    for line in out.splitlines():
+        if line.startswith("{"):
+            try:
+                payload = json.loads(line)
+            except ValueError:
+                continue
+    return payload, code, err
+
+
 def thread_facts(spec, thread_id, messages=5):
     """(thread dict, messages) of one conversation, READ ONLY.
 
@@ -550,9 +577,10 @@ def thread_facts(spec, thread_id, messages=5):
 
 def instance_of(thread, messages):
     """The provider instance a conversation actually runs on (ruling 20).
-    The carrier's own read: the first message that names an instance, then
-    the thread object; never what a caller asked for."""
-    for row in messages:
+    The carrier's own read: the LATEST message that names an instance (a
+    conversation moved mid-way is its newest turn, not its first), then the
+    thread object; never what a caller asked for."""
+    for row in reversed(messages):
         got = row.get("providerInstanceId") or row.get("provider_instance_id")
         if got:
             return got
@@ -611,8 +639,13 @@ def rebind_fence(spec, agent, open_issues, live):
 
 def binding_for_rebind(spec, agent, doc):
     """The live binding a rebind replaces the thread id of. The LIVE binding
-    is the truth (the R13 law); the spec must agree with it except where an
-    earlier recorded rebind moved it on — a rotate or a foreign write refuses."""
+    is the truth (the R13 law); the spec must agree with it except for the
+    thread id an earlier recorded rebind moved on.
+
+    The instance and the project are the teammate's identity (ruling 20): a
+    recorded rebind explains a moved THREAD, never a changed provider or
+    project. Tolerating those would start the new primary conversation on
+    whatever instance a foreign write named (review HIGH)."""
     live = ((agent.get("metadata") or {}).get("teammate") or {}).get("t3")
     if not isinstance(live, dict) or not live.get("primaryThreadId"):
         die("the agent carries no teammate.t3 binding; its state is unclear — "
@@ -625,15 +658,23 @@ def binding_for_rebind(spec, agent, doc):
         die("spec has no binding object; the provider instance and project "
             "must come from the spec")
     live_core, spec_core = binding_core(live), binding_core(spec["binding"])
+    for key in ("providerInstanceId", "projectId", "primaryThreadId"):
+        if not spec_core.get(key):
+            die(f"the spec's binding has no {key}; its state is unclear — "
+                "inspect the spec before rebinding")
     if live_core != spec_core:
         known = [r.get("newThreadId") for r in (doc.get("rebinds") or [])
                  if isinstance(r, dict) and not r.get("rolledBackAt")]
-        if live_core.get("primaryThreadId") not in known:
-            die(f"the live binding's thread is "
-                f"{live_core.get('primaryThreadId')!r}, the spec says "
-                f"{spec_core.get('primaryThreadId')!r}, and no recorded "
-                "rebind explains the difference (rotated?); refresh the "
-                "spec's binding before rebinding")
+        differs = sorted(k for k in set(live_core) | set(spec_core)
+                         if live_core.get(k) != spec_core.get(k))
+        if differs != ["primaryThreadId"] or \
+                live_core.get("primaryThreadId") not in known:
+            die(f"the live binding differs from the spec in "
+                f"{', '.join(differs) or 'unknown keys'} (live thread "
+                f"{live_core.get('primaryThreadId')!r}, spec "
+                f"{spec_core.get('primaryThreadId')!r}); no recorded rebind "
+                "explains it (rotated?); refresh the spec's binding before "
+                "rebinding")
     return live
 
 
@@ -656,6 +697,23 @@ def cmd_rebind_thread(spec, dry_run=False):
             f"{doc['rolledBackAt']}; rebind-thread is for a live move")
     live_binding = binding_for_rebind(spec, agent, doc)
     old_id = live_binding["primaryThreadId"]
+
+    def look_again():
+        """The whole fence, re-read at the irreversible steps. A wake that
+        starts while the new conversation is being made would land its
+        result on the old conversation (review MED), and a rotate or a
+        foreign write would move what we are about to replace."""
+        agent_now, open_now, live_now = read_state(http, spec)
+        found_now = rebind_fence(spec, agent_now, open_now, live_now)
+        binding_now = ((agent_now.get("metadata") or {})
+                       .get("teammate") or {}).get("t3") or {}
+        moved = [k for k in ("primaryThreadId", "providerInstanceId",
+                             "projectId", "bindingRevision")
+                 if binding_now.get(k) != live_binding.get(k)]
+        if moved:
+            found_now.append("the live binding moved meanwhile ("
+                             + ", ".join(moved) + "); inspect the agent")
+        return found_now
 
     notes = []
     if agent.get("status") == "error":
@@ -685,15 +743,34 @@ def cmd_rebind_thread(spec, dry_run=False):
         message = spec.get("rebind_message") or (
             f"Primary conversation rebind for {spec['agent_name']}, "
             + time.strftime("%Y-%m-%d") + ". Reply with just: READY")
-        started = t3_output_json(t3_installed(spec, [
+        found_now = look_again()
+        if found_now:
+            die("not rebinding: " + "; ".join(found_now))
+        started, start_code, start_err = t3_start_json(spec, [
             "thread", "start", str(live_binding["projectId"]), message,
             "--provider", str(live_binding["providerInstanceId"]),
-            "--model", str(model), "--title", title, "--wait", "--json"]),
-            "t3 thread start")
-        if not isinstance(started, dict) or not started.get("threadId"):
-            die("t3 thread start returned no threadId; nothing was written — "
-                "inspect the answer")
-        new_id = started["threadId"]
+            "--model", str(model), "--title", title, "--wait", "--json"])
+        new_id = (started.get("threadId")
+                  if isinstance(started, dict) else None)
+        if not new_id:
+            die(f"t3 thread start failed (exit {start_code}) before a thread "
+                f"existed: {str(start_err).strip()[:300]} — nothing was "
+                "written")
+        if start_code != 0:
+            # The thread exists; its run did not complete. Keep the id and
+            # refuse the write: pointing the binding at a conversation whose
+            # first turn failed is a person's decision, not a repair.
+            print(json.dumps({
+                "agent": agent.get("name"), "dryRun": False,
+                "oldThreadId": old_id, "newThreadId": new_id,
+                "startExit": start_code,
+                "startStatus": started.get("status"), "wrote": []},
+                indent=2))
+            die(f"the new thread {new_id} exists but its start reported exit "
+                f"{start_code} (status {started.get('status')!r}): "
+                f"{str(start_err).strip()[:200]} — NOT writing the binding. "
+                "The stray thread is left as it is — a person decides what "
+                "happens to it")
         # The provider is proven by what the SERVER says the new thread ran
         # on, never by what we asked for. A mismatch refuses BEFORE any
         # write: the stray thread is left exactly as it is and a person
@@ -711,6 +788,14 @@ def cmd_rebind_thread(spec, dry_run=False):
             die(f"the new thread {new_id} reports model {new_model!r}, asked "
                 f"for {model!r}; NOT writing the binding. The stray thread "
                 "is left as it is — a person decides what happens to it")
+        found_now = look_again()
+        if found_now:
+            print(json.dumps({
+                "agent": agent.get("name"), "dryRun": False,
+                "oldThreadId": old_id, "newThreadId": new_id, "wrote": []},
+                indent=2))
+            die("not writing the binding: " + "; ".join(found_now)
+                + f" — the new thread {new_id} is left as it is")
         written = write_binding(http, spec["agent_id"],
                                 dict(live_binding, primaryThreadId=new_id))
         revision = [live_binding.get("bindingRevision"),
@@ -779,7 +864,14 @@ def cmd_rebind_rollback(spec):
     doc["rebinds"] = [dict(r, rolledBackAt=time.strftime(
         "%Y-%m-%dT%H:%M:%SZ", time.gmtime())) if r is target else r
         for r in rebinds]
-    write_config_file(result_path, doc)
+    try:
+        write_config_file(result_path, doc)
+    except BaseException:
+        log(f"the binding was restored to {target['oldThreadId']} but the "
+            f"record at {result_path} was NOT written; before any retry, "
+            "mark that record's last rebind rolledBackAt — the live binding "
+            "and the record now disagree")
+        raise
     print(json.dumps({
         "agent": agent.get("name"), "boardStatus": agent.get("status"),
         "restoredThreadId": target["oldThreadId"],
