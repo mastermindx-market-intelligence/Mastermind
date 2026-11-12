@@ -553,7 +553,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/application-transport-image.tar
           key: docker-fixture-application-transport-${{ runner.arch }}-ubuntu-24.04-68ee22004a91-${{ hashFiles('tests/application_tunnel_ci/Dockerfile') }}
-      - name: Verify closed application and capacity transports in isolated root fixtures
+      - name: Verify closed application transport in isolated root fixtures
         if: matrix.index == 0
         env:
           APPLICATION_TRANSPORT_IMAGE_RESTORED: ${{ steps.application_transport_image_cache.outputs.cache-hit }}
