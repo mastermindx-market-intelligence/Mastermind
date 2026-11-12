@@ -612,6 +612,26 @@ class TestSocketService:
         finally:
             server.close()
 
+    def test_paperclip_error_reaches_the_caller_typed(self, tmp_path):
+        # GBL-5 B2 (panel B old-code #2): the store's typed
+        # GblPaperclipError (RECORD_INVALID, AMBIGUOUS_CREATE, …) used to
+        # be flattened to INTERNAL_ERROR with detail "GblPaperclipError"
+        # at the serve loop — the client's own code and detail must reach
+        # the caller typed.
+        from integrations.gbl.paperclip_client import GblPaperclipError
+
+        class RefusingStore(FakeStore):
+            def read_ask(self, ask_id):
+                raise GblPaperclipError("RECORD_INVALID", "fixture refusal")
+        server = _server(tmp_path, bridge(RefusingStore()), (os.getuid(),))
+        try:
+            response = _exchange(server, REQUEST)
+            assert response["ok"] is False
+            assert response["error"]["code"] == "RECORD_INVALID"
+            assert response["error"]["detail"] == "fixture refusal"
+        finally:
+            server.close()
+
     def test_real_bridge_over_socket_end_to_end(self, tmp_path):
         store = FakeStore()
         core = bridge(store)

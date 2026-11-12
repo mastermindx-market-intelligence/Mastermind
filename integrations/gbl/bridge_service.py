@@ -785,6 +785,16 @@ class BridgeServer:
         except TypeError:
             return self._error("INVALID_ARGUMENTS")
         except Exception as exc:  # no traceback or payload crosses the wire
+            # GBL-5 B2 (panel B old-code #2): the store's typed
+            # GblPaperclipError (RECORD_INVALID, AMBIGUOUS_CREATE, …) must
+            # reach the caller with ITS code and detail, not be flattened
+            # to INTERNAL_ERROR.  The import is local because
+            # paperclip_client imports this module at load (a top-level
+            # import here would be a load-order cycle); at dispatch time
+            # both modules are loaded and this is a sys.modules lookup.
+            from integrations.gbl.paperclip_client import GblPaperclipError
+            if isinstance(exc, GblPaperclipError):
+                return self._error(exc.code, exc.detail)
             return self._error("INTERNAL_ERROR", type(exc).__name__)
         return {"schema": RESPONSE_SCHEMA, "ok": True, "result": result}
 
