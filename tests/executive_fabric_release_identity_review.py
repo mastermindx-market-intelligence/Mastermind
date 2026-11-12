@@ -807,13 +807,27 @@ REVIEWED_FILES['app/mastermind_os/src/fixtures/knowledge-memory-source.json'] = 
 # Exact whole-file hash and whole-token spans only; any drift restores the
 # ordinary D8 guard. This pin is a source-drift qualification, not independent
 # review or release authority.
-REVIEWED_FILES['control_plane/workspace_capacity_fabric.py'] = {'sha256': 'f48347aa98d894368e7e175263427c55f79c066cb3c7dfd7f32ea4253db53892', 'sites': ((234, 66, 69, 'int', '900'), (277, 106, 109, 'int', '900'))}
+# 2026-11-11 WO-20 fourth-drift merge (master 8ee0196d, landed #2351): the
+# merged file is master's byte-identical landing, whose review advanced the
+# two qualified 900-second bounds into the shared contract as named
+# constants (common/workspace_capacity_fabric_contract.py:
+# MAX_PREVIEW_LIFETIME_SECONDS = 900, MAX_CONSUMER_RECEIPT_SECONDS = 900 -
+# self-describing elapsed-time limits, never identities). The pinned file no
+# longer contains the reviewed literals, the merged bytes carry no identity
+# finding, and master's landing registers no pin for this path, so the entry
+# is retired onto master's registry parity. Any future re-introduction of
+# inline freshness literals restores the ordinary D8 guard.
 
 # 2026-11-09 MMOS composition (commit 3838b8b82, PR #2351): the 900px breakpoint
 # of the Capacity Fabric responsive layout is a CSS viewport width in the
 # alias-tainted accounts-selector line, never an identity. Exact whole-file
 # hash and whole-token span only; any drift restores the ordinary D8 guard.
-REVIEWED_FILES['app/mastermind_os/src/resources/capacity-fabric.css'] = {'sha256': 'e75e39ac6eba0344f4a3133d3c875976d342b7db9b69e6010c6d29f0ffc8f1bf', 'sites': ((49, 19, 22, 'int', '900'),)}
+# 2026-11-11 WO-20 fourth-drift merge (master 8ee0196d, landed #2351): the
+# merged css is master's byte-identical landing; its landing review only
+# reformatted the media query across lines, and the reviewed 900px token
+# stays byte-identical at line 49, columns 19-22. Digest requalified onto
+# the merged bytes; no new literal site is qualified.
+REVIEWED_FILES['app/mastermind_os/src/resources/capacity-fabric.css'] = {'sha256': '38971b8a47bc3beacf846f892028080c54a1f445c7892cd85ea53eca4ed1977a', 'sites': ((49, 19, 22, 'int', '900'),)}
 
 # Actual local Programs observation negative-test HTTP statuses, no OS identity.
 # 2026-11-07 attended source check: native Hermes composition and exact pending
