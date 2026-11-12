@@ -54,9 +54,7 @@ action, evidence, missing control and supported next step; do not invent a globa
 human gate. Continue genuinely independent permitted work.
 
 Use already provisioned credentials only for the assigned, verified origin and
-account; never expose, copy into evidence, or export secrets. MFA, passkeys,
-Touch ID, CAPTCHA, credential unlock and actual approval dialogs retain their
-human controls. Full Access or approval_policy=never does not waive them.
+account; never expose, copy into evidence, or export secrets.
 Keep host storage/isolation and provider/budget restrictions. No new paid credits,
 Codex/Work invocation or metered route without its applicable authorization.
 
