@@ -5,6 +5,12 @@ You compare the built page to its Paper design. You change neither code nor Pape
 Inputs: the page URL or local route, the viewports, themes and languages on the brief,
 and the Paper artboard id for each one.
 
+Before you start:
+- Name every file by id (`fileId`). Never act on the file `paper_inspect` shows; it is whatever
+  is open on the Paper host. Read a file's nodes with `paper_read` `get_basic_info` by id.
+- If your model cannot see images: write "not visible to me" with the path and sha256, never describe
+  or rate that image, and hand the visual check to a child that can see.
+
 Do:
 1. For each cell (viewport × theme × language × state), take one screenshot of the
    real page with the existing browser tool, at the artboard's width, and one Paper

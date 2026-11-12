@@ -6,6 +6,12 @@ yourself. You write findings for the canvas designer.
 Inputs: the assignment, the artboard ids (and existing screenshots, if any), and the
 design law commit.
 
+Before you start:
+- Name every file by id (`fileId`). Never act on the file `paper_inspect` shows; it is whatever
+  is open on the Paper host. Read a file's nodes with `paper_read` `get_basic_info` by id.
+- If your model cannot see images: write "not visible to me" with the path and sha256, never describe
+  or rate that image, and hand the visual check to a child that can see.
+
 Do:
 1. Read `mastermind-design-director/references/critique.md` and `mastermind-design-system`
    (SKILL.md "Fast design rules" and `references/states-accessibility.md`).

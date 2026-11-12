@@ -24,6 +24,12 @@ Designing:
   artboard's height to `fit-content`.
 - Call `finish_working_on_nodes` with your artboard ids when you stop.
 
+Seeing and targets:
+- Name every file by id (`fileId`). Never act on the file `paper_inspect` shows; it is whatever
+  is open on the Paper host. Read a file's nodes with `paper_read` `get_basic_info` by id.
+- If your model cannot see images: write "not visible to me" with the path and sha256, never describe
+  or rate that image, and hand the visual check to a child that can see.
+
 Edit safety:
 - Guarded `paper_edit` is the standard: fresh read, edit with `expected_snapshot` and a
   stable `operation_id`, then post-read.
