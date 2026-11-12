@@ -2052,9 +2052,15 @@ def handle_ask(pc, issue, reply, ask, op, opts):
             # The marker alone is not this ask's child: the marker is the
             # PARENT's content, so a sibling of a different ask matches it
             # too. Adopt only this ask's own child — same assignee, same
-            # title the create would have written.
+            # title the create would have written. Delta-4 D4-4: "own" also
+            # means created by THIS carrier (createdByAgentId == me, the
+            # N9/D4-6 law — the server stamps create authorship, so a
+            # foreign row is not ours to adopt no matter how well its text
+            # matches); marker, assignee and title are all public text a
+            # teammate can plant.
             for row in untruncated_children(pc, issue["id"], me.get("id")):
-                if (is_ask_child_of(row, issue)
+                if (row.get("createdByAgentId") == me.get("id")
+                        and is_ask_child_of(row, issue)
                         and row.get("assigneeAgentId") == agent_id
                         and (row.get("title") or "") == want_title):
                     log(f"ask create failed ({exc}) but child "

@@ -1765,6 +1765,87 @@ def test_create_failure_readback_adopts_only_this_asks_child():
     assert [c for c in pc.calls if c[0] == "block"] == []  # nobody adopted
 
 
+def test_create_failure_readback_never_adopts_a_foreign_child():
+    # Delta-4 D4-4: the create-failure read-back loop matched only marker +
+    # assignee + title — all three are public text a teammate can plant, and
+    # the marker is the PARENT's content, not the child creator's. A
+    # foreign-created child matching the whole triple was adopted as this
+    # ask's child: the parent blocked on a child this carrier never created
+    # (rc 0, silently wrong attribution) instead of failing honestly. The
+    # read-back now requires createdByAgentId == me like every other
+    # family decision (N9/D4-6 law: the server stamps create authorship;
+    # a foreign row is not ours to adopt).
+    roster = {"Vega-TEST": "ag-vega"}
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    ask_op = f"{op}-ask"
+    vega_ask = ("I need Vega.\n\n"
+                "```paperclip-ask\n"
+                "assignee: Vega-TEST\n"
+                "title: Review the summary\n"
+                "description: Read it and say if it is right.\n"
+                "```\n")
+    parent = board.served_parent(
+        id="is-1", identifier="MMO-1", status="todo", dependencyReady=True,
+        title="Summarize file X",
+        description="Write a three-line summary.")
+    planted = board.served_child(
+        id="ch-7", identifier="MMO-7", parentId="is-1",
+        assigneeAgentId="ag-vega", title="Review the summary",
+        status="todo", createdByAgentId="ag-anyone",   # NOT this carrier
+        description=f"Asked by Mira on MMO-1 [{ask_op}]")
+    parent["blockedBy"] = board.blocked_by(planted)
+    pc = FakePaperclip(issues={"is-1": parent}, fail=("create_issue",))
+    pc.child_rows["is-1"] = [dict(planted)]
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}]\n\ntask"),
+                          ("assistant", "r1", vega_ask)])
+    with pytest.raises(wc.CarrierError):
+        run_with_roster(pc, t3, roster)
+    assert [c for c in pc.calls if c[0] == "block"] == []  # nobody adopted
+
+
+def test_create_failure_readback_still_adopts_this_carriers_own_child():
+    # D4-4's companion: the identity gate must not over-tighten. The honest
+    # lost-answer race — the create's HTTP answer never arrives but the
+    # server executed it (R2a finding 6), so the child appears only between
+    # the reuse scan and the read-back, stamped createdByAgentId == me
+    # (the server stamps the authenticated agent — D4-6). The adoption
+    # stands: one child, the parent blocked on it.
+    roster = {"Vega-TEST": "ag-vega"}
+    op = wc.op_id("is-1", "Summarize file X\nWrite a three-line summary.")
+    ask_op = f"{op}-ask"
+    vega_ask = ("I need Vega.\n\n"
+                "```paperclip-ask\n"
+                "assignee: Vega-TEST\n"
+                "title: Review the summary\n"
+                "description: Read it and say if it is right.\n"
+                "```\n")
+    parent = board.served_parent(
+        id="is-1", identifier="MMO-1", status="todo", dependencyReady=True,
+        title="Summarize file X",
+        description="Write a three-line summary.")
+    parent["blockedBy"] = board.blocked_by()      # todo parent, no relation yet
+
+    class LostAnswerCreate(FakePaperclip):
+        def create_issue(self, company_id, payload):
+            # the server executed the create; only its answer is lost
+            row = board.served_child(
+                id="ch-8", identifier="MMO-8", parentId=payload["parentId"],
+                assigneeAgentId=payload.get("assigneeAgentId"),
+                title=payload.get("title"), status="todo",
+                description=payload.get("description"))
+            self.child_rows.setdefault(payload["parentId"], []).append(row)
+            raise wc.CarrierError("POST /api/issues -> HTTP 503 (fake)")
+
+    pc = LostAnswerCreate(issues={"is-1": parent})
+    t3 = FakeT3(messages=[("user", "r1", f"[{op}]\n\ntask"),
+                          ("assistant", "r1", vega_ask)])
+    assert run_with_roster(pc, t3, roster) == 0
+    assert len(pc.child_rows["is-1"]) == 1       # the one child, adopted
+    blocks = [c for c in pc.calls if c[0] == "block"]
+    assert blocks and blocks[0][2] == ("ch-8",)  # parent blocked on it
+    assert pc.issues["is-1"]["status"] == "blocked"
+
+
 def test_a_second_ask_keeps_the_first_child_in_the_blocker_set():
     # The unblock PATCH carries the WHOLE blocker set, and the carrier sent
     # only the new child: the first child's relation was deleted, its
