@@ -699,3 +699,91 @@ Per the round's scope, recorded and left:
 - **N11** (unbounded re-parse, `wake_carrier.py:191-276`/`2633-2638` at
   42b0ffe1d) — recorded as a note; bounding it is a behavior change to
   the wake loop that no round-4 finding forced.
+
+## Round 5 (delta-4, 2026-11-11) — final round under ruling 12
+
+Base `608d43870`, head at this round's end. Findings: the panel-2
+SCORE.md "Delta check 4" section. Six code items, each red test first;
+logs under `~/.mastermind/mmos_evidence/rf-20261111/round5/`.
+
+### D4-6 probe — server-stamped create authorship (verdict: stamped)
+
+Before the code items: does issue-create honour a client-supplied
+`createdByAgentId`? An isolated dev board (instance `rfprobe`, loopback
+3792, its own postgres on 54399, no real root touched) ran one create
+supplying a foreign `createdByAgentId` as the authenticated agent; the
+read-back and a direct DB cross-check both show the row carries the
+AUTHENTICATED agent. Source agrees: `routes/issues.js` builds
+`createInput = { ...createBody, …, createdByAgentId: actor.agentId }` —
+the stamp comes after the body spread, and the zod create schemas have
+no such field. So the identity gates on `createdByAgentId` are
+server-backed attribution: a caller cannot forge another agent's
+authorship on create. Evidence: `~/.mastermind/mmos_evidence/
+rf-20261111/round5/d4-6-probe.md`. (One earlier launch attempt
+transiently joined the real instance's postgres via an unset
+`embeddedPostgresPort`; SELECT-only reconciliation showed zero rows
+written or updated; the config was pinned to 54399 before the probe.)
+
+### Repairs
+
+- **D4-1 (HIGH)** — single-shrink legacy-op collision. When the family's
+  true oldest member was cancelled, the done family shrank to one child
+  and single-mode addressed the survivor's own turn with the unsuffixed
+  `{ask_op}-ret` op — the cancelled child's OLD answered turn then
+  reconciled as the survivor's answer and was delivered: exit 0,
+  in_review, no error. The legacy owner is now computed over done AND
+  cancelled rows (`_true_oldest_id`, before the cancelled split) and the
+  return edge refuses loudly (CarrierError naming both children) when a
+  non-owner reconciles or claims the answered/pending legacy turn; a
+  family row without `createdAt` cannot attribute the turn and refuses
+  too. A deleted sibling is undetectable in the children list and stays
+  a documented residual. Test:
+  `test_single_shrink_legacy_collision_refuses_instead_of_delivering`.
+- **D4-2** — equal-createdAt tie. The order sites sorted on the bare
+  `createdAt` string, so equal timestamps fell back to the board's
+  served (newest-activity-first) order and the legacy op was adopted by
+  whichever row was served first. Both sites (`ordered_oldest_first`,
+  the `oldest_id` min) now use `(createdAt, id)` — the same stable
+  second key `_true_oldest_id` uses, so the adoption site and the D4-1
+  guard can never disagree. Test:
+  `test_equal_createdAt_tie_breaks_on_id_not_served_order`.
+- **D4-3** — the N5 truncation raise is scoped to children that can be
+  this carrier's. A truncated list row the board attributes to another
+  agent (`createdByAgentId != me`, served on the list row) can never
+  pass any caller's identity filter; it is now skipped without the full
+  re-read, so its failed read no longer kills the wake (an unrelated
+  truncated child's 503 cost the own done child its delivery, every
+  wake). Mine and unattributed truncated rows still re-read with the
+  N5 raise. Test:
+  `test_a_foreign_truncated_childs_failed_read_never_kills_the_wake`.
+- **D4-4** — the create-failure adoption loop matched only marker +
+  assignee + title (all public text a teammate can plant; the marker is
+  the PARENT's content). A foreign-created child matching the triple
+  was adopted: rc 0, the parent silently blocked on a child this
+  carrier never created. The loop now requires `createdByAgentId == me`
+  (N9/D4-6 law); no own child found re-raises honestly. Red:
+  `test_create_failure_readback_never_adopts_a_foreign_child`;
+  companion (the honest lost-answer race, the server executed the
+  create and stamped me): adoption stands,
+  `test_create_failure_readback_still_adopts_this_carriers_own_child`.
+- **D4-5** — the identity gate's cannot-attribute arm. A
+  marker-matching child with NO `createdByAgentId` was silently dropped
+  from the family (rc 0, no board trace, every wake) — and the same row
+  would be dropped or duplicated the same silent way by the return edge
+  and the reuse scan, which the gate precedes in one wake. The gate now
+  raises CarrierError on an unattributed marker-matching child. Test:
+  `test_an_unattributed_marker_child_is_refused_not_silently_dropped`.
+- **D4-7** — empty-family exits over a recorded blocker are
+  board-visible, not log-only. The gate's no-ask-child probe exit (the
+  round-2 P3 shape), the gate's family-outside-the-recorded-blockers
+  exit and the return edge's no-done-child exit (defense in depth) now
+  post ONE idempotent `[t2-carrier]` note naming the recorded blockers
+  (`_blocker_note`). Tests:
+  `test_a_recorded_blocker_no_wake_covers_leaves_a_board_note`,
+  `test_a_family_outside_the_recorded_blockers_leaves_a_board_note`,
+  `test_handle_returns_empty_family_posts_a_note_when_blockers_recorded`.
+
+### The round's written notes stay as recorded
+
+N4, N6, N7, N8, N11 — unchanged from the round-4 notes section; no
+delta-4 finding reopened them.
