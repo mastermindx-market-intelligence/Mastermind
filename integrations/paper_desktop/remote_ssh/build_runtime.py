@@ -98,6 +98,13 @@ def main(argv=None) -> int:
         ap.error("--dest already exists; this builder never replaces a runtime")
     home = str(Path.home())
     repo = Path(a.repo)
+    # sshd runs the forced command through the login shell, which sources its rc
+    # first (zsh: ~/.zshenv). Any byte it prints would corrupt MCP stdout.
+    shell = os.environ.get("SHELL", "/bin/sh")
+    noise = subprocess.run([shell, "-c", "true"], stdin=subprocess.DEVNULL,
+                           capture_output=True).stdout
+    if noise:
+        ap.error(f"login shell {shell} prints {len(noise)} bytes to stdout on startup; fix its rc first")
 
     dest.mkdir(mode=0o700, parents=False)
     for sub in ("source", "bin"):

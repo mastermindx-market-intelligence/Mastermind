@@ -3,7 +3,7 @@
 
   keyline.py make   --profile read|design --from <ip> --pubkey <file> --runtime <dir> --label <name>
   keyline.py check  --line-file <file> --runtime <dir>
-  keyline.py append --line-file <file> --authorized-keys <file> --backup-dir <new dir> [--apply]
+  keyline.py append --line-file <file> --runtime <dir> --authorized-keys <file> --backup-dir <new dir> [--apply]
 
 Every line has exactly: restrict, one literal from= address, and a forced command that
 is one of the runtime's fixed gate scripts. `restrict` turns off pty, agent, X11 and
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import fcntl
 import hashlib
 import ipaddress
 import json
@@ -64,6 +65,7 @@ def check_line(line: str, runtime: Path | None = None) -> dict:
 
 
 def make(profile: str, ip: str, pubkey: str, runtime: Path, label: str) -> str:
+    runtime = Path(os.path.normpath(str(runtime)))
     if profile not in ("read", "design"):
         raise ValueError("profile must be read or design")
     if not LABEL.match(label):
@@ -77,8 +79,18 @@ def make(profile: str, ip: str, pubkey: str, runtime: Path, label: str) -> str:
     return line
 
 
-def append(line: str, ak: Path, backup_dir: Path, apply: bool) -> dict:
-    info = check_line(line)
+def append(line: str, runtime: Path, ak: Path, backup_dir: Path, apply: bool) -> dict:
+    info = check_line(line, Path(os.path.normpath(str(runtime))))
+    # One lock across read, check and append; another keyline append waits.
+    lock_fd = os.open(str(ak) + ".mmos-paper.lock", os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        return _append_locked(line, info, ak, backup_dir, apply)
+    finally:
+        os.close(lock_fd)
+
+
+def _append_locked(line: str, info: dict, ak: Path, backup_dir: Path, apply: bool) -> dict:
     existing = ak.read_bytes() if ak.exists() else b""
     if line.encode() in existing.splitlines():
         raise ValueError("LINE_ALREADY_PRESENT")
@@ -123,6 +135,7 @@ def main(argv=None) -> int:
     ck.add_argument("--runtime")
     apd = sub.add_parser("append")
     apd.add_argument("--line-file", required=True)
+    apd.add_argument("--runtime", required=True)
     apd.add_argument("--authorized-keys", required=True)
     apd.add_argument("--backup-dir", required=True)
     apd.add_argument("--apply", action="store_true")
@@ -135,7 +148,7 @@ def main(argv=None) -> int:
             print(json.dumps(check_line(line, Path(a.runtime) if a.runtime else None)))
         else:
             line = Path(a.line_file).read_text().strip()
-            print(json.dumps(append(line, Path(a.authorized_keys), Path(a.backup_dir), a.apply)))
+            print(json.dumps(append(line, Path(a.runtime), Path(a.authorized_keys), Path(a.backup_dir), a.apply)))
     except (ValueError, OSError) as exc:
         print(json.dumps({"state": "REFUSED", "reason": str(exc)}))
         return 2
