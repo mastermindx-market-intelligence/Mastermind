@@ -42,6 +42,15 @@ def test_control_plane_does_not_reference_window_reader() -> None:
 # Exact importer -> module exceptions. Each entry is a single importer path mapped to the
 # only Reader modules that importer may name; there is no package-wide or wildcard allowance.
 EXTERNAL_IMPORTER_EXCEPTIONS: dict[str, frozenset[str]] = {
+    "integrations/mastermind_steward_app/installed_profiles.py": frozenset(
+        {"integrations.mastermind_window_reader.owner_read_resource"}
+    ),
+    "integrations/mastermind_workspace_app/native_authorization_identity.py": frozenset(
+        {"integrations.mastermind_window_reader.owner_read_resource"}
+    ),
+    "tests/test_native_authorization_identity.py": frozenset(
+        {"integrations.mastermind_window_reader.owner_read_resource"}
+    ),
     "integrations/mastermind_steward_app/installed.py": frozenset(
         {
             "integrations.mastermind_window_reader.production_binding",
@@ -180,3 +189,19 @@ def test_import_fence_still_rejects_unapproved_nested_importers(
 def test_import_scan_preserves_missing_source_errors(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         _imports(tmp_path / "absent.py")
+
+
+@pytest.mark.parametrize("path,names", [
+    ("integrations/mastermind_steward_app/installed_profiles.py", {'NativeOutputReadResource'}),
+    ("integrations/mastermind_workspace_app/native_authorization_identity.py", {"_content_identity_reader"}),
+    ("tests/test_native_authorization_identity.py", {"from_existing_business_owner", "NativeOutputReadResource"}),
+])
+def test_authorization_metadata_importers_use_only_the_exact_reviewed_reader_symbols(path, names):
+    # These exact issuer/reader seams do not admit another Reader module or
+    # an arbitrary factory/dispatch import at the same importer path.
+    imports = [node for node in ast.walk(ast.parse((ROOT / path).read_text()))
+               if isinstance(node, ast.ImportFrom) and node.module ==
+               "integrations.mastermind_window_reader.owner_read_resource"]
+    assert imports
+    assert {alias.name for node in imports for alias in node.names} == names
+    assert all(alias.name != "*" for node in imports for alias in node.names)

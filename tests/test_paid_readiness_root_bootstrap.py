@@ -11,11 +11,57 @@ import pytest
 
 SOURCE=Path(__file__).resolve().parents[1]/'ops/native_fabric/quota_continuity/candidate/paid_host_readiness.py'
 
+_READINESS_IDENTITY_FIELDS = (
+    'dev', 'ino', 'mode', 'uid', 'gid', 'nlink', 'size', 'mtime_ns', 'ctime_ns',
+)
+
+
+def _observe_bootstrap_identity(m, frame, info, comparison, root, definition,
+                                fixture_root, seen):
+    """Describe the first real comparison without reading another stat or path."""
+    if seen or frame.f_code is not m._RootSourceBootstrap.check.__code__:
+        return
+    before = frame.f_locals.get('before')
+    if type(before) is not tuple or len(before) != len(_READINESS_IDENTITY_FIELDS):
+        return
+    current = m._identity(info)
+    if current == before:
+        return
+    owner = frame.f_locals['self']
+    held_fd = frame.f_locals['fd']
+    path = next((path for path, item in owner.held.items() if item[0] == held_fd), None)
+    if path is None:
+        return
+    if path.is_relative_to(root):
+        scope = 'release'
+    elif path.is_relative_to(definition):
+        scope = 'definition'
+    elif path.is_relative_to(fixture_root):
+        scope = 'fixture_ancestor'
+    else:
+        scope = 'external_ancestor'
+    report = {
+        'comparison': comparison,
+        'scope': scope,
+        'kind': 'directory' if stat.S_ISDIR(before[2]) else 'file',
+        'changed_fields': [
+            field for field, old, new in zip(_READINESS_IDENTITY_FIELDS, before, current)
+            if old != new
+        ],
+    }
+    seen.append(report)
+    # Never emit paths, source, raw stat values or exception text. Pytest retains
+    # this captured line on a failure; the original check still decides refusal.
+    print('READINESS_IDENTITY_DIAGNOSTIC ' + json.dumps(report, sort_keys=True),
+          file=sys.stderr)
+
+
 @pytest.fixture
 def bootstrap(tmp_path,monkeypatch):
     spec=importlib.util.spec_from_file_location('inert_readiness_bootstrap',SOURCE)
     m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
-    root=tmp_path/'releases'/('a'*40);definition=tmp_path/'definition'
+    fixture_root=tmp_path/'namespace'
+    root=fixture_root/'releases'/('a'*40);definition=fixture_root/'definition'
     root.mkdir(parents=True);definition.mkdir()
     files={
         'control_plane/__init__.py':b'',
@@ -40,17 +86,64 @@ def bootstrap(tmp_path,monkeypatch):
         (root/'.executive-release-manifest.json').write_bytes(raw)
         (definition/'profile.json').write_bytes(m.canonical(dict(release_commit=root.name,release_tree='b'*40,release_manifest_sha256=hashlib.sha256(raw).hexdigest())))
     seal()
-    # Only the native Root ownership/ancestor mode/ACL premise is simulated.
-    # The actual opened FD, named identities, bytes, import finder and compile run.
+    # Simulate native Root ownership/mode/ACL and stable child-list metadata on
+    # the exact external directory ancestors of this disposable namespace.
+    # Sibling activity can change nlink, size, mtime and ctime without changing
+    # these copied sources. Only those four observed fields are projected.
+    # Device/inode stay real, ownership/mode keep their existing premises, and
+    # every field inside the namespace stays outside this new projection.
+    # Actual FDs, descriptor/named device and inode, bytes, finder and compile run.
     raw_fstat=os.fstat;raw_stat=os.stat
+    external_ancestors = frozenset(fixture_root.parents)
+    external_contents = {}
+    content_fields = ('st_nlink', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
     class RootInfo:
-        def __init__(self,value):self.value=value
+        def __init__(self,value,contents=None):
+            self.value=value
+            self.contents=contents
         st_uid=0;st_gid=0
         @property
         def st_mode(self):return self.value.st_mode&~0o022 if stat.S_ISDIR(self.value.st_mode) else self.value.st_mode
-        def __getattr__(self,key):return getattr(self.value,key)
-    monkeypatch.setattr(os,'fstat',lambda fd:RootInfo(raw_fstat(fd)))
-    monkeypatch.setattr(os,'stat',lambda *a,**kw:RootInfo(raw_stat(*a,**kw)))
+        def __getattr__(self,key):
+            if self.contents is not None and key in self.contents:
+                return self.contents[key]
+            return getattr(self.value,key)
+    def root_info(value, frame):
+        path = None
+        if frame.f_code is m._RootSourceBootstrap.hold.__code__:
+            path = frame.f_locals.get('path')
+        elif frame.f_code is m._RootSourceBootstrap.check.__code__:
+            owner, fd = frame.f_locals['self'], frame.f_locals['fd']
+            path = next((p for p, item in owner.held.items() if item[0] == fd), None)
+        contents = None
+        if stat.S_ISDIR(value.st_mode) and path in external_ancestors:
+            contents = external_contents.setdefault(
+                path, {field: getattr(value, field) for field in content_fields},
+            )
+        return RootInfo(value, contents)
+    seen_identity_drift = []
+    def observed_fstat(fd):
+        info = root_info(raw_fstat(fd), sys._getframe(1))
+        try:
+            _observe_bootstrap_identity(
+                m, sys._getframe(1), info, 'fd', root, definition, fixture_root,
+                seen_identity_drift,
+            )
+        except Exception:
+            pass  # Diagnostic failure cannot replace the original guard outcome.
+        return info
+    def observed_stat(*args, **kwargs):
+        info = root_info(raw_stat(*args, **kwargs), sys._getframe(1))
+        try:
+            _observe_bootstrap_identity(
+                m, sys._getframe(1), info, 'named', root, definition, fixture_root,
+                seen_identity_drift,
+            )
+        except Exception:
+            pass
+        return info
+    monkeypatch.setattr(os,'fstat',observed_fstat)
+    monkeypatch.setattr(os,'stat',observed_stat)
     monkeypatch.setattr(m,'_bootstrap_acl',lambda fd:None)
     monkeypatch.setattr(m,'_RELEASES',root.parent);monkeypatch.setattr(m,'_DEFINITION',definition)
     names=lambda name:any(name==p or name.startswith(p+'.') for p in ('ops','control_plane','scripts','common'))
@@ -104,13 +197,41 @@ def test_unknown_root_module_has_no_path_loader_fallback(bootstrap):
         with m._qualified_root_interfaces():pytest.fail('unlisted source imported')
 
 
-def test_source_replacement_during_context_is_detected(bootstrap):
+def test_source_replacement_during_context_is_detected(bootstrap, capsys):
     m,root,_,_=bootstrap
-    with pytest.raises(ValueError):
+    with pytest.raises(m.ReadinessRefused):
+        with m._qualified_root_interfaces() as interfaces:
+            target=root/'ops/executive_os/canonical_paid_qualification.py'
+            target.write_text('ANSWER=99\n# PRIVATE_SOURCE_SENTINEL\n')
+            interfaces.check()
+    stderr = capsys.readouterr().err
+    rows = [line.removeprefix('READINESS_IDENTITY_DIAGNOSTIC ')
+            for line in stderr.splitlines()
+            if line.startswith('READINESS_IDENTITY_DIAGNOSTIC ')]
+    assert len(rows) == 1
+    report = json.loads(rows[0])
+    assert set(report) == {'comparison', 'scope', 'kind', 'changed_fields'}
+    assert report['comparison'] == 'fd'
+    assert report['scope'] == 'release' and report['kind'] == 'file'
+    assert 'size' in report['changed_fields']
+    assert set(report['changed_fields']) <= set(_READINESS_IDENTITY_FIELDS)
+    assert str(root) not in stderr and 'PRIVATE_SOURCE_SENTINEL' not in stderr
+
+
+def test_identity_diagnostic_failure_preserves_the_original_refusal(
+    bootstrap, monkeypatch, capsys,
+):
+    m,root,_,_=bootstrap
+    def broken_observer(*args, **kwargs):
+        raise RuntimeError('PRIVATE_DIAGNOSTIC_SENTINEL')
+    monkeypatch.setattr(sys.modules[__name__], '_observe_bootstrap_identity',
+                        broken_observer)
+    with pytest.raises(m.ReadinessRefused):
         with m._qualified_root_interfaces() as interfaces:
             target=root/'ops/executive_os/canonical_paid_qualification.py'
             target.write_text('ANSWER=99\n')
             interfaces.check()
+    assert 'PRIVATE_DIAGNOSTIC_SENTINEL' not in capsys.readouterr().err
 
 
 @pytest.mark.parametrize('pointer,error,accepted',[(None,2,True),(None,0,False),(None,13,False),(123,0,False)])
@@ -159,3 +280,160 @@ def test_actual_root_owner_import_graph_from_disposable_git_sources(bootstrap,re
         interfaces.check()
     assert sys.path==before
     record_property('actual_root_python_snapshots',count)
+
+
+
+def test_external_ancestor_timestamp_noise_does_not_change_fixture_sources(bootstrap):
+    m,root,_,_=bootstrap
+    # This private outer directory belongs to this test, but is strictly above
+    # the disposable Root namespace. Never mutate a shared host ancestor.
+    external = root.parents[2]
+    with m._qualified_root_interfaces() as interfaces:
+        before = external.stat()
+        os.utime(external, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+        after = external.stat()
+        changed = {
+            field for field, old, new in zip(
+                _READINESS_IDENTITY_FIELDS, m._identity(before), m._identity(after),
+            ) if old != new
+        }
+        assert 'mtime_ns' in changed
+        assert changed <= {'mtime_ns', 'ctime_ns'}
+        interfaces.check()
+
+
+@pytest.mark.parametrize('scope', ['fixture_ancestor', 'release', 'definition'])
+def test_owned_namespace_timestamp_drift_is_still_refused(bootstrap, capsys, scope):
+    m,root,definition,_=bootstrap
+    target = {
+        'fixture_ancestor': root.parent.parent,
+        'release': root,
+        'definition': definition,
+    }[scope]
+    with pytest.raises(m.ReadinessRefused):
+        with m._qualified_root_interfaces() as interfaces:
+            before = target.stat()
+            os.utime(target, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+            after = target.stat()
+            changed = {
+                field for field, old, new in zip(
+                    _READINESS_IDENTITY_FIELDS, m._identity(before), m._identity(after),
+                ) if old != new
+            }
+            assert 'mtime_ns' in changed
+            assert changed <= {'mtime_ns', 'ctime_ns'}
+            interfaces.check()
+    stderr = capsys.readouterr().err
+    rows = [json.loads(line.removeprefix('READINESS_IDENTITY_DIAGNOSTIC '))
+            for line in stderr.splitlines()
+            if line.startswith('READINESS_IDENTITY_DIAGNOSTIC ')]
+    assert len(rows) == 1
+    assert rows[0]['scope'] == scope and rows[0]['kind'] == 'directory'
+    assert rows[0]['comparison'] == 'fd'
+    assert 'mtime_ns' in rows[0]['changed_fields']
+    assert set(rows[0]['changed_fields']) <= {'mtime_ns', 'ctime_ns'}
+    assert str(target) not in stderr
+
+
+@pytest.mark.parametrize('field', ['nlink', 'size', 'mtime_ns', 'ctime_ns'])
+@pytest.mark.parametrize('comparison', ['fd', 'named'])
+def test_original_guard_refuses_each_content_field_without_fixture_projection(
+    monkeypatch, field, comparison,
+):
+    from types import SimpleNamespace
+    spec=importlib.util.spec_from_file_location('inert_timestamp_guard',SOURCE)
+    m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+    values = (1, 2, stat.S_IFDIR | 0o755, 0, 0, 1, 4096, 100, 200)
+    original = dict(zip(('st_' + name for name in _READINESS_IDENTITY_FIELDS), values))
+    changed = dict(original)
+    changed['st_' + field] += 1
+    before, after = SimpleNamespace(**original), SimpleNamespace(**changed)
+    assert [name for name in original if original[name] != changed[name]] == ['st_' + field]
+    guard = object.__new__(m._RootSourceBootstrap)
+    guard.held = {Path('/uninstalled-test-namespace'): (41, m._identity(before), None, 'synthetic')}
+    # The original production check runs with controlled returned metadata only.
+    # No real external ancestor is opened or mutated by this control.
+    with pytest.raises(m.ReadinessRefused):
+        with monkeypatch.context() as patch:
+            patch.setattr(os, 'fstat', lambda fd: after if comparison == 'fd' else before)
+            patch.setattr(os, 'stat', lambda *args, **kwargs: after if comparison == 'named' else before)
+            patch.setattr(m, '_bootstrap_acl', lambda fd: pytest.fail('drift reached ACL check'))
+            guard.check()
+
+
+def test_external_ancestor_child_entry_does_not_change_fixture_sources(bootstrap):
+    m,root,_,_=bootstrap
+    external = root.parents[2]
+    with m._qualified_root_interfaces() as interfaces:
+        before = external.stat()
+        (external / 'unrelated-owned-sibling').mkdir()
+        after = external.stat()
+        changed = {
+            field for field, old, new in zip(
+                _READINESS_IDENTITY_FIELDS, m._identity(before), m._identity(after),
+            ) if old != new
+        }
+        assert changed & {'nlink', 'size'}
+        assert changed <= {'nlink', 'size', 'mtime_ns', 'ctime_ns'}
+        interfaces.check()
+
+
+@pytest.mark.parametrize('scope', ['fixture_ancestor', 'release', 'definition'])
+def test_owned_namespace_child_entry_is_still_refused(bootstrap, capsys, scope):
+    m,root,definition,_=bootstrap
+    target = {
+        'fixture_ancestor': root.parent.parent,
+        'release': root,
+        'definition': definition,
+    }[scope]
+    with pytest.raises(m.ReadinessRefused):
+        with m._qualified_root_interfaces() as interfaces:
+            before = target.stat()
+            (target / 'new-owned-entry').mkdir()
+            after = target.stat()
+            changed = {
+                field for field, old, new in zip(
+                    _READINESS_IDENTITY_FIELDS, m._identity(before), m._identity(after),
+                ) if old != new
+            }
+            assert changed & {'nlink', 'size'}
+            assert changed <= {'nlink', 'size', 'mtime_ns', 'ctime_ns'}
+            interfaces.check()
+    stderr = capsys.readouterr().err
+    rows = [json.loads(line.removeprefix('READINESS_IDENTITY_DIAGNOSTIC '))
+            for line in stderr.splitlines()
+            if line.startswith('READINESS_IDENTITY_DIAGNOSTIC ')]
+    assert len(rows) == 1
+    assert rows[0]['scope'] == scope and rows[0]['kind'] == 'directory'
+    assert rows[0]['comparison'] == 'fd'
+    assert set(rows[0]['changed_fields']) & {'nlink', 'size'}
+    assert set(rows[0]['changed_fields']) <= {'nlink', 'size', 'mtime_ns', 'ctime_ns'}
+    assert str(target) not in stderr
+
+
+def test_external_ancestor_replacement_is_still_refused(bootstrap, capsys):
+    m,root,_,_=bootstrap
+    external = root.parents[2]
+    moved = external.with_name(external.name + '-held-original')
+    assert not moved.exists()
+    try:
+        with pytest.raises(m.ReadinessRefused):
+            with m._qualified_root_interfaces() as interfaces:
+                mode = stat.S_IMODE(external.stat().st_mode)
+                external.rename(moved)
+                external.mkdir(mode=mode)
+                interfaces.check()
+    finally:
+        # Restore only this test's private directory after the guard closes FDs.
+        if moved.exists():
+            external.rmdir()
+            moved.rename(external)
+    stderr = capsys.readouterr().err
+    rows = [json.loads(line.removeprefix('READINESS_IDENTITY_DIAGNOSTIC '))
+            for line in stderr.splitlines()
+            if line.startswith('READINESS_IDENTITY_DIAGNOSTIC ')]
+    assert len(rows) == 1
+    assert rows[0]['scope'] == 'external_ancestor'
+    assert rows[0]['comparison'] == 'named' and rows[0]['kind'] == 'directory'
+    assert rows[0]['changed_fields'] == ['ino']
+    assert str(external) not in stderr

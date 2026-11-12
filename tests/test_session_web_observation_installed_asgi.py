@@ -71,7 +71,11 @@ def native_profile(tmp_path, monkeypatch, binding):
             while not destination.exists() and not failures and time.monotonic() < until:
                 time.sleep(.01)
             assert destination.exists(), ("synthetic native startup", failures)
-            yield path
+            try:
+                yield path
+            except BaseException as exc:
+                exc.add_note(f"native fixture worker failures: {failures!r}")
+                raise
             assert not failures
         finally:
             proc.stdin.close()
@@ -111,11 +115,18 @@ def test_signed_installed_private_native_vertical_and_mid_read_revocation(
         raw["allowed_peer_uids"] = (os.geteuid(),)
         return raw
     monkeypatch.setattr(control, "_raw_for_factory", qualified_raw)
-    calls, revoke = [], [False]
+    calls, completed_censuses, census_errors, revoke = [], [], [], [False]
+    revocation_committed = threading.Event()
     original_census = web_sol_client.census_via_extension
     def census(binding, **kwargs):
         calls.append((binding["binding_id"], kwargs))
-        result = original_census(binding, **kwargs)
+        try:
+            result = original_census(binding, **kwargs)
+        except Exception as exc:
+            census_errors.append({"attempt": len(calls), "type": type(exc).__name__,
+                                  "message": str(exc)})
+            raise
+        completed_censuses.append(binding["binding_id"])
         if revoke[0]:
             withdrawn = json.loads(b.path.read_text())
             withdrawn["session_web_observation"]["permissions"] = {
@@ -123,6 +134,7 @@ def test_signed_installed_private_native_vertical_and_mid_read_revocation(
             replacement = b.path.with_name("revoked.json")
             replacement.write_text(json.dumps(withdrawn)); replacement.chmod(0o600)
             replacement.replace(b.path)
+            revocation_committed.set()
         return result
     monkeypatch.setattr(web_sol_client, "census_via_extension", census)
 
@@ -162,7 +174,7 @@ def test_signed_installed_private_native_vertical_and_mid_read_revocation(
                     foreign = auth._read_token(rsa_key, iat=now - 1, nbf=now - 1,
                                                exp=now + 300, client_id="another-client")
                     _, empty = await host.call(http, foreign, OBSERVE_TOOL, {})
-                    assert empty["ok"] is True and empty["data"]["sources"] == []
+                    assert empty["ok"] is True and empty["data"]["sources"] == [], empty
                     assert len(calls) == 1
                     # A caller cannot smuggle a profile selector into the private tool.
                     malformed = await _raw_ceo_request(Path(raw["ceo_ingress_socket_path"]), (
@@ -182,10 +194,16 @@ def test_signed_installed_private_native_vertical_and_mid_read_revocation(
                     # Revoke after the real native read but before private completion.
                     revoke[0] = True
                     _, withheld = await host.call(http, token, OBSERVE_TOOL, {})
+                    # A transport refusal is not evidence that the intended
+                    # post-read permission change actually took place.
+                    assert len(completed_censuses) == 2, (
+                        "second real native census did not complete", census_errors)
+                    assert revocation_committed.is_set(), (
+                        "permission revocation was not published", census_errors)
                     assert withheld["ok"] is False and withheld["data"] is None
                     assert len(calls) == 2
                     _, empty = await host.call(http, token, OBSERVE_TOOL, {})
-                    assert empty["ok"] is True and empty["data"]["sources"] == []
+                    assert empty["ok"] is True and empty["data"]["sources"] == [], empty
                     assert len(calls) == 2, "withdrawn permission must not re-enter C2"
             assert constructors, "the actual Control factory never composed the installed owner"
 

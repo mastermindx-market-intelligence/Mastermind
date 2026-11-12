@@ -119,32 +119,14 @@ APPLICATION_PREIMAGES = {
 
 
 def verify_current_stage(output):
-    """Qualify the current107 build before restoring any historical bytes."""
+    """Qualify all current107 bytes before restoring historical fixtures."""
+    import test_native_current_source as current_source
     native = Path(builder.__file__).parent.parent
-    manifest_raw = (output / 'native-manifest.json').read_bytes()
-    inventory_raw = (output / 'native-source-inventory.json').read_bytes()
-    baseline_raw = (native / 'rollout/native-manifest.json').read_bytes()
-    baseline_inventory_raw = (native / 'rollout/native-source-inventory.json').read_bytes()
-    manifest = json.loads(manifest_raw)
-    inventory = json.loads(inventory_raw)
-    if (manifest_raw != baseline_raw or inventory_raw != baseline_inventory_raw
-            or len(manifest) != 107
-            or set(manifest) != {'ext/' + name for name in builder.BASE_FILES | builder.ADDITIONS} | {'pool'}
-            or set(inventory['files']) != set(manifest)
-            or inventory['native_code_files'] != len(manifest)):
-        raise AssertionError('current application source closure differs')
-    for name, wanted in manifest.items():
-        data = (output / 'native-code-stage' / name).read_bytes()
-        row = inventory['files'][name]
-        source = (native / row['source']).read_bytes()
-        if (g.digest(data) != wanted or row['sha256'] != wanted
-                or row['bytes'] != len(data) or source != data):
-            raise AssertionError('current captured source differs: ' + name)
-        if name in APPLICATION_PREIMAGES:
-            candidate = 'candidate/' + name.split('/')[1]
-            if row['source'] != candidate or (native / candidate).read_bytes() != data:
-                raise AssertionError('current application candidate differs: ' + name)
-    return manifest
+    if set(APPLICATION_PREIMAGES) != current_source.APPLICATION_MEMBERS:
+        raise AssertionError("current application source binding differs")
+    return current_source.verify_current_stage(
+        output, native,
+        {"ext/" + name for name in builder.BASE_FILES | builder.ADDITIONS} | {"pool"})
 
 
 def restore_application_preimages(stage, manifest):
@@ -164,7 +146,8 @@ class PairedLauncherUpgrade(unittest.TestCase):
         try:
             cls.shared = tempfile.TemporaryDirectory(prefix='upgrade-source-')
             cls.built = Path(cls.shared.name).resolve() / 'built'
-            with mock.patch.object(sys, 'argv', ['builder', '--output', str(cls.built)]), \
+            with mock.patch.object(sys, 'argv', ['builder', '--output', str(cls.built),
+                                                 '--broker-busy-epoch']), \
                     contextlib.redirect_stdout(io.StringIO()):
                 builder.main()
             current_manifest = (cls.built / 'native-manifest.json').read_bytes()
@@ -300,25 +283,21 @@ class PairedLauncherUpgrade(unittest.TestCase):
                         'ext/fabric_continuation.py', 'ext/remote_sub_exec.py',
                         'ext/remote_sub_helpers.py', 'ext/slot.py'}):
                 raise AssertionError('long-horizon predecessor scope differs')
-            helper_name = 'ext/remote_sub_helpers.py'
-            helper_item = long_fixture['files'][helper_name]
-            helper_payload = zlib.decompress(base64.b64decode(helper_item['zlib_base64'], validate=True))
-            if (len(helper_payload) != helper_item['bytes']
-                    or g.digest(helper_payload) != helper_item['sha256']
-                    or helper_item['sha256'] != old[helper_name]):
-                raise AssertionError('historical95 polling helper preimage differs')
-            (cls.built / 'native-code-stage' / helper_name).write_bytes(helper_payload)
+            # Both the polling helper and the pre-busy continuation belong to
+            # this already sealed historical102 fixture. Never try to undo a
+            # modern broker-busy change by text substitution into historical95.
+            for historical_name in ('ext/remote_sub_helpers.py',
+                                    'ext/fabric_continuation.py'):
+                item = long_fixture['files'][historical_name]
+                payload = zlib.decompress(base64.b64decode(item['zlib_base64'], validate=True))
+                if (len(payload) != item['bytes']
+                        or g.digest(payload) != item['sha256']
+                        or item['sha256'] != old[historical_name]):
+                    raise AssertionError('historical95 long-horizon preimage differs: '+historical_name)
+                (cls.built / 'native-code-stage' / historical_name).write_bytes(payload)
             inverse = {
                 'ext/commission_deadline.py': [
                     ('not 0 <= result <= 14400', 'not 0 <= result <= 7200'),
-                ],
-                'ext/fabric_continuation.py': [
-                    ('if not 1 <= budget <= 14400:', 'if not 1 <= budget <= 7200:'),
-                    ('floor = 14400 if kwargs.get("task_complexity") == "C3_FRONTIER_JUDGMENT" else (\n'
-                     '        7200 if kwargs.get("task_complexity") == "C2_COMPLEX_BOUNDED" else (\n'
-                     '        3600 if kwargs.get("task_complexity") in (None, "") else 0))',
-                     'floor = 7200 if kwargs.get("task_complexity") == "C3_FRONTIER_JUDGMENT" else (\n'
-                     '        3600 if kwargs.get("task_complexity") in (None, "", "C2_COMPLEX_BOUNDED") else 0)'),
                 ],
                 'ext/slot.py': [
                     ('MAX_CHILD_TIMEOUT_S = 14400.0', 'MAX_CHILD_TIMEOUT_S = 7200.0'),
@@ -689,6 +668,23 @@ class PairedLauncherUpgrade(unittest.TestCase):
         finally:
             _expected = False
 
+
+def verify_broker_busy_stage(output):
+    """Qualify all current107 busy-epoch bytes before restoring historical fixtures."""
+    import test_native_broker_busy_source as busy_source
+    native = Path(builder.__file__).parent.parent
+    if set(APPLICATION_PREIMAGES) != busy_source.APPLICATION_MEMBERS:
+        raise AssertionError("current application source binding differs")
+    return busy_source.verify_broker_busy_stage(
+        output, native,
+        {"ext/" + name for name in builder.BASE_FILES | builder.ADDITIONS} | {"pool"})
+
+
+# Converge 2121 rebind (probe-law additive override): this module's paired
+# upgrade stages the broker-busy epoch, so its current-stage verification
+# resolves to the busy closure above. Master's default verifier keeps its
+# exact bytes and every other caller is unaffected.
+verify_current_stage = verify_broker_busy_stage
 
 if __name__ == '__main__':
     unittest.main()

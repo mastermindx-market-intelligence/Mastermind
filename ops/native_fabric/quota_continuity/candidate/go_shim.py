@@ -221,23 +221,14 @@ class ApplicationHTTPBinding:
 
     def __post_init__(self):
         from application_http_transports import BailianResponsesDriver
-        if (type(self.driver) is not BailianResponsesDriver
-                or type(self.accounts) is not frozenset or not self.accounts
-                or any(not isinstance(account, str) or APPLICATION_ID.fullmatch(account) is None for account in self.accounts)
-                or not isinstance(self.source_projection_sha256, str)
-                or re.fullmatch(r"[0-9a-f]{64}", self.source_projection_sha256) is None
-                or not callable(self.credential_loader)):
-            raise ValueError("invalid application HTTP binding")
+        if not (type(self.driver) is BailianResponsesDriver or _is_glm_application_driver(self.driver)) or type(self.accounts) is not frozenset or (not self.accounts) or any((not isinstance(account, str) or APPLICATION_ID.fullmatch(account) is None for account in self.accounts)) or (not isinstance(self.source_projection_sha256, str)) or (re.fullmatch('[0-9a-f]{64}', self.source_projection_sha256) is None) or (not callable(self.credential_loader)):
+            raise ValueError('invalid application HTTP binding')
 
     def recipe(self, model):
         identity = self.driver.identity
         if model not in identity.allowed_models:
-            raise ValueError("application HTTP model unavailable")
-        return {"schema": "mastermind.application_http_recipe.v1", "pool": identity.pool, "model": model,
-            "driver_id": identity.driver_id, "realm_id": identity.realm_id, "provider": identity.provider,
-            "protocol": identity.protocol, "endpoint": identity.endpoint,
-            "source_projection_sha256": self.source_projection_sha256,
-            "credential_owner": "bailian_keys._codex_key_value"}
+            raise ValueError('application HTTP model unavailable')
+        return {'schema': 'mastermind.application_http_recipe.v1', 'pool': identity.pool, 'model': model, 'driver_id': identity.driver_id, 'realm_id': identity.realm_id, 'provider': identity.provider, 'protocol': identity.protocol, 'endpoint': identity.endpoint, 'source_projection_sha256': self.source_projection_sha256, 'credential_owner': 'glm_keys.selected_account_key' if identity.pool == 'glm' else 'bailian_keys._codex_key_value'}
 
     def account_binding(self, account):
         from application_http_transports import AccountBinding
@@ -247,35 +238,26 @@ class ApplicationHTTPBinding:
 
     def observe(self, compiled, permit, account_binding):
         from application_http_transports import DispatchPermit
-        native_permit = DispatchPermit(**{key: permit[key] for key in (
-            "dispatch_id", "request_digest", "logical_payload_digest", "wire_body_digest", "account",
-            "model", "lease_id", "expires_at", "dispatch_permitted")})
+        native_permit = DispatchPermit(**{key: permit[key] for key in ('dispatch_id', 'request_digest', 'logical_payload_digest', 'wire_body_digest', 'account', 'model', 'lease_id', 'expires_at', 'dispatch_permitted')})
         observation = self.driver.send_prepared(compiled, native_permit, account_binding)
-        if observation.disposition != "complete":
-            raise ApplicationTransportUncertain("application_transport_unknown")
+        if observation.disposition != 'complete':
+            raise ApplicationTransportUncertain('application_transport_unknown')
         served = observation.served_model
-        served = served if isinstance(served, str) and 1 <= len(served) <= 256 and "\x00" not in served else None
+        served = served if isinstance(served, str) and 1 <= len(served) <= 256 and ('\x00' not in served) else None
         normalized = observation.normalized
-        body, complete = b"", False
-        # A complete HTTP effect may still contain no valid model answer.
-        # Retain its actual status/digest/usage and deliver a bounded terminal
-        # error; never reinterpret a partial output as an executable tool call.
-        if observation.result_status == "ok" and normalized is not None:
-            text, calls = normalized["text"], normalized["tool_calls"]
-            complete = bool(text or calls) and served == permit["model"]
+        body, complete = (b'', False)
+        if observation.result_status == 'ok' and normalized is not None:
+            text, calls = (normalized['text'], normalized['tool_calls'])
+            complete = bool(text or calls) and served == permit['model']
             if complete:
-                message = {"role": "assistant", "content": text or None}
+                message = {'role': 'assistant', 'content': text or None}
+                if self.driver.identity.pool == 'glm' and 'reasoning_content' in normalized:
+                    message['reasoning_content'] = normalized['reasoning_content']
                 if calls:
-                    message["tool_calls"] = calls
-                delivery = {"id": permit["dispatch_id"], "object": "chat.completion", "model": served,
-                    "choices": [{"index": 0, "finish_reason": "tool_calls" if calls else "stop", "message": message}],
-                    "usage": {"prompt_tokens": observation.usage["input_tokens"],
-                              "completion_tokens": observation.usage["output_tokens"]}}
-                body = json.dumps(delivery, sort_keys=True, separators=(",", ":"),
-                    ensure_ascii=False, allow_nan=False).encode("utf-8")
-        return ApplicationUpstreamResult(observation.upstream_status, body,
-            observation.usage["input_tokens"], observation.usage["output_tokens"], served,
-            observation.upstream_body_sha256, hashlib.sha256(body).hexdigest() if complete else None, complete)
+                    message['tool_calls'] = calls
+                delivery = {'id': permit['dispatch_id'], 'object': 'chat.completion', 'model': served, 'choices': [{'index': 0, 'finish_reason': 'tool_calls' if calls else 'stop', 'message': message}], 'usage': {'prompt_tokens': observation.usage['input_tokens'], 'completion_tokens': observation.usage['output_tokens']}}
+                body = json.dumps(delivery, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False).encode('utf-8')
+        return ApplicationUpstreamResult(observation.upstream_status, body, observation.usage['input_tokens'], observation.usage['output_tokens'], served, observation.upstream_body_sha256, hashlib.sha256(body).hexdigest() if complete else None, complete)
 
 
 @dataclass(frozen=True, init=False)
@@ -2532,6 +2514,39 @@ class WorkerReplyBuffer(io.BytesIO):
         return super().write(data)
 
 
+def _is_glm_application_driver(driver):
+    if getattr(type(driver), "pool", None) != "glm":
+        return False
+    try:
+        from glm_application_adapter import GlmChatCompletionsDriver
+    except ImportError:
+        return False
+    return type(driver) is GlmChatCompletionsDriver
+
+
+def _application_http_binding_map(value):
+    if value is None:
+        return {}
+    if type(value) is ApplicationHTTPBinding:
+        value = {value.driver.identity.pool: value}
+    if type(value) is not dict:
+        raise ValueError("invalid application HTTP binding map")
+    result = {}
+    for pool, binding in value.items():
+        if (type(pool) is not str or type(binding) is not ApplicationHTTPBinding
+                or pool != binding.driver.identity.pool):
+            raise ValueError("invalid application HTTP binding map")
+        result[pool] = binding
+    return result
+
+
+def _application_http_binding_for(bindings, pool, model):
+    binding = bindings.get(pool)
+    if binding is None or model not in binding.driver.identity.allowed_models:
+        return None
+    return binding
+
+
 def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 *, application_services: Tuple[ApplicationServiceBinding, ...] = (),
                 worker_capabilities_enabled: Optional[bool] = None,
@@ -2556,16 +2571,17 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
         if (len(set(refs)) != len(refs) or len(set(credentials)) != len(credentials)
                 or any(hmac.compare_digest(s.credential, router.token) for s in application_services)):
             raise ValueError("ambiguous application credentials")
-    if application_http_binding is not None:
-        if type(application_http_binding) is not ApplicationHTTPBinding or lease_gateway is None:
-            raise ValueError("invalid application HTTP startup")
-        for model in application_http_binding.driver.identity.allowed_models:
-            recipe, _ = lease_gateway.application_recipe("bailian", model)
-            if recipe != application_http_binding.recipe(model):
-                raise ValueError("application HTTP recipe conflicts with admission")
-        if lease_gateway._application_http_accounts != application_http_binding.accounts:
-            raise ValueError("application HTTP accounts conflict with admission")
-    if any(service.pool == "bailian" for service in application_services) and application_http_binding is None:
+    http_bindings = _application_http_binding_map(application_http_binding)
+    if http_bindings and lease_gateway is None:
+        raise ValueError("application HTTP binding requires gateway")
+    for http_pool, http_binding in http_bindings.items():
+        for http_model in http_binding.driver.identity.allowed_models:
+            expected_recipe, expected_digest = lease_gateway.application_recipe(http_pool, http_model)
+            if expected_recipe != http_binding.recipe(http_model):
+                raise ValueError("application HTTP recipe mismatch")
+        if http_binding.accounts != lease_gateway._application_http_accounts_by_pool.get(http_pool, frozenset()):
+            raise ValueError("application HTTP account mismatch")
+    if any(service.pool == 'bailian' and 'bailian' not in http_bindings for service in application_services):
         raise ValueError("application HTTP transport required")
     from go_lease_capability import NATIVE_APPLICATION_POOLS
     if (type(application_native_bindings) is not tuple
@@ -2579,6 +2595,10 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
         if key in native_bindings:
             raise ValueError("duplicate native startup binding")
         native_bindings[key] = binding
+    http_keys = {(pool, model) for pool, binding in http_bindings.items()
+                 for model in binding.driver.identity.allowed_models}
+    if http_keys.intersection(native_bindings):
+        raise ValueError("overlapping native and HTTP application binding")
     # An enrolled stable service may recover/close an old operation even when
     # its former executor has been removed. New execution then refuses below.
     source_sha256 = {}
@@ -2604,8 +2624,8 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             purpose = service.selection_purpose
             if purpose is None or service.pool == "go":
                 continue
-            if service.pool == "bailian":
-                if application_http_binding is None:
+            if service.pool in http_bindings:
+                if http_bindings.get(service.pool) is None:
                     raise ValueError("application selection transport required")
             elif (any(key[0] == service.pool for key in native_bindings)
                   and not any(key[0] == service.pool and binding.selection is not None
@@ -2818,25 +2838,23 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
         def _application_candidates(self, service, payload):
             """Pure dispatch grammar intersection, after original recovery only."""
             from lease_broker import _application_native_payload
-            allowed_pools = service.route_scope.document["pools"]
+            allowed_pools = service.route_scope.document['pools']
             candidates = set()
             for pool, model in lease_gateway.application_registered_routes():
-                if (pool not in allowed_pools
-                        or payload["model"] is not None and model != payload["model"]):
+                if pool not in allowed_pools or (payload['model'] is not None and model != payload['model']):
                     continue
                 concrete = dict(payload, model=model)
                 try:
-                    if pool == "go":
-                        if payload["model"] == "qwen3.8-flash" and {"temperature", "reasoning_effort"} & set(payload):
+                    http_binding = _application_http_binding_for(http_bindings, pool, model)
+                    if pool == 'go':
+                        if payload['model'] == 'qwen3.8-flash' and {'temperature', 'reasoning_effort'} & set(payload):
                             continue
-                        if (set(concrete) - APPLICATION_BODY_KEYS
-                                or not router.application_model_supported(model, "/v1/chat/completions")):
+                        if set(concrete) - APPLICATION_BODY_KEYS or not router.application_model_supported(model, '/v1/chat/completions'):
                             continue
-                    elif pool == "bailian":
-                        if (application_http_binding is None
-                                or model not in application_http_binding.driver.identity.allowed_models):
+                    elif http_binding is not None:
+                        if http_binding is None or model not in http_binding.driver.identity.allowed_models:
                             continue
-                        application_http_binding.driver.prepare_request(concrete)
+                        http_binding.driver.prepare_request(concrete)
                     else:
                         native = native_bindings.get((pool, model))
                         if native is None or native.selection is None:
@@ -3028,75 +3046,61 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             self.application_auto_route = None
             if service is None:
                 self.close_connection = True
-                self._application_reply("refused", code="application_unauthorized", status=401)
+                self._application_reply('refused', code='application_unauthorized', status=401)
                 return
-            if self.path != path or path not in {"/v1/chat/completions", "/application-turns/close"}:
+            if self.path != path or path not in {'/v1/chat/completions', '/application-turns/close'}:
                 self.close_connection = True
-                self._application_reply("refused", code="application_route_unsupported", status=400)
+                self._application_reply('refused', code='application_route_unsupported', status=400)
                 return
-            if path == "/application-turns/close":
+            if path == '/application-turns/close':
                 self._application_close(service)
                 return
             try:
-                turn_id, request_id = self._one("X-MM-Application-Turn-ID"), self._one("Idempotency-Key")
-                if any(APPLICATION_ID.fullmatch(value) is None for value in (turn_id, request_id)):
-                    raise ValueError("invalid operation identity")
-                if any(self.headers.get_all(name) for name in ("X-MM-Leased", "X-MM-Pool-Account", "X-MM-Run-Id", "X-MM-Host", "X-MM-Worker-Model", "X-MM-Principal", "X-MM-Workload")):
-                    raise ValueError("caller authority override")
-                self.application_turn_id, self.application_request_id = turn_id, request_id
-                recipe_values = self.headers.get_all("X-MM-Application-Recipe-Digest") or []
-                if len(recipe_values) > 1 or recipe_values and re.fullmatch(r"[0-9a-f]{64}", recipe_values[0]) is None:
-                    raise ValueError("invalid recipe commitment")
+                turn_id, request_id = (self._one('X-MM-Application-Turn-ID'), self._one('Idempotency-Key'))
+                if any((APPLICATION_ID.fullmatch(value) is None for value in (turn_id, request_id))):
+                    raise ValueError('invalid operation identity')
+                if any((self.headers.get_all(name) for name in ('X-MM-Leased', 'X-MM-Pool-Account', 'X-MM-Run-Id', 'X-MM-Host', 'X-MM-Worker-Model', 'X-MM-Principal', 'X-MM-Workload'))):
+                    raise ValueError('caller authority override')
+                self.application_turn_id, self.application_request_id = (turn_id, request_id)
+                recipe_values = self.headers.get_all('X-MM-Application-Recipe-Digest') or []
+                if len(recipe_values) > 1 or (recipe_values and re.fullmatch('[0-9a-f]{64}', recipe_values[0]) is None):
+                    raise ValueError('invalid recipe commitment')
                 recipe_digest = recipe_values[0] if recipe_values else None
-                scope_values = self.headers.get_all("X-MM-Application-Route-Scope-Digest") or []
-                if len(scope_values) > 1 or scope_values and re.fullmatch(r"[0-9a-f]{64}", scope_values[0]) is None:
-                    raise ValueError("invalid route scope commitment")
+                scope_values = self.headers.get_all('X-MM-Application-Route-Scope-Digest') or []
+                if len(scope_values) > 1 or (scope_values and re.fullmatch('[0-9a-f]{64}', scope_values[0]) is None):
+                    raise ValueError('invalid route scope commitment')
                 expected_scope_digest = scope_values[0] if scope_values else None
                 raw, payload = self._read_object(APPLICATION_MAX_REQUEST)
                 payload = _application_json(raw)
-                # Original recovery is independent of today's service pool.
-                # Dispatch-specific grammar is checked only after that recovery.
-                if (set(payload) - (APPLICATION_EXACT_BODY_KEYS | APPLICATION_NATIVE_BODY_KEYS)
-                        or "reasoning_effort" in payload and (expected_scope_digest is None
-                            or payload.get("model") != "qwen3.8-flash")
-                        or payload.get("stream", False) is not False
-                        or "model" not in payload
-                        or payload["model"] is not None and (not isinstance(payload["model"], str) or not payload["model"])
-                        or not isinstance(payload.get("messages"), list) or not 1 <= len(payload["messages"]) <= 512):
-                    raise ValueError("unsupported application payload")
+                if set(payload) - (APPLICATION_EXACT_BODY_KEYS | APPLICATION_NATIVE_BODY_KEYS) or ('reasoning_effort' in payload and (expected_scope_digest is None or payload.get('model') != 'qwen3.8-flash')) or payload.get('stream', False) is not False or ('model' not in payload) or (payload['model'] is not None and (not isinstance(payload['model'], str) or not payload['model'])) or (not isinstance(payload.get('messages'), list)) or (not 1 <= len(payload['messages']) <= 512):
+                    raise ValueError('unsupported application payload')
             except Exception:
                 self.close_connection = True
-                self._application_reply("refused", code="application_request_invalid", status=400)
+                self._application_reply('refused', code='application_request_invalid', status=400)
                 return
-            scope = {"workload": service.workload, "turn_id": turn_id, "pool": service.pool, "model": payload["model"]}
-            recovery_args = dict(principal_id=service.principal_id, host=service.host,
-                request_id=request_id, path=path, payload=payload, expected_recipe_digest=recipe_digest,
-                include_turn=True, expected_route_scope_digest=expected_scope_digest)
+            scope = {'workload': service.workload, 'turn_id': turn_id, 'pool': service.pool, 'model': payload['model']}
+            recovery_args = dict(principal_id=service.principal_id, host=service.host, request_id=request_id, path=path, payload=payload, expected_recipe_digest=recipe_digest, include_turn=True, expected_route_scope_digest=expected_scope_digest)
             try:
                 recovered = self._application_recover(scope, recovery_args)
-                if type(recovered) is not dict or recovered.get("kind") not in {
-                        "turn_absent", "request_present", "turn_present_new_step"}:
-                    raise ValueError("unqualified original recovery")
+                if type(recovered) is not dict or recovered.get('kind') not in {'turn_absent', 'request_present', 'turn_present_new_step'}:
+                    raise ValueError('unqualified original recovery')
             except Exception as error:
                 from go_lease_gateway import ApplicationSelectionRefused
                 if isinstance(error, ApplicationSelectionRefused):
-                    self._application_reply("refused", code="application_turn_scope_changed", status=409)
+                    self._application_reply('refused', code='application_turn_scope_changed', status=409)
                 else:
-                    self._application_reply("effect_unknown", code="application_recovery_unavailable", status=503)
+                    self._application_reply('effect_unknown', code='application_recovery_unavailable', status=503)
                 return
-            if recovered["kind"] == "request_present":
-                self._application_recovered(recovered["request"])
+            if recovered['kind'] == 'request_present':
+                self._application_recovered(recovered['request'])
                 return
-            if (recovered["kind"] == "turn_present_new_step"
-                    and recovered["turn"]["disposition"] != "existing"):
-                self._application_recovered(recovered["turn"])
+            if recovered['kind'] == 'turn_present_new_step' and recovered['turn']['disposition'] != 'existing':
+                self._application_recovered(recovered['turn'])
                 return
-            # A new step uses its original turn. Only an absent TURN selects.
-            # No live /models or /usage query precedes this original recovery.
-            scoped = payload["model"] is None or expected_scope_digest is not None
-            if recovered["kind"] == "turn_present_new_step":
-                if not scoped and scope["pool"] != recovered["turn"]["pool"]:
-                    self._application_reply("refused", code="application_turn_scope_changed", status=409)
+            scoped = payload['model'] is None or expected_scope_digest is not None
+            if recovered['kind'] == 'turn_present_new_step':
+                if not scoped and scope['pool'] != recovered['turn']['pool']:
+                    self._application_reply('refused', code='application_turn_scope_changed', status=409)
                     return
             original_payload = payload
             execution_scope = scope
@@ -3104,58 +3108,52 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
             pool = service.pool
             if scoped:
                 if service.route_scope is None or service.selection_purpose is None:
-                    self._application_reply("refused", code="application_auto_scope_unavailable", status=409)
+                    self._application_reply('refused', code='application_auto_scope_unavailable', status=409)
                     return
                 if expected_scope_digest != service.route_scope.digest:
-                    self._application_reply("refused", code="application_auto_scope_changed", status=409)
+                    self._application_reply('refused', code='application_auto_scope_changed', status=409)
                     return
-                if (recipe_digest is not None or type(payload.get("max_tokens")) is not int
-                        or not 1 <= payload["max_tokens"] <= 32768
-                        or "preferred_tokens" in payload):
-                    self._application_reply("refused", code="application_auto_contract_refused", status=400)
+                if recipe_digest is not None or type(payload.get('max_tokens')) is not int or (not 1 <= payload['max_tokens'] <= 32768) or ('preferred_tokens' in payload):
+                    self._application_reply('refused', code='application_auto_contract_refused', status=400)
                     return
                 candidates = self._application_candidates(service, payload)
-                selected = self._application_select(service, scope, recovery_args, payload, recovered,
-                                                    candidates=candidates)
+                selected = self._application_select(service, scope, recovery_args, payload, recovered, candidates=candidates)
                 if selected is None:
                     return
                 selection, purpose, recovered = selected
-                target = selection["identity"] if selection is not None else recovered["turn"]
-                pool, model = target["pool"], target["model"]
+                target = selection['identity'] if selection is not None else recovered['turn']
+                pool, model = (target['pool'], target['model'])
                 if (pool, model) not in candidates:
-                    self._application_reply("refused", code="application_auto_transport_changed", status=409)
+                    self._application_reply('refused', code='application_auto_transport_changed', status=409)
                     return
                 execution_scope = dict(scope, pool=pool, model=model)
                 payload = dict(payload, model=model)
-                recipe_digest = None if pool == "go" else lease_gateway.application_recipe(pool, model)[1]
-            allowed = (APPLICATION_NATIVE_BODY_KEYS if pool in NATIVE_APPLICATION_POOLS
-                       else APPLICATION_EXACT_BODY_KEYS if scoped and original_payload["model"] is not None and pool == "bailian"
-                       else APPLICATION_BODY_KEYS)
+                recipe_digest = None if pool == 'go' else lease_gateway.application_recipe(pool, model)[1]
+            model = payload['model']
+            http_binding = _application_http_binding_for(http_bindings, pool, model)
+            native_request = ((pool, model) in lease_gateway._application_native_recipes or (pool in NATIVE_APPLICATION_POOLS and pool not in lease_gateway._application_http_accounts_by_pool and (pool, model) not in native_bindings))
+            allowed = APPLICATION_NATIVE_BODY_KEYS if native_request else APPLICATION_EXACT_BODY_KEYS if scoped and original_payload['model'] is not None and (pool == 'bailian') else APPLICATION_BODY_KEYS
             if set(payload) - allowed:
-                self._application_reply("refused", code="application_request_invalid", status=400)
+                self._application_reply('refused', code='application_request_invalid', status=400)
                 return
-            if pool in NATIVE_APPLICATION_POOLS:
-                self._application_native_post(service, execution_scope, recovery_args, payload, recipe_digest, recovered,
-                    original_scope=scope, original_payload=original_payload, selected=selected)
+            if native_request:
+                self._application_native_post(service, execution_scope, recovery_args, payload, recipe_digest, recovered, original_scope=scope, original_payload=original_payload, selected=selected)
                 return
-            model = payload["model"]
-            compiled, account_binding, commitment = None, None, None
-            if pool == "bailian":
+            compiled, account_binding, commitment = (None, None, None)
+            if http_binding is not None:
                 try:
-                    if application_http_binding is None:
-                        raise ValueError("application realm workload unavailable")
-                    compiled = application_http_binding.driver.prepare_request(payload)
+                    if http_binding is None:
+                        raise ValueError('application realm workload unavailable')
+                    compiled = http_binding.driver.prepare_request(payload)
                     recipe, expected_digest = lease_gateway.application_recipe(pool, model)
-                    if recipe != application_http_binding.recipe(model) or recipe_digest != expected_digest:
-                        raise ValueError("application recipe mismatch")
-                    commitment = {"recipe_digest": recipe_digest,
-                        "logical_payload_digest": compiled.logical_payload_digest,
-                        "wire_body_digest": compiled.wire_body_digest}
+                    if recipe != http_binding.recipe(model) or recipe_digest != expected_digest:
+                        raise ValueError('application recipe mismatch')
+                    commitment = {'recipe_digest': recipe_digest, 'logical_payload_digest': compiled.logical_payload_digest, 'wire_body_digest': compiled.wire_body_digest}
                 except Exception:
-                    self._application_reply("refused", code="application_transport_contract_refused", status=400)
+                    self._application_reply('refused', code='application_transport_contract_refused', status=400)
                     return
             elif not router.application_model_supported(model, path):
-                self._application_reply("refused", code="application_model_unavailable", status=400)
+                self._application_reply('refused', code='application_model_unavailable', status=400)
                 return
             if selected is None:
                 selected = self._application_select(service, scope, recovery_args, payload, recovered)
@@ -3163,97 +3161,72 @@ def make_server(router: Router, port: int = 0, lease_gateway: Any = None,
                 return
             selection, purpose, recovered = selected
             try:
-                binding = lease_gateway.begin_application(execution_scope, principal_id=service.principal_id,
-                    host=service.host, expected_credential_ref=service.credential_ref,
-                    deadline_ns=time.monotonic_ns() + 5_000_000_000,
-                    expected_recipe_digest=recipe_digest,
-                    expected_selection=selection, selection_purpose=purpose, selection_payload=original_payload,
-                    selection_route_scope=(service.route_scope.document
-                        if original_payload["model"] is None or recovery_args.get("expected_route_scope_digest") is not None
-                        else None))
+                binding = lease_gateway.begin_application(execution_scope, principal_id=service.principal_id, host=service.host, expected_credential_ref=service.credential_ref, deadline_ns=time.monotonic_ns() + 5000000000, expected_recipe_digest=recipe_digest, expected_selection=selection, selection_purpose=purpose, selection_payload=original_payload, selection_route_scope=service.route_scope.document if original_payload['model'] is None or recovery_args.get('expected_route_scope_digest') is not None else None)
             except Exception as error:
                 self._application_admission_failed(scope, recovery_args, error)
                 return
-            if not binding.get("ok"):
-                self._application_reply("refused", code="application_admission_refused", status=429)
+            if not binding.get('ok'):
+                self._application_reply('refused', code='application_admission_refused', status=429)
                 return
-            if binding.get("disposition") not in {"admitted", "existing"}:
+            if binding.get('disposition') not in {'admitted', 'existing'}:
                 self._application_recovered(binding)
                 return
             if compiled is not None:
                 try:
-                    account_binding = application_http_binding.account_binding(binding["account"])
-                    application_http_binding.driver.preflight_credential(compiled, account_binding)
+                    account_binding = http_binding.account_binding(binding['account'])
+                    http_binding.driver.preflight_credential(compiled, account_binding)
                 except Exception:
-                    self._application_reply("refused", code="application_account_unavailable", status=503)
+                    self._application_reply('refused', code='application_account_unavailable', status=503)
                     return
-            reserved, permit, observed, settled = False, None, None, False
+            reserved, permit, observed, settled = (False, None, None, False)
             started = router.now()
             try:
                 if compiled is None:
-                    reserved = router.reserve_application_account(binding["account"], model)
+                    reserved = router.reserve_application_account(binding['account'], model)
                     if not reserved:
-                        self._application_reply("refused", code="application_account_unavailable", status=429)
+                        self._application_reply('refused', code='application_account_unavailable', status=429)
                         return
-                permit = lease_gateway.prepare_application(binding["token"], principal_id=service.principal_id,
-                    host=service.host, turn_id=turn_id, request_id=request_id, path=path, payload=original_payload,
-                    expected_pool=pool, transport_commitment=commitment)
-                if not permit.get("dispatch_permitted"):
+                permit = lease_gateway.prepare_application(binding['token'], principal_id=service.principal_id, host=service.host, turn_id=turn_id, request_id=request_id, path=path, payload=original_payload, expected_pool=pool, transport_commitment=commitment)
+                if not permit.get('dispatch_permitted'):
                     self._application_recovered(permit)
                     return
                 self._application_auto_commit(binding, permit, original_payload)
-                observed = (router.application_transport(permit) if compiled is None
-                            else application_http_binding.observe(compiled, permit, account_binding))
-                terminal = {key: permit[key] for key in ("dispatch_id", "request_digest", "lease_id", "account", "model")}
-                terminal.update(response_digest=hashlib.sha256(observed.body).hexdigest(),
-                    status_code=observed.status, completed_at=router.now(),
-                    usage={"input_tokens": observed.input_tokens, "output_tokens": observed.output_tokens})
+                observed = router.application_transport(permit) if compiled is None else http_binding.observe(compiled, permit, account_binding)
+                terminal = {key: permit[key] for key in ('dispatch_id', 'request_digest', 'lease_id', 'account', 'model')}
+                terminal.update(response_digest=hashlib.sha256(observed.body).hexdigest(), status_code=observed.status, completed_at=router.now(), usage={'input_tokens': observed.input_tokens, 'output_tokens': observed.output_tokens})
                 if compiled is not None:
-                    terminal.update(terminal_kind="http_responses_v1", **commitment,
-                        response_digest=observed.upstream_digest, delivery_digest=observed.delivery_digest,
-                        served_model=observed.serving_model)
+                    terminal.update(terminal_kind='http_chat_v1' if http_binding.driver.identity.pool == 'glm' else 'http_responses_v1', **commitment, response_digest=observed.upstream_digest, delivery_digest=observed.delivery_digest, served_model=observed.serving_model)
                 observed = self._application_routed_result(observed)
                 if compiled is not None:
                     terminal = dict(terminal, delivery_digest=observed.delivery_digest)
                 try:
-                    result = lease_gateway.complete_application(permit["dispatch_id"], terminal_receipt=terminal)
-                    settled = result.get("disposition") == "terminal"
+                    result = lease_gateway.complete_application(permit['dispatch_id'], terminal_receipt=terminal)
+                    settled = result.get('disposition') == 'terminal'
                 except Exception:
-                    # Reconcile original settlement ACK loss; no second send or
-                    # repeated writer. A receipt is checked against these bytes.
                     recovered = self._application_recover(scope, recovery_args)
-                    original = recovered.get("request") if recovered.get("kind") == "request_present" else None
-                    settled = (isinstance(original, dict) and original.get("disposition") == "terminal"
-                               and original.get("terminal_receipt") == terminal)
+                    original = recovered.get('request') if recovered.get('kind') == 'request_present' else None
+                    settled = isinstance(original, dict) and original.get('disposition') == 'terminal' and (original.get('terminal_receipt') == terminal)
                 if not settled:
-                    raise ApplicationTransportUncertain("application_settlement_unknown")
+                    raise ApplicationTransportUncertain('application_settlement_unknown')
             except Exception as error:
-                if permit is not None and permit.get("dispatch_permitted"):
-                    code = str(error) if isinstance(error, ApplicationTransportUncertain) else "application_execution_unknown"
+                if permit is not None and permit.get('dispatch_permitted'):
+                    code = str(error) if isinstance(error, ApplicationTransportUncertain) else 'application_execution_unknown'
                     try:
-                        lease_gateway.mark_application_unknown(permit["dispatch_id"], reason=code)
+                        lease_gateway.mark_application_unknown(permit['dispatch_id'], reason=code)
                     except Exception:
-                        pass  # Canonical pending is retained; never free it here.
-                self._application_reply("effect_unknown", code="application_execution_unknown", status=503, observed=observed)
+                        pass
+                self._application_reply('effect_unknown', code='application_execution_unknown', status=503, observed=observed)
                 return
             finally:
                 if observed is not None and compiled is None:
                     try:
-                        router._usage_row(self, permit["account"], path, payload, started,
-                            "ok" if observed.status < 300 else "upstream_error", observed.body, 1, None,
-                            application_result=observed)
+                        router._usage_row(self, permit['account'], path, payload, started, 'ok' if observed.status < 300 else 'upstream_error', observed.body, 1, None, application_result=observed)
                     except Exception:
-                        # Optional writer ACK loss cannot undo terminal settlement
-                        # and must not cause a second usage append or inference.
                         pass
                 if reserved:
-                    router.release(binding["account"])
-            # Downstream delivery is deliberately outside transport/settlement
-            # exception handling: a closed browser cannot poison known success.
-            if observed.status >= 300 or observed.serving_model != model or not observed.answer_complete:
-                self._application_reply("terminal", code=("application_upstream_error" if observed.status >= 300 else
-                    "application_model_mismatch" if observed.serving_model != model else "application_response_invalid"),
-                    status=observed.status if observed.status >= 300 else 502, observed=observed)
+                    router.release(binding['account'])
+            if observed.status >= 300 or observed.serving_model != model or (not observed.answer_complete):
+                self._application_reply('terminal', code='application_upstream_error' if observed.status >= 300 else 'application_model_mismatch' if observed.serving_model != model else 'application_response_invalid', status=observed.status if observed.status >= 300 else 502, observed=observed)
                 return
             self._application_delivery(observed)
 
@@ -3536,9 +3509,9 @@ def main(*, application_broker=None,
     # objects. No new config/credential/grant registry or env selector exists.
     if bool(application_services) != (application_broker is not None):
         raise ValueError("application startup binding incomplete")
-    if application_http_binding is not None and (
-            type(application_http_binding) is not ApplicationHTTPBinding or not application_services):
-        raise ValueError("application HTTP startup binding incomplete")
+    http_bindings = _application_http_binding_map(application_http_binding)
+    if application_http_binding is not None and not application_services:
+        raise ValueError("application HTTP binding requires services")
     if (type(application_native_bindings) is not tuple
             or any(type(binding) is not ApplicationNativeBinding for binding in application_native_bindings)
             or application_native_bindings and not application_services):
@@ -3578,17 +3551,14 @@ def main(*, application_broker=None,
             application_broker=application_broker,
             **({"application_selection_profile": application_selection_profile}
                if application_selection_profile is not None else {}),
-            **({"application_http_accounts": application_http_binding.accounts,
-                "application_http_recipes": tuple(application_http_binding.recipe(model)
-                    for model in sorted(application_http_binding.driver.identity.allowed_models))}
-               if application_http_binding is not None else {}),
+            **({'application_http_accounts': {pool: binding.accounts for pool, binding in http_bindings.items()}, 'application_http_recipes': tuple(binding.recipe(model) for pool, binding in sorted(http_bindings.items()) for model in sorted(binding.driver.identity.allowed_models))} if http_bindings else {}),
             **({"application_native_accounts": native_accounts, "application_native_recipes": tuple(native_recipes)}
                if application_native_bindings else {}),
             **({"application_native_selection": native_selection} if native_selection else {}))
     server = make_server(router, int(os.environ.get("GO_SHIM_PORT", DEFAULTS["GO_SHIM_PORT"])),
         lease_gateway=gateway, application_services=application_services,
         worker_capabilities_enabled=worker_enabled,
-        **({"application_http_binding": application_http_binding} if application_http_binding is not None else {}),
+        **({'application_http_binding': (application_http_binding if type(application_http_binding) is ApplicationHTTPBinding else http_bindings)} if http_bindings else {}),
         **({"application_native_bindings": application_native_bindings} if application_native_bindings else {}))
     print(f"go_shim listening port={server.server_port}", flush=True)
     server.serve_forever()

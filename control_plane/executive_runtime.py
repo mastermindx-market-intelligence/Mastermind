@@ -918,6 +918,23 @@ def _normalise_constraints(
         {str(item).strip().lower() for item in quota_values if str(item).strip()}
     ) or ["default"]
     result: dict[str, Any] = {"eligible_quota_classes": eligible, **role_fields, **direct_fields}
+    if "native_memory" in raw:
+        # Public correlation on the existing Job, never source/dispatch authority.
+        # The protected Memory owner independently requires current Runtime,
+        # genuine Control peer and Linux recipient/source admission.
+        from common.native_memory_intent_contract import normalize_memory_runtime_intent
+        try:
+            result["native_memory"] = normalize_memory_runtime_intent(raw["native_memory"])
+        except (ValueError, TypeError, UnicodeError, RecursionError):
+            raise StateConflict("native Memory intent constraint is invalid") from None
+    if "native_memory_evaluation" in raw:
+        from common.memory_evaluation_contract import evaluation_intent
+        try:
+            if "native_memory" not in result:
+                raise ValueError()
+            result["native_memory_evaluation"] = evaluation_intent(raw["native_memory_evaluation"])
+        except (ValueError, TypeError):
+            raise StateConflict("native Memory evaluation constraint is invalid") from None
 
     aliases_raw = raw.get("preferred_model_aliases") or []
     if isinstance(aliases_raw, str):
@@ -16667,6 +16684,292 @@ class JobRegistry:
             )
         return payload
 
+    def admit_child_execution_request(
+        self,
+        request: Any,
+        *,
+        policy: Any | None = None,
+        _principal_commit_guard: Callable[[], None] | None = None,
+        _receiving_command_id: str | None = None,
+    ) -> Any:
+        """Admit one bounded child request through the existing creation owner.
+
+        The full idempotency triple and semantic digest identify the operation.
+        Replay precedes fresh authority and queue limits. Exact retained legacy
+        records keep their original command and Job; no alias is written.
+
+        Fresh authority and ready counts are rechecked by create_job's existing
+        synchronous guard, under its writer transaction and before commit.
+        Request root/parent references remain provenance, never Job ancestry,
+        credentials, a worker selection or a placement commitment.
+        """
+        from dataclasses import replace
+        from control_plane.child_execution_contracts import (
+            CHILD_EXECUTION_REQUEST_SCHEMA,
+            ChildExecutionRequest,
+        )
+        from control_plane.child_request_admission import (
+            AdmissionOutcome,
+            ChildRequestAdmissionConflict,
+            ReadyQueuePolicy,
+            _legacy_admission_command_id,
+            admission_command_id,
+            decide_admission,
+            request_priority,
+        )
+        from control_plane.executive_coo_hierarchy import child_request_queue_wait
+
+        if type(request) is not ChildExecutionRequest:
+            raise StateConflict(
+                "child request admission requires a ChildExecutionRequest.v1 envelope")
+        resolved_policy = policy if policy is not None else ReadyQueuePolicy.from_env()
+        key = request.idempotency_key()
+        command_id = admission_command_id(request)
+        legacy_command = _legacy_admission_command_id(key)
+        command_candidates = tuple(dict.fromkeys((command_id, legacy_command)))
+        if (_receiving_command_id is not None
+                and _receiving_command_id not in command_candidates):
+            raise StateConflict("child-request receiving command differs from its tuple")
+        digest = request.request_digest
+
+        def child_request_of(payload_json: Any) -> dict[str, Any] | None:
+            payload = _json_loads(str(payload_json), fallback=None)
+            if not isinstance(payload, dict):
+                return None
+            material = payload.get("provenance")
+            if not isinstance(material, dict):
+                return None
+            child_request = material.get("child_request")
+            if (not isinstance(child_request, dict)
+                    or child_request.get("schema") != CHILD_EXECUTION_REQUEST_SCHEMA):
+                return None
+            return child_request
+
+        def existing_admission(connection: Any) -> tuple[str, str, str] | None:
+            matches = []
+            for candidate in command_candidates:
+                row = connection.execute(
+                    """
+                    SELECT e.payload_json, e.command_id, e.event_type,
+                           e.aggregate_type, e.aggregate_id, e.job_id,
+                           j.job_id AS retained_job_id
+                    FROM events e LEFT JOIN jobs j ON j.job_id = e.job_id
+                    WHERE e.command_id=?
+                    """,
+                    (candidate,),
+                ).fetchone()
+                if row is None:
+                    continue
+                material = child_request_of(row["payload_json"])
+                if (row["event_type"] != "JOB_CREATED"
+                        or row["aggregate_type"] != "job"
+                        or not row["retained_job_id"]
+                        or row["job_id"] != row["retained_job_id"]
+                        or row["aggregate_id"] != row["job_id"]
+                        or material is None
+                        or material.get("command_id") != candidate):
+                    raise StateConflict(
+                        "child-request command is owned by another semantic action")
+                stored_key = tuple(material.get(name) for name in (
+                    "root_ref", "immediate_parent_run_ref", "logical_child_key"))
+                stored_digest = material.get("request_digest")
+                if (any(type(part) is not str or not part.strip() for part in stored_key)
+                        or type(stored_digest) is not str or len(stored_digest) != 64
+                        or any(char not in "0123456789abcdef" for char in stored_digest)):
+                    raise StateConflict("child-request admission record lost its identity")
+                if candidate == legacy_command:
+                    if _legacy_admission_command_id(stored_key) != candidate:
+                        raise StateConflict("child-request retained tuple differs from its command")
+                if stored_key != key:
+                    if candidate == legacy_command and candidate != command_id:
+                        # A proven delimiter collision is another operation.
+                        # It still consumes capacity; never adopt or rewrite it.
+                        continue
+                    raise StateConflict("child-request retained tuple differs from its command")
+                matches.append((str(row["job_id"]), stored_digest, candidate))
+            if len(matches) > 1:
+                raise StateConflict("child-request has multiple retained command identities")
+            return matches[0] if matches else None
+
+        def replay(existing: tuple[str, str, str]) -> Any:
+            try:
+                outcome = decide_admission(
+                    request, existing=existing[:2], root_ready=0, fleet_ready=0,
+                    policy=resolved_policy)
+            except ChildRequestAdmissionConflict as exc:
+                raise StateConflict(str(exc)) from exc
+            return replace(outcome, command_id=existing[2])
+
+        def ready_counts(connection: Any) -> tuple[int, int]:
+            """Count this lane's queued, unclaimed, non-cancelling Jobs."""
+            root_ready = int(connection.execute(
+                """
+                SELECT COUNT(*) FROM events e JOIN jobs j ON j.job_id = e.job_id
+                WHERE e.event_type='JOB_CREATED'
+                  AND json_extract(e.payload_json,
+                      '$.provenance.child_request.schema') = ?
+                  AND json_extract(e.payload_json,
+                      '$.provenance.child_request.root_ref') = ?
+                  AND j.status='QUEUED'
+                  AND j.current_attempt_id IS NULL
+                  AND j.cancel_requested_at_ms IS NULL
+                """,
+                (CHILD_EXECUTION_REQUEST_SCHEMA, request.root_ref),
+            ).fetchone()[0])
+            fleet_ready = int(connection.execute(
+                """
+                SELECT COUNT(*) FROM events e JOIN jobs j ON j.job_id = e.job_id
+                WHERE e.event_type='JOB_CREATED'
+                  AND json_extract(e.payload_json,
+                      '$.provenance.child_request.schema') = ?
+                  AND j.status='QUEUED'
+                  AND j.current_attempt_id IS NULL
+                  AND j.cancel_requested_at_ms IS NULL
+                """,
+                (CHILD_EXECUTION_REQUEST_SCHEMA,),
+            ).fetchone()[0])
+            return root_ready, fleet_ready
+
+        common = {
+            "command_id": command_id,
+            "request_digest": digest,
+            "root_ref": request.root_ref,
+            "logical_child_key": request.logical_child_key,
+        }
+        with self.store.read() as connection:
+            existing = existing_admission(connection)
+        if existing is not None:
+            return replay(existing)
+
+        class _ReadyQueueWait(Exception):
+            def __init__(self, outcome):
+                self.outcome = outcome
+
+        def recheck_admission():
+            # create_job already holds BEGIN IMMEDIATE. A fresh reader sees
+            # committed rows, excluding this transaction's pending Job on the
+            # second check. Other writers cannot take the remaining slot.
+            with self.store.read() as connection:
+                if existing_admission(connection) is not None:
+                    # A legacy record may have committed during the lock wait.
+                    # Reconcile it before fresh authority, just like the
+                    # incumbent canonical-command duplicate check.
+                    raise StateConflict("child request was already admitted")
+            if (_receiving_command_id == legacy_command
+                    and legacy_command != command_id):
+                raise StateConflict("legacy child-request command cannot create fresh work")
+            if _principal_commit_guard is not None:
+                if not callable(_principal_commit_guard):
+                    return _principal_commit_guard
+                result = _principal_commit_guard()
+                if result is not None:
+                    # Preserve create_job's existing synchronous/None contract,
+                    # including its coroutine close/refusal behavior.
+                    return result
+            with self.store.read() as connection:
+                root_ready, fleet_ready = ready_counts(connection)
+            wait = child_request_queue_wait(
+                root_ready, fleet_ready,
+                policy=resolved_policy, root_ref=request.root_ref)
+            if wait is not None:
+                raise _ReadyQueueWait(AdmissionOutcome(
+                    state="WAIT", wait_reason=str(wait["reason"]),
+                    wait_detail=wait, **common))
+            return None
+
+        provenance = {
+            "child_request": {
+                "schema": CHILD_EXECUTION_REQUEST_SCHEMA,
+                "root_ref": request.root_ref,
+                "immediate_parent_run_ref": request.immediate_parent_run_ref,
+                "logical_child_key": request.logical_child_key,
+                "request_digest": digest,
+                "policy_revision": request.policy_revision,
+                "requested_complexity": request.requested_complexity,
+                "fallback_mode": request.fallback_mode,
+                "command_id": command_id,
+            },
+        }
+        objective = (
+            f"[child-request] key={request.logical_child_key} "
+            f"root={request.root_ref} parent={request.immediate_parent_run_ref} "
+            f"digest={digest[:12]}"
+        )
+        try:
+            job = self.create_job(
+                objective,
+                priority=request_priority(request),
+                constraints={"required_capabilities": ["read"]},
+                attempt_limit=1,
+                command_id=command_id,
+                provenance=provenance,
+                _principal_commit_guard=recheck_admission,
+            )
+        except _ReadyQueueWait as exc:
+            return exc.outcome
+        except StateConflict:
+            # Preserve the incumbent duplicate reconciliation after rollback.
+            with self.store.read() as connection:
+                existing = existing_admission(connection)
+            if existing is None:
+                raise
+            return replay(existing)
+        return AdmissionOutcome(state="ADMITTED", job_id=job.job_id, **common)
+
+    def child_request_ready_queue(
+        self,
+        *,
+        now_ms: int,
+        policy: Any | None = None,
+        eligible: Any = None,
+    ) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+        """Order this lane's ready queue: priority, aging, root fairness.
+
+        Returns ``(ordered, skipped)``.  ``skipped`` holds the
+        skip-ineligible tail (not yet available, or failing the optional
+        ``eligible`` predicate) — an ineligible head never blocks the
+        entries behind it.
+        """
+
+        from control_plane.child_execution_contracts import (
+            CHILD_EXECUTION_REQUEST_SCHEMA,
+        )
+        from control_plane.child_request_admission import (
+            ReadyQueueEntry,
+            ReadyQueuePolicy,
+            select_next_ready,
+        )
+
+        resolved_policy = policy if policy is not None else ReadyQueuePolicy.from_env()
+        with self.store.read() as connection:
+            rows = connection.execute(
+                """
+                SELECT j.job_id, j.priority, j.available_at_ms,
+                       json_extract(e.payload_json,
+                           '$.provenance.child_request.root_ref') AS root_ref
+                FROM events e JOIN jobs j ON j.job_id = e.job_id
+                WHERE e.event_type='JOB_CREATED'
+                  AND json_extract(e.payload_json,
+                      '$.provenance.child_request.schema') = ?
+                  AND j.status='QUEUED'
+                  AND j.current_attempt_id IS NULL
+                  AND j.cancel_requested_at_ms IS NULL
+                ORDER BY j.job_id
+                """,
+                (CHILD_EXECUTION_REQUEST_SCHEMA,),
+            ).fetchall()
+        entries = [
+            ReadyQueueEntry(
+                job_id=str(row["job_id"]),
+                root_ref=str(row["root_ref"]),
+                priority=int(row["priority"]),
+                available_at_ms=int(row["available_at_ms"]),
+            )
+            for row in rows
+        ]
+        return select_next_ready(
+            entries, now_ms=int(now_ms), policy=resolved_policy, eligible=eligible)
+
     def create_job(
         self,
         objective: str,
@@ -18355,19 +18658,51 @@ def _recheck_placement_lineage(connection, job_row, spec, authority) -> None:
 
 
 def _placement_binding_for_attempt(connection, attempt_id: str) -> dict[str, Any] | None:
+    """The Attempt's CURRENT ExecutionBinding: the one issued at claim, or the
+    latest re-issue by adoption or expired OHF takeover, both of which rotate
+    the fence on the same Attempt."""
     rows = connection.execute(
-        "SELECT payload_json FROM events WHERE attempt_id=? AND event_type='JOB_CLAIMED' "
-        "AND aggregate_type='job'",
+        "SELECT event_type,payload_json FROM events WHERE attempt_id=? AND ("
+        "(event_type='JOB_CLAIMED' AND aggregate_type='job') OR "
+        "(event_type IN ('ATTEMPT_ADOPTED','OHF_EXPIRED_LEASE_TAKEN_OVER') "
+        "AND aggregate_type='attempt')) ORDER BY event_id",
         (attempt_id,),
     ).fetchall()
-    bindings = [
-        payload["execution_binding"]
-        for payload in (json.loads(row[0]) for row in rows)
+    issued = [
+        (row[0], payload["execution_binding"])
+        for row, payload in ((row, json.loads(row[1])) for row in rows)
         if isinstance(payload, dict) and "execution_binding" in payload
     ]
-    if len(bindings) > 1:
+    claimed = [binding for kind, binding in issued if kind == "JOB_CLAIMED"]
+    if len(claimed) > 1:
         raise PersistenceError("Attempt carries more than one ExecutionBinding")
-    return bindings[0] if bindings else None
+    if issued and not claimed:
+        raise PersistenceError("re-issued ExecutionBinding has no claim-time binding")
+    return issued[-1][1] if issued else None
+
+
+def _reissue_placement_binding(
+    connection, row: sqlite3.Row, *, fence_counter: int, lease_expires_at_ms: int
+) -> dict[str, Any] | None:
+    """Re-issue the binding in the SAME transaction as its fence rotation."""
+    from control_plane.child_execution_contracts import ExecutionBinding
+    from control_plane.executive_placement_authority import reissue_execution_binding
+    placed = connection.execute(
+        "SELECT json_type(constraints_json,'$.child_placement') FROM jobs WHERE job_id=?",
+        (row["job_id"],),
+    ).fetchone()
+    if placed is None or placed[0] is None:
+        return None  # legacy (non-placement) Job: no binding to re-issue
+    raw = _placement_binding_for_attempt(connection, str(row["attempt_id"]))
+    if raw is None:
+        raise StateConflict("adoption refused: placement Job Attempt has no ExecutionBinding")
+    binding = ExecutionBinding.from_dict(raw)
+    if (binding.attempt_ref != str(row["attempt_id"])
+            or binding.fence_counter != int(row["fence_generation"])):
+        raise PersistenceError("placement ExecutionBinding and Attempt fence diverged")
+    return reissue_execution_binding(
+        binding, fence_counter=fence_counter, lease_expires_at_ms=lease_expires_at_ms
+    ).to_dict()
 
 
 def _require_placement_settlement_fence(
@@ -19848,6 +20183,9 @@ class AttemptRegistry:
             )
             if updated_attempt.rowcount != 1:
                 raise StateConflict(f"attempt {attempt_id} lost the adoption race")
+            reissued = _reissue_placement_binding(
+                connection, row, fence_counter=next_fence, lease_expires_at_ms=expiry
+            )
             self.store.append_event(
                 connection,
                 aggregate_type="attempt",
@@ -19864,6 +20202,7 @@ class AttemptRegistry:
                     "previous_lease_owner": str(row["lease_owner"]),
                     "lease_owner": owner,
                     "lease_expires_at_ms": expiry,
+                    **({"execution_binding": reissued} if reissued is not None else {}),
                 },
                 timestamp_ms=timestamp,
             )
@@ -20031,6 +20370,12 @@ class AttemptRegistry:
             )
             if quota.rowcount != 1 or attempt.rowcount != 1:
                 raise StateConflict("expired OHF takeover lost its CAS race")
+            binding = _reissue_placement_binding(
+                connection,
+                row,
+                fence_counter=next_fence,
+                lease_expires_at_ms=expiry,
+            )
             self.store.append_event(
                 connection,
                 aggregate_type="attempt",
@@ -20046,6 +20391,7 @@ class AttemptRegistry:
                     "fence_generation": next_fence,
                     "lease_owner": owner,
                     "lease_expires_at_ms": expiry,
+                    **({"execution_binding": binding} if binding is not None else {}),
                 },
                 timestamp_ms=timestamp,
             )
@@ -21247,6 +21593,14 @@ class AttemptRegistry:
                         attempt_id,
                     ),
                 )
+                if cancel_was_requested:
+                    # Custody is released here and the Job is terminal, so no
+                    # later verb can settle (REVIEW_2314 M-2). The LOST branch
+                    # keeps custody; requeue_job settles both.
+                    ResourceBroker(self.store)._settle_placement_in_transaction(
+                        connection, attempt_id=attempt_id, timestamp=timestamp,
+                        reason="LEASE_EXPIRED",
+                    )
                 self.store.append_event(
                     connection,
                     aggregate_type="job",
@@ -25243,6 +25597,13 @@ class ResourceBroker:
         the exact demands against same-transaction counters. The claim is the
         effect authority for its Attempt, so the commitment is BEGUN in the same
         transaction; settlement later moves it to SETTLED exactly once.
+
+        Forensic divergence (REVIEW_2314 m-4): this path does not call
+        ``mint_capacity_capture``/``evaluate_begin``. Inside one BEGIN IMMEDIATE
+        transaction that recheck would be tautological, but placement
+        commitments therefore carry no capacity-capture receipt; the JOB_CLAIMED
+        ``placement_commitment`` payload (observations digest, registry
+        revision) is their admission evidence.
         """
         from . import executive_physical_resources as physical
 
@@ -25335,6 +25696,14 @@ class ResourceBroker:
         Idempotent: no commitment (legacy claim) or an already-terminal one is
         a no-op. Called wherever the Worker quota custody of that Attempt is
         released, inside the same transaction.
+
+        Trust basis (REVIEW_2314 m-2): ``terminal_effect_state: TERMINAL`` is
+        asserted without the incumbent settle's ``process_terminal`` /
+        ``descendants_terminal`` proofs. It rides the same-transaction Worker
+        quota release, whose verb (complete/fail/cancel/release/requeue/expiry)
+        is the Executive's effect authority for the Attempt; the settlement
+        ``reason`` names that verb. Weaker forensics than other physical
+        commitments until the reviewed-schema placement request kind lands.
         """
         from .executive_placement_authority import PLACEMENT_OWNER
 

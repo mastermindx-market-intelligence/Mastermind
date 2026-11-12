@@ -18,6 +18,7 @@ on:
       - "scripts/ci_pytest.py"
       - "scripts/ci_parallel_shard.py"
       - "scripts/ci_pytest_timing.py"
+      - "scripts/ci_fixed_diagnostics.py"
       - "tests/test_rwe*.py"
       - "tests/test_ci_pytest*.py"
       - ".github/workflows/ci.yml"
@@ -61,7 +62,7 @@ jobs:
 
   shadow-shards:
     needs: [prepare-lock]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -125,17 +126,45 @@ jobs:
 
       - name: Realize hash-locked environment
         # Every runner consumes the one prepare-lock artifact above.
-        run: python scripts/rwe_env.py realize --dest /tmp/rwe-env
+        run: |
+          set -euo pipefail
+          env_parent="$(mktemp -d "${RUNNER_TEMP:?}/rwe-shadow.XXXXXX")"
+          env_dir="$env_parent/env"
+          printf 'MMX_RWE_SHADOW_ENV=%s\n' "$env_dir" >> "$GITHUB_ENV"
+          python scripts/rwe_env.py realize --dest "$env_dir"
+
+      # Same owned directory and closed diagnostic schema as canonical CI.
+      # The canonical shard already loads its fixed timing plugin; no plugin,
+      # pytest selector or environment policy is supplied by this workflow.
+      - name: Prepare fixed test diagnostics
+        run: |
+          diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/ci-fixed.XXXXXX")"
+          chmod 0700 "$diagnostic_dir"
+          printf 'MMX_CI_FIXED_DIAGNOSTICS_DIR=%s\n' "$diagnostic_dir" >> "$GITHUB_ENV"
 
       - name: Run canonical test shard inside the realized environment
-        run: python scripts/rwe_env.py gate --env /tmp/rwe-env --shard-index ${{ matrix.index }}
+        run: python scripts/rwe_env.py gate --env "${MMX_RWE_SHADOW_ENV:?}" --shard-index ${{ matrix.index }}
+
+      - name: Upload fixed test diagnostics
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@v4
+        with:
+          name: rwe-fixed-diagnostics-${{ matrix.index }}
+          path: |
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-unit/ci-fixed-diagnostics.json
+            ${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-rollout/ci-fixed-diagnostics.json
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 0
 
       - name: Upload receipt
-        if: always()
+        if: ${{ always() && env.MMX_RWE_SHADOW_ENV != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: rwe-receipt-linux-${{ matrix.index }}
-          path: /tmp/rwe-env/rwe_receipt.json
+          path: ${{ env.MMX_RWE_SHADOW_ENV }}/rwe_receipt.json
           if-no-files-found: warn
 
   shadow-gate:

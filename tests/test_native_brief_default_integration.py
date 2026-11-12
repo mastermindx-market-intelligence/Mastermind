@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('candidate_writer', ROOT / 'scripts/project_execution_brief.py')
@@ -152,6 +153,87 @@ class NativeDefaultCliTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(path.read_text(), original)
             self.assertFalse((root / 'backup').exists())
+
+
+class CreateTargetCliTests(unittest.TestCase):
+    def invoke(self, path, profile, *extra):
+        return subprocess.run([sys.executable, '-B', str(ROOT / 'scripts/project_execution_brief.py'),
+            '--path', str(path), '--profile', profile, *extra],
+            text=True, capture_output=True, timeout=20, cwd=tempfile.gettempdir())
+
+    def test_missing_target_refused_without_explicit_flag(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'instructions.md'
+            result = self.invoke(path, 'claude')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('--create-target', result.stderr)
+            self.assertFalse(path.exists())
+
+    def test_create_preview_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'instructions.md'
+            result = self.invoke(path, 'claude', '--create-target')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertTrue(report['preview_only'])
+            self.assertTrue(report['would_create'])
+            self.assertFalse(path.exists())
+
+    def test_create_apply_installs_block_with_readback_and_stays_idempotent(self):
+        brief = (ROOT / 'docs/NATIVE_EXECUTION_BRIEF.md').read_text()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'instructions.md'
+            result = self.invoke(path, 'claude', '--create-target', '--apply',
+                                 '--backup-dir', str(root / 'backup'))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            receipt = json.loads(result.stdout)
+            self.assertTrue(receipt['created'])
+            self.assertIsNone(receipt['backup'])
+            expected = M.project('', brief, 'claude')
+            self.assertEqual(receipt['after_sha256'], M.digest(expected.encode()))
+            self.assertEqual(path.read_text(), expected)
+            self.assertTrue(expected.startswith('<!-- ' + M.MARKER + ' -->\n# '))
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            again = self.invoke(path, 'claude', '--create-target', '--apply',
+                                '--expected-sha256', receipt['after_sha256'],
+                                '--backup-dir', str(root / 'backup'))
+            self.assertEqual(again.returncode, 0, again.stderr)
+            self.assertFalse(json.loads(again.stdout)['changed'])
+            self.assertEqual(path.read_text(), expected)
+
+    def test_create_refuses_preimage_memory_profile_and_missing_parent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'instructions.md'
+            refused = self.invoke(path, 'claude', '--create-target', '--apply',
+                                  '--expected-sha256', '0' * 64, '--backup-dir', str(root / 'backup'))
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertFalse(path.exists())
+            memory = self.invoke(path, 'memory', '--create-target')
+            self.assertNotEqual(memory.returncode, 0)
+            self.assertFalse(path.exists())
+            orphan = self.invoke(root / 'missing' / 'instructions.md', 'claude',
+                                 '--create-target', '--apply', '--backup-dir', str(root / 'backup'))
+            self.assertNotEqual(orphan.returncode, 0)
+            self.assertFalse((root / 'missing').exists())
+            real = root / 'real'
+            real.mkdir()
+            linked = root / 'linked'
+            linked.symlink_to(real, target_is_directory=True)
+            via_link = self.invoke(linked / 'instructions.md', 'claude', '--create-target', '--apply',
+                                   '--backup-dir', str(root / 'backup'))
+            self.assertNotEqual(via_link.returncode, 0)
+            self.assertIn('existing real directory', via_link.stderr)
+            self.assertFalse((real / 'instructions.md').exists())
+
+    def test_create_apply_refuses_when_target_appears_during_preparation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'instructions.md'
+            with mock.patch.object(M.os, 'link', side_effect=FileExistsError):
+                with self.assertRaisesRegex(ValueError, 'appeared'):
+                    M.apply_creation(path, 'x')
+            self.assertFalse(path.exists())
 
 
 if __name__ == '__main__':

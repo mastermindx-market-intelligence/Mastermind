@@ -494,12 +494,11 @@ def test_the_policy_is_never_installed_late_by_the_initializer():
 # ------------------------------------------------------------ unit recipe ----
 
 
-def test_shared_recipe_bytes_are_unchanged_for_the_profile_renderer():
+def test_shared_recipe_bytes_are_unchanged_for_the_profile_renderer(tmp_path):
     from integrations.hermes_harness.stack import compose_profile
+    state = tmp_path / "hermes-runtime-mmsecretary"
     profile = compose_profile(
-        "mmsecretary", state_dir=Path("/home/mmsecretary/.local/state/hermes-runtime-mmsecretary"),
-        hermes_home=Path("/home/mmsecretary/.local/state/hermes-runtime-mmsecretary/current/hermes-home"),
-        secrets_file=Path("/home/mmsecretary/.config/hermes-runtime/mmsecretary.secrets.env"))
+        "mmsecretary", state_dir=state, secrets_file=tmp_path / "mmsecretary.secrets.env")
     unit = system_service.render_host_unit(
         profile, runtime_user="mmsecretary", runtime_group="mmsecretary",
         python_executable="/usr/bin/python3.12",
@@ -514,8 +513,8 @@ def test_shared_recipe_bytes_are_unchanged_for_the_profile_renderer():
     assert ("ExecStart=/usr/bin/python3.12 -I -S -B "
             "/opt/mastermind-executive/releases/" + "a" * 40 +
             "/ops/executive_os/release_manifest.py hermes-runtime supervise "
-            "--profile /home/mmsecretary/.local/state/hermes-runtime-mmsecretary/current/profile.yaml "
-            "--hermes-bin /home/mmsecretary/.local/state/hermes-runtime-mmsecretary/current/bin/hermes\n") in unit
+            f"--profile {state}/current/profile.yaml "
+            f"--hermes-bin {state}/current/bin/hermes\n") in unit
 
 
 def test_install_input_consumer_supplies_the_same_closed_recipe():

@@ -30,7 +30,7 @@ def test_accepted_macro_merge_rule_can_fit_when_composed_with_this_kernel():
     # the compact Project must retain the pointer and never bulk-arm PRs.
     block = _project_block()
     for guard in (
-        "9A. ONE-PASS DELIVERY:",
+        "9A. TASK FIRST:",
         "docs/DELIVERY_WORKFLOW.md",
         "Never bulk-arm/clear other holds",
         "Native review != GitHub APPROVED",

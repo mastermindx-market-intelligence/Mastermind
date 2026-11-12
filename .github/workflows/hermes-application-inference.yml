@@ -20,8 +20,10 @@ on:
       - '.github/workflows/hermes-application-inference.yml'
       - '.github/workflows/ci.yml'
       - 'tests/integration/test_fabric_*_cross_pool_auto.py'
-  merge_group:
-    types: [checks_requested]
+  # No merge_group trigger: this workflow is not a required check, so the merge
+  # queue never waits for it, and every built, rebuilt or discarded queue group
+  # would spend runners on it. The path-filtered push run below proves each
+  # landed change instead. Policy: tests/test_ci_merge_group_capacity.py.
   push:
     branches: [master]
     paths:
@@ -45,6 +47,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: hermes-application-inference-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   studio-preflight-observation:
@@ -362,17 +368,49 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # Same outage hardening as the main CI workflow: the fixture image is a
+      # pure function of the pinned Dockerfile (no COPY, digest-pinned base),
+      # so restore the exact built bytes from the Actions cache and run apt
+      # only on a genuine cache miss (first build, Dockerfile change or
+      # eviction). Pull requests restore read-only; only a protected master
+      # push may save under this key. runner.arch keeps fleet/hosted CPU
+      # architectures from cross-loading each other's images.
+      - name: Restore cached application transport fixture image
+        id: application_transport_image_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/application-transport-image.tar
+          key: docker-fixture-application-transport-${{ runner.arch }}-ubuntu-24.04-68ee22004a91-${{ hashFiles('tests/application_tunnel_ci/Dockerfile') }}
       - name: Qualify original and successor in isolated Linux root fixture
+        env:
+          APPLICATION_TRANSPORT_IMAGE_RESTORED: ${{ steps.application_transport_image_cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
           hermes_transport_source="$(mktemp -d "${RUNNER_TEMP}/hermes-transport-source.XXXXXX")"
           trap 'rm -rf "$hermes_transport_source"' EXIT
           git archive --format=tar HEAD | tar -x -C "$hermes_transport_source"
           chmod 0755 "$hermes_transport_source"
-          docker build --file tests/application_tunnel_ci/Dockerfile --tag hermes-transport:${{ github.sha }} tests/application_tunnel_ci
+          # Identical image bytes either way: the cached tar is a docker save
+          # of an image built from this exact Dockerfile; the run below is
+          # byte-identical in both branches.
+          if [ "$APPLICATION_TRANSPORT_IMAGE_RESTORED" = "true" ]; then
+            docker load --input "$RUNNER_TEMP/application-transport-image.tar"
+            docker tag mastermind-application-transport:fixture-cache hermes-transport:${{ github.sha }}
+          else
+            docker build --file tests/application_tunnel_ci/Dockerfile \
+              --tag hermes-transport:${{ github.sha }} \
+              --tag mastermind-application-transport:fixture-cache tests/application_tunnel_ci
+            docker save --output "$RUNNER_TEMP/application-transport-image.tar" mastermind-application-transport:fixture-cache
+          fi
           docker run --rm --network=none --cap-drop=ALL --security-opt=no-new-privileges --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777 --tmpfs /fixture:rw,exec,nosuid,nodev,mode=0755 \
             --mount "type=bind,src=${hermes_transport_source},dst=/repo,readonly" hermes-transport:${{ github.sha }}
+      - name: Save application transport fixture image for protected runs
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.application_transport_image_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/application-transport-image.tar
+          key: docker-fixture-application-transport-${{ runner.arch }}-ubuntu-24.04-68ee22004a91-${{ hashFiles('tests/application_tunnel_ci/Dockerfile') }}
   pinned-native-contract:
     name: Hermes pinned v0.23 primary and tools
     runs-on: ubuntu-latest

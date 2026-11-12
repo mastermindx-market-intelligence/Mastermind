@@ -32,6 +32,7 @@ import argparse
 import dataclasses
 import datetime as _datetime
 import json
+import math
 import os
 import platform
 import re
@@ -83,6 +84,7 @@ _THRESHOLD_KEYS = frozenset({
 })
 _REQUEST_KEYS = frozenset({"schema", "request_id", "operation", "payload"})
 _RESPONSE_KEYS = frozenset({"schema", "request_id", "operation", "ok", "result"})
+_ERROR_RESPONSE_KEYS = frozenset({"schema", "request_id", "operation", "ok", "error"})
 _PULL_PAYLOAD_KEYS = frozenset({"host_id", "snapshot", "free_local_slots"})
 _HEARTBEAT_PAYLOAD_KEYS = frozenset({"host_id", "snapshot"})
 _RELEASE_PAYLOAD_KEYS = frozenset({
@@ -292,7 +294,10 @@ def build_error_response(request: Mapping[str, Any], code: str, detail: str = ""
 def validate_response(value: Any, *, request: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise HostExecutorError("RESPONSE_NOT_OBJECT")
-    if set(value) != _RESPONSE_KEYS:
+    if type(value.get("ok")) is not bool:
+        raise HostExecutorError("RESPONSE_OK_INVALID")
+    expected_keys = _RESPONSE_KEYS if value["ok"] else _ERROR_RESPONSE_KEYS
+    if set(value) != expected_keys:
         raise HostExecutorError("RESPONSE_FIELDS_INVALID")
     if value["schema"] != HOST_EXECUTOR_RESPONSE_SCHEMA:
         raise HostExecutorError("RESPONSE_SCHEMA_UNSUPPORTED")
@@ -300,7 +305,9 @@ def validate_response(value: Any, *, request: Mapping[str, Any]) -> dict[str, An
         raise HostExecutorError("RESPONSE_IDENTITY_MISMATCH")
     if value["ok"] is not True:
         error = value.get("error")
-        if not isinstance(error, dict) or not isinstance(error.get("code"), str):
+        if (not isinstance(error, dict) or set(error) != {"code", "detail"}
+                or not isinstance(error["code"], str) or not error["code"]
+                or not isinstance(error["detail"], str)):
             raise HostExecutorError("RESPONSE_ERROR_INVALID")
         raise HostExecutorError(f"REMOTE_REFUSED:{error['code']}")
     if not isinstance(value["result"], dict):
@@ -331,6 +338,8 @@ def _validate_pull_payload(payload: Mapping[str, Any]) -> None:
     if set(payload) != _PULL_PAYLOAD_KEYS:
         raise HostExecutorError("PAYLOAD_FIELDS_INVALID")
     _validate_host_and_snapshot(payload)
+    if type(payload["free_local_slots"]) is not int or payload["free_local_slots"] < 0:
+        raise HostExecutorError("PAYLOAD_FREE_LOCAL_SLOTS_INVALID")
 
 
 def _validate_heartbeat_payload(payload: Mapping[str, Any]) -> None:
@@ -684,13 +693,16 @@ class HostExecutor:
                 return False, "memory availability unknown at recheck"
         elif mem_available_gib < reserve:
             return False, f"memory available {mem_available_gib:.1f} GiB below reserve {reserve:.1f} GiB"
-        disk = raw.get("disk_free_gib") or {}
-        runtime_free = disk.get("runtime_dir", disk.get("root"))
+        disk = raw.get("disk_free_gib")
+        runtime_free = disk.get("runtime_dir") if isinstance(disk, Mapping) else None
+        if (not isinstance(runtime_free, (int, float)) or isinstance(runtime_free, bool)
+                or not math.isfinite(runtime_free)):
+            return False, "runtime disk availability unknown at recheck"
         floor = float(self.thresholds.get(
             "runtime_floor_gib", (raw.get("proposed_thresholds") or {}).get(
                 "runtime_floor_gib", DEFAULT_RUNTIME_FLOOR_GIB),
         ))
-        if isinstance(runtime_free, (int, float)) and float(runtime_free) < floor:
+        if float(runtime_free) < floor:
             return False, f"runtime disk {float(runtime_free):.1f} GiB below floor {floor:.1f} GiB"
         return True, ""
 
@@ -962,6 +974,14 @@ class HostHeartbeatIntake:
             # Zero new claims: the placement authority is never consulted.
             return build_response(valid, {
                 "claim": None, "reason_code": code, "detail": detail,
+                "heartbeat_digest": record["snapshot_digest"],
+            })
+        if payload["free_local_slots"] == 0:
+            # Readiness capacity is not evidence of an available local slot.
+            # Keep the heartbeat, but do not enter the claim authority.
+            return build_response(valid, {
+                "claim": None, "reason_code": "NO_FREE_LOCAL_SLOT",
+                "detail": "free_local_slots=0",
                 "heartbeat_digest": record["snapshot_digest"],
             })
         claim, reason_code, reason_detail = self._claim_for_host(

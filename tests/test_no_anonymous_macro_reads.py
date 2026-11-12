@@ -136,6 +136,14 @@ _ALLOWLIST: dict[tuple[str, str], str] = {
 # acquisition. Each exception binds one entire reviewed source line in one file.
 # A fetch/clone/raw-content call added even in the same file is still rejected.
 _INERT_PR_LINK_DATA_LINES: dict[str, frozenset[str]] = {
+    # Immutable public fixture provenance DATA, not source acquisition. Exact
+    # path + entire line only; every fetch/clone/other URL still reaches the fence.
+    'tests/fixtures/memory_native_v3_9fb08/PROVENANCE.json': frozenset((
+        '"original_held_pr": "https://github.com/mastermindx-market-intelligence/macro/pull/10768",',
+    )),
+    'tests/fixtures/memory_native_v3_9fb08/SOURCE_MANIFEST.json': frozenset((
+        '"carrier": "https://github.com/mastermindx-market-intelligence/macro/pull/10768",',
+    )),
     # Exact published compiler provenance, asserted as local archive metadata.
     # Neither line performs a request; other acquisition text stays guarded.
     'tests/fixtures/discovery-correction-source.json': frozenset((
