@@ -170,8 +170,32 @@ def _chain_paths(runtime: Path, backups: Path) -> list:
     return paths
 
 
-def _temp_roots() -> set:
-    return set(Path("/tmp").glob("mastermind-executive-upgrade-evidence-*"))
+def _scoped_temp_roots(monkeypatch):
+    """Process-scoped private-temp accounting for the cleanup assertions.
+
+    The production prefix is machine-global and sibling schema-upgrade modules
+    on concurrent pytest workers (CI shards run ``-n 4 --dist loadfile``) call
+    the same :func:`tempfile.mkdtemp` site, so a foreign worker's transient
+    directory can enter -- and then vanish from -- a before/after snapshot of
+    the global prefix without any defect in this module's code. The cleanup
+    assertions below still exercise the real ``mkdtemp`` and its real cleanup
+    path; only the prefix (and therefore the glob) is made process-unique.
+    """
+    prefix = f"mastermind-executive-upgrade-evidence-p{os.getpid()}-"
+    real_mkdtemp = evidence.tempfile.mkdtemp
+
+    def _mkdtemp(*args, **kwargs):
+        return real_mkdtemp(prefix=prefix)
+
+    monkeypatch.setattr(evidence.tempfile, "mkdtemp", _mkdtemp)
+
+    def _roots() -> set:
+        # The glob follows tempfile's actual root: under the CI parallel
+        # placement each worker's TMPDIR is scoped to its own quiet root, so
+        # the created directories land there rather than under /tmp.
+        return set(Path(evidence.tempfile.gettempdir()).glob(prefix + "*"))
+
+    return _roots
 
 
 def _descriptor_count() -> int:
@@ -367,7 +391,8 @@ def test_production_config_gate_is_root_owned_0440(tmp_path, monkeypatch):
 def test_positive_chain_yields_closed_material_and_cleans_temps(tmp_path, monkeypatch):
     runtime, backups, config, release = _build_chain(tmp_path, monkeypatch)
     before = _snapshot(_chain_paths(runtime, backups))
-    temp_roots_before = _temp_roots()
+    temp_roots = _scoped_temp_roots(monkeypatch)
+    temp_roots_before = temp_roots()
     with _open_initial(runtime, release) as material:
         assert material.phase == "INITIAL"
         assert material.material["phase"] == "INITIAL"
@@ -443,7 +468,7 @@ def test_positive_chain_yields_closed_material_and_cleans_temps(tmp_path, monkey
         }
     assert not material.source_v5_database.exists()
     assert not material.target_v7_database.exists()
-    assert _temp_roots() == temp_roots_before
+    assert temp_roots() == temp_roots_before
     assert _snapshot(_chain_paths(runtime, backups)) == before
 
 
@@ -908,7 +933,8 @@ def test_initial_opening_never_mutates_or_relaxes_originals(tmp_path, monkeypatc
 def test_failure_paths_close_descriptors_and_remove_private_temps(
     tmp_path, monkeypatch
 ):
-    temp_roots_before = _temp_roots()
+    temp_roots = _scoped_temp_roots(monkeypatch)
+    temp_roots_before = temp_roots()
     runtime, backups, config, release = _build_chain(tmp_path, monkeypatch)
     _receipt_path(runtime, "C67").unlink()
     before = _descriptor_count()
@@ -916,7 +942,7 @@ def test_failure_paths_close_descriptors_and_remove_private_temps(
         with _open_initial(runtime, release):
             pass
     assert _descriptor_count() <= before + 2
-    assert _temp_roots() == temp_roots_before
+    assert temp_roots() == temp_roots_before
 
     runtime2, backups2, config2, release2 = _build_chain(tmp_path, monkeypatch)
 
@@ -929,7 +955,7 @@ def test_failure_paths_close_descriptors_and_remove_private_temps(
         with _open_initial(runtime2, release2):
             pass
     assert _descriptor_count() <= before2 + 2
-    assert _temp_roots() == temp_roots_before
+    assert temp_roots() == temp_roots_before
 
 
 # Native principal integration regressions, after the retained raw Fabric

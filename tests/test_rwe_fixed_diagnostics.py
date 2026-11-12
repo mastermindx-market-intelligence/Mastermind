@@ -108,6 +108,10 @@ def test_real_canonical_rwe_child_retains_public_case_and_original_result(tmp_pa
     monkeypatch.setattr(rwe_env, 'vendor_present', lambda _: True)
     for name in ('PYTHONPATH', 'PYTEST_ADDOPTS', 'PYTEST_PLUGINS'):
         monkeypatch.delenv(name, raising=False)
+    # The fixture child asserts the exact serial gate argv under disabled
+    # plugin autoload; the shard job's worker switch must not leak in and
+    # inject xdist flags that child cannot load.
+    monkeypatch.delenv('CI_PYTEST_WORKERS', raising=False)
     monkeypatch.setenv('PYTEST_DISABLE_PLUGIN_AUTOLOAD', '1')
     monkeypatch.setenv('MMX_CI_FIXED_DIAGNOSTICS_DIR', str(diagnostic))
     args = argparse.Namespace(root=str(root), env=str(environment), subset=None, shard_index=5)

@@ -1408,8 +1408,11 @@ def test_shared_placement_paid_launch_substituting_provider_is_refused(
         _guard_launch(shared_placement, command)
     output = _emitted(capsys)
     assert output["permissionDecision"] == "deny"
-    assert "provider substitution" in output["permissionDecisionReason"]
-    assert "'grok'" in output["permissionDecisionReason"]
+    reason = output["permissionDecisionReason"]
+    if "python3 " in command:
+        assert "R6_INTERPRETER_WRAPPER" in reason and "unobservable launch" in reason
+    else:
+        assert "provider substitution" in reason and "'grok'" in reason
 
 
 # --- required refusal 4: unaccounted descendant --------------------------------
@@ -1840,7 +1843,10 @@ def test_m4_unknown_wrapper_modes_are_refused_never_ignored(
     with pytest.raises(SystemExit):
         _guard_launch(shared_placement, command)
     reason = _emitted(capsys)["permissionDecisionReason"]
-    assert "unknown wrapper mode" in reason or "provider substitution" in reason
+    if launch.startswith("python3 "):
+        assert "R6_INTERPRETER_WRAPPER" in reason and "unobservable launch" in reason
+    else:
+        assert "unknown wrapper mode" in reason or "provider substitution" in reason
 
 
 def test_m4_off_list_wrapper_mode_is_observed_in_unarmed_sessions(
@@ -2040,9 +2046,15 @@ def test_m3_every_wrapper_shape_is_enumerated_and_checked(
         "POOL_ORCHESTRATOR_ID=root-orch-1 POOL_PARENT_RUN_ID=hermes-run-7 "
         "POOL_TASK_CLASS=code "
     )
-    for shape in shapes:  # each shape alone, matching: allowed
+    # Retain the protected source's interpreter-hosted wrapper refusal;
+    # recognizing the script in the census is not an armed launch grant.
+    direct = [shape for shape in shapes if not shape.startswith("python3 ")]
+    for shape in direct:  # direct wrapper alone, matching: allowed
         _guard_launch(shared_placement, prefix + shape)
         assert capsys.readouterr().out == "", shape
+    with pytest.raises(SystemExit):
+        _guard_launch(shared_placement, prefix + shapes[-1])
+    assert "R6_INTERPRETER_WRAPPER" in _emitted(capsys)["permissionDecisionReason"]
     for shape in shapes:  # repeated in one command: second is unaccounted
         with pytest.raises(SystemExit):
             _guard_launch(shared_placement, f"{prefix}{shape} && {shape}")
@@ -2330,6 +2342,13 @@ def test_n3_computed_launch_refusal_stays_scoped_to_wrapper_tokens(
         "TOOL=ls; $TOOL -la /tmp",
         "python3 /opt/mastermind/ext/slot.py glm -- run",
     ):
+        if "python3 /opt/mastermind/ext/slot.py" in command:
+            # Protected source refuses the interpreter-hosted wrapper before
+            # binding; retain this case as an explicit negative control.
+            with pytest.raises(SystemExit):
+                _guard_launch(shared_placement, command)
+            assert "R6_INTERPRETER_WRAPPER" in _emitted(capsys)["permissionDecisionReason"]
+            continue
         if command in _R12_ARMED_FLIPS:
             # r12 (re-check #7): a shell construct in an ARMED session is
             # judged by the ADMIT grammar — this computed command word is
@@ -2653,6 +2672,13 @@ def test_r5_b1_structural_refusals_stay_scoped(
         "python3 -m pytest tests/test_provider_orchestrator_policy.py",
         "jq -r '.models[]' config.json",
     ):
+        if "python3 /opt/mastermind/ext/slot.py" in command:
+            # Protected source refuses the interpreter-hosted wrapper before
+            # binding; retain this case as an explicit negative control.
+            with pytest.raises(SystemExit):
+                _guard_launch(shared_placement, command)
+            assert "R6_INTERPRETER_WRAPPER" in _emitted(capsys)["permissionDecisionReason"]
+            continue
         if command in _R12_ARMED_FLIPS:
             # r12 (re-check #7): armed, a shell construct (quoted or not)
             # puts the command in scope; these are not admitted forms.
@@ -3014,7 +3040,7 @@ _R6_TABLE = [
     # --- honest controls ---
     ("control-plain-launch", _R6_L, "allow", "control", ""),
     ("control-slot-py", _R6_P + "python3 /opt/mastermind/ext/slot.py glm -- run",
-     "allow", "control", ""),
+     "deny", "protected-refusal", "R6_INTERPRETER_WRAPPER"),
     ("control-faithful-bash-c", "bash -c '" + _R6_L + "'", "allow", "control", ""),
     ("control-faithful-bash-c-outer-identity", _R6_P + "bash -c '" + _R6_B + "'",
      "allow", "control", ""),
@@ -3106,11 +3132,12 @@ def test_r6_table_covers_every_review_class() -> None:
     assert classes["obs-1"] == 12 and classes["deferred"] == 1
     assert classes["r5-deny"] == 29
     assert classes["doc-limit"] == 5
-    assert classes["control"] == 8
+    assert classes["control"] == 7
+    assert classes["protected-refusal"] == 1
     assert all(
         expected == "deny"
         for _, _, expected, klass, _ in _R6_TABLE
-        if klass in ("MULT", "REG", "ID", "r5-deny", "deferred")
+        if klass in ("MULT", "REG", "ID", "r5-deny", "deferred", "protected-refusal")
     )
 
 
@@ -3451,11 +3478,11 @@ _R7_REVIEW2_TABLE = [
     ("nested-bash-path", "/bin/bash -c '" + _R6_L + "'",
      "allow", "deny", True, "on-purpose", ""),
     ("slot-staged-path", _R6_P + "python3 /tmp/staged/slot.py glm -- run",
-     "allow", "deny", True, "on-purpose", ""),
+     "deny", "deny", False, "protected-source", "R6_INTERPRETER_WRAPPER"),
     ("slot-upper", _R6_P + "python3 " + _R7_EXT + "SLOT.PY glm -- run",
-     "allow", "deny", True, "on-purpose", ""),
+     "deny", "deny", False, "protected-source", "R6_INTERPRETER_WRAPPER"),
     ("slot-python2", _R6_P + "python " + _R7_EXT + "slot.py glm -- run",
-     "allow", "deny", True, "on-purpose", ""),
+     "deny", "deny", False, "protected-source", "R6_INTERPRETER_WRAPPER"),
     # --- r7 extras: zsh divergences, exact values, launch output targets ---
     ("zsh-numeric-glob", _R6_L + " <1-9> /tmp/x",
      "deny", "deny", False, "r7-extra", "R6_TOKENIZE_FAILED"),
@@ -3493,7 +3520,7 @@ _R7_REVIEW2_TABLE = [
     ("control-env-prefix", "env " + _R6_P + "nohup nice -n 5 timeout 90m " + _R6_B,
      "allow", "deny", True, "control", ""),
     ("control-slot", _R6_P + "python3 " + _R7_EXT + "slot.py glm -- run",
-     "allow", "deny", True, "control", ""),
+     "deny", "deny", False, "protected-source", "R6_INTERPRETER_WRAPPER"),
     ("control-pool-remote",
      _R6_P + "pool remote mini2 glm /tmp/p.txt /repo glm-5.3",
      "allow", "deny", True, "control", ""),
@@ -3620,7 +3647,7 @@ def test_r7_review2_table_covers_every_reviewer_row() -> None:
 #: r6 rows that ARE launches (every other admitted row is a read or out of scope).
 _R7_R6_LAUNCH_ROWS = frozenset({
     "exec", "command", "nohup", "setsid", "timeout", "nice",
-    "control-plain-launch", "control-slot-py", "control-faithful-bash-c",
+    "control-plain-launch", "control-faithful-bash-c",
     "control-faithful-bash-c-outer-identity", "control-inherited-bare-launch",
 })
 
@@ -3684,6 +3711,21 @@ def test_r7_every_admitted_launch_shape_reaches_every_binding_check(
     _r6_armed_with_identity(shared_placement, monkeypatch, tmp_path)
     faithful, substituted = shape.format(pool="glm"), shape.format(pool="grok")
     parse = guard.r7_parse(faithful)
+    # The protected source's interpreter-hosted wrapper prohibition is
+    # stronger than the earlier r13 positive controls. Keep these cases as
+    # explicit bound/unbound refusals, not deleted or silently skipped tests.
+    if "python" in shape:
+        assert "slot.py" in shape and parse is not None and parse.refused
+        assert any(code == "R6_INTERPRETER_WRAPPER" for code, _ in parse.codes)
+        calls = _r7_gate_spy(monkeypatch, guard)
+        for command in (faithful, substituted):
+            verdict, reason = _r6_verdict(guard, shared_placement, command, capsys)
+            assert verdict == "deny" and "R6_INTERPRETER_WRAPPER" in reason
+        monkeypatch.delenv("POOL_EXECUTION_BINDING", raising=False)
+        verdict, reason = _r6_verdict(guard, shared_placement, faithful, capsys)
+        assert verdict == "deny" and "R6_INTERPRETER_WRAPPER" in reason
+        assert calls == []
+        return
     assert parse is not None and not parse.refused, parse and parse.codes
     assert len(parse.launches) == 1
     calls = _r7_gate_spy(monkeypatch, guard)
@@ -6506,7 +6548,7 @@ def test_r12_known_limits_are_pinned(
 #: "missing binding"; ``allow`` → ALLOW both, gate unreached.
 _R12_HONEST_CONTROLS = [
     (_R6_L, "launch"),
-    (_R6_P + "python3 /opt/mastermind/ext/slot.py glm -- run", "launch"),
+    (_R6_P + "python3 /opt/mastermind/ext/slot.py glm -- run", "protected-interpreter"),
     ("bash -c '" + _R6_L + "'", "launch"),
     (_R6_B, "launch"),
     ("cat /opt/mastermind/ext/sub.sh", "allow"),
@@ -6550,7 +6592,12 @@ def test_r12_honest_armed_controls_still_pass(
     (bound, bound_reason, bound_gate), (nobind, nobind_reason, nobind_gate) = _r7_both(
         guard, shared_placement, monkeypatch, tmp_path, capsys, command
     )
-    if kind == "launch":
+    if kind == "protected-interpreter":
+        assert (bound, nobind) == ("deny", "deny")
+        assert (bound_gate, nobind_gate) == (False, False)
+        assert "R6_INTERPRETER_WRAPPER" in bound_reason
+        assert "R6_INTERPRETER_WRAPPER" in nobind_reason
+    elif kind == "launch":
         assert (bound, bound_gate) == ("allow", True), bound_reason
         assert (nobind, nobind_gate) == ("deny", True) and "missing binding" in nobind_reason
     else:

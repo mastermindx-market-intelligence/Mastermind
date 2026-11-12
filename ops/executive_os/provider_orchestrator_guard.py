@@ -36,6 +36,11 @@ pieces and an admitted nested ``-c`` interpreter then joins — so ``\⏎`` is
 also read on the quote-deleted, backslash-preserving view
 (``_r12_unquoted_view``) and the literal name check joins it there first;
 the ``slot`` module check also reads flag-combined ``-Bmslot`` forms.
+Protected-source composition: Python-hosted ``slot.py`` remains refused in
+armed sessions (``R6_INTERPRETER_WRAPPER``). The parse still recognizes its
+identity for diagnostics and unchanged unarmed handling; recognition grants
+no exception to the protected interpreter refusal. The r13 structural scope
+and v1.1 binding checks remain intact.
 There is no independent signing authority — the binding is only an assignment
 of opaque references, trusted exactly as far as it matches the owner's current
 lease. The gate fences every lexically observed launch in the commands it is
@@ -839,6 +844,10 @@ _R6_CLAUSES = {
         "last argument; a read form writes only to /dev/null or a duplicated "
         "descriptor; no network or dot-path targets)"
     ),
+    "R6_INTERPRETER_WRAPPER": (
+        "an interpreter-hosted wrapper is outside the protected armed launch "
+        "forms ({detail})"
+    ),
     "R6_NOT_A_PLAIN_LAUNCH": (
         "the wrapper name appears, but not as the command word of a plain "
         "launch, and {detail} is not an admitted read form — it receives the "
@@ -857,13 +866,7 @@ _R6_CLAUSES = {
         "path or spelling may resolve to a staged binary"
     ),
 }
-_R6_REMEDY = (
-    "Run the paid launch as a plain command: the wrapper (or python3 "
-    "…/slot.py) as the command word, optionally behind env NAME=value / "
-    "nohup / nice -n N / timeout DURATION / setsid / exec / command, with "
-    "literal arguments, redirections only at the end and nothing else on the "
-    "line (or bash -c '<that one launch>')."
-)
+_R6_REMEDY = "Run the paid launch as a plain command: a direct owner-approved wrapper as the command word, optionally behind env NAME=value / nohup / nice -n N / timeout DURATION / setsid / exec / command, with literal arguments, redirections only at the end and nothing else on the line (or bash -c '<that one launch>')."
 _R7_READ_REMEDY = (
     "Not launching? Drop the bare wrapper name from the command text, or use "
     "an admitted read form: cat/head/tail/grep/egrep/fgrep/wc/ls/stat/file/"
@@ -3335,6 +3338,15 @@ def _r7_unit(
                 "(inline program, option, stdin or another script)",
             ))
             return ""
+        # Protected WO-11 source refuses interpreter-hosted wrappers even
+        # when their script basename is recognizable. Keep the parser's
+        # census for diagnostics/legacy identity checks, but never turn that
+        # recognition into an armed launch allowance during integration.
+        codes.append((
+            "R6_INTERPRETER_WRAPPER",
+            "interpreter-hosted slot.py remains refused by the protected "
+            "shared-placement posture; use a direct owner-approved wrapper",
+        ))
         wrapper, args = "slot.py", words[index + 2:]
     elif lowered in _R6_NESTED_SHELLS or lowered in _R6_OTHER_SHELLS:
         parse.launch_like = True
