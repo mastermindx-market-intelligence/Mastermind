@@ -190,7 +190,7 @@ def test_retained_native_turn_reads_real_original_completion_without_another_dis
         async with _selected_child_service(tmp_path, short_socket_root,
                 name="native-original-result") as (service, supervisor, root, received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             command = _install(service, runtime, work)
             composition = selected_child_composition()
             class OriginalTransport:

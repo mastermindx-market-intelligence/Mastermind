@@ -180,6 +180,10 @@ def admit_selected_child(service, root):
 
 
 def publish_planner_return(service, planner):
+    return asyncio.run(publish_planner_return_async(service, planner))
+
+
+async def publish_planner_return_async(service, planner):
     """Original planner's phase/Wake owners; physical Relay/receiver are inert.
 
     This is a continuation fixture: a previously delivered planner turn has
@@ -191,8 +195,8 @@ def publish_planner_return(service, planner):
     from control_plane.wake_ledger import requested_record
     from control_plane.wake_persist import WakeLedgerRepository
     runtime = service.runtime
-    asyncio.run(service._project_terminal_return(planner.job_id,
-        expected_attempt_id=planner.current_attempt_id))
+    await service._project_terminal_return(planner.job_id,
+        expected_attempt_id=planner.current_attempt_id)
     assert service._terminal_return_last_diagnostic == "terminal-return:APPLIED"
     candidate = reduce_terminal_return(material=runtime.validated_role_completion(
         planner.job_id, expected_attempt_id=planner.current_attempt_id))
@@ -220,7 +224,8 @@ def _acknowledge_prior_planner_turn(runtime, obligation):
     # The incumbent source fixture seals a separate current receiver through
     # actual OHF owners. Its unassociated root does not change this project's
     # sole admitted root. Only the physical process/native turn is modeled.
-    receiver_runtime, sealed, generation = _admitted_runtime(runtime.store.root)
+    receiver_runtime, sealed, generation = _admitted_runtime(runtime.store.root, runtime=runtime)
+    assert receiver_runtime is runtime
     target = SessionTarget(session_alias="COO-CODEX", target_seat="coo",
         reasoning_surface="codex", wake_transport="codex-app-server",
         allowed_transports=("codex-app-server",), workstream=None, target_enabled=False)

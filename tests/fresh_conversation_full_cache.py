@@ -55,6 +55,10 @@ class CanonicalFixtureCache:
         module.__file__ = str(self.root / 'scripts/agentos.py')
         previous = sys.modules.get(name)
         sys.modules[name] = module
+        previous_bytecode = sys.dont_write_bytecode
+        # The real fixed child sets PYTHONDONTWRITEBYTECODE=1. Its in-process
+        # replacement must not dirty the captured source via sibling imports.
+        sys.dont_write_bytecode = True
         try:
             exec(compile(self.code, module.__file__, 'exec'), module.__dict__)
             moment = datetime.now(timezone.utc)
@@ -65,6 +69,7 @@ class CanonicalFixtureCache:
                 builds=None, p0_status=None, worktrees={})
             brief = module.build_brief(state, now=moment, since=moment-timedelta(days=1), since_label='1d')
         finally:
+            sys.dont_write_bytecode = previous_bytecode
             if previous is None: sys.modules.pop(name, None)
             else: sys.modules[name] = previous
         def captured_child(argv, *, cwd, timeout, max_bytes):

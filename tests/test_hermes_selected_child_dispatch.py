@@ -49,9 +49,10 @@ from tests.test_executive_service import (
     _request,
     _FakeSupervisor,
 )
+from tests.selected_child_mission import SelectedChildMission, WORK_REF, continuation_source
 
 
-def _admit_work_child(service, root):
+async def _admit_work_child(service, root):
     """Admit one plan whose single step is a direct work child of the root."""
 
     runtime = service.runtime
@@ -68,7 +69,33 @@ def _admit_work_child(service, root):
         root.job_id,
         command_id=f"coo-cycle:{root.job_id}:admit-plan:{dispatch.attempt.attempt_id}",
     )
+    await _qualify_planner_continuation(service, runtime.jobs.get_job(planner.job_id))
     return children[0]
+
+
+async def _qualify_planner_continuation(service, planner):
+    """Publish the real prior return and keep its separate receiver explicit."""
+    from control_plane.coo_principal_mandate import _mission_state
+    from tests.test_joint_api_project_owner import publish_planner_return_async
+    runtime = service.runtime
+    mission = service._selected_child_mission
+    mission.publish()
+    try:
+        initial = _mission_state(mission.workspace.read_mission_for_work_ref(WORK_REF),
+            expected_work_ref=WORK_REF)
+    except ValueError as error:
+        assert str(error) == "source_unavailable"
+    else:
+        assert initial.qualified is False
+    before = {job.job_id for job in runtime.jobs.list_jobs()}
+    await publish_planner_return_async(service, planner)
+    receiver_jobs = [job for job in runtime.jobs.list_jobs() if job.job_id not in before]
+    assert len(receiver_jobs) == 2
+    assert len({job.root_job_id for job in receiver_jobs}) == 1
+    assert receiver_jobs[0].root_job_id != mission.root.job_id
+    mission.receiver_job_ids = frozenset(job.job_id for job in receiver_jobs)
+    mission.publish()
+    mission.require_current()
 
 
 @pytest.fixture
@@ -126,40 +153,42 @@ async def _selected_child_service(tmp_path, short_socket_root, *, name,
         tmp_path, socket_root=short_socket_root, coo_autonomy_armed=True,
         coo_tick_interval_seconds=3600.0,
     )
+    config, source = continuation_source(config)
     received: list[TerminalReturnCandidate] = []
-    holder: dict[str, Any] = {"finish_gate": asyncio.Event()}
+    holder: dict[str, Any] = {"finish_gate": asyncio.Event(), "planner_returns": []}
 
     def factory(runtime: Runtime):
         supervisor = supervisor_factory(runtime, finish_gate=holder["finish_gate"])
         holder["supervisor"] = supervisor
         return supervisor
 
+    def project(candidate):
+        job = service.runtime.jobs.get_job(candidate.job_id)
+        target = holder["planner_returns"] if job.orchestration_role == "plan" else received
+        return _capture_projection(target, candidate)
+
     service = ExecutiveControlService(
         config,
         supervisor_factory=factory,
         autonomy_guard=(lambda: None),
-        terminal_return_projector=lambda candidate: _capture_projection(
-            received, candidate
-        ),
+        terminal_return_projector=project,
+        ceo_ingress_dialogue_source_provider=lambda _intent, _work: source,
     )
     await service.start()
     try:
         assert (await _request(service, "register-worker"))["ok"] is True
         _register_peer(service)
         intent = _coo_intent(config, name)
+        intent["workstream"] = WORK_REF
         receipt = service._submit_service_intent(intent)
         root = service.runtime.jobs.get_job(receipt["job_id"])
-        # Use the existing installed-source parser and real mandate guard.
-        # Only disposable source callbacks and physical providers are fixtures.
-        from tests.test_principal_dialogue_authority_guard import prepared
+        # Source/parser, current Mission and live claim share this exact owner.
         authority_dir = tmp_path / "selected-child-authority"
         authority_dir.mkdir()
-        with pytest.MonkeyPatch.context() as patch:
-            authority, authority_config, document, facts = prepared(authority_dir, patch)
-            document = json.loads(json.dumps(document).replace('"JOB-100"', json.dumps(root.job_id)))
-            patch.setattr(authority.workspace, "read_mission_for_work_ref", lambda work: document)
-            service._selected_child_fixture = (authority, authority_config, document, facts)
-            yield service, holder["supervisor"], root, received, holder["finish_gate"]
+        mission = SelectedChildMission(service, root, authority_dir)
+        service._selected_child_mission = mission
+        service._selected_child_fixture = (mission.provider, mission.config, None, mission.facts)
+        yield service, holder["supervisor"], root, received, holder["finish_gate"]
     finally:
         await service.close()
 
@@ -230,7 +259,7 @@ def test_selected_child_submit_claims_completes_and_returns(tmp_path, short_sock
             tmp_path, short_socket_root, name="selected-child",
         ) as (service, _supervisor, root, received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             command = _install(service, runtime, work)
             try:
                 submitted = await _call({
@@ -282,7 +311,7 @@ def test_repeated_submit_observes_the_same_command_and_attempt(tmp_path, short_s
             tmp_path, short_socket_root, name="selected-child-replay",
         ) as (service, _supervisor, root, received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             command = _install(service, runtime, work)
             try:
                 first = await _call({
@@ -328,7 +357,7 @@ def test_frozen_ordinal_is_never_recomputed(tmp_path, short_socket_root):
             tmp_path, short_socket_root, name="selected-child-ordinal",
         ) as (service, _supervisor, root, _received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             # A frozen ordinal that is not the next Attempt refuses before
             # any effect; it never becomes a fresh Attempt.
             command = _install(service, runtime, work, ordinal=2)
@@ -358,7 +387,7 @@ def test_stale_selection_refuses_before_effect(tmp_path, short_socket_root, patc
             tmp_path, short_socket_root, name="selected-child-stale",
         ) as (service, _supervisor, root, _received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             stale = ExecutiveChildSelection(**{
                 **_selection(work).__dict__, **patch,
             })
@@ -383,7 +412,7 @@ def test_wrong_authority_refuses_without_effect(tmp_path, short_socket_root):
             tmp_path, short_socket_root, name="selected-child-authority",
         ) as (service, _supervisor, root, _received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
 
             # The aggregation root is not a dispatchable selected child. The
             # service owner refuses it before any claim exists.
@@ -458,7 +487,7 @@ def test_model_cannot_author_selection_authority(tmp_path, short_socket_root):
             tmp_path, short_socket_root, name="selected-child-model",
         ) as (service, _supervisor, root, _received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             command = _install(service, runtime, work)
             try:
                 # A request key never selects or replaces a canonical Attempt.
@@ -501,7 +530,7 @@ def test_unbound_default_refuses_the_selected_child_branch(tmp_path, short_socke
         async with _selected_child_service(
             tmp_path, short_socket_root, name="selected-child-unbound",
         ) as (service, _supervisor, root, _received, gate):
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             clear_selected_child_composition()
             refused = await _call({
                 "action": "selected_child_submit", "command": _command(work),
@@ -520,7 +549,7 @@ def test_unknown_post_claim_effect_stays_on_its_original_command(tmp_path, short
             supervisor_factory=_ambiguous_factory,
         ) as (service, _supervisor, root, _received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             command = _install(service, runtime, work)
             try:
                 unknown = await _call({
@@ -562,7 +591,7 @@ def test_claim_boundary_re_proves_the_frozen_selection(tmp_path):
             name="selected-child-claim",
         ) as (service, _supervisor, root, _received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             selection = _selection(work)
             command = _command(work)
             expected = ExecutiveSelectedChild(
@@ -617,7 +646,7 @@ def test_explicit_selection_that_names_another_claim_is_refused(tmp_path, short_
             tmp_path, short_socket_root, name="selected-child-mismatch",
         ) as (service, _supervisor, root, _received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             expected = ExecutiveSelectedChild(
                 selection=_selection(work), attempt_ordinal=1,
             ).expected_selection()
@@ -648,7 +677,7 @@ def test_reconciled_effect_is_no_longer_reported_as_unknown(tmp_path, short_sock
             supervisor_factory=_ambiguous_factory,
         ) as (service, _supervisor, root, _received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             command = _install(service, runtime, work)
             try:
                 unknown = await _call({
@@ -687,7 +716,7 @@ def test_same_loop_invocation_refuses_instead_of_deadlocking(tmp_path, short_soc
             tmp_path, short_socket_root, name="selected-child-loop",
         ) as (service, _supervisor, root, _received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             command = _install(service, runtime, work)
             try:
                 refused = composition_submit_on_this_loop(service, runtime, work)
@@ -722,7 +751,7 @@ def test_bound_identity_never_degrades_to_unconstrained_claim(tmp_path, short_so
         async with _selected_child_service(tmp_path, short_socket_root,
                 name="bound-identity") as (service, supervisor, root, received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             expected = ExecutiveSelectedChild(_selection(work), 1).expected_selection()
             with expected_child_selection(expected):
                 with pytest.raises(StateConflict, match="does not name this claim"):
@@ -761,7 +790,7 @@ def test_concurrent_selected_submits_never_reenter_ambiguous_start(tmp_path, sho
         async with _selected_child_service(tmp_path, short_socket_root,
                 name="concurrent-original", supervisor_factory=_ContendedAmbiguousSupervisor
                 ) as (service, supervisor, root, received, gate):
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             command = _install(service, service.runtime, work)
             composition = selected_child_composition()
             try:
@@ -784,7 +813,7 @@ def test_timeout_keeps_original_identity_and_does_not_cancel_scheduled_submit(tm
     async def exercise():
         async with _selected_child_service(tmp_path, short_socket_root,
                 name="scheduled-timeout") as (service, supervisor, root, received, gate):
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             command = _install(service, service.runtime, work)
             composition = replace(selected_child_composition(), timeout=0.01)
             original = service.dispatch_selected_child
@@ -820,7 +849,7 @@ def test_post_dispatch_failure_never_becomes_no_effect(tmp_path, short_socket_ro
     async def exercise():
         async with _selected_child_service(tmp_path, short_socket_root,
                 name="post-dispatch-result") as (service, supervisor, root, received, gate):
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             command = _install(service, service.runtime, work)
             composition = selected_child_composition()
             original = service.dispatch_selected_child
@@ -851,7 +880,7 @@ def test_missing_unknown_marker_does_not_clear_incumbent_uncertainty(tmp_path, s
                 name="marker-write-failure", supervisor_factory=_ambiguous_factory
                 ) as (service, supervisor, root, received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             command = _install(service, runtime, work)
             def unavailable(*args, **kwargs):
                 raise PersistenceError("marker storage unavailable")
@@ -876,7 +905,7 @@ def test_real_principal_revocation_inside_claim_rolls_back_all_claim_facts(tmp_p
         async with _selected_child_service(tmp_path, short_socket_root,
                 name="claim-authority-race") as (service, supervisor, root, received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             command = _install(service, runtime, work)
             original = runtime.attempts._claim_job_in_transaction
             authority_config = service._selected_child_fixture[1]
@@ -905,7 +934,7 @@ def test_private_authority_cannot_be_model_role_or_async_guard(tmp_path, short_s
         async with _selected_child_service(tmp_path, short_socket_root,
                 name="private-authority") as (service, supervisor, root, received, gate):
             runtime = service.runtime
-            work = _admit_work_child(service, root)
+            work = await _admit_work_child(service, root)
             command = _install(service, runtime, work)
             composition = selected_child_composition()
             if case == "role_string":

@@ -207,8 +207,9 @@ def _attestation(profile: RequestedExecutionProfile) -> ObservedHarnessAttestati
     )
 
 
-def _admitted_runtime(tmp_path):
-    runtime = Runtime.at(tmp_path)
+def _admitted_runtime(tmp_path, *, runtime=None):
+    runtime = Runtime.at(tmp_path) if runtime is None else runtime
+    assert runtime.store.root == tmp_path
     runtime.workers.register_worker(
         "worker-a",
         provider="openai-codex",
