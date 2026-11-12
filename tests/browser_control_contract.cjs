@@ -25,6 +25,10 @@ function pageWorldDispatch(f) {
   // scripting stub below mirrors that, so the fake can model both shapes.
   return message => {
     if(f.state.messageHook) f.state.messageHook(message);
+    // A malformed page reply (ok is not a boolean): the controller's own
+    // validation throws a bare PAGE_RESPONSE_INVALID — no flags attached.
+    if(f.state.invalidResponseOn && message.action===f.state.invalidResponseOn)
+      return {ok:"yes",code:"OK"};
     if(message.action==="snapshot") {
       f.state.session=message.session_id;f.state.snapshot=SNAP;f.state.snapshotCount++;
       return {ok:true,code:"OK",effect:"NOT_APPLIED",data:{snapshot_id:SNAP}};
@@ -66,7 +70,7 @@ function fixture() {
   const state = {boot:BOOT, effects:[], permissions:new Set(["tabs","scripting","debugger"]),
     sites:new Set(["https://allowed.test/*"]), document:"document-one", session:SESSION, snapshot:null,
     snapshotCount:0, messageHook:null, permissionHook:null, focusFailure:null, detachFailure:false,
-    injectFailure:null, filesFailure:null, worldMissing:false, dispatchFailureOn:null, dispatchFailureText:null,
+    injectFailure:null, filesFailure:null, worldMissing:false, dispatchFailureOn:null, dispatchFailureText:null, invalidResponseOn:null,
     keyEventDetail:null, captureFunc:false, lastFunc:null, filesInstalls:0,
     history:{currentIndex:1,entries:[{id:10,url:"https://denied.test/"},{id:11,url:"https://allowed.test/page"}]}};
   const f = {state};
@@ -378,6 +382,29 @@ function fixture() {
     f.state.dispatchFailureOn=null;
     const next=await f.run(request("read",{nonce:randomBytes(24).toString("hex"),params:{offset:0}}));
     assert.equal(next.status,"ACTION_DISPATCHED","the next page read is not blocked");
+  }
+  // Ruling 15 item 1: the bare PAGE_RESPONSE_INVALID rethrow (the page
+  // replied, but the reply shape is invalid — for example a frame swapped
+  // between send and answer) carries neither flag, and `possible` must not
+  // wedge a pure read as an uncertain action: reads apply nothing, so the
+  // read stays NOT_APPLIED and retryable. A write hitting the same rethrow
+  // keeps the conservative uncertain verdict.
+  {
+    const f=fixture();await f.snapshot();
+    f.state.invalidResponseOn="read";
+    const bad=await f.run(request("read",{params:{offset:0}}));
+    assert.equal(bad.status,"PAGE_RESPONSE_INVALID");
+    assert.equal(bad.effect,"NOT_APPLIED","a pure read is never uncertain on an invalid reply");
+    f.state.invalidResponseOn=null;
+    const next=await f.run(request("read",{nonce:randomBytes(24).toString("hex"),params:{offset:0}}));
+    assert.equal(next.status,"ACTION_DISPATCHED","the read can be retried at once");
+  }
+  {
+    const f=fixture();await f.snapshot();
+    f.state.invalidResponseOn="fill";
+    const bad=await f.run(request("fill",{params:{text:"x"}}));
+    assert.equal(bad.status,"ACTION_EFFECT_UNKNOWN");
+    assert.equal(bad.effect,"EFFECT_UNKNOWN","a write stays conservative on an invalid reply");
   }
   // The pre-dispatch failures stay NOT_APPLIED (nothing was sent).
   {
