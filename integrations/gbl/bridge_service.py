@@ -427,8 +427,16 @@ class GblBridge:
         law demoted (``defect: EVENT_SEQ_DUPLICATE`` — the tag verified;
         only the number was re-issued).  A POST that happened must count
         for budget, cooldown and settlement however the chain law
-        re-numbered it (deputy MED-2); a FOREIGN row — untrusted with no
-        store defect stamp — counts nothing."""
+        re-numbered it (deputy MED-2); a FOREIGN row counts nothing.
+
+        GBL-5 micro 1, RULING 19(a): the ``defect`` stamp is a marking a
+        comment body cannot supply — the store strips EVERY key only it
+        may set (``paperclip_client.STORE_ONLY_EVENT_KEYS``) from a stored
+        event before verification and re-attaches the stamp itself only
+        after the tag verified and the chain law demoted the row.  So the
+        two conditions below are exactly "this row is the store's".  The
+        same body keys are stripped by the bridge's own in-place demotion
+        (:meth:`_ordered_events`), which is the only other writer of it."""
         markers: list[dict[str, Any]] = []
         for event in record.get("events", ()):
             if event.get("type") not in ("nudge", "nudge_attempt",

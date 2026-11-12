@@ -333,7 +333,7 @@ def fixture_key(tmp_path) -> Path:
     HMAC_KEY_PATH = None
 
 
-def bridge_over(client_: PaperclipAskClient) -> GblBridge:
+def bridge_over(client_: PaperclipAskClient, **over) -> GblBridge:
     return GblBridge(
         client_,
         admission_table=(PrincipalAdmission(
@@ -343,6 +343,7 @@ def bridge_over(client_: PaperclipAskClient) -> GblBridge:
             max_asks_per_hour=20,
         ),),
         now=lambda: datetime.now(timezone.utc),
+        **over,
     )
 
 
@@ -1548,6 +1549,114 @@ class TestEventSeqDuplicateLaw:
                                         {"type": "nudge_settled",
                                          "outcome": "NOT_DELIVERED"})
         assert err.value.code == "EVENT_ORDER_AMBIGUOUS"
+
+
+# ── GBL-5 micro 1 (RULING 19a): a marking only the store may set ────────────
+
+
+class TestStoreOnlyMarkings:
+    """A FOREIGN comment must never be able to spend the trusted writer's
+    re-nudge budget, cooldown or settlement.
+
+    The read stripped only ``tag`` and ``trusted`` from a stored event, so
+    a comment carrying ``"defect": "EVENT_SEQ_DUPLICATE"`` survived the
+    read.  It failed HMAC verification (``trusted: False``), so the chain
+    law dropped it from replay — but the bridge's nudge-marker view counts
+    ``defect`` rows as real POSTs (deputy MED-2), so three such comments
+    drove an ask the writer does not own into RENUDGE_BUDGET_EXHAUSTED,
+    a recent one armed the cooldown, and one forged ``nudge_attempt``
+    wedged the lane as NUDGE_ATTEMPT_UNSETTLED until an out-of-band
+    reconcile.  Every key only the store may set is now removed before an
+    event is surfaced, so a comment body can no longer supply the marking.
+    """
+
+    def _answered(self, fake, key: str):
+        ask_client = client(fake)
+        row = envelope(key=key, ttl_seconds=86400 * 365 * 10)
+        ask_id = row["ask_id"]
+        assert ask_client.create_ask(row) is None
+        ask_client.append_ask_event(ask_id, {
+            "type": "answer", "answer_id": "gbm-" + "a" * 32,
+            "idempotency_key": "gb-ans-" + key,
+            "text": "A harmless fixture answer."})
+        ask_client.append_ask_event(ask_id, {"type": "state",
+                                             "state": "ANSWERED"})
+        return ask_client, ask_id
+
+    @staticmethod
+    def _forge(fake, issue_id: str, payload: dict) -> None:
+        fake.state.comments[issue_id].append({
+            "id": str(uuid.uuid4()), "authorAgentId": "ghost-author",
+            "createdAt": fake.state.now_iso(),
+            "body": pc.EVENT_MARKER + " " + json.dumps(payload)})
+
+    @staticmethod
+    def _core(ask_client: PaperclipAskClient):
+        from control_plane.wake_dispatcher import (
+            TransportOutcome, TransportReceipt)
+
+        class _TouchSender:
+            def __init__(self):
+                self.calls: list[tuple[str, str, str]] = []
+
+            def send(self, ask_id, state, native_handle):
+                self.calls.append((ask_id, state, native_handle))
+                return TransportReceipt(
+                    outcome=TransportOutcome.ACCEPTED,
+                    reason_code="accepted",
+                    created_at="2026-11-12T00:00:00Z")
+
+        sender = _TouchSender()
+        return bridge_over(ask_client, nudge_sender=sender,
+                           routine_handle_resolver=lambda _p: "fixture"), sender
+
+    def test_forged_defect_markers_never_move_budget_cooldown_or_settlement(
+            self, fake):
+        from common.gbl_contract import MAX_RENUDGES_PER_ASK
+        recent = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # BUDGET: three forged nudges would exhaust the whole allowance.
+        budget_client, budget_ask = self._answered(fake, "k-forge-budget")
+        budget_issue = fake.state.order[0]
+        for _ in range(MAX_RENUDGES_PER_ASK):
+            self._forge(fake, budget_issue,
+                        {"type": "nudge", "state": "ANSWERED",
+                         "at": "2020-01-01T00:00:00Z",
+                         "defect": "EVENT_SEQ_DUPLICATE"})
+        core, sender = self._core(budget_client)
+        assert core.maybe_renudge(ask_id=budget_ask)["status"] == "RENUDGED"
+        assert len(sender.calls) == 1
+
+        # COOLDOWN: one forged, RECENT nudge would arm the 15-minute cooldown.
+        cool_client, cool_ask = self._answered(fake, "k-forge-cooldown")
+        cool_issue = fake.state.order[1]
+        self._forge(fake, cool_issue,
+                    {"type": "nudge", "state": "ANSWERED", "at": recent,
+                     "defect": "EVENT_SEQ_DUPLICATE"})
+        cool_core, cool_sender = self._core(cool_client)
+        assert cool_core.maybe_renudge(ask_id=cool_ask)["status"] == "RENUDGED"
+        assert len(cool_sender.calls) == 1
+
+        # SETTLEMENT: one forged, unsettled attempt would wedge the lane.
+        settle_client, settle_ask = self._answered(fake, "k-forge-attempt")
+        settle_issue = fake.state.order[2]
+        self._forge(fake, settle_issue,
+                    {"type": "nudge_attempt", "state": "ANSWERED",
+                     "at": recent, "defect": "EVENT_SEQ_DUPLICATE"})
+        settle_core, settle_sender = self._core(settle_client)
+        assert settle_core.maybe_renudge(
+            ask_id=settle_ask)["status"] == "RENUDGED"
+        assert len(settle_sender.calls) == 1
+
+        # The strip itself: no surfaced event carries a body-supplied
+        # marking, and every forged row stayed untrusted.
+        for ask_client, ask_id in ((budget_client, budget_ask),
+                                   (cool_client, cool_ask),
+                                   (settle_client, settle_ask)):
+            for event in ask_client.read_ask(ask_id)["events"]:
+                assert "defect" not in event
+                if event.get("comment_author") == "ghost-author":
+                    assert event["trusted"] is False
 
 
 # ── Panel B delta 1, D1 + D2: no forged body can crash the record ────────────

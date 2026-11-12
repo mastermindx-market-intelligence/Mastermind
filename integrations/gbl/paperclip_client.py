@@ -173,6 +173,21 @@ _HEX64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 # contract by construction.
 APPEND_LOCK_NAME = "append.lock"
 
+# GBL-5 micro 1, RULING 19(a): the keys only the STORE (or this reader) may
+# set on a surfaced event.  A comment body can carry any JSON key at all, so
+# every one of them is removed from the parsed body BEFORE verification and
+# re-attached only by this reader: ``tag``/``trusted`` are the store's stamps,
+# ``defect`` is the chain law's own demotion marking (a comment carrying
+# ``"defect": "EVENT_SEQ_DUPLICATE"`` must never be counted as a real POST by
+# the bridge's nudge-marker view), and the ``comment_*`` keys are provenance
+# this client reads from the comment ROW, never from the body.  ``seq`` is
+# deliberately NOT listed: it is part of the signed v1 content, and it is
+# consulted only for a tag-verified event.
+STORE_ONLY_EVENT_KEYS = frozenset({
+    "tag", "trusted", "defect",
+    "comment_id", "comment_author", "comment_created_at", "comment_order",
+})
+
 
 class GblPaperclipError(Exception):
     """Closed typed failure of the Paperclip mapping; `code` names it."""
@@ -951,9 +966,14 @@ class PaperclipAskClient:
         EXACTLY tag verification (§2.4): the tag must be well-formed v1,
         the seq an integer, and the HMAC must bind (ask_id, seq, event).
         Everything else — no tag, wrong version, cross-ask binding,
-        tampered content, a claimed ``trusted`` key — is ``False``."""
+        tampered content, a claimed ``trusted`` key — is ``False``.
+
+        EVERY key only the store may set is stripped first
+        (:data:`STORE_ONLY_EVENT_KEYS`), so a comment body can never
+        supply a stamp the reader would otherwise honour — above all the
+        ``defect`` demotion marking the bridge counts as a real POST."""
         event = {key: value for key, value in stored.items()
-                 if key not in ("tag", "trusted")}
+                 if key not in STORE_ONLY_EVENT_KEYS}
         tag = stored.get("tag")
         trusted = False
         if _tag_is_wellformed(tag):
