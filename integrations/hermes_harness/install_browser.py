@@ -84,6 +84,99 @@ def json_bytes(data):
     return (json.dumps(data, indent=2, sort_keys=True) + "\n").encode()
 
 
+MMX_PIN_FOLDER = ".t3/mcp/mmx-browser"
+
+
+def _resolved(path):
+    return Path(path).expanduser().resolve()
+
+
+def runtime_pin_program_roots(home=None):
+    """Program folders named by the live mmx-browser runtime pin (read-only).
+
+    A running bridge server loaded ``server.js`` from its pin folder — the
+    flat ``runtime.json`` location before the versioned migration, the folder
+    ``current`` resolves to after it — and re-verifies the pinned
+    ``source_root`` closure before every dispatch. Both are folders a running
+    program has loaded, so an installer never targets them. A pin that exists
+    but cannot be read is a refusal, not a skip: an unverifiable pin proves no
+    target safe.
+    """
+    mmx = (Path(home) if home is not None else Path.home()) / MMX_PIN_FOLDER
+    pins = []
+    if (mmx / "runtime.json").exists():
+        pins.append((mmx, mmx / "runtime.json"))
+    current = mmx / "current"
+    if current.is_symlink() or current.exists():
+        current_root = _resolved(current)
+        pins.append((current_root, current_root / "runtime.json"))
+    roots = []
+    for folder, pin in pins:
+        if not pin.is_file():
+            raise RuntimeError("live runtime pin folder is missing runtime.json: " + str(pin))
+        try:
+            document = json.loads(read_owned(pin))
+        except (OSError, ValueError, RuntimeError) as error:
+            raise RuntimeError("live runtime pin is unreadable; refusing to install without it: "
+                               + str(pin)) from error
+        source_root = document.get("source_root") if isinstance(document, dict) else None
+        if not isinstance(source_root, str) or not source_root:
+            raise RuntimeError("live runtime pin names no source_root: " + str(pin))
+        roots.append((str(folder), _resolved(folder),
+                      "a folder running mmx-browser servers load (live pin " + str(pin) + ")"))
+        roots.append((source_root, _resolved(source_root),
+                      "the release source_root of the live runtime pin " + str(pin)))
+    return roots
+
+
+def loaded_extension_roots(profile_rows):
+    """Folders a Chrome has loaded for our extension id, from profile rows.
+
+    Rows need only ``data_directory`` and ``profile_directory``. Every
+    registration state that names a ``loaded_path`` protects it: an
+    unverified or identity-mismatched load is still a load.
+    """
+    from integrations.hermes_harness import browser_routes as routes
+    roots = []
+    for row in profile_rows or []:
+        if not isinstance(row, dict):
+            continue
+        data_directory = row.get("data_directory")
+        directory = row.get("profile_directory")
+        if not isinstance(data_directory, (str, Path)) or not isinstance(directory, str):
+            continue
+        try:
+            # A synthetic browser_id: registration compares it against the
+            # loaded folder's instance_config.js, and the guard protects every
+            # path-naming state — loaded, unverified or mismatched — alike.
+            state = routes.registration({"data_directory": str(data_directory),
+                                         "profile_directory": directory,
+                                         "browser_id": ""})
+        except (OSError, ValueError, KeyError):
+            continue
+        loaded_path = state.get("loaded_path")
+        if isinstance(loaded_path, str) and loaded_path:
+            roots.append((loaded_path, _resolved(loaded_path),
+                          "a folder Chrome has loaded for profile " + directory))
+    return roots
+
+
+def refuse_loaded_or_pinned(targets, protected, what):
+    """Class rule (ruling-15 micro-fix; principal): an installer never targets
+    a folder a running program has loaded. Refuses any target that is a
+    protected folder, sits inside one, or contains one, naming the protected
+    folder by its recorded path."""
+    for label, target in targets:
+        resolved = _resolved(target)
+        for recorded, protected_resolved, reason in protected:
+            if (resolved == protected_resolved
+                    or resolved.is_relative_to(protected_resolved)
+                    or protected_resolved.is_relative_to(resolved)):
+                raise RuntimeError(what + " refused: the " + label + " " + str(target)
+                                   + " is, contains, or is inside " + recorded + " — " + reason
+                                   + "; an installer never targets a folder a running program has loaded")
+
+
 def stage_release(build_manifest, install_base):
     manifest = json.loads(read_owned(build_manifest))
     if manifest.get("schema") != SCHEMA or not re.fullmatch("[0-9a-f]{40}", manifest.get("source_commit", "")):
@@ -110,6 +203,25 @@ def install_chrome(release_root, manifest, base, python_executable, chrome_profi
     from integrations.chairman_surfaces.web_sol_protocol import WEB_SOL_PACKAGE_VERSION
     chrome_root = Path.home() / "Library/Application Support/Google/Chrome"
     native_root = chrome_root / "NativeMessagingHosts"
+    # Class rule (ruling-15 micro-fix): this native-messaging installer never
+    # targets a folder a running program has loaded. The release root must not
+    # be, contain, or sit inside a program folder named by the live runtime
+    # pin, and no staged extension folder may be one Chrome has loaded.
+    # Checked before any render output, native manifest, or inventory write.
+    protected = (loaded_extension_roots([{"data_directory": str(chrome_root),
+                                          "profile_directory": name} for name in chrome_profiles])
+                 + runtime_pin_program_roots())
+    targets = [("release root", Path(release_root))]
+    for profile_name in chrome_profiles:
+        if not re.fullmatch(r"Default|Profile [0-9]+", profile_name) or not (chrome_root/profile_name).is_dir():
+            continue  # the profile loop below raises the canonical error
+        try:
+            instance = local_browser_instance_id(chrome_root, profile_name)
+        except Exception:
+            continue  # the profile loop below raises the canonical error
+        targets.append(("staged extension folder for profile " + profile_name,
+                        release_root / "chrome" / profile_name.replace(" ", "-") / "extensions" / instance[:24]))
+    refuse_loaded_or_pinned(targets, protected, "native-messaging install target")
     assets = release_root / "integrations/chairman_surfaces/web_sol_extension"
     source_files = {name: read_owned(assets / name) for name in _CENSUS_SOURCE_NAMES}
     expected = {name: manifest["files"]["integrations/chairman_surfaces/web_sol_extension/" + name] for name in _CENSUS_SOURCE_NAMES}
@@ -156,17 +268,33 @@ def plugin_package(release_root, base, source_commit):
     return package, commit
 
 
-def install_profiles(release_root, manifest, base, python_executable, enrollment, *, prior_source=None):
+def install_profiles(release_root, manifest, base, python_executable, enrollment, *, prior_source=None, staging_root=None, update_loaded=False):
     """Add/update named profiles using observed prior bytes; never rewrite Chrome preferences.
 
     The enrollment is host-owned installation input, not a model tool argument.
     Existing unrelated routes survive. A previous immutable source commit is
     required to replace a native registration or loaded extension's code.
+    ``staging_root`` is required: this installer has no default staging root
+    because the historical default (``~/Downloads/Mastermind-Browser-0.5.0``)
+    was a folder Chrome had already loaded. A staging root — or any
+    ``Chrome-<alias>`` folder prepared under it — that is, contains, or is
+    inside a folder Chrome has loaded or a program folder named by the live
+    mmx-browser runtime pin is refused by name before anything is rendered or
+    written; that check gates the prepared-extension writes below.
+    By default the bytes of a folder Chrome has already loaded are never
+    changed: ``update_loaded=False`` skips the loaded-folder rewrite entirely
+    and the release is staged under the explicit ``staging_root``. The profile
+    is moved to the new bytes by an explicit extension reload from the staging
+    folder, never by an unbidden byte change under a running service worker.
     """
     from integrations.hermes_harness import browser_routes as routes
     from integrations.chairman_surfaces.web_sol_deployment import WebSolRelease, render_census_extension_bundle, _CENSUS_SOURCE_NAMES, verify_deployment_readback
     from integrations.chairman_surfaces.web_sol_instance import local_browser_instance_id
     from integrations.chairman_surfaces.web_sol_protocol import WEB_SOL_PACKAGE_VERSION
+    if staging_root is None:
+        raise RuntimeError("usage error: --staging-root is required; this installer has no default "
+                           "staging root — the historical default (~/Downloads/Mastermind-Browser-0.5.0) "
+                           "is a folder Chrome has already loaded")
     if set(enrollment) != {"host_ref","label","profiles","remote_hosts","remote_profiles"}:
         raise RuntimeError("invalid host enrollment")
     host_ref=enrollment["host_ref"]
@@ -176,6 +304,21 @@ def install_profiles(release_root, manifest, base, python_executable, enrollment
         hosts=[dict(host_ref=host_ref,label=enrollment["label"],transport="local")],profiles=[])
     if document["local_host_ref"]!=host_ref:
         raise RuntimeError("host enrollment identity changed")
+    staging_root_path=Path(staging_root).expanduser()
+    # Class rule (ruling-15 micro-fix; principal): an installer never targets a
+    # folder a running program has already loaded. Refuse a staging root — or
+    # any per-profile Chrome-<alias> folder prepared under it — that is,
+    # contains, or is inside a folder Chrome has loaded or a program folder
+    # named by the live mmx-browser runtime pin. This check gates every
+    # prepared-extension write below: nothing is rendered or written before it
+    # passes, and the refusal names the protected folder.
+    protected=(loaded_extension_roots(enrollment["profiles"])+runtime_pin_program_roots())
+    guard_targets=[("staging root",staging_root_path)]
+    for supplied in enrollment["profiles"]:
+        if isinstance(supplied,dict) and isinstance(supplied.get("alias"),str):
+            guard_targets.append(("prepared folder for alias "+supplied["alias"],
+                                  staging_root_path/("Chrome-"+supplied["alias"])))
+    refuse_loaded_or_pinned(guard_targets,protected,"staging root")
     prior_manifest=None
     if prior_source:
         if not re.fullmatch("[0-9a-f]{40}",prior_source):raise RuntimeError("invalid prior source")
@@ -204,7 +347,7 @@ def install_profiles(release_root, manifest, base, python_executable, enrollment
         bundle=render_census_extension_bundle({},release,source_files=sources,expected_source_digests=expected,instance_id=instance)
         native=next(a for a in bundle.artifacts if a.kind=="native_host_manifest")
         native_path=chrome_root/"NativeMessagingHosts"/native.destination.name
-        extension=Path.home()/"Downloads"/"Mastermind-Browser-0.5.0"/("Chrome-"+supplied["alias"])
+        extension=staging_root_path/("Chrome-"+supplied["alias"])
         row=dict(supplied,host_ref=host_ref,browser_id=instance,manager="chrome",extension_path=str(extension),native_host_manifest=str(native_path))
         # Validate coordinates before constructing any path from an alias.
         routes.validate(dict(schema=routes.SCHEMA,local_host_ref=host_ref,hosts=[hosts[host_ref]],profiles=[row]))
@@ -234,7 +377,13 @@ def install_profiles(release_root, manifest, base, python_executable, enrollment
                 changes.append((prepared,artifact.content,artifact.mode,prepared_prior))
         changes.append((native_path,native.content,0o600,digest(previous_native) if previous_native else None))
         loaded=routes.registration(row)
-        if loaded.get("installed") and loaded.get("loaded_path")!=str(extension):
+        # Default: never change the bytes of a folder Chrome has loaded. The
+        # MV3 service worker re-reads its scripts from disk on every wake, so
+        # rewriting a loaded folder takes effect with no person acting and
+        # can mix an old worker with new page scripts. The reload step moves
+        # the profile to the staged bytes instead; the rewrite exists only
+        # for an explicitly requested in-place update.
+        if update_loaded and loaded.get("installed") and loaded.get("loaded_path")!=str(extension):
             loaded_path=Path(loaded["loaded_path"])
             # Only replace our exact old source assets. Unknown local edits and
             # other extension owners are a reconciliation boundary.
@@ -322,14 +471,24 @@ def main():
     parser.add_argument("--hermes-profile",type=Path,action="append",default=[])
     parser.add_argument("--enrollment",type=Path)
     parser.add_argument("--prior-source")
+    parser.add_argument("--staging-root",type=Path,
+        help="required with --enrollment: fresh per-release staging root for Chrome-<alias> folders; there is no "
+             "default (the historical default was a folder Chrome had loaded), and a loaded or runtime-pinned root is refused")
+    parser.add_argument("--update-loaded",action="store_true",
+        help="also rewrite extension bytes inside folders Chrome has already loaded (default: never)")
     args=parser.parse_args()
+    if args.enrollment and args.staging_root is None:
+        parser.error("the following arguments are required for --enrollment: --staging-root "
+                     "(this installer has no default staging root; the historical default "
+                     "~/Downloads/Mastermind-Browser-0.5.0 is a folder Chrome has already loaded)")
     if sys.platform not in {"darwin","linux"}:
         raise RuntimeError("this installer targets macOS and Linux")
     base=args.install_base.resolve()
     release, manifest=stage_release(args.build_manifest,base)
     if args.enrollment:
         if args.chrome_profile or args.hermes_profile:raise RuntimeError("named enrollment uses the separate native upgrade specification")
-        inventory,chrome=install_profiles(release,manifest,base,args.python.resolve(),json.loads(read_owned(args.enrollment)),prior_source=args.prior_source)
+        inventory,chrome=install_profiles(release,manifest,base,args.python.resolve(),json.loads(read_owned(args.enrollment)),
+            prior_source=args.prior_source,staging_root=args.staging_root,update_loaded=args.update_loaded)
     else:
         if sys.platform!="darwin" or not args.chrome_profile:raise RuntimeError("named enrollment required")
         inventory,chrome=install_chrome(release,manifest,base,args.python.resolve(),args.chrome_profile)

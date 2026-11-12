@@ -358,7 +358,14 @@ def _accepted_peer_hello(
     )
     if versions != (wsp.WEB_SOL_PACKAGE_VERSION,) * 3:
         raise NativeHostError("transport_version_mismatch")
-    if accepted["capability_digest"] != wsp.transport_capability_digest():
+    # Compatibility admission (ruling 16): the peer may present this
+    # release's digest or exactly the one previous release's; anything else
+    # is refused. Which set the connection is then held to is decided by
+    # transport_capability_action_set at the request boundary.
+    if (
+        wsp.transport_capability_action_set(accepted["capability_digest"])
+        is None
+    ):
         raise NativeHostError("transport_capability_mismatch")
     if accepted["boot_nonce"] != expected_boot_nonce:
         raise NativeHostError("transport_boot_mismatch")
@@ -895,6 +902,7 @@ def _serve_client(
     timeout_seconds: float,
     expected_instance_id: str,
     boot_nonce: str,
+    extension_actions=None,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> None:
     timeout = _validate_timeout_seconds(timeout_seconds)
@@ -904,7 +912,7 @@ def _serve_client(
         reader = client.makefile("rb", buffering=0)
         writer = client.makefile("wb", buffering=0)
         try:
-            complete_server_handshake(
+            final_ack = complete_server_handshake(
                 reader,
                 writer,
                 expected_role="client",
@@ -912,6 +920,11 @@ def _serve_client(
                 boot_nonce=boot_nonce,
                 deadline=deadline,
                 monotonic=monotonic,
+            )
+            # The connection is held to the action set its own digest
+            # describes, whatever the client sends after admission.
+            admitted_actions = wsp.transport_capability_action_set(
+                final_ack["capability_digest"]
             )
             request = read_frame(
                 reader,
@@ -929,6 +942,27 @@ def _serve_client(
                         or request["transport_boot_nonce"] != boot_nonce):
                     raise NativeHostError("transport_instance_mismatch")
                 deadline = Deadline(ends_at=started + browser.TOTAL_SECONDS)
+                if (admitted_actions is None
+                        or request["action"] not in admitted_actions
+                        or extension_actions is None
+                        or request["action"] not in extension_actions):
+                    # An action outside either admitted set — client's or the
+                    # extension's — is refused without reaching Chrome, so a
+                    # mixed client/extension pair never dispatches an action
+                    # one end cannot execute. The receipt keeps the refusal
+                    # explicit instead of breaking the session's connection.
+                    write_frame(
+                        writer,
+                        browser.receipt(
+                            request,
+                            status="ACTION_UNAVAILABLE",
+                            effect="NOT_APPLIED",
+                            data={"reason": "transport_capability_mismatch"},
+                        ),
+                        deadline=deadline,
+                        monotonic=monotonic,
+                    )
+                    return
             receipt = forward_request(
                 request,
                 write_chrome=lambda document: _write_chrome(
@@ -966,6 +1000,7 @@ def _serve_guarded_client(
     timeout_seconds: float,
     expected_instance_id: str,
     boot_nonce: str,
+    extension_actions=None,
     action_gate: threading.Lock,
     gate_pre_acquired: bool = False,
 ) -> str:
@@ -986,6 +1021,7 @@ def _serve_guarded_client(
             timeout_seconds=timeout_seconds,
             expected_instance_id=expected_instance_id,
             boot_nonce=boot_nonce,
+            extension_actions=extension_actions,
         )
     except ChromeChannelError:
         raise
@@ -1028,13 +1064,19 @@ def run_native_host(
         code="transport_boot_invalid",
     )
     startup_deadline = Deadline(ends_at=time.monotonic() + timeout)
-    complete_server_handshake(
+    extension_ack = complete_server_handshake(
         chrome_in,
         chrome_out,
         expected_role="extension",
         expected_instance_id=instance_id,
         boot_nonce=boot_nonce,
         deadline=startup_deadline,
+    )
+    # The extension end may also present the one previous release's digest
+    # (host respawned while the profile still runs the old bundle); every
+    # client request is intersected with this set before it reaches Chrome.
+    extension_actions = wsp.transport_capability_action_set(
+        extension_ack["capability_digest"]
     )
     server = open_private_server(destination, owner_uid=uid)
     action_gate = threading.Lock()
@@ -1057,6 +1099,7 @@ def run_native_host(
                 timeout_seconds=timeout,
                 expected_instance_id=instance_id,
                 boot_nonce=boot_nonce,
+                extension_actions=extension_actions,
                 action_gate=action_gate,
                 gate_pre_acquired=True,
             )

@@ -15,7 +15,11 @@ const HELLO_ACK_SCHEMA = "mastermind.web_sol_transport_hello_ack.v1";
 const INSTANCE_CONFIG_SCHEMA = "mastermind.web_sol_instance_config.v1";
 const TRANSPORT_PROTOCOL_MAJOR = 1;
 const PACKAGE_VERSION = "0.4.0";
-const EXPECTED_CAPABILITY_DIGEST = "e0216d3d9e9f05edef32ff642cb82a1281b1a9766d5cc35f694c88e0ef0bb0bb";
+// Must equal web_sol_deployment's rendered instance_config.js capabilityDigest
+// (= web_sol_protocol.transport_capability_digest()); a mismatch leaves
+// INSTANCE_CONFIG null and the extension inert. The 40-action digest of the
+// previous release (e0216d3d...) is admitted by the new host, not by this file.
+const EXPECTED_CAPABILITY_DIGEST = "1c40ec98d1086a8f8005151757b040698057019f5e9169cace91e393b6f60d40";
 const MAX_ACTION_TTL_MS = 60000;
 const ALLOWED_FUTURE_SKEW_MS = 5000;
 const CHATGPT_TAB_PATTERNS = Object.freeze([
