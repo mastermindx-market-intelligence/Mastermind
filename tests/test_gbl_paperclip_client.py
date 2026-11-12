@@ -1686,6 +1686,28 @@ class TestHmacKeyLaw:
                                          "state": "ANSWERED"})
         assert "HMAC_KEY" in err.value.code
 
+    def test_short_first_use_write_is_a_typed_error(self, fake, tmp_path,
+                                                    monkeypatch):
+        # GBL-5 B3 (panel B old-code #3): os.write's return count was
+        # never checked — a short write left a truncated key on disk while
+        # the client returned (and cached) the full 32 bytes; the NEXT
+        # process would fail closed on HMAC_KEY_INVALID with no hint why.
+        state = tmp_path / "state"
+        state.mkdir()
+        path = state / "hmac_v1.key"
+        ask_client = client(fake, hmac_key_path=path)
+        ask_id = self._created(fake, ask_client)
+
+        def short_write(_fd, data):
+            return len(data) - 5          # 27 of 32 bytes land
+
+        monkeypatch.setattr(pc.os, "write", short_write)
+        with pytest.raises(GblPaperclipError) as err:
+            ask_client.append_ask_event(ask_id,
+                                        {"type": "state",
+                                         "state": "ANSWERED"})
+        assert err.value.code == "HMAC_KEY_UNWRITABLE"
+
     def test_a_tagged_event_without_a_configured_key_is_typed(self, fake):
         # Not silent "untrusted": a tagged event proves a key exists; a
         # client with no key configured fails closed and visibly.

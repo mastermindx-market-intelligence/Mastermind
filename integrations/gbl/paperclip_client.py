@@ -285,7 +285,16 @@ def _load_or_create_hmac_key(path: Path) -> bytes:
                 f"cannot create {path}: {type(exc).__name__}") from None
         else:
             try:
-                os.write(handle, data)
+                written = os.write(handle, data)
+                if written != len(data):
+                    # GBL-5 B3 (panel B old-code #3): os.write may write
+                    # short; unchecked, the disk holds a truncated key
+                    # while this process returns the full bytes — the next
+                    # user fails closed on HMAC_KEY_INVALID with no cause.
+                    raise GblPaperclipError(
+                        "HMAC_KEY_UNWRITABLE",
+                        f"short write to {path}: {written} of "
+                        f"{len(data)} bytes")
             except OSError as exc:
                 # F3 (ENOSPC family): typed, never a raw escape.  A
                 # partial file, if one remains, fails closed on the next
