@@ -45,7 +45,8 @@ def source_owners(tmp_path_factory):
     # Build current source first, then restore the exact historical B11 target.
     # Later ordinary generations must not relabel that one finite transition.
     target = root / 'current'
-    with mock.patch.object(sys, 'argv', ['builder', '--output', str(target)]), \
+    with mock.patch.object(sys, 'argv', ['builder', '--output', str(target),
+                                         '--broker-busy-epoch']), \
             contextlib.redirect_stdout(io.StringIO()):
         builder.main()
     current_raw = (target / 'native-manifest.json').read_bytes()
@@ -579,7 +580,7 @@ def test_installed_control_resolves_actual_completed_successor(owner, tmp_path):
     with mock.patch.object(bundle.Path, "home", return_value=home):
         installed = bundle.install(source=control_source, control_root=control,
                                    launcher=launcher)
-    assert len(installed["files"]) == 63
+    assert len(installed["files"]) == 74
     code = r"""
 import importlib.util,json,sys
 from pathlib import Path

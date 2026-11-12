@@ -1,0 +1,141 @@
+{
+  "broker_calls": [
+    {
+      "argv": [
+        "acquire",
+        "--host",
+        "fixture",
+        "--orchestrator-id",
+        "root",
+        "--pool",
+        "minimax",
+        "--task-class",
+        "remote-minimax",
+        "--model",
+        "MiniMax-M2.7",
+        "--pid",
+        "20949",
+        "--ttl",
+        "900",
+        "--wait",
+        "0",
+        "--deadline-ns",
+        "1380398207647541",
+        "--prelease-receipt",
+        "/var/folders/sb/h3rq5rvj1b3_r18p6w9swyp80000gn/T/fabric-prelease-regression-_8bcixb6/state/remote_sub/origin.prelease-quota.json",
+        "--run-id",
+        "origin",
+        "--parent-run-id",
+        "parent",
+        "--request-sha256",
+        "05bfc474d0e6e6725748a2571e30bc3b9600bb937c94a81a165484454d2a77bc",
+        "--launch-sha256",
+        "e0fb9b19f7f67cd267892c8bede593d7d2ab596a46c632f87fd63f17f3bcf12d",
+        "--controller-sha256",
+        "e140eb481c8c61f70eea6e8b8bcba175c18ba31bb3423f1ec182384cb54db449"
+      ]
+    }
+  ],
+  "broker_returns": [
+    {
+      "rc": 75
+    }
+  ],
+  "contender_lease_count": 0,
+  "continuation": {
+    "controller_reason": "continuation_evidence_unqualified",
+    "controller_return": "RECORDED",
+    "effective_run_id": "origin.q1.97d707e2a72546eb",
+    "effective_status": {
+      "acceptance_reason": "EXECUTION_NOT_ELIGIBLE",
+      "acceptance_state": "UNVERIFIED",
+      "accepted": null,
+      "accepted_by": null,
+      "parent_run_id": null,
+      "rc": 78,
+      "result_available": false,
+      "result_bytes": null,
+      "root_id": null,
+      "run_id": "origin.q1.97d707e2a72546eb",
+      "schema": "mastermind.fabric_task_status.v1",
+      "signal": "prelaunch_failure",
+      "state": "TERMINAL_FAILURE"
+    },
+    "prior_attempts": [
+      {
+        "acceptance_reason": "EXECUTION_NOT_ELIGIBLE",
+        "acceptance_state": "UNVERIFIED",
+        "accepted": null,
+        "accepted_by": null,
+        "execution_absence_proven": true,
+        "parent_run_id": "parent",
+        "rc": 75,
+        "reason": "prelease_quota_cooldown",
+        "request_retained": true,
+        "result_available": false,
+        "result_bytes": null,
+        "root_id": "root",
+        "run_id": "origin",
+        "same_run_replay_allowed": false,
+        "schema": "mastermind.fabric_task_status.v1",
+        "signal": "quota",
+        "state": "TERMINAL_FAILURE"
+      }
+    ],
+    "requested_run_id": "origin",
+    "schema": "mastermind.fabric_continuation.v1"
+  },
+  "controller_rc": 78,
+  "cooldown_observation": {
+    "duplicate": false,
+    "initial_rejection": true,
+    "kind": "rate_limit",
+    "recorded": true,
+    "scope": "minimax:account"
+  },
+  "fresh_route_after_return": {
+    "pool": "glm",
+    "reason": "ok"
+  },
+  "native_controller_calls": 2,
+  "native_log": "2026-11-11T02:31Z [remote_sub id=origin host=fixture] RUN_RESERVED explicit=1\n2026-11-11T02:31Z [remote_sub id=origin host=fixture] LEASE_WAIT pool=minimax wait=0\n2026-11-11T02:31Z [remote_sub id=origin host=fixture] LEASE_REFUSED rc=75\n",
+  "origin_status": {
+    "acceptance_reason": "EXECUTION_NOT_ELIGIBLE",
+    "acceptance_state": "UNVERIFIED",
+    "accepted": null,
+    "accepted_by": null,
+    "execution_absence_proven": true,
+    "parent_run_id": "parent",
+    "rc": 75,
+    "reason": "prelease_quota_cooldown",
+    "request_retained": true,
+    "result_available": false,
+    "result_bytes": null,
+    "root_id": "root",
+    "run_id": "origin",
+    "same_run_replay_allowed": false,
+    "schema": "mastermind.fabric_task_status.v1",
+    "signal": "quota",
+    "state": "TERMINAL_FAILURE"
+  },
+  "route_calls_before_controller_return": [
+    {
+      "pool": "minimax",
+      "reason": "ok"
+    },
+    {
+      "pool": "glm",
+      "reason": "ok"
+    }
+  ],
+  "route_selected_before_cooldown": true,
+  "schema": "offline.prelease_cooldown_regression.v1",
+  "source_hashes": {
+    "fabric_continuation.py": "8b3ab69abc6e61bdae98dea026c4dc5075ab7bc0b062624cb205df4a27a98030",
+    "fabric_task.py": "0e85036189cc074c3b1a463304f1ccadba82038beadff3b51255c1ef2ec68d66",
+    "lease_broker.py": "5af51da91f8c13cedca525a906d211e0e03f53cdd19c041d638d35d85e60a24c",
+    "quota_circuit.py": "ba1f2582505a0350260d0bdc4a00f6374a2e1140bc4b6cead84368b606f9970e",
+    "remote_sub.sh": "e140eb481c8c61f70eea6e8b8bcba175c18ba31bb3423f1ec182384cb54db449"
+  },
+  "ssh_scp_rsync_calls": 0
+}

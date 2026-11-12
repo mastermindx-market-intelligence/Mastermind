@@ -9,11 +9,12 @@ const out:AuthState={status:"signed_out",reason:null,acquisition:false,content:f
 const pending:AuthState={...out,status:"signing_in"};
 const signed:AuthState={...out,status:"signed_in",acquisition:true,content:true};
 afterEach(()=>{cleanup();delete window.MastermindMissionHost;});
-async function setup(action:()=>Promise<unknown>=async()=>pending){
+async function setup(action:()=>Promise<unknown>=async()=>pending, reset:()=>Promise<unknown>=async()=>out){
  const events=new Map<string,(e:{payload:unknown})=>void>();
  const invoke=vi.fn(async(command:string)=>{
   if(command==="executive_auth_status")return {generation:1,available:false};
-  if(command==="auth_status"||command==="sign_out")return out;
+  if(command==="auth_status")return out;
+  if(command==="sign_out")return reset();
   if(command==="sign_in_primary")return action();throw Error("UNEXPECTED_NATIVE_COMMAND");
  });
  const raw=await createNativeClient(invoke as never,async(name,fn)=>{events.set(name,fn as never);return()=>{};});
@@ -27,13 +28,13 @@ it("explicit gesture invokes only zero-input primary through actual NativeClient
  const x=await setup(),before=vi.fn();render(<Surface host={x.host} before={before}/>);
  expect(x.invoke.mock.calls.filter(c=>c[0].startsWith("sign_in"))).toHaveLength(0);
  expect(screen.getByText("Account access only. Work needs separate authorization.")).toBeTruthy();
- fireEvent.click(screen.getByRole("button"));await waitFor(()=>expect(before).toHaveBeenCalledTimes(1));
+ fireEvent.click(screen.getByRole("button",{name:"Sign in to account"}));await waitFor(()=>expect(before).toHaveBeenCalledTimes(1));
  await waitFor(()=>expect(x.invoke.mock.calls.filter(c=>c[0]==="sign_in_primary")).toEqual([["sign_in_primary"]]));
  expect(x.invoke.mock.calls.filter(c=>c[0]==="sign_in")).toHaveLength(0);
 });
 it("missing primary facet never falls back to generic full Sign in",async()=>{
  const x=await setup();delete x.raw.signInPrimary;const host=bindMissionHost(x.raw);window.MastermindMissionHost=host;
- render(<Surface host={host}/>);const button=screen.getByRole("button") as HTMLButtonElement;
+ render(<Surface host={host}/>);const button=screen.getByRole("button",{name:"Sign in to account"}) as HTMLButtonElement;
  expect(button.disabled).toBe(true);fireEvent.click(button);expect(screen.getByText("Account sign-in is unavailable here.")).toBeTruthy();
  expect(x.invoke.mock.calls.filter(c=>c[0].startsWith("sign_in"))).toHaveLength(0);
 });
@@ -44,17 +45,18 @@ it.each(["host","owner","method","auth","epoch"] as const)("no-render %s withdra
  else if(kind==="method")x.host.primaryAccount!.signIn=vi.fn();
  else if(kind==="auth")x.host.auth!.getState=()=>out;
  else (x.host as {invalidationGeneration?:()=>number}).invalidationGeneration=()=>99;
- fireEvent.click(screen.getByRole("button"));expect(x.invoke.mock.calls.filter(c=>c[0].startsWith("sign_in"))).toHaveLength(0);
+ fireEvent.click(screen.getByRole("button",{name:"Sign in to account"}));expect(x.invoke.mock.calls.filter(c=>c[0].startsWith("sign_in"))).toHaveLength(0);
 });
 it("duplicate gestures retain one original handoff",async()=>{
  let finish!:(v:unknown)=>void;const held=new Promise(r=>{finish=r;});const x=await setup(()=>held);render(<Surface host={x.host}/>);
- fireEvent.click(screen.getByRole("button"));fireEvent.click(screen.getByRole("button"));
+ fireEvent.click(screen.getByRole("button",{name:"Sign in to account"}));fireEvent.click(screen.getByRole("button",{name:"Sign in to account"}));
  await waitFor(()=>expect(x.invoke.mock.calls.filter(c=>c[0]==="sign_in_primary")).toHaveLength(1));
  await expect(x.raw.signInPrimary!()).rejects.toThrow("PRIMARY_AUTH_PENDING");finish(pending);
 });
 it("lost handoff remains unconfirmed without owner/raw retry",async()=>{
- const x=await setup(async()=>{throw Error("inert lost reply");});render(<Surface host={x.host}/>);fireEvent.click(screen.getByRole("button"));
- await screen.findByText(/handoff is unconfirmed/);expect((screen.getByRole("button") as HTMLButtonElement).disabled).toBe(true);
+ const x=await setup(async()=>{throw Error("inert lost reply");});render(<Surface host={x.host}/>);fireEvent.click(screen.getByRole("button",{name:"Sign in to account"}));
+ await screen.findByText(/handoff is unconfirmed/);expect((screen.getByRole("button",{name:"Sign in to account"}) as HTMLButtonElement).disabled).toBe(true);
+ expect((screen.getByRole("button",{name:"Clear saved sign-in"}) as HTMLButtonElement).disabled).toBe(true);
  await expect(x.host.primaryAccount!.signIn()).rejects.toThrow("PRIMARY_AUTH_UNAVAILABLE");
  await expect(x.raw.signInPrimary!()).rejects.toThrow("PRIMARY_AUTH_PENDING");
  expect(x.invoke.mock.calls.filter(c=>c[0]==="sign_in_primary")).toHaveLength(1);
@@ -75,4 +77,34 @@ it("primary entry withdraws old Executive transport before dispatch without an e
  });
  raw=await createNativeClient(invoke as never,async()=>()=>{});await raw.signInPrimary!();
  expect(await check).toBe("EXECUTIVE_UNAVAILABLE");expect(invoke.mock.calls.filter(c=>c[0]==="executive_session_send")).toHaveLength(0);
+});
+it("explicit reset is available after relaunch and calls only the existing sign-out once",async()=>{
+ let finish!:(v:unknown)=>void;const held=new Promise(r=>{finish=r;});const x=await setup(undefined,()=>held);
+ render(<Surface host={x.host}/>);expect(x.invoke.mock.calls.filter(c=>c[0]==="sign_out")).toHaveLength(0);
+ const reset=screen.getByRole("button",{name:"Clear saved sign-in"});fireEvent.click(reset);fireEvent.click(reset);
+ await waitFor(()=>expect(x.invoke.mock.calls.filter(c=>c[0]==="sign_out")).toEqual([["sign_out"]]));
+ expect(x.invoke.mock.calls.filter(c=>c[0].startsWith("sign_in"))).toHaveLength(0);
+ finish(out);await waitFor(()=>expect((screen.getByRole("button",{name:"Sign in to account"}) as HTMLButtonElement).disabled).toBe(false));
+ expect(x.invoke.mock.calls.filter(c=>c[0].startsWith("sign_in"))).toHaveLength(0);
+ fireEvent.click(screen.getByRole("button",{name:"Sign in to account"}));
+ await waitFor(()=>expect(x.invoke.mock.calls.filter(c=>c[0]==="sign_in_primary")).toEqual([["sign_in_primary"]]));
+});
+it.each(["host","method","reader","epoch"] as const)("reset refuses no-render %s withdrawal",async kind=>{
+ const x=await setup();render(<Surface host={x.host}/>);
+ if(kind==="host")window.MastermindMissionHost={...x.host};
+ else if(kind==="method")x.host.auth!.signOut=vi.fn();
+ else if(kind==="reader")x.host.auth!.getState=()=>out;
+ else x.host.invalidationGeneration=()=>99;
+ fireEvent.click(screen.getByRole("button",{name:"Clear saved sign-in"}));
+ expect(x.invoke.mock.calls.filter(c=>c[0]==="sign_out"||c[0].startsWith("sign_in"))).toHaveLength(0);
+});
+it("lost reset remains unconfirmed without repeating sign-out or starting sign-in",async()=>{
+ const x=await setup(undefined,async()=>{throw Error("inert lost reset reply");});render(<Surface host={x.host}/>);
+ fireEvent.click(screen.getByRole("button",{name:"Clear saved sign-in"}));
+ await screen.findByText(/sign-out result is unconfirmed/);
+ for(const name of ["Clear saved sign-in","Sign in to account"]){
+  const button=screen.getByRole("button",{name}) as HTMLButtonElement;expect(button.disabled).toBe(true);fireEvent.click(button);
+ }
+ expect(x.invoke.mock.calls.filter(c=>c[0]==="sign_out")).toEqual([["sign_out"]]);
+ expect(x.invoke.mock.calls.filter(c=>c[0].startsWith("sign_in"))).toHaveLength(0);
 });

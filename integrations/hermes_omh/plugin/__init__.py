@@ -27,7 +27,7 @@ TASK_CLASSES=frozenset(('execute','fix_build','mechanical','review','census','au
     'verify','build','high_level','architecture','integration','domain_orchestration','orchestration'))
 COMPLEXITIES=frozenset(('C0_MECHANICAL','C1_ROUTINE_BOUNDED','C2_COMPLEX_BOUNDED','C3_FRONTIER_JUDGMENT'))
 PREVIEW_FIELDS=frozenset(('pool','model','mode','host','state','reason','reserved',
-                         'selection_rechecked_at_request','proof'))
+                         'selection_rechecked_at_request','proof','authority','route_preview'))
 SOURCE_FILES=frozenset({
     'integrations/__init__.py','integrations/hermes_omh/__init__.py',
     'integrations/hermes_omh/__main__.py','integrations/hermes_omh/adapter.py',
@@ -94,6 +94,19 @@ def _capacity_preview(ctx, requirements):
                 or result.get('selection_rechecked_at_request') is not True
                 or result.get('proof')!='PREVIEW_ONLY_NO_RESERVATION_OR_DISPATCH'):
             raise ValueError('proof')
+        # WO-07 OQ-10 re-point: the shared-law route_preview composition rides
+        # along when the bridge serves it. Both fields stay optional so an
+        # installed release still serving the owner-only shape keeps passing.
+        if 'authority' in result and result.get('authority')!='NONE_SOURCE_PREVIEW_ONLY':
+            raise ValueError('authority')
+        if 'route_preview' in result:
+            record=result.get('route_preview')
+            if (type(record) is not dict or record.get('schema')!='RoutePreview.v1'
+                    or record.get('authority')!='NONE_SOURCE_PREVIEW_ONLY'
+                    or record.get('production_armed') is not False
+                    or record.get('capacity_knowledge') not in ('observed','configured_only','unknown')
+                    or record.get('rank_basis') not in ('suitability_only','observed_headroom','bounded_unknown')):
+                raise ValueError('route_preview')
         for key in ('pool','model'):
             value=result.get(key)
             if type(value) is not str or re.fullmatch('[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}',value) is None:

@@ -65,6 +65,7 @@ _PROJECT_ARCHIVE_ROUTE = "/workspace/projects/archive/current"
 _AUTONOMY_ROUTE = "/workspace/autonomy/current"
 _RESOURCE_CAPACITY_ROUTE = "/workspace/resources/capacity/current"
 _MODEL_CONFIGURATION_ROUTE = "/workspace/resources/models/current"
+_CAPACITY_FABRIC_ROUTE = "/workspace/resources/fabric/current"
 _HOST_OBSERVATION_ROUTE = "/workspace/resources/host-observation/current"
 _ACTIVITY_ROUTE = "/workspace/operator/activity/current"
 _FABRIC_CATALOG_ROUTE = "/workspace/fabric/catalog/current"
@@ -422,8 +423,13 @@ class WorkspaceAppConfig:
     authorize_discovery: Callable[[VerifiedPrincipal], bool] | None = None
     authorize_actions: Mapping[str, Callable[[VerifiedPrincipal], bool]] | None = None
     source_operation_context: Any = None
+    paperclip: Any = None
 
     def __post_init__(self) -> None:
+        if self.paperclip is not None:
+            from integrations.paperclip_control.installed import PaperclipWorkspaceBinding
+            if type(self.paperclip) is not PaperclipWorkspaceBinding or self.paperclip.policy_id != self.authenticator.policy.policy_id:
+                raise ValueError("Paperclip must bind the same Workspace principal policy")
         if self.project_admission_load_bindings is not None and not callable(self.project_admission_load_bindings):
             raise ValueError("sealed current project membership loader required")
         if self.source_operation_context is not None:
@@ -1703,6 +1709,8 @@ class _RawPathFence:
         _ACTIVITY_ROUTE,
         _RESOURCE_CAPACITY_ROUTE,
         _MODEL_CONFIGURATION_ROUTE,
+        _CAPACITY_FABRIC_ROUTE,
+        "/workspace/company/current",
         _HOST_OBSERVATION_ROUTE,
         _FABRIC_CATALOG_ROUTE,
         _FABRIC_STATUS_ROUTE,
@@ -1713,6 +1721,7 @@ class _RawPathFence:
     _ROUTE_METHODS = {
         **{path: "GET" for path in _READ_ROUTES},
         **{path: "POST" for path in _CCR_ACTION_ROUTES.values()},
+        "/workspace/company/command": "POST",
     }
 
     def __init__(self, app: Any) -> None:
@@ -1888,6 +1897,10 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         from integrations.mastermind_workspace_app.model_configuration import model_configuration_current
         return await model_configuration_current(request, config=config)
 
+    async def capacity_fabric_endpoint(request: Request) -> Response:
+        from integrations.mastermind_workspace_app.capacity_fabric import capacity_fabric_current
+        return await capacity_fabric_current(request, config=config)
+
     async def activity_endpoint(request: Request) -> JSONResponse:
         return await activity_current(request, config=config)
 
@@ -1952,6 +1965,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_ACTIVITY_ROUTE, activity_endpoint, methods=["GET"]),
         Route(_RESOURCE_CAPACITY_ROUTE, resource_capacity_endpoint, methods=["GET"]),
         Route(_MODEL_CONFIGURATION_ROUTE, model_configuration_endpoint, methods=["GET"]),
+        Route(_CAPACITY_FABRIC_ROUTE, capacity_fabric_endpoint, methods=["GET"]),
         Route(_HOST_OBSERVATION_ROUTE, host_observation_endpoint, methods=["GET"]),
         Route(_FABRIC_CATALOG_ROUTE, fabric_catalog_endpoint, methods=["GET"]),
         Route(_FABRIC_STATUS_ROUTE, fabric_status_endpoint, methods=["GET"]),
@@ -1962,6 +1976,15 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         async def action_endpoint(request: Request, *, operation=operation) -> Response:
             return await control_room_action(request, config=config, operation=operation)
         routes.append(Route(path, action_endpoint, methods=["POST"]))
+    from integrations.mastermind_workspace_app.paperclip_http import paperclip_http
+    async def company_read_endpoint(request):
+        return await paperclip_http(request, config=config)
+    async def company_command_endpoint(request):
+        return await paperclip_http(request, config=config, command=True)
+    routes.extend([
+        Route("/workspace/company/current", company_read_endpoint, methods=["GET"]),
+        Route("/workspace/company/command", company_command_endpoint, methods=["POST"]),
+    ])
     application = Starlette(routes=routes)
     # Never silently rewrite a trailing-slash alias onto a different route:
     # an encoded/trailing-slash/raw-path ambiguity must refuse as a plain

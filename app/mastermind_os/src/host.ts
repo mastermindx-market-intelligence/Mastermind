@@ -1,3 +1,5 @@
+import { bindCompanyTransport, type CompanyRawMethods, type CompanyTransport } from "./company/transport";
+import { validateBacklogRequest, validateCompanySelection } from "./company/contract";
 import {bindNativeWorkAuthorization, type NativeWorkAuthorizationOwner} from "./native-work-authorization";
 import {bindNativePrimaryAccount, type NativePrimaryAccountOwner} from "./native-primary-account";
 import {bindNativeAuthorizationContinuation, type NativeAuthorizationContinuationOwner} from "./native-authorization-continuation-host";
@@ -21,6 +23,7 @@ import {instructionHostMethods,instructionPublicRequest,type InstructionRawMetho
 import { decodeProjectAssociation, normalizeProjectAssociationSelection, type ProjectAssociationSelection, type ProjectAssociationDocument } from "./conversations/project-association";
 import { decodeResourceCapacityRead, validResourceCapacitySelection, type ResourceCapacityReadSelection, type ResourceCapacityRead } from "./resources/resource-capacity-read";
 import { decodeModelConfiguration, type ModelConfigurationRead } from "./resources/model-configuration";
+import { decodeCapacityFabric, type CapacityFabricRead } from "./resources/capacity-fabric";
 import { decodeAutonomyPolicy, isAutonomySelection, type AutonomyRead, type AutonomySelection } from "./supervision/autonomy-policy";
 import { decodeProjectJournal, validJournalSelection, type JournalSelection, type ProjectJournalDocument } from "./project-journal";
 import { decodeAcceptedDirection, validDirectionSelection, type DirectionSelection, type AcceptedDirectionRead } from "./direction/accepted-direction";
@@ -85,7 +88,7 @@ import {
   type ControlRoomOperation, type ControlRoomActionResult,
 } from "./control-room";
 
-export interface RawClient extends Partial<HostObservationRawMethods>,Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
+export interface RawClient extends Partial<CompanyRawMethods>, Partial<HostObservationRawMethods>,Partial<ProjectAdmissionRawMethods>,Partial<InstructionRawMethods>,Partial<ProjectAccessRawMethods> {
   signInPrimary?(): Promise<unknown>;
   readWorkAuthorization?(): Promise<unknown>;
   signInForWork?(): Promise<unknown>;
@@ -132,6 +135,7 @@ export interface RawClient extends Partial<HostObservationRawMethods>,Partial<Pr
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
   readResourceCapacity?(request: ResourceCapacityReadSelection & { signal: AbortSignal }): Promise<unknown>;
   readModelConfiguration?(request: { signal: AbortSignal }): Promise<unknown>;
+  readCapacityFabric?(request: { signal: AbortSignal }): Promise<unknown>;
   readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
   readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
   /** Optional authorized recent-run metadata; no source endpoint is implied by this interface. */
@@ -191,6 +195,7 @@ export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
 export interface MissionHost extends Partial<HostObservationHostMethods>,Partial<ProjectAdmissionHostMethods>,Partial<InstructionHostMethods>,Partial<ProjectAccessHostMethods> {
+  readonly company?: CompanyTransport;
   readonly primaryAccount?: NativePrimaryAccountOwner;
   readonly workAuthorization?: NativeWorkAuthorizationOwner;
   readonly authorizationContinuation?: NativeAuthorizationContinuationOwner;
@@ -228,6 +233,7 @@ export interface MissionHost extends Partial<HostObservationHostMethods>,Partial
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
   readResourceCapacity?: (request: ResourceCapacityReadSelection & { signal: AbortSignal }) => Promise<ResourceCapacityRead>;
   readModelConfiguration?: (request: { signal: AbortSignal }) => Promise<ModelConfigurationRead>;
+  readCapacityFabric?: (request: { signal: AbortSignal }) => Promise<CapacityFabricRead>;
   readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
   readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
   readAttendedFabricCatalog?: (request: { signal: AbortSignal }) => Promise<FabricCatalog>;
@@ -576,6 +582,7 @@ export function bindMissionHost(
       if(!current())throw Error('PROJECT_PLANNING_UNAVAILABLE');
       return result;
     }}} : {}),
+    company: bindCompanyTransport(client),
     ...(boundSource?{sourceOperations:boundSource}:{}),
     ...(sourceContextReader && client.invalidationGeneration ? {
       async readSourceOperationContext(request: SourceOperationContextSelection & { signal: AbortSignal }) {
@@ -711,6 +718,22 @@ export function bindMissionHost(
         const raw = await client.readAdmittedPlan!({ ...selected, signal: request.signal });
         if (!authorized()) throw new Error("READ_CANCELLED");
         return decodeAdmittedPlan(raw, selected);
+      },
+    } : {}),
+    ...(client.readCapacityFabric && client.invalidationGeneration ? {
+      async readCapacityFabric({ signal }: { signal: AbortSignal }) {
+        const started = epoch, source = client.invalidationGeneration!(), reader = client.readCapacityFabric!;
+        const verify = () => {
+          const state = client.getState();
+          if (signal.aborted || epoch !== started || !Number.isSafeInteger(source)
+            || source !== client.invalidationGeneration?.() || reader !== client.readCapacityFabric)
+            throw new Error("READ_CANCELLED");
+          if (state.status !== "signed_in" || !state.acquisition) throw new Error("CAPACITY_FABRIC_UNAUTHORIZED");
+        };
+        verify();
+        const raw = await reader.call(client, { signal });
+        verify();
+        return decodeCapacityFabric(raw);
       },
     } : {}),
     ...(client.readModelConfiguration && client.invalidationGeneration ? {
@@ -1206,6 +1229,9 @@ export async function createNativeClient(
       | "read_retained_activity"
       | "read_resource_capacity"
       | "read_model_configuration"
+      | "read_capacity_fabric"
+      | "read_company_workspace"
+      | "create_company_backlog"
       | "read_host_observation"
       | "read_fabric_catalog"
       | "read_fabric_status"
@@ -1471,7 +1497,16 @@ export async function createNativeClient(
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
       return read("read_admitted_plan", signal, { selection: { work_ref, root_job_id } });
     },
+    readCompany: ({ signal, ...selection }) => {
+      validateCompanySelection(selection);
+      return read("read_company_workspace", signal, { selection });
+    },
+    createCompanyBacklog: ({ payload, signal }) => {
+      validateBacklogRequest(payload);
+      return read("create_company_backlog", signal, { payload });
+    },
     readModelConfiguration: ({ signal }) => read("read_model_configuration", signal),
+    readCapacityFabric: ({ signal }) => read("read_capacity_fabric", signal),
     readHostObservation: request => {
       const selection=hostObservationPublicSelection(request);
       return selection ? read("read_host_observation",request.signal,{selection})

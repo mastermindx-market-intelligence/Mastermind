@@ -234,12 +234,15 @@ def validate_optional_mounts(raw):
     }
     for name, keys in shapes.items():
         if name in raw and (type(raw[name]) is not dict or not keys <= set(raw[name])
-                or set(raw[name]) - keys - ({'missions'} if name == 'coo' else set())):
+                or set(raw[name]) - keys - ({'missions'} if name == 'coo' else {'paperclip'} if name == 'workspace' else set())):
             raise ValueError('optional mount configuration differs')
     policies = optional_policies(raw)
     if 'workspace' in raw:
         from integrations.mastermind_workspace_app.project_authoring_grant import validate_project_bindings
         validate_project_bindings(raw['workspace']['bindings'], policies['workspace'])
+        if 'paperclip' in raw['workspace']:
+            from integrations.paperclip_control.installed import validate_configuration
+            validate_configuration(raw['workspace']['paperclip'])
     if 'steward' in raw:
         from integrations.executive_content_contract import ContentObserverProfiles
         content = policies['content']
@@ -622,7 +625,13 @@ def build_optional_apps(raw, source, config_path, sink):
                 policy=policies['workspace'], load_bindings=legacy_workspace_loader, action=operation)[0]
             for operation in OPERATIONS
         }
+        paperclip_binding = None
+        if 'paperclip' in raw['workspace']:
+            from integrations.paperclip_control.installed import build_installed_binding
+            paperclip_binding = build_installed_binding(raw['workspace']['paperclip'], policy=policies['workspace'],
+                load_current=current_projection_loader(config_path, source, raw, 'workspace', 'paperclip'))
         workspace_config = WorkspaceAppConfig(authenticator=authenticators['workspace'],
+            paperclip=paperclip_binding,
             now=lambda: int(time.time()), authorize_principal=gate,
             authorize_discovery=discovery_gate, authorize_actions=action_gates,
             project_admission_load_bindings=workspace_project_bindings_loader,

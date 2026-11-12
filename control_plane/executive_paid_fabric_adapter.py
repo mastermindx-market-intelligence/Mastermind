@@ -73,6 +73,28 @@ def _schema_input(spec):
     finally:os.close(fd)
 
 
+def paid_child_admission_record(job,binding):
+    """The admitted child classification for this claim, carried as DATA (WO-05).
+
+    Derived only from the broker-admitted claim the runtime already
+    authenticated — never from caller or child env. The sealed READ/RESEARCH
+    lane keeps its admitted economic class until WO-13's ChildExecutionRequest
+    envelope replaces this interim derivation with the per-child admitted
+    record; the value already travels digest-bound to the exact claim.
+    """
+    from control_plane.child_execution_contracts import (
+        C2_COMPLEX_BOUNDED, POLICY_REVISION)
+    from control_plane.paid_fabric_backend import (PAID_CHILD_ADMISSION_SCHEMA,
+                                                   admitted_class_digest)
+    record=dict(schema=PAID_CHILD_ADMISSION_SCHEMA,binding=dict(binding),
+        task_kind=('research' if 'RESEARCH' in set(job.requested_authorities)
+                   else job.orchestration_role),
+        effective_complexity=C2_COMPLEX_BOUNDED,
+        witness_disposition='not_required',
+        policy_revision=POLICY_REVISION)
+    return dict(record,admission_digest=admitted_class_digest(record))
+
+
 class CanonicalPaidFabricWorkerAdapter(AttendedFabricWorkerAdapter):
     adapter_id=ADAPTER_ID
     requires_attempt_lease=True
@@ -117,16 +139,18 @@ class CanonicalPaidFabricWorkerAdapter(AttendedFabricWorkerAdapter):
         if source is None or spec.effective_grant_digest!=attempt.effective_grant_digest:
             raise BrokerStateError('Paid commission/grant provenance unavailable')
         from control_plane.executive_worker_broker import _launch_spec_to_json
-        payload=dict(binding=dict(root_id=job.root_job_id,job_id=job.job_id,attempt_id=attempt.attempt_id,
+        binding=dict(root_id=job.root_job_id,job_id=job.job_id,attempt_id=attempt.attempt_id,
                 effective_grant_digest=attempt.effective_grant_digest,
-                commission_sha256=source.commission_ref.content_sha256),
+                commission_sha256=source.commission_ref.content_sha256)
+        payload=dict(binding=binding,
             physical_binding_sha256=physical.digest,launch_spec=_launch_spec_to_json(spec),validation_commands=[],
             paid_route=dict(provider='glm',host_ref=physical.host_ref,model=physical.model,
                             parent_job_id=job.parent_job_id),
             paid_input=dict(prompt=spec.prompt,result_schema=_schema_input(spec)),
             paid_physical_binding=dataclasses.asdict(physical),
             paid_source_config=self.binding_source.source_for(physical),
-            paid_account=worker.account_label,paid_quota_class=quota.quota_class)
+            paid_account=worker.account_label,paid_quota_class=quota.quota_class,
+            paid_child_admission=paid_child_admission_record(job,binding))
         context=control_recovery if control_recovery is not None else self._control_recovery.get(spec.run_id)
         if context is not None:
             from control_plane.worker_execution_contract import _validate_control_recovery_context

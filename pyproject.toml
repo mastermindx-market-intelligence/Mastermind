@@ -41,6 +41,11 @@ dev = [
     "uvicorn[standard]==0.52.4",
     # Exact current security-reviewed JWT implementation for hermetic A1 tests.
     "PyJWT[crypto]==2.14.0",
+    # Hosted shards run their resolved module list under pytest-xdist
+    # (--dist loadfile with the CI_PYTEST_WORKERS switch; see
+    # scripts/ci_pytest.py). Exact pin: unrelated releases must not change
+    # worker scheduling or report forwarding on hosted CI.
+    "pytest-xdist==3.8.0",
 ]
 
 # Isolated installation profile for remote Business MCP app/resource-server

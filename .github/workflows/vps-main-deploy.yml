@@ -29,7 +29,11 @@ concurrency:
 jobs:
   deploy:
     if: github.repository == 'mastermindx-market-intelligence/Mastermind' && github.ref == 'refs/heads/master'
-    runs-on: ubuntu-latest
+    # GitHub-hosted only. The org's fleet-ci runners carry `ubuntu-latest` as a
+    # custom label and reuse a persistent workspace, so a previous job's
+    # sparse-checkout can survive into this one and hide ops/ from the pin check.
+    # No self-hosted runner carries `ubuntu-24.04`.
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +41,20 @@ jobs:
           # The existing deploy_from_git.sh fetches and verifies current master
           # before archiving the immutable accepted SHA.
           fetch-depth: 1
+      - name: Materialise the full checkout tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A reused self-hosted workspace can still be sparse from an earlier
+          # job; a sparse tree must never masquerade as a missing host pin.
+          git sparse-checkout disable 2>/dev/null || true
+          git config --local --unset-all core.sparseCheckout 2>/dev/null || true
+          if git sparse-checkout list >/dev/null 2>&1; then
+            echo "::error::Workspace is still sparse after disable"
+            exit 1
+          fi
+          test -s ops/vps_origin_known_hosts ||
+            { echo "::error::VPS host pin missing after full-tree refresh"; exit 1; }
       - name: Deploy exact accepted master using incumbent rollback owner
         shell: bash
         env:
