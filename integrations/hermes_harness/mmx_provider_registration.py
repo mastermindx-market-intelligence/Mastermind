@@ -17,9 +17,17 @@ worker's sandboxed onboarding stub). This command therefore:
   expected old path (or already exactly the new one); one wrong, missing,
   unreadable or unparsable file refuses the whole run, naming the home and a
   code, never quoting file contents;
+* changes one value and nothing else (class rule): the JSON-encoded old path
+  must occur EXACTLY ONCE in the raw bytes — otherwise ``OLD_VALUE_NOT_UNIQUE``
+  refuses the whole run before any write — only that span is replaced, the
+  result must re-parse to exactly the intended one-value change, and the file
+  is never re-serialised, so key order, non-ASCII text, float spellings, the
+  trailing-newline state and the file mode all survive byte for byte;
 * writes through the owned CAS writer: a file that changed since its check
   refuses that file alone (``WRITE_RACE``) and keeps the session's bytes, and
-  each write leaves a ``.claude.json.previous.<16hex>`` backup;
+  each write leaves a ``.claude.json.previous.<16hex>`` backup; a write error
+  that is NOT a digest mismatch is reported as what it is (``WRITE_FAILED``
+  with the errno name), never as a race;
 * reads every switched file back after a short wait, so a session that
   rewrites the file after our write is reported (``READBACK_RACE_*``), not
   silently believed;
@@ -31,6 +39,8 @@ session is idle; an already-switched home is a no-op, so re-runs are safe.
 from __future__ import annotations
 
 import argparse
+import copy
+import errno
 import json
 import os
 from pathlib import Path
@@ -39,7 +49,7 @@ import sys
 import time
 
 from .browser_routes import decode
-from .install_browser import digest, json_bytes, read_owned, write_owned
+from .install_browser import digest, read_owned, write_owned
 
 SERVER_KEY = "mmx-browser"
 FILE_NAME = ".claude.json"
@@ -118,6 +128,60 @@ def _readback_status(args, old_real, new_real):
     return "READBACK_RACE_UNKNOWN"
 
 
+def _encoded_value(value):
+    """The JSON encoding of one string value, as the raw file holds it."""
+    return json.dumps(value, ensure_ascii=False).encode("utf-8")
+
+
+def _planned_replacement(prior_raw, document, old_literal, new_value, path, home):
+    """CLASS RULE: a change to one value in a settings file other programs
+    own leaves every byte outside that value as it was.
+
+    The JSON-encoded old value must occur EXACTLY ONCE in the raw bytes
+    (zero or several occurrences both refuse the whole run, before any write
+    in any home — several occurrences mean no span can be replaced without
+    guessing which one was meant). Only that span is replaced. The result
+    must re-parse to exactly the first parse with that one value changed.
+    Nothing is ever re-serialised: key order, non-ASCII text, float
+    spellings, the trailing-newline state and the mode all survive."""
+    needle = _encoded_value(old_literal)
+    occurrences = prior_raw.count(needle)
+    if occurrences != 1:
+        raise SwitchRefusal(
+            "OLD_VALUE_NOT_UNIQUE",
+            str(path) + " — the JSON-encoded old server path occurs " + str(occurrences)
+            + " times in the raw bytes; exactly one occurrence is required to replace"
+            " it safely, so the whole run is refused before any write", home)
+    post_raw = prior_raw.replace(needle, _encoded_value(new_value))
+    try:
+        reparsed = decode(post_raw)
+    except Exception as error:
+        raise SwitchRefusal("REPLACED_JSON_INVALID", str(path), home) from error
+    intended = copy.deepcopy(document)
+    entry = intended["mcpServers"][SERVER_KEY]
+    entry["args"] = list(entry["args"][:-1]) + [new_value]
+    if reparsed != intended:
+        raise SwitchRefusal(
+            "REPLACE_VERIFY_FAILED",
+            str(path) + " — the byte replacement did not re-parse to exactly the"
+            " intended one-value change; nothing is written", home)
+    return post_raw
+
+
+# write_owned's digest-mismatch refusals — a file that changed since phase 1
+# read it. Every other write error is reported as what it is (item c).
+_CAS_REFUSALS = ("existing file differs; no overwrite",
+                 "destination changed during installation",
+                 "installation readback failed")
+
+
+def _write_failure(row, error):
+    code = (errno.errorcode.get(error.errno)
+            if isinstance(error, OSError) and error.errno is not None else None)
+    return dict(home=row["home"], status="WRITE_FAILED",
+                detail=code or type(error).__name__)
+
+
 def switch(providers_root, mmx_root, *, homes=DEFAULT_HOMES,
            worker_home=DEFAULT_WORKER_HOME, readback_wait=2.0, pause=time.sleep):
     """Check every provider home, then switch each planned .claude.json.
@@ -141,7 +205,8 @@ def switch(providers_root, mmx_root, *, homes=DEFAULT_HOMES,
     new_real = os.path.realpath(new_target)
     new_value = str(new_target)
 
-    # phase 1 — every file checked before the first write
+    # phase 1 — every file checked, and every planned replacement computed
+    # and verified in raw bytes, before the first write
     planned = []
     for home in homes:
         path, prior_raw, mode, document = _read_home(providers_root, home)
@@ -155,8 +220,12 @@ def switch(providers_root, mmx_root, *, homes=DEFAULT_HOMES,
             raise SwitchRefusal("ARGS_INVALID",
                                 str(path) + " — the registered " + SERVER_KEY
                                 + " args are not exactly the expected old server path", home)
+        post_raw = (_planned_replacement(prior_raw, document, args[-1],
+                                         new_value, path, home)
+                    if state == "PLANNED" else None)
         planned.append(dict(home=home, path=path, prior_raw=prior_raw, mode=mode,
-                            document=document, args=args, state=state))
+                            document=document, args=args, state=state,
+                            post_raw=post_raw))
 
     # the worker home carries no entry and is never written; an entry there
     # refuses the whole run, and an unreadable file proves nothing safe
@@ -166,19 +235,28 @@ def switch(providers_root, mmx_root, *, homes=DEFAULT_HOMES,
         if _entry_args(document) is not None:
             raise SwitchRefusal("WORKER_HAS_ENTRY", str(worker_path), worker_home)
 
-    # phase 2 — CAS writes; a file changed since its check refuses alone
+    # phase 2 — CAS writes of the byte-preserving replacement computed in
+    # phase 1; a file changed since its check refuses alone (WRITE_RACE) and
+    # keeps the session's bytes, any other write error reports what it is
     rows = []
     for row in planned:
         if row["state"] == "ALREADY_SWITCHED":
             rows.append(dict(home=row["home"], status="ALREADY_SWITCHED"))
             continue
-        entry = row["document"]["mcpServers"][SERVER_KEY]
-        entry["args"] = list(row["args"][:-1]) + [new_value]
         try:
-            write_owned(row["path"], json_bytes(row["document"]), row["mode"],
+            write_owned(row["path"], row["post_raw"], row["mode"],
                         expected=digest(row["prior_raw"]))
-        except Exception:
-            rows.append(dict(home=row["home"], status="WRITE_RACE"))
+        except OSError as error:
+            rows.append(_write_failure(row, error))
+            continue
+        except RuntimeError as error:
+            if any(marker in str(error) for marker in _CAS_REFUSALS):
+                rows.append(dict(home=row["home"], status="WRITE_RACE"))
+            else:
+                rows.append(_write_failure(row, error))
+            continue
+        except Exception as error:
+            rows.append(_write_failure(row, error))
             continue
         rows.append(dict(home=row["home"], status="SWITCHED"))
 

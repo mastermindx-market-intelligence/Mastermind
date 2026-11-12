@@ -16,13 +16,28 @@ only — never contents — and reads every file back after a short wait.
 Fails first on 9bb79b899: the module does not exist there — the runbook
 said "edit ... backup each first" by hand. Every test here runs on FIXTURE
 files only; the real provider homes are never opened by this lane.
+
+BR-MICRO3 class rule (principal, 17:32Z 2026-11-12): a change to one value
+in a settings file other programs own leaves every byte outside that value
+as it was, and the test proves it by comparing bytes. The real files are
+unsorted, carry non-ASCII text and floats, one is ~81 KB, and running
+sessions rewrite them — so the switch must replace the JSON-encoded old
+path in the RAW BYTES (exactly one occurrence, else OLD_VALUE_NOT_UNIQUE
+refuses the whole run before any write), never re-serialise, and report a
+write error that is not a digest mismatch as what it is (WRITE_FAILED with
+the errno name), not WRITE_RACE. The byte-preservation, uniqueness and
+classification tests below fail first on 2186a6684, where the switch still
+wrote every file back through json_bytes (indent 2, sorted, ASCII escapes,
+trailing newline added) and folded every write error into WRITE_RACE.
 """
 from __future__ import annotations
 
+import errno as errno_module
 import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tempfile
@@ -90,6 +105,32 @@ class ProviderRegistrationSwitch(unittest.TestCase):
         path = self.providers / home / ".claude.json"
         path.unlink(missing_ok=True)  # fixtures replace; write_owned never overwrites without CAS
         write_owned(path, json_bytes(document), 0o600)
+
+    def raw_fixture(self, extra_pair="", trailing_newline=False):
+        """A .claude.json shaped like the REAL files, not like json_bytes:
+        unsorted keys, raw non-ASCII text, a float spelling (0.00001234)
+        that a re-serialise would rewrite as 1.234e-05, and a trailing
+        newline only when asked. The old server path sits in args exactly
+        once unless extra_pair says otherwise."""
+        raw = ('{"numStartups": 7, "hasCompletedOnboarding": true, '
+               '"note": "café — 日本語 · Übersicht", "rate": 0.00001234, '
+               '"mcpServers": {"mmx-browser": {"command": "node", "args": ['
+               + json.dumps(self.old_path, ensure_ascii=False)
+               + ']}, "zzz-keep": {"command": "keep", "args": ["me"]}}'
+               + extra_pair + '}')
+        return (raw + ("\n" if trailing_newline else "")).encode("utf-8")
+
+    def write_home_raw(self, home, raw, mode=0o600):
+        path = self.providers / home / ".claude.json"
+        path.unlink(missing_ok=True)
+        path.write_bytes(raw)
+        path.chmod(mode)
+
+    def expected_swap(self, raw):
+        needle = json.dumps(self.old_path, ensure_ascii=False).encode("utf-8")
+        replacement = json.dumps(self.new_path, ensure_ascii=False).encode("utf-8")
+        self.assertEqual(raw.count(needle), 1, "fixture must carry the needle exactly once")
+        return raw.replace(needle, replacement)
 
     def read_home(self, home):
         return json.loads((self.providers / home / ".claude.json").read_bytes())
@@ -226,6 +267,163 @@ class ProviderRegistrationSwitch(unittest.TestCase):
         self.assertEqual(self.read_home("fabric-anthropic-oauth")
                          ["mcpServers"]["mmx-browser"]["args"], [self.old_path])
         self.assertEqual(original, old_attribute)
+
+    # ---- BR-MICRO3: the byte-preservation class rule (items a + b) ----
+
+    def test_switch_replaces_only_the_one_value_leaving_every_other_byte(self):
+        # unsorted keys, raw non-ASCII, a 0.00001234 float spelling, NO
+        # trailing newline — a re-serialise would change all four
+        raw = self.raw_fixture()
+        self.write_home_raw("experiential-claude", raw, mode=0o600)
+        receipt = self.switch()
+        self.assertEqual(receipt["state"], "PROVIDER_ARGS_SWITCHED")
+        path = self.providers / "experiential-claude" / ".claude.json"
+        out = path.read_bytes()
+        self.assertEqual(out, self.expected_swap(raw))
+        # the class rule, byte by byte: order, non-ASCII, float, no newline
+        self.assertIn("café — 日本語 · Übersicht".encode("utf-8"), out)
+        self.assertIn(b'"rate": 0.00001234', out)
+        self.assertIn(b'"numStartups": 7', out)  # still first — unsorted
+        self.assertFalse(out.endswith(b"\n"))
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        # the backup holds the exact prior bytes
+        backups = list(path.parent.glob(".claude.json.previous.*"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), raw)
+
+    def test_switch_preserves_a_trailing_newline_and_the_file_mode(self):
+        raw = self.raw_fixture(trailing_newline=True)
+        self.write_home_raw("fabric-experiential", raw, mode=0o644)
+        self.switch()
+        path = self.providers / "fabric-experiential" / ".claude.json"
+        out = path.read_bytes()
+        self.assertEqual(out, self.expected_swap(raw))
+        self.assertTrue(out.endswith(b"\n"))
+        self.assertEqual(out.count(b"\n"), raw.count(b"\n"))  # no added newline
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+
+    def test_old_value_in_another_string_refuses_the_whole_run(self):
+        # the old path also sits, exactly, in another string value: the
+        # JSON-encoded old value occurs TWICE in the raw bytes, so no
+        # replacement is safe — refuse BEFORE any write in ANY home
+        raw = self.raw_fixture(extra_pair=', "previousServer": '
+                               + json.dumps(self.old_path, ensure_ascii=False))
+        self.write_home_raw("fabric-unified-router", raw)
+        before = folder_hash(self.providers)
+        with self.assertRaises(reg.SwitchRefusal) as caught:
+            self.switch()
+        message = str(caught.exception)
+        self.assertIn("OLD_VALUE_NOT_UNIQUE", message)
+        self.assertIn("fabric-unified-router", message)
+        self.assertEqual(folder_hash(self.providers), before)
+        self.assertEqual(list(self.providers.rglob(".claude.json.previous.*")), [])
+
+    def test_old_path_inside_a_longer_string_is_left_byte_identical(self):
+        # the quoted JSON-encoded value occurs exactly once even though the
+        # path TEXT also appears inside a longer string — that longer string
+        # is outside the value, so every byte of it survives
+        raw = self.raw_fixture(extra_pair=', "history": '
+                               + json.dumps("was " + self.old_path + " before"))
+        self.write_home_raw("fabric-anthropic-oauth", raw)
+        self.switch()
+        path = self.providers / "fabric-anthropic-oauth" / ".claude.json"
+        out = path.read_bytes()
+        self.assertEqual(out, self.expected_swap(raw))
+        self.assertIn(("was " + self.old_path + " before").encode("utf-8"), out)
+
+    # ---- BR-MICRO3 item c: a write error reports what it is ----
+
+    def test_a_write_error_that_is_not_a_digest_mismatch_reports_errno(self):
+        original = reg.write_owned
+        target = self.providers / "fabric-anthropic-oauth" / ".claude.json"
+        before_target = target.read_bytes()
+
+        def failing_write(path, content, mode=0o600, expected=None):
+            if Path(path) == target:
+                raise PermissionError(errno_module.EACCES, "Permission denied")
+            return original(path, content, mode, expected=expected)
+
+        reg.write_owned = failing_write
+        try:
+            receipt = self.switch()
+        finally:
+            reg.write_owned = original
+        self.assertEqual(receipt["state"], "PROVIDER_ARGS_SWITCHED_WITH_RACES")
+        rows = {row["home"]: row for row in receipt["homes"]}
+        self.assertEqual(rows["fabric-anthropic-oauth"]["status"], "WRITE_FAILED")
+        self.assertIn("EACCES", json.dumps(rows["fabric-anthropic-oauth"]))
+        # the other homes still switch
+        self.assertEqual(rows["experiential-claude"]["status"], "SWITCHED")
+        # the failed home: file untouched, no backup
+        self.assertEqual(target.read_bytes(), before_target)
+        self.assertEqual(list(target.parent.glob(".claude.json.previous.*")), [])
+
+    def test_a_digest_mismatch_still_reports_write_race(self):
+        # the other half of item c: only a digest mismatch is a WRITE_RACE
+        original = reg.write_owned
+        target = self.providers / "fabric-experiential" / ".claude.json"
+
+        def racing_write(path, content, mode=0o600, expected=None):
+            if Path(path) == target:
+                document = json.loads(target.read_bytes())
+                document["numStartups"] = 9
+                target.write_bytes(json_bytes(document))
+            return original(path, content, mode, expected=expected)
+
+        reg.write_owned = racing_write
+        try:
+            receipt = self.switch()
+        finally:
+            reg.write_owned = original
+        rows = {row["home"]: row for row in receipt["homes"]}
+        self.assertEqual(rows["fabric-experiential"]["status"], "WRITE_RACE")
+        self.assertNotIn("detail", rows["fabric-experiential"])
+
+    # ---- BR-MICRO3 item d: what a re-run does after a WRITE_RACE ----
+
+    def test_rerun_after_a_write_race_switches_only_the_raced_home(self):
+        original = reg.write_owned
+        target = self.providers / "fabric-anthropic-oauth" / ".claude.json"
+
+        def racing_write(path, content, mode=0o600, expected=None):
+            if Path(path) == target:
+                # a running session rewrites the file after the check phase
+                document = json.loads(target.read_bytes())
+                document["numStartups"] = 8
+                target.write_bytes(json_bytes(document))
+            return original(path, content, mode, expected=expected)
+
+        reg.write_owned = racing_write
+        try:
+            first = self.switch()
+        finally:
+            reg.write_owned = original
+        self.assertEqual(first["state"], "PROVIDER_ARGS_SWITCHED_WITH_RACES")
+        statuses = {row["home"]: row["status"] for row in first["homes"]}
+        self.assertEqual(statuses["fabric-anthropic-oauth"], "WRITE_RACE")
+        self.assertEqual({statuses[home] for home in HOMES
+                          if home != "fabric-anthropic-oauth"}, {"SWITCHED"})
+        # the race left NO effect on that home: the session's bytes stand,
+        # and the CAS refusal happened before any backup was written
+        self.assertEqual(self.read_home("fabric-anthropic-oauth")["numStartups"], 8)
+        self.assertEqual(self.read_home("fabric-anthropic-oauth")
+                         ["mcpServers"]["mmx-browser"]["args"], [self.old_path])
+        self.assertEqual(list(target.parent.glob(".claude.json.previous.*")), [])
+        # the re-run: the raced home is still PLANNED and switches now; the
+        # already-switched homes are skipped without a second write or backup
+        second = self.switch()
+        self.assertEqual(second["state"], "PROVIDER_ARGS_SWITCHED")
+        statuses = {row["home"]: row["status"] for row in second["homes"]}
+        self.assertEqual(statuses["fabric-anthropic-oauth"], "SWITCHED")
+        self.assertEqual({statuses[home] for home in HOMES
+                          if home != "fabric-anthropic-oauth"}, {"ALREADY_SWITCHED"})
+        # the session's own value survives the late byte-preserving switch
+        self.assertEqual(self.read_home("fabric-anthropic-oauth")["numStartups"], 8)
+        self.assertEqual(self.read_home("fabric-anthropic-oauth")
+                         ["mcpServers"]["mmx-browser"]["args"], [self.new_path])
+        for home in HOMES:
+            backups = list((self.providers / home).glob(".claude.json.previous.*"))
+            self.assertEqual(len(backups), 1, home)
 
     def test_cli_requires_both_roots_and_writes_nothing_without_them(self):
         before = folder_hash(self.root)
