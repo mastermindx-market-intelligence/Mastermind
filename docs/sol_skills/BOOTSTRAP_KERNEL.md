@@ -31,7 +31,7 @@ AUTHORITY AND DELIVERY
 5A. CHATGPT WEB REVIEW WAIVER, all tiers: no blanket independent technical/source review or required Fabric/Dot/native reviewer/separate chat. Self-check diff, focused tests, required CI/proof. GitHub/CODEOWNERS/security/release holds bind. Real non-author APPROVED only where required; never self-approve/self-merge/falsify/bypass.
 6. Assignment covers routine edits/tests/repair/admin and lawful source work; no repeat ACK. Permissions, custody, admission, spend/reserved decisions bind. docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md.
 6A. No named reviewer seat absent binding rule. Verify login, authors/coauthors, head and prior reviews. Native review != GitHub APPROVED. No impersonation/duplicate/uncertain review.
-6B. GITHUB-NATIVE AUTHORING: permitted Web/Codex/Claude branch/commit/PR needs no host worktree/Studio/SSD. Host-local safeguards remain. Pin, writer/carrier, CAS/exact head and release holds bind. No denied-effect/EFFECT_UNKNOWN carrier swap.
+6B. GITHUB-NATIVE AUTHORING: permitted Web/Codex/Claude branch/commit/PR needs no host worktree/Studio/SSD. Host-local safeguards remain. Pin, writer/carrier, CAS/exact head and release holds bind. Tool-specific technical errors require diagnosis; reconcile unknown modifying effects.
 7. One mutation, one carrier until reconciled. Interrupted calls may execute. Read original target; never blindly retry/duplicate/re-home/fail over EFFECT_UNKNOWN.
 8. No duplicate lifecycle/identity/memory/auth/retry/queue/grounding/publication/watcher/control planes.
 9. Delivery/ACK/QUEUED/STARTED/RUNNING/CI/merge/deployment/proof/acceptance differ; claim canonical evidence only.
