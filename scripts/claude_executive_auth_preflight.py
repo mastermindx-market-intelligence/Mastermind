@@ -103,13 +103,16 @@ def evaluate(installed: dict | None, claude: dict | None,
              resource: dict, auth: dict) -> dict:
     """Pure, bounded diagnostic without any host or credential access."""
     problems: list[str] = []
+    read_policy = None
 
     if installed is None:
         problems.append("INSTALLED_CONFIG_UNREADABLE")
     else:
         if installed.get("executive_mcp_profile") != "web_ceo_v3":
             problems.append("EXECUTIVE_V3_PROFILE_NOT_ACTIVE")
-        policies = installed.get("policies") or {}
+        policies = installed.get("policies")
+        read = policies.get("read") if type(policies) is dict else None
+        read_policy = read if type(read) is dict else None
         coo = installed.get("coo")
         if type(coo) is not dict or type(coo.get("policy")) is not dict:
             problems.append("INSTALLED_COO_POLICY_MISSING")
@@ -120,10 +123,9 @@ def evaluate(installed: dict | None, claude: dict | None,
                     any(type(scope) is not str for scope in scopes)
                     or set(scopes) != EXPECTED_SCOPES):
                 problems.append("COO_SCOPE_CONTRACT_INVALID")
-            read = policies.get("read") if type(policies) is dict else None
-            if type(read) is not dict or (policy.get("resource") != read.get("resource")
-                    or policy.get("issuer") != read.get("issuer")
-                    or policy.get("resource_metadata_url") != read.get("resource_metadata_url")):
+            if read_policy is None or (policy.get("resource") != read_policy.get("resource")
+                    or policy.get("issuer") != read_policy.get("issuer")
+                    or policy.get("resource_metadata_url") != read_policy.get("resource_metadata_url")):
                 problems.append("COO_RESOURCE_ISSUER_MISMATCH")
             binding = coo.get("binding")
             if type(binding) is not dict:
@@ -186,15 +188,22 @@ def evaluate(installed: dict | None, claude: dict | None,
         problems.append("LOCAL_OAUTH_DISCOVERY_UNAVAILABLE")
     else:
         endpoint = as_metadata.get("authorization_endpoint")
-        if type(endpoint) is not str or urlsplit(endpoint).scheme != "https":
-            problems.append("BROWSER_AUTHORIZATION_ENDPOINT_NOT_HTTPS")
+        try:
+            endpoint_parts = urlsplit(endpoint) if type(endpoint) is str else None
+            endpoint_host = endpoint_parts.hostname if endpoint_parts is not None else None
+        except ValueError:
+            problems.append("BROWSER_AUTHORIZATION_ENDPOINT_INVALID")
         else:
-            read = installed.get("policies", {}).get("read", {}) if type(installed) is dict else {}
-            issuer = read.get("issuer") if type(read) is dict else None
-            approved = urlsplit(issuer).hostname if type(issuer) is str else None
-            endpoint_host = urlsplit(endpoint).hostname
-            if not approved or endpoint_host not in {approved, "localhost", "127.0.0.1"}:
-                problems.append("BROWSER_AUTHORIZATION_ENDPOINT_UNTRUSTED_HOST")
+            if endpoint_parts is None or endpoint_parts.scheme != "https":
+                problems.append("BROWSER_AUTHORIZATION_ENDPOINT_NOT_HTTPS")
+            else:
+                issuer = read_policy.get("issuer") if read_policy is not None else None
+                try:
+                    approved = urlsplit(issuer).hostname if type(issuer) is str else None
+                except ValueError:
+                    approved = None
+                if not approved or endpoint_host not in {approved, "localhost", "127.0.0.1"}:
+                    problems.append("BROWSER_AUTHORIZATION_ENDPOINT_UNTRUSTED_HOST")
 
     return {
         "schema": "mastermind.claude_executive_auth_preflight.v1",
@@ -223,3 +232,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

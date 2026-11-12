@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
+
 from scripts.claude_executive_auth_preflight import COO_SCOPE, READ_SCOPE, evaluate
 
 
@@ -144,3 +146,37 @@ def test_coo_policy_without_enrolled_mission_is_not_live():
     assert output["status"] == "BLOCKED"
     assert "COO_PRINCIPAL_BINDING_NOT_ENROLLED" in output["problems"]
     assert "COO_MISSION_NOT_ENROLLED" in output["problems"]
+
+
+@pytest.mark.parametrize("policies", [None, False, [], ["fixture-private-value"], "fixture-private-value", 1])
+def test_malformed_installed_policies_return_bounded_blocked_result(policies):
+    args = list(good())
+    args[0]["policies"] = policies
+    output = result(args)
+    assert output["status"] == "BLOCKED"
+    assert "COO_RESOURCE_ISSUER_MISMATCH" in output["problems"]
+    assert "BROWSER_AUTHORIZATION_ENDPOINT_UNTRUSTED_HOST" in output["problems"]
+    assert "fixture-private-value" not in str(output)
+    assert output["no_auth_attempt"] and output["no_config_mutation"]
+
+
+@pytest.mark.parametrize("endpoint", ["https://[", "https://issuer.example.test\uff0f.attacker.test/authorize"])
+def test_malformed_authorization_url_returns_blocked_without_disclosure(endpoint):
+    args = list(good())
+    args[5]["json"]["authorization_endpoint"] = endpoint
+    output = result(args)
+    assert output["status"] == "BLOCKED"
+    assert "BROWSER_AUTHORIZATION_ENDPOINT_INVALID" in output["problems"]
+    assert endpoint not in str(output)
+
+
+@pytest.mark.parametrize("issuer", ["https://[", "https://issuer.example.test\uff0f.attacker.test/"])
+def test_malformed_issuer_returns_blocked_without_disclosure(issuer):
+    args = list(good())
+    args[0]["policies"]["read"]["issuer"] = issuer
+    args[0]["coo"]["policy"]["issuer"] = issuer
+    output = result(args)
+    assert output["status"] == "BLOCKED"
+    assert "BROWSER_AUTHORIZATION_ENDPOINT_UNTRUSTED_HOST" in output["problems"]
+    assert issuer not in str(output)
+
