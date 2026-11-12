@@ -874,30 +874,57 @@ class PaperclipAskClient:
             self, issue_seg: str,
             ask_id: str) -> list[tuple[dict[str, Any], dict[str, Any], bool]]:
         """The event-shaped comments, oldest first, each verified by tag
-        alone and THEN by the A3 chain law: the LATER of two tag-verified
-        events sharing a seq — the re-issued number the pre-A2 allocation
-        could mint — is demoted FOR THAT EVENT (``trusted: False``, typed
-        ``defect: EVENT_SEQ_DUPLICATE``).  The first (oldest) holder of
-        the number stays authoritative.  Every consumer of stored events
-        (the read path, the append path's allocation and idempotency
-        check) sees the SAME law: a demoted duplicate can neither reorder
-        the chain nor suppress a real append as an 'already appended'
-        core match.  Each entry is ``(comment row, event, trusted)``;
-        plain comments are not events and never appear."""
+        alone and THEN by the GBL-5 R2 chain law (RULING 19(a) + deputy
+        MED-1):
+
+        * a tag-verified event whose seq EQUALS an earlier tag-verified
+          event's is a re-issued number.  For a NON-state event the LATER
+          holder is demoted FOR THAT EVENT (``trusted: False``, typed
+          ``defect: EVENT_SEQ_DUPLICATE``) and the first holder stays
+          authoritative — the A3 law, unchanged.  For a STATE event (a
+          delivery mark) nothing is demoted: whether the result was
+          delivered is exactly what the duplicate leaves unclear, so the
+          reading refuses typed ``EVENT_ORDER_AMBIGUOUS`` and every
+          consumer (the read path, the append path's allocation and
+          idempotency check) sees the same refusal — nothing is
+          delivered, re-derived or 'healed' forward.
+        * a tag-verified seq strictly LOWER than an earlier trusted one
+          is a chain anomaly (a delayed or torn append), never a
+          duplicate: it refuses ``EVENT_ORDER_AMBIGUOUS`` too.
+
+        Each entry is ``(comment row, event, trusted)``; plain comments
+        are not events and never appear."""
         verified: list[tuple[dict[str, Any], dict[str, Any], bool]] = []
         seen_seq: set[int] = set()
+        last_seq: int | None = None
         for row in self._comment_rows(issue_seg):
             stored = _parse_event_body(str(row.get("body") or ""))
             if stored is None:
                 continue          # a plain comment: not an event at all
             event, trusted = self._verified_event(stored, ask_id)
             if trusted and type(event.get("seq")) is int:
-                if event["seq"] in seen_seq:
+                seq = event["seq"]
+                if seq in seen_seq:
+                    if event.get("type") == "state":
+                        raise GblPaperclipError(
+                            "EVENT_ORDER_AMBIGUOUS",
+                            f"ask {ask_id}: trusted seq {seq} is held by "
+                            f"an earlier event and by a state event "
+                            f"({event.get('state')}); whether the result "
+                            f"was delivered is unclear — nothing is "
+                            f"delivered or re-derived")
                     event["trusted"] = False
                     event["defect"] = "EVENT_SEQ_DUPLICATE"
                     trusted = False
                 else:
-                    seen_seq.add(event["seq"])
+                    if last_seq is not None and seq < last_seq:
+                        raise GblPaperclipError(
+                            "EVENT_ORDER_AMBIGUOUS",
+                            f"ask {ask_id}: trusted seq {seq} follows "
+                            f"trusted seq {last_seq}; the chain order is "
+                            f"unclear — nothing is delivered or re-derived")
+                    seen_seq.add(seq)
+                    last_seq = seq
             verified.append((row, event, trusted))
         return verified
 

@@ -32,6 +32,7 @@ from integrations.gbl.bridge_service import (
     PrincipalAdmission,
     RENUDGE_COOLDOWN_SECONDS,
 )
+from integrations.gbl.paperclip_client import GblPaperclipError
 from integrations.gbl.bridge_service import BridgeServer, BridgeServiceConfig
 
 PRINCIPAL = "grok-account-main"
@@ -78,11 +79,16 @@ class FakeStore:
 
     @staticmethod
     def _authoritative_trusted(record):
-        """The rows the real store surfaces as trusted once the GBL-5 A3
-        chain law is applied: the LATER of two trusted rows sharing a seq
-        is demoted for that event (the store re-derives trust AND the
-        chain on every read; this double re-derives the same view)."""
+        """The rows the real store surfaces as trusted once the GBL-5 R2
+        chain law is applied: a trusted row whose seq EQUALS an earlier
+        trusted row is demoted for that event — unless it is a STATE
+        event (a delivery mark is never demoted; the read refuses
+        EVENT_ORDER_AMBIGUOUS instead), and a trusted row whose seq is
+        strictly LOWER than an earlier trusted one refuses the same way
+        (deputy MED-1).  The store re-derives trust AND the chain on every
+        read; this double re-derives the same view."""
         seen: set[int] = set()
+        last_seq: int | None = None
         rows = []
         for event in record["events"]:
             if event.get("trusted") is not True:
@@ -90,8 +96,17 @@ class FakeStore:
             seq = event.get("seq")
             if type(seq) is int:
                 if seq in seen:
-                    continue          # later duplicate: demoted
+                    if event.get("type") == "state":
+                        raise GblPaperclipError(
+                            "EVENT_ORDER_AMBIGUOUS",
+                            f"a state event re-issues trusted seq {seq}")
+                    continue          # later non-state duplicate: demoted
+                if last_seq is not None and seq < last_seq:
+                    raise GblPaperclipError(
+                        "EVENT_ORDER_AMBIGUOUS",
+                        f"trusted seq {seq} follows trusted seq {last_seq}")
                 seen.add(seq)
+                last_seq = seq
             rows.append(event)
         return rows
 
@@ -889,13 +904,15 @@ class TestRepairStoreTrust:
         result = core.fetch_result(principal=PRINCIPAL, ask_id=ASK_ID)
         assert result["answer"] == "The real fixture answer."
 
-    def test_duplicate_seq_is_demoted_and_the_record_stays_readable(self):
-        # GBL-5 A3 (proof 1's bricked record): a duplicate seq used to
-        # raise EVENT_SEQ_INVALID on EVERY later read.  A duplicate number
-        # is a per-event defect, never a refusal of the whole record —
-        # the duplicate leaves the authoritative stream and the replay
-        # reads on (the store surfaces the row typed as trusted: False
-        # with defect EVENT_SEQ_DUPLICATE).
+    def test_state_duplicate_refuses_and_delivers_nothing(self):
+        # GBL-5 R2, RULING 19(a) (deputy round 2, H2): GBL-5 A3 demoted the
+        # LATER holder of a duplicate number by position with no type
+        # check — on this shape it dropped the CONSUMED, replay re-derived
+        # ANSWERED, and fetch_result handed the SAME answer out a second
+        # time.  A delivery mark is never demoted: the order is unclear,
+        # so status and result refuse EVENT_ORDER_AMBIGUOUS and deliver
+        # NOTHING (a test that expects the second delivery is a defect,
+        # not a specification).
         store = FakeStore()
         core = bridge(store)
         core.submit_ask(**submit())
@@ -903,12 +920,49 @@ class TestRepairStoreTrust:
         # A store-stamped CONSUMED re-issuing the number ANSWERED took.
         store.asks[ASK_ID]["events"].append(
             {"type": "state", "state": "CONSUMED", "seq": 1, "trusted": True})
+        with pytest.raises(GblBridgeError) as err:
+            core.ask_status(principal=PRINCIPAL, ask_id=ASK_ID)
+        assert err.value.code == "EVENT_ORDER_AMBIGUOUS"
+        with pytest.raises(GblBridgeError) as err:
+            core.fetch_result(principal=PRINCIPAL, ask_id=ASK_ID)
+        assert err.value.code == "EVENT_ORDER_AMBIGUOUS"
+        # The withhold erases nothing: both rows are still on the record.
+        assert len(store.asks[ASK_ID]["events"]) == 3
+
+    def test_nonstate_duplicate_still_demotes_and_reads_on(self):
+        # The A3 law for non-state events: the later holder of a duplicate
+        # number is demoted per event, the first stays authoritative, and
+        # the record reads on.  No CONSUMED exists yet, so the fetch is a
+        # FIRST delivery.
+        store = FakeStore()
+        core = bridge(store)
+        core.submit_ask(**submit())
+        store.seed_answer(ASK_ID)       # answer(seq 0) + ANSWERED(seq 1)
+        store.asks[ASK_ID]["events"].append(
+            {"type": "nudge", "state": "ANSWERED", "seq": 1, "trusted": True})
         assert core.ask_status(principal=PRINCIPAL,
                                ask_id=ASK_ID)["state"] == "ANSWERED"
-        result = core.fetch_result(principal=PRINCIPAL, ask_id=ASK_ID)
-        assert result["status"] == "ANSWER_UNCONSUMED"
+        assert core.fetch_result(principal=PRINCIPAL,
+                                 ask_id=ASK_ID)["status"] == "ANSWER_UNCONSUMED"
         assert core.fetch_result(principal=PRINCIPAL,
                                  ask_id=ASK_ID)["status"] == "CONSUMED"
+
+    def test_lower_seq_after_a_higher_one_refuses_typed(self):
+        # Deputy MED-1: a strictly LOWER trusted seq after a higher one is
+        # a chain anomaly (delayed or torn append), not a duplicate —
+        # silently stamping it EVENT_SEQ_DUPLICATE once made a legitimate
+        # state vanish and the answer deliverable again.  It refuses.
+        store = FakeStore()
+        core = bridge(store)
+        core.submit_ask(**submit())
+        store.seed_answer(ASK_ID)       # answer(seq 0) + ANSWERED(seq 1)
+        store.asks[ASK_ID]["events"].append(
+            {"type": "state", "state": "CONSUMED", "seq": 5, "trusted": True})
+        store.asks[ASK_ID]["events"].append(
+            {"type": "nudge", "state": "ANSWERED", "seq": 3, "trusted": True})
+        with pytest.raises(GblBridgeError) as err:
+            core.fetch_result(principal=PRINCIPAL, ask_id=ASK_ID)
+        assert err.value.code == "EVENT_ORDER_AMBIGUOUS"
 
     def test_missing_sequence_stamp_stays_a_typed_refusal(self):
         # The malformed-stamp case keeps its typed refusal: a trusted

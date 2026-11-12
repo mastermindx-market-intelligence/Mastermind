@@ -1428,16 +1428,24 @@ class TestEventSeqAcrossProcesses:
                                  ask_id=ask_id)["status"] == "CONSUMED"
 
 
-class TestEventSeqDuplicateDemoted:
-    """GBL-5 A3 (proof 1's bricked record): a duplicate seq found ON READ
-    is a typed defect FOR THAT EVENT — ``trusted: False`` with
-    ``defect: EVENT_SEQ_DUPLICATE`` — never a refusal of the whole record.
-    The fixture is proof 1's exact row shape: answer(1), nudge_attempt(2),
-    nudge(3), then a store-stamped CONSUMED that re-issued 3 because its
-    allocation read lagged.  Before the fix, every later read of that
-    record raised EVENT_SEQ_INVALID."""
+class TestEventSeqDuplicateLaw:
+    """GBL-5 A3 (proof 1's bricked record) kept the record READABLE by
+    demoting the later holder of a duplicate number per event.  GBL-5 R2,
+    RULING 19(a) (deputy round 2, H2): that demotion was by POSITION with
+    no type check — on the MMO-1 shape it dropped the CONSUMED, replay
+    re-derived ANSWERED, and the next fetch handed the SAME answer out a
+    second time.  A delivery mark written by the trusted writer is never
+    demoted, ignored or re-derived away: when a duplicate or out-of-order
+    seq leaves the order unclear for a STATE event, the reading refuses
+    typed (EVENT_ORDER_AMBIGUOUS) and NOTHING is delivered — neither a
+    second delivery nor a 'healed' CONSUMED indistinguishable from a
+    first.  Non-state duplicates keep the per-event demotion (readable,
+    first holder authoritative); a strictly LOWER seq after a higher one
+    is a chain anomaly and refuses (deputy MED-1)."""
 
-    def test_proof1_shaped_duplicate_keeps_the_record_readable(self, fake):
+    def seed_proof1_shape(self, fake):
+        """answer(1), nudge_attempt(2), nudge(3) — then the caller injects
+        the proof-1 duplicate row re-issuing seq 3."""
         ask_client = client(fake)
         row = envelope(ttl_seconds=86400 * 365 * 10)   # never expires here
         ask_id = row["ask_id"]
@@ -1450,38 +1458,96 @@ class TestEventSeqDuplicateDemoted:
             "type": "nudge_attempt", "outcome": "SENT"})           # seq 2
         ask_client.append_ask_event(ask_id, {
             "type": "nudge", "state": "ANSWERED"})                 # seq 3
+        return ask_client, ask_id
+
+    def inject_tagged(self, fake, ask_id: str, seq: int, core: dict) -> None:
+        """A genuinely store-stamped row re-issuing ``seq`` — tag and all
+        VALID (the pre-R2 store really did mint these)."""
         issue_id = fake.state.order[0]
-        # The proof-1 duplicate: a genuinely store-stamped CONSUMED whose
-        # allocation read had not seen the nudge row — tag and all VALID.
-        core3 = {"type": "state", "state": "CONSUMED"}
-        stamped3 = {**core3, "seq": 3}
-        tagged3 = {**stamped3,
-                   "tag": expect_tag(KEY_BYTES, ask_id, 3, stamped3)}
+        stamped = {**core, "seq": seq}
+        tagged = {**stamped,
+                  "tag": expect_tag(KEY_BYTES, ask_id, seq, stamped)}
         fake.state.comments[issue_id].append({
             "id": str(uuid.uuid4()), "authorAgentId": AGENT_ID,
             "createdAt": fake.state.now_iso(),
             "body": pc.EVENT_MARKER + " " + json.dumps(
-                tagged3, sort_keys=True, separators=(",", ":"))})
+                tagged, sort_keys=True, separators=(",", ":"))})
+
+    def test_state_duplicate_refuses_typed_and_delivers_nothing(self, fake):
+        # RULING 19(a): the MMO-1 shape — a store-stamped CONSUMED
+        # re-issuing the nudge's seq 3.  Demoting it by position re-derived
+        # the record to ANSWERED and delivered the answer a SECOND time;
+        # healing forward minted a CONSUMED indistinguishable from a first
+        # delivery.  Now every path refuses EVENT_ORDER_AMBIGUOUS and
+        # delivers nothing.
+        ask_client, ask_id = self.seed_proof1_shape(fake)
+        self.inject_tagged(fake, ask_id, 3, {"type": "state",
+                                             "state": "CONSUMED"})
+
+        def refuses(op):
+            with pytest.raises(GblPaperclipError) as err:
+                op()
+            assert err.value.code == "EVENT_ORDER_AMBIGUOUS"
+
+        refuses(lambda: ask_client.read_ask(ask_id))          # the read
+        core = bridge_over(ask_client)
+        refuses(lambda: core.ask_status(principal=PRINCIPAL,
+                                        ask_id=ask_id))       # status
+        refuses(lambda: core.fetch_result(principal=PRINCIPAL,
+                                          ask_id=ask_id))     # delivery
+        refuses(lambda: ask_client.append_ask_event(          # no blind
+            ask_id, {"type": "state", "state": "CONSUMED"}))  # healing
+        # Nothing was re-derived away: the comments still hold all four
+        # rows, CONSUMED included — the refusal withholds, it never erases.
+        issue_id = fake.state.order[0]
+        bodies = [str(c["body"]) for c in fake.state.comments[issue_id]]
+        assert sum('"CONSUMED"' in b for b in bodies) == 1
+
+    def test_nonstate_duplicate_still_demotes_per_event(self, fake):
+        # The A3 law for everything that is not a delivery mark: the LATER
+        # holder of a duplicate number is demoted for that event, the first
+        # stays authoritative, and the record reads on.  No CONSUMED ever
+        # existed here, so the fetch is a FIRST delivery (seq 4), never a
+        # second one.
+        ask_client, ask_id = self.seed_proof1_shape(fake)
+        self.inject_tagged(fake, ask_id, 3, {"type": "nudge",
+                                             "state": "ANSWERED"})
 
         record = ask_client.read_ask(ask_id)          # no refusal on read
         assert [e["seq"] for e in record["events"]] == [1, 2, 3, 3]
         assert [e["trusted"] for e in record["events"]] == [True] * 3 + [False]
-        assert record["events"][3]["state"] == "CONSUMED"   # still visible
         assert record["events"][3]["defect"] == "EVENT_SEQ_DUPLICATE"
-
         core = bridge_over(ask_client)
         assert core.ask_status(principal=PRINCIPAL,
                                ask_id=ask_id)["state"] == "ANSWERED"
         first = core.fetch_result(principal=PRINCIPAL, ask_id=ask_id)
-        assert first["status"] == "ANSWER_UNCONSUMED"
-        assert first["answer"] == "A harmless fixture answer."
+        assert first["status"] == "ANSWER_UNCONSUMED"     # the FIRST fetch
         assert core.fetch_result(principal=PRINCIPAL,
                                  ask_id=ask_id)["status"] == "CONSUMED"
-        # The healing append moved FORWARD past the duplicate: seq 4, never
-        # a third 3.
         events = ask_client.read_ask(ask_id)["events"]
         assert [e["seq"] for e in events] == [1, 2, 3, 3, 4]
         assert events[4]["trusted"] is True
+
+    def test_lower_seq_after_a_higher_one_refuses_typed(self, fake):
+        # Deputy MED-1: a strictly LOWER trusted seq after a higher one is
+        # a chain anomaly (a delayed or torn append), not a duplicate —
+        # silently dropping it once made a legitimate state vanish.  It
+        # refuses EVENT_ORDER_AMBIGUOUS; nothing is re-derived.
+        ask_client, ask_id = self.seed_proof1_shape(fake)
+        self.inject_tagged(fake, ask_id, 5, {"type": "state",
+                                             "state": "CONSUMED"})
+        # a delayed append that minted 4 landing AFTER the 5 (3 is taken
+        # by the real nudge; 4 is the next unseen number below the mark)
+        self.inject_tagged(fake, ask_id, 4, {"type": "nudge",
+                                             "state": "ANSWERED"})
+        with pytest.raises(GblPaperclipError) as err:
+            ask_client.read_ask(ask_id)
+        assert err.value.code == "EVENT_ORDER_AMBIGUOUS"
+        with pytest.raises(GblPaperclipError) as err:
+            ask_client.append_ask_event(ask_id,
+                                        {"type": "nudge_settled",
+                                         "outcome": "NOT_DELIVERED"})
+        assert err.value.code == "EVENT_ORDER_AMBIGUOUS"
 
 
 # ── Panel B delta 1, D1 + D2: no forged body can crash the record ────────────

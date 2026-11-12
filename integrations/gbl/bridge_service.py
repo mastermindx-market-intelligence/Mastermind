@@ -213,12 +213,15 @@ class GblBridge:
         EVENT_TRUST_INVALID, never an authoritative event that slips past
         the seq law because ``is True``/``is False`` both miss it.
 
-        GBL-5 A3 (proof 1's bricked record): a duplicate number is a typed
-        defect FOR THAT EVENT, never a refusal of the whole record — the
-        later duplicate is demoted (``trusted: False`` +
-        ``EVENT_SEQ_DUPLICATE``, the same stamp the store surfaces on its
-        row) and leaves the authoritative stream, and the replay reads on.
-        A trusted event WITHOUT an integer seq keeps its typed
+        GBL-5 A3 + R2, RULING 19(a) (deputy round 2, H2/MED-1): a duplicate
+        number is demoted per event ONLY when the later holder is not a
+        STATE event — a delivery mark is never demoted, ignored or
+        re-derived away by position, so a state event re-issuing a taken
+        number refuses typed EVENT_ORDER_AMBIGUOUS and NOTHING is
+        delivered.  A trusted seq strictly LOWER than an earlier trusted
+        one is a chain anomaly (a delayed or torn append), not a
+        duplicate: it refuses the same way instead of vanishing.  A
+        trusted event WITHOUT an integer seq keeps its typed
         EVENT_SEQ_INVALID refusal: that is a malformed stamp, not a
         duplicate number."""
         events = list(record.get("events", ()))
@@ -236,10 +239,21 @@ class GblBridge:
                 if type(seq) is not int:
                     raise GblBridgeError("EVENT_SEQ_INVALID",
                                          "trusted event without an integer seq")
-                if last_seq is not None and seq <= last_seq:
-                    event["trusted"] = False   # duplicate number: demote,
+                if last_seq is not None and seq == last_seq:
+                    if event.get("type") == "state":
+                        raise GblBridgeError(
+                            "EVENT_ORDER_AMBIGUOUS",
+                            f"a state event re-issues trusted seq {seq}; "
+                            f"whether the result was delivered is unclear "
+                            f"— nothing is delivered")
+                    event["trusted"] = False   # non-state duplicate: demote,
                     event["defect"] = "EVENT_SEQ_DUPLICATE"   # never refuse
                     continue
+                if last_seq is not None and seq < last_seq:
+                    raise GblBridgeError(
+                        "EVENT_ORDER_AMBIGUOUS",
+                        f"trusted seq {seq} follows trusted seq {last_seq}; "
+                        f"the chain order is unclear — nothing is delivered")
                 last_seq = seq
         return [event for event in events if event.get("trusted") is not False]
 
