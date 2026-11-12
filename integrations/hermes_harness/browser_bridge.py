@@ -277,6 +277,17 @@ def _unique(pairs):
     return result
 
 
+def _emit(result):
+    # The stdout write is the operator's only reply channel. Page-produced
+    # text can carry lone surrogates (JSON \ud800 escapes), which no UTF-8
+    # stream can encode; on UnicodeEncodeError re-emit ASCII-escaped so the
+    # operator still receives exactly one parseable reply instead of none.
+    try:
+        sys.stdout.write(json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n")
+    except UnicodeEncodeError:
+        sys.stdout.write(json.dumps(result, ensure_ascii=True, allow_nan=False, separators=(",", ":")) + "\n")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--bindings", required=True, type=Path)
@@ -300,7 +311,7 @@ def main(argv=None):
                          operation_key=data["operation_key"], nonce=data["nonce"],local_only=args.local_only)
     except (ValueError, TypeError, UnicodeError, RecursionError):
         result = _refusal("INVALID_INPUT")
-    sys.stdout.write(json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n")
+    _emit(result)
     return 0
 
 

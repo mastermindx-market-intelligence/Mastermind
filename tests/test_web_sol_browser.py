@@ -192,6 +192,27 @@ def test_native_tool_schema_matches_consumer():
     assert "session_id" not in bridge.TOOL_SCHEMA["parameters"]["properties"]
 
 
+def test_bridge_emit_never_fails_on_unencodable_reply_text(monkeypatch):
+    # p1#7: page-produced text can reach the reply carrying lone surrogates
+    # (JSON \ud800 escapes are valid JSON strings). The stdout write is the
+    # operator's only reply channel, so it must never raise: it falls back to
+    # ASCII escaping, and the operator still receives one parseable reply.
+    raw=io.BytesIO()
+    stream=io.TextIOWrapper(raw,encoding="utf-8",newline="")
+    monkeypatch.setattr(bridge.sys,"stdout",stream)
+    bridge._emit({"state":"RECEIPT","data":{"content":"end \ud800 tail"}})
+    stream.flush()
+    line=raw.getvalue()
+    parsed=json.loads(line.decode("utf-8"))
+    assert parsed["data"]["content"]=="end \ud800 tail"
+    assert line.decode("ascii")==line.decode("utf-8"),"the fallback escapes the surrogate"
+    # An ordinary non-ASCII payload keeps the compact unescaped channel.
+    raw.seek(0); raw.truncate()
+    bridge._emit({"state":"RECEIPT","data":{"content":"café 𝕏"}})
+    stream.flush()
+    assert raw.getvalue()==b'{"state":"RECEIPT","data":{"content":"caf\xc3\xa9 \xf0\x9d\x95\x8f"}}\n'
+
+
 def test_client_stamps_discovered_connection_and_refuses_changed_generation_before_write(monkeypatch):
     writes=[]
     connection=SimpleNamespace(settimeout=lambda _:None,connect=lambda _:None,
