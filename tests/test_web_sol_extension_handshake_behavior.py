@@ -28,6 +28,7 @@ const { webcrypto } = require("node:crypto");
 const source = fs.readFileSync(process.argv[1], "utf8");
 const scenario = process.argv[2];
 const capabilityDigest = process.argv[3];
+const packageVersion = process.argv[4];
 const INSTANCE = "a".repeat(64);
 const EXPECTED_HOST = `com.mastermind.web_sol_surface.${INSTANCE.slice(0, 24)}`;
 const BOOT = "boot-nonce-0000000000000001";
@@ -39,9 +40,9 @@ const config = {
     ? `com.mastermind.web_sol_surface.${"b".repeat(24)}`
     : EXPECTED_HOST,
   protocolMajor: 1,
-  clientPackageVersion: "0.3.0",
-  nativePackageVersion: "0.3.0",
-  extensionPackageVersion: "0.3.0",
+  clientPackageVersion: packageVersion,
+  nativePackageVersion: packageVersion,
+  extensionPackageVersion: packageVersion,
   capabilityDigest,
 };
 
@@ -198,6 +199,7 @@ def run_scenario(scenario: str) -> subprocess.CompletedProcess[str]:
             str(BACKGROUND),
             scenario,
             wsp.transport_capability_digest(),
+            wsp.WEB_SOL_PACKAGE_VERSION,
         ],
         capture_output=True,
         text=True,
