@@ -1442,3 +1442,45 @@ A long-running child with a climbing item count and no output file gets one acti
 Two panel verdicts reached the principal two hours late because a panel lead's interim note
 arrives as "completed"; the principal now reads the final with one status call after any
 interim note.
+
+## 35. Amendment, 2026-11-12 00:15 UTC: release -3 is live, the review loop gets an end, install 3 without the router
+
+**Release -3 is installed on the real team server.** One pack and one restart (ruling 8)
+carried the silent-stop patch and the installer repairs through MF2. Downtime was about two
+and a half minutes. Proofs: `doctor` exit 0 with the tree verified, one delegated child
+waking its parent exactly once, and a real Secretary turn answering in six seconds. The
+temporary `binaryPath` setting from section 34 is cleared; a second Secretary turn ran
+without it, so the provider CLI resolves through the recorded folder alone. Release -2 is
+byte-unchanged and stays as the rollback until about 15:20 UTC on 2026-11-13. Not yet
+proven: that the reply text shows in the Mastermind OS window.
+
+**Returns are sent, not waited for (ruling 11).** Seven finished returns sat unread for up
+to four hours because a lane or panel lead can end without waking its sender. Every send
+now ends with an instruction to send the return line to the deputy thread, and the deputy
+lists what it cannot read for the principal.
+
+**The review loop gets an end (ruling 12).** Three lanes stopped on the same pattern: each
+blind check closed everything it was given and then found something new in code the round
+had not touched. The installed code is worse than every head under review, so waiting for
+a clean check costs more than it buys. A stopped lane gets one final round on a short named
+list; the check of the changed lines ends the loop; anything first found in unchanged code
+comes to the principal as one list with costs. Applied to ask-and-return, the browser fill
+and the Grok Bot link client.
+
+**What a fill receipt claims (ruling 13).** APPLIED means the box held the asked content
+after the page's pending microtasks and one stated settle interval. A page that changes
+the box later is outside the receipt; the operator rule is to read the box before sending.
+
+**Install 3 goes ahead without the router change.** The upstream web reader is attached to
+the teammates' model by the upstream account, not by anything this programme generates. It
+is offered today; the limits install neither adds nor worsens it and removes the credential
+reads that make it dangerous. This reverses the earlier ruling that install 3 waits for the
+web reader to be closed. Closing it means changing the Fabric router that every session on
+this Mac uses, which is the Chairman's; he has been asked once. Meanwhile a read-only census
+checks whether another model on the team route comes without the tool.
+
+**Grok Bot link.** The design, its addendum and the ruling are in `integrations/mmos/gbl/`.
+Contract and bridge core passed their panel; the Paperclip client is in its final round.
+
+**Macro CI.** A capacity report from Sector Intelligence was forwarded to the CI Lightning
+thread, which owns CI across the three repositories. It is not this programme's work.
