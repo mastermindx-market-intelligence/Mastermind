@@ -25,11 +25,14 @@ def git(root, *args):
 def fixture_clock_sample():
     """Explicit portable test clock premise, never installed Darwin capability.
 
-    Preserve the Mlo/Wlo/Mhi/Whi bracket and live wall/monotonic movement.
+    Model a zero-width Mlo/Wlo/Mhi/Whi pair from one wall-clock observation.
+    Coupling the synthetic channels avoids scheduler gaps between OS reads;
+    later observations still debit real elapsed wall time. Physical clock
+    discrepancy is covered by the separate adversarial clock-contract tests.
     Production _source_clock_sample remains Darwin-only and fail-closed.
     """
-    return (time.monotonic_ns() // 1000000, time.time_ns() // 1000000,
-            time.monotonic_ns() // 1000000, time.time_ns() // 1000000)
+    instant = time.time_ns() // 1000000
+    return (instant, instant, instant, instant)
 
 
 class CanonicalFixtureCache:
@@ -116,5 +119,5 @@ class CanonicalFixtureCache:
                 'actual pinned Store/build_state/build_brief and canonical compose_control_room',
                 'physical AgentOS brief child evaluated in-process over exact captured code',
                 'absent Inbox/active builds/bindings remain explicitly unavailable',
-                'portable fixture Mlo/Wlo/Mhi/Whi clock is synthetic; no Darwin clock capability claim',
+                'synthetic zero-width paired clock from one wall observation; no Darwin clock capability claim',
                 'fixture READ binding and private kernel/provider enrollment remain synthetic'])

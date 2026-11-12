@@ -292,6 +292,12 @@ jobs:
     # Scope classification and the `test` fan-in execute no suite and stay on
     # `ubuntu-latest`.
     runs-on: ubuntu-24.04
+    # Each shard's resolved module list runs under pytest-xdist on the same
+    # hosted 4-vCPU runner: identical module set and verdicts, each module
+    # whole on one worker (--dist loadfile, see scripts/ci_pytest.py).
+    # Rollback: set to "1" (or "0") to restore today's exact serial argv.
+    env:
+      CI_PYTEST_WORKERS: "4"
     # Keep every prerequisite and the full 45-minute repository allowance.
     # Actual setup took ~23m; a successful test/upload then crossed job60 in
     # cleanup. Job75 + fan-in8 =83, within the retained 100-minute CI budget.
@@ -679,7 +685,7 @@ jobs:
             tests/integration/test_fabric_regional_portfolio_composition.py \
             tests/integration/test_fabric_chat_browser.py \
             ops/native_fabric/quota_continuity \
-            ops/native_fabric/experiential_proxy/gateway.py |
+            ops/native_fabric/experiential_proxy/gateway.py ops/native_fabric/experiential_proxy/anthropic_policy.py |
             tar -x -C "$brain_composition_root"
           mkdir -p "$brain_composition_root/vendor/macro"
           # Isolate synthetic owner configuration in a copy of the exact source.

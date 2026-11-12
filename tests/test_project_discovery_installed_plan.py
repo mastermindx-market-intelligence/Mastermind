@@ -50,6 +50,26 @@ def test_selected_source_runtime_failure_does_not_fall_back(monkeypatch, tmp_pat
     assert failure.value.cmd[0] == str(selected)
 
 
+def test_portable_fixture_clock_keeps_age_without_inter_read_jitter(monkeypatch):
+    from tests import fresh_conversation_full_cache as fixture
+    from scripts import chairman_control_room as clock_owner
+    nanoseconds = [0]
+
+    def interrupted_observation():
+        # Each physical observation is separated by a scheduling-sized gap.
+        nanoseconds[0] += 3_000_000
+        return nanoseconds[0]
+
+    monkeypatch.setattr(fixture, 'time', types.SimpleNamespace(
+        time_ns=interrupted_observation, monotonic_ns=interrupted_observation))
+    anchor = fixture.fixture_clock_sample()
+    current = fixture.fixture_clock_sample()
+    assert clock_owner._valid_clock_sample(anchor), anchor
+    assert clock_owner._valid_clock_sample(current), current
+    # The coherent fixture still pays elapsed time; it is not a frozen clock.
+    assert clock_owner._source_elapsed(anchor, current) == 3
+
+
 def actual_child(j, monkeypatch, *, after=lambda: None):
     collector = j['collector']
     monkeypatch.setattr(collector, '_python', _qualified_source_python())
@@ -296,7 +316,7 @@ def test_actual_create_default_reload_programs_and_explicit_runtime_mission(full
         slot = j['document']['profiles'][j['document']['primary_profile']]
         previous = slot['project_canonical_data_read']; slot['project_canonical_data_read'] = None
         without_latest = asyncio.run(read.handle_frame(request))['result']
-        assert without_latest['availability'] == 'AVAILABLE' and without_latest['schema'] == 'mastermind.workspace_programs.v1'
+        assert without_latest['availability'] == 'AVAILABLE' and without_latest['schema'] == 'mastermind.workspace_programs.v1', without_latest
         assert without_latest['control_room'] == original
         slot['project_canonical_data_read'] = previous
         assert len(j['runtime'].events.list_events()) == event_count

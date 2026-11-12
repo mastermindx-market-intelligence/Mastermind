@@ -1,4 +1,5 @@
 import freshRecoveryOwner from "./conversations/new-conversation/fixtures/fresh-conversation-recovery-owner.json";
+import capacityFabricOwner from "./resources/fixtures/capacity-fabric-owner-read.json";
 import projectConversationLegacy from "./fixtures/project-conversation-catalogue-owner.json";
 import projectConversationFresh from "./fixtures/project-fresh-conversation-owner.json";
 // @vitest-environment jsdom
@@ -35,6 +36,34 @@ const deferred = <T>() => {
 const flush = async () => {
   for (let i = 0; i < 30; i++) await Promise.resolve();
 };
+
+describe("fixed Capacity Fabric transport", () => {
+  it("uses the original acquisition identity on the fixed current read", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(response(capacityFabricOwner));
+    expect(await e.client.readCapacityFabric!({ signal: new AbortController().signal })).toEqual(capacityFabricOwner);
+    expect(e.fetcher).toHaveBeenCalledExactlyOnceWith(ORIGIN + "/workspace/resources/fabric/current",
+      expect.objectContaining({ method: "GET", redirect: "error", credentials: "omit", cache: "no-store",
+        headers: expect.objectContaining({ Authorization: "Bearer private-token" }) }));
+  });
+  it("enforces the response cap and preserves typed unavailability", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(response({ payload: "x".repeat(262_144) }));
+    await expect(e.client.readCapacityFabric!({ signal: new AbortController().signal })).rejects.toThrow();
+    const unavailable = { schema: "mastermind.workspace_capacity_fabric.v1", availability: "UNAVAILABLE",
+      reason_codes: ["SOURCE_UNAVAILABLE"], observed_at: null, expires_at: null, source_revision: null,
+      resources: [], consumers: [], recommendations: [], admission_authorized: false };
+    e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(unavailable), { status: 503, headers: { "content-type": "application/json" } }));
+    expect(await e.client.readCapacityFabric!({ signal: new AbortController().signal })).toEqual(unavailable);
+  });
+  it("withholds a capacity reply after sign-out", async () => {
+    const e = setup(); await e.login();
+    const pendingResponse = deferred<Response>(); e.fetcher.mockReturnValueOnce(pendingResponse.promise);
+    const pending = e.client.readCapacityFabric!({ signal: new AbortController().signal });
+    await e.client.signOut(); pendingResponse.resolve(response(capacityFabricOwner));
+    await expect(pending).rejects.toThrow();
+  });
+});
 
 describe("fixed BYOK role metadata transport", () => {
   it("uses the existing acquisition token with the fixed path and private no-store transport", async () => {
