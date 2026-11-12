@@ -2,9 +2,12 @@
 
 The CLI must be a thin transport over the same server dispatch: identical
 receipts, identical gates. These tests inject a fake context so no real
-peekaboo, screen, or network is touched. Run from the checkout root:
+peekaboo, screen, or network is touched. Run from the checkout root UNDER
+PYTEST (BCU R2 item 2: the server's test mode is "MMOS_CU_TEST_MODE=1 AND
+pytest loaded in-process"; make_ctx's 1 s thresholds refuse outside the
+harness):
 
-    python3 -m unittest tests/test_mmos_bcu_cli.py
+    python3 -m pytest tests/test_mmos_bcu_cli.py
 """
 import io
 import json
@@ -24,6 +27,23 @@ if CHECKOUT not in sys.path:
 
 import cli  # noqa: E402
 import server  # noqa: E402
+
+_SAVED_TEST_MODE = None
+
+
+def setUpModule():
+    # BCU R2 item 2: the harness escape for make_ctx's sub-default (1 s)
+    # thresholds. Meaningful only because this module runs inside pytest.
+    global _SAVED_TEST_MODE
+    _SAVED_TEST_MODE = os.environ.get("MMOS_CU_TEST_MODE")
+    os.environ["MMOS_CU_TEST_MODE"] = "1"
+
+
+def tearDownModule():
+    if _SAVED_TEST_MODE is None:
+        os.environ.pop("MMOS_CU_TEST_MODE", None)
+    else:
+        os.environ["MMOS_CU_TEST_MODE"] = _SAVED_TEST_MODE
 
 
 class FakeAdapter(object):

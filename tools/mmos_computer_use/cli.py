@@ -17,16 +17,20 @@ returned by `lease_acquire`: the lease is single-holder and each
 acquisition has its own nonce (SERVER_VERSION 0.3.0). Missing or wrong
 nonce is a typed LEASE_NONCE_INVALID receipt, not a transport error.
 
-Environment (M2 hardening):
-  MMOS_CU_PRESENCE_MIN_IDLE / MMOS_CU_PACING_SECONDS may only make the
-    gates STRICTER than their defaults (below the floor refuses at
-    startup).
+Environment (M2 hardening; BCU R2 item 2):
+  MMOS_CU_PRESENCE_MIN_IDLE / MMOS_CU_PACING_SECONDS — like the
+    runtime.json keys and any constructor argument — may only make the
+    gates STRICTER than their 180 s defaults; outside the test harness
+    every looser value refuses at startup (the defaults are the
+    production floors), and no value may go below the absolute 1 s floor.
   MMOS_CU_STATE_DIR / MMOS_CU_DENY / MMOS_CU_RUNTIME may only point
     INSIDE this tool's own folder (tools/mmos_computer_use/ or a subdir);
     anything outside refuses at startup.
   MMOS_CU_TEST_MODE=1 is the explicit test-only escape that permits
-    sub-floor thresholds and out-of-layer paths. Never set it in
-    production: it exists so the unit tests can drive the gates cheaply.
+    sub-default thresholds and out-of-layer paths. Since BCU R2 item 2 it
+    is honored ONLY inside the unit-test harness process (pytest loaded
+    in-process): the env marker alone, which any session could export,
+    never unlocks the layer. Never set it in production.
 """
 import argparse
 import json

@@ -5,8 +5,10 @@ Pure unit tests: no screen access, no real peekaboo interaction, no network
 beyond an in-process fake HTTP server. The peekaboo adapter is exercised
 against a fake peekaboo shell script in a temp dir.
 
-Run from the checkout root:
-    python3 -m unittest tests/test_mmos_bcu_computer_use.py -v
+Run from the checkout root UNDER PYTEST (BCU R2 item 2: the server's test
+mode is "MMOS_CU_TEST_MODE=1 AND pytest loaded in-process", so sub-default
+thresholds refuse when this file is run by a plain unittest loader):
+    python3 -m pytest tests/test_mmos_bcu_computer_use.py
 """
 
 import base64
