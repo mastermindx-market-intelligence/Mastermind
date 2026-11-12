@@ -2039,3 +2039,26 @@ DeepSeek worker with the same eight points.
 **Rule added.** A settings file that running sessions rewrite is changed only through a writer that checks every file before its first write and reads back afterwards.
 
 **Next, in order.** Unchanged from section 49. The browser bridge install follows its repair round, then one sitting with the Chairman for the five Chrome profiles. Other programmes are told the window first.
+
+## 51. Amendment, 2026-11-12 17:04 UTC: port fix and memory link repair merged; one install per lane; redaction ruled as a class
+
+**What happened.** Two more lanes are merged as source. Nothing is installed.
+
+- Grok Bot link port fix. The link reaches the real board on port 3100 only through its one settings file, owned by this user and readable by no one else. Port 3179 stays refused in every case. A reply lost after a request was sent now reads as "effect unknown, replay with the same key".
+- Memory link repair, rounds 1 and 2. A teammate's recorded conversation follows the board's binding through a command. Every check runs before the first write.
+
+**Rules added.**
+
+- Redaction does not try to find where a value ends. A credential label followed by a separator later on the same line removes everything from the label to the end of that line. Losing the tail of a line is accepted. A leaked value is not.
+- A redaction is accepted only after a probe with forms nobody listed in the brief. The check that passes the listed forms proves the list, not the pattern.
+- A secret written in plain prose with no label and no known shape cannot be recognised by any pattern. The install list says so in one sentence.
+- A lane is installed on the real root once. Parts that a later round of the same lane will change are not placed early.
+- A refusal message never advises a step the rules forbid.
+
+**Rulings.**
+
+- Grok Bot link. Three of the reviewer's low findings are fixed in the return-wiring round: the opt-in accepts only the literal address 127.0.0.1, a non-ASCII address is refused, and a stray opt-in field anywhere else in the file is refused. The principal no longer places the inactive parts before that round. The install list is updated once at that round's head and rehearsed whole. It states what the board does with an idle bridge agent before the principal creates it.
+- Memory link. One last round, the third of three: the label rule as written above, three more label words, and a password inside a web address. The install stays held until it returns.
+- A stale empty lock in the shared git store was removed by the principal after a check that no process held it. Lanes still report such a file and stop.
+
+**Next, in order.** Unchanged from section 49.
