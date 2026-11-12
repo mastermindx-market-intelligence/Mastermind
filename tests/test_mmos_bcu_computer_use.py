@@ -4417,8 +4417,11 @@ class TestForegroundPasteGate(unittest.TestCase):
     ``paste --foreground`` delivers Cmd+V to whichever window holds focus, so
     a deny-listed window (the target itself, or a floating password-manager
     panel above it) could receive text meant for the target. If either check
-    fails the paste subprocess never starts: nothing is pasted and the
-    pasteboard is unchanged.
+    fails the paste subprocess never starts: nothing is pasted. BCU R3 M2:
+    the refusal receipt always names the completed steps, and the
+    pasteboard claim is "unchanged" only while NO act step was dispatched —
+    after a dispatched focus click the honest claim is
+    "not_written_by_this_layer".
     """
 
     def setUp(self):
@@ -4507,6 +4510,48 @@ class TestForegroundPasteGate(unittest.TestCase):
         self.assertIs(payload["pasted"], False)
         self.assertEqual(payload["clipboard_state"], "unchanged")
         self.assertEqual([c for c in read_calls(ctx) if c[0] == "paste"], [])
+        self.assertGreaterEqual(len(calls), 2, "the gate never re-read")
+
+    def test_gate_refusal_after_focus_click_names_steps_and_pasteboard(self):
+        # BCU R3 M2 (fail-first on 1ae3e29e6): when the gate refuses AFTER
+        # the focus click was dispatched, the receipt must NAME the
+        # completed steps and report the pasteboard as
+        # "not_written_by_this_layer" — once this layer has dispatched
+        # input into the window it can no longer claim the pasteboard is
+        # "unchanged"; the honest claim is that THIS LAYER never wrote it.
+        ctx = self._ctx()
+        real = ctx.adapter.inspect_window
+        calls = []
+
+        def became_denied(window_id):
+            # The observe read (call 1) succeeds; the window turns
+            # deny-listed only at the gate's FRESH read (call 2), AFTER the
+            # named field's focus click was dispatched.
+            calls.append(window_id)
+            data = real(window_id)
+            if len(calls) == 1:
+                return data
+            out = dict(data) if isinstance(data, dict) else {}
+            out["app"] = "1Password"
+            out["bundle_id"] = "com.1password.1password"
+            return out
+
+        ctx.adapter.inspect_window = became_denied
+        payload = self._paste(ctx, element_ref="field1")
+        self.assertEqual(payload["status"], "NOT_APPLIED", payload)
+        self.assertIn("DENY_LISTED", payload["cause"])
+        self.assertIs(payload["pasted"], False)
+        self.assertEqual(payload["clipboard_state"],
+                         "not_written_by_this_layer")
+        self.assertEqual(payload["steps"],
+                         ["observe:snapshot snap-abc123",
+                          "act:focus_click:field1"])
+        self.assertIn("not written by this layer", payload["cause"])
+        self.assertEqual([c for c in read_calls(ctx) if c[0] == "paste"], [])
+        # The focus click WAS dispatched — that is exactly why the wording
+        # changed from "unchanged".
+        self.assertEqual(
+            len([c for c in read_calls(ctx) if c[0] == "click"]), 1)
         self.assertGreaterEqual(len(calls), 2, "the gate never re-read")
 
     def test_background_paste_is_not_gated_on_frontmost(self):

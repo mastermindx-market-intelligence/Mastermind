@@ -2277,8 +2277,18 @@ PASTE_GATE_UNPASTED = ("nothing was pasted; the pasteboard is unchanged "
                        "(this layer never writes it — peekaboo's paste is the "
                        "only clipboard writer and it never ran)")
 
+# BCU R3 M2: once an act step (the focus click) HAS been dispatched, this
+# layer can no longer claim the pasteboard is "unchanged" — input went into
+# the window and anything may have reacted to it. The honest claim is
+# narrower: THIS LAYER wrote nothing to the pasteboard, and the receipt
+# names every step that did complete.
+PASTE_GATE_NOT_WRITTEN = ("nothing was pasted; the pasteboard was not "
+                          "written by this layer (input was already "
+                          "dispatched into the window before this refusal; "
+                          "the completed steps are named in the receipt)")
 
-def _paste_foreground_gate(ctx, args, snap, window_id):
+
+def _paste_foreground_gate(ctx, args, snap, window_id, completed):
     """R-H1 (BCU R2 item 5): the two checks that run IMMEDIATELY before the
     opt-in foreground paste chord.
 
@@ -2295,14 +2305,27 @@ def _paste_foreground_gate(ctx, args, snap, window_id):
                   (``is_frontmost`` true); slice_front raises it when needed.
 
     Either failure refuses BEFORE the paste subprocess starts: nothing is
-    pasted, the previous pasteboard contents are still in place (the layer
-    never sets the clipboard itself), and the receipt carries
-    ``pasted: false`` / ``clipboard_state: unchanged``. There is no retry and
-    no fallback to a background paste.
+    pasted and the receipt carries ``pasted: false`` plus the completed
+    ``steps`` (BCU R3 M2). The clipboard wording depends on what already
+    ran: with NO dispatched act step the pasteboard is ``unchanged`` (the
+    layer never sets it itself and peekaboo's paste never ran); once an act
+    step (the focus click) HAS been dispatched, the honest claim is the
+    narrower ``not_written_by_this_layer`` — input went into the window, so
+    this layer attests only about itself. There is no retry and no fallback
+    to a background paste.
     """
     def _refuse(code, detail):
-        wrapped = OpError(code, "%s; %s" % (detail, PASTE_GATE_UNPASTED))
-        wrapped.extra = {"pasted": False, "clipboard_state": "unchanged"}
+        dispatched_act = any(str(step).startswith("act:")
+                             for step in completed)
+        note = PASTE_GATE_NOT_WRITTEN if dispatched_act \
+            else PASTE_GATE_UNPASTED
+        wrapped = OpError(code, "%s; %s" % (detail, note))
+        wrapped.extra = {
+            "pasted": False,
+            "clipboard_state": ("not_written_by_this_layer"
+                                if dispatched_act else "unchanged"),
+            "steps": list(completed),
+        }
         return wrapped
 
     gate_codes = {"DENY_LISTED", "DENY_OVERLAY", "DENY_OVERLAY_UNVERIFIED",
@@ -3172,8 +3195,9 @@ def _op_slice_paste(ctx, args):
         _foreground_gate(ctx, args)
         # R-H1 (BCU R2 item 5): deny, then frontmost — both on fresh reads
         # immediately before the chord. A failure here refuses BEFORE the
-        # paste subprocess starts: nothing pasted, pasteboard unchanged.
-        _paste_foreground_gate(ctx, args, snap, window_id)
+        # paste subprocess starts: nothing pasted; the receipt names the
+        # completed steps and the honest pasteboard claim (M2).
+        _paste_foreground_gate(ctx, args, snap, window_id, completed)
         paste_argv = paste_argv + ["--foreground"]
     state_write = None
     try:
