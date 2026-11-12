@@ -131,6 +131,18 @@ case "$1" in
     fi
     ;;
   see)
+    # Round-2 D-H2 knob: count see calls; from the 3rd onward an optional
+    # FAKE_PEEKABOO_IDENTITY_2 replaces the identity (simulate a window
+    # that becomes deny-listed between the observe and the confirm read).
+    if [ -n "${FAKE_PEEKABOO_SEE_COUNT:-}" ]; then
+      see_n=0
+      [ -f "${FAKE_PEEKABOO_SEE_COUNT}" ] && read -r see_n < "${FAKE_PEEKABOO_SEE_COUNT}"
+      see_n=$((see_n+1))
+      printf '%s' "$see_n" > "${FAKE_PEEKABOO_SEE_COUNT}"
+      if [ "$see_n" -ge 3 ] && [ -n "${FAKE_PEEKABOO_IDENTITY_2:-}" ]; then
+        ident="${FAKE_PEEKABOO_IDENTITY_2}"
+      fi
+    fi
     if has --tree; then
       echo "{\"success\": true, \"data\": {${ident}, \"snapshot_id\": \"snap-tree\", \"tree\": [
         {\"role\": \"Window\", \"label\": \"doc\", \"id\": \"w0\", \"children\": [
@@ -3912,6 +3924,119 @@ class TestPeekabooFixtureReplay(unittest.TestCase):
         os.environ["FAKE_PEEKABOO_FIXTURES"] = empty
         windows = ctx.adapter.list_windows("TextEdit")
         self.assertEqual(windows[0]["window_id"], 42)
+
+
+class TestDenyBeforePixels(unittest.TestCase):
+    """Round 2, D-H2: for EVERY path that can produce an image (act
+    observe, slice observe, post-paste confirm, capture), the deny check
+    runs FIRST on a read that takes no screenshot (``see --tree
+    --no-screenshot``). A refused window leaves no captured pixels
+    anywhere — including peekaboo's own ~/.peekaboo/snapshots folder, where
+    every pixel-taking ``see`` persists an image."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mmos-cu-pixels-")
+
+    def tearDown(self):
+        for key in ("FAKE_PEEKABOO_IDENTITY", "FAKE_PEEKABOO_LOG",
+                    "FAKE_PEEKABOO_IDENTITY_2", "FAKE_PEEKABOO_SEE_COUNT"):
+            os.environ.pop(key, None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _snapshot_dir_listing(self):
+        """File list of the real ~/.peekaboo/snapshots folder (or a marker
+        when absent) — a denied act must leave it byte-for-byte the same."""
+        path = os.path.expanduser("~/.peekaboo/snapshots")
+        if not os.path.isdir(path):
+            return ("<absent>",)
+        return ("<present>", tuple(sorted(os.listdir(path))))
+
+    def _ctx_denied(self):
+        ctx = build_ctx(self.tmp, identity=IDENTITY_ONepw)
+        acquire_lease(ctx)
+        return ctx
+
+    def _act(self, ctx, action, extra):
+        args = {"action": action, "window_id": 42,
+                "owner": "agent-a", "lease_nonce": ctx.lease_nonce}
+        args.update(extra)
+        return mmos.handle_tool_call(ctx, args)
+
+    def _assert_no_pixel_read(self, ctx):
+        sees = [c for c in read_calls(ctx) if c[0] == "see"]
+        self.assertTrue(sees, "expected the screenshot-less deny read")
+        for argv in sees:
+            self.assertIn(
+                "--no-screenshot", argv,
+                "pixel-taking see on a denied window: %r" % (argv,))
+        # And the peekaboo snapshot folder is untouched by the refusal.
+        self.assertEqual(self._snapshot_dir_listing(), self._before)
+
+    def test_press_on_denied_window_takes_no_pixels(self):
+        self._before = self._snapshot_dir_listing()
+        ctx = self._ctx_denied()
+        payload = json.loads(self._act(ctx, "press",
+                                       {"element_ref": "btn1"})
+                             ["content"][0]["text"])
+        self.assertEqual(payload["status"], "NOT_APPLIED")
+        self.assertIn("DENY_LISTED", payload["cause"])
+        self._assert_no_pixel_read(ctx)
+
+    def test_keys_on_denied_window_takes_no_pixels(self):
+        self._before = self._snapshot_dir_listing()
+        ctx = self._ctx_denied()
+        payload = json.loads(self._act(ctx, "keys", {"chord": "return"})
+                             ["content"][0]["text"])
+        self.assertEqual(payload["status"], "NOT_APPLIED")
+        self.assertIn("DENY_LISTED", payload["cause"])
+        self._assert_no_pixel_read(ctx)
+
+    def test_slice_click_on_denied_window_takes_no_pixels(self):
+        self._before = self._snapshot_dir_listing()
+        ctx = self._ctx_denied()
+        payload = json.loads(self._act(ctx, "slice_click",
+                                       {"element_ref": "btn1"})
+                             ["content"][0]["text"])
+        self.assertEqual(payload["status"], "NOT_APPLIED")
+        self.assertIn("DENY_LISTED", payload["cause"])
+        self._assert_no_pixel_read(ctx)
+
+    def test_slice_paste_on_denied_window_takes_no_pixels(self):
+        self._before = self._snapshot_dir_listing()
+        ctx = self._ctx_denied()
+        payload = json.loads(self._act(ctx, "slice_paste",
+                                       {"text": "hello"})
+                             ["content"][0]["text"])
+        self.assertEqual(payload["status"], "NOT_APPLIED")
+        self.assertIn("DENY_LISTED", payload["cause"])
+        # No paste dispatch may run for a denied window.
+        self.assertEqual([c for c in read_calls(ctx) if c[0] == "paste"], [])
+        self._assert_no_pixel_read(ctx)
+
+    def test_paste_confirm_read_denies_before_pixels(self):
+        # Allowed window at observe time, deny-listed by the confirm read
+        # (title/app changed to 1Password): the confirm must refuse on a
+        # screenshot-less read; exactly ONE pixel see (the observe) exists.
+        self._before = self._snapshot_dir_listing()
+        ctx = build_ctx(self.tmp)  # TextEdit identity: allowed at observe
+        acquire_lease(ctx)
+        os.environ["FAKE_PEEKABOO_IDENTITY_2"] = IDENTITY_ONepw
+        os.environ["FAKE_PEEKABOO_SEE_COUNT"] = os.path.join(
+            self.tmp, "see-count")
+        payload = json.loads(self._act(ctx, "slice_paste",
+                                       {"element_ref": "field1",
+                                        "text": "hello"})["content"][0]["text"])
+        self.assertEqual(payload["status"], "APPLIED")
+        self.assertIn("confirm read failed: DENY_LISTED", payload["observed"])
+        plain = [c for c in read_calls(ctx) if c[0] == "see"
+                 and "--tree" not in c]
+        self.assertEqual(len(plain), 1,
+                         "confirm must deny on a --no-screenshot read "
+                         "before any second pixel capture: %r" % (plain,))
+        tree = [c for c in read_calls(ctx) if c[0] == "see"
+                and "--tree" in c]
+        self.assertTrue(any("--no-screenshot" in c for c in tree))
+        self.assertEqual(self._snapshot_dir_listing(), self._before)
 
 
 if __name__ == "__main__":

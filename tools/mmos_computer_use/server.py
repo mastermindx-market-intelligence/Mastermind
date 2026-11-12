@@ -2162,9 +2162,14 @@ def _foreground_gate(ctx, args):
 def _act_observe(ctx, args, window_id):
     """Gate, then take the FRESH snapshot every ACT dispatches on.
 
-    Order: lease + presence (local, no read), then one ``see --window-id N
-    --json`` (identity, ui_elements, coordinate_context), then the deny list
-    on that read. Returns (snapshot, snapshot_id).
+    Order (D-H2): lease + presence (local, no read), then the deny list on
+    a read that takes NO screenshot (``see --tree --no-screenshot``, the
+    same pattern as _op_capture), and only then one pixel-taking
+    ``see --window-id N --json`` (identity, ui_elements,
+    coordinate_context) whose identity is deny-checked again. A refused
+    window is never photographed — peekaboo persists every pixel-taking
+    ``see`` under ~/.peekaboo/snapshots, so the deny must precede pixels.
+    Returns (snapshot, snapshot_id).
     """
     ctx.lease.require_and_renew(args.get("owner"),
                                    nonce=args.get("lease_nonce"))
@@ -2173,6 +2178,8 @@ def _act_observe(ctx, args, window_id):
         raise OpError("HUMAN_ACTIVE",
                       "human idle %.1fs < %.1fs threshold; act refused"
                       % (state["human_idle_seconds"], ctx.presence.min_idle))
+    pre = ctx.adapter.inspect_window(window_id)
+    _deny_gate_window(ctx, pre)
     snap = ctx.adapter.snapshot_window(window_id)
     _deny_gate_window(ctx, snap)
     snapshot_id = snapshot_id_of(snap)
@@ -2707,11 +2714,15 @@ def _confirm_skipped(ctx):
 
 
 def _slice_observe(ctx, args, window_id, completed):
-    """Slice observe step: lease renew + presence + ONE fresh snapshot +
-    deny list on the window identity. Appends the completed step."""
+    """Slice observe step: lease renew + presence + deny list on a read
+    that takes NO screenshot (D-H2) + ONE fresh pixel snapshot whose
+    identity is deny-checked again. A refused window is never
+    photographed. Appends the completed step."""
     ctx.lease.require_and_renew(args.get("owner"),
                                    nonce=args.get("lease_nonce"))
     _slice_sequence_gate(ctx, completed, "observe")
+    pre = ctx.adapter.inspect_window(window_id)
+    _deny_gate_window(ctx, pre)
     snap = ctx.adapter.snapshot_window(window_id)
     _deny_gate_window(ctx, snap)
     snapshot_id = snapshot_id_of(snap)
@@ -3019,8 +3030,12 @@ def _op_slice_paste(ctx, args):
         note = " (confirm skipped: %s)" % skipped
     else:
         try:
+            # D-H2: the confirm read deny-checks on a screenshot-less read
+            # first; a window that became deny-listed after the paste is
+            # never photographed again.
+            pre = ctx.adapter.inspect_window(window_id)
+            _deny_gate_window(ctx, pre)
             fresh = ctx.adapter.snapshot_window(window_id)
-            _deny_gate_window(ctx, fresh)
             if element_ref is not None:
                 element = resolve_element(fresh, element_ref)
                 value = element.get("value")
