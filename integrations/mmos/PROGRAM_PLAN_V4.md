@@ -2017,3 +2017,25 @@ DeepSeek worker with the same eight points.
 1. Memory link repair round, then its install and the Hermes timers one at a time.
 2. Grok Bot link: port fix, then GBL-RETURN, then the install and one sitting with the Chairman.
 3. Browser bridge fix and the last computer-use round, as they return.
+
+## 50. Amendment, 2026-11-12 15:40 UTC: browser bridge fix merged; its install waits for one small repair round
+
+**What happened.** The browser bridge fix is merged as source. Nothing is installed. The principal read the acceptance change, both installer guards, the pin writer and the step list, and ran the six test files once (48 pass).
+
+**Accepted as built.**
+
+- The new host accepts exactly one previous release, by a named constant.
+- An action the older side does not describe is refused before Chrome sees it.
+- The installer has no default folder. It refuses a folder Chrome or a running server has loaded.
+- The pin switch is the last step.
+
+**Held for one repair round (ruling 15).**
+
+- The pin migration checks both release folders before its first write. Today a failure between the two writes leaves a state that a re-run refuses.
+- A profile whose registration cannot be read refuses the install by name. Today that profile is skipped, which is the failure this fix exists to prevent.
+- The server path in the provider homes is changed through the product's own writer or one guarded command, never by a hand edit. Running sessions rewrite that file.
+- One final install list is written for the exact commit being installed and rehearsed again at that commit.
+
+**Rule added.** A settings file that running sessions rewrite is changed only through a writer that checks every file before its first write and reads back afterwards.
+
+**Next, in order.** Unchanged from section 49. The browser bridge install follows its repair round, then one sitting with the Chairman for the five Chrome profiles. Other programmes are told the window first.
