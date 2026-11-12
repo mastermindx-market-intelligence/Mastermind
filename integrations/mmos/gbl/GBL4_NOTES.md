@@ -15,7 +15,7 @@ sole writer:
   bridge service agent in the isolated dev instance (no existing roster or
   spec was edited).
 - `tests/test_gbl_ask_cli.py` (44 after round 2),
-  `tests/test_gbl_paperclip_client.py` (132 after round 3).
+  `tests/test_gbl_paperclip_client.py` (136 after the final round).
 - this note.
 
 `common/gbl_contract.py` and the GBL-1/GBL-2 modules were imported and NOT
@@ -442,15 +442,41 @@ Delta check 2 at `337b145d1`: 4/4 delta-1 items CLOSED, no new HIGH,
   closed on the next use as `HMAC_KEY_INVALID`.  Tests failing first:
   a 0555 state dir (real EACCES → raw `PermissionError` before) and a
   simulated ENOSPC on the write (raw `OSError` before).
+- **F2 (MED-note, kept as a note by the deputy's instruction)** — one
+  foreign issue ANYWHERE in the company whose description carries the
+  marker plus an unbalanced `{` raises the typed `RECORD_INVALID` out
+  of `count_asks` (hourly-ceiling check dead) and out of `read_ask`
+  for any ask whose scan reaches the bad row — a whole-lane typed DoS
+  lever from a foreign-writable surface.  Fail-closed is the DESIGN
+  (an H4/M5 law: corruption is never read as absence, never a short
+  count), so a fix would have to distinguish "corrupt foreign row"
+  from "corrupt own row" — i.e. skip-rows-on-scan semantics the
+  contract does not define.  Availability-only, no data loss, typed at
+  both reviewed heads.  A future round could add a per-scan quarantine
+  (skip a corrupt row in RESOLUTION scans while count_asks still fails
+  closed) if the contract lane defines it; not done here.
+- **F4 (LOW, note)** — editing the stored envelope's `principal` field
+  makes the ask invisible to `count_asks` (its hourly-ceiling check
+  misses it) while `read_ask` still resolves it by ask id — a
+  ceiling-evasion lever on a foreign-writable surface.  Same
+  storage-model family as F2 (the description is the record); a
+  server-side ask_id uniqueness/ownership row is the real fix (the D4
+  lane item).
+- **F5 (LOW, note)** — `append_ask_event` canonicalises the
+  CALLER-SUPPLIED core unguarded: a bridge-side event carrying a
+  non-finite float raises a raw `ValueError`.  The caller is trusted
+  bridge code (not a forged path — every FOREIGN value is
+  parse-hardened since round 3), so this is a defensive-hardening
+  nicety, not a reachable defect from Paperclip data.
 
 
 
 `TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest
--p no:cacheprovider <file>` — at the round-3 head, all eight GBL files
-one at a time:
+-p no:cacheprovider <file>` — at the final-round head, all eight GBL
+files one at a time:
 
-- `tests/test_gbl_paperclip_client.py` — 132/132 (121 at round 2, +11 in
-  round 3: the D1/D2 shapes and the key-anchor law; the fake HTTP server
+- `tests/test_gbl_paperclip_client.py` — 136/136 (121 at round 2, +11 in
+  round 3, +2 F1 and +2 F3 in the final round; the fake HTTP server
   binds 127.0.0.1 on an EPHEMERAL port, and the real GblBridge is driven
   over the client for the EFFECT_UNKNOWN tests)
 - `tests/test_gbl_ask_cli.py` — 44/44 (real GBL-2 `GblBridge`+
