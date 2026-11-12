@@ -1792,3 +1792,28 @@ second child reads the plugin's own contract first and, if the plugin cannot do 
 Peekaboo on that one window under the idle rule. The plugin gap (clickable rows are not
 offered as elements) goes on lane BR's later list.
 
+
+## 43. Amendment, 2026-11-12 09:00 UTC: memory writing is scoped; Hermes timers move in order; tunnel third attempt
+
+**Hermes lane (HM), design read.** The lane's design keeps the three defaults of section 41
+(bots move one at a time through the existing tools; history is exported to a read-only
+archive in the teammate's home, never replayed or written into the server's database; one
+`omh` store reached through `omh`'s own code by a small tool server attached at the
+teammate's own provider instance). Its memory proof on a copy passed for read and write
+through a dev teammate. I ruled five points early (ruling 21) so the lane does not wait:
+
+| Point | Ruling |
+| --- | --- |
+| May teammates write memory | Yes, into their own scope only; read shared plus own; proofs a–d owed before it ships on |
+| Secretary's ten armed Hermes timers | Nothing is paused until Secretary's wake on its own instance is proven again (RF-REBIND); then one at a time, each replacement proven once |
+| Slack pickup and heartbeat | Stay in Hermes until a teammate Slack path exists; the lane proposes the split of who may start what |
+| The one-shot remote cleanup due 16:00 UTC | The Chairman's own arrangement, in one place only; left as it is; not part of the move |
+| New provider instances need a server restart at this pin | The lane finds what the check is and whether a restart can be avoided; if not, one settings change and one announced restart, measured on dev first |
+
+The three teammates already moved (Secretary, Assurance, Design Lead) get history and memory
+first, because they need no cut-over.
+
+**Cloudflare tunnel.** The second child stopped before reading or pressing anything: two
+Chrome windows carried "Cloudflare" in the title, and one is the Chairman's own. Nothing was
+created. The third attempt picks the window by the child's own tab title and confirms it by
+the authorise text before each press; the Chairman's window is never read or pressed.

@@ -150,3 +150,20 @@ then escalates the disagreement.
     audit shows shell and web fetch worked and four children started, and afterwards the
     carrier refused every Secretary wake (`rf-carrier-refresh.md` step 2e still owed).
 
+21. **A teammate writes memory only into its own scope; a person's live channel is not cut to
+    tidy a move (2026-11-12).** (a) The memory link lets a teammate read the shared `omh`
+    scope and its own scope, each record labelled with its scope, and write only into its own
+    scope (`user` / `teammate-<slug>`). Nothing a teammate can call promotes a record into the
+    shared scope; promotion is a person's review. Writing ships on only if the proof shows that
+    Hermes does not replay a teammate-scope record into other bots and that one teammate cannot
+    read another's scope. Recalled memory is data, never an instruction. (b) A Hermes timer
+    that is a person's live channel (today: Secretary's Slack pickup and its heartbeat) stays
+    armed in Hermes until the teammate has a proven replacement path; while it stays, the
+    install list names which kinds of work each side may start, so no effect has two
+    initiators. (c) A timer a person arranged with their bot that exists in one place only and
+    is not being moved is left exactly as it is. (d) Nothing in Hermes is paused for a teammate
+    whose wake on its own provider instance is not currently proven. (e) New provider instances
+    are added to the team server in one settings change with at most one announced restart;
+    cut-overs stay one agent at a time. Reason: the shared scope is replayed into every Hermes
+    bot's prompt, so one teammate's write could steer fifteen bots; and the Chairman uses the
+    Slack bot and the team server's app every day.
