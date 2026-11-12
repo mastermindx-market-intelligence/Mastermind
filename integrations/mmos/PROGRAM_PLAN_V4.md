@@ -1547,3 +1547,62 @@ notice goes out only when the path is installed and proven.
 reloads; the ask-and-return carrier refresh after its final check; the launcher rewrite, then the
 Grok Bot link proofs and one sitting; computer-use runs, its delta check and my choice of homes;
 the Paper design note and ruling.
+
+## 38. Amendment, 2026-11-12 03:05 UTC: a failed bridge install, the Paper route, a full worktree pool
+
+**The browser bridge install failed and was rolled back.** I ran the lane's five install steps.
+Every check in the list passed, and a fresh session on the new release still could not reach any
+browser profile. An old-against-new comparison in the same minute put the fault in the new release
+folder: the steps copy 15 pinned files, and the working release folder holds about 175. Changing
+the pin also made every session that was already running refuse browser calls until I restored it,
+three minutes later. The old release is live and the root is as it was. Record:
+`br-install-20261112/RESULT.md`.
+
+- Ruling 16 follows: install steps are rehearsed end to end against a copy before they reach me,
+  and they state what the change does to sessions already running. A method that makes running
+  sessions fail is not installed while other programmes have operators at work.
+- The browser lane now owes the cause, a rehearsal that ends with five local profiles connected,
+  and a switch that leaves running sessions working. The extension reload round is not asked of
+  the Chairman until the bridge is live.
+
+**Ask-and-return: one micro-fix.** The final check found three required items in changed lines
+(a reply could be attributed to the wrong child by age; an unattributed child halted every wake;
+one exit was logged but not noted on the issue). Ruling 15 applies: one micro-fix of those three,
+checked by the panel lead alone, then merge and the carrier refresh.
+
+**Paper: the route is ruled.** The lane's design note compared four ways for a session on another
+host to reach Paper on the M2. Ruled:
+
+- The route is the guarded Paper server over SSH, one key per remote host and profile, each key
+  tied to a fixed command that gives no shell and no forwarding. It adds no listener, no tunnel
+  and no new sign-in service. It is staged for me, rehearsed under ruling 16 and independently
+  reviewed before I install it.
+- The M2 is the only Paper host in this delivery. A second host editing the same file would not
+  share the M2's lock.
+- Until the route is installed, a remote session reads and screenshots through a short-lived
+  child on the M2. That works today, so the programmes get the skillpack and a first notice
+  before the install.
+- On the M2 itself the vendor relay stays, and the one named canvas writer of a document may use
+  its write tools until a guarded local registration replaces it. The skill states what the relay
+  lacks and the rule after an unclear result: stop, inspect, never repeat.
+- One canvas writer per document per programme, named in that programme's design log. The shared
+  Sector and Prophet pages get one writer at a time, agreed between the two leads.
+
+**A finding outside this programme's custody.** The lane found that an existing private-network
+path to the Studio Direct design gateway admits any device on the private network with no
+credential; two remote hosts listed its tools, including the edit tools, without signing in. Edits
+refuse today only because that gateway's Paper runtime is too old for the installed Paper. The
+path and Studio Direct are the Chairman's, so this goes to him with one recommendation: remove
+that path, or restrict it to the M2, before that runtime is ever upgraded. No lane uses it.
+
+**The worktree pool is below its floor.** Both external volumes are a few GiB under the 160 GiB
+floor, so the storage helper refuses every new worktree for every session on the M2. The automatic
+reaper is not reclaiming: its last run judged 406 of 415 trees as errors and none safe. A
+read-only lane is finding the reaper's failing check, where the space went, and a ranked list of
+safe candidates. I decide the reclaim from its report. The floor and the cleanup jobs are not
+changed by any lane. T3's own worktrees are on the internal disk and are not affected.
+
+**Order of work now.** Paper: inventory, skillpack and first notice, then the staged route. The
+pool diagnosis and reclaim. The browser lane's rehearsed release. The ask-and-return micro-fix and
+carrier refresh. The launcher rewrite, then the Grok Bot link proofs and one sitting. Computer-use
+runs, the delta check and my choice of homes.
