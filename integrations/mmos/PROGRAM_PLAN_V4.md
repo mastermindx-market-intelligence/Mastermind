@@ -1754,7 +1754,7 @@ Three of them could not read the text in the returned image; that is the missing
 vision, which lane BCU owns, not a Paper fault. The inspect tool takes no file and returns
 whatever file is open on the M2; the skillpack must tell designers to name the file.
 
-## 42. Amendment, 2026-11-12 08:45 UTC: a teammate is its provider instance; first census of the Hermes bots
+## 42. Amendment, 2026-11-12 08:40 UTC: a teammate is its provider instance; first census of the Hermes bots
 
 **What happened.** The Chairman used the Mastermind OS window to talk in Secretary's
 conversation and the window let him pick the general provider and another model. Those two
