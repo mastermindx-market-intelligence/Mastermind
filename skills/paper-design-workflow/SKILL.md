@@ -105,6 +105,19 @@ For native MCP clients, use only the Paper actions exposed and approved in that 
 never grants permission, and sealed workers do not inherit ambient plugins or Executive grants.
 
 
+## T3 sessions on any host
+
+In T3 Code, read `references/t3-carriers.md` before the first Paper call. It covers which
+carrier you have, how a remote session without Paper tools reads through a short-lived
+child on the Paper host, the **one named canvas writer per document**, and the raw
+`paper` relay. The relay has no snapshot guard and no operation id. Only the named writer
+may use its write tools. After an unclear result, stop, inspect the original target, and
+never repeat the call. Guarded `paper_edit` stays the standard wherever it works.
+
+For design work, load `mastermind-design-director` (studio protocol, specialist child
+briefs, design log) and `mastermind-design-system` (visual law). No UI is built before its
+screens are designed and critiqued in Paper.
+
 ## Scope the design
 
 Define the user's task, primary persona, target screen, meaningful states and
