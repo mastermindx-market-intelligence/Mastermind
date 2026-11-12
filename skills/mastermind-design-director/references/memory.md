@@ -31,6 +31,11 @@ Design memory lives in places the programme already owns. This adds no new store
 4. **Held targets** are listed in both the design log and the manifest, with the
    original operation id and carrier. Nobody retries, recreates, finishes or exports
    a held target. Only the lead who owns its original carrier releases it.
+5. **A screenshot of a root that contains a held target carries the hold for that
+   region.** Mark such an image in the inventory as "contains held region `<id>`;
+   reference for the surrounding board only". Never build, edit or copy from that
+   region, and never use the image as a reference pull, skillpack example or critique
+   sample. Do not crop, re-export or re-render it to work around the hold.
 
 Account-local chat memory is not design memory. A fresh session must be able to
 continue from the README page, the manifest and the log alone.

@@ -27,3 +27,7 @@ Missing states stay `not_observed`; do not infer them from neighbours. No total 
 
 Return: a table of the twelve dimensions, the findings (blocking first), and a verdict:
 `REVISE` (with the one coherent revision hypothesis) or `READY_FOR_DECISION`.
+
+## Held targets
+
+Never use a held target as a reference or sample. A screenshot of a root that contains a held target carries the hold for that region: treat that region as held content, not a design to copy, and do not crop, re-export or re-render it.

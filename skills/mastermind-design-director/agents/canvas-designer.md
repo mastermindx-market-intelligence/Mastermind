@@ -31,6 +31,7 @@ Edit safety:
 - After any unclear result: stop, inspect the target by node id, never repeat. Log
   `EFFECT_UNKNOWN`.
 - Never touch held targets or nodes outside your assigned ids.
+- A screenshot of a root that contains a held target carries the hold for that region: do not copy from it.
 
 Return: the artboard ids made or changed, with names and sizes; each screenshot path
 and sha256; operation ids and their states; what you could not do and why; and one
