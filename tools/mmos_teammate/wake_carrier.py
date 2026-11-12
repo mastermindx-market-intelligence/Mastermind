@@ -1826,6 +1826,12 @@ def handle_return(pc, t3, issue, ask_op, opts, me_id):
     if not family:
         log(f"return wake on {issue.get('identifier')}: every ask child was "
             f"cancelled; leaving the issue for a person")
+        # Delta-5 D4-7 (final check finding 3): the family was non-empty at
+        # the empty-family check above (so its note did not fire) and the
+        # cancelled split emptied it — this exit was log-only, the parent
+        # blocked forever with no board trace. Same law as the other exits:
+        # one idempotent note over the recorded blockers.
+        _blocker_note(pc, issue)
         return 0
     open_rows = [row for row in family if row.get("status") != "done"]
     if open_rows:

@@ -2195,6 +2195,26 @@ def test_a_recorded_blocker_no_wake_covers_leaves_a_board_note():
     assert pc.issues["is-1"]["status"] == "blocked"
 
 
+def test_every_ask_child_cancelled_leaves_a_board_note():
+    # Delta-5 D4-7 (final check finding 3, probes 2 and 14): the family is
+    # non-empty at the empty-family check (so THAT note does not fire),
+    # then the cancelled split empties it and the all-cancelled exit was
+    # log-only — the parent stayed blocked forever with no board trace,
+    # the exact strand D4-7 targets. The exit posts the same one
+    # idempotent [t2-carrier] note naming the recorded blocker.
+    issues, ask_op, child1 = blocked_parent_with_done_child()
+    child1 = dict(child1, status="cancelled")   # the ONLY ask child,
+    issues["is-1"]["blockedBy"] = board.blocked_by(child1)  # recorded
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [child1]
+    t3 = FakeT3(replies=["SHOULD NOT SEND"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert t3.sends == []
+    notes = _blocker_note_bodies(pc)
+    assert len(notes) == 1 and "MMO-2" in notes[0] and "person" in notes[0]
+    assert pc.issues["is-1"]["status"] == "blocked"
+
+
 def test_a_family_outside_the_recorded_blockers_leaves_a_board_note():
     # Delta-4 D4-7, second exit: this carrier's own marker-matching children
     # exist but NONE of them is the recorded blocker (someone re-blocked the
