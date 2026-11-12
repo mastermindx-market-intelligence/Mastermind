@@ -19,11 +19,12 @@ def test_heavy_jobs_cancel_and_final_gate_keeps_aggregating():
     from scripts import ci_parallel_shard as fan
     assert jobs["pr_fast"]["if"] == fan._REQUIRED_PR_FAST_IF
     assert jobs["pytest_shards"]["if"] == fan._REQUIRED_SHARDS_IF
+    assert jobs["native_admission"]["if"] == fan._REQUIRED_SHARDS_IF
     assert jobs["test"]["if"] == fan._REQUIRED_GATE_IF
-    assert jobs["test"]["needs"] == ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards"]
+    assert jobs["test"]["needs"] == ["pr_scope", "pr_fast", "pin_guards", "qualification", "native_admission", "pytest_shards"]
 
 
-@pytest.mark.parametrize("job", ["pr_fast", "pytest_shards"])
+@pytest.mark.parametrize("job", ["pr_fast", "pytest_shards", "native_admission"])
 @pytest.mark.parametrize("replacement", ["always()", "success()", "true"])
 def test_validator_rejects_uncancellable_or_incomplete_heavy_job_selector(job, replacement):
     source = WORKFLOW.read_text(encoding="utf-8")

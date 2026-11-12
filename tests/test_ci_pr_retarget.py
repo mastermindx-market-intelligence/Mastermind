@@ -127,6 +127,7 @@ def test_actual_event_conditions_preserve_source_checks_and_isolate_metadata(
         fast = bool(_expression(jobs["pr_fast"]["if"], github, needs, cancelled))
         shards = bool(_expression(jobs["pytest_shards"]["if"], github, needs, cancelled))
         assert bool(_expression(jobs["qualification"]["if"], github, needs, cancelled)) == shards
+        assert bool(_expression(jobs["native_admission"]["if"], github, needs, cancelled)) == shards
         assert fast == (scope_event and not metadata and mode != "full" and not cancelled)
         assert shards == (not metadata and not cancelled and (
             event in {"push", "workflow_dispatch"} or (scope_event and mode == "full")
