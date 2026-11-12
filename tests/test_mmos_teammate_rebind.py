@@ -1,11 +1,14 @@
 """rebind-thread: a fresh primary conversation on the teammate's OWN provider
 instance (ruling 20 — a teammate is its provider instance, not its
 conversation)."""
+import calendar
 import copy
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 import types
 
 import pytest
@@ -127,7 +130,11 @@ def test_rebind_gives_the_teammate_its_own_instance_back(rebound, capsys):
     assert out["oldThread"]["providerInstanceId"] == "capacity_fabric"
     assert out["newThreadId"] == NEW
     assert out["newThread"]["providerInstanceId"] == "assurance"
-    assert out["title"] == "Assurance primary " + out["at"][:10]
+    # RF-TITLE: "<Name> primary <YYYY-MM-DD> <HH:MM>Z" — two rebinds on one
+    # day must differ, so the title carries the minute (UTC, like "at")
+    assert re.fullmatch(r"Assurance primary \d{4}-\d{2}-\d{2} \d{2}:\d{2}Z",
+                        out["title"]), out["title"]
+    assert out["title"].startswith("Assurance primary " + out["at"][:10])
     # the binding moved through the move's own writer: revision bumped,
     # read-back verified, everything else in the binding preserved
     got = live_binding(http)
@@ -500,6 +507,50 @@ def test_a_start_timeout_says_the_thread_may_exist(rebound, capsys):
     assert "nothing was written" not in err
     assert live_binding(http)["primaryThreadId"] == OLD
     assert "rebinds" not in result_doc(spec)
+
+
+class FakeClock:
+    """A pinned UTC clock for ``co.time`` (RF-TITLE). Two rebinds on one day
+    must produce distinct titles, so a test has to control the minute."""
+
+    def __init__(self, epoch):
+        self.epoch = epoch
+
+    def gmtime(self, secs=None):
+        return time.gmtime(self.epoch if secs is None else secs)
+
+    def strftime(self, fmt, tup=None):
+        return time.strftime(fmt, self.gmtime() if tup is None else tup)
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+def test_two_rebinds_on_one_day_get_distinct_titles(rebound, monkeypatch,
+                                                    capsys):
+    # RF-TITLE (principal ruling, 2026-11-12): the rebind tool titled by date
+    # only, so two rebinds on one day left two live-looking conversations
+    # sharing a title (HM install part B, finding 3). The title must carry
+    # the minute: "<Name> primary <YYYY-MM-DD> <HH:MM>Z".
+    # Fails first at d92d1863f.
+    spec, http, t3 = rebound
+    day = calendar.timegm(time.strptime("2026-11-12", "%Y-%m-%d"))
+    monkeypatch.setattr(co, "time", FakeClock(day + 13 * 3600 + 20 * 60))
+    assert co.cmd_rebind_thread(spec) == 0
+    out1 = printed_json(capsys.readouterr().out)
+    # a second rebind the same day (the chained-rebind shape)
+    t3.new_id = "mcp:new-2"
+    t3.threads[NEW]["thread"]["providerInstanceId"] = "capacity_fabric"
+    t3.threads["mcp:new-2"] = thread_row("assurance")
+    monkeypatch.setattr(co, "time", FakeClock(day + 19 * 3600 + 35 * 60))
+    assert co.cmd_rebind_thread(spec) == 0
+    out2 = printed_json(capsys.readouterr().out)
+    assert out1["title"] == "Assurance primary 2026-11-12 13:20Z"
+    assert out2["title"] == "Assurance primary 2026-11-12 19:35Z"
+    assert out1["title"] != out2["title"]
+    # the record keeps both titles apart, too
+    assert [r["title"] for r in result_doc(spec)["rebinds"]] == \
+        [out1["title"], out2["title"]]
 
 
 def test_a_failed_rollback_record_write_names_the_reconciliation(

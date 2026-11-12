@@ -2317,3 +2317,67 @@ class TestRefusalBeforeFirstWrite:
         assert after == before, (
             "a refusing apply rewrote gate/limits/settings: "
             + ", ".join(p for p in watched if before[p] != after[p]))
+
+
+# --- RF-TITLE (principal ruling, 2026-11-12) --------------------------------
+#     The board binding owns which conversation is a teammate's primary; the
+#     roster does not rename a conversation it resolved through the binding.
+#     The title difference is a note and apply ends rc 0. Fails first at
+#     d92d1863f: there the rename was attempted (a headless browser driven
+#     against a live conversation) and the apply ended rc 1 without one.
+
+
+class TestRfTitleBindingRenameSkip:
+    def test_apply_skips_the_rename_of_a_binding_resolved_thread_rc0(
+            self, tmp_path, fake_t3, monkeypatch, capsys):
+        """The real-root shape after HM install part B (findings 2 and 3): a
+        rebind minted a new primary titled "<Name> primary <date>", the board
+        binding resolves the roster to it, and apply must finish rc 0 without
+        driving a browser against the live conversation."""
+        home, _settings = fake_home(tmp_path)
+        (home / "userdata" / "environment-id").write_text("env-1")
+        spec = load(tmp_path, binding_raw(tmp_path))
+        profile = os.path.join(spec["server"]["root"], "browser")
+        os.makedirs(profile, mode=0o700)
+        spec["browser_profile"] = profile
+        spec["browser_node"] = "/bin/echo"
+        make_db(spec, [
+            {"threadId": "t-old", "title": "A — quality", "instance": "a"},
+            {"threadId": "t-new", "title": "A primary 2026-11-12",
+             "instance": "a"},
+            {"threadId": "b-1", "title": "B — design", "instance": "b"},
+        ])
+        write_roster_state(spec, {
+            "A": state_entry("a", "t-old"),
+            "B": state_entry("b", "b-1"),
+        })
+        monkeypatch.setattr(team_roster, "acquire_apply_lock", lambda s: None)
+        monkeypatch.setattr(team_roster, "ensure_project", lambda s: PROJECT)
+        monkeypatch.setattr(team_roster, "session_processes", lambda *p: [])
+        monkeypatch.setattr(team_roster, "write_urls_file",
+                            lambda s, t: "/tmp/urls.json")
+        monkeypatch.setattr(team_roster, "paperclip_binding",
+                            lambda s, m: "t-new" if m["name"] == "A" else "b-1")
+        real_run = subprocess.run
+
+        def run(argv, *args, **kwargs):
+            if any("roster_browser.js" in str(a) for a in argv):
+                raise AssertionError(
+                    "the browser was driven against a binding-resolved "
+                    "thread")
+            return real_run(argv, *args, **kwargs)
+
+        monkeypatch.setattr(team_roster.subprocess, "run", run)
+        # rename_threads is NOT patched: the real skip must end apply rc 0
+        assert team_roster.cmd_apply(spec) == 0
+        out = capsys.readouterr().out
+        report = json.loads(out[out.index("{"):])
+        by_name = {r["name"]: r for r in report["teammates"]}
+        assert by_name["A"]["threadId"] == "t-new"
+        assert by_name["A"]["renamed"] is False
+        assert fake_t3.calls == [], "following a binding creates nothing"
+        # the note prints the title difference
+        assert "A primary 2026-11-12" in out
+        assert "A — quality" in out
+        assert "binding" in out
+        assert "INCOMPLETE" not in out

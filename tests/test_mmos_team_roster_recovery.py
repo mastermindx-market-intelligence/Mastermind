@@ -446,3 +446,82 @@ class TestRenameApplication:
         spec["browser_profile"] = str(tmp_path / "foreign")
         with pytest.raises(SystemExit):
             team_roster.rename_threads(spec, threads)
+
+
+class TestBindingResolvedRenameSkip:
+    """RF-TITLE (principal ruling, 2026-11-12): the board binding owns which
+    conversation is a teammate's primary; the roster does not rename a
+    conversation it resolved THROUGH the binding. The title difference is a
+    printed note and apply ends rc 0. A thread the roster itself minted keeps
+    today's rename behaviour. The skip tests fail first at d92d1863f."""
+
+    def threads(self, spec, tmp_path, a_recovered_by):
+        profile = tmp_path / "t3-team" / "browser"
+        profile.mkdir(parents=True, mode=0o700)
+        (tmp_path / "t3-team" / "home" / "userdata").mkdir(parents=True)
+        (tmp_path / "t3-team" / "home" / "userdata" /
+         "environment-id").write_text("env-1")
+        spec["browser_profile"] = str(profile)
+        spec["browser_node"] = "/bin/echo"
+        return {m["name"]: {
+            "threadId": "t1" if m["name"] == "A" else "t2",
+            "projectId": PROJECT,
+            # the rebind tool's own title shape: differs from the roster title
+            "currentTitle": ("A primary 2026-11-12" if m["name"] == "A"
+                             else "B — product"),
+            "title": team_roster.teammate_title(m),
+            "pinnedAt": None,
+            "recoveredBy": a_recovered_by if m["name"] == "A" else "state",
+        } for m in spec["teammates"]}
+
+    def test_binding_resolved_thread_is_skipped_with_a_note(
+            self, tmp_path, monkeypatch, capsys):
+        spec = load(tmp_path, make_spec(tmp_path))
+        threads = self.threads(spec, tmp_path, "binding")
+
+        def boom(*args, **kwargs):
+            raise AssertionError(
+                "the browser was driven against a binding-resolved thread")
+
+        monkeypatch.setattr(team_roster.subprocess, "run", boom)
+        renames, failures = team_roster.rename_threads(spec, threads)
+        assert failures == []
+        assert renames == {"A": False, "B": False}
+        out = capsys.readouterr().out
+        assert "A primary 2026-11-12" in out   # the live title
+        assert "A — quality" in out            # the roster title
+        assert "binding" in out
+
+    def test_a_minted_thread_still_renames_as_today(self, tmp_path,
+                                                    monkeypatch):
+        """A thread the roster itself minted (here: recovered through its own
+        state record) keeps the browser rename and the durable read-back."""
+        spec = load(tmp_path, make_spec(tmp_path))
+        threads = self.threads(spec, tmp_path, "state")
+        make_db(spec, [{"threadId": "t1", "title": "A primary 2026-11-12",
+                        "instance": "a"}])
+        calls = []
+
+        def run(argv, **kwargs):
+            calls.append(argv)
+            Path(argv[-1]).write_text(json.dumps({"threadId": "t1"}))
+            with sqlite3.connect(team_roster.db_path(spec)) as conn:
+                conn.execute(
+                    "UPDATE orchestration_v2_projection_threads "
+                    "SET title='A — quality', payload_json=? "
+                    "WHERE thread_id='t1'",
+                    (json.dumps({"id": "t1", "projectId": PROJECT,
+                                 "title": "A — quality", "pinnedAt": None,
+                                 "providerInstanceId": "a"}),))
+
+            class Proc:
+                returncode = 0
+                stdout = "RENAME_DONE t1 A — quality"
+                stderr = ""
+            return Proc()
+
+        monkeypatch.setattr(team_roster.subprocess, "run", run)
+        renames, failures = team_roster.rename_threads(spec, threads)
+        assert failures == []
+        assert renames == {"A": True, "B": False}
+        assert calls and calls[0][2] == "rename"

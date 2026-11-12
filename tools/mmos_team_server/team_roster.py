@@ -1547,9 +1547,23 @@ def rename_threads(spec, threads):
     profile is supplied by the operator, never inferred from a live server's
     credential files, and no token appears in argv.
     """
-    stale = [(mate, threads[mate["name"]]["currentTitle"])
-             for mate in spec["teammates"]
-             if threads[mate["name"]]["currentTitle"] != teammate_title(mate)]
+    stale = []
+    for mate in spec["teammates"]:
+        info = threads[mate["name"]]
+        wanted = teammate_title(mate)
+        if info["currentTitle"] == wanted:
+            continue
+        if info.get("recoveredBy") == "binding":
+            # RF-TITLE (principal ruling, 2026-11-12): the board binding owns
+            # which conversation is this teammate's primary; the roster does
+            # not rename a conversation it resolved THROUGH the binding. The
+            # title difference is a note, not a failure — apply ends rc 0. A
+            # thread the roster itself minted keeps the rename path below.
+            log(f"{mate['name']}: thread {info['threadId']} was resolved "
+                f"through the board binding; not renaming it (live title "
+                f"{info['currentTitle']!r}, roster title {wanted!r})")
+            continue
+        stale.append((mate, info["currentTitle"]))
     if not stale:
         return {mate["name"]: False for mate in spec["teammates"]}, []
     profile = spec.get("browser_profile")
