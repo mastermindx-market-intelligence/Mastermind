@@ -219,6 +219,7 @@
           mismatch_kind: raw === preFill ? "box-unchanged" : "content-differs",
           prefill_characters: preFill.length,
           lines_inserted: stopped.linesInserted, time_bound_ms: stopped.timeBoundMs,
+          snapshot_consumed: true,
           box_excerpt: excerpt, box_excerpt_is_untrusted: true}, "NOT_APPLIED");
       }
       if (offset !== -1) {
@@ -226,10 +227,13 @@
         // mismatch_kind names what the mismatch is: box-unchanged means the
         // box still holds exactly what it held before the fill — the write
         // never took (a model-owning editor reverted it); content-differs
-        // means the box holds something else again.
+        // means the box holds something else again. Either way the attempt
+        // consumed the observation: the receipt says so, because a retry on
+        // the dead snapshot would be refused.
         return result(false, "FILL_MISMATCH", {...common, first_diff_offset: offset,
           mismatch_kind: raw === preFill ? "box-unchanged" : "content-differs",
           prefill_characters: preFill.length,
+          snapshot_consumed: true,
           box_excerpt: excerpt, box_excerpt_is_untrusted: true}, "NOT_APPLIED");
       }
       return result(true, "OK", {...common, snapshot_consumed: true, refresh_required: true}, "APPLIED");

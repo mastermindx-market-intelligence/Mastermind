@@ -70,12 +70,19 @@ const fixture = `<!doctype html><html><head><title>Fill receipt fixture</title><
     // An empty fill that leaves stale text is a mismatch, never APPLIED.
     await page.evaluate(()=>document.getElementById("plain").textContent="hello");
     {
-      const r=await fill("plain editable","");
+      const s=await snapshot();
+      const el=s.elements.find(e=>e.name==="plain editable");
+      const r=await send("fill",el.ref,"",s.snapshot_id);
       assert.equal(r.code,"FILL_MISMATCH","stale text after empty fill");
       assert.equal(r.effect,"NOT_APPLIED");
       assert.equal(r.data.asked_characters,0);
       assert.equal(r.data.box_characters,5);
       assert.equal(r.data.first_diff_offset,0);
+      // The attempt consumed the observation — the receipt must say so, and
+      // the same snapshot must no longer authorize another mutation.
+      assert.equal(r.data.snapshot_consumed,true,"a mismatch fill consumed the snapshot");
+      assert.equal((await send("fill",el.ref,"retry",s.snapshot_id)).code,"STALE_SNAPSHOT",
+        "the consumed observation no longer authorizes a fill");
       assert.equal(await box("plain"),"hello","box untouched by the refusal to claim success");
     }
     // An append where a replace was asked is a mismatch from offset 0.
