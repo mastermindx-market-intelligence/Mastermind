@@ -68,7 +68,7 @@ if (HERE / "omh_sleep").exists():
 
 if (HERE / "omh_fail").exists():
     if (HERE / "omh_secret").exists():
-        sys.stderr.write("store refused: token: abc123\n")
+        sys.stderr.write("store refused: token: abc123 api_key='k3y value'\n")
     else:
         sys.stderr.write("store refused: not admissible\n")
     sys.exit(1)
@@ -96,9 +96,11 @@ else:
             {
                 "record_id": "rec-1" if kind == "user-global" else "rec-own",
                 "scope": {"kind": kind, "ref": ref},
-                "summary": ("Alpha uses confirmation token: abc123" if secret
+                "summary": ("Alpha uses confirmation token: abc123 "
+                            "{\"password\": \"hunter2\"}" if secret
                             else "Alpha uses confirmation over prediction"),
-                "subject": "password: doctrine" if secret else "doctrine",
+                "subject": ("password: doctrine and pwd: s3cr3t-subject"
+                            if secret else "doctrine"),
                 "tags": ["doctrine"],
                 "record_type": "fact",
                 "approved_at": "2026-11-01T00:00:00Z",
@@ -629,3 +631,237 @@ def test_schema_pattern_and_tag_re_agree(harness: Harness):
     assert not _re.fullmatch(pattern, "--scope-kind")
     assert not _re.fullmatch(pattern, "-x")
 
+
+
+# --- RF-MEMLINK-R1 item 1 (principal ruling 2026-11-12 14:08Z): a label form
+# consumes its VALUE, to the end of the value — not just the label. The
+# round-0 tests asserted only that the label was gone, which is why they
+# passed while "my password: hunter2" came out as "my [redacted] hunter2".
+# Every test here asserts the VALUE itself is absent, and fails first on
+# f4e94ead5.
+
+import importlib.util as _ilu  # noqa: E402
+
+_mod_spec = _ilu.spec_from_file_location("memory_link_server_r1", SERVER)
+memory_link_server = _ilu.module_from_spec(_mod_spec)
+_mod_spec.loader.exec_module(memory_link_server)
+
+R1_LABEL_VALUE_CASES = [
+    ("my password: hunter2", "hunter2"),
+    ("passwd=hunter2", "hunter2"),
+    ("secret: hunter2", "hunter2"),
+    ("token = abc123 for the board", "abc123"),
+    ("API key: abc123", "abc123"),
+    ("api_key=abc123", "abc123"),
+    ("apikey: abc123", "abc123"),
+    ("Authorization: Bearer abc123", "abc123"),
+    ("authorization: basic abc123", "abc123"),
+    ("Bearer abc123", "abc123"),
+]
+
+
+@pytest.mark.parametrize("body,value", R1_LABEL_VALUE_CASES)
+def test_redact_consumes_the_labelled_value(body, value):
+    out = memory_link_server.redact(body)
+    assert value not in out, f"value survived redaction: {out!r}"
+    assert "[redacted]" in out
+
+
+def test_redact_removes_to_the_end_of_the_line_not_just_the_value():
+    # principal ruling 16:10Z replaces round 1's "keep the words after the
+    # value": everything from the label to the end of THAT LINE is removed,
+    # while the next line survives untouched.
+    out = memory_link_server.redact("token = abc123 for the board")
+    assert "abc123" not in out
+    assert "for the board" not in out
+    out = memory_link_server.redact("token = abc123\nthe next line stays")
+    assert "abc123" not in out
+    assert "the next line stays" in out
+
+
+# The prefix forms and the label-only refusal must not be weakened by the
+# value-consuming pattern: memory_save's refusal keeps using this same regex.
+R1_NOT_WEAKENED_CASES = [
+    "sk-live-abcdef123456",
+    "ghp_abcdefghijklmnopqrstuvwxyz0123",
+    "github_pat_ABC123def",
+    "xoxb-123456-abcdef",
+    "AKIAIOSFODNN7EXAMPLE",
+    "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0",
+    "-----BEGIN RSA PRIVATE KEY-----",
+    "password:",
+    "token =",
+]
+
+
+@pytest.mark.parametrize("text", R1_NOT_WEAKENED_CASES)
+def test_prefix_and_label_only_forms_still_refuse(text):
+    assert memory_link_server.looks_like_credential(text)
+    out = memory_link_server.redact(text)
+    assert "[redacted]" in out
+    assert out != text
+
+
+@pytest.mark.parametrize("body,value", R1_LABEL_VALUE_CASES)
+def test_notes_never_leak_the_labelled_value(harness: Harness, body, value):
+    notes = harness.tmp / "notes"
+    notes.mkdir()
+    (notes / "MEMORY.md").write_text(body + "\n", encoding="utf-8")
+    (notes / "USER.md").write_text("user notes\n", encoding="utf-8")
+    cfg = harness.write_config(profile_memory_dir=str(notes))
+    harness.start(cfg)
+    harness.handshake()
+    text = harness.tool_text(harness.call_tool("memory_notes", {}))
+    assert value not in text, f"value left the link unredacted: {text!r}"
+    assert "[redacted]" in text
+
+
+@pytest.mark.parametrize("summary", [
+    "secret: hunter2",
+    "passwd=hunter2",
+    "API key: abc123",
+    "Authorization: Bearer abc123",
+    "Bearer abc123",
+])
+def test_save_refuses_every_label_form(harness: Harness, summary):
+    cfg = harness.write_config(write_enabled=True)
+    harness.start(cfg)
+    harness.handshake()
+    resp = harness.call_tool(
+        "memory_save", {"summary": summary, "type": "fact"})
+    assert harness.tool_text(resp) == "not saved: looks like a credential"
+    assert not (harness.tmp / "omh_last.json").exists()
+
+
+# --- RF-MEMLINK R2 item 1 (principal ruling 16:10Z, repair round 2 of 3,
+# REPLACING the per-quote-form approach): when a credential label is found,
+# everything from the label to the END OF THAT LINE is removed — no attempt
+# is made to find where the value ends; over-removal is accepted, a leaked
+# value is not. A private key header removes through the matching END line,
+# or to the end of the text when there is none. Every test asserts the VALUE
+# is absent — across unit redact, notes, recall summary/subject and error
+# text — and fails first at d447c357d.
+
+R2_LINE_CASES = [
+    # (text, forbidden fragments — each must be absent after redaction)
+    ('{"password": "hunter2"}', ("hunter2",)),
+    ("password = 'hunter 2 x'", ("hunter 2 x", "2 x")),
+    ("pwd: hunter2", ("hunter2",)),
+    ("PASSWORD=hunter2", ("hunter2",)),
+    ("password: hunter2 token: abc123", ("hunter2", "abc123")),  # two labels
+    ("client_secret: zzz", ("zzz",)),          # already redacted at head
+    ('"api_key":"abc"', ("abc",)),             # no space after the colon
+    ("passphrase = 'open sesame'", ("open sesame", "sesame")),
+    ('{\n  "user": "admin",\n  "password": "hunter2",\n  "port": 3798\n}',
+     ("hunter2",)),                            # multi-line JSON object
+]
+
+
+@pytest.mark.parametrize("body,forbidden", R2_LINE_CASES)
+def test_redact_removes_the_value_in_r2_shapes(body, forbidden):
+    out = memory_link_server.redact(body)
+    for frag in forbidden:
+        assert frag not in out, f"value fragment survived redaction: {out!r}"
+    assert "[redacted]" in out
+
+
+@pytest.mark.parametrize("body,forbidden", R2_LINE_CASES)
+def test_notes_never_leak_the_r2_shapes(harness: Harness, body, forbidden):
+    notes = harness.tmp / "notes"
+    notes.mkdir()
+    (notes / "MEMORY.md").write_text(body + "\n", encoding="utf-8")
+    (notes / "USER.md").write_text("user notes\n", encoding="utf-8")
+    cfg = harness.write_config(profile_memory_dir=str(notes))
+    harness.start(cfg)
+    harness.handshake()
+    text = harness.tool_text(harness.call_tool("memory_notes", {}))
+    for frag in forbidden:
+        assert frag not in text, f"value left the link unredacted: {text!r}"
+    assert "[redacted]" in text
+
+
+# memory_save's refusal uses the same pattern, so it must stay at least as
+# strong: every R2 shape is refused BEFORE the store program is invoked.
+@pytest.mark.parametrize("body,_forbidden", R2_LINE_CASES)
+def test_save_refuses_every_r2_label_form(harness: Harness, body, _forbidden):
+    cfg = harness.write_config(write_enabled=True)
+    harness.start(cfg)
+    harness.handshake()
+    resp = harness.call_tool(
+        "memory_save", {"summary": body, "type": "fact"})
+    assert harness.tool_text(resp) == "not saved: looks like a credential"
+    assert not (harness.tmp / "omh_last.json").exists()
+
+
+def test_recall_redacts_summary_and_subject_in_r2_shapes(harness: Harness):
+    # the fake store's secret record carries the JSON form in its summary
+    # and a pwd: label in its subject (FAKE_OMH above)
+    (harness.tmp / "omh_secret").write_text("1", encoding="utf-8")
+    cfg = harness.write_config()
+    harness.start(cfg)
+    harness.handshake()
+    text = harness.tool_text(
+        harness.call_tool("memory_recall", {"query": "confirmation"}))
+    assert "rec-own" in text and "rec-1" in text  # the records still arrive
+    for frag in ("abc123", "hunter2", "s3cr3t-subject"):
+        assert frag not in text, f"value left the link unredacted: {text!r}"
+    assert "[redacted]" in text
+
+
+def test_error_excerpt_redacts_the_quoted_value(harness: Harness):
+    # the failing store's stderr carries api_key='k3y value' — a quoted
+    # value with spaces inside an error excerpt
+    (harness.tmp / "omh_secret").write_text("1", encoding="utf-8")
+    (harness.tmp / "omh_fail").write_text("1", encoding="utf-8")
+    cfg = harness.write_config()
+    harness.start(cfg)
+    harness.handshake()
+    resp = harness.call_tool("memory_recall", {"query": "confirmation"})
+    assert resp["result"].get("isError") is True
+    text = harness.tool_text(resp)
+    for frag in ("abc123", "k3y", "value'"):
+        assert frag not in text, f"value left the link unredacted: {text!r}"
+    assert "[redacted]" in text
+
+
+def test_redact_removes_only_the_labelled_line_of_a_json_object():
+    # the ruling removes the LABELLED LINE, not the whole document: sibling
+    # fields on other lines survive.
+    body = '{\n  "user": "admin",\n  "password": "hunter2",\n  "port": 3798\n}'
+    out = memory_link_server.redact(body)
+    assert "hunter2" not in out
+    assert "admin" in out and "3798" in out
+
+
+def test_private_key_block_with_end_line_is_removed_whole():
+    body = ("before\n-----BEGIN RSA PRIVATE KEY-----\nMIIdata\n"
+            "-----END RSA PRIVATE KEY-----\nafter\n")
+    out = memory_link_server.redact(body)
+    assert "MIIdata" not in out
+    assert "PRIVATE KEY" not in out
+    assert "before" in out and "after" in out
+
+
+def test_private_key_block_without_end_removes_to_end_of_text():
+    body = "start\n-----BEGIN EC PRIVATE KEY-----\nMIIdata without end\n"
+    out = memory_link_server.redact(body)
+    assert "MIIdata" not in out
+    assert "PRIVATE KEY" not in out
+    assert "start" in out
+
+
+def test_notes_remove_a_whole_private_key_block(harness: Harness):
+    notes = harness.tmp / "notes"
+    notes.mkdir()
+    (notes / "MEMORY.md").write_text(
+        "keep this line\n-----BEGIN RSA PRIVATE KEY-----\nMIIdata\n"
+        "-----END RSA PRIVATE KEY-----\nafter key\n", encoding="utf-8")
+    (notes / "USER.md").write_text("user notes\n", encoding="utf-8")
+    cfg = harness.write_config(profile_memory_dir=str(notes))
+    harness.start(cfg)
+    harness.handshake()
+    text = harness.tool_text(harness.call_tool("memory_notes", {}))
+    assert "MIIdata" not in text, f"key body left the link: {text!r}"
+    assert "keep this line" in text
+    assert "after key" in text and "user notes" in text
+    assert "[redacted]" in text

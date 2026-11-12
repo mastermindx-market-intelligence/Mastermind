@@ -1317,9 +1317,49 @@ def paperclip_binding(spec, mate, opener=None):
     return (meta.get("t3") or {}).get("primaryThreadId")
 
 
-def ensure_threads(spec, project_id):
+def _resolve_bound(mate, bound, by_id, recorded_by_name, state_path):
+    """The bound conversation, validated (RF-MEMLINK-R1 item 2(i)).
+
+    The board binding is the authority for the roster's RECORD: a stale state
+    entry — including one whose thread sits on another provider instance, the
+    Secretary shape on the real root — is followed past, never adopted from,
+    and the record moves through this command, never through a hand edit of
+    the state file. Two things still refuse, exactly as before: a bound
+    thread on ANOTHER provider instance is never adopted, and a bound thread
+    the state records for another teammate is ambiguity, not an adoption.
+    """
+    name = mate["name"]
+    owner = next((n for n, tid in recorded_by_name.items()
+                  if n != name and tid == bound), None)
+    if owner:
+        die(f"{name}: Paperclip binds its agent to thread {bound}, which the "
+            f"roster state records for {owner}; refusing to pick or create "
+            f"a primary thread")
+    found = by_id.get(bound)
+    if found is None:
+        die(f"{name}: Paperclip binds its agent to thread {bound}, which "
+            f"this roster does not know; refusing to create a second primary "
+            f"thread. If {bound} is the real primary, record it in "
+            f"{state_path} (or unbind the agent in Paperclip) and apply again")
+    if found["instance"] and found["instance"] != mate["instance"]:
+        die(f"{name}: Paperclip binds its agent to thread {bound}, but that "
+            f"thread belongs to provider instance {found['instance']!r}, not "
+            f"{mate['instance']!r}; a conversation on another provider "
+            f"instance is never adopted")
+    return found
+
+
+def resolve_threads(spec, project_id):
+    """The check phase of thread recovery (RF-MEMLINK-R1 item 2(ii)).
+
+    Every conversation check — the state file, the live threads and the board
+    bindings — runs here and refuses HERE, before cmd_apply has written the
+    gate, the limits or settings.json. Nothing is created and no state is
+    saved; commit_threads does the writing once every teammate resolved.
+    """
     state, state_path = load_state(spec)
     live = list_threads(spec, project_id)
+    by_id = {t["threadId"]: t for t in live}
     recorded_by_name = {name: (entry or {}).get("threadId")
                         for name, entry in state["teammates"].items()}
     # One GET per configured agent, before any thread is created (R2a 12).
@@ -1330,29 +1370,25 @@ def ensure_threads(spec, project_id):
     for mate in spec["teammates"]:
         title = teammate_title(mate)
         recorded = recorded_by_name.get(mate["name"])
-        found, problem = _recover_thread(mate, live, recorded_by_name)
-        if problem:
-            die(f"{mate['name']}: {problem}; refusing to pick or create a "
-                f"primary thread")
         bound = bindings[mate["name"]]
         if bound is not None:
-            if found is None:
-                die(f"{mate['name']}: Paperclip binds its agent to thread "
-                    f"{bound}, which this roster does not know; refusing to "
-                    f"create a second primary thread. If {bound} is the real "
-                    f"primary, record it in {state_path} (or unbind the agent "
-                    f"in Paperclip) and apply again")
-            if found["threadId"] != bound:
-                die(f"{mate['name']}: Paperclip binds its agent to thread "
-                    f"{bound}, but the roster resolved {found['threadId']}; "
-                    f"refusing. Reconcile the Paperclip binding and the "
-                    f"roster to one thread and apply again")
+            found = _resolve_bound(mate, bound, by_id, recorded_by_name,
+                                   state_path)
+            recovered_by = ("state" if found["threadId"] == recorded
+                            else "binding")
+        else:
+            found, problem = _recover_thread(mate, live, recorded_by_name)
+            if problem:
+                die(f"{mate['name']}: {problem}; refusing to pick or create "
+                    f"a primary thread")
+            recovered_by = (_recovered_by(mate, found, recorded)
+                            if found is not None else None)
         if found is not None:
             threads[mate["name"]] = {
                 "threadId": found["threadId"], "title": title,
                 "created": False, "currentTitle": found["title"],
                 "projectId": project_id, "pinnedAt": found["pinnedAt"],
-                "recoveredBy": _recovered_by(mate, found, recorded),
+                "recoveredBy": recovered_by,
                 "instance": found["instance"] or mate["instance"],
             }
             if found["title"] != title:
@@ -1360,6 +1396,18 @@ def ensure_threads(spec, project_id):
                     f"{found['title']!r}; the roster title is {title!r}")
             continue
         to_create.append(mate)
+    seen = {}
+    for name, info in threads.items():
+        if info["threadId"] in seen:
+            die(f"{name} and {seen[info['threadId']]} resolved to the same "
+                f"thread {info['threadId']}; refusing")
+        seen[info["threadId"]] = name
+    return threads, to_create, state, state_path
+
+
+def commit_threads(spec, project_id, threads, to_create, state, state_path):
+    """The write phase: mint what resolve_threads could not recover, re-run
+    the duplicate check over resolved AND created ids, save the state."""
     # Every check has passed for every teammate; only now is a thread created,
     # so one teammate's refusal leaves the whole roster untouched.
     for mate in to_create:
@@ -1401,6 +1449,15 @@ def ensure_threads(spec, project_id):
     state["appliedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     save_state(spec, state, state_path)
     return threads, state_path
+
+
+def ensure_threads(spec, project_id):
+    """Recover-then-create in one call — the pre-split behaviour, kept for
+    the recovery suites and any caller that does not need cmd_apply's
+    refuse-before-first-write ordering."""
+    threads, to_create, state, state_path = resolve_threads(spec, project_id)
+    return commit_threads(spec, project_id, threads, to_create,
+                          state, state_path)
 
 
 def acquire_apply_lock(spec):
@@ -1675,6 +1732,13 @@ def cmd_apply(spec, drop=()):
     dropped = dropped_teammates(spec)
     disable = confirm_drops(spec, dropped, drop) if dropped else []
     project_id = ensure_project(spec)
+    # RF-MEMLINK-R1 item 2(ii): every conversation check — the state file,
+    # the live threads and the board bindings — runs and refuses HERE, before
+    # the gate, the homes, the limits and settings.json are written. A
+    # refusing apply leaves the root untouched; only the commit phase below
+    # (after the settings are in place) mints threads and saves the state.
+    resolved, to_create, thread_state, thread_state_path = \
+        resolve_threads(spec, project_id)
     gate_sha = ensure_gate(spec)
     # every home exists BEFORE any limits are generated (repair round 1,
     # P1): the sibling enumeration of <root>/teammates then sees every
@@ -1696,7 +1760,8 @@ def cmd_apply(spec, drop=()):
                                  if name in wrote]
     report_pending_restarts(spec, pending)
     ensure_instances(spec, disable=disable)
-    threads, _ = ensure_threads(spec, project_id)
+    threads, _ = commit_threads(spec, project_id, resolved, to_create,
+                                thread_state, thread_state_path)
     renames, rename_failures = rename_threads(spec, threads)
     urls_path = write_urls_file(spec, threads)
     log(f"thread URLs written: {urls_path} (0600, no credentials)")

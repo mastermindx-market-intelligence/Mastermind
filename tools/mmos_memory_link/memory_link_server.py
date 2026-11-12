@@ -31,8 +31,27 @@ CREDENTIAL_RE = re.compile(
     r"|xox[a-zA-Z]?-[A-Za-z0-9-]+"
     r"|AKIA[A-Z0-9]+"
     r"|eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9._-]*"
-    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
-    r"|(?i:password|token)\s*[:=])"
+    # A private key header removes everything through the matching END
+    # line — or, when there is none, to the end of the text (principal
+    # ruling 16:10Z, repair round 2).
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?"
+    r"(?:-----END [A-Z ]*PRIVATE KEY-----[^\n]*|\Z)"
+    # A label form removes everything from the label to the END OF ITS
+    # LINE — no attempt is made to find where the value ends. Over-removal
+    # is accepted; a leaked value is not (principal ruling 16:10Z, which
+    # replaces the round-1/round-2 value-end approach). The label is the
+    # word — whatever quotes or punctuation hug it — followed ON THE SAME
+    # LINE by ':' or '='; a plural 's' is swallowed too, and "api key"
+    # takes a space, '_', '-' or no separator. The value part `[^\n]*`
+    # may match empty, so the bare "password:" and "token =" labels still
+    # match: memory_save's refusal uses this same pattern and stays at
+    # least as strong as before.
+    r"|(?i:password|passwd|pwd|passphrase|secret|token|api[ _-]?key"
+    r"|authorization|bearer|cookie|credential)s?"
+    r"[^\w\s]*[ \t]*[:=][^\n]*"
+    # Bare "Bearer <token>" with no colon at all (round-1 refusal case):
+    # kept so the save refusal stays at least as strong.
+    r"|(?i:bearer)[ \t]+\S+)"
 )
 
 
