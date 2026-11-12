@@ -68,10 +68,14 @@ from control_plane.wake_dispatcher import (
 # Lane-chosen default (not doc-pinned): one re-nudge per ask per 15-minute
 # cooldown, bounded by MAX_RENUDGES_PER_ASK (ARCHITECTURE flow 1 step 10).
 RENUDGE_COOLDOWN_SECONDS = 900
+# GBL-RETURN outcome 2: the bounded lost-wake recovery scan (the board wake
+# is the primary; this read is the capped, read-only backstop).
+RETURN_SCAN_MAX = 25
 
 REQUEST_SCHEMA = "mastermind.gbl.request.v1"
 RESPONSE_SCHEMA = "mastermind.gbl.response.v1"
-OPS = frozenset({"ask", "answer", "result", "question", "status", "reconcile"})
+OPS = frozenset({"ask", "answer", "result", "question", "status", "reconcile",
+                 "return", "return_scan"})
 
 
 class GblBridgeError(ValueError):
@@ -144,6 +148,34 @@ class GblResultDeliveryLockStore(Protocol):
     def delivered_answer_id(self, ask_id: str) -> str | None: ...
 
     def record_delivery(self, ask_id: str, answer_id: str) -> None: ...
+
+
+@runtime_checkable
+class GblDelegateDispatchStore(Protocol):
+    """OPTIONAL capability of a :class:`GblAskStore` (GBL-RETURN): the
+    delegate dispatch/return arm.  A delegate ask is handed to the target
+    teammate THROUGH THE BOARD — one child issue of the ask record in the
+    RF carrier's installed shape, assigned to the teammate's agent id
+    resolved from the spec's target table ON THE SERVER (never from the
+    caller) — and the answer is taken from the bridge's OWN board read of
+    that child (the carrier's result-comment law), never from waker-
+    supplied text.  ``scan_delegate_asks`` is the bounded lost-wake
+    recovery read.  It is one capability: a store that offers any of it
+    must offer all of it; the Paperclip client does, test doubles are
+    explicitly marked (``GBL_TEST_DOUBLE``) and keep the pre-GBL-RETURN
+    shapes exactly."""
+
+    def resolve_target_agent(self, target: str) -> str: ...
+
+    def dispatch_delegate(self, ask: Mapping[str, Any]) -> dict[str, Any]: ...
+
+    def read_dispatch_child(self, ask_id: str,
+                            child_issue_id: str) -> dict[str, Any]: ...
+
+    def read_child_result(self, ask_id: str,
+                          child_issue_id: str) -> dict[str, Any]: ...
+
+    def scan_delegate_asks(self) -> list[str]: ...
 
 
 # ── Admission (RULING §3/§5: the table is the boundary; v1 ships EMPTY) ─────
@@ -320,6 +352,12 @@ class GblBridge:
             raise GblBridgeError("KIND_NOT_ALLOWED", kind)
         if target not in row.targets:
             raise GblBridgeError("TARGET_NOT_ALLOWED", target)
+        if kind == "delegate":
+            # GBL-RETURN outcome 1: the target resolves against the
+            # server-side target table BEFORE any record exists — a
+            # delegate ask that could never dispatch must not create an
+            # orphan record (typed TARGET_AGENT_NOT_CONFIGURED propagates).
+            self._require_dispatch_target(target)
         envelope = build_ask(kind=kind, principal=principal, target=target,
                              title=title, body=body,
                              idempotency_key=idempotency_key,
@@ -354,13 +392,47 @@ class GblBridge:
                     "read-back") from None
         if landed is not None:
             return self._classify_existing(landed, envelope)
-        return {"status": "CREATED", "ask": dict(envelope)}
+        result: dict[str, Any] = {"status": "CREATED", "ask": dict(envelope)}
+        if kind == "delegate":
+            # GBL-RETURN outcome 1: DELEGATE OUT — the child issue exists
+            # (create-or-reuse) before the caller is told CREATED.  A test
+            # double without the capability keeps the pre-GBL-RETURN shape
+            # exactly (no "dispatch" key); a production store without it
+            # refused typed back in _require_dispatch_target.
+            store = self._dispatch_store()
+            if store is not None:
+                result["dispatch"] = self._ensure_dispatched(
+                    dict(envelope), store)
+        elif kind == "question":
+            # GBL-RETURN outcome 3: a CREATED question ask fires exactly
+            # one QUESTION_AVAILABLE nudge from SHIPPED code, under the
+            # same budget/cooldown/unknown-effect law as ANSWERED.  A
+            # nudge failure is REPORTED, never fatal — the record exists
+            # and return_scan/reconcile recover; the ask is never lost
+            # because attention failed.
+            try:
+                result["question_nudge"] = self._nudge_question_once(ask_id)
+            except GblBridgeError as exc:
+                result["question_nudge"] = {"status": exc.code,
+                                            "ask_id": ask_id}
+        return result
 
     def _classify_existing(self, existing: Mapping[str, Any],
                            envelope: Mapping[str, Any]) -> dict[str, Any]:
         verdict = classify_ask_duplicate(_record_envelope(existing), envelope)
         if verdict.value == "IDEMPOTENT":
-            return {"status": "IDEMPOTENT", "ask": dict(existing)}
+            result: dict[str, Any] = {"status": "IDEMPOTENT",
+                                      "ask": dict(existing)}
+            if existing.get("kind") == "delegate":
+                # GBL-RETURN outcome 5: a replayed delegate ask is also a
+                # dispatch-recovery edge — ensure (never re-create) the
+                # child, so a lost wake or a lost dispatch event heals on
+                # the next submit.
+                store = self._dispatch_store()
+                if store is not None:
+                    result["dispatch"] = self._ensure_dispatched(existing,
+                                                                 store)
+            return result
         raise GblBridgeError("CONFLICT",
                              f"key {envelope['idempotency_key']} reused "
                              "with new content")
@@ -500,6 +572,39 @@ class GblBridge:
                 "DELIVERY_LOCK_UNAVAILABLE", type(self._store).__name__)
         return lock() if lock is not None else contextlib.nullcontext()
 
+    def _dispatch_store(self) -> Any:
+        """The store's delegate-dispatch arm
+        (:class:`GblDelegateDispatchStore`), or ``None`` for an explicitly
+        marked test double.
+
+        Fails CLOSED exactly like the delivery lock: a production store
+        missing ANY of the five methods refuses typed — silently skipping
+        dispatch would leave a delegate ask recorded as created while no
+        work ever reached the teammate, which is the defect GBL-RETURN
+        exists to remove."""
+        store = self._store
+        missing = [name for name in
+                   ("resolve_target_agent", "dispatch_delegate",
+                    "read_dispatch_child", "read_child_result",
+                    "scan_delegate_asks")
+                   if getattr(store, name, None) is None]
+        if not missing:
+            return store
+        if getattr(store, "GBL_TEST_DOUBLE", False):
+            return None
+        raise GblBridgeError(
+            "DISPATCH_CAPABILITY_UNAVAILABLE",
+            f"{type(store).__name__} lacks {','.join(missing)}")
+
+    def _require_dispatch_target(self, target: str) -> None:
+        """Pre-create target resolution for a delegate ask: the typed
+        TARGET_AGENT_NOT_CONFIGURED refusal (or the fail-closed capability
+        refusal) fires BEFORE the record exists, so an undispatchable ask
+        never becomes an orphan issue."""
+        store = self._dispatch_store()
+        if store is not None:
+            store.resolve_target_agent(target)
+
     def _host_delivered(self, ask_id: str) -> bool:
         """True once the HOST's own delivery record exists for the ask.
 
@@ -592,26 +697,15 @@ class GblBridge:
                 f"'at'; cooldown and settlement cannot be derived — "
                 f"nothing is sent") from None
 
-    def maybe_renudge(self, *, ask_id: str) -> dict[str, Any]:
-        """One re-nudge per cooldown for an unconsumed answer, bounded by
-        the contract budget (MAX_RENUDGES_PER_ASK).  M8: the attempt is
-        persisted BEFORE the send and independent of its outcome, so an
-        effect-unknown send can never be repeated blindly — reconcile via
-        :meth:`reconcile_nudge`, never resend.  M7: the transport receipt
-        is consumed — a definite no-start (pre-submit refusal,
-        TARGET_UNAVAILABLE, FAILED) is a typed ``NUDGE_NOT_DELIVERED`` that
-        burns no budget, never a false RENUDGED."""
-        record = self._require_ask(ask_id)
-        # GBL-5 micro 5b: a delivered answer owes no reminder, whatever
-        # the listing shows.  Before this, a failed CONSUMED post left the
-        # listing at ANSWERED and reminders kept going until the budget
-        # was gone.  This arm sends nothing and is named for the caller.
-        if self._host_delivered(ask_id):
-            return {"status": "ALREADY_DELIVERED", "ask_id": ask_id}
-        state = self._replay_state(record)
-        if state != "ANSWERED":
-            return {"status": state, "ask_id": ask_id}
-        now = self._now()
+    def _nudge_law(self, ask_id: str, record: Mapping[str, Any],
+                   now: datetime) -> tuple[list[dict[str, Any]],
+                                           list[dict[str, Any]]]:
+        """The shared decision half of the nudge law.  GBL-RETURN outcome 3
+        puts QUESTION_AVAILABLE under EXACTLY the same budget, unsettled-
+        attempt and cooldown law as ANSWERED, so both paths derive from
+        this one method — one law, two states.
+
+        Returns ``(every counted marker, the delivered-nudge subset)``."""
         self._ordered_events(record)   # chain law enforced on the record
         # Budget, cooldown and settlement count every nudge-family row the
         # trusted writer really POSTed — including a row the duplicate law
@@ -652,15 +746,30 @@ class GblBridge:
                 raise GblBridgeError(
                     "RENUDGE_COOLDOWN",
                     f"{int(RENUDGE_COOLDOWN_SECONDS - elapsed)}s remain")
+        return events, nudges
+
+    def _nudge_fire(self, ask_id: str, state: str,
+                    record: Mapping[str, Any],
+                    nudges: list[dict[str, Any]], now: datetime,
+                    sent_status: str) -> dict[str, Any]:
+        """The shared send half of the nudge law, for either wake state.
+        M8: the attempt is persisted BEFORE the send and independent of its
+        outcome, so an effect-unknown send can never be repeated blindly —
+        reconcile via :meth:`reconcile_nudge`, never resend.  M7: the
+        transport receipt is consumed — a definite no-start (pre-submit
+        refusal, TARGET_UNAVAILABLE, FAILED) is a typed
+        ``NUDGE_NOT_DELIVERED`` that burns no budget, never a false
+        success.  ``sent_status`` names a delivered send for the caller's
+        path ("RENUDGED" for ANSWERED, "QUESTION_NUDGED" for a question)."""
         if self._nudge_sender is None or self._resolve_handle is None:
             raise GblBridgeError("NUDGE_SENDER_UNAVAILABLE", ask_id)
         native_handle = self._resolve_handle(record["principal"])
         at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         # Persist first: whatever the send does, the attempt exists.
         self._store.append_ask_event(ask_id, {
-            "type": "nudge_attempt", "state": "ANSWERED", "at": at})
+            "type": "nudge_attempt", "state": state, "at": at})
         try:
-            sent = self._nudge_sender.send(ask_id, "ANSWERED", native_handle)
+            sent = self._nudge_sender.send(ask_id, state, native_handle)
         except WakeEffectUnknownError:
             return {"status": "NUDGE_EFFECT_UNKNOWN", "ask_id": ask_id}
         except WakePreSubmitError as exc:
@@ -668,7 +777,7 @@ class GblBridge:
             # unknown remains, so the lane stays usable after cooldown.
             self._store.append_ask_event(ask_id, {
                 "type": "nudge_settled", "outcome": "NOT_DELIVERED",
-                "state": "ANSWERED", "at": at})
+                "state": state, "at": at})
             return {"status": "NUDGE_NOT_DELIVERED", "ask_id": ask_id,
                     "reason_code": str(getattr(exc, "reason_code", ""))}
         except WakeDispatchError as exc:
@@ -678,18 +787,38 @@ class GblBridge:
         outcome = getattr(receipt, "outcome", None)
         if outcome in (TransportOutcome.ACCEPTED, TransportOutcome.DELIVERED):
             self._store.append_ask_event(ask_id, {
-                "type": "nudge", "state": "ANSWERED", "at": at})
-            return {"status": "RENUDGED", "ask_id": ask_id,
+                "type": "nudge", "state": state, "at": at})
+            return {"status": sent_status, "ask_id": ask_id,
                     "nudge_count": len(nudges) + 1}
         if outcome in (TransportOutcome.TARGET_UNAVAILABLE,
                        TransportOutcome.FAILED):
             self._store.append_ask_event(ask_id, {
                 "type": "nudge_settled", "outcome": "NOT_DELIVERED",
-                "state": "ANSWERED", "at": at})
+                "state": state, "at": at})
             return {"status": "NUDGE_NOT_DELIVERED", "ask_id": ask_id,
                     "reason_code": str(getattr(receipt, "reason_code", ""))}
         raise GblBridgeError("NUDGE_RECEIPT_INVALID",
                              f"unrecognized receipt shape {type(sent).__name__}")
+
+    def maybe_renudge(self, *, ask_id: str) -> dict[str, Any]:
+        """One re-nudge per cooldown for an unconsumed answer, bounded by
+        the contract budget (MAX_RENUDGES_PER_ASK).  The law itself lives
+        in :meth:`_nudge_law` / :meth:`_nudge_fire`, shared verbatim with
+        the question nudge (GBL-RETURN outcome 3)."""
+        record = self._require_ask(ask_id)
+        # GBL-5 micro 5b: a delivered answer owes no reminder, whatever
+        # the listing shows.  Before this, a failed CONSUMED post left the
+        # listing at ANSWERED and reminders kept going until the budget
+        # was gone.  This arm sends nothing and is named for the caller.
+        if self._host_delivered(ask_id):
+            return {"status": "ALREADY_DELIVERED", "ask_id": ask_id}
+        state = self._replay_state(record)
+        if state != "ANSWERED":
+            return {"status": state, "ask_id": ask_id}
+        now = self._now()
+        _events, nudges = self._nudge_law(ask_id, record, now)
+        return self._nudge_fire(ask_id, "ANSWERED", record, nudges, now,
+                                "RENUDGED")
 
     def reconcile_nudge(self, *, principal: str,
                         ask_id: str) -> dict[str, Any]:
@@ -724,23 +853,29 @@ class GblBridge:
                 settled_after_last_attempt = True
         if settled_after_last_attempt:
             raise GblBridgeError("NUDGE_ALREADY_SETTLED", ask_id)
-        # The settlement row reuses the attempt's timestamp; validate it
-        # BEFORE any transport call so a malformed attempt refuses typed
-        # instead of sending a wake whose settlement it could not record.
+        # The settlement row reuses the attempt's timestamp AND its state;
+        # validate the timestamp BEFORE any transport call so a malformed
+        # attempt refuses typed instead of sending a wake whose settlement
+        # it could not record.  GBL-RETURN outcome 3: a QUESTION_AVAILABLE
+        # attempt settles under the same law — the state is the attempt's
+        # own, never assumed (a pre-GBL-RETURN attempt carries "ANSWERED"
+        # and keeps settling exactly as before; a legacy row without the
+        # key defaults to "ANSWERED", the only state that ever existed).
         self._marker_time(attempts[-1], ask_id)
         attempt_at = attempts[-1]["at"]
+        attempt_state = str(attempts[-1].get("state") or "ANSWERED")
         if self._nudge_sender is None or self._resolve_handle is None:
             raise GblBridgeError("NUDGE_SENDER_UNAVAILABLE", ask_id)
         native_handle = self._resolve_handle(record["principal"])
         try:
-            settled = self._nudge_sender.reconcile(ask_id, "ANSWERED",
+            settled = self._nudge_sender.reconcile(ask_id, attempt_state,
                                                    native_handle)
         except WakeEffectUnknownError:
             return {"status": "NUDGE_EFFECT_UNKNOWN", "ask_id": ask_id}
         except WakePreSubmitError as exc:
             self._store.append_ask_event(ask_id, {
                 "type": "nudge_settled", "outcome": "NOT_DELIVERED",
-                "state": "ANSWERED", "at": attempt_at})
+                "state": attempt_state, "at": attempt_at})
             return {"status": "RECONCILED_NOT_DELIVERED", "ask_id": ask_id,
                     "reason_code": str(getattr(exc, "reason_code", ""))}
         except WakeDispatchError as exc:
@@ -750,7 +885,7 @@ class GblBridge:
         outcome = getattr(receipt, "outcome", None)
         if outcome in (TransportOutcome.ACCEPTED, TransportOutcome.DELIVERED):
             self._store.append_ask_event(ask_id, {
-                "type": "nudge", "state": "ANSWERED",
+                "type": "nudge", "state": attempt_state,
                 "at": attempt_at})
             return {"status": "RECONCILED_DELIVERED", "ask_id": ask_id,
                     "nudge_count": len(nudges) + 1}
@@ -758,11 +893,164 @@ class GblBridge:
                        TransportOutcome.FAILED):
             self._store.append_ask_event(ask_id, {
                 "type": "nudge_settled", "outcome": "NOT_DELIVERED",
-                "state": "ANSWERED", "at": attempt_at})
+                "state": attempt_state, "at": attempt_at})
             return {"status": "RECONCILED_NOT_DELIVERED", "ask_id": ask_id,
                     "reason_code": str(getattr(receipt, "reason_code", ""))}
         raise GblBridgeError("NUDGE_RECEIPT_INVALID",
                              f"unrecognized receipt shape {type(settled).__name__}")
+
+    # -- GBL-RETURN: the delegate dispatch/return edge ------------------------
+
+    def _ensure_dispatched(self, record: Mapping[str, Any],
+                           store: Any) -> dict[str, Any]:
+        """Create-or-reuse the board child for a delegate ask, exactly once
+        per ask.  A TRUSTED ``dispatch`` event is the permanent marker, so
+        a replay (a re-sent ask, a return wake, a recovery scan) never
+        dispatches a second time; and a lost dispatch event still cannot
+        duplicate the child, because the store's dispatch is itself a
+        reuse scan under the RF identity law.  The event is deterministic
+        (no timestamp): the store's canonical-JSON append idempotency makes
+        even a duplicate append a no-op."""
+        for event in self._ordered_events(record):
+            if event.get("type") == "dispatch" and event.get("child_issue_id"):
+                return {"status": "ALREADY_DISPATCHED",
+                        "child_issue_id": str(event["child_issue_id"])}
+        envelope = _record_envelope(record)
+        ask_id = str(envelope.get("ask_id") or "")
+        try:
+            outcome = store.dispatch_delegate(envelope)
+        except GblCreateEffectUnknown:
+            # The child may or may not exist and the relation may be half
+            # recorded: the effect stays unknown, and the ONLY recovery is
+            # a later ensure, which reconciles by the store's reuse scan —
+            # never a blind second dispatch.
+            return {"status": "DISPATCH_EFFECT_UNKNOWN", "ask_id": ask_id}
+        child_id = str(outcome["child_issue_id"])
+        self._store.append_ask_event(ask_id, {
+            "type": "dispatch", "child_issue_id": child_id,
+            "target_agent": str(outcome["target_agent"])})
+        return {"status": "REUSED" if outcome.get("reused") else "DISPATCHED",
+                "ask_id": ask_id, "child_issue_id": child_id}
+
+    def _nudge_question_once(self, ask_id: str) -> dict[str, Any]:
+        """GBL-RETURN outcome 3 — exactly one QUESTION_AVAILABLE nudge for
+        a CREATED question ask, from SHIPPED code, under the same
+        budget/cooldown/unknown-effect law as ANSWERED (:meth:`_nudge_law`
+        + :meth:`_nudge_fire`).
+
+        Exactly-once: ANY question-state marker the trusted writer really
+        posted — a delivered nudge, an unsettled attempt or a settlement —
+        means the one nudge was already attempted; a wake is never
+        re-sent because attention is cheap to duplicate and the record is
+        not.  NO state event is appended: the ask stays OPEN (a question
+        nudge is attention, not an answer)."""
+        record = self._require_ask(ask_id)
+        state = self._replay_state(record)
+        if state in ("ANSWERED", "CONSUMED"):
+            return {"status": "SKIPPED_ANSWERED", "ask_id": ask_id}
+        for event in self._nudge_markers(record):
+            if event.get("state") == "QUESTION_AVAILABLE":
+                return {"status": "NUDGE_ALREADY_ATTEMPTED",
+                        "ask_id": ask_id}
+        now = self._now()
+        _events, nudges = self._nudge_law(ask_id, record, now)
+        return self._nudge_fire(ask_id, "QUESTION_AVAILABLE", record,
+                                nudges, now, "QUESTION_NUDGED")
+
+    def return_delegate(self, *, ask_id: str) -> dict[str, Any]:
+        """GBL-RETURN outcome 2 — DELEGATE BACK.  The bridge takes the
+        answer from its OWN board read (its created child, assignee = the
+        spec-resolved target agent, the carrier's result comment), never
+        from waker-supplied text: a wake carries the ask id and nothing
+        else.  This is the board-wake handler AND the scan-recovered path.
+
+        Outcome 5 (ruling 19 delivery law, exactly-once):
+        * a duplicate wake no-ops — an answered/consumed/host-delivered
+          ask reports ALREADY_ANSWERED and posts nothing;
+        * a lost wake is recovered by READ, not a second send — a child
+          that is not done reports NOT_YET;
+        * a return for a child the bridge did not create refuses typed
+          (the store's read_dispatch_child identity law,
+          RETURN_CHILD_NOT_OURS) and never enters the record.
+
+        Outcome 4: an ask that is not a delegate (including the bridge's
+        own ask-record issue being assigned to the bridge agent) is a
+        harmless typed no-op, never an error run."""
+        record = self._require_ask(ask_id)
+        if record.get("kind") != "delegate":
+            return {"status": "NOT_A_DELEGATE", "ask_id": ask_id}
+        now = self._now()
+        if is_expired(record, now):
+            return {"status": "EXPIRED", "ask_id": ask_id}
+        state = self._replay_state(record)
+        if state in ("ANSWERED", "CONSUMED") or self._host_delivered(ask_id):
+            return {"status": "ALREADY_ANSWERED", "ask_id": ask_id,
+                    "state": state}
+        store = self._dispatch_store()
+        if store is None:
+            raise GblBridgeError("DISPATCH_CAPABILITY_UNAVAILABLE",
+                                 type(self._store).__name__)
+        # Recovery re-dispatch: if the dispatch event was lost (or the
+        # original dispatch was effect-unknown), ensure reconciles by the
+        # store's reuse scan — one child, whatever the history.
+        dispatch = self._ensure_dispatched(record, store)
+        if dispatch["status"] == "DISPATCH_EFFECT_UNKNOWN":
+            return {"status": "DISPATCH_EFFECT_UNKNOWN", "ask_id": ask_id}
+        child_id = dispatch["child_issue_id"]
+        result = store.read_child_result(ask_id, child_id)
+        if result.get("cancelled"):
+            return {"status": "CHILD_CANCELLED", "ask_id": ask_id,
+                    "child_issue_id": child_id}
+        if not result.get("done"):
+            return {"status": "NOT_YET", "ask_id": ask_id,
+                    "child_issue_id": child_id}
+        answer = result.get("answer")
+        if not isinstance(answer, str) or not answer.strip():
+            # A done child with no usable comment: reported, never posted
+            # as an empty answer.  The next wake/scan re-reads.
+            return {"status": "NO_ANSWER_COMMENT", "ask_id": ask_id,
+                    "child_issue_id": child_id}
+        try:
+            posted = self.post_answer(
+                principal=record["principal"], ask_id=ask_id, answer=answer,
+                idempotency_key=f"gbl-board-return-{ask_id}")
+        except GblBridgeError as exc:
+            if exc.code == "ANSWER_ALREADY_GIVEN":
+                return {"status": "ALREADY_ANSWERED", "ask_id": ask_id}
+            if exc.code == "EXPIRED":
+                return {"status": "EXPIRED", "ask_id": ask_id}
+            raise
+        # The one ANSWERED nudge (existing intake + attention law).  A
+        # nudge failure is reported in the result, never fatal: the answer
+        # is durably in the record and reconcile_nudge/return_scan heal
+        # the attention edge.
+        try:
+            nudge = self.maybe_renudge(ask_id=ask_id)
+        except GblBridgeError as exc:
+            nudge = {"status": exc.code, "ask_id": ask_id}
+        return {"status": "RETURNED", "ask_id": ask_id,
+                "child_issue_id": child_id,
+                "answer_id": posted.get("answer_id"),
+                "nudge": nudge}
+
+    def return_scan(self) -> dict[str, Any]:
+        """GBL-RETURN outcome 2 — the bridge's own bounded read of open
+        delegate asks: the lost-wake recovery source when no board wake
+        arrived.  Read-only per ask until a child is actually done; one
+        ask's typed failure is reported in its row and never aborts the
+        remaining asks."""
+        store = self._dispatch_store()
+        if store is None:
+            return {"status": "SCAN_SKIPPED"}
+        results: list[dict[str, Any]] = []
+        for ask_id in store.scan_delegate_asks()[:RETURN_SCAN_MAX]:
+            try:
+                row = self.return_delegate(ask_id=ask_id)
+            except GblBridgeError as exc:
+                row = {"status": exc.code, "ask_id": ask_id}
+            results.append(row)
+        return {"status": "SCANNED", "count": len(results),
+                "results": results}
 
 
 # ── The loopback socket door (peer uid only, the B14 service pattern) ───────
@@ -1041,6 +1329,11 @@ _OP_ARGUMENTS = {
                frozenset({"principal", "ask_id"})),
     "reconcile": (frozenset({"principal", "ask_id"}),
                   frozenset({"principal", "ask_id"})),
+    # GBL-RETURN: the wake carries the ask id and NOTHING else (outcome 2)
+    # — no answer text, no child id, no caller-supplied target crosses the
+    # door.  return_scan takes no arguments at all.
+    "return": (frozenset({"ask_id"}), frozenset({"ask_id"})),
+    "return_scan": (frozenset(), frozenset()),
 }
 
 _OP_METHODS = {
@@ -1050,6 +1343,8 @@ _OP_METHODS = {
     "question": "fetch_question",
     "status": "ask_status",
     "reconcile": "reconcile_nudge",
+    "return": "return_delegate",
+    "return_scan": "return_scan",
 }
 
 __all__ = [
@@ -1057,12 +1352,14 @@ __all__ = [
     "OPS",
     "PrincipalAdmission",
     "RENUDGE_COOLDOWN_SECONDS",
+    "RETURN_SCAN_MAX",
     "BridgeServer",
     "BridgeServiceConfig",
     "GblAskStore",
     "GblBridge",
     "GblBridgeError",
     "GblCreateEffectUnknown",
+    "GblDelegateDispatchStore",
     "REQUEST_SCHEMA",
     "RESPONSE_SCHEMA",
 ]

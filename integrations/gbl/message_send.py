@@ -56,10 +56,36 @@ class GblMessageError(ValueError):
 
 @dataclass(frozen=True)
 class EnvironmentRow:
-    """One admitted t3 environment: its id and the home its CLI runs in."""
+    """One admitted t3 environment.
+
+    GBL-RETURN item 6: the row names the t3 program by ABSOLUTE path and
+    its server port explicitly — the sender never finds ``t3`` on PATH
+    (the bridge launchd PATH deliberately drops ``~/.t3/bin``, so a PATH
+    lookup would either fail or, worse, find a different install's binary
+    talking to a different server).  A row without both is refused at
+    construction; there is no default program and no default port."""
 
     environment_id: str
     t3code_home: str
+    t3_program: str
+    t3_port: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.environment_id, str) or not self.environment_id:
+            raise GblMessageError("ENVIRONMENT_ROW_INVALID",
+                                  "environment_id must be a non-empty string")
+        if not isinstance(self.t3code_home, str) or not self.t3code_home:
+            raise GblMessageError("ENVIRONMENT_ROW_INVALID",
+                                  "t3code_home must be a non-empty string")
+        if (not isinstance(self.t3_program, str)
+                or not self.t3_program.startswith("/")):
+            raise GblMessageError(
+                "ENVIRONMENT_ROW_INVALID",
+                "t3_program must be an absolute path — a bare name would be "
+                "a PATH lookup, which this sender never performs")
+        if type(self.t3_port) is not int or not 1 <= self.t3_port <= 65535:
+            raise GblMessageError("ENVIRONMENT_ROW_INVALID",
+                                  "t3_port must be an integer 1..65535")
 
 
 DEFAULT_ENVIRONMENTS: tuple[EnvironmentRow, ...] = ()   # v1 ships EMPTY
@@ -80,8 +106,9 @@ class CommandResult:
 
 
 class SubprocessRunner:
-    """Runs the stock ``t3`` binary.  Injected as a fake everywhere in tests;
-    this class is the only place a real process ever appears."""
+    """Runs the row-named ``t3`` program (argv[0] is the row's ABSOLUTE
+    path, so no PATH lookup happens).  Injected as a fake everywhere in
+    tests; this class is the only place a real process ever appears."""
 
     def run(self, argv, *, stdin: str, env: dict) -> CommandResult:
         full_env = dict(os.environ)
@@ -152,13 +179,28 @@ class MessageSender:
 
     # ── carrier ──────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _row_env(row: EnvironmentRow) -> dict:
+        """The carrier environment for one row: the home AND the port,
+        explicitly.  A row that lost either field between admission and the
+        call is refused again here (defence in depth, item 6) — the sender
+        never lets a bare ``t3`` inherit an ambient T3CODE_PORT."""
+        if (not isinstance(row.t3_program, str)
+                or not row.t3_program.startswith("/")
+                or type(row.t3_port) is not int
+                or not 1 <= row.t3_port <= 65535):
+            raise GblMessageError("ENVIRONMENT_ROW_INVALID",
+                                  getattr(row, "environment_id", ""))
+        return {"T3CODE_HOME": row.t3code_home,
+                "T3CODE_PORT": str(row.t3_port)}
+
     def _scan(self, *, thread_ref: str, row: EnvironmentRow,
               depth: int) -> str:
         try:
             result = self._runner.run(
-                ["t3", "thread", "show", thread_ref, "--json", "--messages",
-                 str(depth)],
-                stdin="", env={"T3CODE_HOME": row.t3code_home})
+                [row.t3_program, "thread", "show", thread_ref, "--json",
+                 "--messages", str(depth)],
+                stdin="", env=self._row_env(row))
         except (TimeoutError, OSError) as err:
             raise GblMessageError("SCAN_FAILED",
                                   f"{type(err).__name__} reading thread") from None
@@ -227,8 +269,9 @@ class MessageSender:
     def _send_command(self, *, thread_ref: str, row: EnvironmentRow,
                       stdin_text: str) -> CommandResult:
         return self._runner.run(
-            ["t3", "thread", "send", thread_ref, "-", "--wait", "--json"],
-            stdin=stdin_text, env={"T3CODE_HOME": row.t3code_home})
+            [row.t3_program, "thread", "send", thread_ref, "-", "--wait",
+             "--json"],
+            stdin=stdin_text, env=self._row_env(row))
 
     def _lock_for(self, environment_id: str, thread_ref: str) -> threading.Lock:
         key = (environment_id, thread_ref)

@@ -117,6 +117,13 @@ class FakePaperclipState:
         # land but stay hidden from GET until reveal_lagged_comments().
         self.comment_visibility_lag = 0
         self.lagged_comment_ids: set[str] = set()
+        # GBL-RETURN knobs: the dispatch/return surface.  The board stamps
+        # the creator from the calling key (the client never sends it);
+        # list projections can truncate long descriptions; comments carry
+        # an author type the result-comment law keys on.
+        self.created_by_agent_id: str | None = AGENT_ID
+        self.comment_author_type = "agent"
+        self.truncate_list_descriptions_at: int | None = None
         self._clock = itertools.count(1)    # strictly increasing timestamps
 
     def reveal_lagged_comments(self) -> None:
@@ -168,6 +175,8 @@ class FakePaperclipState:
                         "identifier": f"FX-{len(self.order) + 1}",
                         "createdAt": self.now_iso(),
                         "status": row.get("status") or "todo"})
+            if self.created_by_agent_id is not None:
+                row.setdefault("createdByAgentId", self.created_by_agent_id)
             self.issues[issue_id] = row
             self.order.append(issue_id)
             self.comments[issue_id] = []
@@ -187,6 +196,22 @@ class FakePaperclipState:
             if self.ignore_offset:
                 offset = 0
             newest_first = [self.issues[iid] for iid in reversed(self.order)]
+            parent = query.get("parentId", [None])[0]
+            if parent is not None:
+                # the children projection (RF walk): parentId-filtered
+                newest_first = [row for row in newest_first
+                                if str(row.get("parentId")) == parent]
+            if self.truncate_list_descriptions_at is not None:
+                cut = self.truncate_list_descriptions_at
+                projections = []
+                for row in newest_first:
+                    description = row.get("description") or ""
+                    if isinstance(description, str) and len(description) > cut:
+                        row = dict(row)
+                        row["description"] = description[:cut]
+                        row["descriptionTruncated"] = True
+                    projections.append(row)
+                newest_first = projections
             page = newest_first[offset:offset + limit]
             if self.list_envelope == "bare":
                 return 200, page
@@ -202,11 +227,26 @@ class FakePaperclipState:
             row.update({"id": agent_id, "createdAt": self.now_iso()})
             self.agents[agent_id] = row
             return 200, row
+        # /api/agents/me — the REAL board requires an AGENT actor here and
+        # refuses this client's local-trusted header with 401 (no-seam
+        # proof 1 finding, dev board 2026-11-12).  The fake mirrors that:
+        # any client code path that still calls this route fails its test.
+        if (method == "GET" and len(parts) == 3 and parts[0] == "api"
+                and parts[1] == "agents" and parts[2] == "me"):
+            return 401, {"error": "Agent authentication required"}
         # /api/issues/{id}
         if method == "GET" and len(parts) == 3 and parts[0] == "api" \
                 and parts[1] == "issues":
             row = self.issues.get(parts[2])
             return (200, row) if row is not None else (404, {"error": "gone"})
+        # PATCH /api/issues/{id} — the block relation (RF handle_ask law)
+        if (method == "PATCH" and len(parts) == 3 and parts[0] == "api"
+                and parts[1] == "issues"):
+            row = self.issues.get(parts[2])
+            if row is None:
+                return 404, {"error": "gone"}
+            row.update(body or {})
+            return 200, row
         # /api/issues/{id}/comments
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "issues" \
                 and parts[3] == "comments":
@@ -225,6 +265,7 @@ class FakePaperclipState:
                 row = dict(body or {})
                 row.update({"id": str(uuid.uuid4()),
                             "authorAgentId": self.comment_author,
+                            "authorType": self.comment_author_type,
                             "createdAt": self.now_iso()})
                 rows.append(row)                    # the write LANDS…
                 if self.comment_visibility_lag > 0:
@@ -2229,15 +2270,42 @@ class TestSpecLoading:
                 "base_url": fake.base,
                 "company_id": COMPANY_ID,
                 "agent_id": AGENT_ID,
+                "agent_name": "Grok Bridge Fixture",
                 "hmac_key_path": str(fixture_key),
             },
         }
         path = tmp_path / "spec.json"
         path.write_text(json.dumps(spec))
         ask_client = PaperclipAskClient.from_spec(path)
+        # the display name is spec-held; /api/agents/me is NEVER called
+        # (the fake board 401s that route for this client, like the real one)
+        assert ask_client._agent_name == "Grok Bridge Fixture"
         row = envelope()
         ask_client.create_ask(row)
         assert ask_client.read_ask(row["ask_id"]) is not None
+
+    def test_from_spec_agent_name_is_optional_and_typed(self, fake, tmp_path,
+                                                        fixture_key):
+        base = {
+            "kind": "gbl_bridge_service_agent_dev",
+            "paperclip": {
+                "base_url": fake.base,
+                "company_id": COMPANY_ID,
+                "agent_id": AGENT_ID,
+                "hmac_key_path": str(fixture_key),
+            },
+        }
+        path = tmp_path / "spec.json"
+        # absent -> the neutral fallback, never a board read
+        path.write_text(json.dumps(base))
+        assert PaperclipAskClient.from_spec(path)._agent_name == \
+            "the Grok bridge"
+        # a non-string name is refused at load, not stringified silently
+        bad = json.loads(json.dumps(base))
+        bad["paperclip"]["agent_name"] = 42
+        path.write_text(json.dumps(bad))
+        with pytest.raises(ValueError, match="agent_name"):
+            PaperclipAskClient.from_spec(path)
 
     def test_from_spec_refuses_a_bad_base_url(self, tmp_path):
         spec = {"paperclip": {"base_url": "http://127.0.0.1:3100",
@@ -2454,6 +2522,396 @@ class TestProductionBoardOptIn:
                     stack.extend(node.values())
                 elif isinstance(node, list):
                     stack.extend(node)
+
+
+# ── GBL-RETURN item 8 (principal ruling 16:05Z): three review LOWs closed ───
+# (a) LOW-3: under the production_board flag the host must be the LITERAL
+#     127.0.0.1 — localhost and [::1] with port 3100 get the typed refusal
+#     PRODUCTION_BOARD_NOT_ALLOWED_HERE, not an admission.
+# (b) LOW-4: a non-ASCII base URL is refused typed (BASE_URL_NOT_ASCII) with
+#     or without the flag — fullwidth digits normalize consistently through
+#     isdigit()/int(), but the returned base kept the non-ASCII netloc and
+#     died raw (UnicodeEncodeError) at request time.
+# (c) LOW-2: the FIELD NAME production_board anywhere in the spec other than
+#     paperclip.production_board is the typed refusal, whatever its value —
+#     the runtime gate now mirrors the repo hygiene test's whole-tree scan.
+# Every new-behaviour test below fails first at 117ab5180.
+
+
+class TestItem8ProductionBoardNarrowing:
+    def _place_canonical(self, tmp_path, monkeypatch, spec, *, mode=0o600):
+        home = tmp_path / "home"
+        spec_dir = home / ".mastermind" / "gbl"
+        spec_dir.mkdir(parents=True)
+        spec_path = spec_dir / "spec.json"
+        spec_path.write_text(json.dumps(spec))
+        spec_path.chmod(mode)
+        monkeypatch.setattr(pc, "_current_home", lambda: str(home))
+        return spec_path
+
+    # -- (a) LOW-3: the literal host under the flag ----------------------------
+
+    def test_opt_in_refuses_localhost_alias(self):
+        with pytest.raises(GblPaperclipError) as err:
+            pc.validate_paperclip_base_url("http://localhost:3100",
+                                           production_board=True)
+        assert err.value.code == "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+
+    def test_opt_in_refuses_uppercase_localhost_alias(self):
+        with pytest.raises(GblPaperclipError) as err:
+            pc.validate_paperclip_base_url("http://LOCALHOST:3100",
+                                           production_board=True)
+        assert err.value.code == "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+
+    def test_opt_in_refuses_ipv6_loopback(self):
+        with pytest.raises(GblPaperclipError) as err:
+            pc.validate_paperclip_base_url("http://[::1]:3100",
+                                           production_board=True)
+        assert err.value.code == "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+
+    def test_opt_in_refuses_alias_on_any_port(self):
+        # the flag binds the host on EVERY port, not only 3100
+        with pytest.raises(GblPaperclipError) as err:
+            pc.validate_paperclip_base_url("http://localhost:8080",
+                                           production_board=True)
+        assert err.value.code == "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+
+    # -- (b) LOW-4: non-ASCII base URLs refuse typed ---------------------------
+
+    def test_non_ascii_port_refused_with_flag(self):
+        with pytest.raises(GblPaperclipError) as err:
+            pc.validate_paperclip_base_url("http://127.0.0.1:３１００",
+                                           production_board=True)
+        assert err.value.code == "BASE_URL_NOT_ASCII"
+
+    def test_non_ascii_port_refused_without_flag(self):
+        with pytest.raises(GblPaperclipError) as err:
+            pc.validate_paperclip_base_url("http://127.0.0.1:８０８０")
+        assert err.value.code == "BASE_URL_NOT_ASCII"
+
+    def test_non_ascii_host_refused(self):
+        with pytest.raises(GblPaperclipError) as err:
+            pc.validate_paperclip_base_url("http://１２７.０.０.１:8080")
+        assert err.value.code == "BASE_URL_NOT_ASCII"
+
+    # -- (c) LOW-2: the field name is honored at exactly one place -------------
+
+    def test_stray_top_level_field_is_a_typed_refusal(self, tmp_path,
+                                                      monkeypatch):
+        spec = _prod_spec("http://127.0.0.1:8080", flag=None,
+                          key=str(tmp_path / "k.key"))
+        spec["production_board"] = True      # stray, OUTSIDE the block
+        spec_path = self._place_canonical(tmp_path, monkeypatch, spec)
+        with pytest.raises(GblPaperclipError) as err:
+            pc.PaperclipAskClient.from_spec(spec_path)
+        assert err.value.code == "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+
+    def test_stray_nested_field_is_refused_whatever_its_value(
+            self, tmp_path, monkeypatch):
+        spec = _prod_spec("http://127.0.0.1:8080", flag=None,
+                          key=str(tmp_path / "k.key"))
+        spec["edge"] = {"environments": [{"production_board": False}]}
+        spec_path = self._place_canonical(tmp_path, monkeypatch, spec)
+        with pytest.raises(GblPaperclipError) as err:
+            pc.PaperclipAskClient.from_spec(spec_path)
+        assert err.value.code == "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+
+    def test_stray_copy_beside_the_honored_field_is_refused(
+            self, tmp_path, monkeypatch):
+        spec = _prod_spec(key=str(tmp_path / "k.key"))   # paperclip flag true
+        spec["routine"] = {"production_board": True}     # stray copy
+        spec_path = self._place_canonical(tmp_path, monkeypatch, spec)
+        with pytest.raises(GblPaperclipError) as err:
+            pc.PaperclipAskClient.from_spec(spec_path)
+        assert err.value.code == "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+
+    def test_stray_field_refused_even_at_a_noncanonical_path(
+            self, tmp_path, monkeypatch):
+        # the scan runs wherever from_spec parses: a stray field is the typed
+        # refusal even when the paperclip block carries no flag at all and
+        # the path gate would never fire — base constructs this silently
+        spec = _prod_spec("http://127.0.0.1:8080", flag=None)
+        spec["production_board"] = "yes"
+        spec_path = tmp_path / "elsewhere.json"
+        spec_path.write_text(json.dumps(spec))
+        spec_path.chmod(0o600)
+        monkeypatch.setattr(pc, "_current_home",
+                            lambda: str(tmp_path / "home"))
+        with pytest.raises(GblPaperclipError) as err:
+            pc.PaperclipAskClient.from_spec(spec_path)
+        assert err.value.code == "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+
+
+# ── GBL-RETURN: the delegate dispatch/return capability ─────────────────────
+
+
+TARGET_AGENT_ID = "33333333-3333-4333-8333-333333333333"
+
+
+def _delegate_envelope(key: str = "d-1",
+                       body: str = "Do the harmless fixture work.",
+                       **over) -> dict:
+    return envelope(key, kind="delegate", target="secretary",
+                    title="Fixture delegate", body=body, **over)
+
+
+class TestDelegateDispatch:
+    """The dispatch/return arm of the client: the RF carrier's shapes
+    replicated field-for-field (child create payload, end-anchored ask
+    marker, reuse scan, self-owned block descriptor, ambiguous-create
+    reconcile, result-comment law, bounded delegate scan).  The fake board
+    stamps ``createdByAgentId`` from the calling key exactly like the real
+    one; the client never sends it."""
+
+    def _client(self, fake) -> PaperclipAskClient:
+        return client(fake, target_agents={"secretary": TARGET_AGENT_ID},
+                      service_agent_name="Grok Bridge Fixture")
+
+    def _created_ask(self, fake, key: str = "d-1"):
+        store = self._client(fake)
+        env = _delegate_envelope(key)
+        assert store.create_ask(env) is None
+        parent = store._issue_for(env["ask_id"])
+        assert parent is not None
+        return store, env, parent
+
+    def _post_comment(self, store, issue_id: str, body: str) -> None:
+        store._request("POST", f"/api/issues/{issue_id}/comments",
+                       {"body": body})
+
+    def test_resolve_target_agent_is_server_side_only(self, fake):
+        store = self._client(fake)
+        assert store.resolve_target_agent("secretary") == TARGET_AGENT_ID
+        with pytest.raises(GblPaperclipError) as err:
+            store.resolve_target_agent("nobody")
+        assert err.value.code == "TARGET_AGENT_NOT_CONFIGURED"
+
+    def test_targets_table_validates_at_construction(self, fake):
+        with pytest.raises(ValueError):
+            client(fake, target_agents={"": TARGET_AGENT_ID})
+        with pytest.raises(ValueError):
+            client(fake, target_agents={"secretary": "not a token!"})
+        with pytest.raises(ValueError):
+            client(fake, target_agents={"secretary": 42})
+
+    def test_dispatch_creates_the_rf_shaped_child_and_blocks_parent(
+            self, fake):
+        store, env, parent = self._created_ask(fake)
+        outcome = store.dispatch_delegate(env)
+        assert outcome["target_agent"] == TARGET_AGENT_ID
+        assert outcome["reused"] is False
+        child = fake.state.issues[outcome["child_issue_id"]]
+        assert child["parentId"] == parent["id"]
+        assert child["assigneeAgentId"] == TARGET_AGENT_ID
+        assert child["status"] == "todo"
+        assert child["createdByAgentId"] == AGENT_ID   # stamped by the board
+        assert child["title"] == "Fixture delegate"
+        full_parent = store._full_issue(parent["id"])
+        expected_op = pc._rf_expected_ask_op(full_parent)
+        assert child["description"].endswith(f"[{expected_op}]")
+        assert "Asked by Grok Bridge Fixture on " in child["description"]
+        assert "Do the harmless fixture work." in child["description"]
+        # the parent is blocked on the child with a SELF-owned descriptor
+        blocked = fake.state.issues[parent["id"]]
+        assert blocked["status"] == "blocked"
+        assert outcome["child_issue_id"] in blocked["blockedByIssueIds"]
+        descriptor = blocked["unblockDescriptor"]
+        assert descriptor["owner"] == {"agentId": AGENT_ID}
+        assert child["identifier"] in descriptor["action"]
+        assert descriptor["action"].startswith("secretary completes ")
+
+    def test_dispatch_twice_reuses_one_child(self, fake):
+        store, env, parent = self._created_ask(fake)
+        first = store.dispatch_delegate(env)
+        second = store.dispatch_delegate(env)
+        assert second["child_issue_id"] == first["child_issue_id"]
+        assert second["reused"] is True
+        children = [row for row in fake.state.issues.values()
+                    if row.get("parentId") == parent["id"]]
+        assert len(children) == 1
+
+    def test_ambiguous_create_landed_reconciles_by_rescan(self, fake):
+        store, env, parent = self._created_ask(fake)
+        fake.state.create_reply_status = 409   # the row LANDS; reply is lost
+        outcome = store.dispatch_delegate(env)
+        assert outcome["reused"] is True       # reconciled, never re-created
+        children = [row for row in fake.state.issues.values()
+                    if row.get("parentId") == parent["id"]]
+        assert len(children) == 1
+        assert outcome["child_issue_id"] == children[0]["id"]
+
+    def test_ambiguous_create_not_landed_is_effect_unknown(self, fake):
+        store, env, parent = self._created_ask(fake)
+        fake.state.create_fail_status = 409    # refused BEFORE landing
+        with pytest.raises(GblCreateEffectUnknown):
+            store.dispatch_delegate(env)
+        children = [row for row in fake.state.issues.values()
+                    if row.get("parentId") == parent["id"]]
+        assert children == []                  # nothing was created twice
+
+    def test_definite_create_refusal_stays_typed(self, fake):
+        store, env, _parent = self._created_ask(fake)
+        fake.state.create_fail_status = 422    # a definite refusal
+        with pytest.raises(GblPaperclipClientError) as err:
+            store.dispatch_delegate(env)
+        assert err.value.code == "HTTP_422"
+
+    def test_unknown_target_refuses_before_touching_the_board(self, fake):
+        store, env, parent = self._created_ask(fake)
+        before = len(fake.state.issues)
+        with pytest.raises(GblPaperclipError) as err:
+            store.dispatch_delegate(dict(env, target="nobody"))
+        assert err.value.code == "TARGET_AGENT_NOT_CONFIGURED"
+        assert len(fake.state.issues) == before
+
+    def test_missing_record_is_typed(self, fake):
+        store = self._client(fake)
+        with pytest.raises(GblPaperclipError) as err:
+            store.dispatch_delegate(_delegate_envelope("never-created"))
+        assert err.value.code == "ASK_RECORD_MISSING"
+
+    def test_swapped_record_is_a_typed_mismatch(self, fake, monkeypatch):
+        store, env, parent = self._created_ask(fake)
+        stale = dict(store._issue_for(env["ask_id"]))
+        # a foreign edit replaces the record between the resolve and the
+        # full read: dispatch must refuse, never act on the wrong text
+        fake.state.issues[parent["id"]]["description"] = "foreign rewrite"
+        monkeypatch.setattr(store, "_issue_for", lambda ask_id: stale)
+        with pytest.raises(GblPaperclipError) as err:
+            store._ask_parent_row(env["ask_id"])
+        assert err.value.code == "ASK_RECORD_MISMATCH"
+
+    def test_ambiguous_block_patch_is_effect_unknown_then_reuse_heals(
+            self, fake):
+        store, env, parent = self._created_ask(fake)
+        fake.state.fail_status[("PATCH", f"/api/issues/{parent['id']}")] = 503
+        with pytest.raises(GblCreateEffectUnknown):
+            store.dispatch_delegate(env)
+        children = [row for row in fake.state.issues.values()
+                    if row.get("parentId") == parent["id"]]
+        assert len(children) == 1              # the child exists; relation lost
+        del fake.state.fail_status[("PATCH", f"/api/issues/{parent['id']}")]
+        outcome = store.dispatch_delegate(env)
+        assert outcome["reused"] is True       # never a second child
+        blocked = fake.state.issues[parent["id"]]
+        assert blocked["status"] == "blocked"
+        assert outcome["child_issue_id"] in blocked["blockedByIssueIds"]
+
+    def test_read_dispatch_child_identity_law(self, fake):
+        store, env, parent = self._created_ask(fake)
+        outcome = store.dispatch_delegate(env)
+        child_id = outcome["child_issue_id"]
+        row = store.read_dispatch_child(env["ask_id"], child_id)
+        assert row["id"] == child_id
+        # a decoy issue is refused, naming the failed checks
+        decoy = fake.state.add_issue("Decoy issue", "no marker here")
+        with pytest.raises(GblPaperclipError) as err:
+            store.read_dispatch_child(env["ask_id"], decoy)
+        assert err.value.code == "RETURN_CHILD_NOT_OURS"
+        assert "parent" in err.value.detail
+        # a nonexistent child is refused, never an untyped 404
+        with pytest.raises(GblPaperclipError) as err:
+            store.read_dispatch_child(env["ask_id"], str(uuid.uuid4()))
+        assert err.value.code == "RETURN_CHILD_NOT_OURS"
+        # the board clearing the blocker relation at resolution must not
+        # strand the return edge (RF handle_return: empty set ⇒ fall back)
+        fake.state.issues[parent["id"]].pop("blockedByIssueIds", None)
+        fake.state.issues[parent["id"]]["status"] = "in_progress"
+        assert store.read_dispatch_child(env["ask_id"], child_id)["id"] == \
+            child_id
+
+    def test_null_creator_is_ours_foreign_creator_is_not(self, fake):
+        # Real-board finding (no-seam dev proof, 2026-11-12): a board
+        # serving this client's local-trusted role stamps
+        # createdByAgentId=null on its creates — the creator identity is
+        # not recorded.  Null is still OUR child everywhere the law is
+        # applied; a NON-NULL foreign id is still refused/skipped.
+        fake.state.created_by_agent_id = None
+        store, env, parent = self._created_ask(fake)
+        first = store.dispatch_delegate(env)
+        child_id = first["child_issue_id"]
+        assert fake.state.issues[child_id].get("createdByAgentId") is None
+        second = store.dispatch_delegate(env)          # the reuse scan
+        assert second["child_issue_id"] == child_id    # still finds it
+        assert second["reused"] is True
+        assert store.read_dispatch_child(env["ask_id"], child_id)["id"] == \
+            child_id
+        # a foreign non-null creator: refused by the return identity law
+        # and invisible to the dispatch reuse scan
+        fake.state.issues[child_id]["createdByAgentId"] = str(uuid.uuid4())
+        with pytest.raises(GblPaperclipError) as err:
+            store.read_dispatch_child(env["ask_id"], child_id)
+        assert err.value.code == "RETURN_CHILD_NOT_OURS"
+        assert "creator" in err.value.detail
+        third = store.dispatch_delegate(env)
+        assert third["reused"] is False
+        assert third["child_issue_id"] != child_id
+        children = [row for row in fake.state.issues.values()
+                    if row.get("parentId") == parent["id"]]
+        assert len(children) == 2                      # never reuses foreign
+
+    def test_read_child_result_states_and_comment_law(self, fake):
+        store, env, _parent = self._created_ask(fake)
+        outcome = store.dispatch_delegate(env)
+        child_id = outcome["child_issue_id"]
+        # not done yet
+        assert store.read_child_result(env["ask_id"], child_id) == \
+            {"done": False, "cancelled": False, "answer": None}
+        # cancelled is terminal and carries nothing back
+        fake.state.issues[child_id]["status"] = "cancelled"
+        assert store.read_child_result(env["ask_id"], child_id) == \
+            {"done": False, "cancelled": True, "answer": None}
+        # done with the assignee's own comment: the verbatim answer
+        fake.state.issues[child_id]["status"] = "done"
+        fake.state.comment_author = TARGET_AGENT_ID
+        self._post_comment(store, child_id, "[coding-job] machine noise")
+        self._post_comment(store, child_id, "The harmless fixture answer.")
+        result = store.read_child_result(env["ask_id"], child_id)
+        assert result == {"done": True, "cancelled": False,
+                          "answer": "The harmless fixture answer."}
+
+    def test_read_child_result_fallback_and_pointer(self, fake):
+        store, env, _parent = self._created_ask(fake, key="d-fb")
+        outcome = store.dispatch_delegate(env)
+        child_id = outcome["child_issue_id"]
+        fake.state.issues[child_id]["status"] = "done"
+        # a done child with no comment at all: the pointer, never a guess
+        assert store.read_child_result(env["ask_id"], child_id)["answer"] == \
+            "(no answer comment on the child issue)"
+        # an unattributed comment (the installed board's plain-route shape,
+        # gbl4-devproof): the disclaimed fallback, verbatim RF wording
+        fake.state.comment_author = AGENT_ID       # not the child's assignee
+        self._post_comment(store, child_id, "Some bystander comment.")
+        answer = store.read_child_result(env["ask_id"], child_id)["answer"]
+        assert answer.startswith(
+            "(the asked teammate's own comment was not found;")
+        assert answer.endswith("Some bystander comment.")
+
+    def test_scan_delegate_asks_is_bounded_kind_filtered_and_truncation_aware(
+            self, fake):
+        store = self._client(fake)
+        env1 = _delegate_envelope("s-1")
+        env2 = _delegate_envelope("s-2", body="fixture words. " * 120)
+        env3 = envelope("s-3")                     # a question ask
+        env4 = _delegate_envelope("s-4")
+        for env in (env1, env2, env3, env4):
+            assert store.create_ask(env) is None
+        done_row = store._issue_for(env4["ask_id"])
+        fake.state.issues[done_row["id"]]["status"] = "done"
+        found = store.scan_delegate_asks()
+        assert set(found) == {env1["ask_id"], env2["ask_id"]}
+        # a list projection that CUTS the long envelope must not misread it
+        # as corrupt or foreign: the row is re-read in full before parsing
+        fake.state.truncate_list_descriptions_at = 300
+        assert env2["ask_id"] in store.scan_delegate_asks()
+
+    def test_scan_delegate_asks_caps_at_the_bound(self, fake):
+        store = self._client(fake)
+        envs = [_delegate_envelope(f"cap-{i}")
+                for i in range(pc.SCAN_DELEGATE_ASKS_MAX + 5)]
+        for env in envs:
+            assert store.create_ask(env) is None
+        assert len(store.scan_delegate_asks()) == pc.SCAN_DELEGATE_ASKS_MAX
 
 
 class TestDurableLedgerLines:

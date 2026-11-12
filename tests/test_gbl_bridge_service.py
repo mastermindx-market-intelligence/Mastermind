@@ -31,6 +31,7 @@ from integrations.gbl.bridge_service import (
     GblCreateEffectUnknown,
     PrincipalAdmission,
     RENUDGE_COOLDOWN_SECONDS,
+    RETURN_SCAN_MAX,
 )
 from integrations.gbl.paperclip_client import GblPaperclipError
 from integrations.gbl.bridge_service import BridgeServer, BridgeServiceConfig
@@ -146,6 +147,64 @@ class FakeStore:
         self.append_ask_event(ask_id, {
             "type": "answer", "answer_id": "gbm-" + "a" * 32, "text": text})
         self.append_ask_event(ask_id, {"type": "state", "state": "ANSWERED"})
+
+
+TARGET_AGENT = "target-agent-fixture"
+
+
+class DispatchStore(FakeStore):
+    """FakeStore + the whole :class:`GblDelegateDispatchStore` arm.  The
+    board-side shapes (RF child, identity law, result comment) are proven
+    against the fake HTTP board in ``test_gbl_paperclip_client.py``; this
+    double proves the BRIDGE half — when dispatch is consulted, when the
+    event is appended, when nothing is ever sent twice."""
+
+    def __init__(self, clock=None, targets=None):
+        super().__init__(clock)
+        self.targets = ({"secretary": TARGET_AGENT, "assurance": "agent-a2"}
+                        if targets is None else dict(targets))
+        self.dispatch_calls: list[dict] = []
+        self.dispatch_result: dict | None = None
+        self.dispatch_error: Exception | None = None
+        self.child_result = {"done": False, "cancelled": False,
+                             "answer": None}
+        self.child_error: Exception | None = None
+        self.scan_ids: list[str] | None = None
+
+    def resolve_target_agent(self, target):
+        agent = self.targets.get(target)
+        if agent is None:
+            raise GblPaperclipError("TARGET_AGENT_NOT_CONFIGURED", target)
+        return agent
+
+    def dispatch_delegate(self, ask):
+        self.dispatch_calls.append(dict(ask))
+        if self.dispatch_error is not None:
+            raise self.dispatch_error
+        if self.dispatch_result is not None:
+            return dict(self.dispatch_result)
+        return {"child_issue_id": "child-fixture-1",
+                "child_identifier": "FX-2",
+                "target_agent": self.targets[ask["target"]],
+                "reused": False}
+
+    def read_dispatch_child(self, ask_id, child_issue_id):
+        if self.child_error is not None:
+            raise self.child_error
+        return {"id": child_issue_id, "status": "todo"}
+
+    def read_child_result(self, ask_id, child_issue_id):
+        if self.child_error is not None:
+            raise self.child_error
+        return dict(self.child_result)
+
+    def scan_delegate_asks(self):
+        if self.scan_ids is not None:
+            return list(self.scan_ids)
+        return [ask_id for ask_id, record in self.asks.items()
+                if record.get("kind") == "delegate"
+                and not any(e.get("type") == "answer"
+                            for e in record.get("events", ()))]
 
 
 class FakeNudgeSender:
@@ -478,8 +537,13 @@ class TestRenudge:
     def test_not_answered_is_noop(self):
         store = FakeStore()
         sender = FakeNudgeSender()
+        # GBL-RETURN: a CREATED question ask now fires its own
+        # QUESTION_AVAILABLE nudge; this row tests the ANSWERED no-op, so
+        # the setup submits without a sender (the creation nudge reports
+        # NUDGE_SENDER_UNAVAILABLE and persists nothing) and the sender
+        # under test stays pristine.
+        bridge(store).submit_ask(**submit())
         core = bridge(store, sender=sender)
-        core.submit_ask(**submit())
         result = core.maybe_renudge(ask_id=ASK_ID)
         assert result["status"] == "OPEN"
         assert sender.calls == []
@@ -1104,10 +1168,13 @@ class TestRepairRenudge:
         from common.gbl_contract import MAX_RENUDGES_PER_ASK
         store = FakeStore()
         sender = FakeNudgeSender()
+        # GBL-RETURN: submit without a sender so the CREATED question
+        # nudge leaves no marker — the budget accounting below is exactly
+        # the rows this test seeds.
+        bridge(store).submit_ask(**submit())
         core = bridge(store, sender=sender,
                       clock=lambda: T0 + timedelta(
                           seconds=RENUDGE_COOLDOWN_SECONDS + 1))
-        core.submit_ask(**submit())
         store.seed_answer(ASK_ID)
         events = store.asks[ASK_ID]["events"]
         for index in range(MAX_RENUDGES_PER_ASK - 1):  # real, trusted nudges
@@ -1131,10 +1198,12 @@ class TestRepairRenudge:
         # markers alive, never silently vanish from the accounting.
         store = FakeStore()
         sender = FakeNudgeSender()
+        # GBL-RETURN: sender-less setup keeps the question nudge out of
+        # the ledger (and its seq out of the demoted row's way).
+        bridge(store).submit_ask(**submit())
         core = bridge(store, sender=sender,
                       clock=lambda: T0 + timedelta(
                           seconds=RENUDGE_COOLDOWN_SECONDS + 1))
-        core.submit_ask(**submit())
         store.seed_answer(ASK_ID)
         store.asks[ASK_ID]["events"].append(
             {"type": "nudge_attempt", "state": "ANSWERED",
@@ -1187,8 +1256,10 @@ class TestRepairRenudge:
     def test_reconcile_without_attempt_is_typed(self):
         store = FakeStore()
         sender = FakeNudgeSender()
+        # GBL-RETURN: sender-less submit — the question nudge's attempt
+        # would otherwise BE an attempt to reconcile.
+        bridge(store).submit_ask(**submit())
         core = bridge(store, sender=sender)
-        core.submit_ask(**submit())
         with pytest.raises(GblBridgeError) as err:
             core.reconcile_nudge(principal=PRINCIPAL, ask_id=ASK_ID)
         assert err.value.code == "NUDGE_ATTEMPT_NOT_FOUND"
@@ -1223,8 +1294,12 @@ class TestRepairRound2:
     only; ``reconcile`` carries the same party check as every mutating op."""
 
     def _answered(self, store, sender):
+        # GBL-RETURN: the CREATED question ask fires its own
+        # QUESTION_AVAILABLE nudge; these rows exercise the ANSWERED
+        # attempt/reconcile law, so the setup submits without a sender and
+        # the nudge slate under test starts empty.
+        bridge(store).submit_ask(**submit())
         core = bridge(store, sender=sender)
-        core.submit_ask(**submit())
         core.post_answer(principal=PRINCIPAL, ask_id=ASK_ID,
                          answer="A harmless fixture answer.",
                          idempotency_key="gb-ans-0001")
@@ -1350,5 +1425,434 @@ class TestRepairRound2:
                 "arguments": {"ask_id": ASK_ID}})
             assert response["ok"] is False
             assert response["error"]["code"] == "INVALID_ARGUMENTS"
+        finally:
+            server.close()
+
+
+# ── GBL-RETURN: delegate dispatch, board return, question nudge ─────────────
+
+
+class TestDelegateDispatchBridge:
+    """Outcome 1 (delegate out) at the bridge layer: dispatch is ensured
+    exactly once per ask, its event is deterministic, an unknown target
+    refuses BEFORE any record exists, and an effect-unknown dispatch is
+    surfaced — never blindly replayed."""
+
+    def test_created_delegate_dispatches_and_records_a_deterministic_event(
+            self):
+        store = DispatchStore()
+        core = bridge(store)
+        result = core.submit_ask(**submit(kind="delegate"))
+        assert result["status"] == "CREATED"
+        assert result["dispatch"]["status"] == "DISPATCHED"
+        assert result["dispatch"]["child_issue_id"] == "child-fixture-1"
+        assert len(store.dispatch_calls) == 1
+        assert store.dispatch_calls[0]["target"] == "secretary"
+        events = [e for e in store.asks[ASK_ID]["events"]
+                  if e.get("type") == "dispatch"]
+        assert len(events) == 1
+        assert events[0]["child_issue_id"] == "child-fixture-1"
+        assert events[0]["target_agent"] == TARGET_AGENT
+        assert "at" not in events[0]       # deterministic core: append-idempotent
+
+    def test_replayed_delegate_ask_never_dispatches_twice(self):
+        store = DispatchStore()
+        core = bridge(store)
+        core.submit_ask(**submit(kind="delegate"))
+        second = core.submit_ask(**submit(kind="delegate"))
+        assert second["status"] == "IDEMPOTENT"
+        assert second["dispatch"]["status"] == "ALREADY_DISPATCHED"
+        assert len(store.dispatch_calls) == 1
+
+    def test_unknown_target_refuses_before_any_record_exists(self):
+        # "assurance" passes bridge admission but is absent from the
+        # server-side target table: the delegate must refuse BEFORE any
+        # record exists — no orphan ask that could never dispatch.
+        store = DispatchStore(targets={"secretary": TARGET_AGENT})
+        core = bridge(store)
+        with pytest.raises(GblPaperclipError) as err:
+            core.submit_ask(**submit(kind="delegate", target="assurance"))
+        assert err.value.code == "TARGET_AGENT_NOT_CONFIGURED"
+        assert store.asks == {} and store.create_calls == 0
+
+    def test_effect_unknown_is_surfaced_never_blindly_replayed(self):
+        store = DispatchStore()
+        store.dispatch_error = GblCreateEffectUnknown("create timed out")
+        core = bridge(store)
+        result = core.submit_ask(**submit(kind="delegate"))
+        assert result["status"] == "CREATED"
+        assert result["dispatch"]["status"] == "DISPATCH_EFFECT_UNKNOWN"
+        assert [e for e in store.asks[ASK_ID]["events"]
+                if e.get("type") == "dispatch"] == []
+        # the return edge refuses to act on an unknown dispatch too
+        assert core.return_delegate(ask_id=ASK_ID)["status"] == \
+            "DISPATCH_EFFECT_UNKNOWN"
+        # recovery: the store heals and the ensure reconciles by reuse —
+        # ONE dispatch event, resolved by the store's scan, never a guess
+        store.dispatch_error = None
+        store.dispatch_result = {"child_issue_id": "child-recovered",
+                                 "child_identifier": "FX-9",
+                                 "target_agent": TARGET_AGENT,
+                                 "reused": True}
+        assert core.return_delegate(ask_id=ASK_ID)["status"] == "NOT_YET"
+        events = [e for e in store.asks[ASK_ID]["events"]
+                  if e.get("type") == "dispatch"]
+        assert len(events) == 1
+        assert events[0]["child_issue_id"] == "child-recovered"
+
+    def test_marked_double_without_the_arm_keeps_the_old_shape(self):
+        store = FakeStore()                # GBL_TEST_DOUBLE, no dispatch arm
+        core = bridge(store)
+        result = core.submit_ask(**submit(kind="delegate"))
+        assert result["status"] == "CREATED"
+        assert "dispatch" not in result    # pre-GBL-RETURN shape, exactly
+
+    def test_unmarked_store_without_the_arm_fails_closed(self):
+        class Unmarked(FakeStore):
+            GBL_TEST_DOUBLE = False
+        core = bridge(Unmarked())
+        with pytest.raises(GblBridgeError) as err:
+            core.submit_ask(**submit(kind="delegate"))
+        assert err.value.code == "DISPATCH_CAPABILITY_UNAVAILABLE"
+
+    def test_partial_arm_fails_closed(self):
+        class Partial(FakeStore):
+            GBL_TEST_DOUBLE = False
+
+            def resolve_target_agent(self, target):
+                return TARGET_AGENT
+        core = bridge(Partial())
+        with pytest.raises(GblBridgeError) as err:
+            core.submit_ask(**submit(kind="delegate"))
+        assert err.value.code == "DISPATCH_CAPABILITY_UNAVAILABLE"
+
+
+class TestQuestionNudge:
+    """Outcome 3: a CREATED question ask fires exactly ONE
+    QUESTION_AVAILABLE nudge from shipped code, under the same
+    budget/cooldown/unknown-effect law as ANSWERED; the ask stays OPEN."""
+
+    def _receipt(self, outcome):
+        from control_plane.wake_dispatcher import (
+            TransportOutcome, TransportReceipt)
+        return TransportReceipt(outcome=TransportOutcome(outcome),
+                                reason_code="fixture",
+                                created_at="2026-11-11T12:00:00Z")
+
+    def test_created_question_fires_exactly_one_nudge(self):
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        core = bridge(store, sender=sender)
+        result = core.submit_ask(**submit())
+        assert result["status"] == "CREATED"
+        assert result["question_nudge"]["status"] == "QUESTION_NUDGED"
+        assert sender.calls == [
+            (ASK_ID, "QUESTION_AVAILABLE", "routine-handle-fixture")]
+        events = store.asks[ASK_ID]["events"]
+        assert [e["type"] for e in events] == ["nudge_attempt", "nudge"]
+        assert all(e["state"] == "QUESTION_AVAILABLE" for e in events)
+        # the ask itself stays OPEN — a nudge is attention, not an answer
+        assert core.ask_status(principal=PRINCIPAL,
+                               ask_id=ASK_ID)["state"] == "OPEN"
+
+    def test_a_second_attempt_is_refused_not_resent(self):
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        core = bridge(store, sender=sender)
+        core.submit_ask(**submit())
+        assert core._nudge_question_once(ASK_ID)["status"] == \
+            "NUDGE_ALREADY_ATTEMPTED"
+        assert len(sender.calls) == 1
+
+    def test_a_settled_no_delivery_still_counts_as_attempted(self):
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        sender.receipt = self._receipt("TARGET_UNAVAILABLE")
+        core = bridge(store, sender=sender)
+        result = core.submit_ask(**submit())
+        assert result["status"] == "CREATED"           # never fatal
+        assert result["question_nudge"]["status"] == "NUDGE_NOT_DELIVERED"
+        settled = [e for e in store.asks[ASK_ID]["events"]
+                   if e.get("type") == "nudge_settled"]
+        assert settled and settled[0]["state"] == "QUESTION_AVAILABLE"
+        # exactly-once covers settlements too: no second send is ever armed
+        assert core._nudge_question_once(ASK_ID)["status"] == \
+            "NUDGE_ALREADY_ATTEMPTED"
+        assert len(sender.calls) == 1
+
+    def test_effect_unknown_question_attempt_reconciles_with_its_own_state(
+            self):
+        from control_plane.wake_dispatcher import WakeEffectUnknownError
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        sender.error = WakeEffectUnknownError("submission result unavailable")
+        core = bridge(store, sender=sender)
+        result = core.submit_ask(**submit())
+        assert result["question_nudge"]["status"] == "NUDGE_EFFECT_UNKNOWN"
+        sender.error = None
+        out = core.reconcile_nudge(principal=PRINCIPAL, ask_id=ASK_ID)
+        assert out["status"] == "RECONCILED_DELIVERED"
+        assert sender.reconcile_calls == [
+            (ASK_ID, "QUESTION_AVAILABLE", "routine-handle-fixture")]
+        nudges = [e for e in store.asks[ASK_ID]["events"]
+                  if e.get("type") == "nudge"]
+        assert len(nudges) == 1
+        assert nudges[0]["state"] == "QUESTION_AVAILABLE"
+
+    def test_no_sender_is_reported_and_the_ask_still_creates(self):
+        store = FakeStore()
+        core = bridge(store)                 # no sender, no resolver use
+        result = core.submit_ask(**submit())
+        assert result["status"] == "CREATED"
+        assert result["question_nudge"]["status"] == "NUDGE_SENDER_UNAVAILABLE"
+
+    def test_the_question_nudge_shares_the_cooldown_with_answered(self):
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        tick = {"now": T0}
+        core = bridge(store, sender=sender, clock=lambda: tick["now"])
+        core.submit_ask(**submit())          # QUESTION_AVAILABLE at T0
+        core.post_answer(principal=PRINCIPAL, ask_id=ASK_ID,
+                         answer="A harmless fixture answer.",
+                         idempotency_key="gb-ans-0001")
+        with pytest.raises(GblBridgeError) as err:
+            core.maybe_renudge(ask_id=ASK_ID)
+        assert err.value.code == "RENUDGE_COOLDOWN"
+        tick["now"] = T0 + timedelta(seconds=RENUDGE_COOLDOWN_SECONDS + 1)
+        assert core.maybe_renudge(ask_id=ASK_ID)["status"] == "RENUDGED"
+        assert [call[1] for call in sender.calls] == \
+            ["QUESTION_AVAILABLE", "ANSWERED"]
+
+    def test_the_question_nudge_burns_the_shared_budget(self):
+        from common.gbl_contract import MAX_RENUDGES_PER_ASK
+        store = FakeStore()
+        sender = FakeNudgeSender()
+        tick = {"now": T0}
+        core = bridge(store, sender=sender, clock=lambda: tick["now"])
+        core.submit_ask(**submit())          # burns one of the budget slots
+        core.post_answer(principal=PRINCIPAL, ask_id=ASK_ID,
+                         answer="A harmless fixture answer.",
+                         idempotency_key="gb-ans-0001")
+        for _ in range(MAX_RENUDGES_PER_ASK - 1):
+            tick["now"] = tick["now"] + timedelta(
+                seconds=RENUDGE_COOLDOWN_SECONDS + 1)
+            assert core.maybe_renudge(ask_id=ASK_ID)["status"] == "RENUDGED"
+        tick["now"] = tick["now"] + timedelta(
+            seconds=RENUDGE_COOLDOWN_SECONDS + 1)
+        with pytest.raises(GblBridgeError) as err:
+            core.maybe_renudge(ask_id=ASK_ID)
+        assert err.value.code == "RENUDGE_BUDGET_EXHAUSTED"
+        assert len(sender.calls) == MAX_RENUDGES_PER_ASK
+
+
+class TestReturnDelegate:
+    """Outcomes 2/4/5: the answer comes from the bridge's OWN board read,
+    a duplicate wake no-ops, a lost wake is recovered by read (never a
+    second send), a foreign child refuses typed, and a non-delegate ask —
+    including the bridge's own ask-record issue — is a harmless no-op."""
+
+    def _delegate(self, store=None, sender=None, clock=None):
+        store = store if store is not None else DispatchStore()
+        core = bridge(store, sender=sender, clock=clock)
+        core.submit_ask(**submit(kind="delegate"))
+        return core, store
+
+    def test_question_ask_is_a_harmless_noop(self):
+        store = DispatchStore()
+        core = bridge(store)
+        core.submit_ask(**submit())          # kind=question
+        assert core.return_delegate(ask_id=ASK_ID) == \
+            {"status": "NOT_A_DELEGATE", "ask_id": ASK_ID}
+        assert store.dispatch_calls == []
+
+    def test_child_not_done_reports_not_yet_and_posts_nothing(self):
+        core, store = self._delegate()
+        result = core.return_delegate(ask_id=ASK_ID)
+        assert result["status"] == "NOT_YET"
+        assert result["child_issue_id"] == "child-fixture-1"
+        assert [e for e in store.asks[ASK_ID]["events"]
+                if e.get("type") == "answer"] == []
+
+    def test_done_child_returns_the_answer_and_fires_one_answered_nudge(self):
+        store = DispatchStore()
+        store.child_result = {"done": True, "cancelled": False,
+                              "answer": "The harmless fixture answer."}
+        sender = FakeNudgeSender()
+        core = bridge(store, sender=sender)
+        core.submit_ask(**submit(kind="delegate"))
+        result = core.return_delegate(ask_id=ASK_ID)
+        assert result["status"] == "RETURNED"
+        assert result["child_issue_id"] == "child-fixture-1"
+        assert result["nudge"]["status"] == "RENUDGED"
+        assert sender.calls == [
+            (ASK_ID, "ANSWERED", "routine-handle-fixture")]
+        answers = [e for e in store.asks[ASK_ID]["events"]
+                   if e.get("type") == "answer"]
+        assert len(answers) == 1
+        assert answers[0]["text"] == "The harmless fixture answer."
+        assert answers[0]["idempotency_key"] == f"gbl-board-return-{ASK_ID}"
+        # outcome 5: the duplicate wake no-ops — no second post, no second
+        # nudge, whatever the waker says
+        second = core.return_delegate(ask_id=ASK_ID)
+        assert second["status"] == "ALREADY_ANSWERED"
+        assert len(sender.calls) == 1
+        answers = [e for e in store.asks[ASK_ID]["events"]
+                   if e.get("type") == "answer"]
+        assert len(answers) == 1
+
+    def test_lost_dispatch_event_recovers_by_read_never_by_a_second_child(
+            self):
+        core, store = self._delegate()
+        # the dispatch append was lost: the ledger no longer carries it
+        store.asks[ASK_ID]["events"] = [
+            e for e in store.asks[ASK_ID]["events"]
+            if e.get("type") != "dispatch"]
+        store.dispatch_result = {"child_issue_id": "child-fixture-1",
+                                 "child_identifier": "FX-2",
+                                 "target_agent": TARGET_AGENT,
+                                 "reused": True}
+        result = core.return_delegate(ask_id=ASK_ID)
+        assert result["status"] == "NOT_YET"
+        assert result["child_issue_id"] == "child-fixture-1"  # SAME child
+        events = [e for e in store.asks[ASK_ID]["events"]
+                  if e.get("type") == "dispatch"]
+        assert len(events) == 1                 # the event is restored, once
+
+    def test_cancelled_child_is_terminal_and_carries_nothing_back(self):
+        store = DispatchStore()
+        store.child_result = {"done": False, "cancelled": True,
+                              "answer": None}
+        core = bridge(store)
+        core.submit_ask(**submit(kind="delegate"))
+        assert core.return_delegate(ask_id=ASK_ID)["status"] == \
+            "CHILD_CANCELLED"
+        assert [e for e in store.asks[ASK_ID]["events"]
+                if e.get("type") == "answer"] == []
+
+    def test_foreign_child_refuses_typed_and_never_enters_the_record(self):
+        store = DispatchStore()
+        store.child_error = GblPaperclipError(
+            "RETURN_CHILD_NOT_OURS", "child fails: marker,assignee")
+        core = bridge(store)
+        core.submit_ask(**submit(kind="delegate"))
+        with pytest.raises(GblPaperclipError) as err:
+            core.return_delegate(ask_id=ASK_ID)
+        assert err.value.code == "RETURN_CHILD_NOT_OURS"
+        assert [e for e in store.asks[ASK_ID]["events"]
+                if e.get("type") == "answer"] == []
+
+    def test_done_without_a_usable_comment_posts_nothing(self):
+        store = DispatchStore()
+        store.child_result = {"done": True, "cancelled": False,
+                              "answer": None}
+        core = bridge(store)
+        core.submit_ask(**submit(kind="delegate"))
+        assert core.return_delegate(ask_id=ASK_ID)["status"] == \
+            "NO_ANSWER_COMMENT"
+        assert [e for e in store.asks[ASK_ID]["events"]
+                if e.get("type") == "answer"] == []
+
+    def test_expired_delegate_reports_expired(self):
+        store = DispatchStore()
+        core = bridge(store)
+        core.submit_ask(**submit(kind="delegate"))
+        late = bridge(store, clock=lambda: T0 + timedelta(hours=25))
+        assert late.return_delegate(ask_id=ASK_ID)["status"] == "EXPIRED"
+
+    def test_nudge_failure_is_reported_but_the_answer_stays_returned(self):
+        store = DispatchStore()
+        store.child_result = {"done": True, "cancelled": False,
+                              "answer": "The harmless fixture answer."}
+        core = bridge(store)                 # no sender: the nudge cannot fire
+        core.submit_ask(**submit(kind="delegate"))
+        result = core.return_delegate(ask_id=ASK_ID)
+        assert result["status"] == "RETURNED"
+        assert result["nudge"]["status"] == "NUDGE_SENDER_UNAVAILABLE"
+        answers = [e for e in store.asks[ASK_ID]["events"]
+                   if e.get("type") == "answer"]
+        assert len(answers) == 1             # the record holds the answer
+
+
+class TestReturnScan:
+    """The bridge's own bounded read: the lost-wake recovery source."""
+
+    def test_scan_skipped_for_a_double_without_the_arm(self):
+        assert bridge(FakeStore()).return_scan() == {"status": "SCAN_SKIPPED"}
+
+    def test_scan_processes_every_open_delegate_ask(self):
+        store = DispatchStore()
+        core = bridge(store)
+        core.submit_ask(**submit(kind="delegate"))
+        core.submit_ask(**submit(kind="delegate", idempotency_key="gb-ask-0002"))
+        core.submit_ask(**submit(idempotency_key="gb-ask-0003"))  # question: not scanned
+        out = core.return_scan()
+        assert out["status"] == "SCANNED"
+        assert out["count"] == 2
+        assert all(row["status"] == "NOT_YET" for row in out["results"])
+
+    def test_one_typed_failure_never_aborts_the_scan(self):
+        store = DispatchStore()
+        core = bridge(store)
+        core.submit_ask(**submit(kind="delegate"))
+        real_ids = store.scan_delegate_asks()
+        store.scan_ids = ["gb-" + "9" * 32] + real_ids
+        out = core.return_scan()
+        assert out["count"] == len(real_ids) + 1
+        statuses = {row["status"] for row in out["results"]}
+        assert "ASK_NOT_FOUND" in statuses and "NOT_YET" in statuses
+
+    def test_scan_is_capped_at_the_bound(self):
+        store = DispatchStore()
+        core = bridge(store)
+        store.scan_ids = [f"gb-{i:032x}" for i in range(RETURN_SCAN_MAX + 5)]
+        out = core.return_scan()
+        assert out["count"] == RETURN_SCAN_MAX
+        assert all(row["status"] == "ASK_NOT_FOUND" for row in out["results"])
+
+
+class TestReturnWireOps:
+    """The door: 'return' carries the ask id and NOTHING else; extra
+    arguments are refused at the wire before any core method runs."""
+
+    def test_return_is_a_wire_op(self, tmp_path):
+        store = DispatchStore()
+        store.child_result = {"done": True, "cancelled": False,
+                              "answer": "The harmless fixture answer."}
+        core = bridge(store)
+        core.submit_ask(**submit(kind="delegate"))
+        server = _server(tmp_path, core, (os.getuid(),))
+        try:
+            response = _exchange(server, {
+                "schema": "mastermind.gbl.request.v1", "op": "return",
+                "arguments": {"ask_id": ASK_ID}})
+            assert response["ok"] is True
+            assert response["result"]["status"] == "RETURNED"
+        finally:
+            server.close()
+
+    def test_return_refuses_a_smuggled_answer(self, tmp_path):
+        store = DispatchStore()
+        core = bridge(store)
+        server = _server(tmp_path, core, (os.getuid(),))
+        try:
+            response = _exchange(server, {
+                "schema": "mastermind.gbl.request.v1", "op": "return",
+                "arguments": {"ask_id": ASK_ID,
+                              "answer": "smuggled waker text"}})
+            assert response["ok"] is False
+            assert response["error"]["code"] == "INVALID_ARGUMENTS"
+        finally:
+            server.close()
+
+    def test_return_scan_is_a_wire_op(self, tmp_path):
+        store = DispatchStore()
+        core = bridge(store)
+        server = _server(tmp_path, core, (os.getuid(),))
+        try:
+            response = _exchange(server, {
+                "schema": "mastermind.gbl.request.v1", "op": "return_scan",
+                "arguments": {}})
+            assert response["ok"] is True
+            assert response["result"]["status"] == "SCANNED"
         finally:
             server.close()
