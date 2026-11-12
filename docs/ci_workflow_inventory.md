@@ -33,13 +33,14 @@ source ownership.
 ## Interface
 
 ```bash
-python -m scripts.ci_workflow_inventory --root /path/to/repository
+python -B -m scripts.ci_workflow_inventory --root /path/to/repository
 ```
 
 The command reads the immediate `.github/workflows/*.yml` and `*.yaml`
 files and prints JSON to stdout. It uses the project's existing PyYAML dependency,
 does not call GitHub, spawn a process, execute workflow expressions, write files,
 follow symlinked workflow paths, or inspect local credential stores.
+Use `-B` to suppress Python's implicit bytecode-cache writes as well.
 Shell redirection is an operator's optional output choice. Exit status 0 means all
 discovered files were inspected; status 2 means coverage is incomplete. Neither
 status is a migration or release verdict.
