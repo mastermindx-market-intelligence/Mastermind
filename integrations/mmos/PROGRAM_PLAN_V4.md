@@ -1510,3 +1510,40 @@ question to him stands.
 the browser bridge release after its final check, with one round of extension reloads for
 the Chairman; computer use after I choose its homes; the Grok Bot link install and one
 sitting with the Chairman.
+
+## 37. Amendment, 2026-11-12 02:40 UTC: a development board joined the real store; three class rulings; the Paper lane
+
+**What happened.** A lane's abandoned start of a development Paperclip joined the real database
+for about ninety seconds. I reconciled it myself by comparing the whole store before and after:
+one effect, two permission rows whose update time was re-stamped and nothing else changed. No
+repair was needed. The lane's own three-table check had missed it.
+
+**Rulings that follow (text in `deputy/RULINGS.md`).**
+- Ruling 14: a development board starts only through a launcher that pins the instance home,
+  database port and database folder, and the start banner is read first. A "not written" claim
+  needs a whole-store comparison. The development launcher is being rewritten to meet this; the
+  Grok Bot link's board steps wait for it.
+- Ruling 15: when the check that ends a review loop finds required items in lines the last round
+  changed, I may grant one micro-fix, checked by the panel lead alone, with no further round.
+  First used on the browser fill.
+- Window proofs: a proof is met when the reply text is in the window's own accessibility text for
+  the open conversation. No lane scrolls the Chairman's window to improve a proof.
+
+**A lane that had stopped silently.** The computer-use lane was recorded as waiting for an idle
+screen; it had stopped the previous afternoon behind a monitor that never fired. It was restarted
+with an order to run in the idle window without a monitor. Rule for lane state: a "waiting" row is
+checked against the lane's own task record, not copied forward.
+
+**New lane: Paper (Chairman's order, 02:28 UTC).** One Opus lead, reporting to me, with two
+outcomes: one reviewed path by which a session on any host can read, screenshot and, where its
+brief allows, edit Paper files held on a studio Mac; and a design skillpack (protocols, specialist
+skills, ready briefs for design children) for the Sector Intelligence and Prophet programmes,
+built on the three existing design skills rather than beside them. The lane installs nothing and
+returns staged changes. Existing mockups are read-only for it. Its design note comes to me for a
+ruling before anything is built. Both programmes were told the lane exists; the "Paper is ready"
+notice goes out only when the path is installed and proven.
+
+**Order of work now.** Browser-fill micro-fix, then the bridge release and one round of extension
+reloads; the ask-and-return carrier refresh after its final check; the launcher rewrite, then the
+Grok Bot link proofs and one sitting; computer-use runs, its delta check and my choice of homes;
+the Paper design note and ruling.
