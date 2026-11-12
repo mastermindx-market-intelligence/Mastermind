@@ -256,8 +256,9 @@ PACING_FLOOR_SECONDS = 1.0
 # ``"pytest" in sys.modules`` check was defeatable via
 # PYTHONPATH/sitecustomize). The only sub-default path left is an in-process
 # constructor argument (unit-test injection), and it still never goes below
-# the absolute 1 s floor. A subprocess test passes paths as launch
-# ARGUMENTS, never as environment variables.
+# the absolute 1 s floor. A subprocess test injects scratch paths through
+# serve()'s keyword parameters (test-only launcher), never as environment
+# variables — the shipped entry point takes no path argument at all.
 DEFAULT_LEASE_TTL = 120
 SEE_TIMEOUT_S = 30.0
 ACT_TIMEOUT_S = 15.0
@@ -428,8 +429,9 @@ def _config_source_floor(value, default, code, label):
     and any flag reachable from the environment is a flag a session can set.
     The floors hold IN CODE for every value arriving from the environment or
     from runtime.json. Unit tests use constructor injection (which never
-    reaches this check) plus a fake clock; a subprocess test passes paths as
-    launch ARGUMENTS (main() --state-dir/--runtime/--deny).
+    reaches this check) plus a fake clock; a subprocess test injects scratch
+    paths through serve()'s keyword parameters (test-only launcher — the
+    shipped main() takes no path argument, BCU-MICRO R3-M2).
     """
     if value < default:
         raise RefuseError(
@@ -452,8 +454,10 @@ def _env_path_override(env_name, value):
 
     BCU R3 H2: UNCONDITIONAL — the former MMOS_CU_TEST_MODE escape is gone
     (a session-settable flag can never loosen a rule). A harness subprocess
-    that needs scratch paths passes them as launch ARGUMENTS instead
-    (main() --state-dir/--runtime/--deny)."""
+    that needs scratch paths starts the server through the TEST-ONLY
+    launcher (tests/mmos_cu_harness_launcher.py → serve() keyword
+    injection) instead; the shipped main() takes no path argument at all
+    (BCU-MICRO R3-M2)."""
     if not _inside_layer(value):
         raise RefuseError(
             "ENV_PATH_OUTSIDE_LAYER",
@@ -850,14 +854,15 @@ def _lease_remaining(lease, now_wall, now_mono):
 # state with one exported variable — forking the lease (a second holder
 # acquires "the" lease) and resetting pacing (missing file = "no record")
 # with zero writes inside the checkout. No environment variable (the former
-# MMOS_CU_STATE_DIR is gone) and no file moves it; only an explicit launch
-# ARGUMENT (--state-dir, the harness path) or constructor injection
-# redirects state. Known limits of a same-uid layer, recorded in the
-# runbook: a session with a shell can still read/write this folder, and a
-# MISSING pacing file reads as "no record" — after the migration the first
-# act on each window is admitted without a wait. When this layer attaches
-# to a teammate, this folder joins that teammate's write-deny roots
-# (registration note; not done in this round).
+# MMOS_CU_STATE_DIR is gone) and no file moves it; only constructor
+# injection (the serve()/build_context() keyword parameters, reached by the
+# test-only harness launcher — the shipped entry point takes NO path
+# argument at all, BCU-MICRO R3-M2) redirects state. Known limits of a
+# same-uid layer, recorded in the runbook: a session with a shell can still
+# read/write this folder, and a MISSING pacing file reads as "no record" —
+# after the migration the first act on each window is admitted without a
+# wait. When this layer attaches to a teammate, this folder joins that
+# teammate's write-deny roots (registration note; not done in this round).
 STATE_DIR = os.path.join(pwd.getpwuid(os.getuid()).pw_dir,
                          ".mastermind", "mmos_computer_use")
 
@@ -886,8 +891,9 @@ class Lease:
     def __init__(self, state_dir=None):
         # BCU R3 M5: FIXED folder outside the checkout (STATE_DIR, 0700).
         # The MMOS_CU_STATE_DIR env override is removed — no environment
-        # value moves the lease state; only a launch argument / constructor
-        # injection (the harness path) redirects it.
+        # value moves the lease state; only constructor injection does
+        # (the state_dir keyword — test-only harness launcher; the shipped
+        # entry point takes no path argument, BCU-MICRO R3-M2).
         self.state_dir = state_dir or STATE_DIR
         self.lease_path = os.path.join(self.state_dir, "lease.json")
         self.lock_path = os.path.join(self.state_dir, "lease.lock")
@@ -3552,12 +3558,15 @@ def _text_result(payload, is_error=False):
 def build_context(state_dir=None, runtime_path=None, deny_path=None):
     """Assemble the production context.
 
-    BCU R3 H2: the optional arguments are LAUNCH-argument injection
-    (main() --state-dir/--runtime/--deny) — the only path-override
-    mechanism left, used by the harness round-trip test and an explicit
-    operator launch line. Environment variables still select only among
-    IN-LAYER paths (MMOS_CU_DENY/MMOS_CU_RUNTIME) and can never lower a
-    floor; nothing a session can set by environment or file loosens a rule.
+    BCU-MICRO (R3-M2): the keyword parameters are CONSTRUCTOR INJECTION
+    only — an in-process path for tests/harness (the test-only launcher
+    tests/mmos_cu_harness_launcher.py passes them through serve()). The
+    shipped entry point main() takes no path argument at all, so nothing a
+    session can place on the MCP registration surface (command + args +
+    env in one config blob) chooses this layer's rules, its binary or its
+    state. Environment variables still select only among IN-LAYER paths
+    (MMOS_CU_DENY/MMOS_CU_RUNTIME) and can never lower a floor; nothing a
+    session can set by environment or file loosens a rule (R3 H2).
     """
     runtime = load_runtime(runtime_path or resolve_runtime_path())
     if deny_path is None:
@@ -3580,7 +3589,8 @@ def build_context(state_dir=None, runtime_path=None, deny_path=None):
 def serve(stdin=None, stdout=None, state_dir=None, runtime_path=None,
           deny_path=None):
     """MCP loop. Readable/writable streams are injectable for tests; the
-    path arguments are the launch-argument injection path (H2)."""
+    path keywords are the constructor-injection path (BCU-MICRO R3-M2:
+    test-only launcher — the shipped entry point never passes them)."""
     stdin = stdin if stdin is not None else sys.stdin
     stdout = stdout if stdout is not None else sys.stdout
 
@@ -3674,28 +3684,28 @@ def serve(stdin=None, stdout=None, state_dir=None, runtime_path=None,
 def main(argv=None):
     """Entry point.
 
-    BCU R3 H2: launch ARGUMENTS (never environment variables) are the only
-    path-override mechanism. --state-dir/--runtime/--deny exist for the
-    harness round-trip test (which passes its scratch state path as an
-    argument) and for an explicit operator launch line; the 180 s floors and
-    the in-layer env-path rule hold unconditionally either way.
+    BCU-MICRO (R3-M2) CLASS RULE: the shipped entry point of a restraining
+    layer takes NO argument that chooses its rules, its binary or its
+    state. The former --runtime/--deny/--state-dir are REMOVED, not
+    restricted: the MCP registration line (command + args + env in one
+    config blob) is exactly the surface this round's threat model treats as
+    session-influenceable, so a launch argument there is an environment
+    variable by another name (--runtime would even name an arbitrary
+    binary with a self-declared sha). The runtime descriptor, the deny
+    list and the state folder come only from the pinned in-layer paths and
+    the fixed 0700 folder; ANY argument is a usage error (exit 2).
+    serve()/build_context() keep their keyword parameters for constructor
+    injection — an in-process path used by the test-only harness launcher
+    (tests/mmos_cu_harness_launcher.py, not part of the installed set),
+    never reachable from this entry point. The 180 s floors and the
+    in-layer env-path rule hold unconditionally either way (R3 H2).
     """
     parser = argparse.ArgumentParser(
         prog=SERVER_NAME,
-        description="Restrained computer-use MCP server (stdio).")
-    parser.add_argument("--state-dir", default=None,
-                        help="lease/pacing state folder (default: the FIXED "
-                             "0700 folder ~/.mastermind/mmos_computer_use, "
-                             "M5 — no environment override exists)")
-    parser.add_argument("--runtime", default=None,
-                        help="runtime descriptor path (default: the pinned "
-                             "in-layer runtime.json / runtime.json.dev)")
-    parser.add_argument("--deny", default=None,
-                        help="deny-list path (default: the in-layer "
-                             "deny.json)")
-    args = parser.parse_args(argv)
-    return serve(state_dir=args.state_dir, runtime_path=args.runtime,
-                 deny_path=args.deny)
+        description="Restrained computer-use MCP server (stdio). No launch "
+                    "argument chooses its rules, its binary or its state.")
+    parser.parse_args(argv)
+    return serve()
 
 
 if __name__ == "__main__":

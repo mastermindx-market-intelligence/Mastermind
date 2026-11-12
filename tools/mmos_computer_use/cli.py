@@ -27,13 +27,17 @@ Environment (M2 hardening; BCU R3 H2 — unconditional, in code):
   MMOS_CU_DENY / MMOS_CU_RUNTIME may only point INSIDE this tool's own
     folder (tools/mmos_computer_use/ or a subdir); anything outside refuses
     at startup, unconditionally. A harness subprocess that needs scratch
-    paths passes them as server launch ARGUMENTS
-    (--state-dir/--runtime/--deny), never as env vars.
+    paths starts the server through the TEST-ONLY launcher
+    tests/mmos_cu_harness_launcher.py (serve() keyword injection), never as
+    env vars: the SHIPPED server entry point takes no path argument at all
+    (BCU-MICRO R3-M2 class rule — the shipped entry point of a restraining
+    layer takes no argument that chooses its rules, its binary or its
+    state).
   The state folder is NOT env-configurable at all (BCU R3 M5): the former
     MMOS_CU_STATE_DIR is ignored entirely; lease + pacing state lives in
-    the fixed 0700 folder ~/.mastermind/mmos_computer_use, outside the
-    checkout. Only the --state-dir launch argument (harness path)
-    redirects it.
+    the fixed 0700 folder ~/.mastermind/mmos_computer_use (home from the
+    password database, never $HOME — R3-M1), outside the checkout, and the
+    shipped entry point offers no argument to redirect it either.
 """
 import argparse
 import json

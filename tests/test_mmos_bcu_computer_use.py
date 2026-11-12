@@ -12,8 +12,9 @@ BCU R3 H2: the server has NO test-mode flag any more — the 180 s floors are
 unconditional in code for every environment/runtime.json value. Sub-default
 thresholds in these tests come from constructor injection (Presence/
 Pacer/_StubPresence arguments), and the subprocess round trip passes its
-scratch paths as server launch ARGUMENTS (--state-dir/--runtime/--deny),
-never as environment variables.
+scratch paths through the TEST-ONLY launcher mmos_cu_harness_launcher.py
+(serve() keyword injection), never as environment variables: the shipped
+server entry point takes no path argument at all (BCU-MICRO R3-M2).
 """
 
 import base64
@@ -29,6 +30,7 @@ import threading
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CHECKOUT = os.path.dirname(HERE)
@@ -1212,9 +1214,13 @@ class TestMcpFraming(unittest.TestCase):
         with open(deny, "w") as handle:
             json.dump(mmos.DEFAULT_DENY, handle)
         self.env = dict(os.environ)
-        # BCU R3 H2: NO MMOS_CU_* path/threshold env for the child — a
-        # subprocess test passes its scratch paths as launch ARGUMENTS. The
+        # BCU R3 H2: NO MMOS_CU_* path/threshold env for the child. The
         # only env the child gets is the fake-peekaboo harness plumbing.
+        # BCU-MICRO (R3-M2): the shipped server.py entry point takes no
+        # path argument, so the round trip starts the server through the
+        # TEST-ONLY launcher (tests/mmos_cu_harness_launcher.py — not part
+        # of the installed set), which injects the scratch paths via
+        # serve()'s keyword parameters.
         for key in ("MMOS_CU_TEST_MODE", "MMOS_CU_RUNTIME",
                     "MMOS_CU_STATE_DIR", "MMOS_CU_DENY",
                     "MMOS_CU_PRESENCE_MIN_IDLE", "MMOS_CU_PACING_SECONDS"):
@@ -1223,9 +1229,9 @@ class TestMcpFraming(unittest.TestCase):
             "FAKE_PEEKABOO_LOG": log,
             "FAKE_PEEKABOO_IDENTITY": IDENTITY_TEXTEDIT,
         })
-        server_py = os.path.join(TOOL_DIR, "server.py")
+        launcher = os.path.join(HERE, "mmos_cu_harness_launcher.py")
         self.proc = subprocess.Popen(
-            [sys.executable, server_py,
+            [sys.executable, launcher,
              "--runtime", write_runtime(self.tmp, bin_path),
              "--state-dir", os.path.join(self.tmp, "state"),
              "--deny", deny],
@@ -2879,6 +2885,54 @@ class TestEnvStrictness(unittest.TestCase):
         os.environ["MMOS_CU_DENY"] = "/tmp/other-deny.json"
         with self.assertRaises(mmos.RefuseError):
             mmos.build_context()
+
+
+class TestShippedEntryPoint(unittest.TestCase):
+    """BCU-MICRO (R3-M2) CLASS RULE: the shipped entry point of a
+    restraining layer takes NO argument that chooses its rules, its binary
+    or its state. --runtime (arbitrary "peekaboo" binary = arbitrary code
+    execution with server privileges, its sha self-declared), --deny
+    (arbitrary rules) and --state-dir (lease fork + pacing reset) are
+    REMOVED from main() — the MCP registration line (command + args + env
+    in one config blob) is the same surface the H2 threat model treats as
+    session-influenceable, so a launch argument there is an environment
+    variable by another name. They survive only as serve()/build_context()
+    KEYWORD parameters: constructor injection, an in-process path the
+    shipped entry point never reaches, used by the test-only launcher
+    tests/mmos_cu_harness_launcher.py (not part of the installed set)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mmos-cu-entry-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_path_arguments_are_usage_errors_and_start_nothing(self):
+        # Fail-first on e69774fa6: the old main() ACCEPTED all three and
+        # handed them straight to serve() — one registration-line edit
+        # could choose the binary, the rules and the state folder. Now each
+        # is an argparse usage error (exit 2) and serve is never reached:
+        # nothing starts.
+        for argv in (["--state-dir", os.path.join(self.tmp, "state")],
+                     ["--runtime", os.path.join(self.tmp, "runtime.json")],
+                     ["--deny", os.path.join(self.tmp, "deny.json")]):
+            err = io.StringIO()
+            with mock.patch.object(mmos, "serve") as fake_serve, \
+                    mock.patch.object(sys, "stderr", err):
+                with self.assertRaises(SystemExit, msg=argv) as caught:
+                    mmos.main(argv)
+            self.assertEqual(caught.exception.code, 2, argv)
+            fake_serve.assert_not_called()
+            self.assertIn("unrecognized arguments", err.getvalue())
+
+    def test_bare_entry_point_still_serves_with_no_path_kwargs(self):
+        # The registration line `python3 server.py` (no args) is unchanged,
+        # and serve() is reached with NO path keyword: the pinned in-layer
+        # descriptor, the in-layer deny list and the fixed state folder are
+        # the only configuration the shipped path can run with.
+        with mock.patch.object(mmos, "serve", return_value=0) as fake_serve:
+            self.assertEqual(mmos.main([]), 0)
+        fake_serve.assert_called_once_with()
 
 
 class TestConfirmAfterHumanActive(unittest.TestCase):

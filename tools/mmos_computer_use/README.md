@@ -213,7 +213,7 @@ pin, and serves MCP over stdio (newline-delimited JSON-RPC 2.0:
 | Variable                   | Meaning                                        |
 |----------------------------|------------------------------------------------|
 | `MMOS_CU_RUNTIME`          | runtime.json path override (must be inside this tool's folder) |
-| `MMOS_CU_STATE_DIR`        | **REMOVED (BCU R3 M5) — ignored entirely.** Lease + pacing state lives in the fixed 0700 folder `~/.mastermind/mmos_computer_use`, outside the checkout; only the `--state-dir` launch argument (harness path) redirects it |
+| `MMOS_CU_STATE_DIR`        | **REMOVED (BCU R3 M5) — ignored entirely.** Lease + pacing state lives in the fixed 0700 folder `~/.mastermind/mmos_computer_use`, outside the checkout, with the home read from the password database (never `$HOME`, R3-M1); nothing on the shipped entry point redirects it (BCU-MICRO R3-M2 removed `--state-dir`) — only the in-process `serve()` keyword (test-only launcher) does |
 | `MMOS_CU_PRESENCE_MIN_IDLE`| human-idle threshold seconds; default 180, values below it refuse UNCONDITIONALLY |
 | `MMOS_CU_PACING_SECONDS`   | minimum interval between input-delivering acts; default 180, values below it refuse UNCONDITIONALLY |
 | `MMOS_CU_DENY`             | deny.json path override (must be inside this tool's folder) |
@@ -232,9 +232,11 @@ worktree copy can never fork it; the former `MMOS_CU_STATE_DIR` variable is
 ignored. The `~` is the home from the PASSWORD DATABASE
 (`pwd.getpwuid(os.getuid()).pw_dir`), never `$HOME` — a session-exported
 `HOME` cannot move the state folder either (BCU-MICRO R3-M1). A harness
-subprocess that needs scratch paths passes them as
-server launch ARGUMENTS (`--state-dir`, `--runtime`, `--deny`), never as
-environment variables. Known limit of a same-uid layer (runbook): a session
+subprocess that needs scratch paths starts the server through the
+TEST-ONLY launcher `tests/mmos_cu_harness_launcher.py`, which injects them
+via `serve()`'s keyword parameters — never as environment variables and
+never as launch arguments of the shipped entry point (BCU-MICRO R3-M2).
+Known limit of a same-uid layer (runbook): a session
 with a shell can still read/write that folder, and a missing pacing file
 reads as "no record".
 
@@ -259,6 +261,20 @@ runtime.json value below the default refuses startup
   }
 }
 ```
+
+The shipped entry point takes **no argument that chooses its rules, its
+binary or its state** (BCU-MICRO R3-M2 class rule): `--runtime`, `--deny`
+and `--state-dir` were REMOVED from `main()`, and any argument is a usage
+error (exit 2). The registration line above runs the pinned in-layer
+descriptor, the in-layer deny list and the fixed state folder — the same
+configuration for every attach, because the MCP registration surface
+(command + args + env in one config blob) is treated as
+session-influenceable. The harness round-trip test uses the TEST-ONLY
+launcher `tests/mmos_cu_harness_launcher.py`, which is **not part of the
+installed set**; the installed set is `server.py`, `cli.py` and the
+in-layer `runtime.json`/`deny.json`. Known limit (runbook): whoever writes
+the registration line chooses the program that runs, and no code inside
+the server can change that — writing it is the principal's act only.
 
 ## Tool actions → peekaboo commands
 
