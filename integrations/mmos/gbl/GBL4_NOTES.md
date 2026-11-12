@@ -433,6 +433,15 @@ Delta check 2 at `337b145d1`: 4/4 delta-1 items CLOSED, no new HIGH,
   duplicate minted, the stored events survive and the record reads back
   intact once restored — tested end-to-end including the trusted answer
   event.
+- **F3 (MED-note, fixed — about 13 lines)** — the first-use key create
+  sat inside the `except FileNotFoundError` handler, so `os.open`
+  failures other than `FileExistsError` (EACCES/EROFS/ELOOP) and
+  `os.write` failures (ENOSPC family) escaped RAW out of
+  `read_ask`/`append_ask_event`.  Both steps now raise the typed
+  `HMAC_KEY_UNWRITABLE`; a partial file left by a failed write fails
+  closed on the next use as `HMAC_KEY_INVALID`.  Tests failing first:
+  a 0555 state dir (real EACCES → raw `PermissionError` before) and a
+  simulated ENOSPC on the write (raw `OSError` before).
 
 
 

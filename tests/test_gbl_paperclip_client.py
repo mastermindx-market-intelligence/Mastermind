@@ -1510,6 +1510,46 @@ class TestHmacKeyLaw:
         finally:
             os.chmod(state, 0o700)
 
+    # -- panel B delta 2, F3: first-use create/write failures stay typed -------
+
+    def test_unwritable_state_dir_is_a_typed_error(self, fake, tmp_path):
+        # F3: EACCES from the first-use os.open escaped untyped — the open
+        # sits inside the FileNotFoundError handler, out of the outer
+        # typed catch's reach.
+        state = tmp_path / "state"
+        state.mkdir()
+        os.chmod(state, 0o555)               # readable, not writable
+        try:
+            path = state / "hmac_v1.key"
+            ask_client = client(fake, hmac_key_path=path)
+            ask_id = self._created(fake, ask_client)
+            with pytest.raises(GblPaperclipError) as err:
+                ask_client.append_ask_event(
+                    ask_id, {"type": "state", "state": "ANSWERED"})
+            assert "HMAC_KEY" in err.value.code
+        finally:
+            os.chmod(state, 0o700)
+
+    def test_failed_first_use_write_is_a_typed_error(self, fake, tmp_path,
+                                                     monkeypatch):
+        # F3: an OSError out of the first-use os.write (ENOSPC family)
+        # also escaped untyped.
+        state = tmp_path / "state"
+        state.mkdir()
+        path = state / "hmac_v1.key"
+        ask_client = client(fake, hmac_key_path=path)
+        ask_id = self._created(fake, ask_client)
+
+        def refused(_fd, _data):
+            raise OSError(28, "simulated no space left on device")
+
+        monkeypatch.setattr(pc.os, "write", refused)
+        with pytest.raises(GblPaperclipError) as err:
+            ask_client.append_ask_event(ask_id,
+                                        {"type": "state",
+                                         "state": "ANSWERED"})
+        assert "HMAC_KEY" in err.value.code
+
     def test_a_tagged_event_without_a_configured_key_is_typed(self, fake):
         # Not silent "untrusted": a tagged event proves a key exists; a
         # client with no key configured fails closed and visibly.

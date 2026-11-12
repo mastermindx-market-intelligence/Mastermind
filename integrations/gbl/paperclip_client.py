@@ -275,9 +275,23 @@ def _load_or_create_hmac_key(path: Path) -> bytes:
                 raise GblPaperclipError(
                     "HMAC_KEY_UNREADABLE",
                     f"cannot state {path}: {type(exc).__name__}") from None
+        except OSError as exc:
+            # F3: EACCES/EROFS/ELOOP … at the anchor are a typed local-law
+            # error, never a raw escape into the record paths (the open
+            # sits inside this handler, out of the outer catch's reach).
+            raise GblPaperclipError(
+                "HMAC_KEY_UNWRITABLE",
+                f"cannot create {path}: {type(exc).__name__}") from None
         else:
             try:
                 os.write(handle, data)
+            except OSError as exc:
+                # F3 (ENOSPC family): typed, never a raw escape.  A
+                # partial file, if one remains, fails closed on the next
+                # use as HMAC_KEY_INVALID.
+                raise GblPaperclipError(
+                    "HMAC_KEY_UNWRITABLE",
+                    f"cannot write {path}: {type(exc).__name__}") from None
             finally:
                 os.close(handle)
             return data
