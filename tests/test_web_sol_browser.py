@@ -193,19 +193,27 @@ def test_native_tool_schema_matches_consumer():
 
 
 def test_bridge_emit_never_fails_on_unencodable_reply_text(monkeypatch):
-    # p1#7: page-produced text can reach the reply carrying lone surrogates
-    # (JSON \ud800 escapes are valid JSON strings). The stdout write is the
-    # operator's only reply channel, so it must never raise: it falls back to
-    # ASCII escaping, and the operator still receives one parseable reply.
+    # p1#7 + ruling 15 item 4: page-produced text can reach the reply
+    # carrying lone surrogates — high (\ud800) or low (\udc80) — and the
+    # operator's only reply channel is stdout. The bridge encodes strictly
+    # itself and writes bytes through sys.stdout.buffer: a text layer with
+    # errors="surrogateescape" (the default for the spawned subprocess under
+    # plain, PYTHONUTF8=1 and LC_ALL=C) passes low surrogates through as raw
+    # bytes and would emit an invalid UTF-8 line without raising. One
+    # parseable reply always arrives.
     raw=io.BytesIO()
-    stream=io.TextIOWrapper(raw,encoding="utf-8",newline="")
+    stream=io.TextIOWrapper(raw,encoding="utf-8",errors="surrogateescape",newline="")
     monkeypatch.setattr(bridge.sys,"stdout",stream)
     bridge._emit({"state":"RECEIPT","data":{"content":"end \ud800 tail"}})
+    bridge._emit({"state":"RECEIPT","data":{"content":"low \udc80 tail"}})
     stream.flush()
-    line=raw.getvalue()
-    parsed=json.loads(line.decode("utf-8"))
-    assert parsed["data"]["content"]=="end \ud800 tail"
-    assert line.decode("ascii")==line.decode("utf-8"),"the fallback escapes the surrogate"
+    lines=raw.getvalue().split(b"\n")
+    assert lines[-1]==b""
+    for line in lines[:-1]:
+        json.loads(line.decode("utf-8"))
+    assert all(line for line in lines[:-1]),"every emitted line is strict-valid UTF-8"
+    assert json.loads(lines[0].decode("utf-8"))["data"]["content"]=="end \ud800 tail"
+    assert json.loads(lines[1].decode("utf-8"))["data"]["content"]=="low \udc80 tail"
     # An ordinary non-ASCII payload keeps the compact unescaped channel.
     raw.seek(0); raw.truncate()
     bridge._emit({"state":"RECEIPT","data":{"content":"café 𝕏"}})

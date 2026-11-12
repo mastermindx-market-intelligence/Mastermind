@@ -32,8 +32,10 @@ correct inserts wrong), truthful textContent fallback, fill line cap + time
 bound (no tab freeze), UTF-16-unit fill cap, the paged `read` action, the
 ruling-13 fill settle (APPLIED = the box held the asked content at the re-read
 after the page's pending microtasks plus one settle interval of 250 ms; a page
-that changes the box later is outside the receipt), and a stdout guard so a
-reply carrying unencodable text still reaches the operator ASCII-escaped.
+that changes the box later is outside the receipt), and a stdout guard that
+strictly encodes each reply and writes bytes through `sys.stdout.buffer`,
+falling back to ASCII escaping so a reply carrying unencodable text (lone
+surrogates) still reaches the operator as one parseable line.
 
 The final round also changes extension-side files (`browser_page.js`,
 `browser_control.js` in `integrations/chairman_surfaces/web_sol_extension/`).
@@ -59,7 +61,7 @@ use the full values already present in runtime.json for those).
 | integrations/chairman_surfaces/web_sol_native_host.py | unchanged (d2379ef5…) |
 | integrations/chairman_surfaces/web_sol_protocol.py | unchanged (c8d276a5…) |
 | integrations/hermes_harness/__init__.py | unchanged (0c924141…) |
-| integrations/hermes_harness/browser_bridge.py | **b47987fca67521a7647e5c801d6fe60e85a2044ad934b840bdda8c5e76328cd5** |
+| integrations/hermes_harness/browser_bridge.py | **4ff2113f4eebf9abbfc4aa847a1264f95e01d549459c9b08bae1d6a9460db67f** |
 | integrations/hermes_harness/browser_routes.py | unchanged (ec58abff…) |
 | integrations/hermes_harness/browser_tool_schema.json | **08c4066074d7ac5cbc21943b8bdb4d33262b2291121c30ed493c60c8fd516edb** |
 
@@ -134,3 +136,6 @@ Read-contract limits, in plain sentences:
   held the asked content at the re-read after the page's pending microtasks
   plus one settle interval (250 ms in this build) — a page that changes the
   box later is outside the receipt.
+- `settle_interval_ms` is a floor, not a ceiling: hidden tabs throttle
+  timers, so a fill in a hidden tab settles later than 250 ms — do not
+  timeout-and-retry a fill that may have applied.

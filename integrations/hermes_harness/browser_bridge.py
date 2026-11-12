@@ -284,13 +284,20 @@ def _unique(pairs):
 
 def _emit(result):
     # The stdout write is the operator's only reply channel. Page-produced
-    # text can carry lone surrogates (JSON \ud800 escapes), which no UTF-8
-    # stream can encode; on UnicodeEncodeError re-emit ASCII-escaped so the
-    # operator still receives exactly one parseable reply instead of none.
+    # text can carry lone surrogates (JSON \ud800/\udc80 escapes), which no
+    # strict UTF-8 encode accepts. Encode explicitly and write the bytes
+    # through sys.stdout.buffer: a text-layer stdout with
+    # errors="surrogateescape" (the default for this spawned subprocess)
+    # passes low surrogates through as raw bytes and would emit an invalid
+    # UTF-8 line without raising. On a failed strict encode, re-emit
+    # ASCII-escaped so the operator still receives exactly one parseable
+    # reply.
     try:
-        sys.stdout.write(json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n")
+        data = (json.dumps(result, ensure_ascii=False, allow_nan=False, separators=(",", ":")) + "\n").encode("utf-8", "strict")
     except UnicodeEncodeError:
-        sys.stdout.write(json.dumps(result, ensure_ascii=True, allow_nan=False, separators=(",", ":")) + "\n")
+        data = (json.dumps(result, ensure_ascii=True, allow_nan=False, separators=(",", ":")) + "\n").encode("ascii")
+    sys.stdout.buffer.write(data)
+    sys.stdout.buffer.flush()
 
 
 def main(argv=None):
