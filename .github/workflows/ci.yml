@@ -548,6 +548,10 @@ jobs:
 
       # A root-only finite owner must have positive proof, not skipped tests.
       # The container receives only tracked public source and disposable tmpfs.
+      # The same isolated root fixture proves BOTH the application transport
+      # and the capacity transport: require_proof.py lists both suites and
+      # requires every root-gated capacity install/rollback node, so a skipped
+      # capacity mutation can no longer pass as green CI.
       # Same outage hardening as the H1 fixture above: the image is a pure
       # function of the pinned Dockerfile, so restore the previously built
       # bytes from the Actions cache and run apt only on a genuine cache miss.

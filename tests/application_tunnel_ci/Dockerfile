@@ -19,7 +19,8 @@ RUN set -eu; \
         fi; \
         sleep 5; \
     done
-ENV PYTHONPATH=/repo PYTHONDONTWRITEBYTECODE=1 MM_APPLICATION_TRANSPORT_TEST_ROOT=/fixture
+ENV PYTHONPATH=/repo PYTHONDONTWRITEBYTECODE=1 MM_APPLICATION_TRANSPORT_TEST_ROOT=/fixture \
+    MM_CAPACITY_TRANSPORT_TEST_ROOT=/fixture
 WORKDIR /repo
 USER 0:0
 CMD ["/usr/bin/python3.12", "-B", "tests/application_tunnel_ci/require_proof.py"]

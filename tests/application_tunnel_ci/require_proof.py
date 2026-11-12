@@ -12,9 +12,13 @@ def main():
     if os.geteuid() != 0 or not sys.platform.startswith("linux"):
         raise SystemExit("the transport proof requires its isolated Linux root fixture")
     root = Path(__file__).resolve().parents[2]
+    # The capacity purpose shares the incumbent server and its authfile, so its
+    # root-gated lifecycle is proven in this same isolated root fixture: outside
+    # it those tests skip, and a skipped install/rollback is not evidence.
     suites = ["tests/test_application_tunnel_entry.py", "tests/test_application_tunnel_control.py",
               "tests/test_application_tunnel_lifecycle.py", "tests/test_os_tunnel_entry.py",
-              "tests/test_hermes_primary_application_tunnel.py", "tests/test_application_tunnel_home.py"]
+              "tests/test_hermes_primary_application_tunnel.py", "tests/test_application_tunnel_home.py",
+              "tests/test_capacity_tunnel_entry.py", "tests/test_capacity_tunnel_control.py"]
     with tempfile.TemporaryDirectory(prefix="application-transport-proof-") as directory:
         report = Path(directory) / "proof.xml"
         result = subprocess.run([sys.executable, "-B", "-m", "pytest", "-q", "-o", "addopts=",
@@ -38,12 +42,24 @@ def main():
                     "test_server_lost_ack_reconciles_original_committed_grant",
                     "test_loaded_label_without_running_pid_cannot_claim_start",
                     "test_actual_linux_process_image_observation_binds_this_running_python",
-                    "test_actual_application_reader_accepts_owned_private_file_without_acl"}
+                    "test_actual_application_reader_accepts_owned_private_file_without_acl",
+                    "test_stage_records_the_capacity_identity_and_a_closed_server_bundle",
+                    "test_stage_refuses_a_credential_rotation_on_the_original_operation",
+                    "test_apply_server_adds_one_capacity_acl_and_preserves_the_incumbent",
+                    "test_apply_server_is_serialized_on_the_incumbent_application_server_lock",
+                    "test_apply_client_installs_only_capacity_targets_and_lifecycle_is_proven",
+                    "test_start_client_refuses_without_a_proven_server_grant",
+                    "test_apply_client_refuses_a_target_that_changed_after_the_stage",
+                    "test_rollback_restores_the_incumbent_authfile_and_removes_only_capacity_files",
+                    "test_rollback_never_touches_an_application_owned_authfile_entry",
+                    "test_rollback_preserves_an_application_grant_added_after_the_capacity_apply",
+                    "test_rollback_refuses_when_the_capacity_entry_itself_drifted"}
         observed = {node.get("name") for node in document.iter("testcase")}
         if not required <= observed or totals["tests"] < len(required) or any(
                 totals[key] for key in ("failures", "errors", "skipped")):
             raise SystemExit("required positive transport proof missing: " + json.dumps(totals, sort_keys=True))
-        print("APPLICATION_TRANSPORT_SOURCE_PROOF " + json.dumps(totals, sort_keys=True))
+        print("TRANSPORT_SOURCE_PROOF " + json.dumps(totals, sort_keys=True))
+        print("Proves both the application and capacity transport root suites.")
         print("Synthetic fixtures only; no installed grant, daemon, tunnel or provider effect.")
 
 
