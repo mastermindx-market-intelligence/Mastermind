@@ -70,9 +70,17 @@ RESTART_BACKUP_NAMES = frozenset({".claude.json.backup",
 RUNTIME_PRIVATE_NAMES = frozenset({"cutover-preimage.json",
                                    "cutover-result.json", "carrier.json",
                                    "tool-limits.json"})
+# Lane HM: the earlier conversations exported from the bot's previous
+# runtime. Readable (it is the teammate's own past), never writable: a
+# teammate must not be able to rewrite its own record.
+READ_ONLY_NAMES = frozenset({"history"})
+# Lane HM: the only MCP namespace a gate config may allow by name. A
+# config listing any other MCP tool is refused whole (fail closed).
+ALLOWED_MCP_PREFIX = "mcp__memory-link__"
 # the write fence: nobody may create/replace any of these through tools
 PROTECTED_NAMES = (CLAUDE_CONFIG_NAMES | RESTART_BACKUP_NAMES |
-                   RUNTIME_PRIVATE_NAMES | frozenset({"CHARTER.md"}))
+                   RUNTIME_PRIVATE_NAMES | READ_ONLY_NAMES |
+                   frozenset({"CHARTER.md"}))
 # One unreadable set (repair round 2 R3/M5, extended by panel 3 H-2) used
 # by Read, Glob and Grep alike: everything above except CHARTER.md, which
 # the teammate reads as its charter. The families in unreadable_name cover
@@ -228,10 +236,22 @@ def load_config(argv):
     for key in ("home",):
         if not isinstance(config.get(key), str) or not config[key]:
             refuse(f"gate config missing '{key}'; refusing")
-    for key in ("read_roots", "deny_reads", "write_names"):
+    for key in ("read_roots", "deny_reads", "write_names",
+                "allow_mcp_tools"):
         value = config.get(key)
         if value is not None and not isinstance(value, list):
             refuse(f"gate config '{key}' is not a list; refusing")
+    # Lane HM: exact MCP tool names, memory-link namespace only. Any other
+    # entry refuses the whole config: a typo or a broad grant must never
+    # widen a teammate's tools silently.
+    mcp_names = config.get("allow_mcp_tools") or []
+    for name in mcp_names:
+        if (not isinstance(name, str)
+                or not name.startswith(ALLOWED_MCP_PREFIX)
+                or not re.fullmatch(r"mcp__memory-link__[a-z_]{1,40}", name)):
+            refuse("gate config 'allow_mcp_tools' may list only exact "
+                   f"{ALLOWED_MCP_PREFIX}<tool> names; refusing")
+    config["allow_mcp_tools"] = frozenset(mcp_names)
     # M-R1 (panel 3): config-side paths get the SAME firmlink/case
     # canonicalization tool paths get, so a config spelled in the
     # /System/Volumes/Data form cannot dodge the home-relative checks (a
@@ -618,6 +638,8 @@ def decide(payload):
     if tool in SEARCH_TOOLS:
         return check_search(tool_input, cwd, cfg)
     if tool in FREE_TOOLS:
+        return None
+    if tool in cfg.get("allow_mcp_tools", frozenset()):
         return None
     return f"tool {tool} is not on this teammate's allowlist"
 

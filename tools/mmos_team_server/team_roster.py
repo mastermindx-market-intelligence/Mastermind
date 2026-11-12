@@ -216,6 +216,29 @@ def load_spec(path):
                 f"{mate['slug']!r}")
         if mate["slug"] in slugs:
             die(f"duplicate slug {mate['slug']!r}")
+        link = mate.get("memory_link")
+        if link is not None:
+            # Lane HM: the memory link is one MCP server, wired by a config
+            # file under <server root>/config/ (server-private: no teammate
+            # can read or rewrite what it launches) and gated by exact tool
+            # names in the memory-link namespace only.
+            if not isinstance(link, dict) or set(link) != {"mcp_config",
+                                                           "tools"}:
+                die(f"{where}.memory_link must be an object with exactly "
+                    "'mcp_config' and 'tools'")
+            tools = link["tools"]
+            if (not isinstance(tools, list) or not tools or any(
+                    not isinstance(t, str) or not re.fullmatch(
+                        r"mcp__memory-link__[a-z_]{1,40}", t)
+                    for t in tools)):
+                die(f"{where}.memory_link.tools must list exact "
+                    "mcp__memory-link__<tool> names")
+            cfg_dir = os.path.join(os.path.realpath(expand(server["root"])),
+                                   "config", "memory-link")
+            target = os.path.realpath(expand(str(link["mcp_config"])))
+            if os.path.dirname(target) != cfg_dir or " " in target:
+                die(f"{where}.memory_link.mcp_config must be a file directly "
+                    f"in {cfg_dir} (no spaces)")
         if mate["accent_color"].lower() in colors:
             die(f"duplicate accent_color {mate['accent_color']!r}")
         if "—" in mate["name"] or mate["name"] != mate["name"].strip():
@@ -279,6 +302,32 @@ def t3_json(proc, what):
         die(f"{what} failed (exit {proc.returncode}): "
             f"{(proc.stderr or proc.stdout).strip()[:300]}")
     return payload
+
+
+# Lane HM finding at server pin 0770446: the server applies a settings.json
+# write about a second later (fs.watch, 100 ms debounce, then a provider
+# registry rebuild), so a thread start sent in that window is refused as
+# "Provider instance ... is disabled for project". No restart is needed: the
+# same start succeeds once the reload has landed. Only that refusal is
+# retried, a bounded number of times.
+SETTINGS_LAG_MARKER = "is disabled for project"
+SETTINGS_LAG_ATTEMPTS = 5
+SETTINGS_LAG_WAIT_S = 2.0
+
+
+def start_thread_after_settings(spec, args, what):
+    for attempt in range(1, SETTINGS_LAG_ATTEMPTS + 1):
+        proc = t3(spec, args)
+        text = (proc.stderr or "") + (proc.stdout or "")
+        if (proc.returncode != 0 and SETTINGS_LAG_MARKER in text
+                and attempt < SETTINGS_LAG_ATTEMPTS):
+            log(f"{what}: server has not applied the new settings yet; "
+                f"retrying in {SETTINGS_LAG_WAIT_S:g} s "
+                f"({attempt}/{SETTINGS_LAG_ATTEMPTS})")
+            time.sleep(SETTINGS_LAG_WAIT_S)
+            continue
+        return t3_json(proc, what)
+    return None  # unreachable
 
 
 def db(spec):
@@ -434,6 +483,12 @@ SERVER_PRIVATE = ("run", "home", "config", "bin", "runtime", "claude-home",
 # the gate derives from the same sets directly.
 HOME_LOCKED = tuple(sorted(frozenset({"CHARTER.md"}) |
                            _gate.RUNTIME_PRIVATE_NAMES |
+                           # RF-MEMLINK (b): the history archive is read-only
+                           # for the teammate (ruling 22 accepts a residual
+                           # reader, never a writer), so the rule layer must
+                           # carry its deny — a write fence is never held by
+                           # the PreToolUse hook alone.
+                           _gate.READ_ONLY_NAMES |
                            _gate.RESTART_BACKUP_NAMES))
 # What a teammate may not even READ in its own home: the whole Claude
 # configuration class plus this deployment's private runtime files (the
@@ -693,12 +748,15 @@ def gate_config(spec, mate):
     write_names = spec.get("home_write_allow")
     if write_names is not None and not write_names:
         write_names = []
-    return {
+    out = {
         "home": home,
         "read_roots": read_roots,
         "deny_reads": deny_reads,
         "write_names": write_names,
     }
+    if mate.get("memory_link"):
+        out["allow_mcp_tools"] = list(mate["memory_link"]["tools"])
+    return out
 
 
 def gate_sha256():
@@ -1060,6 +1118,9 @@ def instance_for(spec, mate):
         "--append-system-prompt-file", charter_path,
         "--settings", limits_path,
     ]
+    if mate.get("memory_link"):
+        launch_args += ["--mcp-config", os.path.realpath(
+            expand(mate["memory_link"]["mcp_config"]))]
     return {
         "driver": "claudeAgent",
         "displayName": mate["name"],
@@ -1303,10 +1364,10 @@ def ensure_threads(spec, project_id):
     # so one teammate's refusal leaves the whole roster untouched.
     for mate in to_create:
         title = teammate_title(mate)
-        launched = t3_json(t3(spec, [
+        launched = start_thread_after_settings(spec, [
             "thread", "start", project_id, "Reply with just: READY",
             "--provider", mate["instance"], "--model", spec["model"],
-            "--title", title, "--json"]), "t3 thread start")
+            "--title", title, "--json"], "t3 thread start")
         threads[mate["name"]] = {"threadId": launched["threadId"],
                                  "projectId": project_id, "pinnedAt": None,
                                  "currentTitle": title,

@@ -21,7 +21,7 @@ HYPHEN_GUARD = "‐"
 NOTE_CAP = 4000
 CAPTURE_TYPES = frozenset({"fact", "decision", "lesson", "procedure", "episode"})
 TEAMMATE_RE = re.compile(r"^[a-z0-9-]+$")
-TAG_RE = re.compile(r"^[a-z0-9-]{1,32}$")
+TAG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 CHILD_PATH = "/usr/bin:/bin"
 
 CREDENTIAL_RE = re.compile(
@@ -152,8 +152,12 @@ def rpc_result(req_id: Any, result: Any) -> None:
 
 
 def tool_payload(text: str, max_chars: int, is_error: bool = False) -> dict[str, Any]:
+    # RF-MEMLINK (a), class rule: nothing leaves the link unredacted. Every
+    # tools/call reply passes here — note bodies, recall summaries and
+    # subjects, save receipts and error excerpts alike — so the server's own
+    # redact() runs at this one choke point, before the output cap.
     body: dict[str, Any] = {
-        "content": [{"type": "text", "text": cap_text(text, max_chars)}]
+        "content": [{"type": "text", "text": cap_text(redact(text), max_chars)}]
     }
     if is_error:
         body["isError"] = True
@@ -208,7 +212,8 @@ def tool_schemas(cfg: dict[str, Any]) -> list[dict[str, Any]]:
                         "tags": {
                             "type": "array",
                             "maxItems": 4,
-                            "items": {"type": "string", "pattern": r"^[a-z0-9-]{1,32}$"},
+                            "items": {"type": "string",
+                                      "pattern": TAG_RE.pattern},
                         },
                     },
                     "required": ["summary", "type"],

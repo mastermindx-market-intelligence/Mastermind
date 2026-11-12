@@ -67,7 +67,10 @@ if (HERE / "omh_sleep").exists():
     time.sleep(30)
 
 if (HERE / "omh_fail").exists():
-    sys.stderr.write("store refused: not admissible\n")
+    if (HERE / "omh_secret").exists():
+        sys.stderr.write("store refused: token: abc123\n")
+    else:
+        sys.stderr.write("store refused: not admissible\n")
     sys.exit(1)
 
 args = sys.argv[1:]
@@ -87,13 +90,15 @@ if sub == "capture":
 else:
     kind = args[args.index("--scope-kind") + 1] if "--scope-kind" in args else ""
     ref = args[args.index("--scope-ref") + 1] if "--scope-ref" in args else ""
+    secret = (HERE / "omh_secret").exists()
     out = {
         "included_records": [
             {
                 "record_id": "rec-1" if kind == "user-global" else "rec-own",
                 "scope": {"kind": kind, "ref": ref},
-                "summary": "Alpha uses confirmation over prediction",
-                "subject": "doctrine",
+                "summary": ("Alpha uses confirmation token: abc123" if secret
+                            else "Alpha uses confirmation over prediction"),
+                "subject": "password: doctrine" if secret else "doctrine",
                 "tags": ["doctrine"],
                 "record_type": "fact",
                 "approved_at": "2026-11-01T00:00:00Z",
@@ -525,3 +530,102 @@ def test_own_section_survives_output_cap(harness: Harness):
     assert len(text) <= 200
     budgets = [int(c["argv"][c["argv"].index("--max-chars") + 1]) for c in harness.omh_log()]
     assert all(b <= 100 for b in budgets)
+
+
+# --- RF-MEMLINK item (a): nothing leaves the link unredacted. The server's own
+# redact() now runs at the one choke point every tools/call reply passes
+# through, so the note bodies, the recall summaries and subjects, and the error
+# excerpts are covered alike. MED-1 of the 2026-11-12 independent review.
+
+
+def test_notes_are_redacted_before_they_leave(harness: Harness):
+    notes = harness.tmp / "notes"
+    notes.mkdir()
+    (notes / "MEMORY.md").write_text("my password: hunter2\n", encoding="utf-8")
+    (notes / "USER.md").write_text(
+        "-----BEGIN RSA PRIVATE KEY-----\nZZZ\n", encoding="utf-8")
+    cfg = harness.write_config(profile_memory_dir=str(notes))
+    harness.start(cfg)
+    harness.handshake()
+    text = harness.tool_text(harness.call_tool("memory_notes", {}))
+    assert "MEMORY.md" in text and "USER.md" in text  # still a notes reply
+    assert "[redacted]" in text
+    assert "password:" not in text
+    assert "PRIVATE KEY" not in text
+
+
+def test_recall_redacts_summary_and_subject(harness: Harness):
+    (harness.tmp / "omh_secret").write_text("1", encoding="utf-8")
+    cfg = harness.write_config()
+    harness.start(cfg)
+    harness.handshake()
+    text = harness.tool_text(harness.call_tool("memory_recall", {"query": "confirmation"}))
+    assert "rec-own" in text and "rec-1" in text  # the records still arrive
+    assert "[redacted]" in text
+    assert "token:" not in text
+    assert "password:" not in text
+
+
+def test_error_excerpt_is_redacted(harness: Harness):
+    (harness.tmp / "omh_secret").write_text("1", encoding="utf-8")
+    (harness.tmp / "omh_fail").write_text("1", encoding="utf-8")
+    cfg = harness.write_config()
+    harness.start(cfg)
+    harness.handshake()
+    resp = harness.call_tool("memory_recall", {"query": "confirmation"})
+    assert resp["result"].get("isError") is True
+    text = harness.tool_text(resp)
+    assert "[redacted]" in text
+    assert "token:" not in text
+
+
+# --- RF-MEMLINK item (c): no tag may start with a dash. A caller-supplied tag
+# is one argv token in option position; the store program must never see a
+# value that begins with '-'. LOW of the 2026-11-12 independent review.
+
+
+def test_tag_may_not_start_with_a_dash(harness: Harness):
+    cfg = harness.write_config(write_enabled=True)
+    harness.start(cfg)
+    harness.handshake()
+    resp = harness.call_tool(
+        "memory_save",
+        {
+            "summary": "we chose confirmation over prediction",
+            "type": "decision",
+            "tags": ["--scope-kind"],
+        },
+    )
+    assert resp["result"].get("isError") is True
+    assert harness.tool_text(resp) == "invalid tags"
+    assert harness.omh_log() == []  # the store program was never started
+
+
+def test_tag_starting_with_a_digit_is_still_a_tag(harness: Harness):
+    cfg = harness.write_config(write_enabled=True)
+    harness.start(cfg)
+    harness.handshake()
+    resp = harness.call_tool(
+        "memory_save",
+        {
+            "summary": "we chose confirmation over prediction",
+            "type": "decision",
+            "tags": ["2026-plan"],
+        },
+    )
+    assert harness.tool_text(resp) == "saved rec-new (auto_approved=true)"
+    assert "2026-plan" in harness.last_omh()["argv"]
+
+
+def test_schema_pattern_and_tag_re_agree(harness: Harness):
+    cfg = harness.write_config(write_enabled=True)
+    harness.start(cfg)
+    harness.handshake()
+    tools = harness.rpc("tools/list")["result"]["tools"]
+    save = next(t for t in tools if t["name"] == "memory_save")
+    pattern = save["inputSchema"]["properties"]["tags"]["items"]["pattern"]
+    import re as _re
+    assert _re.fullmatch(pattern, "2026-plan")
+    assert not _re.fullmatch(pattern, "--scope-kind")
+    assert not _re.fullmatch(pattern, "-x")
+
