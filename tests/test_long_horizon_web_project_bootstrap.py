@@ -57,7 +57,7 @@ def test_default_preserves_real_stops_and_existing_safety_fences():
         "a proven ACTIVE_EXECUTION boundary",
         "never pad time",
         "No denied-effect/EFFECT_UNKNOWN carrier swap",
-        "Explicit safety/permission denial ends that action",
+        "Restrict only proven denied effects",
         "never self-approve/self-merge/falsify/bypass",
         "Never bulk-arm/clear other holds",
         "Native review != GitHub APPROVED",
