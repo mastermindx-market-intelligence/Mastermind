@@ -1606,3 +1606,49 @@ changed by any lane. T3's own worktrees are on the internal disk and are not aff
 pool diagnosis and reclaim. The browser lane's rehearsed release. The ask-and-return micro-fix and
 carrier refresh. The launcher rewrite, then the Grok Bot link proofs and one sitting. Computer-use
 runs, the delta check and my choice of homes.
+
+## 39. Amendment, 2026-11-12 04:10 UTC: Paper is connected, the pool diagnosis is in
+
+**Paper, installed by me (03:41 to 03:57 UTC).** I read every staged script and the source at the
+lane's commit before running anything. Each staged hash matched and each step ran as written.
+
+- The design skillpack is installed in the T3 skill bundle on the M2 and on ubuntu2. It carries the
+  carrier rules, the ten-step studio protocol, the design-memory convention, a batch screenshot
+  exporter and five specialist child briefs (art director, canvas designer, design critic, UI
+  implementer, visual verifier).
+- A new guarded Paper runtime is built on the M2. It replaces nothing.
+- ubuntu2 has one key for the design profile, admitted on the M2 for one fixed command only, and
+  one new MCP entry in its provider home. Checked from ubuntu2 over the real route: five tools
+  listed, the inspect call answered connected, a requested shell command was ignored and a
+  terminal was refused.
+- Both programme leads have the notice: what already lives in Paper for them, how to connect, the
+  one-writer rule, the skills, the specialist briefs, the holds and the limits.
+
+**Not yet proven, so not yet opened.** A read and a screenshot from a new T3 session on ubuntu2
+through the registered entry, and one guarded edit with readback on a throwaway file, including a
+stale-snapshot refusal. Until the lane returns that proof, remote guarded edits stay held; reads
+and screenshots are open. The Prophet lead was told this in the notice and gets one line when it
+changes.
+
+**Still to install.** The read profile on the other linked hosts, one host at a time, after the
+session proof passes. The lane stages a keygen brief and a register brief per host and says which
+hosts cannot take the route as staged. Then the qualification fix for the three tools the guarded
+server does not yet admit, and a guarded local registration on the M2 to replace the vendor relay.
+
+**Two defects in the staged text, returned to the lane.** The notice said two skill folders on the
+M2 are links into the bundle; they are real folders without these skills. The install steps gave
+no way to list the hidden registration backup, and a child rightly stopped there.
+
+**The worktree pool.** The read-only lane found one cause. The scheduled reaper's Python process is
+denied reads on both external volumes by the operating system's privacy control, so every tree is
+judged an error and none is ever safe. Separately, the scheduled job is started with both the apply
+and the dry-run flags, so it could not remove anything even if it could read. Space is going at
+about 11 GiB an hour per volume: 152 new trees were minted in one day and nothing is reclaimed.
+Candidates on the second volume alone: 146 clean, merged, idle trees, about 190 GiB. A further 779
+orphaned folders are outside the reaper's scope and need their own ruled path.
+
+What I do with it: run the incumbent reaper from this session, report-only first, and apply only
+if it classifies and only through its own guards (three days old, content on the remote, clean, no
+process inside, non-force removal, human roots protected). I change neither the floor nor the
+scheduled jobs. The privacy grant for the scheduled process and the job's flags are the storage
+owner's settings; they go to the Chairman as one line with the evidence.
