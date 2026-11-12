@@ -2084,7 +2084,7 @@ DeepSeek worker with the same eight points.
 
 **Next, in order.** Unchanged from section 49.
 
-## 53. Amendment, 2026-11-12 18:27 UTC: bridge release staged on the real machine; the Chairman's reloads are next
+## 53. Amendment, 2026-11-12 18:22 UTC: bridge release staged on the real machine; the Chairman's reloads are next
 
 **What changed.** The last bridge round is merged as source at `b640dec14`. The principal ran the installer step on the real machine for that commit. The new release is built and the browser host registrations point at it. The running sessions, the live pin and every folder Chrome has loaded are unchanged, and all five profiles stayed connected.
 
