@@ -167,3 +167,27 @@ then escalates the disagreement.
     cut-overs stay one agent at a time. Reason: the shared scope is replayed into every Hermes
     bot's prompt, so one teammate's write could steer fifteen bots; and the Chairman uses the
     Slack bot and the team server's app every day.
+
+22. **Teammate memory scope is `target`; work is split by where it arrives; the history
+    archive's residual reader is accepted for one release (2026-11-12).** (a) Ruling 21 (a)
+    named the scope `user` / `teammate-<slug>`. The store refuses `user` without a validated
+    human principal, and that refusal is correct. The memory link therefore reads and writes
+    `target` / `teammate-<slug>`; the scope is fixed from the server's own config and nothing
+    in a tool call can change it. Proofs a–d passed on that scope (the store's prefetch never
+    builds `target`; a second teammate saw none of the first one's records). (b) While a
+    teammate also has a live body in Hermes, work is split by where it arrives. A request that
+    arrives in Slack is the Hermes body's from start to finish, as today. A board issue, a
+    routine or a moved timer is the teammate's from start to finish. Neither body picks up the
+    other's work, and a timer that has moved is paused in Hermes first. The Hermes body filing
+    board issues for the teammate ("front desk") is switched on by the principal, one kind of
+    work at a time, only after the teammate's wake is proven and the answer has a proven way
+    back to where the person asked. (c) The history archive is plain read-only files in the
+    teammate's home. A turn a person runs on another provider in that conversation can read
+    them; that reader is the same Mac user who already holds the originals. Accepted until the
+    release that stops offering another provider in a teammate's conversation (ruling 20 c).
+    No lane widens the archive's readers or copies it elsewhere. (d) A teammate that already
+    moved gets the memory link only through a fresh primary conversation on its own provider
+    instance (ruling 20 b), one at a time, with its board agent idle. A teammate's wake is
+    never held back to save a second rebind. Reason: the Hermes body's behaviour is its Hermes
+    prompt, which no lane edits, and the teammate has no Slack path, so a request filed to the
+    board today would be answered where the person never looks.

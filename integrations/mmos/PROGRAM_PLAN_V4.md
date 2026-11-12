@@ -1817,3 +1817,48 @@ first, because they need no cut-over.
 Chrome windows carried "Cloudflare" in the title, and one is the Chairman's own. Nothing was
 created. The third attempt picks the window by the child's own tab title and confirms it by
 the authorise text before each press; the Chairman's window is never read or pressed.
+
+## 44. Amendment, 2026-11-12 10:05 UTC: Hermes lane returned; tunnel created; no restart needed
+
+**Cloudflare tunnel: created, not running.** Section 43's third attempt and two more stopped
+cleanly (the browser offers no safe way to press inside the page; then the sign-in form, a
+human control). The route changed: the principal ran the tunnel login, the Chairman signed in
+and authorised, and the principal created the named tunnel `mmos-link` with one hostname on
+the unused sister domain. No config file, no launchd job, no connection. Writing the config,
+starting it and any launchd job stay the principal's acts on the Grok Bot link's rehearsed
+install list, after that lane's delivery fix passes its check.
+
+**Hermes lane (HM), returned.** Nothing was installed and nothing in Hermes was paused.
+
+| Item | Result |
+| --- | --- |
+| Census | 15 Hermes homes: 9 distinct bots to move, Meta-CEO as one teammate (its second profile is a model route), one experiment that stays in Hermes, 3 already moved |
+| History | 5,093 conversations / 209,475 rows exported to read-only archives; count check passed for all 15 sources; search proven |
+| Memory | one small tool server per teammate over the one shared store, through the store's own program; read and scoped write proven through a dev teammate; two writers proven safe on a copy |
+| Restart | not needed: the refusal after adding a provider instance was a race with the server's ~1 s settings reload; a bounded retry closes it; ten instances were added on a running dev server |
+| Install list | 13 of 14 steps rehearsed on a copy; the board move (one agent at a time) was checked read-only: 8 of 9 clear, Product has one open issue |
+
+Rulings (22): the memory scope is `target`, not `user`; work is split by where it arrives
+while Secretary keeps its Slack body in Hermes; the archive's residual reader is accepted
+until release -4; the three moved teammates get the link through a fresh primary conversation.
+
+**Order from here.**
+1. The gate and roster patch goes to lane RF; the gate change gets an independent review and
+   the principal's read before install (critical surface).
+2. RF-REBIND returns; Secretary is rebound and its wake proven. This is not held for item 1.
+3. Install part B (server file, configs, roster apply, history) for Secretary, Assurance and
+   Design Lead; then a fresh primary conversation for each.
+4. Secretary's seven movable timers, one at a time, each replacement proven once.
+5. Part C: the ten new teammates in one roster apply, then their history; then the board
+   move one agent at a time. Product waits on its open issue. Meta-CEO's board agent is in
+   an error state and is the principal's to clear and move last.
+
+No install on the real root while machine load is above 50 (it was 73 at 09:58 UTC).
+
+**Other lanes.** Grok Bot link round 2: the delivery rule (ruling 19) passed its independent
+check; one micro-fix ordered (forged store-only keys, a typed refusal, fetch under the host
+lock). Browser compatibility: micro-fix running (an installer never defaults to a folder a
+running program has loaded). Storage reclaim tool: the independent reviewer failed twice on
+a gateway error; repair round 1 runs on the principal's own eight points. Sector reported a
+browser tool defect (tab close refused; chat row menu not offered) — recorded as HARNESS 15
+for the browser lane.
