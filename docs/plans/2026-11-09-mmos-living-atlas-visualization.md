@@ -7,6 +7,8 @@
 **Source baseline:** Mastermind protected master at **85179e35ce1fd3ddc00e85df5745fee4d5288068**.  
 **Programme alignment:** extend the existing Team / Projects / Code / Fleet experience and WS:EXECUTIVE-ECOSYSTEM-COMPLETION. This is a proposed experience specification, not a new runtime, admission grant, registry or accepted organizational ruling.
 
+**12 November refinement:** [Futuristic swarm direction and executable study](2026-11-12-living-atlas-swarm-refinement.md) updates the visual treatment, rich-actor budget and attachment to the existing Living HQ contract after inspection of the supplied video. The source/evidence and lifecycle requirements below remain applicable.
+
 ## 1. The decision
 
 Build **Living Atlas**: a navigable, gently dimensional landscape of projects connected by fine threads. Small articulated robotic creatures, called **weavers** in this proposal, inhabit it. They travel, dock, inspect, build, wait and return results. The world has the movement and visual care of a game, with the clarity and evidence of an operating interface.

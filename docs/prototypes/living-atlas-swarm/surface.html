@@ -1,0 +1,96 @@
+<div id="mmx-swarm-atlas">
+ <style>
+  #mmx-swarm-atlas{color-scheme:dark;--sa-bg:#060a11;--sa-panel:#0b111c;--sa-line:#202c3c;--sa-ink:#e8eef8;--sa-muted:#94a5be;--sa-cyan:#82f5e6;background:var(--sa-bg);color:var(--sa-ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;border:1px solid var(--sa-line);border-radius:14px;overflow:hidden;isolation:isolate;}
+  #mmx-swarm-atlas *{box-sizing:border-box;}
+  #mmx-swarm-atlas button,#mmx-swarm-atlas select{font:inherit;color:inherit;}
+  #mmx-swarm-atlas button{background:#111b29;border:1px solid #2a394d;border-radius:7px;padding:7px 11px;min-height:35px;}
+  #mmx-swarm-atlas button:hover{background:#1b2a3d;}
+  #mmx-swarm-atlas button[aria-pressed="true"]{color:#a0fff0;background:#16302f;border-color:#3b7b73;}
+  #mmx-swarm-atlas select{max-width:100%;min-width:0;border:1px solid #2a394d;background:#101a28;border-radius:6px;padding:7px 27px 7px 9px;}
+  #mmx-swarm-atlas .sa-top{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px 104px 17px 23px;border-bottom:1px solid var(--sa-line);}
+  #mmx-swarm-atlas .sa-brand{display:flex;align-items:center;gap:12px;min-width:0;}
+  #mmx-swarm-atlas .sa-mark{font:500 23px/1 ui-monospace,monospace;color:var(--sa-cyan);letter-spacing:-4px;padding-right:4px;}
+  #mmx-swarm-atlas .sa-eyebrow{font:11px/1.5 ui-monospace,monospace;letter-spacing:1.3px;color:#91a2bb;}
+  #mmx-swarm-atlas h2{font-size:21px;line-height:1.2;margin:3px 0 0;font-weight:550;letter-spacing:-.4px;}
+  #mmx-swarm-atlas .sa-simulation{font:11px/1.4 ui-monospace,monospace;color:#e8cf9d;text-align:right;white-space:nowrap;}
+  #mmx-swarm-atlas .sa-toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:8px;padding:12px 16px;background:#0a101a;border-bottom:1px solid #1b2737;}
+  #mmx-swarm-atlas .sa-field{display:flex;flex-direction:column;gap:3px;font-size:11px;color:#a1b0c6;}
+  #mmx-swarm-atlas .sa-field select{font-size:12px;}
+  #mmx-swarm-atlas .sa-tools{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto;}
+  #mmx-swarm-atlas .sa-tools button{font-size:12px;}
+  #mmx-swarm-atlas .sa-main{display:grid;grid-template-columns:minmax(0,1fr) 240px;}
+  #mmx-swarm-atlas .sa-world{position:relative;min-width:0;background:#04070c;}
+  #mmx-swarm-atlas canvas{display:block;width:100%;height:610px;touch-action:pan-y;}
+  #mmx-swarm-atlas .sa-world-tools{position:absolute;right:13px;bottom:13px;display:flex;gap:5px;}
+  #mmx-swarm-atlas .sa-world-tools button{background:#0c1623eF;font:12px ui-monospace,monospace;padding:7px 10px;}
+  #mmx-swarm-atlas .sa-legend{position:absolute;left:15px;bottom:16px;max-width:calc(100% - 150px);font:10px/1.5 ui-monospace,monospace;color:#8394ab;pointer-events:none;}
+  #mmx-swarm-atlas .sa-inspector{padding:20px 16px;border-left:1px solid #202c3c;background:linear-gradient(160deg,#101927,#0a101a 65%);min-width:0;}
+  #mmx-swarm-atlas .sa-overline{font:11px/1.4 ui-monospace,monospace;letter-spacing:1px;color:#90a6bf;text-transform:uppercase;}
+  #mmx-swarm-atlas h3{font-size:18px;line-height:1.3;margin:8px 0 4px;font-weight:550;}
+  #mmx-swarm-atlas .sa-role{font-size:12px;color:#a9b8cc;margin-bottom:18px;}
+  #mmx-swarm-atlas .sa-status{font:11px/1.4 ui-monospace,monospace;display:inline-block;padding:4px 7px;background:#14292a;color:#9af3df;border:1px solid #294f4b;border-radius:4px;}
+  #mmx-swarm-atlas .sa-status[data-state="attention"]{background:#30251a;border-color:#6f5131;color:#ffd29a;}
+  #mmx-swarm-atlas .sa-status[data-state="unobserved"],#mmx-swarm-atlas .sa-status[data-state="waiting"]{background:#1d2430;border-color:#384558;color:#c1cdde;}
+  #mmx-swarm-atlas .sa-current{font-size:16px;line-height:1.5;min-height:75px;margin:12px 0 15px;}
+  #mmx-swarm-atlas .sa-facts{margin:0;display:grid;grid-template-columns:66px minmax(0,1fr);gap:10px 8px;border-top:1px solid #233044;padding-top:14px;font-size:12px;}
+  #mmx-swarm-atlas .sa-facts dt{color:#91a3bb;}
+  #mmx-swarm-atlas .sa-facts dd{margin:0;overflow-wrap:anywhere;}
+  #mmx-swarm-atlas .sa-process{margin-top:20px;padding-top:15px;border-top:1px solid #233044;}
+  #mmx-swarm-atlas .sa-process-title{font-size:12px;color:#aabbd0;margin-bottom:8px;}
+  #mmx-swarm-atlas .sa-process-line{font:12px/1.6 ui-monospace,monospace;color:#d5def0;}
+  #mmx-swarm-atlas .sa-source{font:11px/1.6 ui-monospace,monospace;color:#92a5be;margin-top:16px;}
+  #mmx-swarm-atlas .sa-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+  #mmx-swarm-atlas .sa-timeline{padding:13px 17px 15px;border-top:1px solid #202c3c;background:#0b111c;}
+  #mmx-swarm-atlas .sa-time-row{display:flex;justify-content:space-between;gap:12px;font:11px ui-monospace,monospace;color:#a2b5cd;margin-bottom:8px;}
+  #mmx-swarm-atlas input[type="range"]{display:block;width:100%;height:22px;margin:0;accent-color:#82f5e6;}
+  #mmx-swarm-atlas .sa-bottom{display:grid;grid-template-columns:1.3fr 1fr .8fr;gap:0;border-top:1px solid #202c3c;}
+  #mmx-swarm-atlas .sa-bottom>section{padding:17px 19px;min-width:0;}
+  #mmx-swarm-atlas .sa-bottom>section+section{border-left:1px solid #202c3c;}
+  #mmx-swarm-atlas .sa-event-list{list-style:none;margin:11px 0 0;padding:0;display:grid;gap:8px;}
+  #mmx-swarm-atlas .sa-event-list li{display:flex;gap:10px;align-items:baseline;font-size:12px;}
+  #mmx-swarm-atlas .sa-event-list time{font:11px ui-monospace,monospace;color:#6e8ba8;flex:0 0 29px;}
+  #mmx-swarm-atlas .sa-links{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;}
+  #mmx-swarm-atlas .sa-links button{font-size:11px;padding:6px 8px;min-height:31px;background:#111d2a;}
+  #mmx-swarm-atlas .sa-coverage{font-size:12px;color:#a9bdd3;margin-top:12px;line-height:1.7;}
+  #mmx-swarm-atlas .sa-coverage strong{color:#d4e5f2;font-weight:500;}
+  #mmx-swarm-atlas .sa-footer{padding:10px 18px;border-top:1px solid #1b2737;font:11px/1.6 ui-monospace,monospace;color:#71879e;}
+  @media(max-width:850px){#mmx-swarm-atlas .sa-main{grid-template-columns:minmax(0,1fr);}
+   #mmx-swarm-atlas .sa-inspector{border-left:0;border-top:1px solid #202c3c;display:grid;grid-template-columns:1fr 1fr;gap:0 24px;padding:18px;}
+   #mmx-swarm-atlas .sa-inspector .sa-identity{grid-row:1/3;}#mmx-swarm-atlas .sa-current{min-height:0;}
+   #mmx-swarm-atlas .sa-process{margin-top:15px;}#mmx-swarm-atlas .sa-source{grid-column:1/-1;margin-top:10px;}
+   #mmx-swarm-atlas canvas{height:590px;}#mmx-swarm-atlas .sa-tools{margin-left:0;}}
+  @media(max-width:560px){#mmx-swarm-atlas .sa-top{padding:17px 80px 15px 15px;flex-wrap:wrap;gap:9px;}
+   #mmx-swarm-atlas .sa-simulation{text-align:left;white-space:normal;}
+   #mmx-swarm-atlas .sa-toolbar{padding:10px;gap:8px;}#mmx-swarm-atlas .sa-field{flex:1 1 42%;}
+   #mmx-swarm-atlas .sa-tools{width:100%;}#mmx-swarm-atlas .sa-tools button{flex:1 0 auto;}
+   #mmx-swarm-atlas .sa-inspector{grid-template-columns:minmax(0,1fr);gap:8px;}
+   #mmx-swarm-atlas .sa-inspector .sa-identity{grid-row:auto;}
+   #mmx-swarm-atlas .sa-bottom{grid-template-columns:1fr;}#mmx-swarm-atlas .sa-bottom>section+section{border-left:0;border-top:1px solid #202c3c;}
+   #mmx-swarm-atlas canvas{height:470px;}#mmx-swarm-atlas .sa-legend{font-size:11px;bottom:64px;max-width:calc(100% - 25px);}
+   #mmx-swarm-atlas select{font-size:16px!important;}#mmx-swarm-atlas button{min-height:40px;}
+   #mmx-swarm-atlas .sa-time-row{line-height:1.6;flex-wrap:wrap;}}
+ </style>
+ <header class="sa-top"><div class="sa-brand"><div class="sa-mark" aria-hidden="true">M∴</div><div><div class="sa-eyebrow">MASTERMIND OS / OBSERVATORY</div><h2>Living Atlas</h2></div></div><div class="sa-simulation">SWARM STUDY<br>Simulated events · no live connection</div></header>
+ <div class="sa-toolbar">
+  <label class="sa-field">Project<select data-control="project" aria-label="Focus project"><option value="">Entire estate</option><option value="team">Always-on team</option><option value="os">Mastermind OS</option><option value="terminal">Terminal</option><option value="macro">Macro</option><option value="research">Research</option><option value="capacity">Capacity Fabric</option></select></label>
+  <label class="sa-field">Session<select data-control="actor" aria-label="Inspect session"><option value="lead">T3 coding lead</option><option value="meta">Meta-CEO</option><option value="ui">Source helper</option><option value="browser-helper">Browser helper</option><option value="researcher">Research bot</option><option value="macro-lead">Macro lead</option><option value="terminal-lead">Terminal lead</option><option value="capacity-bot">Capacity observer</option></select></label>
+  <div class="sa-tools"><button type="button" data-control="pause">Pause display</button><button type="button" data-control="follow" aria-pressed="false">Follow lead</button><button type="button" data-control="motion">Motion: Full</button><button type="button" data-control="feed" aria-pressed="false">Lose T3 feed</button></div>
+ </div>
+ <div class="sa-main">
+  <div class="sa-world"><canvas aria-label="Simulated animated project web. Select projects or sessions with the controls; use the timeline to inspect the scenario." role="img">The activity explorer and session inspector provide the same scenario in text.</canvas><div class="sa-legend">Fine mesh = visual texture<br>Labeled targets = sample work</div><div class="sa-world-tools"><button type="button" data-control="zoom-out" aria-label="Zoom out">−</button><button type="button" data-control="reset">Estate</button><button type="button" data-control="zoom-in" aria-label="Zoom in">+</button></div></div>
+  <aside class="sa-inspector" aria-label="Selected session">
+   <div class="sa-identity"><div class="sa-overline">Selected session</div><h3 data-field="name">T3 coding lead</h3><div class="sa-role" data-field="role">Project COO · T3 Code</div><div class="sa-status" data-field="status">QUEUED</div><div class="sa-current" data-field="current">Waiting for the assignment.</div></div>
+   <dl class="sa-facts"><dt>Project</dt><dd data-field="project">Mastermind OS</dd><dt>Repository</dt><dd data-field="repo">Mastermind</dd><dt>Parent</dt><dd data-field="parent">Meta-CEO</dd><dt>Evidence</dt><dd data-field="evidence">Synthetic scenario</dd></dl>
+   <section class="sa-process"><div class="sa-process-title">Independent process</div><div class="sa-process-line" data-field="process">Checks have not started</div></section>
+   <div class="sa-source" data-field="source">Fixture data · not current fleet state</div>
+   <div class="sa-sr" data-field="announcement" aria-live="polite"></div>
+  </aside>
+ </div>
+ <div class="sa-timeline"><div class="sa-time-row"><label for="sa-time">Scenario time <span data-field="clock">00.0</span> / 48 s</label><span data-field="milestone">Project brief</span><label>Playback <select data-control="speed" aria-label="Scenario playback speed"><option value="1">1×</option><option value="1.5" selected>1.5×</option><option value="2">2×</option></select></label><button type="button" data-control="replay">Replay</button></div><input id="sa-time" data-control="time" type="range" min="0" max="48" step="0.1" value="0" aria-label="Scenario time in seconds"></div>
+ <div class="sa-bottom">
+  <section><div class="sa-overline">Observed activity / simulated</div><ol class="sa-event-list" data-field="events"><li><time>00s</time><span>A project brief is prepared</span></li></ol></section>
+  <section><div class="sa-overline">Team relationships</div><div class="sa-links"><button type="button" data-select="meta">Meta-CEO</button><button type="button" data-select="lead">T3 lead</button><button type="button" data-select="ui">Source helper</button><button type="button" data-select="browser-helper">Browser helper</button></div><div class="sa-coverage">Delegation and message delivery are distinct relationships.</div></section>
+  <section><div class="sa-overline">Observation</div><div class="sa-coverage" data-field="coverage"><strong>6 project fields</strong><br>Sample activity only</div><div class="sa-coverage">Pause changes the display. No real execution is controlled.</div></section>
+ </div>
+ <footer class="sa-footer">MASTERMIND / LIVING ATLAS · Original motion study · Project fields and entity counts are illustrative.</footer>
+</div>

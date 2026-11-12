@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Mastermind Living Atlas — Swarm Study</title><style>body{margin:0;padding:20px;background:#03060a;}main{max-width:1440px;margin:0 auto;}@media(max-width:600px){body{padding:0;}}</style></head><body><main><div id="mmx-swarm-atlas">
+ <style>
+  #mmx-swarm-atlas{color-scheme:dark;--sa-bg:#060a11;--sa-panel:#0b111c;--sa-line:#202c3c;--sa-ink:#e8eef8;--sa-muted:#94a5be;--sa-cyan:#82f5e6;background:var(--sa-bg);color:var(--sa-ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;border:1px solid var(--sa-line);border-radius:14px;overflow:hidden;isolation:isolate;}
+  #mmx-swarm-atlas *{box-sizing:border-box;}
+  #mmx-swarm-atlas button,#mmx-swarm-atlas select{font:inherit;color:inherit;}
+  #mmx-swarm-atlas button{background:#111b29;border:1px solid #2a394d;border-radius:7px;padding:7px 11px;min-height:35px;}
+  #mmx-swarm-atlas button:hover{background:#1b2a3d;}
+  #mmx-swarm-atlas button[aria-pressed="true"]{color:#a0fff0;background:#16302f;border-color:#3b7b73;}
+  #mmx-swarm-atlas select{max-width:100%;min-width:0;border:1px solid #2a394d;background:#101a28;border-radius:6px;padding:7px 27px 7px 9px;}
+  #mmx-swarm-atlas .sa-top{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:20px 104px 17px 23px;border-bottom:1px solid var(--sa-line);}
+  #mmx-swarm-atlas .sa-brand{display:flex;align-items:center;gap:12px;min-width:0;}
+  #mmx-swarm-atlas .sa-mark{font:500 23px/1 ui-monospace,monospace;color:var(--sa-cyan);letter-spacing:-4px;padding-right:4px;}
+  #mmx-swarm-atlas .sa-eyebrow{font:11px/1.5 ui-monospace,monospace;letter-spacing:1.3px;color:#91a2bb;}
+  #mmx-swarm-atlas h2{font-size:21px;line-height:1.2;margin:3px 0 0;font-weight:550;letter-spacing:-.4px;}
+  #mmx-swarm-atlas .sa-simulation{font:11px/1.4 ui-monospace,monospace;color:#e8cf9d;text-align:right;white-space:nowrap;}
+  #mmx-swarm-atlas .sa-toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:8px;padding:12px 16px;background:#0a101a;border-bottom:1px solid #1b2737;}
+  #mmx-swarm-atlas .sa-field{display:flex;flex-direction:column;gap:3px;font-size:11px;color:#a1b0c6;}
+  #mmx-swarm-atlas .sa-field select{font-size:12px;}
+  #mmx-swarm-atlas .sa-tools{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto;}
+  #mmx-swarm-atlas .sa-tools button{font-size:12px;}
+  #mmx-swarm-atlas .sa-main{display:grid;grid-template-columns:minmax(0,1fr) 240px;}
+  #mmx-swarm-atlas .sa-world{position:relative;min-width:0;background:#04070c;}
+  #mmx-swarm-atlas canvas{display:block;width:100%;height:610px;touch-action:pan-y;}
+  #mmx-swarm-atlas .sa-world-tools{position:absolute;right:13px;bottom:13px;display:flex;gap:5px;}
+  #mmx-swarm-atlas .sa-world-tools button{background:#0c1623eF;font:12px ui-monospace,monospace;padding:7px 10px;}
+  #mmx-swarm-atlas .sa-legend{position:absolute;left:15px;bottom:16px;max-width:calc(100% - 150px);font:10px/1.5 ui-monospace,monospace;color:#8394ab;pointer-events:none;}
+  #mmx-swarm-atlas .sa-inspector{padding:20px 16px;border-left:1px solid #202c3c;background:linear-gradient(160deg,#101927,#0a101a 65%);min-width:0;}
+  #mmx-swarm-atlas .sa-overline{font:11px/1.4 ui-monospace,monospace;letter-spacing:1px;color:#90a6bf;text-transform:uppercase;}
+  #mmx-swarm-atlas h3{font-size:18px;line-height:1.3;margin:8px 0 4px;font-weight:550;}
+  #mmx-swarm-atlas .sa-role{font-size:12px;color:#a9b8cc;margin-bottom:18px;}
+  #mmx-swarm-atlas .sa-status{font:11px/1.4 ui-monospace,monospace;display:inline-block;padding:4px 7px;background:#14292a;color:#9af3df;border:1px solid #294f4b;border-radius:4px;}
+  #mmx-swarm-atlas .sa-status[data-state="attention"]{background:#30251a;border-color:#6f5131;color:#ffd29a;}
+  #mmx-swarm-atlas .sa-status[data-state="unobserved"],#mmx-swarm-atlas .sa-status[data-state="waiting"]{background:#1d2430;border-color:#384558;color:#c1cdde;}
+  #mmx-swarm-atlas .sa-current{font-size:16px;line-height:1.5;min-height:75px;margin:12px 0 15px;}
+  #mmx-swarm-atlas .sa-facts{margin:0;display:grid;grid-template-columns:66px minmax(0,1fr);gap:10px 8px;border-top:1px solid #233044;padding-top:14px;font-size:12px;}
+  #mmx-swarm-atlas .sa-facts dt{color:#91a3bb;}
+  #mmx-swarm-atlas .sa-facts dd{margin:0;overflow-wrap:anywhere;}
+  #mmx-swarm-atlas .sa-process{margin-top:20px;padding-top:15px;border-top:1px solid #233044;}
+  #mmx-swarm-atlas .sa-process-title{font-size:12px;color:#aabbd0;margin-bottom:8px;}
+  #mmx-swarm-atlas .sa-process-line{font:12px/1.6 ui-monospace,monospace;color:#d5def0;}
+  #mmx-swarm-atlas .sa-source{font:11px/1.6 ui-monospace,monospace;color:#92a5be;margin-top:16px;}
+  #mmx-swarm-atlas .sa-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+  #mmx-swarm-atlas .sa-timeline{padding:13px 17px 15px;border-top:1px solid #202c3c;background:#0b111c;}
+  #mmx-swarm-atlas .sa-time-row{display:flex;justify-content:space-between;gap:12px;font:11px ui-monospace,monospace;color:#a2b5cd;margin-bottom:8px;}
+  #mmx-swarm-atlas input[type="range"]{display:block;width:100%;height:22px;margin:0;accent-color:#82f5e6;}
+  #mmx-swarm-atlas .sa-bottom{display:grid;grid-template-columns:1.3fr 1fr .8fr;gap:0;border-top:1px solid #202c3c;}
+  #mmx-swarm-atlas .sa-bottom>section{padding:17px 19px;min-width:0;}
+  #mmx-swarm-atlas .sa-bottom>section+section{border-left:1px solid #202c3c;}
+  #mmx-swarm-atlas .sa-event-list{list-style:none;margin:11px 0 0;padding:0;display:grid;gap:8px;}
+  #mmx-swarm-atlas .sa-event-list li{display:flex;gap:10px;align-items:baseline;font-size:12px;}
+  #mmx-swarm-atlas .sa-event-list time{font:11px ui-monospace,monospace;color:#6e8ba8;flex:0 0 29px;}
+  #mmx-swarm-atlas .sa-links{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;}
+  #mmx-swarm-atlas .sa-links button{font-size:11px;padding:6px 8px;min-height:31px;background:#111d2a;}
+  #mmx-swarm-atlas .sa-coverage{font-size:12px;color:#a9bdd3;margin-top:12px;line-height:1.7;}
+  #mmx-swarm-atlas .sa-coverage strong{color:#d4e5f2;font-weight:500;}
+  #mmx-swarm-atlas .sa-footer{padding:10px 18px;border-top:1px solid #1b2737;font:11px/1.6 ui-monospace,monospace;color:#71879e;}
+  @media(max-width:850px){#mmx-swarm-atlas .sa-main{grid-template-columns:minmax(0,1fr);}
+   #mmx-swarm-atlas .sa-inspector{border-left:0;border-top:1px solid #202c3c;display:grid;grid-template-columns:1fr 1fr;gap:0 24px;padding:18px;}
+   #mmx-swarm-atlas .sa-inspector .sa-identity{grid-row:1/3;}#mmx-swarm-atlas .sa-current{min-height:0;}
+   #mmx-swarm-atlas .sa-process{margin-top:15px;}#mmx-swarm-atlas .sa-source{grid-column:1/-1;margin-top:10px;}
+   #mmx-swarm-atlas canvas{height:590px;}#mmx-swarm-atlas .sa-tools{margin-left:0;}}
+  @media(max-width:560px){#mmx-swarm-atlas .sa-top{padding:17px 80px 15px 15px;flex-wrap:wrap;gap:9px;}
+   #mmx-swarm-atlas .sa-simulation{text-align:left;white-space:normal;}
+   #mmx-swarm-atlas .sa-toolbar{padding:10px;gap:8px;}#mmx-swarm-atlas .sa-field{flex:1 1 42%;}
+   #mmx-swarm-atlas .sa-tools{width:100%;}#mmx-swarm-atlas .sa-tools button{flex:1 0 auto;}
+   #mmx-swarm-atlas .sa-inspector{grid-template-columns:minmax(0,1fr);gap:8px;}
+   #mmx-swarm-atlas .sa-inspector .sa-identity{grid-row:auto;}
+   #mmx-swarm-atlas .sa-bottom{grid-template-columns:1fr;}#mmx-swarm-atlas .sa-bottom>section+section{border-left:0;border-top:1px solid #202c3c;}
+   #mmx-swarm-atlas canvas{height:470px;}#mmx-swarm-atlas .sa-legend{font-size:11px;bottom:64px;max-width:calc(100% - 25px);}
+   #mmx-swarm-atlas select{font-size:16px!important;}#mmx-swarm-atlas button{min-height:40px;}
+   #mmx-swarm-atlas .sa-time-row{line-height:1.6;flex-wrap:wrap;}}
+ </style>
+ <header class="sa-top"><div class="sa-brand"><div class="sa-mark" aria-hidden="true">M∴</div><div><div class="sa-eyebrow">MASTERMIND OS / OBSERVATORY</div><h2>Living Atlas</h2></div></div><div class="sa-simulation">SWARM STUDY<br>Simulated events · no live connection</div></header>
+ <div class="sa-toolbar">
+  <label class="sa-field">Project<select data-control="project" aria-label="Focus project"><option value="">Entire estate</option><option value="team">Always-on team</option><option value="os">Mastermind OS</option><option value="terminal">Terminal</option><option value="macro">Macro</option><option value="research">Research</option><option value="capacity">Capacity Fabric</option></select></label>
+  <label class="sa-field">Session<select data-control="actor" aria-label="Inspect session"><option value="lead">T3 coding lead</option><option value="meta">Meta-CEO</option><option value="ui">Source helper</option><option value="browser-helper">Browser helper</option><option value="researcher">Research bot</option><option value="macro-lead">Macro lead</option><option value="terminal-lead">Terminal lead</option><option value="capacity-bot">Capacity observer</option></select></label>
+  <div class="sa-tools"><button type="button" data-control="pause">Pause display</button><button type="button" data-control="follow" aria-pressed="false">Follow lead</button><button type="button" data-control="motion">Motion: Full</button><button type="button" data-control="feed" aria-pressed="false">Lose T3 feed</button></div>
+ </div>
+ <div class="sa-main">
+  <div class="sa-world"><canvas aria-label="Simulated animated project web. Select projects or sessions with the controls; use the timeline to inspect the scenario." role="img">The activity explorer and session inspector provide the same scenario in text.</canvas><div class="sa-legend">Fine mesh = visual texture<br>Labeled targets = sample work</div><div class="sa-world-tools"><button type="button" data-control="zoom-out" aria-label="Zoom out">−</button><button type="button" data-control="reset">Estate</button><button type="button" data-control="zoom-in" aria-label="Zoom in">+</button></div></div>
+  <aside class="sa-inspector" aria-label="Selected session">
+   <div class="sa-identity"><div class="sa-overline">Selected session</div><h3 data-field="name">T3 coding lead</h3><div class="sa-role" data-field="role">Project COO · T3 Code</div><div class="sa-status" data-field="status">QUEUED</div><div class="sa-current" data-field="current">Waiting for the assignment.</div></div>
+   <dl class="sa-facts"><dt>Project</dt><dd data-field="project">Mastermind OS</dd><dt>Repository</dt><dd data-field="repo">Mastermind</dd><dt>Parent</dt><dd data-field="parent">Meta-CEO</dd><dt>Evidence</dt><dd data-field="evidence">Synthetic scenario</dd></dl>
+   <section class="sa-process"><div class="sa-process-title">Independent process</div><div class="sa-process-line" data-field="process">Checks have not started</div></section>
+   <div class="sa-source" data-field="source">Fixture data · not current fleet state</div>
+   <div class="sa-sr" data-field="announcement" aria-live="polite"></div>
+  </aside>
+ </div>
+ <div class="sa-timeline"><div class="sa-time-row"><label for="sa-time">Scenario time <span data-field="clock">00.0</span> / 48 s</label><span data-field="milestone">Project brief</span><label>Playback <select data-control="speed" aria-label="Scenario playback speed"><option value="1">1×</option><option value="1.5" selected>1.5×</option><option value="2">2×</option></select></label><button type="button" data-control="replay">Replay</button></div><input id="sa-time" data-control="time" type="range" min="0" max="48" step="0.1" value="0" aria-label="Scenario time in seconds"></div>
+ <div class="sa-bottom">
+  <section><div class="sa-overline">Observed activity / simulated</div><ol class="sa-event-list" data-field="events"><li><time>00s</time><span>A project brief is prepared</span></li></ol></section>
+  <section><div class="sa-overline">Team relationships</div><div class="sa-links"><button type="button" data-select="meta">Meta-CEO</button><button type="button" data-select="lead">T3 lead</button><button type="button" data-select="ui">Source helper</button><button type="button" data-select="browser-helper">Browser helper</button></div><div class="sa-coverage">Delegation and message delivery are distinct relationships.</div></section>
+  <section><div class="sa-overline">Observation</div><div class="sa-coverage" data-field="coverage"><strong>6 project fields</strong><br>Sample activity only</div><div class="sa-coverage">Pause changes the display. No real execution is controlled.</div></section>
+ </div>
+ <footer class="sa-footer">MASTERMIND / LIVING ATLAS · Original motion study · Project fields and entity counts are illustrative.</footer>
+</div>
+
+<script>
+(()=>{
+/* Original, synthetic scenario. No real sessions, commands, or source observations. */
+const DURATION = 48;
+const PROJECTS = [
+  { id:'team', label:'Always-on team', detail:'Paperclip · coordination', x:610, y:155, r:133, color:'#59dfcc' },
+  { id:'os', label:'Mastermind OS', detail:'Portfolio reliability', x:980, y:370, r:170, color:'#9aa4ff' },
+  { id:'terminal', label:'Terminal', detail:'Market intelligence', x:990, y:730, r:139, color:'#ff80b5' },
+  { id:'macro', label:'Macro', detail:'Regime research', x:545, y:805, r:147, color:'#ebc475' },
+  { id:'research', label:'Research', detail:'Source validation', x:235, y:555, r:143, color:'#78caff' },
+  { id:'capacity', label:'Capacity Fabric', detail:'Placement observations', x:240, y:205, r:116, color:'#78dec0' }
+];
+const RESOURCES = [
+  { id:'assignment', project:'team', x:630,y:117,label:'Project brief',kind:'artifact' },
+  { id:'teamlink', project:'team', x:677,y:203,label:'Teamlink',kind:'message' },
+  { id:'source', project:'os',x:1095,y:250,label:'Portfolio view',kind:'file' },
+  { id:'browser', project:'os',x:1135,y:435,label:'Browser check',kind:'browser' },
+  { id:'shell', project:'os',x:860,y:450,label:'Targeted checks',kind:'process' },
+  { id:'review', project:'os',x:855,y:275,label:'Change set',kind:'artifact' },
+  { id:'pull-request',project:'os',x:1020,y:500,label:'Pull request',kind:'artifact'},
+  { id:'news',project:'terminal',x:1055,y:713,label:'News flow',kind:'process'},
+  { id:'chart',project:'terminal',x:937,y:776,label:'Chart output',kind:'artifact'},
+  { id:'regime',project:'macro',x:598,y:760,label:'Regime model',kind:'file'},
+  { id:'macro-result',project:'macro',x:496,y:860,label:'Research result',kind:'artifact'},
+  { id:'sources',project:'research',x:187,y:512,label:'Primary sources',kind:'browser'},
+  { id:'research-result',project:'research',x:304,y:588,label:'Source notes',kind:'artifact'},
+  { id:'placement',project:'capacity',x:185,y:179,label:'Placement state',kind:'process'},
+  { id:'pool',project:'capacity',x:290,y:248,label:'Pool observation',kind:'artifact'}
+];
+const s=(at,project,x,y,label,status='working',targets=[])=>({at,project,x,y,label,status,targets});
+const ACTORS = [
+ {id:'meta',name:'Meta-CEO',role:'Always-on coordinator',owner:'Paperclip / native runtime',project:'team',born:0,color:'#59dfcc',parent:null,repo:null,steps:[
+   s(0,'team',592,167,'Preparing the project brief','working',['assignment']),
+   s(1.8,'team',641,188,'Sending the brief through Teamlink','working',['teamlink']),
+   s(5,'capacity',261,221,'Inspecting the capacity observation','working',['pool']),
+   s(10,'research',269,550,'Following source validation','working',['research-result']),
+   s(16,'macro',559,811,'Inspecting the research handoff','working',['macro-result']),
+   s(24,'team',599,180,'Waiting for the coding team','waiting'),
+   s(33,'team',640,187,'Receiving the prepared change','working',['teamlink']),
+   s(36,'team',601,166,'Awaiting the verification result','waiting'),
+   s(45,'team',615,157,'Consuming the verified result','complete',['assignment'])]},
+ {id:'lead',name:'T3 coding lead',role:'Project COO',owner:'T3 Code',project:'os',born:2.6,color:'#82f5e6',parent:'meta',repo:'Mastermind',steps:[
+   s(2.6,'os',927,343,'Tracing the Portfolio return path','working',['review','source']),
+   s(5.2,'os',973,347,'Delegating source and browser checks','working',['source','browser']),
+   s(9,'os',924,408,'Starting targeted checks','working',['shell']),
+   s(12,'os',1044,362,'Inspecting the route in a browser','working',['browser']),
+   s(18,'os',929,407,'Investigating a failing check','attention',['shell']),
+   s(21,'os',999,309,'Applying a focused correction','working',['source']),
+   s(24,'os',1052,359,'Verifying the corrected route','working',['browser']),
+   s(28,'os',966,350,'Collecting helper results','working',['review']),
+   s(32,'os',982,425,'Preparing the pull request','working',['pull-request']),
+   s(35,'os',976,375,'PR ready; awaiting merge observation','waiting'),
+   s(40,'os',1053,365,'Merged; product check still running','working',['browser']),
+   s(44,'os',977,362,'Product behavior verified','complete')]},
+ {id:'ui',name:'Source helper',role:'Delegated implementation',owner:'T3 child session',project:'os',born:5.4,color:'#a9b1ff',parent:'lead',repo:'Mastermind',steps:[
+   s(5.4,'os',1005,220,'Reading the affected view','working',['source']),
+   s(11,'os',1055,219,'Saving the first correction','working',['source']),
+   s(17,'os',1025,226,'Waiting for the check result','waiting'),
+   s(21.2,'os',1065,238,'Saving the follow-up correction','working',['source']),
+   s(27,'os',998,264,'Returning the source change','complete')]},
+ {id:'browser-helper',name:'Browser helper',role:'Delegated verification',owner:'T3 child session',project:'os',born:6.2,color:'#d0b4ff',parent:'lead',repo:'Mastermind',steps:[
+   s(6.2,'os',1146,471,'Reproducing the Portfolio failure','working',['browser']),
+   s(14,'os',1130,487,'Waiting for the correction','waiting'),
+   s(24.2,'os',1166,474,'Checking the updated interaction','working',['browser']),
+   s(29,'os',1116,477,'Returning browser evidence','complete')]},
+ {id:'researcher',name:'Research bot',role:'Always-on researcher',owner:'Paperclip / native runtime',project:'research',born:0,color:'#78caff',parent:'meta',repo:'Research',steps:[
+   s(0,'research',238,530,'Comparing primary sources','working',['sources']),
+   s(7,'research',274,567,'Writing the source notes','working',['research-result']),
+   s(12,'research',245,548,'Waiting for the next source','waiting'),
+   s(16,'research',205,529,'Checking a new observation','working',['sources']),
+   s(22,'research',278,574,'Returning source notes to Macro','complete')]},
+ {id:'macro-lead',name:'Macro lead',role:'Project lead',owner:'T3 Code',project:'macro',born:0,color:'#ebc475',parent:null,repo:'Macro',steps:[
+   s(0,'macro',544,788,'Reviewing regime inputs','working',['regime']),
+   s(9.8,'macro',507,825,'Running the research check','working',['macro-result']),
+   s(18,'macro',546,800,'Awaiting source validation','waiting'),
+   s(23,'macro',574,779,'Integrating the source notes','working',['regime']),
+   s(31,'macro',514,835,'Returning the analysis','complete')]},
+ {id:'terminal-lead',name:'Terminal lead',role:'Project lead',owner:'T3 Code',project:'terminal',born:0,color:'#ff80b5',parent:null,repo:'Terminal',steps:[
+   s(0,'terminal',1018,728,'Inspecting the news update path','working',['news']),
+   s(8,'terminal',967,749,'Checking a chart update','working',['chart']),
+   s(19,'terminal',1029,714,'Inspecting the next update','working',['news']),
+   s(32,'terminal',973,747,'Waiting for a new source observation','waiting')]},
+ {id:'capacity-bot',name:'Capacity observer',role:'Always-on operations',owner:'Existing capacity owner',project:'capacity',born:0,color:'#78dec0',parent:'meta',repo:'Mastermind',steps:[
+   s(0,'capacity',220,195,'Reading placement observations','working',['placement']),
+   s(10,'capacity',259,229,'Inspecting the pool observation','working',['pool']),
+   s(20,'capacity',218,190,'Refreshing the qualified observation','working',['placement']),
+   s(30,'capacity',253,225,'Waiting for a new observation','waiting')]}
+];
+const SIGNALS=[
+ {at:1.9,duration:.85,from:[655,194],to:[928,343],label:'Assignment',color:'#59dfcc',kind:'teamlink',scope:'t3'},
+ {at:5.4,duration:.4,from:[973,347],to:[1005,220],label:'Source helper',color:'#a9b1ff',kind:'delegation',scope:'t3'},
+ {at:6.2,duration:.45,from:[973,347],to:[1146,471],label:'Browser helper',color:'#d0b4ff',kind:'delegation',scope:'t3'},
+ {at:22.2,duration:.9,from:[278,574],to:[574,779],label:'Source notes',color:'#78caff',kind:'result',scope:'research'},
+ {at:28,duration:.45,from:[998,264],to:[966,350],label:'Change returned',color:'#a9b1ff',kind:'result',scope:'t3'},
+ {at:29,duration:.5,from:[1116,477],to:[966,350],label:'Evidence returned',color:'#d0b4ff',kind:'result',scope:'t3'},
+ {at:33.5,duration:.95,from:[982,425],to:[640,187],label:'PR prepared',color:'#82f5e6',kind:'teamlink',scope:'t3'},
+ {at:44.5,duration:.95,from:[977,362],to:[615,157],label:'Verification result',color:'#82f5e6',kind:'teamlink',scope:'t3'}
+];
+const EVENTS=[
+ {at:0,label:'A project brief is prepared',actor:'meta',kind:'Brief',detail:'The always-on team holds the objective and context.'},
+ {at:1.9,label:'Teamlink carries the assignment',actor:'meta',kind:'Handoff',detail:'A message crosses to a distinct T3 execution.'},
+ {at:2.6,label:'The T3 coding lead starts',actor:'lead',kind:'Started',detail:'A new observed session is separate from the persistent coordinator.'},
+ {at:5.4,label:'The source helper starts',actor:'ui',kind:'Helper',detail:'An explicit parent–child relationship is visible.'},
+ {at:6.2,label:'The browser helper starts',actor:'browser-helper',kind:'Helper',detail:'Two helpers now work alongside their lead.'},
+ {at:9,label:'A check process starts',actor:'lead',kind:'Process',detail:'The process stays at its station when the lead moves away.'},
+ {at:11,label:'A file change is confirmed',actor:'ui',kind:'Saved',detail:'A confirmed effect, separate from a requested edit.'},
+ {at:12,label:'The lead moves to browser inspection',actor:'lead',kind:'Browser',detail:'The independent check process continues.'},
+ {at:18,label:'The targeted check fails',actor:'lead',kind:'Attention',detail:'Attention interrupts the previous work pose.'},
+ {at:21.2,label:'A correction is saved',actor:'ui',kind:'Saved',detail:'The follow-up edit has its own observation.'},
+ {at:22.2,label:'Research returns notes to Macro',actor:'researcher',kind:'Result',detail:'An unrelated team continues concurrently.'},
+ {at:23,label:'The targeted checks restart',actor:'lead',kind:'Process',detail:'The retry is a separate process attempt.'},
+ {at:26,label:'The targeted checks pass',actor:'lead',kind:'Checks',detail:'Passing checks do not imply merge or deployment.'},
+ {at:29,label:'Browser evidence returns',actor:'browser-helper',kind:'Evidence',detail:'The helper result is available to its parent.'},
+ {at:33.5,label:'The pull request is prepared',actor:'lead',kind:'PR ready',detail:'Prepared delivery is distinct from merge.'},
+ {at:35,label:'The coordinator reads the return',actor:'meta',kind:'Consumed',detail:'Delivery and consumption are separate observations.'},
+ {at:40,label:'A merge is observed',actor:'lead',kind:'Merged',detail:'The product verification remains pending.'},
+ {at:44,label:'The product check is verified',actor:'lead',kind:'Verified',detail:'This distinct observation completes the example journey.'},
+ {at:45.5,label:'The verified result is consumed',actor:'meta',kind:'Consumed',detail:'The always-on team receives the final result.'}
+];
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+const smooth=v=>{v=clamp(v);return v*v*v*(v*(v*6-15)+10);};
+function actorAt(actor,time,motion='full'){
+ if(time<actor.born)return null;
+ let index=0;for(let i=1;i<actor.steps.length&&actor.steps[i].at<=time;i++)index=i;
+ const step=actor.steps[index],prev=actor.steps[Math.max(0,index-1)];
+ const dx=step.x-prev.x,dy=step.y-prev.y,distance=Math.hypot(dx,dy);
+ const duration=motion==='off'?0:motion==='calm'?.55:distance>180?.72:.31;
+ const u=duration===0?1:clamp((time-step.at)/duration),f=smooth(u);
+ const arc=motion==='full'?Math.sin(Math.PI*u)*Math.min(26,distance*.18):0;
+ return {...actor,...step,x:prev.x+dx*f,y:prev.y+dy*f-arc,stepIndex:index,
+  heading:distance>1?Math.atan2(dy,dx):.1+actor.born*.3,moving:u<1&&distance>1,
+  age:time-step.at,targets:step.targets,sourceTime:time,fromX:prev.x,fromY:prev.y,travelDuration:duration,travelProgress:u};
+}
+function snapshotAt(time,{motion='full',lostAt=null}={}){
+ const t=clamp(time,0,DURATION),isT3=id=>['lead','ui','browser-helper'].includes(id);
+ const actors=ACTORS.map(a=>{
+  const stale=lostAt!==null&&isT3(a.id);const aTime=stale?Math.min(t,lostAt):t;
+  const pose=actorAt(a,aTime,motion),terminal=pose?.status==='complete';return pose?{...pose,stale,status:stale&&!terminal?'unobserved':pose.status,
+   label:stale?(terminal?'Result previously returned; T3 feed now unobserved':'T3 observation lost; current work unknown'):pose.label,targets:stale?[]:pose.targets,moving:stale?false:pose.moving}:null;
+ }).filter(Boolean);
+ const ptime=lostAt===null?t:Math.min(t,lostAt);
+ let process=null;
+ if(ptime>=9){const observed=ptime<18?'running':ptime<23?'failed':ptime<26?'running':'passed',state=lostAt!==null&&observed==='running'?'unobserved':observed;
+  process={id:'checks',x:860,y:450,label:'Targeted checks',state,stale:lostAt!==null,attempt:ptime>=23?2:1,startedAt:ptime>=23?23:9};}
+ const events=EVENTS.filter(e=>e.at<=t&&!(lostAt!==null&&isT3(e.actor)&&e.at>lostAt));
+ const signals=SIGNALS.filter(e=>t>=e.at&&t<e.at+e.duration&&!(lostAt!==null&&e.scope==='t3'));
+ return {time:t,projects:PROJECTS,resources:RESOURCES,actors,process,events,signals,partial:lostAt!==null,finished:t>=DURATION};
+}
+
+/* Original display-only renderer. Geometry has no execution or telemetry authority. */
+const TAU=Math.PI*2;
+const rgba=(hex,a)=>{const n=parseInt(hex.slice(1),16);return 'rgba('+[(n>>16)&255,(n>>8)&255,n&255,a].join(',')+')';};
+const lerp=(a,b,t)=>a+(b-a)*t;
+function random(seed){let x=seed>>>0;return()=>{x^=x<<13;x^=x>>>17;x^=x<<5;return(x>>>0)/4294967296;};}
+function roundRect(c,x,y,w,h,r){r=Math.min(r,w/2,h/2);c.beginPath();c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.quadraticCurveTo(x+w,y,x+w,y+r);c.lineTo(x+w,y+h-r);c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);c.lineTo(x+r,y+h);c.quadraticCurveTo(x,y+h,x,y+h-r);c.lineTo(x,y+r);c.quadraticCurveTo(x,y,x+r,y);c.closePath();}
+function cubicPoint(a,b,c,d,u){const v=1-u;return{x:v*v*v*a.x+3*v*v*u*b.x+3*v*u*u*c.x+u*u*u*d.x,y:v*v*v*a.y+3*v*v*u*b.y+3*v*u*u*c.y+u*u*u*d.y};}
+function probeGeometry(origin,target,age,index=0,mode='full'){
+ const dx=target.x-origin.x,dy=target.y-origin.y,d=Math.max(1,Math.hypot(dx,dy)),nx=-dy/d,ny=dx/d;
+ const cycle=((age+index*.173)%1.26+1.26)%1.26;
+ const extension=mode!=='full'?1:cycle<.18?smooth(cycle/.18):cycle<.62?1:cycle<.86?1-smooth((cycle-.62)/.24):0;
+ const bend=(index%2?1:-1)*(22+Math.min(d*.1,21));
+ const tip={x:lerp(origin.x+dx/d*30,target.x,extension),y:lerp(origin.y+dy/d*30,target.y,extension)};
+ return {a:origin,b:{x:lerp(origin.x,tip.x,.32)+nx*bend,y:lerp(origin.y,tip.y,.32)+ny*bend},
+  c:{x:lerp(origin.x,tip.x,.72)-nx*bend*.4,y:lerp(origin.y,tip.y,.72)-ny*bend*.4},d:tip,
+  contact:extension>.98,extension};
+}
+function makeField(project,index,canvasFactory){
+ const rnd=random(9281+index*731),r=project.r,w=Math.ceil(r*2.36),h=Math.ceil(r*1.92),res=1.4;
+ const canvas=canvasFactory(Math.ceil(w*res),Math.ceil(h*res)),ctx=canvas.getContext('2d');
+ ctx.scale(res,res);ctx.translate(w/2,h/2);
+ const points=[],buckets=new Map(),cell=25;
+ for(let i=0;i<1850;i++){
+  const a=i*2.3999632297+rnd()*.3,rad=Math.sqrt(rnd()),z=(rnd()-.5)*2;
+  const shape=.88+.1*Math.sin(a*3+index)+.06*Math.cos(a*5-index);
+  const x=Math.cos(a)*r*rad*shape+(rnd()-.5)*12;
+  const y=Math.sin(a)*r*rad*.72*shape+z*20;
+  const point={x,y,z,brightness:.14+rnd()*.68};points.push(point);
+  const key=Math.floor(x/cell)+','+Math.floor(y/cell);if(!buckets.has(key))buckets.set(key,[]);buckets.get(key).push(i);
+ }
+ for(let bin=0;bin<4;bin++){
+  ctx.fillStyle=bin%2?rgba(project.color,.20+bin*.03):'rgba(202,222,242,'+(.13+bin*.05)+')';ctx.beginPath();
+  for(let i=0;i<1050;i++){const a=rnd()*TAU,rad=Math.sqrt(rnd()),shape=.88+.1*Math.sin(a*3+index)+.06*Math.cos(a*5-index),x=Math.cos(a)*r*rad*shape,y=Math.sin(a)*r*rad*.72*shape+(rnd()-.5)*35,s=.4+rnd()*.6;ctx.rect(x,y,s,s);}ctx.fill();
+ }
+ let edges=0;
+ ctx.lineWidth=.4;
+ for(let i=0;i<points.length;i++){
+  const p=points[i],bx=Math.floor(p.x/cell),by=Math.floor(p.y/cell),near=[];
+  for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(const j of buckets.get((bx+dx)+','+(by+dy))||[]){if(j>=i)continue;const q=points[j],dist=Math.hypot(p.x-q.x,p.y-q.y);if(dist<42)near.push({j,dist});}
+  near.sort((a,b)=>a.dist-b.dist);
+  for(const {j,dist} of near.slice(0,2)){
+   const q=points[j],depth=.2+.8*Math.pow(1-clamp(Math.hypot(p.x/r,p.y/(r*.82))),.6);ctx.strokeStyle=i%4===0?rgba(project.color,.12*depth*(1-dist/65)):'rgba(192,210,232,'+(.14*depth*(1-dist/65))+')';
+   ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(q.x,q.y);ctx.stroke();edges++;
+  }
+ }
+ for(let i=0;i<points.length;i++){const p=points[i];ctx.fillStyle=i%5===0?rgba(project.color,p.brightness*.72):'rgba(225,235,250,'+(p.brightness*.62)+')';const s=i%19===0?1.5:.7;ctx.fillRect(p.x-s/2,p.y-s/2,s,s);}
+ const mist=ctx.createRadialGradient(0,0,8,0,0,r);mist.addColorStop(0,rgba(project.color,.035));mist.addColorStop(1,rgba(project.color,0));ctx.fillStyle=mist;ctx.fillRect(-w/2,-h/2,w,h);
+ return{canvas,w,h,points,edges};
+}
+class AtlasRenderer{
+ constructor(canvas,projects,{canvasFactory}={}){
+  this.canvas=canvas;this.ctx=canvas.getContext('2d');if(!this.ctx)throw new Error('Canvas rendering is unavailable.');
+  this.factory=canvasFactory||((w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c;});
+  this.fields=projects.map((p,i)=>makeField(p,i,this.factory));this.projects=projects;this.hits=[];this.labels=[];
+  this.resources=new Map();this.stats={texturePoints:this.fields.reduce((s,f)=>s+f.points.length,0),textureEdges:this.fields.reduce((s,f)=>s+f.edges,0)};
+ }
+ resize(width,height,dpr=1){this.width=width;this.height=height;this.dpr=Math.min(1.5,dpr);this.canvas.width=Math.round(width*this.dpr);this.canvas.height=Math.round(height*this.dpr);}
+ point(x,y){return{x:this.width/2+(x-this.camera.x)*this.camera.zoom,y:this.height/2+(y-this.camera.y)*this.camera.zoom};}
+ world(x,y){return{x:(x-this.width/2)/this.camera.zoom+this.camera.x,y:(y-this.height/2)/this.camera.zoom+this.camera.y};}
+ hitTest(x,y){return this.hits.slice().reverse().find(h=>Math.hypot(h.x-x,h.y-y)<=h.r)||null;}
+ render(model,view){
+  const c=this.ctx,w=this.width,h=this.height;this.camera=view.camera;this.view=view;this.model=model;this.hits=[];this.labels=[];
+  this.resources=new Map(model.resources.map(r=>[r.id,r]));c.setTransform(this.dpr,0,0,this.dpr,0,0);c.clearRect(0,0,w,h);
+  const bg=c.createRadialGradient(w*.53,h*.47,0,w*.53,h*.47,Math.max(w,h)*.75);bg.addColorStop(0,'#0a101a');bg.addColorStop(1,'#03060b');c.fillStyle=bg;c.fillRect(0,0,w,h);
+  c.save();c.translate(w/2,h/2);c.scale(this.camera.zoom,this.camera.zoom);c.translate(-this.camera.x,-this.camera.y);
+  this.drawStructure(c);
+  for(let i=0;i<model.projects.length;i++)this.drawField(c,model.projects[i],this.fields[i],i);
+  if(view.connections)this.drawRelations(c);
+  for(const r of model.resources)this.drawResource(c,r);
+  if(model.process)this.drawProcess(c,model.process);
+  for(const signal of model.signals)this.drawSignal(c,signal);
+  const ordered=[...model.actors].sort((a,b)=>(a.id===view.selected?1:0)-(b.id===view.selected?1:0)||a.y-b.y);
+  for(const a of ordered)this.drawProbes(c,a);
+  for(const a of ordered)this.drawActor(c,a);
+  c.restore();this.drawLabels(c);
+  if(model.partial){c.fillStyle='rgba(5,9,15,.88)';roundRect(c,14,14,Math.min(267,w-28),28,6);c.fill();c.font='12px ui-monospace, monospace';c.fillStyle='#e8c487';c.fillText('T3 unobserved · other teams continue',25,32);}
+ }
+ drawStructure(c){
+  const pairs=[[0,1],[0,4],[0,5],[4,3],[3,2]],ps=this.model.projects;
+  for(const [ia,ib] of pairs){const a=ps[ia],b=ps[ib];c.strokeStyle='rgba(130,160,195,.10)';c.lineWidth=.7;c.beginPath();c.moveTo(a.x,a.y);c.bezierCurveTo(a.x+(b.x-a.x)*.4,a.y-70,b.x-(b.x-a.x)*.25,b.y+60,b.x,b.y);c.stroke();}
+ }
+ drawField(c,p,f,i){
+  const screen=this.point(p.x,p.y);if(screen.x<-220||screen.x>this.width+220||screen.y<-180||screen.y>this.height+180)return;
+  const focus=!this.view.project||this.view.project===p.id,alpha=focus?1:.3;c.globalAlpha=alpha;
+  c.drawImage(f.canvas,p.x-f.w/2,p.y-f.h/2,f.w,f.h);
+  if(this.view.motion!=='off'){
+   for(let k=0;k<12;k++){const point=f.points[(k*31+i*17)%f.points.length],a=.1+.24*(.5+.5*Math.sin(this.model.time*(.7+k*.015)+k*1.8));c.fillStyle=rgba(p.color,a);c.fillRect(p.x+point.x,p.y+point.y,1.9,1.9);}
+  }
+  c.globalAlpha=1;
+  const label=this.point(p.x,p.y-p.r*.84-15);
+  const members=this.model.actors.filter(a=>a.project===p.id),working=members.filter(a=>['working','attention'].includes(a.status)).length;
+  const unknown=members.some(a=>a.stale);
+  if(focus&&label.y>=12&&label.y<this.height-30&&label.x>-20&&label.x<this.width+20)this.labels.push({kind:'project',id:p.id,text:p.label,sub:unknown?'T3 observation missing':working+' working · '+p.detail,x:label.x,y:label.y,color:p.color,alpha:1,priority:1});
+  this.hits.push({kind:'project',id:p.id,x:screen.x,y:screen.y,r:p.r*this.camera.zoom*.78});
+ }
+ drawRelations(c){
+  for(const actor of this.model.actors){if(!actor.parent)continue;const parent=this.model.actors.find(a=>a.id===actor.parent);if(!parent)continue;
+   if(this.view.selected!==actor.id&&this.view.selected!==parent.id)continue;
+   c.setLineDash([4,6]);c.lineWidth=1;c.strokeStyle=rgba(actor.color,actor.stale?.17:.38);c.beginPath();c.moveTo(parent.x,parent.y);c.quadraticCurveTo((parent.x+actor.x)/2,(parent.y+actor.y)/2-35,actor.x,actor.y);c.stroke();c.setLineDash([]);
+  }
+ }
+ drawResource(c,r){
+  const selected=this.model.actors.find(a=>a.id===this.view.selected),active=selected?.targets.includes(r.id),inProject=!this.view.project||this.view.project===r.project;
+  const color=this.projects.find(p=>p.id===r.project).color;
+  c.globalAlpha=inProject?1:.25;c.strokeStyle=rgba(color,active?.75:.23);c.fillStyle=active?rgba(color,.10):'#091019';c.lineWidth=1;
+  const size=r.kind==='process'?11:7;
+  if(r.kind==='browser'){roundRect(c,r.x-10,r.y-7,20,14,2);c.fill();c.stroke();c.beginPath();c.moveTo(r.x-10,r.y-3);c.lineTo(r.x+10,r.y-3);c.stroke();}
+  else if(r.kind==='file'){c.strokeRect(r.x-6,r.y-8,12,16);c.beginPath();c.moveTo(r.x-3,r.y-3);c.lineTo(r.x+3,r.y-3);c.moveTo(r.x-3,r.y+1);c.lineTo(r.x+3,r.y+1);c.stroke();}
+  else if(r.kind==='message'){c.beginPath();c.moveTo(r.x,r.y-7);c.lineTo(r.x+9,r.y);c.lineTo(r.x,r.y+7);c.lineTo(r.x-9,r.y);c.closePath();c.fill();c.stroke();}
+  else {roundRect(c,r.x-size,r.y-size*.7,size*2,size*1.4,2);c.fill();c.stroke();}
+  c.globalAlpha=1;
+  if(active){const p=this.point(r.x,r.y);this.labels.push({text:r.label,sub:null,x:p.x,y:p.y-20,color:'#dce7f2',priority:3,kind:'resource'});}
+ }
+ drawProcess(c,p){
+  const color=p.state==='failed'?'#f8ba72':p.state==='unobserved'?'#7e8b9a':p.state==='passed'?'#69e0b5':'#9aa4ff';
+  c.save();c.translate(p.x,p.y);c.fillStyle='#0a101a';c.strokeStyle=rgba(color,.8);c.lineWidth=1;roundRect(c,-17,-12,34,24,3);c.fill();c.stroke();
+  c.fillStyle=color;c.font='13px ui-monospace,monospace';c.textAlign='center';c.fillText(p.state==='failed'?'!':p.state==='passed'?'✓':p.state==='unobserved'?'?':'>_',0,5);
+  if(p.state==='running'){c.strokeStyle=rgba(color,.7);c.lineWidth=1.3;c.beginPath();const a=this.view.motion==='off'?0:this.model.time*1.6;c.arc(0,0,24,a,a+Math.PI*.7);c.stroke();}
+  c.restore();const pt=this.point(p.x,p.y);this.labels.push({kind:'process',text:'Checks · '+p.state,x:pt.x,y:pt.y+30,color,priority:2});
+ }
+ drawSignal(c,s){
+  const u=clamp((this.model.time-s.at)/s.duration),a={x:s.from[0],y:s.from[1]},d={x:s.to[0],y:s.to[1]},b={x:lerp(a.x,d.x,.3),y:a.y-85},cc={x:lerp(a.x,d.x,.7),y:d.y-85};
+  c.lineWidth=1;c.strokeStyle=rgba(s.color,.18);c.beginPath();c.moveTo(a.x,a.y);c.bezierCurveTo(b.x,b.y,cc.x,cc.y,d.x,d.y);c.stroke();
+  if(this.view.motion==='off')return;
+  for(let k=0;k<10;k++){const t=u-k*.018;if(t<0)continue;const p=cubicPoint(a,b,cc,d,t);c.fillStyle=rgba(s.color,(1-k/10)*.9);const size=k===0?6:2.2;c.fillRect(p.x-size/2,p.y-size/2,size,size);}
+ }
+ drawProbes(c,a){
+  if(a.stale||!['working','attention'].includes(a.status)||a.moving||!a.targets.length)return;
+  const selected=a.id===this.view.selected,dim=this.view.project&&this.view.project!==a.project;
+  c.globalAlpha=dim?.18:1;
+  a.targets.forEach((id,i)=>{const target=this.resources.get(id);if(!target)return;
+   const g=probeGeometry(a,target,this.model.time-a.born,i,this.view.motion);
+   if(g.extension<.05)return;
+   const color=a.status==='attention'?'#f6bd7b':a.color;c.lineWidth=selected?1.5:1;c.strokeStyle=rgba(color,selected?.76:.4);
+   c.beginPath();c.moveTo(g.a.x,g.a.y);c.bezierCurveTo(g.b.x,g.b.y,g.c.x,g.c.y,g.d.x,g.d.y);c.stroke();
+   if(selected&&this.view.motion==='full')for(let j=1;j<13;j++){const p=cubicPoint(g.a,g.b,g.c,g.d,j/13);c.fillStyle=rgba(color,.58);c.fillRect(p.x-1,p.y-1,2,2);}
+   c.fillStyle=g.contact?'#efffff':color;c.beginPath();c.arc(g.d.x,g.d.y,selected?2.3:1.7,0,TAU);c.fill();
+   if(g.contact&&selected){const f=this.view.motion==='full'?((this.model.time+i*.3)%1):.4;c.strokeStyle=rgba(color,.42*(1-f));c.lineWidth=.8;c.beginPath();c.arc(target.x,target.y,5+f*12,0,TAU);c.stroke();}
+  });c.globalAlpha=1;
+ }
+ drawActor(c,a){
+  const selected=a.id===this.view.selected,dim=this.view.project&&this.view.project!==a.project;
+  const screen=this.point(a.x,a.y);if(screen.x<-100||screen.x>this.width+100||screen.y<-100||screen.y>this.height+100)return;
+  c.globalAlpha=dim?.25:a.stale?.42:1;
+  if(!a.stale&&this.view.motion==='full'&&a.age<a.travelDuration+.45&&Math.hypot(a.x-a.fromX,a.y-a.fromY)>20){
+   c.strokeStyle=rgba(a.color,.24*(1-clamp((a.age-a.travelDuration)/.45)));c.lineWidth=1.2;c.beginPath();c.moveTo(a.fromX,a.fromY);c.quadraticCurveTo((a.fromX+a.x)/2,(a.fromY+a.y)/2-22,a.x,a.y);c.stroke();}
+  c.save();c.translate(a.x,a.y);
+  const r=selected?23:15,phase=this.view.motion==='off'?0:this.model.time;
+  const locomotion=a.moving&&this.view.motion==='full',living=['working','attention'].includes(a.status)&&!a.stale;
+  const angle=a.heading*.34+(living&&this.view.motion==='full'?Math.sin(phase*1.2+a.born)*.035:0);c.rotate(angle);
+  const color=a.status==='attention'?'#f6bd7b':a.stale?'#8995a6':a.color;
+  const legs=selected?14:8;
+  for(let i=0;i<legs;i++){
+   const theta=TAU*(i+.35)/legs,rhythm=phase*(locomotion?16:living?5:0)+i*1.15+a.born;
+   const stride=locomotion?Math.sin(rhythm)*7:living&&this.view.motion==='full'?Math.sin(rhythm)*1.5:0;
+   const bend=.16*Math.sin(theta*2)+(locomotion?.08*Math.sin(rhythm):.04),span=r*(2.15+.23*Math.sin(i*2.3))+stride;
+   const rootx=Math.cos(theta)*r*.95,rooty=Math.sin(theta)*r*.72;
+   const elbowx=Math.cos(theta+bend)*r*1.5,elbowy=Math.sin(theta+bend)*r*1.2;
+   const footx=Math.cos(theta)*span,footy=Math.sin(theta)*span*.82;
+   c.lineWidth=selected?1.1:.85;c.strokeStyle=rgba(color,selected?.75:.58);c.beginPath();c.moveTo(rootx,rooty);
+   c.lineTo(elbowx,elbowy);c.lineTo(footx-Math.cos(theta+.3)*5,footy-Math.sin(theta+.3)*5);c.lineTo(footx,footy);c.stroke();
+   c.fillStyle=rgba('#e6ffff',selected?.83:.5);c.fillRect(footx-1,footy-1,2,2);
+  }
+  c.fillStyle='#07131b';c.strokeStyle=rgba(color,.8);c.lineWidth=1.1;c.beginPath();c.ellipse(0,0,r*1.1,r*.78,0,0,TAU);c.fill();c.stroke();
+  c.save();c.beginPath();c.ellipse(0,0,r*1.08,r*.76,0,0,TAU);c.clip();c.strokeStyle=rgba(color,selected?.25:.16);c.lineWidth=.6;
+  for(let i=-3;i<=3;i++){const x=i*r*.25;c.beginPath();c.moveTo(x,-r);c.quadraticCurveTo(x*.6,0,x,r);c.stroke();const y=i*r*.19;c.beginPath();c.moveTo(-r*1.2,y);c.quadraticCurveTo(0,y*.45,r*1.2,y);c.stroke();}
+  c.restore();
+  if(selected){c.strokeStyle=rgba(color,.23);c.lineWidth=.7;c.beginPath();c.ellipse(0,0,r*1.25,r*.91,0,0,TAU);c.stroke();}
+  const pulse=living&&this.view.motion==='full'?1+Math.sin(phase*4+a.born)*.08:1;
+  c.fillStyle=a.status==='complete'?'#9af1ce':a.status==='waiting'?'#b7c4d6':a.stale?'#738396':'#ff8bb9';
+  c.beginPath();c.moveTo(0,-5*pulse);c.lineTo(5*pulse,0);c.lineTo(0,5*pulse);c.lineTo(-5*pulse,0);c.closePath();c.fill();
+  if(a.status==='waiting'){c.strokeStyle='#a4b6c9';c.lineWidth=1.4;c.beginPath();c.moveTo(-2,-3);c.lineTo(-2,3);c.moveTo(2,-3);c.lineTo(2,3);c.stroke();}
+  c.restore();c.globalAlpha=1;
+  this.hits.push({kind:'actor',id:a.id,x:screen.x,y:screen.y,r:Math.max(20,r*this.camera.zoom*1.8)});
+  if(selected)this.labels.push({kind:'actor',text:a.id==='lead'?'T3 lead':a.name,sub:a.stale?'UNOBSERVED':null,x:screen.x,y:screen.y+Math.max(48,r*this.camera.zoom*2.6),color:a.stale?'#98a5b8':a.color,priority:0});
+ }
+ drawLabels(c){
+  const occupied=this.hits.filter(h=>h.kind==='actor').map(h=>({x:h.x-h.r*.8,y:h.y-h.r*.8,w:h.r*1.6,h:h.r*1.6}));c.textAlign='center';
+  for(const l of this.labels.sort((a,b)=>a.priority-b.priority)){
+   c.font=(l.kind==='project'?'600 14px':'12px')+' ui-monospace, SFMono-Regular, monospace';
+   let width=c.measureText(l.text).width+18;if(l.sub){c.font='11px ui-monospace, monospace';width=Math.max(width,c.measureText(l.sub).width+18);}
+   const height=l.sub?39:24,baseX=clamp(l.x-width/2,8,Math.max(8,this.width-width-8)),baseY=clamp(l.y-12,8,this.height-height-8);let x=baseX,y=baseY,placed=false;
+   for(const shift of [[0,0],[0,-26],[0,26],[-84,0],[84,0],[0,-54],[0,54],[-84,36],[84,36]]){const xx=clamp(baseX+shift[0],8,Math.max(8,this.width-width-8)),yy=clamp(baseY+shift[1],8,this.height-height-8);if(!occupied.some(b=>xx<b.x+b.w+4&&xx+width+4>b.x&&yy<b.y+b.h+3&&yy+height+3>b.y)){x=xx;y=yy;placed=true;break;}}
+   if(!placed&&l.priority>1)continue;occupied.push({x,y,w:width,h:height});
+   c.globalAlpha=l.alpha??1;if(l.kind==='resource'&&(Math.abs(x-baseX)>30||Math.abs(y-baseY)>30)){c.strokeStyle='rgba(190,212,232,.3)';c.lineWidth=.7;c.beginPath();c.moveTo(l.x,l.y+12);c.lineTo(x+width/2,y+height/2);c.stroke();}c.fillStyle=l.kind==='actor'?'rgba(6,16,25,.94)':'rgba(5,9,15,.84)';roundRect(c,x,y,width,height,4);c.fill();
+   if(l.kind==='actor'){c.strokeStyle=rgba(l.color,.37);c.lineWidth=1;c.stroke();}
+   c.font=(l.kind==='project'?'600 14px':'12px')+' ui-monospace, SFMono-Regular, monospace';c.fillStyle=l.kind==='project'?'#e0e8f4':l.color;c.fillText(l.text,x+width/2,y+16);
+   if(l.sub){c.font='11px ui-monospace, monospace';c.fillStyle=l.kind==='actor'?l.color:'#8c9eb5';c.fillText(l.sub,x+width/2,y+31);}
+   c.globalAlpha=1;
+  }
+ }
+ destroy(){this.fields.length=0;this.hits.length=0;this.labels.length=0;this.canvas.width=1;this.canvas.height=1;}
+}
+
+function mountAtlas(root,{canvasFactory,autoPlay=true}={}){
+ if(!root)throw new Error('Atlas root is missing.');
+ const canvas=root.querySelector('canvas'),q=name=>root.querySelector('[data-control="'+name+'"]'),f=name=>root.querySelector('[data-field="'+name+'"]');
+ const reduced=matchMedia('(prefers-reduced-motion: reduce)');
+ const state={time:0,playing:autoPlay,speed:1.5,selected:'lead',project:'',follow:false,motion:reduced.matches?'off':'full',lostAt:null,
+  camera:{x:620,y:490,zoom:.6},target:{x:620,y:490,zoom:.6},width:0,height:0,drag:null,disposed:false};
+ const renderer=new AtlasRenderer(canvas,PROJECTS,{canvasFactory});
+ let frame=0,timer=0,last=performance.now(),lastUI=-1,lastEvent='',wasPlaying=false,resizeObserver;
+ const listeners=[];const listen=(target,event,callback,options)=>{target.addEventListener(event,callback,options);listeners.push(()=>target.removeEventListener(event,callback,options));};
+ function fit(project=state.project,instant=false){const p=PROJECTS.find(x=>x.id===project);state.target=p?{x:p.x,y:p.y,zoom:Math.min(state.width/(p.r*2.8),state.height/(p.r*2.6),1.8)}:{x:620,y:490,zoom:Math.min((state.width-42)/1210,(state.height-65)/945)};
+  if(instant||state.motion==='off')state.camera={...state.target};}
+ function current(){return snapshotAt(state.time,{motion:state.motion,lostAt:state.lostAt});}
+ function updateUI(model,force=false){
+  if(!force&&Math.abs(state.time-lastUI)<.12)return;lastUI=state.time;
+  const original=ACTORS.find(a=>a.id===state.selected),actor=model.actors.find(a=>a.id===state.selected),project=PROJECTS.find(p=>p.id===(actor?.project||original.project));
+  f('name').textContent=original.name;f('role').textContent=original.role+' · '+original.owner;
+  f('status').textContent=(actor?.status||'queued').toUpperCase();f('status').dataset.state=actor?.status||'queued';
+  f('current').textContent=actor?.label||'This session has not started in the scenario.';
+  f('project').textContent=project.label;f('repo').textContent=original.repo||'Coordination';
+  f('parent').textContent=ACTORS.find(a=>a.id===original.parent)?.name||'No parent in this sample';
+  f('evidence').textContent=actor?.stale?'Observation unavailable':'Synthetic fixture';
+  f('process').textContent=model.process?'Targeted checks · '+model.process.state+' · attempt '+model.process.attempt+(model.process.stale?' · last observed':''):'Checks have not started';
+  f('source').textContent=actor?.stale?'Last T3 observation: '+state.lostAt.toFixed(1)+' s · current work unknown':'Fixture data · not current fleet state';
+  f('clock').textContent=state.time.toFixed(1).padStart(4,'0');q('time').value=String(state.time);
+  const latest=model.events.at(-1);f('milestone').textContent=model.partial?'Partial observation':model.finished?'Scenario complete':latest?.kind||'Brief';
+  const eventKey=model.events.slice(-3).map(e=>e.at).join(',')+'|'+state.lostAt;
+  if(eventKey!==lastEvent){lastEvent=eventKey;f('events').replaceChildren(...model.events.slice(-3).reverse().map(e=>{const li=document.createElement('li'),time=document.createElement('time'),span=document.createElement('span');time.textContent=String(Math.floor(e.at)).padStart(2,'0')+'s';span.textContent=e.label;li.append(time,span);return li;}));f('announcement').textContent=model.partial?'T3 observations are unavailable. Other teams continue.':latest?.label||'';}
+  const active=model.actors.filter(a=>a.status==='working'||a.status==='attention').length,unknown=model.actors.filter(a=>a.stale).length;
+  f('coverage').textContent=PROJECTS.length+' project fields · '+model.actors.length+' observed sample sessions · '+active+' working'+(unknown?' · '+unknown+' unobserved':'');
+  q('pause').textContent=state.playing?'Pause display':model.finished?'Play again':'Play display';
+  q('follow').setAttribute('aria-pressed',String(state.follow));q('follow').textContent=state.follow?'Following session':'Follow session';
+  q('motion').textContent='Motion: '+state.motion[0].toUpperCase()+state.motion.slice(1);
+  q('feed').setAttribute('aria-pressed',String(state.lostAt!==null));q('feed').textContent=state.lostAt===null?'Lose T3 feed':'Restore T3 feed';
+  q('project').value=state.project;q('actor').value=state.selected;
+  root.dataset.scenarioTime=state.time.toFixed(2);root.dataset.sourceState=model.partial?'partial':'fixture';
+ }
+ function draw(dt=.016,force=false){
+  const model=current(),actor=model.actors.find(a=>a.id===state.selected);
+  if(state.follow&&actor){const dx=actor.x-state.target.x,dy=actor.y-state.target.y,margin=38/state.camera.zoom;
+   if(Math.abs(dx)>margin||Math.abs(dy)>margin)state.target={x:actor.x,y:actor.y,zoom:Math.min(1.18,state.width/460)};}
+  const ease=state.motion==='off'?1:1-Math.exp(-Math.max(dt,.016)*7);
+  for(const k of ['x','y','zoom'])state.camera[k]+=(state.target[k]-state.camera[k])*ease;
+  renderer.render(model,{camera:state.camera,selected:state.selected,project:state.project,motion:state.motion,connections:true});updateUI(model,force);
+ }
+ function cancel(){if(frame)cancelAnimationFrame(frame);if(timer)clearTimeout(timer);frame=0;timer=0;}
+ function schedule(){if(state.disposed||document.hidden||!state.playing)return;cancel();if(state.motion==='off')timer=setTimeout(()=>tick(performance.now()),200);else frame=requestAnimationFrame(tick);}
+ function tick(now){frame=0;timer=0;if(state.disposed||!root.isConnected){dispose();return;}const dt=Math.min(.25,Math.max(0,(now-last)/1000));last=now;if(state.playing)state.time=Math.min(DURATION,state.time+dt*state.speed);if(state.time>=DURATION)state.playing=false;draw(dt,state.time>=DURATION);schedule();}
+ function redraw(){if(!state.playing)state.camera={...state.target};draw(.1,true);if(state.playing){last=performance.now();schedule();}}
+ function select(id){if(!ACTORS.some(a=>a.id===id))return;state.selected=id;const a=ACTORS.find(x=>x.id===id),pose=current().actors.find(x=>x.id===id),project=pose?.project||a.project;if(state.project&&state.project!==project){state.project=project;fit();}if(state.follow){state.target={x:pose?.x??a.steps[0].x,y:pose?.y??a.steps[0].y,zoom:Math.min(1.18,state.width/460)};}redraw();}
+ function resize(){const rect=canvas.getBoundingClientRect();state.width=Math.max(280,rect.width);state.height=Math.max(320,rect.height);renderer.resize(state.width,state.height,window.devicePixelRatio||1);if(!state.widthInitialized){state.widthInitialized=true;if(state.width<500)state.project='os';}fit(state.project,true);redraw();}
+ function replay(){state.time=0;state.lostAt=null;state.playing=true;lastEvent='';last=performance.now();fit(state.project,true);redraw();}
+ listen(q('pause'),'click',()=>{if(state.time>=DURATION){replay();return;}state.playing=!state.playing;cancel();last=performance.now();redraw();});
+ listen(q('follow'),'click',()=>{state.follow=!state.follow;if(state.follow){const actor=current().actors.find(a=>a.id===state.selected);if(actor)state.target={x:actor.x,y:actor.y,zoom:Math.min(1.18,state.width/460)};}else fit();redraw();});
+ listen(q('motion'),'click',()=>{state.motion=state.motion==='full'?'calm':state.motion==='calm'?'off':'full';cancel();last=performance.now();redraw();});
+ listen(q('feed'),'click',()=>{state.lostAt=state.lostAt===null?state.time:null;redraw();});
+ listen(q('time'),'input',()=>{state.time=clamp(Number(q('time').value),0,DURATION);if(state.lostAt!==null&&state.time<state.lostAt)state.lostAt=state.time;lastEvent='';redraw();});
+ listen(q('speed'),'change',()=>{state.speed=Number(q('speed').value);});
+ listen(q('actor'),'change',()=>select(q('actor').value));
+ listen(q('project'),'change',()=>{state.project=q('project').value;state.follow=false;if(state.project){const a=current().actors.find(a=>a.project===state.project)||ACTORS.find(a=>a.project===state.project);if(a)state.selected=a.id;}fit();redraw();});
+ listen(q('reset'),'click',()=>{state.project='';state.follow=false;fit('',!state.playing);redraw();});
+ for(const name of ['zoom-in','zoom-out'])listen(q(name),'click',()=>{state.follow=false;state.target.zoom=clamp(state.target.zoom*(name==='zoom-in'?1.24:1/1.24),.22,2.2);if(!state.playing)state.camera={...state.target};redraw();});
+ listen(q('replay'),'click',replay);
+ for(const b of root.querySelectorAll('[data-select]'))listen(b,'click',()=>select(b.dataset.select));
+ listen(canvas,'pointerdown',e=>{if(e.pointerType==='touch')return;state.drag={x:e.clientX,y:e.clientY,startX:e.clientX,startY:e.clientY,moved:false};canvas.setPointerCapture?.(e.pointerId);});
+ listen(canvas,'pointermove',e=>{if(!state.drag)return;const dx=e.clientX-state.drag.x,dy=e.clientY-state.drag.y;state.drag.moved=state.drag.moved||Math.hypot(e.clientX-state.drag.startX,e.clientY-state.drag.startY)>5;if(state.drag.moved){state.follow=false;state.camera.x-=dx/state.camera.zoom;state.camera.y-=dy/state.camera.zoom;state.target={...state.camera};draw(.016);}state.drag.x=e.clientX;state.drag.y=e.clientY;});
+ listen(canvas,'pointerup',e=>{const dragged=state.drag?.moved;state.drag=null;canvas.releasePointerCapture?.(e.pointerId);if(dragged)return;const rect=canvas.getBoundingClientRect(),hit=renderer.hitTest(e.clientX-rect.left,e.clientY-rect.top);if(hit?.kind==='actor')select(hit.id);else if(hit?.kind==='project'){state.project=hit.id;state.follow=false;fit();redraw();}});
+ listen(canvas,'pointercancel',()=>{state.drag=null;});
+ listen(document,'visibilitychange',()=>{if(document.hidden){wasPlaying=state.playing;state.playing=false;cancel();}else if(wasPlaying){wasPlaying=false;state.playing=state.time<DURATION;last=performance.now();redraw();}});
+ listen(reduced,'change',e=>{if(e.matches){state.motion='off';cancel();redraw();}});
+ listen(window,'pagehide',()=>dispose());
+ function dispose(){if(state.disposed)return;state.disposed=true;cancel();resizeObserver?.disconnect();for(const remove of listeners)remove();renderer.destroy();delete root.atlasStudy;}
+ root.atlasStudy={state,renderer,snapshot:current,seek(t){state.time=clamp(t,0,DURATION);redraw();},dispose};
+ resizeObserver=new ResizeObserver(resize);resizeObserver.observe(canvas);resize();
+ return dispose;
+}
+
+const root = document.getElementById('mmx-swarm-atlas');
+try { mountAtlas(root); }
+catch (error) {
+ root.dataset.sourceState = 'renderer-unavailable';
+ root.querySelector('[data-field="status"]').textContent = 'RENDERING UNAVAILABLE';
+ root.querySelector('[data-field="current"]').textContent = 'The visual renderer could not start in this browser.';
+ for (const control of root.querySelectorAll('button, select, input')) control.disabled = true;
+}
+
+})();
+</script>
+</main></body></html>
