@@ -41,10 +41,11 @@ tactic, not status polling.
 
 ## Keep real boundaries
 
-An actual safety or permission denial ends that action: no rephrased request,
-alternate tool, account, host, model or delegated replay. Distinguish it from
-schema errors, transport failures, rate limits and model-written hesitation.
-Use existing bounded recovery, never blind retries.
+Classify the actual tool error before deciding recovery. Length, schema,
+capacity and transport failures do not themselves establish a policy denial.
+Repair eligible inputs and technical causes under existing grants after checking
+the original effect. Enforced access restrictions remain specific to the
+restricted operation; independent authorized work continues.
 
 Interrupted mutations may have executed. Keep one logical effect on its original
 carrier until authoritative reconciliation; absence from a short log is not
