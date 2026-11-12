@@ -168,7 +168,21 @@ case "$1" in
       echo "{\"success\": true, \"data\": {${ident}, \"bounds\": {\"width\": 800, \"height\": 600}}}"
     else
       replay see_fixture_window.json
-      echo "{\"success\": true, \"data\": {${ident}, \"snapshot_id\": \"snap-abc123\",
+      # BCU R3 H1: the real plain-see envelope carries a TOP-LEVEL
+      # target_receipt ({pid, window_id}) as a sibling of "data"
+      # (see_fixture_window.json). Mirror that shape so the one resolver
+      # sees what the real CLI reports; --window-id is echoed back.
+      wid=42
+      prev=""
+      for a in "${ARGS[@]}"; do
+        [ "$prev" = "--window-id" ] && wid="$a"
+        prev="$a"
+      done
+      receipt=""
+      if [ -z "${FAKE_PEEKABOO_NO_TARGET_RECEIPT:-}" ]; then
+        receipt=", \"target_receipt\": {\"pid\": 101, \"window_id\": ${wid}}"
+      fi
+      echo "{\"success\": true${receipt}, \"data\": {${ident}, \"snapshot_id\": \"snap-abc123\",
         \"ui_elements\": [
           {\"id\": \"btn1\", \"role\": \"Button\", \"label\": \"OK\", \"value\": \"\"},
           {\"id\": \"field1\", \"role\": \"TextField\", \"label\": \"Name\", \"value\": \"${FAKE_PEEKABOO_FIELD_VALUE:-}\"},
@@ -2396,8 +2410,8 @@ class TestPasteTruthfulness(unittest.TestCase):
 
     def test_clean_pre_dispatch_refusal_stays_not_applied(self):
         ctx = self._ctx()
-        # BCU R2 item 4: the pace is keyed on the owning pid + exact window id
-        # (the fake window list reports owner_pid 101 for window 42).
+        # BCU R2 item 4 / R3 H1: the pace is keyed on the owning pid + exact
+        # window id (the fake see's target_receipt reports pid 101).
         ctx.pacer.record(mmos.pacing_key(42, 101))
         result = self._paste(ctx)
         payload = json.loads(result["content"][0]["text"])
@@ -4080,6 +4094,31 @@ class TestPeekabooFixtureReplay(unittest.TestCase):
         os.environ["FAKE_PEEKABOO_FIXTURES"] = empty
         windows = ctx.adapter.list_windows("TextEdit")
         self.assertEqual(windows[0]["window_id"], 42)
+
+    def test_pacing_key_replays_the_real_target_receipt(self):
+        # BCU R3 H1 (fail-first on 1ae3e29e6): replay the REAL captures and
+        # run one paced act. The pid for the pacing key comes from THE one
+        # resolver — the snapshot's own top-level target_receipt (pid
+        # 49829 in see_fixture_window.json) — not from a window-list
+        # subprocess walk. Real window ROWS carry no pid at all, so the old
+        # row-walking resolver never found one and fell back to the pid-less
+        # "window:98889" key; the new key is "pid:49829|window:98889" and
+        # the paced act makes ZERO `window list` reads.
+        ctx = build_ctx(self.tmp)
+        acquire_lease(ctx)
+        os.environ["FAKE_PEEKABOO_FIXTURES"] = FIXTURE_DIR
+        payload = json.loads(mmos.handle_tool_call(ctx, {
+            "action": "set_text", "window_id": 98889,
+            "element_ref": "elem_1", "text": "bcu-r3-h1",
+            "owner": "agent-a",
+            "lease_nonce": ctx.lease_nonce})["content"][0]["text"])
+        self.assertEqual(payload["status"], "APPLIED", payload)
+        with open(os.path.join(ctx.pacer.state_dir, "pacing.json"),
+                  encoding="utf-8") as handle:
+            pace = handle.read()
+        self.assertIn("pid:49829|window:98889", pace)
+        self.assertNotIn('"window:98889"', pace)
+        self.assertEqual([c for c in read_calls(ctx) if c[0] == "window"], [])
 
 
 class TestDenyBeforePixels(unittest.TestCase):

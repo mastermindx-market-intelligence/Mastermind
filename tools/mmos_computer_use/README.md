@@ -148,13 +148,18 @@ Design summary:
   - **Pacing identity.** A minimum interval (default **180 s**, env
     `MMOS_CU_PACING_SECONDS` or runtime.json `pacing_seconds`; env values
     below the default UNCONDITIONALLY refuse at startup — no test-mode flag)
-    between two input-delivering acts. The key is the M8 identity —
-    `app:<owning app>|title:<NFC, casefolded title>` — NOT the window id,
-    so closing and reopening the same app window does not reset the
-    interval. The window id is recorded alongside for diagnostics. Too soon
-    → `NOT_APPLIED` / `PACING_WAIT` with the seconds remaining. The interval
-    is measured on a monotonic clock where available, so a wall-clock jump
-    cannot shorten or extend it.
+    between two input-delivering acts. The key is `pid:<owning
+    pid>|window:<exact window id>` — never the app name or title, so a
+    title change (tab switch, new message) cannot reset the interval, and
+    the pid binds the record to one process, so a window id recycled by
+    another app cannot inherit (or escape) it. The pid comes from ONE
+    resolver (`target_receipt_pid`): the act's own fresh snapshot carries
+    peekaboo's `target_receipt` (falling back to
+    `target_application_info.pid`); no extra window-list read is made, and
+    paste targeting uses the same resolver. Too soon → `NOT_APPLIED` /
+    `PACING_WAIT` with the seconds remaining. The interval is measured on a
+    monotonic clock where available, so a wall-clock jump cannot shorten
+    or extend it.
   - **Challenge stop.** Before ANY input-delivering dispatch, the shared gate
     scans the window's AX text (and OCR text if present) for challenge
     patterns — captcha, are you a robot, verify you are human, sign in, log
