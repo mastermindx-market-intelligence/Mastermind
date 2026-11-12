@@ -1652,3 +1652,59 @@ if it classifies and only through its own guards (three days old, content on the
 process inside, non-force removal, human roots protected). I change neither the floor nor the
 scheduled jobs. The privacy grant for the scheduled process and the job's flags are the storage
 owner's settings; they go to the Chairman as one line with the evidence.
+
+## 40. Amendment, 2026-11-12 07:15 UTC: Paper is proven and read on five hosts; the pool rule for dead folders
+
+**Paper is proven.** From ubuntu2 a session read a file and took a screenshot, made a guarded edit
+on the throwaway file with a readback, and had a stale snapshot refused. I read the proof and
+viewed the image. The hold on Prophet's remote guarded edits is lifted and the Prophet lead was
+told. The read profile (three tools: catalog, inspect, read) is now registered on m1studio,
+ubuntu0, ubuntu3 and mastermind-pc as well. Each host has its own key, made on that host; each key
+line on the M2 is restricted to that host's address and to one fixed command, and was appended with
+a backup. A probe and two refusal checks passed on every host. A new-session proof per host is
+running. ubuntu4 is offline and has nothing.
+
+Next for the lane, all staged for me to install: the three tools the guarded server does not yet
+admit (new artboard, create and set tokens); a guarded local registration for sessions on the M2;
+and the skillpack for the four hosts that have an old one or none.
+
+**Ruling 17 is in force** (section 39 was written before it): two sides that cannot switch in the
+same instant overlap for exactly one release. The bridge release waits on the round built to it.
+
+**The worktree pool: what holds it today.** Three hand runs of the incumbent reaper from this
+session removed 55 trees through its own guards. Margin above the floor is about 49 GiB on the
+first volume and 5.6 GiB on the second. Each further run frees only what has just turned three
+days old, and so far that has all been on the first volume.
+
+**A correction to section 39.** The scheduled job is not denied on every run. The denial comes and
+goes per start; the job's flags still make it report-only. Both are the storage owner's settings.
+
+**What does not hold: 779 dead folders on the second volume.** Their pointer names a worktree entry
+that no longer exists, so the reaper never sees them. They cannot be proven clean the old way: the
+commits they were made from are gone from the store, and the harness writes its own files into
+every tree. The archived-worktrees folder (67.5 GiB) is the same class. The incumbent archive tool
+skips any folder with a git pointer, so it does not cover them either.
+
+**Ruling for the class.** A dead folder is removed only when, immediately before removal, every
+file in it falls in one of three groups:
+
+| Group | Test | What happens |
+|---|---|---|
+| On the remote | The file's bytes are a blob reachable from a remote ref of its store | Nothing kept; it can be fetched again |
+| Regenerable | It sits under a named build or cache folder on a short list I rule | Nothing kept |
+| Unique | Everything else | Copied to an archive, listed back, every hash compared; then the folder goes |
+
+A folder is left and reported when its unique bytes pass a cap, when a process is inside, when it is
+under three days old, when its pointer is in fact live, or when anything is unclear. The run stops
+at the first unclear result. This replaces "prove the whole tree against one commit", which removes
+nothing, with a proof per file that loses nothing.
+
+A lane builds the tool and tests it on fixtures only, reports on a sample of 40 real folders by
+reading, and finishes the first volume's census. Running it for real is mine, after an independent
+review of the tool and my own read of it. Folders that belong to another programme's proof work
+(the first volume's `tmp/`) are asked about, not swept.
+
+**A class rule from another programme's question.** A child that is already isolated in a worktree
+does not mint a second tree. The harness refuses to enter it and refuses git commands aimed outside
+its own tree; that refusal is a real control. Two branches at once means two children. The recipe
+text in the Macro guard says otherwise and its correction waits for the Chairman's word.
