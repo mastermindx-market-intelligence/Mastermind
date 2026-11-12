@@ -1923,3 +1923,27 @@ DeepSeek worker with the same eight points.
 2. The return edge once (Secretary asks Design Lead), then the installed baseline.
 3. Memory link: the lane's patch with the three required fixes, the principal's read of the gate, roster and server changes, then the install and the Hermes timers one at a time.
 4. Grok Bot link: item 5, the rehearsed install list, the install, then one sitting with the Chairman.
+
+## 47. Amendment, 2026-11-12 13:25 UTC: all three teammates wake on their own instance; ask-and-answer proven; Grok Bot link item 5 merged
+
+**Done.**
+
+- Design Lead and Assurance each have a fresh primary conversation on their own provider instance, on `qwen3.8-max`. Each was woken by a real board task (MAS-23, MAS-24) and answered. Section 46 items 1 and 2 are complete.
+- The return edge works on the real board: Secretary was given one task (MAS-25), asked Design Lead through a child task (MAS-26), and the answer came back into Secretary's new conversation. All proof tasks are settled and no run is live.
+- The installed baseline (carrier hash, each teammate's instance, conversation, binding revision, model and wake proof) is recorded in the lane's evidence folder.
+- Grok Bot link item 5 is merged after the principal's read:
+  - a ledger line is synced to disk before its writer returns, and a sync that fails refuses the write with the existing typed error;
+  - once the host's own delivery record exists, status reports the answer as consumed and neither reminder path sends anything.
+
+**Notes from the read.**
+
+- Board wakes for a teammate now land in its new primary conversation. A person's own conversation with a teammate is separate and is not touched.
+- One bridge test fails about once in 25 runs: `test_refuses_uid_not_in_table_without_calling_core`. The server refuses a caller that is not in its table before reading the request, so the caller's send can meet a closed socket. The refusal still holds. The test and the edge's handling of that closed socket go on the lane's later list; they do not block the install.
+- The team server's default model for a new conversation still names the GLM model. It is changed with the memory-link install, in the same settings change.
+
+**Next, in order.**
+
+1. Memory link: the lane's return, the principal's read of the gate, roster and server changes, then the install and the Hermes timers one at a time.
+2. Grok Bot link: the rehearsed install list on the merged head, the install, then one sitting with the Chairman.
+3. Browser bridge fix and the computer-use round, as they return.
+4. Storage: repeat the census once the other session's deletion has ended, then decide whether the orphan tool is still needed.

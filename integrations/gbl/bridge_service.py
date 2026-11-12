@@ -500,6 +500,22 @@ class GblBridge:
                 "DELIVERY_LOCK_UNAVAILABLE", type(self._store).__name__)
         return lock() if lock is not None else contextlib.nullcontext()
 
+    def _host_delivered(self, ask_id: str) -> bool:
+        """True once the HOST's own delivery record exists for the ask.
+
+        GBL-5 micro 5b: the record is written before the CONSUMED post, so
+        it is the only source that cannot lag this host's own writes — the
+        listing can (``comment_visibility_lag``) and a failed post never
+        lands at all.  Read under the same host-wide delivery lock
+        ``fetch_result`` decides under, from the store's ledger arm.
+        ``False`` from a store that keeps no record (explicitly marked
+        ``GBL_TEST_DOUBLE``) preserves its plain listing read."""
+        records = self._delivery_records()
+        if records is None:
+            return False
+        with self._delivery_lock():
+            return records[0](ask_id) is not None
+
     def ask_status(self, *, principal: str, ask_id: str) -> dict[str, Any]:
         record = self._require_ask(ask_id)
         self._require_party(record, principal)
@@ -507,6 +523,14 @@ class GblBridge:
         # EXPIRED, never a live state it can no longer act in.
         if is_expired(record, self._now()):
             return {"ask_id": ask_id, "state": "EXPIRED", "status": "EXPIRED",
+                    "expires_at": record["expires_at"]}
+        # GBL-5 micro 5b: the host record wins over the listing.  After a
+        # failed CONSUMED post the listing still says ANSWERED while
+        # fetch_result — correctly — reports CONSUMED; status must agree.
+        if self._host_delivered(ask_id):
+            state = "CONSUMED"
+            return {"ask_id": ask_id, "state": state,
+                    "status": surface_ask_state(state),
                     "expires_at": record["expires_at"]}
         state = self._replay_state(record)
         return {"ask_id": ask_id, "state": state,
@@ -578,6 +602,12 @@ class GblBridge:
         TARGET_UNAVAILABLE, FAILED) is a typed ``NUDGE_NOT_DELIVERED`` that
         burns no budget, never a false RENUDGED."""
         record = self._require_ask(ask_id)
+        # GBL-5 micro 5b: a delivered answer owes no reminder, whatever
+        # the listing shows.  Before this, a failed CONSUMED post left the
+        # listing at ANSWERED and reminders kept going until the budget
+        # was gone.  This arm sends nothing and is named for the caller.
+        if self._host_delivered(ask_id):
+            return {"status": "ALREADY_DELIVERED", "ask_id": ask_id}
         state = self._replay_state(record)
         if state != "ANSWERED":
             return {"status": state, "ask_id": ask_id}
@@ -671,6 +701,11 @@ class GblBridge:
         marker so the lane re-arms after cooldown without burning budget."""
         record = self._require_ask(ask_id)
         self._require_party(record, principal)
+        # GBL-5 micro 5b: reconcile observes the transport for an answer
+        # the host has NOT yet handed over.  Once the host record exists,
+        # there is nothing to settle and nothing is observed or sent.
+        if self._host_delivered(ask_id):
+            return {"status": "ALREADY_DELIVERED", "ask_id": ask_id}
         self._ordered_events(record)   # chain law enforced on the record
         # The same POST-really-happened view as maybe_renudge (deputy
         # MED-2): a demoted attempt is still an attempt to reconcile, and
