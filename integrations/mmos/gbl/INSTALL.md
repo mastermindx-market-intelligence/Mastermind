@@ -1,18 +1,27 @@
 # GBL bridge — install list (staged, rehearsed, principal-only)
 
 Lane: GBL install (ruling 16 rehearsal). Date: 2026-11-12. Author: GBL lane lead (sub-agent).
-Code to install: trunk `feat/mmos-v1-integration-t3` (9ce272a69) + branch `t3/mmos-v4-gbl-item5`
-(8dad45083, awaiting the principal's read). Digests below were taken at **8dad45083**; the
-principal re-takes them at `<PRINCIPAL FILLS: merged head>` in P0-3 — only
-`integrations/gbl/bridge_service.py` and `integrations/gbl/paperclip_client.py` differ between
-trunk and item5, so every other digest must match unchanged.
+Code to install: trunk `feat/mmos-v1-integration-t3` at **merged head 26c754bfd** — item5
+(8dad45083) is merged (principal's update 13:27Z); its `integrations/gbl` files are byte-equal to
+8dad45083, verified by digest. The digests below were re-taken at **26c754bfd** and every one
+equals the value taken at 8dad45083, so the rehearsal copy (`git archive 8dad45083`) exercises
+byte-identical bridge code.
 
 **Rehearsal statement (ruling 16):** every step in this list was run end to end against a COPY
 (`git archive 8dad45083` under `~/.mastermind/mmos_dev/gbl/install-rehearsal/repo/`): the bridge
 was started by hand (never launchd), against the test fake-board fixture on an ephemeral port
 (never 127.0.0.1:3100), the tunnel config was validated without running a tunnel and without
-touching `~/.cloudflared`, and each rollback below was run exactly once. Results and logs:
-`REHEARSAL.md` (same folder). Nothing in this list was installed for real by the lane.
+touching `~/.cloudflared`, and each rollback below was run exactly once (R1–R6). Final run:
+**25/25 rehearsal steps passed** and the **7 GBL test suites (361 tests) pass at the merged head**
+(all rc=0). Results and logs: `REHEARSAL.md` (same folder). Nothing in this list was installed
+for real by the lane. The rehearsal found and fixed two real defects, which is exactly what
+ruling 16 is for: (1) a runner edge-build failure left a stale door socket behind (fixed: the
+runner now closes the door before dying typed `EDGE_START_FAILED`); (2) `load_resource_policy`
+REFUSES an empty `allowed_subject_digests` list, so the edge policy cannot ship with `[]` — it
+ships with ONE non-admitting placeholder digest until the sitting (see "The real spec" below).
+Three further usage findings are folded into the steps below: the cloudflared `--config` flag
+position (step 8), the exact HMAC-key mint moment (spec section + step 6/7), and the
+`status=`-line consumer contract for `fetch` (ruling-19b section).
 
 **Effect on running sessions (ruling 16):** NONE of the steps restarts, reconfigures or interrupts
 any teammate session, the Chairman's app, the team server, or any running conversation. The
@@ -27,11 +36,9 @@ refused typed; the connector cannot cause an ask.
 
 ## Phase 0 — prerequisites and BLOCKERS (principal, before anything is placed)
 
-### P0-1 item5 merged
-Merge/read `t3/mmos-v4-gbl-item5` (8dad45083: `_sync_ledger_line` F_FULLFSYNC ledger durability +
-`_host_delivered()` host-record-wins arms — the ruling-19 repairs) into the trunk.
-- **Check:** `git merge-base --is-ancestor 8dad45083 <merged head>` exits 0.
-- **Rollback:** none needed (merge is revertible by the principal's normal path).
+### P0-1 item5 merged — **DONE 2026-11-12** (principal: trunk is now 26c754bfd)
+`git merge-base --is-ancestor 8dad45083 26c754bfd` exits 0 (verified by the lane); all 17
+digests below re-taken at 26c754bfd equal the 8dad45083 values (verified by the lane).
 
 ### P0-2 BLOCKER — the real board port is refused by the shipped code
 `integrations/gbl/paperclip_client.py` line ~98: `RESERVED_PORTS = frozenset({3100, 3179})`;
@@ -52,22 +59,21 @@ via the runner's `from_spec` call. Two ways forward, principal's choice:
   the choice until step 5.
 
 ### P0-3 checkout + digest verification at the merged head
-- **Check:** in the checkout the spec's `repo` will name, `shasum -a 256` every file in the table
-  below; all must match the digests re-taken at `<PRINCIPAL FILLS: merged head>` (the two item5
-  files change digest at merge; the other fifteen are already identical at trunk 9ce272a69).
+- **Check:** in the checkout the spec's `repo` will name (at 26c754bfd or a descendant),
+  `shasum -a 256` every file in the table below; all 17 must match.
 - **Rollback:** a mismatch stops the install; re-fetch the exact head.
 
-### Digest table (at 8dad45083 — the code to install)
+### Digest table (at merged head 26c754bfd — byte-equal to 8dad45083, verified)
 
 | sha256 | path |
 |---|---|
 | 9ca56fb5a74603c25d2270b5054ce95bb4c7f4d34ad62582ef9f73af461e57fc | integrations/gbl/__init__.py |
 | 7a27d6f21ccf1739229185272b2b81d054ee38f9a259c114f90f3850d4f74e52 | integrations/gbl/admission.py |
-| e006e38affccd5bdc2fbc69ea45ff6c652b2c486b5dbd3e7b82620c47b7c19fe | integrations/gbl/bridge_service.py *(item5)* |
+| e006e38affccd5bdc2fbc69ea45ff6c652b2c486b5dbd3e7b82620c47b7c19fe | integrations/gbl/bridge_service.py |
 | adc1486af987014ebf4e1c25e24c54c84ab70b2de4356d7874d75ddddfb548c1 | integrations/gbl/mcp_server.py |
 | c3140af9ce9e4b691cc9f1e3b0e5f62b19e81de729fb1c2e7893249fd96b7548 | integrations/gbl/message_send.py |
 | ba5096b1cb7fbf2a3daf95e72bdf1078d506093c68b025a04446b710f4b9fe56 | integrations/gbl/nudge.py |
-| d4ba0f61b7b641fb3bbe9be23d6b5b61f44791e1e4cf48cd26292e177dc608ec | integrations/gbl/paperclip_client.py *(item5)* |
+| d4ba0f61b7b641fb3bbe9be23d6b5b61f44791e1e4cf48cd26292e177dc608ec | integrations/gbl/paperclip_client.py *(still carries RESERVED_PORTS — P0-2 open)* |
 | 91a5d32c0ab4da1cb0e51d1b4fd9cd59ffc527400000bd808f0cc75fc5e5bd3d | common/gbl_contract.py |
 | 2bba37cb178b53dc4a9cccee7eeb40a1493dfe168a7fbb70f978cf6da6078738 | tools/gbl/gbl_ask.py |
 | abcc8c4fccf8c2da8eadafd508f328515087346f0636d7cefdcd43a29b170d8a | tools/gbl/specs/grok_bridge_dev.json |
@@ -99,9 +105,12 @@ evidence until the principal places them):
   a live or stale socket path at start = typed `SOCKET_IN_USE`, never adopted).
 - **HMAC key path:** `~/.mastermind/gbl/run/hmac_v1.key`. **The bridge creates the key on first
   use** (32 random bytes, 0600, O_NOFOLLOW, symlink refused, parent dir must not be
-  group/other-writable). **No step ever reads an existing key**; no pre-create is needed (the
-  GBL4_NOTES `umask 077 && head -c 32 /dev/urandom` pre-create option remains available but the
-  rehearsal proved lazy creation works). The key never crosses the wire, a log, or argv.
+  group/other-writable). Rehearsal precision: "first use" means the first **TAGGED** event — the
+  answer/state append (`_hmac_key()` is lazy) — NOT the first plain ask; after a READY with no
+  answer activity the key legitimately does not exist yet (S05/S08). **No step ever reads an
+  existing key**; no pre-create is needed (the GBL4_NOTES `umask 077 && head -c 32 /dev/urandom`
+  pre-create option remains available but the rehearsal proved lazy creation works). The key
+  never crosses the wire, a log, or argv.
 - **Real board address:** `http://127.0.0.1:3100` — **see the P0-2 BLOCKER**: the shipped
   base-URL law refuses 3100 until the principal resolves it.
 - **Grok Bridge agent fields:** `<PRINCIPAL FILLS>` — company_id, agent_id (agent created in step
@@ -115,6 +124,15 @@ evidence until the principal places them):
 - **Admission:** BOTH tables ship **EMPTY** (`bridge admission: []`, `edge.admission: []`), and
   `team.message` ships with an EMPTY allowlist and EMPTY environments — `ALLOWLIST_EMPTY` refusal
   for every (environment, thread). Enrollment is principal-only (step 10/11).
+- **Subject-digest placeholder (rehearsal finding):** `load_resource_policy` REFUSES an empty
+  `allowed_subject_digests` list (contracts.py `_sorted_unique_strings`: ≥1 item, sorted, unique),
+  so the edge policy cannot ship with `[]`. It ships with ONE non-admitting placeholder:
+  `subject_digest(issuer="<issuer>", subject="gbl-enrollment-pending")` — deterministic, matches
+  no real token (no connector authenticates before enrollment anyway; the empty `edge.admission`
+  table independently refuses every tool call). The principal REPLACES it with the real digest(s)
+  in the same edit that enrolls rows (step 10). Alternatively the whole `edge` block may be
+  omitted at step 5 and added at step 10 — the runner supports the door-only shape (rehearsal
+  S04a: READY with `edge=disabled`).
 - **Nudge:** no `routine` block ships; the runner logs `nudge=NOT_CONFIGURED` and no nudge can
   fire. The principal adds the block after the sitting creates the webhook routine (step 9), and
   even then the production CALLER of the nudge intake lands with GBL-5 (open dependency below).
@@ -201,8 +219,17 @@ Copy staged `com.mastermind.gbl.bridge.plist` → `~/Library/LaunchAgents/`, the
 is the bridge listener)
 Copy staged `config.yml` → `~/.mastermind/gbl/tunnel/config.yml` (`chmod 600`), copy staged
 `com.mastermind.gbl.tunnel.plist` → `~/Library/LaunchAgents/`,
+Before bootstrapping, re-validate the PLACED config the same way the rehearsal did — note the
+FLAG POSITION (rehearsal finding): `cloudflared tunnel --config ~/.mastermind/gbl/tunnel/config.yml ingress validate`
+and `… ingress rule https://mmos-link.mastermindx.ai/mcp` (must print rule #0 →
+`http://127.0.0.1:3193`) — `--config` must come BEFORE `ingress`; after it, cloudflared prints
+"Incorrect Usage" yet exits 0 (a false PASS), and a misplaced `ingress rule` falls back to the
+DEFAULT config under `~/.cloudflared` instead of the named file. The rehearsal proved these
+commands read no credential file (they passed with `credentials-file` pointing at a non-existent
+path). Then
 `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.mastermind.gbl.tunnel.plist`.
-- **Check:** `~/.mastermind/gbl/run/tunnel.log` shows registered tunnel connections;
+- **Check:** the pre-start validate/rule above → OK / rule #0 `http://127.0.0.1:3193`;
+  `~/.mastermind/gbl/run/tunnel.log` shows registered tunnel connections;
   `curl -s -o /dev/null -w '%{http_code}' https://mmos-link.mastermindx.ai/.well-known/oauth-protected-resource`
   → 200; a request to the same host on any OTHER path pattern not routed (e.g. a bogus hostname via
   `--resolve`) → 404 from the catch-all; `lsof -nP -i :3193` shows ONLY the bridge python and
@@ -226,10 +253,12 @@ gui/$(id -u)/com.mastermind.gbl.bridge` once.
   (nudge returns to NOT_CONFIGURED). The bridge job itself stays.
 
 ### 10. Enrollment — subject digest + door rows (principal-only; sitting step 5)
-Add the OAuth subject digest row(s) to `edge.admission` (with targets/kinds/max_asks_per_hour and
-per-row `message_allowlist` — which stays empty until step 11) and the matching door rows to
-top-level `admission`; `launchctl kickstart -k gui/$(id -u)/com.mastermind.gbl.bridge` (ONE
-restart for many changes, ruling 8).
+REPLACE the placeholder in `policy.allowed_subject_digests` with the real OAuth subject digest(s)
+(sorted), add their row(s) to `edge.admission` (with targets/kinds/max_asks_per_hour and per-row
+`message_allowlist` — which stays empty until step 11) and the matching door rows to top-level
+`admission`; if the edge block was deferred, add it now (policy fields from the sitting's OAuth
+client). Then `launchctl kickstart -k gui/$(id -u)/com.mastermind.gbl.bridge` (ONE restart for
+many changes, ruling 8).
 - **Check:** READY line shows the new row counts; an admitted `gbl_ask ask` from the principal's
   own shell now succeeds and creates the issue on the real board (first true end-to-end); an
   unadmitted label still refuses typed.
@@ -282,13 +311,20 @@ No effect gains two initiators.
 appending serialize across every process on THIS host. Only this host's bridge writes the store;
 never run a second bridge against the same board company/agent, never point another host's clients
 at it, never delete `append.lock`. The delivery mark is permanent: a consumed answer never
-redelivers (rehearsal step S13 proved fetch#2 → `status=CONSUMED`, no text).
+redelivers. **Consumer contract (rehearsal S13, three-fetch proof):** `fetch` delivers the answer
+exactly once — the ONE hand-over is the `status=ANSWER_UNCONSUMED` response; every later fetch
+exits 0, prints `status=CONSUMED` and ECHOES the answer text with a stable `answer_id` (the echo
+is reconciliation aid, not a second delivery; `DELIVERY_MARK_POST_FAILED` can never produce a
+second ANSWER_UNCONSUMED). Consumers — the asker wake above all — MUST branch on the `status=`
+line, never on the exit code or on whether text is present.
 
 ## Open dependencies (surface, not silent)
-1. **P0-2 RESERVED_PORTS blocker** — install cannot reach step 5's check until resolved.
+1. **P0-2 RESERVED_PORTS blocker — STILL OPEN at 26c754bfd** (its `paperclip_client.py` is
+   byte-equal to 8dad45083, so the 3100 refusal stands): install cannot reach step 5's check
+   until the principal picks option (a) or (b).
 2. **GBL-5 not merged**: `ask_return.py` absent; the nudge intake's production caller (the carrier
    "asked-for work returned" wake) and the control-socket carrier-result seam have no production
-   caller at 8dad45083. Consequence: canary proof 1 (delegate) is blocked; flow 2 (question via
+   caller at 26c754bfd. Consequence: canary proof 1 (delegate) is blocked; flow 2 (question via
    CLI `--wait`) works with what this list installs. The staged runner already contains the
    production nudge wiring (https-only, no-redirect bounded poster; secret read at resolve time,
    never logged) so no runner change is needed when GBL-5 lands — only the spec `routine` block.
