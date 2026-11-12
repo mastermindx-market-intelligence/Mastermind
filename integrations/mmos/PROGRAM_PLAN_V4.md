@@ -2018,7 +2018,7 @@ DeepSeek worker with the same eight points.
 2. Grok Bot link: port fix, then GBL-RETURN, then the install and one sitting with the Chairman.
 3. Browser bridge fix and the last computer-use round, as they return.
 
-## 50. Amendment, 2026-11-12 15:40 UTC: browser bridge fix merged; its install waits for one small repair round
+## 50. Amendment, 2026-11-12 15:33 UTC: browser bridge fix merged; its install waits for one small repair round
 
 **What happened.** The browser bridge fix is merged as source. Nothing is installed. The principal read the acceptance change, both installer guards, the pin writer and the step list, and ran the six test files once (48 pass).
 
