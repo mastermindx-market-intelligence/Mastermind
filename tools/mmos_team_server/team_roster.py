@@ -1337,10 +1337,17 @@ def _resolve_bound(mate, bound, by_id, recorded_by_name, state_path):
             f"a primary thread")
     found = by_id.get(bound)
     if found is None:
+        # R3 item 5 (principal ruling 17:05Z): message only, no logic change.
+        # The old wording told the operator to "record it in <state file>",
+        # which contradicts this module's own rule that a record moves
+        # through the rebind command, never a hand edit of the state file.
         die(f"{name}: Paperclip binds its agent to thread {bound}, which "
             f"this roster does not know; refusing to create a second primary "
-            f"thread. If {bound} is the real primary, record it in "
-            f"{state_path} (or unbind the agent in Paperclip) and apply again")
+            f"thread. Repair the binding with `cutover_installed.py "
+            f"rebind-thread <spec>` — a fresh primary on this teammate's own "
+            f"instance, written through the same writer the move used — or "
+            f"unbind the agent in Paperclip, then apply again. The record in "
+            f"{state_path} moves through that command, never a hand edit")
     if found["instance"] and found["instance"] != mate["instance"]:
         die(f"{name}: Paperclip binds its agent to thread {bound}, but that "
             f"thread belongs to provider instance {found['instance']!r}, not "

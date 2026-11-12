@@ -68,7 +68,8 @@ if (HERE / "omh_sleep").exists():
 
 if (HERE / "omh_fail").exists():
     if (HERE / "omh_secret").exists():
-        sys.stderr.write("store refused: token: abc123 api_key='k3y value'\n")
+        sys.stderr.write("store refused: pass for the router: errkey "
+                         "token: abc123 api_key='k3y value'\n")
     else:
         sys.stderr.write("store refused: not admissible\n")
     sys.exit(1)
@@ -99,7 +100,9 @@ else:
                 "summary": ("Alpha uses confirmation token: abc123 "
                             "{\"password\": \"hunter2\"}" if secret
                             else "Alpha uses confirmation over prediction"),
-                "subject": ("password: doctrine and pwd: s3cr3t-subject"
+                "subject": ("auth for the vault: subjauth "
+                            "https://db:urlsecret@h.internal "
+                            "password: doctrine and pwd: s3cr3t-subject"
                             if secret else "doctrine"),
                 "tags": ["doctrine"],
                 "record_type": "fact",
@@ -864,4 +867,142 @@ def test_notes_remove_a_whole_private_key_block(harness: Harness):
     assert "MIIdata" not in text, f"key body left the link: {text!r}"
     assert "keep this line" in text
     assert "after key" in text and "user notes" in text
+    assert "[redacted]" in text
+
+
+# --- RF-MEMLINK R3 (principal ruling 17:05Z, repair round 3 of 3) ---------
+# Item 1: the label rule AS WRITTEN — a label word, then ANYTHING on the
+# same line up to a ':' or '=', removes from the label to the end of the
+# line. Over-removal is accepted ("token budget: 24K per minute" loses its
+# tail); a leaked value is not. Item 2: new label words auth, passcode and
+# pass as a WHOLE WORD (never passage or compass). Item 3: an address with
+# userinfo, scheme://name:secret@host, loses at least the userinfo; the
+# host may stay. Every positive case asserts the VALUE is absent and fails
+# first at 899f62509. Item 4 — a separator on the next line, prose with no
+# separator ("password is X", "login admin / X"), a bare "key:" or "pin" —
+# stays NOT covered under the accepted limit: no code and no test here.
+
+R3_LABEL_GAP_CASES = [
+    # (text, forbidden fragments — each must be absent after redaction)
+    ("password for the router: hunter2", ("hunter2",)),
+    ("token (github): abc123", ("abc123",)),
+    ("the admin password is: hunter2", ("hunter2",)),
+    ("token budget: 24K per minute", ("24K",)),  # over-removal accepted
+    ("auth: hunter2", ("hunter2",)),             # R3 item 2: new label
+    ("passcode: hunter2", ("hunter2",)),         # R3 item 2: new label
+    ("pass: hunter2", ("hunter2",)),             # R3 item 2: whole word
+]
+
+
+@pytest.mark.parametrize("body,forbidden", R3_LABEL_GAP_CASES)
+def test_redact_r3_label_gap_removes_to_end_of_line(body, forbidden):
+    out = memory_link_server.redact(body)
+    for frag in forbidden:
+        assert frag not in out, f"value fragment survived redaction: {out!r}"
+    assert "[redacted]" in out
+
+
+def test_pass_matches_only_as_a_whole_word():
+    # R3 item 2: "pass" is a label only as a whole word — passage and
+    # compass are ordinary English and keep their (harmless) values.
+    for body in ("passage: hunter2", "compass: hunter2"):
+        out = memory_link_server.redact(body)
+        assert "hunter2" in out, f"whole-word rule over-matched: {body!r}"
+        assert "[redacted]" not in out
+
+
+R3_ADDRESS_CASES = [
+    ("connect to https://admin:hunter2@example.com now", ("hunter2",)),
+    ("db url postgres://svc:abc123@db.internal:5432/app", ("abc123",)),
+]
+
+
+@pytest.mark.parametrize("body,forbidden", R3_ADDRESS_CASES)
+def test_redact_r3_address_userinfo_is_removed(body, forbidden):
+    out = memory_link_server.redact(body)
+    for frag in forbidden:
+        assert frag not in out, f"userinfo secret survived redaction: {out!r}"
+    assert "[redacted]" in out
+    if "example.com" in body:
+        assert "example.com" in out  # the host may stay; userinfo must not
+
+
+@pytest.mark.parametrize("body,forbidden", R3_LABEL_GAP_CASES)
+def test_notes_never_leak_the_r3_gap_shapes(harness: Harness, body, forbidden):
+    notes = harness.tmp / "notes"
+    notes.mkdir()
+    (notes / "MEMORY.md").write_text(
+        f"keep this line\n{body}\nafter line\n", encoding="utf-8")
+    (notes / "USER.md").write_text("user notes\n", encoding="utf-8")
+    cfg = harness.write_config(profile_memory_dir=str(notes))
+    harness.start(cfg)
+    harness.handshake()
+    text = harness.tool_text(harness.call_tool("memory_notes", {}))
+    for frag in forbidden:
+        assert frag not in text, f"value left the link unredacted: {text!r}"
+    assert "keep this line" in text and "after line" in text
+    assert "[redacted]" in text
+
+
+@pytest.mark.parametrize("body,forbidden", R3_ADDRESS_CASES)
+def test_notes_never_leak_the_r3_address_shapes(
+        harness: Harness, body, forbidden):
+    notes = harness.tmp / "notes"
+    notes.mkdir()
+    (notes / "MEMORY.md").write_text(
+        f"keep this line\n{body}\nafter line\n", encoding="utf-8")
+    (notes / "USER.md").write_text("user notes\n", encoding="utf-8")
+    cfg = harness.write_config(profile_memory_dir=str(notes))
+    harness.start(cfg)
+    harness.handshake()
+    text = harness.tool_text(harness.call_tool("memory_notes", {}))
+    for frag in forbidden:
+        assert frag not in text, f"value left the link unredacted: {text!r}"
+    assert "keep this line" in text and "after line" in text
+    assert "[redacted]" in text
+
+
+# memory_save's refusal uses the same pattern, so it must stay at least as
+# strong: every R3 shape is refused BEFORE the store program is invoked.
+@pytest.mark.parametrize("body,_forbidden",
+                         R3_LABEL_GAP_CASES + R3_ADDRESS_CASES)
+def test_save_refuses_every_r3_form(harness: Harness, body, _forbidden):
+    cfg = harness.write_config(write_enabled=True)
+    harness.start(cfg)
+    harness.handshake()
+    resp = harness.call_tool(
+        "memory_save", {"summary": body, "type": "fact"})
+    assert harness.tool_text(resp) == "not saved: looks like a credential"
+    assert not (harness.tmp / "omh_last.json").exists()
+
+
+def test_recall_removes_the_r3_subject_shapes(harness: Harness):
+    # FAKE_OMH's secret subject carries an auth-gap label AND an address
+    # with userinfo; neither may leave the link. rec-own/rec-1 precede the
+    # subject in the recall line, so the records still arrive.
+    (harness.tmp / "omh_secret").write_text("1", encoding="utf-8")
+    cfg = harness.write_config()
+    harness.start(cfg)
+    harness.handshake()
+    text = harness.tool_text(
+        harness.call_tool("memory_recall", {"query": "confirmation"}))
+    assert "rec-own" in text and "rec-1" in text
+    for frag in ("subjauth", "urlsecret", "s3cr3t-subject"):
+        assert frag not in text, f"value left the link unredacted: {text!r}"
+    assert "[redacted]" in text
+
+
+def test_error_excerpt_removes_the_r3_gap_shape(harness: Harness):
+    # FAKE_OMH's failing stderr leads with "pass for the router: errkey" —
+    # a gap-label form that survived the round-2 pattern at 899f62509.
+    (harness.tmp / "omh_secret").write_text("1", encoding="utf-8")
+    (harness.tmp / "omh_fail").write_text("1", encoding="utf-8")
+    cfg = harness.write_config()
+    harness.start(cfg)
+    harness.handshake()
+    resp = harness.call_tool("memory_recall", {"query": "confirmation"})
+    assert resp["result"].get("isError") is True
+    text = harness.tool_text(resp)
+    for frag in ("errkey", "abc123", "k3y"):
+        assert frag not in text, f"value left the link unredacted: {text!r}"
     assert "[redacted]" in text

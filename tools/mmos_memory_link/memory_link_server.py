@@ -31,24 +31,34 @@ CREDENTIAL_RE = re.compile(
     r"|xox[a-zA-Z]?-[A-Za-z0-9-]+"
     r"|AKIA[A-Z0-9]+"
     r"|eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9._-]*"
+    # An address with userinfo — scheme://name:secret@host — loses at
+    # least the userinfo (R3 item 3, principal ruling 17:05Z); the host
+    # may stay. A port without '@' (http://host:8080/) has no userinfo
+    # and is left alone.
+    r"|[A-Za-z][A-Za-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@"
     # A private key header removes everything through the matching END
     # line — or, when there is none, to the end of the text (principal
     # ruling 16:10Z, repair round 2).
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?"
     r"(?:-----END [A-Z ]*PRIVATE KEY-----[^\n]*|\Z)"
     # A label form removes everything from the label to the END OF ITS
-    # LINE — no attempt is made to find where the value ends. Over-removal
-    # is accepted; a leaked value is not (principal ruling 16:10Z, which
-    # replaces the round-1/round-2 value-end approach). The label is the
-    # word — whatever quotes or punctuation hug it — followed ON THE SAME
-    # LINE by ':' or '='; a plural 's' is swallowed too, and "api key"
-    # takes a space, '_', '-' or no separator. The value part `[^\n]*`
-    # may match empty, so the bare "password:" and "token =" labels still
-    # match: memory_save's refusal uses this same pattern and stays at
-    # least as strong as before.
-    r"|(?i:password|passwd|pwd|passphrase|secret|token|api[ _-]?key"
-    r"|authorization|bearer|cookie|credential)s?"
-    r"[^\w\s]*[ \t]*[:=][^\n]*"
+    # LINE. R3 states the rule AS WRITTEN (principal ruling 17:05Z): a
+    # label word, then ANYTHING on the same line up to a ':' or '=', then
+    # the rest of the line goes — "password for the router: X",
+    # "token (github): X" and "the admin password is: X" all match. No
+    # attempt is made to find where the value ends; over-removal is
+    # accepted ("token budget: 24K per minute" loses its tail), a leaked
+    # value is not. Labels: password, passwd, pwd, passphrase, passcode,
+    # secret, token, api key (space, '_', '-' or none), authorization,
+    # auth, bearer, cookie, credential — each with an optional plural —
+    # plus "pass" as a WHOLE WORD only (never passage or compass). The
+    # gap `[^\n]*?` and the value `[^\n]*` may both match empty, so the
+    # bare "password:" and "token =" labels still match: memory_save's
+    # refusal uses this same pattern and stays at least as strong.
+    r"|(?:(?i:password|passwd|pwd|passphrase|passcode|secret|token"
+    r"|api[ _-]?key|authorization|auth|bearer|cookie|credential)s?"
+    r"|\b(?i:pass)\b)"
+    r"[^\n]*?[:=][^\n]*"
     # Bare "Bearer <token>" with no colon at all (round-1 refusal case):
     # kept so the save refusal stays at least as strong.
     r"|(?i:bearer)[ \t]+\S+)"
