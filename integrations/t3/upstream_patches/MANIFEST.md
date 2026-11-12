@@ -507,3 +507,88 @@ $ node <vitest> run <12 affected suites: orchestration-v2 + mcp delegated/restar
 $ npx -y pnpm@12.14.0 exec effect-tsgo tsrs --noEmit   (apps/server, packages/contracts)   # exit 0 both -> tsc_server_rc0.log, tsc_contracts_rc0.log
 ```
 Live proof on a private dev server (port 3810, home `~/.mastermind/mmos_dev/t10/`, ACP probe agent): 4 of 4 scenarios, receipt `live_proof_receipt_073325.json`. Evidence: `~/.mastermind/mmos_evidence/t10-20261111/`.
+
+## Pinned upstream patch: delegated child follow-up repairs, rounds 1–2 (lane T10f, 2026-11-11)
+
+File: `t10f_followup_0770446.patch`, sha256
+`bc66ae63d1c863615de446461398335bfb80c4ac58681fc601e51d5fbcb6b207`.
+Upstream pin `0770446869d247a8b28c27d7ed93f47f8ff0c1e4`. Cumulative diff
+`599849ba..ad52aa94` from SSD clone `/Volumes/Mastermind/build-cache/t10-t3code`, branch
+`t3/mmos-v4-t10f` (rounds 1: H1/H2/M1–M4 at `c1624d0e`, 2: D1/D2 at `b4ecc40c`/`ad52aa94`,
+one commit per item, failing test first). Evidence and per-item red/green logs:
+`~/.mastermind/mmos_evidence/t10-20261111/followup/` (`LEDGER.md`, `LEDGER_R1.md`,
+`LEDGER_R2.md`, `sweep_r2.log`, `rel3fit_sweep.log`).
+
+- **Diff stat:** 12 files changed, 2729 insertions(+), 192 deletions(-)
+  - `apps/server/src/mcp/OrchestratorMcpService.ts` (+289/−~90) — the replay-conflict
+    guard for `delegate_task` retries: diffs the replay receipt's stored events (thread
+    project/runtime/interaction modes, task prompt/title/provider/model/completion-wake,
+    run `workspacePreparation` vs the request's own isolation — D1) plus the round-1
+    content fields; typed `request_conflict` failure code; wake arming shared by local and
+    remote waits keyed to the chain-stable namespace (M2/M3).
+  - `apps/server/src/mcp/OrchestratorMcpService.test.ts` (+1355) — replay-receipt helpers
+    now carry `run.created`; identical-retry tests for worktree and cross-project
+    delegations (D1), restart/concurrent/rollover conflict tests (H1), and the round-1
+    guard tests. 81/81.
+  - `apps/server/src/mcp/DelegatedChildStop.integration.test.ts` (+552, new tests in the
+    existing colocated suite) — six silent-stop tests plus the D2 integration test: a
+    held never-started delegated child injected via `ProjectionStore.apply`, restarted
+    runtime, asserts the run leaves `queued`, reaches `running`, drives a real provider
+    turn, and the outbox records exactly one `succeeded` `queued-run.start` effect. 10/10.
+  - `apps/server/src/orchestration-v2/EffectOutbox.ts` (+5) — new replay-safe
+    `queued-run.start` effect request (schema member + AFTER_PROCESS_LOSS list entry).
+  - `apps/server/src/orchestration-v2/EffectWorker.ts` (+45) — its executor: dispatches
+    the queued-run start command through ThreadManagementService with a deterministic
+    `command:effect:<id>` commandId; a duplicate arm re-reads the run and succeeds once
+    it has left `queued`.
+  - `apps/server/src/orchestration-v2/ProviderRuntimeRecoveryService.ts` (+108/−~70) —
+    startup reconcile releases a never-started delegated child's held queue and arms the
+    `queued-run.start` effect inside the per-thread commit's effects array (replay-safe,
+    so it survives `cancelUnsettledEffects` — the round-1 `provider-turn.start` arming
+    was a no-op because that service returns unless the run is already `starting`; D2/M4).
+  - `apps/server/src/orchestration-v2/Orchestrator.ts` (+128) — queued-run start command
+    handler and held-run release/queueing (round-1 H2/M1).
+  - `apps/server/src/orchestration-v2/ProjectionStore.ts` (+15), `RestartBackgroundNote.ts`
+    (+38), `DelegatedCompletionDelivery.test.ts` (+319, new), `ProjectionRecovery.test.ts`
+    (+66), `packages/contracts/src/orchestratorMcp.ts` (+1) — supporting seams and suites.
+- **Apply order:** after `silent_stop_return_0770446.patch` on the pin
+  `0770446` + text-delta + cross-project tree. **The admission patch is NOT required** —
+  `git apply --check` passes on a tree without it, and the whole verification below ran
+  without it (the patch never touches `runtimeLayer.ts` or anything admission decorates).
+- **No schema/migration in the delta** (`queued-run.start` is an additive effect literal +
+  schema member stored as JSON in the existing effect outbox; `request_conflict` is an
+  additive MCP failure code). Rollback: restore the pre-patch build directory.
+
+### Verification actually run (2026-11-11, throwaway copy `~/.mastermind/mmos_dev/t10f/rel3fit/src`)
+
+Tree = release -3's build source exactly: `git archive HEAD` of
+`~/.mastermind/mmos_dev/tsh/source/t3-pin0770446` (pin `0770446869d247a8b28c27d7ed93f47f8ff0c1e4`)
++ `git diff HEAD --binary` (text-delta + cross-project as uncommitted) + the untracked
+`CrossProjectDelegation.test.ts` + `silent_stop_return_0770446.patch` + this patch —
+read-only toward that source; `node_modules` reused by symlink from the SSD clone.
+`git apply --check` exit 0 for both patches before applying.
+
+```
+$ cd apps/server && ../../node_modules/.bin/effect-tsgo tsrs --noEmit; echo exit=$?
+exit=0          # zero error-level diagnostics              -> /tmp/rel3fit_tsc_full.log
+$ node <vitest 5.0.5>/vitest.mjs run <each of the 12 files below> --testTimeout 240000
+# one file at a time, all exit 0, counts identical to the build-clone sweep -> rel3fit_sweep.log
+  src/mcp/OrchestratorMcpService.test.ts                      81 passed (81)
+  src/mcp/DelegatedChildStop.integration.test.ts              10 passed (10)
+  src/orchestration-v2/ProjectionRecovery.test.ts             20 passed (20)
+  src/orchestration-v2/EffectWorker.test.ts                   12 passed (12)
+  src/orchestration-v2/ProviderRuntimeRecoveryService.test.ts 18 passed (18)
+  src/orchestration-v2/ProviderRuntimeRecoveryService.regression.test.ts 1 passed (1)
+  src/orchestration-v2/CrossProjectDelegation.test.ts         11 passed (11)
+  src/orchestration-v2/DelegatedCompletionDelivery.test.ts    46 passed (46)
+  src/orchestration-v2/RemoteDelegatedTask.test.ts             4 passed (4)
+  src/orchestration-v2/RestartBackgroundNote.test.ts           6 passed (6)
+  src/orchestration-v2/RestartContinuation.test.ts            50 passed (50)
+  src/serverRuntimeStartup.test.ts                             8 passed (8)
+  # total 267 passed (267); admission-dependency: none
+```
+
+Also verified in the build clone at `ad52aa94` (per-item red/green and the same 12-suite
+sweep, `sweep_r2.log`, 267/267; D2 integration red against the reverted recovery service:
+the run stayed `queued` — `d2_red_integration.log`). Panel delta 2 READY at `ad52aa94`,
+2/2 closed, 0 HIGH.
