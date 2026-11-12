@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "memory-link": {
+      "command": "python3.12",
+      "args": [
+        "-I",
+        "/ABS/PATH/tools/mmos_memory_link/memory_link_server.py",
+        "--config",
+        "/ABS/PATH/memory-link.config.json"
+      ]
+    }
+  }
+}
