@@ -1997,6 +1997,74 @@ def test_blocked_issue_without_ask_child_is_left_alone():
     assert pc.issues["is-1"]["status"] == "blocked"
 
 
+def _blocker_note_bodies(pc):
+    return [c[2] for c in pc.calls if c[0] == "comment"
+            and c[2].startswith("[t2-carrier]")]
+
+
+def test_a_recorded_blocker_no_wake_covers_leaves_a_board_note():
+    # Delta-4 D4-7 (the round-2 P3 shape, live probe): a recorded blocker
+    # that is NOT one of this carrier's ask children (foreign-created, so
+    # no family) and no marker in the thread — the wake exits 0 with only
+    # a log line. Every future wake repeats it silently: a person has no
+    # board trace to see. The empty-family exits now post ONE idempotent
+    # [t2-carrier] note naming the recorded blocker instead.
+    issues, ask_op, child = blocked_parent_with_done_child()
+    child = dict(child, createdByAgentId="ag-anyone")   # foreign: not family
+    pc = FakePaperclip(issues=issues)   # child IS the recorded blocker
+    pc.child_rows["is-1"] = [child]
+    pc.comment_rows["ch-1"] = [atlas_answer("the planted answer")]
+    t3 = FakeT3(replies=["SHOULD NOT SEND"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert t3.sends == []
+    notes = _blocker_note_bodies(pc)
+    assert len(notes) == 1 and "MMO-666" not in notes[0]  # sanity: fixture child
+    assert "MMO-2" in notes[0] and "person" in notes[0]
+    assert pc.issues["is-1"]["status"] == "blocked"
+
+
+def test_a_family_outside_the_recorded_blockers_leaves_a_board_note():
+    # Delta-4 D4-7, second exit: this carrier's own marker-matching children
+    # exist but NONE of them is the recorded blocker (someone re-blocked the
+    # parent on another issue). The gate exits 0 silently every wake; the
+    # same one idempotent note names the recorded blocker for a person.
+    issues, ask_op, child = blocked_parent_with_done_child()
+    foreign_blocker = dict(child, id="ch-evil", identifier="MMO-666",
+                           assigneeAgentId="ag-anyone",
+                           createdByAgentId="ag-anyone")
+    issues["is-1"]["blockedBy"] = board.blocked_by(foreign_blocker)
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [child]          # own child, done, NOT the blocker
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    t3 = FakeT3(replies=["SHOULD NOT SEND"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert t3.sends == []
+    notes = _blocker_note_bodies(pc)
+    assert len(notes) == 1 and "MMO-666" in notes[0] and "person" in notes[0]
+    assert pc.issues["is-1"]["status"] == "blocked"
+
+
+def test_handle_returns_empty_family_posts_a_note_when_blockers_recorded():
+    # Delta-4 D4-7, third arm (defense in depth — the gate's exits normally
+    # fire first in one wake): the return edge's own family walk can come
+    # up empty while the issue records blockers. Direct call, same law:
+    # one idempotent note naming the recorded blocker, not a log-only exit.
+    issues, ask_op, child = blocked_parent_with_done_child()
+    foreign_blocker = dict(child, id="ch-evil", identifier="MMO-666",
+                           assigneeAgentId="ag-anyone",
+                           createdByAgentId="ag-anyone")
+    issues["is-1"]["blockedBy"] = board.blocked_by(foreign_blocker)
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [child]          # own child, NOT in blocker set
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    t3 = FakeT3(replies=["SHOULD NOT SEND"])
+    assert wc.handle_return(pc, t3, issues["is-1"], ask_op, {},
+                            "ag-1") == 0
+    assert t3.sends == []
+    notes = _blocker_note_bodies(pc)
+    assert len(notes) == 1 and "MMO-666" in notes[0] and "person" in notes[0]
+
+
 # --- a blocked task whose turn was in flight finishes (marker-gated) ---------
 
 def blocked_issue():

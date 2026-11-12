@@ -1774,6 +1774,10 @@ def handle_return(pc, t3, issue, ask_op, opts, me_id):
     if not family:
         log(f"return wake on {issue.get('identifier')} but no done child for "
             f"{ask_op}; leaving the issue for a person")
+        # Delta-4 D4-7 (defense in depth — the gate's exits normally fire
+        # earlier in the wake): an empty family over a recorded blocker is
+        # board-visible, not log-only.
+        _blocker_note(pc, issue)
         return 0
     # Delta-4 D4-1: the unsuffixed {ask_op}-ret turn was addressed when the
     # family had exactly one member — it belongs to the family's TRUE oldest,
@@ -1956,6 +1960,27 @@ def machine_note_once(pc, issue_id, note):
             pc.add_comment(issue_id, note)
     except CarrierError as exc:
         log(f"note on {issue_id} also failed: {exc}")
+
+
+def _blocker_note(pc, issue):
+    """Delta-4 D4-7: the board note for an empty-family exit on an issue
+    that records blockers — ONE idempotent line naming them, so a person
+    sees on the board what every wake was only logging."""
+    names = []
+    for row in (issue.get("blockedBy") or []):
+        if isinstance(row, dict) and row.get("id"):
+            names.append(row.get("identifier") or row["id"])
+    for iid in (issue.get("blockedByIssueIds") or []):
+        if isinstance(iid, str) and iid not in names:
+            names.append(iid)
+    if not names:
+        return None
+    machine_note_once(
+        pc, issue["id"],
+        f"[t2-carrier] blocked issue {issue.get('identifier')} waits on "
+        f"{', '.join(names)}, which is not one of this carrier's ask "
+        "children; a person decides")
+    return names
 
 
 def handle_ask(pc, issue, reply, ask, op, opts):
@@ -2599,6 +2624,9 @@ def _run_carrier_locked(pc, t3_factory, opts, me, binding, thread_id):
                 log(f"blocked issue {issue.get('identifier')} has marker-"
                     "matching children but none of them is the recorded "
                     "blocker; leaving it for a person")
+                # Delta-4 D4-7: this exit repeats silently every wake — the
+                # note makes the mismatch board-visible for a person.
+                _blocker_note(pc, issue)
                 return 0
         if issue.get("status") == "blocked" and not ask_children:
             # A blocked task with no ask child was blocked while the
@@ -2622,6 +2650,9 @@ def _run_carrier_locked(pc, t3_factory, opts, me, binding, thread_id):
                 log(f"blocked issue {issue.get('identifier')} has no ask "
                     "child and no marker in the thread; leaving it for a "
                     "person")
+                # Delta-4 D4-7 (the round-2 P3 shape): a recorded blocker no
+                # wake covers is board-visible, not log-only.
+                _blocker_note(pc, issue)
                 return 0
             # R2a finding 15: a blocked issue with no ask child was blocked
             # by a person or the board. An ANSWERED marker alone is not
