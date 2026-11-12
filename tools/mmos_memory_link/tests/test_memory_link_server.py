@@ -1006,3 +1006,77 @@ def test_error_excerpt_removes_the_r3_gap_shape(harness: Harness):
     for frag in ("errkey", "abc123", "k3y"):
         assert frag not in text, f"value left the link unredacted: {text!r}"
     assert "[redacted]" in text
+
+
+# --- RF-MEMLINK R3b (principal ruling 18:10Z — the LAST pattern change) ---
+# DEFECT at 5b24690eb: label words matched as PREFIXES of ordinary words —
+# "Secretary: please file the Slack pickup" was redacted and refused.
+# R3b, memory_link_server.py only:
+#   A. boundary — a label word, after its optional plural s, is NOT
+#      followed by a lowercase letter and not by two capital letters
+#      (secretKey/SECRET_KEY/GITHUB_TOKEN/PASSWORDS: still match;
+#      Secretary/SECRETARY/Author/authentication/tokenizer/passwordless/
+#      secretariat/authored do not; accepted limit SECRETKEY=X).
+#   B. separator set — ':' '=' full-width '：' '＝' and '|'.
+#   C. next-line value — when the separator is the last thing on the
+#      label's line (trailing spaces allowed), the following line goes.
+#   D. flag form — "--password X", "--token X", "-password X".
+#   E. address userinfo — everything between "://" and the LAST '@'
+#      before the first '/' or space, with or without a colon.
+#   F. four Chinese label words: 密码 密钥 口令 令牌.
+# CLASS RULE: a redaction test has TWO lists — the values that must be
+# gone, and the ordinary team text that must survive; the teammates' own
+# names (Secretary, Design Lead, Assurance) are in the second list.
+# Fail-first at 5b24690eb: MUST_BE_ABSENT rows 7-14 and MUST_SURVIVE rows
+# 1-10 are red there; rows 1-6 / 11-14 are ruling-required coverage that
+# the old pattern already handled.
+
+MUST_BE_ABSENT = [
+    ("Password\t: X", ("X",)),
+    ("export GITHUB_TOKEN=X", ("X",)),
+    ('"secretKey": "X"', ("X",)),
+    ('"dbPassword": "X"', ("X",)),
+    ("authKey: X", ("X",)),
+    ("client_secret: X", ("X",)),
+    ("mysql -u root --password X", ("X",)),
+    ("gh --token X run", ("X",)),
+    ("password：X", ("X",)),
+    ("密码: X", ("X",)),
+    ("https://user:p@X@host/x", ("user:p@X", "X@host")),
+    ('"password":\n"X"', ("X",)),
+    ("secret:\nvalue: X", ("X",)),
+    ("| password | X |", ("X",)),
+]
+
+MUST_SURVIVE = [
+    "Secretary: please file the Slack pickup",
+    "Author: Chris",
+    "authentication flow: works",
+    "The tokenizer splits on spaces: fine",
+    "passwordless login: enabled",
+    "secretariat: n/a",
+    "authored by: X",
+    "Secretary's timer moved; next check: Friday",
+    "Design Lead asked Secretary to draft the note. Due: Monday",
+    "SECRETARY: hello",
+    "Passage: fine",
+    "compass bearing: 270",
+    "see http://127.0.0.1:3780/thread",
+    "Assurance: review at 15:00",
+]
+
+
+@pytest.mark.parametrize("body,forbidden", MUST_BE_ABSENT)
+def test_r3b_must_be_absent(body, forbidden):
+    out = memory_link_server.redact(body)
+    for frag in forbidden:
+        assert frag not in out, f"value survived redaction: {out!r}"
+    assert "[redacted]" in out
+
+
+@pytest.mark.parametrize("body", MUST_SURVIVE)
+def test_r3b_must_survive(body):
+    out = memory_link_server.redact(body)
+    assert out == body, f"ordinary team text was redacted: {out!r}"
+    assert not memory_link_server.looks_like_credential(body), (
+        f"ordinary team text was refused as a credential: {body!r}")
