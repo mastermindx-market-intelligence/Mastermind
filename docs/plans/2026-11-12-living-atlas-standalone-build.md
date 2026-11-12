@@ -38,3 +38,7 @@ Principal implementation is retained for PRINCIPAL_JUDGMENT and LOWER_TOTAL_OVER
 
 ## Initial state
 Site identity created and persisted. No deployment yet. Prior study remains accepted and unchanged. Next action: implement the standalone app and qualify it in the managed Sites browser preview.
+
+
+## Standalone delivery recorded
+The independent app was privately published on 12 November 2026. Source commit: 7c67d19b703d2cd1f57fd1821d0596c19c71c307. Deployment: appgdep_6af59535724481918fbb50059f64793e, state succeeded. Application: https://mastermind-living-atlas.mastermindx-6859.chatgpt.site. The full implementation, evidence, handoff and remaining integration limits are recorded in [2026-11-12-living-atlas-standalone-release.md](2026-11-12-living-atlas-standalone-release.md). The original completion scope above is preserved; live MMOS acquisition and mounting remain deferred as requested.
