@@ -198,11 +198,20 @@
         read_back: !node.isContentEditable ? "value" : path === "fallback" ? "textContent" : "innerText"};
       const offset = firstDiff(askedNormalized, boxNormalized);
       // A time-bound stop reports how far the insertion got and the honest
-      // partial state of the box under its own typed code.
+      // partial state of the box under its own typed code. When the stop
+      // came after everything was inserted, the read-back decides the
+      // effect (ruling 13): APPLIED with the bound disclosed — a false
+      // NOT_APPLIED would invite a duplicate fill of a complete box.
       if (stopped) {
+        if (offset === -1) {
+          return result(true, "OK", {...common,
+            time_bound_exceeded: true,
+            lines_inserted: stopped.linesInserted, time_bound_ms: stopped.timeBoundMs,
+            snapshot_consumed: true, refresh_required: true}, "APPLIED");
+        }
         const excerpt = raw.slice(0, 40);
         return result(false, "FILL_TIME_BOUND", {...common,
-          first_diff_offset: offset === -1 ? null : offset,
+          first_diff_offset: offset,
           mismatch_kind: raw === preFill ? "box-unchanged" : "content-differs",
           prefill_characters: preFill.length,
           lines_inserted: stopped.linesInserted, time_bound_ms: stopped.timeBoundMs,

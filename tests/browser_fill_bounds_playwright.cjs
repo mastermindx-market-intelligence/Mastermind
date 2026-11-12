@@ -11,6 +11,7 @@ const SESSION = "b".repeat(64);
 const fixture = `<!doctype html><html><head><title>Fill bounds fixture</title></head><body>
   <div id="plain" contenteditable="true" role="textbox" aria-label="plain editable"></div>
   <div id="slow" contenteditable="true" role="textbox" aria-label="slow editor"></div>
+  <div id="trickle" contenteditable="true" role="textbox" aria-label="trickle editor"></div>
   <textarea id="area" aria-label="plain textarea"></textarea>
 </body></html>`;
 (async()=>{
@@ -26,10 +27,20 @@ const fixture = `<!doctype html><html><head><title>Fill bounds fixture</title></
       // few hundred lines outlast the insertion time bound.
       const slow=document.getElementById("slow");
       const orig=document.execCommand.bind(document);
+      let calls=0;
       document.execCommand=(cmd,ui,val)=>{
         const sel=document.getSelection();
         if((cmd==="insertText"||cmd==="insertParagraph") && sel && slow.contains(sel.anchorNode)){
           const until=performance.now()+4; while(performance.now()<until){/* busy */}
+        }
+        // The trickle editor stays fast for the first 1920 lines and then
+        // costs ~12ms per call: every checkpoint up to line 1919 passes well
+        // inside the 1500ms bound, and the bound is only exceeded at the
+        // final checkpoint of line 1983 — after the last line was inserted.
+        // (A literal threshold: page.evaluate carries no Node bindings.)
+        if((cmd==="insertText"||cmd==="insertParagraph") && sel && document.getElementById("trickle").contains(sel.anchorNode)){
+          calls+=1;
+          if(calls>3840){const until=performance.now()+12; while(performance.now()<until){/* busy */}}
         }
         return orig(cmd,ui,val);
       };
@@ -90,9 +101,31 @@ const fixture = `<!doctype html><html><head><title>Fill bounds fixture</title></
       const ok=await send("fill",plain.ref,"still alive",after.snapshot_id);
       assert.equal(ok.effect,"APPLIED","the tab is responsive after the bound stop");
     }
+    // Ruling 13 / p2#2: a stop at the time bound AFTER everything was
+    // inserted reports what the read-back saw — APPLIED with the bound
+    // disclosed — never a false NOT_APPLIED that invites a duplicate fill.
+    // The trickle editor passes every checkpoint inside the bound and only
+    // exceeds it at the last line's checkpoint, with all 1984 lines in.
+    {
+      const s=await snapshot();
+      const el=await element("trickle editor",s);
+      const text=Array.from({length:1984},(_,i)=>"trickle "+i).join("\n");
+      const r=await send("fill",el.ref,text,s.snapshot_id);
+      assert.equal(r.ok,true,JSON.stringify(r.data).slice(0,200));
+      assert.equal(r.code,"OK");
+      assert.equal(r.effect,"APPLIED","everything inserted: the read-back decides the effect");
+      assert.equal(r.data.time_bound_exceeded,true,"the receipt still discloses the bound");
+      assert.equal(r.data.lines_inserted,1984,"all lines were inserted before the stop");
+      assert.equal(r.data.box_characters,r.data.asked_characters,"the box holds the whole asked text");
+      assert.equal(r.data.first_diff_offset,undefined);
+      assert.equal(await page.evaluate(()=>document.getElementById("trickle").innerText.replace(/\n+$/,"")),
+        text.replace(/\n+$/,""),"the box genuinely holds every line");
+      // The genuinely partial stop above still stays NOT_APPLIED.
+    }
     console.log(JSON.stringify({state:"PASS",proof:"isolated Chromium DOM fixture",
       cases:["30,000-newline fill refused pre-insertion, snapshot intact",
              "cap boundary: 2000 lines fill, 2001 refused",
-             "slow editor stops under the time bound with typed FILL_TIME_BOUND and honest partial state"]}));
+             "slow editor stops under the time bound with typed FILL_TIME_BOUND and honest partial state",
+             "bound exceeded after everything inserted: APPLIED with time_bound_exceeded, never a false NOT_APPLIED"]}));
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
