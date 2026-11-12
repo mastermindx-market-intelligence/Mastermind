@@ -327,9 +327,18 @@ Check after every step; every step has a rollback.
    (`experiential-claude`, `fabric-experiential`, `fabric-unified-router`,
    `fabric-anthropic-oauth`) BEFORE the first write — each
    `mcpServers.mmx-browser.args` must end exactly at the old flat
-   `$MMX/server.js` — and writes through the owned CAS writer, so a file
-   changed since its check refuses alone (`WRITE_RACE`, keeping the session's
-   bytes) and every write leaves a `.claude.json.previous.<16hex>` backup.
+   `$MMX/server.js`, and the JSON-encoded old path must occur exactly once
+   in each file's raw bytes (zero or several occurrences refuse the whole
+   run as `OLD_VALUE_NOT_UNIQUE` before any write, in any home). The change
+   itself is a raw-byte replacement of that one span: the file is never
+   re-serialised, so key order, non-ASCII text, float spellings, the
+   trailing-newline state and the file mode survive byte for byte, and the
+   replaced bytes must re-parse to exactly the intended one-value change.
+   Writes go through the owned CAS writer, so a file changed since its check
+   refuses alone (`WRITE_RACE`, keeping the session's bytes, leaving no
+   backup) and every landed write leaves a `.claude.json.previous.<16hex>`
+   backup; a write error that is not a digest mismatch is reported as what
+   it is (`WRITE_FAILED` with the errno name), never as a race.
    After a short wait it reads every switched file back, so a session that
    rewrote a file is reported (`READBACK_RACE_*`), not silently believed. It
    prints home names and status codes only — never contents. The written arg
@@ -345,13 +354,17 @@ Check after every step; every step has a rollback.
 
    Check: stdout JSON `state` = `PROVIDER_ARGS_SWITCHED`, one row per home
    (`SWITCHED`, or `ALREADY_SWITCHED` on a re-run — already-switched homes
-   are no-ops, so one re-run after a race is safe). Each `.claude.json`
-   parses and its last arg is `current/server.js`; a fresh session's
-   read-only `browsers` (no probe) still shows `bridge_release_commit`
-   `5aa309692…`. If `state` = `PROVIDER_ARGS_SWITCHED_WITH_RACES`, or the
-   command refuses (it names the home and a code), re-run ONCE when the
-   racing session is idle — do not loop; a refusal means the files are not
-   in the expected state and must be diagnosed, not retried blindly.
+   are no-ops, so one re-run after a race is safe: a `WRITE_RACE` or
+   `WRITE_FAILED` home kept the session's bytes and has no backup, the
+   other homes stay switched, and the re-run skips those as
+   `ALREADY_SWITCHED` while it switches only the failed home). Each
+   `.claude.json` parses and its last arg is `current/server.js`; a fresh
+   session's read-only `browsers` (no probe) still shows
+   `bridge_release_commit` `5aa309692…`. If `state` =
+   `PROVIDER_ARGS_SWITCHED_WITH_RACES`, or the command refuses (it names
+   the home and a code), re-run ONCE when the racing session is idle — do
+   not loop; a refusal means the files are not in the expected state and
+   must be diagnosed, not retried blindly.
    Then the atomic repoint:
 
    ```bash
