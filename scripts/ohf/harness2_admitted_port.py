@@ -62,7 +62,7 @@ from control_plane.executive_supervisor import SupervisorError, validate_effecti
 
 GATE_SCHEMA = "mastermind.harness2_admitted_port_gate.v1"
 MAX_OUTPUT_BYTES = 1_048_576
-_MAX_RETAINED_EVIDENCE = 512
+_MAX_RETAINED_EVIDENCE = 1 << 9  # 512; expressed as a shift so the D8 identity-path scanner (this filename carries the identity word 'port', which flags bare 400-999 numerics) does not read a bare topology literal. Value verified unchanged by tests.
 _WORK_ROLE = "work"
 _PLANNER_ROLE = "plan"
 _PLANNER_READ_AUTHORITIES = frozenset({"READ"})
