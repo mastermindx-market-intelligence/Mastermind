@@ -95,7 +95,7 @@
       let length = 0, count = 0, node;
       while ((node = walker.nextNode()) && count++ < MAX_NODES && length < MAX_TEXT) {
         const parent = node.parentElement;
-        if (!parent || parent.closest("script,style,noscript,input,textarea,select,[contenteditable]") || !visible(parent)) continue;
+        if (!parent || parent.closest(`script,style,noscript,input,textarea,select,${EDITABLE}`) || !visible(parent)) continue;
         const part = text(node.nodeValue, MAX_TEXT - length);
         if (part) {parts.push(part); length += part.length + 1;}
       }
@@ -266,15 +266,18 @@
           if (child.nodeType === 3) {
             const parent = child.parentElement;
             if (!parent || !visible(parent) ||
-                parent.closest("script,style,noscript,template,input,textarea,select,[contenteditable]")) continue;
+                parent.closest(`script,style,noscript,template,input,textarea,select,${EDITABLE}`)) continue;
             const value = child.nodeValue || "";
             if (!value.trim()) continue;
             parts.push(parent.closest("pre") ? value : value.replace(/\s+/g, " "));
           } else if (child.nodeType === 1) {
-            // Any contenteditable ancestor-or-self marks editor territory
-            // (every enumerated variant, and false islands inside an editor):
-            // an editor box is not page content.
-            if (SKIP.test(child.tagName) || child.closest("[contenteditable]") || !visible(child)) continue;
+            // An ancestor-or-self in an editable STATE ("", true or
+            // plaintext-only, any letter case) marks editor territory: an
+            // editor box is not page content. Non-editable states — false,
+            // an explicit inherit, an invalid value — stay page content, as
+            // at base: only the EDITABLE selector decides, never bare
+            // attribute presence.
+            if (SKIP.test(child.tagName) || child.closest(EDITABLE) || !visible(child)) continue;
             if (child.tagName === "BR") {parts.push("\n"); continue;}
             if (BLOCK.test(child.tagName)) {parts.push("\n"); walk(child); parts.push("\n"); continue;}
             walk(child);

@@ -1,12 +1,11 @@
 "use strict";
-// Contenteditable exclusion variants (SCORE p1#2): contenteditable="",
-// "TRUE" and "plaintext-only" all make isContentEditable true, but the read
-// walker and the snapshot page selector matched only the literal attribute
-// value "true" — editor text leaked into the paged read and the snapshot
-// pageText while the reply declared the exclusion, and the variant editors
-// were invisible to the snapshot as fill targets. Every editable variant is
-// excluded from page text and discovered as an editable element. Isolated
-// fixture Chromium only.
+// Contenteditable exclusion variants (SCORE p1#2, ruling 15 item 3):
+// contenteditable="", "TRUE" and "plaintext-only" (any letter case) all make
+// isContentEditable true — every editable STATE is excluded from page text
+// and discovered as an editable fill target. Non-editable states — "false",
+// an explicit "inherit", an invalid value — are page content, not editor
+// territory: their text stays in the snapshot pageText and the paged read
+// exactly as at base 02dd7cbc6. Isolated fixture Chromium only.
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const {chromium} = require(process.env.MMX_BROWSER_TEST_PLAYWRIGHT_MODULE || "playwright");
@@ -17,6 +16,10 @@ const fixture = `<!doctype html><html><head><title>Editable variants fixture</ti
     <div id="empty" contenteditable="" role="textbox" aria-label="empty attr editor">EDIT_EMPTY_ATTR</div>
     <div id="upper" contenteditable="TRUE" role="textbox" aria-label="upper editor">EDIT_TRUE_UPPER</div>
     <div id="plainonly" contenteditable="plaintext-only" role="textbox" aria-label="plaintext editor">EDIT_PLAINTEXT_ONLY</div>
+    <div id="mixed" contenteditable="Plaintext-Only" role="textbox" aria-label="mixed case editor">EDIT_MIXED_CASE</div>
+    <div id="cffalse" contenteditable="false">RELEASE-NOTES-FALSE</div>
+    <div id="cfinherit" contenteditable="inherit">INHERIT-EXPLICIT-TEXT</div>
+    <div id="cfinvalid" contenteditable="maybe">INVALID-VALUE-TEXT</div>
     <p>more visible answer text</p>
   </article>
 </body></html>`;
@@ -33,17 +36,22 @@ const fixture = `<!doctype html><html><head><title>Editable variants fixture</ti
        expires_at:new Date(Date.now()+60000).toISOString()});
     const snapshot=async()=>{const r=await send("snapshot");assert.equal(r.ok,true,JSON.stringify(r));return r.data;};
     const element=async(label,s)=>s.elements.find(e=>e.name===label);
-    const markers=["EDIT_EMPTY_ATTR","EDIT_TRUE_UPPER","EDIT_PLAINTEXT_ONLY"];
+    const markers=["EDIT_EMPTY_ATTR","EDIT_TRUE_UPPER","EDIT_PLAINTEXT_ONLY","EDIT_MIXED_CASE"];
+    // Non-editable states are page content: their text must STAY (as at base
+    // 02dd7cbc6) — a bare [contenteditable] presence check drops them.
+    const contentMarkers=["RELEASE-NOTES-FALSE","INHERIT-EXPLICIT-TEXT","INVALID-VALUE-TEXT"];
 
     // The snapshot's page text excludes every editable variant's editor text.
     {
       const s=await snapshot();
       for(const marker of markers)
         assert.equal(s.text.includes(marker),false,`${marker} leaked into snapshot pageText`);
+      for(const marker of contentMarkers)
+        assert.equal(s.text.includes(marker),true,`${marker} was dropped from snapshot pageText`);
       assert.equal(s.text.includes("visible answer text"),true,"ordinary text is present");
       // ...and every variant is discovered as an editable fill target with
       // its editor value exposed to the operator.
-      for(const label of ["empty attr editor","upper editor","plaintext editor"]) {
+      for(const label of ["empty attr editor","upper editor","plaintext editor","mixed case editor"]) {
         const el=await element(label,s);
         assert.ok(el,`${label} is a snapshot element (fill target)`);
         assert.equal(el.editable,true,`${label} is editable`);
@@ -67,6 +75,8 @@ const fixture = `<!doctype html><html><head><title>Editable variants fixture</ti
       const text=whole.join("");
       for(const marker of markers)
         assert.equal(text.includes(marker),false,`${marker} leaked into the paged read`);
+      for(const marker of contentMarkers)
+        assert.equal(text.includes(marker),true,`${marker} was dropped from the paged read`);
       assert.equal(text.includes("visible answer text"),true);
       assert.equal(text.includes("more visible answer text"),true);
     }
@@ -81,8 +91,9 @@ const fixture = `<!doctype html><html><head><title>Editable variants fixture</ti
         "typed into a variant editor");
     }
     console.log(JSON.stringify({state:"PASS",proof:"isolated Chromium DOM fixture",
-      cases:["contenteditable=''/'TRUE'/'plaintext-only' excluded from snapshot pageText",
+      cases:["contenteditable=''/'TRUE'/'plaintext-only' (any case) excluded from snapshot pageText",
              "every variant discovered as an editable element and fill target",
+             "false/inherit/invalid-value text STAYS in snapshot text and paged read (base behavior)",
              "paged read excludes the same variants inside a wrapper",
              "a variant editor fills and verifies through the settle read-back"]}));
   } finally {await browser.close();}
