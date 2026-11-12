@@ -2854,13 +2854,16 @@ class TestDelegateDispatch:
         store, env, _parent = self._created_ask(fake)
         outcome = store.dispatch_delegate(env)
         child_id = outcome["child_issue_id"]
+        identifier = fake.state.issues[child_id]["identifier"]
         # not done yet
         assert store.read_child_result(env["ask_id"], child_id) == \
-            {"done": False, "cancelled": False, "answer": None}
+            {"done": False, "cancelled": False, "answer": None,
+             "child_identifier": identifier}
         # cancelled is terminal and carries nothing back
         fake.state.issues[child_id]["status"] = "cancelled"
         assert store.read_child_result(env["ask_id"], child_id) == \
-            {"done": False, "cancelled": True, "answer": None}
+            {"done": False, "cancelled": True, "answer": None,
+             "child_identifier": identifier}
         # done with the assignee's own comment: the verbatim answer
         fake.state.issues[child_id]["status"] = "done"
         fake.state.comment_author = TARGET_AGENT_ID
@@ -2868,16 +2871,19 @@ class TestDelegateDispatch:
         self._post_comment(store, child_id, "The harmless fixture answer.")
         result = store.read_child_result(env["ask_id"], child_id)
         assert result == {"done": True, "cancelled": False,
-                          "answer": "The harmless fixture answer."}
+                          "answer": "The harmless fixture answer.",
+                          "child_identifier": identifier}
 
-    def test_read_child_result_fallback_and_pointer(self, fake):
+    def test_read_child_result_fallback_and_no_comment_none(self, fake):
         store, env, _parent = self._created_ask(fake, key="d-fb")
         outcome = store.dispatch_delegate(env)
         child_id = outcome["child_issue_id"]
         fake.state.issues[child_id]["status"] = "done"
-        # a done child with no comment at all: the pointer, never a guess
-        assert store.read_child_result(env["ask_id"], child_id)["answer"] == \
-            "(no answer comment on the child issue)"
+        # R1 item 3: a done child with no comment at all yields None —
+        # never a placeholder string return_delegate would post as the
+        # ask's one permanent answer
+        assert store.read_child_result(env["ask_id"], child_id)["answer"] \
+            is None
         # an unattributed comment (the installed board's plain-route shape,
         # gbl4-devproof): the disclaimed fallback, verbatim RF wording
         fake.state.comment_author = AGENT_ID       # not the child's assignee
@@ -2886,6 +2892,112 @@ class TestDelegateDispatch:
         assert answer.startswith(
             "(the asked teammate's own comment was not found;")
         assert answer.endswith("Some bystander comment.")
+
+    def test_done_child_with_no_comment_yields_none_not_a_placeholder(
+            self, fake):
+        # R1 item 3: a done child with no non-machine comment used to yield
+        # the string "(no answer comment on the child issue)", which
+        # return_delegate posted as the ask's ONE answer — permanent under
+        # ruling 19, poisoning the record even when the real answer landed
+        # later.  It must yield None so the bridge reports
+        # NO_ANSWER_COMMENT, posts nothing, and the next wake/scan re-reads.
+        store, env, _parent = self._created_ask(fake, key="d-noans")
+        outcome = store.dispatch_delegate(env)
+        child_id = outcome["child_issue_id"]
+        fake.state.issues[child_id]["status"] = "done"
+        result = store.read_child_result(env["ask_id"], child_id)
+        assert result["done"] is True
+        assert result["answer"] is None        # never a placeholder string
+        # machine-only comments are still no answer
+        self._post_comment(store, child_id, "[coding-job] machine noise")
+        result = store.read_child_result(env["ask_id"], child_id)
+        assert result["answer"] is None
+
+    def test_no_comment_delegate_reports_no_answer_and_rereads(self, fake):
+        # R1 item 3 end-to-end through the REAL client (fake board), not
+        # the store double: done child, no comment ⇒ NO_ANSWER_COMMENT and
+        # nothing posted; the next return RE-READS (never latches), and the
+        # assignee's real comment later becomes the one answer.
+        store = self._client(fake)
+        core = GblBridge(
+            store,
+            admission_table=(PrincipalAdmission(
+                principal=PRINCIPAL,
+                targets=frozenset({"secretary"}),
+                kinds=frozenset({"delegate"}),
+                max_asks_per_hour=20),),
+            now=lambda: datetime.now(timezone.utc),
+        )
+        res = core.submit_ask(principal=PRINCIPAL, kind="delegate",
+                              target="secretary", title="Fixture delegate",
+                              body="Do the harmless fixture work.",
+                              idempotency_key="r1-noans-e2e")
+        assert res["status"] == "CREATED"
+        ask_id = res["ask"]["ask_id"]
+        child_id = res["dispatch"]["child_issue_id"]
+        fake.state.issues[child_id]["status"] = "done"
+        first = core.return_delegate(ask_id=ask_id)
+        assert first["status"] == "NO_ANSWER_COMMENT"
+        second = core.return_delegate(ask_id=ask_id)
+        assert second["status"] == "NO_ANSWER_COMMENT"   # re-reads, no latch
+        # the real answer arrives afterwards: it — not a placeholder — is
+        # the ask's one answer
+        fake.state.comment_author = TARGET_AGENT_ID
+        fake.state.comment_author_type = "agent"
+        self._post_comment(store, child_id, "The harmless fixture answer.")
+        third = core.return_delegate(ask_id=ask_id)
+        assert third["status"] == "RETURNED"
+        record = store.read_ask(ask_id)
+        answers = [e for e in record["events"] if e.get("type") == "answer"]
+        assert len(answers) == 1
+        assert answers[0]["text"] == "The harmless fixture answer."
+
+    def test_identifier_recorded_is_whole_token(self):
+        # R1 item 5: the block-PATCH skip compared identifiers by
+        # substring — MMO-9 inside a recorded MMO-91 skipped the PATCH
+        # that records the new child as a blocker, losing its
+        # blockers-resolved wake.  Whole-token comparison only.
+        assert pc._identifier_recorded(
+            "MMO-9", "secretary completes MMO-9: fixture")
+        assert pc._identifier_recorded(
+            "MMO-91", "secretary completes MMO-91: fixture")
+        assert not pc._identifier_recorded(
+            "MMO-9", "secretary completes MMO-91: fixture")
+        assert not pc._identifier_recorded(
+            "MMO-9", "secretary completes MMO-90: fixture")
+        assert not pc._identifier_recorded("MMO-9", "xMMO-9 fixture")
+        assert not pc._identifier_recorded("MMO-9", "")
+        assert not pc._identifier_recorded("", "secretary completes MMO-9")
+
+    def test_block_patch_skip_never_matches_a_longer_identifier(self, fake):
+        # R1 item 5 integration: the recorded descriptor names a previous
+        # child FX-31; the reuse scan will not find child1 (foreign
+        # creator), so dispatch creates FX-3 — a substring of the recorded
+        # action but NOT the same token.  The PATCH must fire and record
+        # FX-3 as a blocker; the exact-token case still skips.
+        store, env, parent = self._created_ask(fake, key="d-tok")
+        first = store.dispatch_delegate(env)
+        child1 = first["child_issue_id"]
+        fake.state.issues[child1]["createdByAgentId"] = str(uuid.uuid4())
+        blocked = fake.state.issues[parent["id"]]
+        blocked["unblockDescriptor"] = {
+            "owner": {"agentId": AGENT_ID},
+            "action": "secretary completes FX-31: Fixture delegate"}
+        second = store.dispatch_delegate(env)
+        child2 = second["child_issue_id"]
+        assert child2 != child1
+        assert fake.state.issues[child2]["identifier"] == "FX-3"
+        blocked = fake.state.issues[parent["id"]]
+        assert blocked["status"] == "blocked"
+        assert child2 in blocked["blockedByIssueIds"]    # the PATCH fired
+        assert "FX-3:" in blocked["unblockDescriptor"]["action"]
+        # the exact-token case still skips: re-dispatch reuses child2 and
+        # finds its whole identifier already recorded
+        before = count(fake, "PATCH", f"/api/issues/{parent['id']}")
+        third = store.dispatch_delegate(env)
+        assert third["reused"] is True
+        assert third["child_issue_id"] == child2
+        assert count(fake, "PATCH", f"/api/issues/{parent['id']}") == before
 
     def test_scan_delegate_asks_is_bounded_kind_filtered_and_truncation_aware(
             self, fake):

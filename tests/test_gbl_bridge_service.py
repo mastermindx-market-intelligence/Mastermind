@@ -20,10 +20,12 @@ import pytest
 
 from common.gbl_contract import (
     GBLContractError,
+    MAX_ANSWER_CHARS,
     decode_gbl_frame,
     encode_gbl_frame,
     mint_ask_id,
 )
+from integrations.gbl import bridge_service as gbs
 from integrations.gbl.bridge_service import (
     DEFAULT_ADMISSION_TABLE,
     GblBridge,
@@ -1772,6 +1774,56 @@ class TestReturnDelegate:
                    if e.get("type") == "answer"]
         assert len(answers) == 1             # the record holds the answer
 
+    def test_oversized_answer_is_posted_cut_with_a_notice(self):
+        # R1 HIGH-1: a result comment over the contract's body budget used
+        # to raise GBLContractError INVALID_BODY out of post_answer with
+        # nothing catching it — the answer was lost and every later wake
+        # and scan wedged at the same point until expiry.  The bridge now
+        # posts a bounded answer: a deterministic cut plus a notice naming
+        # the child issue where the full text lives.
+        limit = MAX_ANSWER_CHARS
+
+        def _returned(answer_text):
+            store = DispatchStore()
+            store.child_result = {"done": True, "cancelled": False,
+                                  "answer": answer_text,
+                                  "child_identifier": "FX-2"}
+            core = bridge(store)
+            core.submit_ask(**submit(kind="delegate"))
+            result = core.return_delegate(ask_id=ASK_ID)   # never raises
+            assert result["status"] == "RETURNED"
+            answers = [e for e in store.asks[ASK_ID]["events"]
+                       if e.get("type") == "answer"]
+            assert len(answers) == 1
+            # replay after the (cut) answer: no second post
+            replay = core.return_delegate(ask_id=ASK_ID)
+            assert replay["status"] == "ALREADY_ANSWERED"
+            answers = [e for e in store.asks[ASK_ID]["events"]
+                       if e.get("type") == "answer"]
+            assert len(answers) == 1
+            return answers[0]["text"], store, core
+
+        # exactly at the limit: posted whole, no notice
+        text, _store, _core = _returned("A" * limit)
+        assert text == "A" * limit
+
+        # limit+1 and 64K: posted cut, notice present, total within limit
+        for total in (limit + 1, 65536):
+            text, _store, _core = _returned("R" * total)
+            assert len(text) <= limit
+            assert text.startswith("R" * 100)         # the answer's own head
+            assert f"cut at {limit} of {total} characters" in text
+            assert "child-fixture-1" in text          # child id named
+            assert "FX-2" in text                     # child identifier named
+
+        # deterministic: the same comment always cuts to the same answer,
+        # so the idempotency outcome is stable
+        cut_a = gbs._cut_answer("R" * 65536, "child-fixture-1", "FX-2")
+        cut_b = gbs._cut_answer("R" * 65536, "child-fixture-1", "FX-2")
+        assert cut_a == cut_b
+        assert len(cut_a) <= limit
+        assert gbs._cut_answer("A" * limit, "c", "FX-2") == "A" * limit
+
 
 class TestReturnScan:
     """The bridge's own bounded read: the lost-wake recovery source."""
@@ -1800,6 +1852,44 @@ class TestReturnScan:
         assert out["count"] == len(real_ids) + 1
         statuses = {row["status"] for row in out["results"]}
         assert "ASK_NOT_FOUND" in statuses and "NOT_YET" in statuses
+
+    def test_store_and_contract_errors_never_abort_the_scan(self):
+        # R1 MED-1: return_scan caught only GblBridgeError, so one ask
+        # raising GblPaperclipError (RETURN_CHILD_NOT_OURS, TRANSPORT, …)
+        # or GBLContractError (INVALID_BODY) aborted the WHOLE scan — a
+        # single poisoned ask permanently disabled lost-wake recovery for
+        # every other ask.  Both are now per-ask typed rows (code + ask id,
+        # no answer text) and the healthy ask behind the poisoner is
+        # RETURNED in the same scan.
+        for exc in (GblPaperclipError("RETURN_CHILD_NOT_OURS",
+                                      "child fails: marker,assignee"),
+                    GBLContractError("INVALID_BODY", "body over budget")):
+            store = DispatchStore()
+            core = bridge(store)
+            core.submit_ask(**submit(kind="delegate"))
+            core.submit_ask(**submit(kind="delegate",
+                                     idempotency_key="gb-ask-0002"))
+            ids = store.scan_delegate_asks()
+            assert len(ids) == 2
+            poisoned, healthy = ids[0], ids[1]
+            store.child_result = {"done": True, "cancelled": False,
+                                  "answer": "The harmless fixture answer."}
+            real_read = store.read_child_result
+
+            def read(ask_id, child_issue_id,
+                     _real=real_read, _poisoned=poisoned, _exc=exc):
+                if ask_id == _poisoned:
+                    raise _exc
+                return _real(ask_id, child_issue_id)
+
+            store.read_child_result = read
+            out = core.return_scan()                   # never raises
+            assert out["status"] == "SCANNED"
+            assert out["count"] == 2
+            rows = {row.get("ask_id"): row for row in out["results"]}
+            assert rows[poisoned] == {"status": exc.code,
+                                      "ask_id": poisoned}
+            assert rows[healthy]["status"] == "RETURNED"   # same scan
 
     def test_scan_is_capped_at_the_bound(self):
         store = DispatchStore()

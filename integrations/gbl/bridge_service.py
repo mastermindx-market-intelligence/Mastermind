@@ -42,6 +42,7 @@ from common.gbl_contract import (
     ASK_KINDS,
     DEFAULT_ALLOWLIST,
     GBLContractError,
+    MAX_ANSWER_CHARS,
     MAX_ASKS_PER_HOUR_PER_PRINCIPAL,
     MAX_RENUDGES_PER_ASK,
     advance_ask_state,
@@ -71,6 +72,32 @@ RENUDGE_COOLDOWN_SECONDS = 900
 # GBL-RETURN outcome 2: the bounded lost-wake recovery scan (the board wake
 # is the primary; this read is the capped, read-only backstop).
 RETURN_SCAN_MAX = 25
+
+
+def _cut_answer(answer: str, child_id: str, identifier: Any) -> str:
+    """R1 HIGH-1 — the return edge's answer-budget law.  A board result
+    comment longer than the contract's body budget (MAX_ANSWER_CHARS) used
+    to make ``post_answer`` raise ``GBLContractError INVALID_BODY`` with
+    nothing catching it: the answer was lost for the whole >4096-char input
+    class and every later wake and scan wedged at the same point until
+    expiry.  The bridge instead posts a BOUNDED answer: the comment cut to
+    fit, closing with one explicit notice line saying it was cut at the
+    budget out of the full length and naming the child issue (id and
+    identifier) where the full text lives.  The cut is deterministic — the
+    same comment always yields the same answer, so the idempotency outcome
+    (and ruling 19's one-answer law) is stable."""
+    total = len(answer)
+    if total <= MAX_ANSWER_CHARS:
+        return answer
+    # board-served fields are bounded before they enter the notice, so the
+    # notice itself can never crowd out the kept answer head
+    where = (f"child issue {str(child_id)[:64]}"
+             + (f" ({str(identifier)[:64]})" if identifier else ""))
+    notice = (f"[GBL: answer cut at {MAX_ANSWER_CHARS} of {total} "
+              f"characters; full text on {where}]")
+    keep = MAX_ANSWER_CHARS - len(notice) - 1
+    return answer[:keep] + "\n" + notice
+
 
 REQUEST_SCHEMA = "mastermind.gbl.request.v1"
 RESPONSE_SCHEMA = "mastermind.gbl.response.v1"
@@ -1010,6 +1037,12 @@ class GblBridge:
             # as an empty answer.  The next wake/scan re-reads.
             return {"status": "NO_ANSWER_COMMENT", "ask_id": ask_id,
                     "child_issue_id": child_id}
+        # R1 HIGH-1: bound the answer at the return edge — a comment over
+        # the body budget is posted cut, with a notice naming the child
+        # issue that holds the full text.  No exception class escapes
+        # return_delegate for an oversized comment.
+        answer = _cut_answer(answer, child_id,
+                             result.get("child_identifier"))
         try:
             posted = self.post_answer(
                 principal=record["principal"], ask_id=ask_id, answer=answer,
@@ -1039,6 +1072,7 @@ class GblBridge:
         arrived.  Read-only per ask until a child is actually done; one
         ask's typed failure is reported in its row and never aborts the
         remaining asks."""
+        from integrations.gbl.paperclip_client import GblPaperclipError
         store = self._dispatch_store()
         if store is None:
             return {"status": "SCAN_SKIPPED"}
@@ -1047,6 +1081,13 @@ class GblBridge:
             try:
                 row = self.return_delegate(ask_id=ask_id)
             except GblBridgeError as exc:
+                row = {"status": exc.code, "ask_id": ask_id}
+            except (GBLContractError, GblPaperclipError) as exc:
+                # R1 MED-1: the store's typed refusals (RETURN_CHILD_NOT_OURS,
+                # ASK_RECORD_MISMATCH, TRANSPORT, …) and contract failures
+                # (INVALID_BODY, …) are THIS ask's row — code + ask id, no
+                # answer text — and never abort the remaining asks.  One
+                # poisoned ask cannot disable lost-wake recovery for all.
                 row = {"status": exc.code, "ask_id": ask_id}
             results.append(row)
         return {"status": "SCANNED", "count": len(results),

@@ -405,3 +405,13 @@ class TestGetJson:
     def test_unreachable_board_is_none(self):
         # ephemeral port 1 on loopback: connection refused, logged, None
         assert board_wake._get_json("http://127.0.0.1:9", "k", "/ok") is None
+
+    def test_malformed_pin_is_none_never_a_crash(self, capsys):
+        # R1 item 4: urlsplit(pin) used to run OUTSIDE the try, so a
+        # corrupt installer pin (e.g. an unterminated IPv6 literal)
+        # escaped as a raw ValueError — the one path that broke the
+        # "never an error run" law (brief outcome 4).  Inside the try it
+        # is a logged, skipped read like every other failure.
+        for pin in ("http://[::1", "http://[zz::1", "http://[::1:port]"):
+            assert board_wake._get_json(pin, "k", "/ok") is None
+        assert API_KEY not in capsys.readouterr().out

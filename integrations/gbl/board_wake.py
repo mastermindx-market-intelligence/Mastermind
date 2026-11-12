@@ -62,9 +62,13 @@ def log(message: str) -> None:
 def _get_json(pin: str, api_key: str, path: str):
     """One GET against the pinned board, or None (logged) on any failure.
     No redirects are followed (http.client never does); an oversized or
-    unparseable body is a skipped read, never a crash."""
-    parts = urlsplit(pin)
+    unparseable body is a skipped read, never a crash.  R1 item 4: the pin
+    is parsed INSIDE the try — a corrupt installer pin (e.g. an
+    unterminated IPv6 literal) is a logged, skipped read like every other
+    failure, never a raw ValueError that would exit non-zero and break the
+    "never an error run" law."""
     try:
+        parts = urlsplit(pin)
         connection = http.client.HTTPConnection(
             parts.hostname, parts.port, timeout=HTTP_TIMEOUT_SECONDS)
         try:

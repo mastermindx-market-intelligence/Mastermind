@@ -1302,7 +1302,8 @@ class PaperclipAskClient:
         identifier = child.get("identifier")
         if (fresh.get("status") != "blocked"
                 or not identifier
-                or str(identifier) not in str(descriptor.get("action") or "")):
+                or not _identifier_recorded(
+                    identifier, str(descriptor.get("action") or ""))):
             blocker_ids = list(dict.fromkeys(
                 _rf_recorded_blocker_ids(fresh) + [child_id]))
             try:
@@ -1391,25 +1392,35 @@ class PaperclipAskClient:
         the RF result-comment law ⇒ the answer; cancelled ⇒ terminal, no
         answer (RF q1-10: a cancelled child carries nothing back); anything
         else ⇒ not yet.  A failed comments read FAILS typed — it is never
-        read as "no answer" (RF R2a finding 17)."""
+        read as "no answer" (RF R2a finding 17).  ``child_identifier`` is
+        the board-served identifier of the proven child, for the bridge's
+        cut-answer notice (R1 HIGH-1) to name where the full text lives."""
         child = self.read_dispatch_child(ask_id, child_issue_id)
+        identifier = child.get("identifier")
         status = child.get("status")
         if status == "cancelled":
-            return {"done": False, "cancelled": True, "answer": None}
+            return {"done": False, "cancelled": True, "answer": None,
+                    "child_identifier": identifier}
         if status != "done":
-            return {"done": False, "cancelled": False, "answer": None}
+            return {"done": False, "cancelled": False, "answer": None,
+                    "child_identifier": identifier}
         return {"done": True, "cancelled": False,
-                "answer": self._last_result_comment(child)}
+                "answer": self._last_result_comment(child),
+                "child_identifier": identifier}
 
-    def _last_result_comment(self, child: Mapping[str, Any]) -> str:
+    def _last_result_comment(self, child: Mapping[str, Any]) -> str | None:
         """The RF result-comment law, field-for-field: the LAST comment
         authored by the child's own assignee (authorType agent, author id =
         the child's assigneeAgentId) that is not a machine comment; else the
         newest non-machine comment under a prefix saying it is NOT the asked
-        teammate's own words; else the pointer.  (The installed board may
-        serve plain-route comments unattributed — gbl4-devproof 2026-11-11 —
-        in which case the disclaimed fallback is the served path, exactly as
-        in the RF carrier.)"""
+        teammate's own words; else None.  (The installed board may serve
+        plain-route comments unattributed — gbl4-devproof 2026-11-11 — in
+        which case the disclaimed fallback is the served path, exactly as in
+        the RF carrier.)  R1 item 3: no comment ⇒ None, NEVER a placeholder
+        string — the old "(no answer comment on the child issue)" pointer
+        was posted by return_delegate as the ask's ONE answer, permanent
+        under ruling 19; with None the bridge reports NO_ANSWER_COMMENT,
+        posts nothing, and the next wake/scan re-reads."""
         rows = self._comment_rows(self._issue_seg(child["id"]))
         assignee = child.get("assigneeAgentId")
         if assignee:
@@ -1425,7 +1436,7 @@ class PaperclipAskClient:
                 return ("(the asked teammate's own comment was not found; "
                         "this is the newest comment on the child issue, not "
                         "their answer)\n\n" + body)
-        return "(no answer comment on the child issue)"
+        return None
 
     def scan_delegate_asks(self) -> list[str]:
         """GBL-RETURN outcome 2 — the bridge's OWN bounded read of open
@@ -1937,6 +1948,22 @@ def _rf_recorded_blocker_ids(issue: Mapping[str, Any]) -> list[str]:
 
 def _rf_is_machine_comment(body: str) -> bool:
     return body.startswith(RF_MACHINE_COMMENT_PREFIXES)
+
+
+def _identifier_recorded(identifier: Any, action: str) -> bool:
+    """R1 item 5: does the recorded unblock-descriptor action name THIS
+    child identifier as a WHOLE token?  The skip test used to be a
+    substring match, so a new child ``MMO-9`` "matched" a previously
+    recorded ``MMO-91`` — the PATCH that records the new child as a
+    blocker was skipped and its ``done`` never fired
+    ``issue_blockers_resolved`` on the parent (a lost wake).  Token
+    boundary = anything outside ``[A-Za-z0-9-]`` (or string start/end),
+    the identifier alphabet the board serves."""
+    token = str(identifier or "")
+    if not token:
+        return False
+    pattern = rf"(?<![A-Za-z0-9-]){re.escape(token)}(?![A-Za-z0-9-])"
+    return re.search(pattern, action) is not None
 
 
 # ── Comment provenance (panel B M1/M2 client side; GBL lane consumes) ───────
