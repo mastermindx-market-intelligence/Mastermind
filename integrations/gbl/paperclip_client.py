@@ -563,8 +563,8 @@ class PaperclipAskClient:
             if issue is None:
                 raise GblPaperclipError("ASK_ISSUE_NOT_FOUND", ask_id)
             seg = self._issue_seg(issue.get("id"))
-            verified = [self._verified_event(stored, ask_id)
-                        for stored in self._stored_events(seg)]
+            verified = [(event, trusted) for _row, event, trusted
+                        in self._chain_verified_events(seg, ask_id)]
             next_seq = 1
             for _event, trusted in verified:
                 if trusted is True and type(_event.get("seq")) is int:
@@ -746,19 +746,50 @@ class PaperclipAskClient:
                 stored.append(event)
         return stored
 
+    def _chain_verified_events(
+            self, issue_seg: str,
+            ask_id: str) -> list[tuple[dict[str, Any], dict[str, Any], bool]]:
+        """The event-shaped comments, oldest first, each verified by tag
+        alone and THEN by the A3 chain law: the LATER of two tag-verified
+        events sharing a seq — the re-issued number the pre-A2 allocation
+        could mint — is demoted FOR THAT EVENT (``trusted: False``, typed
+        ``defect: EVENT_SEQ_DUPLICATE``).  The first (oldest) holder of
+        the number stays authoritative.  Every consumer of stored events
+        (the read path, the append path's allocation and idempotency
+        check) sees the SAME law: a demoted duplicate can neither reorder
+        the chain nor suppress a real append as an 'already appended'
+        core match.  Each entry is ``(comment row, event, trusted)``;
+        plain comments are not events and never appear."""
+        verified: list[tuple[dict[str, Any], dict[str, Any], bool]] = []
+        seen_seq: set[int] = set()
+        for row in self._comment_rows(issue_seg):
+            stored = _parse_event_body(str(row.get("body") or ""))
+            if stored is None:
+                continue          # a plain comment: not an event at all
+            event, trusted = self._verified_event(stored, ask_id)
+            if trusted and type(event.get("seq")) is int:
+                if event["seq"] in seen_seq:
+                    event["trusted"] = False
+                    event["defect"] = "EVENT_SEQ_DUPLICATE"
+                    trusted = False
+                else:
+                    seen_seq.add(event["seq"])
+            verified.append((row, event, trusted))
+        return verified
+
     def _events(self, issue_seg: str,
                 ask_id: str) -> list[dict[str, Any]]:
         """The record's events, each stamped with the computed ``trusted``
         flag (§2: verified by the host-held tag — never by an author field
         or a claimed in-JSON ``trusted`` key) and carrying the stored
         ``seq``.  Untrusted events stay visible with ``trusted: False``;
-        the bridge ignores them."""
+        the bridge ignores them.  GBL-5 A3: a duplicate seq is demoted for
+        that event (typed EVENT_SEQ_DUPLICATE) — never a refusal of the
+        whole record; proof 1's duplicate-seq record used to fail every
+        later read."""
         events: list[dict[str, Any]] = []
-        for row in self._comment_rows(issue_seg):
-            stored = _parse_event_body(str(row.get("body") or ""))
-            if stored is None:
-                continue          # a plain comment: not an event at all
-            event, _trusted = self._verified_event(stored, ask_id)
+        for row, event, _trusted in self._chain_verified_events(issue_seg,
+                                                                ask_id):
             _add_comment_provenance(event, row)
             events.append(event)
         return events

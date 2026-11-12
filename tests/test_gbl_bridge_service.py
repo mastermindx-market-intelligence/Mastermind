@@ -76,19 +76,40 @@ class FakeStore:
         record = self.asks.get(ask_id)
         return copy.deepcopy(record) if record else None
 
+    @staticmethod
+    def _authoritative_trusted(record):
+        """The rows the real store surfaces as trusted once the GBL-5 A3
+        chain law is applied: the LATER of two trusted rows sharing a seq
+        is demoted for that event (the store re-derives trust AND the
+        chain on every read; this double re-derives the same view)."""
+        seen: set[int] = set()
+        rows = []
+        for event in record["events"]:
+            if event.get("trusted") is not True:
+                continue
+            seq = event.get("seq")
+            if type(seq) is int:
+                if seq in seen:
+                    continue          # later duplicate: demoted
+                seen.add(seq)
+            rows.append(event)
+        return rows
+
     def append_ask_event(self, ask_id, event):
         record = self.asks[ask_id]
         stamped = {**event, "trusted": True}
         # Round-2 contract: seq derives ONLY from the store's own trusted
         # appends — a foreign/untrusted row (which carries no store seq)
         # never moves the counter, so a trailing foreign comment cannot
-        # reset the sequence and brick the record.
-        last_trusted = max(
-            (existing.get("seq", -1) for existing in record["events"]
-             if existing.get("trusted") is True), default=-1)
+        # reset the sequence and brick the record.  GBL-5 A3: allocation
+        # and idempotency both run over the chain-law trusted view — a
+        # demoted duplicate neither moves the counter nor suppresses the
+        # real append as an "already appended" core match.
+        trusted = self._authoritative_trusted(record)
+        last_trusted = max((row.get("seq", -1) for row in trusted),
+                           default=-1)
         stamped["seq"] = last_trusted + 1
-        if not any(self._same_event(stamped, existing)
-                   for existing in record["events"]):
+        if not any(self._same_event(stamped, row) for row in trusted):
             record["events"].append(stamped)
 
     @staticmethod
@@ -848,25 +869,37 @@ class TestRepairStoreTrust:
         result = core.fetch_result(principal=PRINCIPAL, ask_id=ASK_ID)
         assert result["answer"] == "The real fixture answer."
 
-    def test_equal_or_missing_sequence_stamps_are_typed(self):
+    def test_duplicate_seq_is_demoted_and_the_record_stays_readable(self):
+        # GBL-5 A3 (proof 1's bricked record): a duplicate seq used to
+        # raise EVENT_SEQ_INVALID on EVERY later read.  A duplicate number
+        # is a per-event defect, never a refusal of the whole record —
+        # the duplicate leaves the authoritative stream and the replay
+        # reads on (the store surfaces the row typed as trusted: False
+        # with defect EVENT_SEQ_DUPLICATE).
+        store = FakeStore()
+        core = bridge(store)
+        core.submit_ask(**submit())
+        store.seed_answer(ASK_ID)       # answer(seq 0) + ANSWERED(seq 1)
+        # A store-stamped CONSUMED re-issuing the number ANSWERED took.
+        store.asks[ASK_ID]["events"].append(
+            {"type": "state", "state": "CONSUMED", "seq": 1, "trusted": True})
+        assert core.ask_status(principal=PRINCIPAL,
+                               ask_id=ASK_ID)["state"] == "ANSWERED"
+        result = core.fetch_result(principal=PRINCIPAL, ask_id=ASK_ID)
+        assert result["status"] == "ANSWER_UNCONSUMED"
+        assert core.fetch_result(principal=PRINCIPAL,
+                                 ask_id=ASK_ID)["status"] == "CONSUMED"
+
+    def test_missing_sequence_stamp_stays_a_typed_refusal(self):
+        # The malformed-stamp case keeps its typed refusal: a trusted
+        # event without an integer seq may never slip into the chain.
         store = FakeStore()
         core = bridge(store)
         core.submit_ask(**submit())
         store.asks[ASK_ID]["events"].append(
-            {"type": "state", "state": "ANSWERED", "seq": 5, "trusted": True})
-        store.asks[ASK_ID]["events"].append(
-            {"type": "state", "state": "CONSUMED", "seq": 5, "trusted": True})
-        with pytest.raises(GblBridgeError) as err:
-            core.ask_status(principal=PRINCIPAL, ask_id=ASK_ID)
-        assert err.value.code == "EVENT_SEQ_INVALID"
-        # A missing stamp is refused the same typed way.
-        store2 = FakeStore()
-        core2 = bridge(store2)
-        core2.submit_ask(**submit())
-        store2.asks[ASK_ID]["events"].append(
             {"type": "state", "state": "ANSWERED", "trusted": True})
         with pytest.raises(GblBridgeError) as err:
-            core2.ask_status(principal=PRINCIPAL, ask_id=ASK_ID)
+            core.ask_status(principal=PRINCIPAL, ask_id=ASK_ID)
         assert err.value.code == "EVENT_SEQ_INVALID"
 
 

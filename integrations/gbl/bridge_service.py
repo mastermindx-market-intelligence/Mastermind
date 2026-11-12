@@ -207,13 +207,20 @@ class GblBridge:
     def _ordered_events(record: Mapping[str, Any]) -> list[dict[str, Any]]:
         """The authoritative event list: untrusted (foreign-author) events
         are dropped; the store's own stamps must form a strictly increasing
-        sequence or the defect is named typed (panel B M1/M2 — a broken
-        stamp may never silently reorder the chain, and the typed refusal
-        names the exact defect instead of bricking the record as a random
-        ASK_STATE_REGRESSION).  Round 2: the ``trusted`` stamp must be an
-        exact bool — a truthy 1, a ``"true"`` string or a null is a typed
+        sequence (panel B M1/M2 — a broken stamp may never silently reorder
+        the chain).  Round 2: the ``trusted`` stamp must be an exact bool —
+        a truthy 1, a ``"true"`` string or a null is a typed
         EVENT_TRUST_INVALID, never an authoritative event that slips past
-        the seq law because ``is True``/``is False`` both miss it."""
+        the seq law because ``is True``/``is False`` both miss it.
+
+        GBL-5 A3 (proof 1's bricked record): a duplicate number is a typed
+        defect FOR THAT EVENT, never a refusal of the whole record — the
+        later duplicate is demoted (``trusted: False`` +
+        ``EVENT_SEQ_DUPLICATE``, the same stamp the store surfaces on its
+        row) and leaves the authoritative stream, and the replay reads on.
+        A trusted event WITHOUT an integer seq keeps its typed
+        EVENT_SEQ_INVALID refusal: that is a malformed stamp, not a
+        duplicate number."""
         events = list(record.get("events", ()))
         last_seq: int | None = None
         for event in events:
@@ -230,9 +237,9 @@ class GblBridge:
                     raise GblBridgeError("EVENT_SEQ_INVALID",
                                          "trusted event without an integer seq")
                 if last_seq is not None and seq <= last_seq:
-                    raise GblBridgeError(
-                        "EVENT_SEQ_INVALID",
-                        f"seq {seq} does not follow {last_seq}")
+                    event["trusted"] = False   # duplicate number: demote,
+                    event["defect"] = "EVENT_SEQ_DUPLICATE"   # never refuse
+                    continue
                 last_seq = seq
         return [event for event in events if event.get("trusted") is not False]
 

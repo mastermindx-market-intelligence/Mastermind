@@ -1365,6 +1365,62 @@ class TestEventSeqAllocation:
         assert seqs == [1, 2]
 
 
+class TestEventSeqDuplicateDemoted:
+    """GBL-5 A3 (proof 1's bricked record): a duplicate seq found ON READ
+    is a typed defect FOR THAT EVENT — ``trusted: False`` with
+    ``defect: EVENT_SEQ_DUPLICATE`` — never a refusal of the whole record.
+    The fixture is proof 1's exact row shape: answer(1), nudge_attempt(2),
+    nudge(3), then a store-stamped CONSUMED that re-issued 3 because its
+    allocation read lagged.  Before the fix, every later read of that
+    record raised EVENT_SEQ_INVALID."""
+
+    def test_proof1_shaped_duplicate_keeps_the_record_readable(self, fake):
+        ask_client = client(fake)
+        row = envelope(ttl_seconds=86400 * 365 * 10)   # never expires here
+        ask_id = row["ask_id"]
+        assert ask_client.create_ask(row) is None
+        ask_client.append_ask_event(ask_id, {
+            "type": "answer", "answer_id": "gbm-" + "a" * 32,
+            "idempotency_key": "gb-ans-1",
+            "text": "A harmless fixture answer."})                 # seq 1
+        ask_client.append_ask_event(ask_id, {
+            "type": "nudge_attempt", "outcome": "SENT"})           # seq 2
+        ask_client.append_ask_event(ask_id, {
+            "type": "nudge", "state": "ANSWERED"})                 # seq 3
+        issue_id = fake.state.order[0]
+        # The proof-1 duplicate: a genuinely store-stamped CONSUMED whose
+        # allocation read had not seen the nudge row — tag and all VALID.
+        core3 = {"type": "state", "state": "CONSUMED"}
+        stamped3 = {**core3, "seq": 3}
+        tagged3 = {**stamped3,
+                   "tag": expect_tag(KEY_BYTES, ask_id, 3, stamped3)}
+        fake.state.comments[issue_id].append({
+            "id": str(uuid.uuid4()), "authorAgentId": AGENT_ID,
+            "createdAt": fake.state.now_iso(),
+            "body": pc.EVENT_MARKER + " " + json.dumps(
+                tagged3, sort_keys=True, separators=(",", ":"))})
+
+        record = ask_client.read_ask(ask_id)          # no refusal on read
+        assert [e["seq"] for e in record["events"]] == [1, 2, 3, 3]
+        assert [e["trusted"] for e in record["events"]] == [True] * 3 + [False]
+        assert record["events"][3]["state"] == "CONSUMED"   # still visible
+        assert record["events"][3]["defect"] == "EVENT_SEQ_DUPLICATE"
+
+        core = bridge_over(ask_client)
+        assert core.ask_status(principal=PRINCIPAL,
+                               ask_id=ask_id)["state"] == "ANSWERED"
+        first = core.fetch_result(principal=PRINCIPAL, ask_id=ask_id)
+        assert first["status"] == "ANSWER_UNCONSUMED"
+        assert first["answer"] == "A harmless fixture answer."
+        assert core.fetch_result(principal=PRINCIPAL,
+                                 ask_id=ask_id)["status"] == "CONSUMED"
+        # The healing append moved FORWARD past the duplicate: seq 4, never
+        # a third 3.
+        events = ask_client.read_ask(ask_id)["events"]
+        assert [e["seq"] for e in events] == [1, 2, 3, 3, 4]
+        assert events[4]["trusted"] is True
+
+
 # ── Panel B delta 1, D1 + D2: no forged body can crash the record ────────────
 
 
