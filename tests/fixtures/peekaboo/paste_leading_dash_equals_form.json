@@ -1,0 +1,36 @@
+{
+ "data": null,
+ "effect": "unverifiable",
+ "success": false,
+ "outcome": {
+  "effect": "unverifiable",
+  "route": "local",
+  "evidence": "delivery_accepted",
+  "delivery_mode": "background",
+  "retry_safety": "unsafe",
+  "state": "dispatched_unverified",
+  "retry_safe": false,
+  "requires_fresh_observation": true,
+  "delivery_mechanism": "window_targeted_events",
+  "dispatch_state": "dispatched",
+  "escalation": "observe_before_retry",
+  "mutation_dispatched": true
+ },
+ "target_receipt": {
+  "process_start_identity_decimal": "1794395772541729",
+  "window_id": 98889,
+  "process_start_identity": 1794395772541729,
+  "pid": 49829
+ },
+ "debug_logs": [
+  "[2026-11-11T15:06:23.315Z] DEBUG: Runtime host: local (in-process)"
+ ],
+ "error": {
+  "hint": "Follow the canonical escalation metadata before deciding whether to retry.",
+  "mutation_dispatched": true,
+  "code": "INTERACTION_FAILED",
+  "message": "Background text paste did not return a confirmed outcome.",
+  "retry_safe": false
+ },
+ "note": "M11 probe B: EQUALS form \"--text=-dash-probe-B\" \u2014 value accepted, paste dispatched (mutation_dispatched:true; background-unconfirmed receipt). Probe C (foreground delivery of literal dash text) aborted at the gate (human returned, idle 20s) \u2014 still owed."
+}

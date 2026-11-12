@@ -4,6 +4,10 @@ A zero-dependency (Python 3 stdlib only, runs on `/usr/bin/python3`) stdio
 MCP server that gives a session **window-scoped** computer use on macOS by
 wrapping the [Peekaboo](https://github.com/steipete/peekaboo) CLI.
 
+**Interface version 0.3.0 — breaking change.** Every act must now present the
+`lease_nonce` returned by `lease_acquire`; `keep_path` is gone and no reply
+ever contains image bytes.
+
 Design summary:
 
 - **One MCP tool.** The server exposes exactly one tool, `mmos_computer_use`;
@@ -14,28 +18,55 @@ Design summary:
   No screen-wide, display-wide or all-windows parameter exists anywhere in
   the tool schema.
 - **Deny list first.** Credential managers (Keychain Access, 1Password,
-  Bitwarden, Dashlane, Proton Pass, Keeper, Enpass, Strongbox), password
-  surfaces (Passwords), System Settings, terminal emulators (Terminal, iTerm,
-  iTerm2) and Script Editor are deny-listed in `deny.json` (an arbitrary
-  command surface is not a document window). Every operation that targets a
-  window or an app checks the list first; a match refuses the operation
-  (`DENY_LISTED`) before any content is read. The `windows` op additionally
-  denies every resolved app identity present in the CLI result (the whole op
-  refuses, zero results) and drops entries whose resolved app name is not
-  exactly the requested app; the requested string is matched against app
-  names AND bundle ids (exact-match semantics unchanged). Extra app names,
-  bundle ids and window-title regexes can be added to the `extra_*` fields
-  without touching the defaults.
+  Bitwarden, Dashlane, Proton Pass, Keeper, Enpass, Strongbox, KeePassXC,
+  LastPass), password surfaces (Passwords, SecurityAgent), Settings (System
+  Settings, System Preferences), terminal emulators (Terminal, iTerm, iTerm2)
+  and Script Editor are deny-listed (an arbitrary command surface is not a
+  document window). The built-in defaults ship in `DEFAULT_DENY` and in
+  `deny.json`; a configured file is **unioned** with the defaults, never a
+  replacement — an empty file means defaults only. `title_regexes`
+  (`password`, `passkey`, `saved passwords`, `settings/passwords`,
+  case-insensitive) are matched against every window title the layer reads,
+  including the `windows` op and the `slice_front` target, so a credential
+  field inside an otherwise innocuous app is refused too. Every operation
+  that targets a window or an app checks the list first; a match refuses the
+  operation (`DENY_LISTED`) before any content is read. App names and bundle
+  ids are compared after Unicode NFC normalization and casefolding. The
+  `windows` op additionally denies every resolved app identity present in the
+  CLI result (the whole op refuses, zero results) and drops entries whose
+  resolved app name is not exactly the requested app.
+  **Coordinate-click frontmost gate (H6).** Before a coordinate
+  `pointer_click`/`slice_click` (no `element_ref`), the target window must
+  be the **globally frontmost window** at click time: `window list` reports
+  per-window `is_frontmost`, and a window with anything above it in z-order
+  reports `is_frontmost:false` (real capture:
+  `tests/fixtures/peekaboo/window_list_fixture.json`), so `is_frontmost:true`
+  proves no window can cover the point. Otherwise the click is refused
+  (`WINDOW_NOT_FRONTMOST` with the observed index; a vanished window is
+  `WINDOW_GONE`; a list row without the field fails closed). Element-targeted
+  clicks are unaffected — the element is pinned through the snapshot, not
+  the screen point.
+  **Coordinate-click overlay gate.** Additionally, the layer lists the
+  visible apps; if ANY deny-listed app currently has an on-screen window, the
+  click is refused (`DENY_OVERLAY`, naming the app) because that window may
+  float over the coordinate. Unreadable evidence fails closed
+  (`DENY_OVERLAY_UNVERIFIED`). Element-targeted clicks are unaffected.
 - **Lease + presence before any ACT.** Acts (AX press, set-value text,
   keyboard chord, scroll, last-resort pointer click) and slice ops require
-  1. a held lease (`lease_acquire`, file-backed, single holder, TTL, renewed
-     on every act; `lease_status` reports the owner REDACTED — first 8 chars
-     plus an ellipsis and `owner_redacted: true` — while acquire/release
-     still require the exact owner string),
+  1. a held lease (`lease_acquire`, file-backed, single holder, TTL renewed
+     on every act). Each acquisition returns a random **nonce**; EVERY act
+     must carry `lease_nonce` with that value (`LEASE_NONCE_INVALID` on a
+     missing or wrong nonce). `lease_status` reports only
+     `sha256(owner)[:12]` (`owner_redacted: true`); acquire/release still
+     require the exact owner string. All lease mutations (acquire, renew,
+     release) run inside one `O_CREAT|O_EXCL` critical section; a lock left
+     by a dead pid or older than 60 s is recovered, any other contention is
+     the typed `LEASE_CONTENDED` (never `INTERNAL`). Renewal preserves the
+     acquired TTL (it never silently resets to the default).
   2. a human-idle screen (`ioreg -c IOHIDSystem` HIDIdleTime >= threshold,
      default **180 s** for ALL acts, env `MMOS_CU_PRESENCE_MIN_IDLE` or
      runtime.json `presence_min_idle_seconds`; both sources refuse values
-     below the 1 s floor at startup), and
+     below the 180 s default unless `MMOS_CU_TEST_MODE=1`), and
   3. the deny-list pass on the window identity read by the act's own fresh
      snapshot.
   A blocked act is a `NOT_APPLIED` receipt with cause `LEASE_NOT_HELD` or
@@ -55,8 +86,21 @@ Design summary:
   `{"target": {op, window_id, element_ref}, "status": "APPLIED" |
   "NOT_APPLIED" | "EFFECT_UNKNOWN", "cause"?: "CODE: bounded text",
   "observed": "..."}`. Dispatch is single-shot: one subprocess per operation,
-  no retry loop anywhere. A timeout or unreadable outcome is reported
-  `EFFECT_UNKNOWN` and left for human/next-session reconciliation.
+  no retry loop anywhere. **After a dispatch has started, any failure that is
+  not a proven pre-dispatch refusal is `EFFECT_UNKNOWN` for every act op**
+  (press, set_text, keys, scroll, pointer_click, slice_front, slice_click,
+  slice_send, slice_paste), because the event may have landed even when the
+  CLI failed. Pre-dispatch refusal codes (deny, lease, presence, pacing,
+  challenge, validation) remain `NOT_APPLIED`. A timeout or unreadable
+  outcome is `EFFECT_UNKNOWN` and left for human/next-session reconciliation.
+  Slice receipts carry the completed `steps`; if persisting `pacing.json` /
+  `lease.json` fails AFTER a dispatched act, the act receipt is still returned
+  with `state_write: "failed"` (never `REFUSED`/`INTERNAL`).
+- **No image leaves the layer.** `capture` returns metadata (`window_id`,
+  byte count, `image_returned: false`) plus optional OCR text;
+  `slice_look` / `vision_ask` return the vision model's TEXT answer and
+  `elements`, never the PNG. The image exists only in memory / a staging file
+  deleted in `finally`. There is no `keep_path` parameter.
 - **Pinned runtime.** `runtime.json` (schema `mmos.computer_use.runtime/v1`)
   pins the peekaboo binary path and SHA-256; the digest is verified on every
   server start and a mismatch refuses startup (`PIN_MISMATCH`).
@@ -72,18 +116,14 @@ Design summary:
   with headers — never curl/argv) to the configured Anthropic-protocol vision
   endpoint with the token read from `ANTHROPIC_AUTH_TOKEN` **at call time
   only**, and returns `{answer, elements, model}` where elements carry
-  normalized 0–1000 image coordinates. The endpoint must be https, or plain
-  http only on the loopback (`localhost` / `127.0.0.1` / `::1`); anything
-  else is refused (`VISION_ENDPOINT_INSECURE`) — the captured window image
-  and token must never travel an unencrypted link. Prompt text is capped:
+  normalized 0–1000 image coordinates. **The endpoint must be loopback**
+  (`localhost` / `127.0.0.1` / `::1`, http or https); any other host is
+  refused `VISION_ENDPOINT_INSECURE` even with https. Prompt text is capped:
   `question` ≤ 2000 chars (`QUESTION_TOO_LONG`), caller `element_hints` ≤ 20
   entries, 120 chars each, 1200 chars total (`HINTS_TOO_LONG`); over-limit
   input is refused before any capture or network dispatch. Image
-  bytes/base64 never appear in logs, errors or files; staging directories
-  are deleted in `finally`.
-  Captures are only persisted when `keep_path` is given **and** lies under
-  the caller scratch directory `MMOS_CU_SCRATCH`; anything else is refused
-  (`KEEP_PATH_*`).
+  bytes/base64 never appear in logs, errors, replies or persistent files;
+  staging directories are deleted in `finally`.
 - **Slice ops: one named window, end-to-end.** `slice_front`, `slice_click`,
   `slice_paste`, `slice_send` and `slice_look` each drive ONE named window
   (observe → act → confirm) per `tools/call` and return the same receipt
@@ -95,34 +135,48 @@ Design summary:
     between steps; a human becoming active mid-sequence aborts with
     `NOT_APPLIED` / `HUMAN_ACTIVE_MID_SEQUENCE` naming exactly which steps
     completed (truthful partial-state reporting — nothing continues,
-    nothing retries).
-  - **Pacing.** A minimum interval (default **180 s**, env
-    `MMOS_CU_PACING_SECONDS` or runtime.json `pacing_seconds`; both sources
-    refuse values below the 1 s floor at startup) between two `slice_paste`
-    or `slice_send` sequences on the SAME window (keyed by window id,
-    persisted as `pacing.json` under the state dir). Too soon →
-    `NOT_APPLIED` / `PACING_WAIT` with the seconds remaining.
-  - **Challenge stop.** Before ANY input-delivering dispatch, `slice_click`,
-    `slice_paste` and `slice_send` each scan the window's AX text (and OCR
-    text if present) for challenge patterns — captcha, are you a robot,
-    verify you are human, sign in, log in, rate limit, too many requests,
-    unusual activity, access denied (case-insensitive; extendable via
-    runtime.json `challenge_patterns_extra`). A match is a terminal
-    `NOT_APPLIED` / `CHALLENGE_DETECTED` with a bounded quote of what was
-    seen. The layer stops and reports; it does not retry. `slice_front`
-    raises without delivering input and keeps no scan.
-  - **Paste failure truth table.** A `slice_paste` failure is either a
+    nothing retries). If the act has already completed and the person becomes
+    active only before the CONFIRM readback, the receipt is `APPLIED` with
+    `confirm_skipped: "HUMAN_ACTIVE"` (or `EFFECT_UNKNOWN`) — never
+    `NOT_APPLIED`.
+  - **Shared pre-act gate.** One function runs the challenge scan and the
+    pacing check for every act that can change a page or send: `keys`,
+    `set_text`, `press`, `pointer_click`, `slice_click`, `slice_paste`,
+    `slice_send`. `keys` is paced at minimum for `enter`/`return`; every
+    press/click/set_text is paced too. The check runs AFTER the lease check,
+    so an unleased caller gets `LEASE_NOT_HELD` and cannot read pacing state.
+  - **Pacing identity.** A minimum interval (default **180 s**, env
+    `MMOS_CU_PACING_SECONDS` or runtime.json `pacing_seconds`; env values
+    below the default refuse at startup unless `MMOS_CU_TEST_MODE=1`)
+    between two input-delivering acts. The key is the M8 identity —
+    `app:<owning app>|title:<NFC, casefolded title>` — NOT the window id,
+    so closing and reopening the same app window does not reset the
+    interval. The window id is recorded alongside for diagnostics. Too soon
+    → `NOT_APPLIED` / `PACING_WAIT` with the seconds remaining. The interval
+    is measured on a monotonic clock where available, so a wall-clock jump
+    cannot shorten or extend it.
+  - **Challenge stop.** Before ANY input-delivering dispatch, the shared gate
+    scans the window's AX text (and OCR text if present) for challenge
+    patterns — captcha, are you a robot, verify you are human, sign in, log
+    in, rate limit, too many requests, unusual activity, access denied
+    (case-insensitive; extendable via runtime.json
+    `challenge_patterns_extra`). A match is a terminal `NOT_APPLIED` /
+    `CHALLENGE_DETECTED` with a bounded quote of what was seen; zero
+    dispatches. The layer stops and reports; it does not retry.
+    `slice_front` raises without delivering input and keeps no scan.
+  - **Dispatch failure truth table (all acts).** A failure is either a
     provably pre-dispatch refusal — `WINDOW_IDENTITY_UNKNOWN`, `DENY_LISTED`,
-    `LEASE_NOT_HELD`, `HUMAN_ACTIVE` / `HUMAN_ACTIVE_MID_SEQUENCE` /
-    `PRESENCE_UNKNOWN`, `PACING_WAIT`, `CHALLENGE_DETECTED`,
-    `ELEMENT_NOT_FOUND`, and validation errors (`TEXT_REQUIRED`,
-    `ELEMENT_REF_INVALID`, `WINDOW_ID_REQUIRED`, `SNAPSHOT_UNAVAILABLE`) —
-    reported `NOT_APPLIED` with certainty that nothing was sent, or any other
-    dispatch-phase failure (`CLI_ERROR`, `FOREGROUND_REQUIRED`, unparseable
+    `DENY_OVERLAY`, `DENY_OVERLAY_UNVERIFIED`, `LEASE_NOT_HELD`,
+    `LEASE_NONCE_INVALID`, `LEASE_CONTENDED`, `HUMAN_ACTIVE` /
+    `HUMAN_ACTIVE_MID_SEQUENCE` / `PRESENCE_UNKNOWN`, `PACING_WAIT`,
+    `CHALLENGE_DETECTED`, `ELEMENT_NOT_FOUND`, `WINDOW_APP_MISMATCH`,
+    `FOREGROUND_REQUIRED` from the explicit background attempt, and
+    validation errors — reported `NOT_APPLIED` with certainty that nothing
+    was sent, or any other dispatch-phase failure (`CLI_ERROR`, unparseable
     CLI output, `DISPATCH_TIMEOUT`, `DISPATCH_UNAVAILABLE`), reported
-    `EFFECT_UNKNOWN`: the clipboard may hold the caller text and the paste
-    chord may have been delivered, so the receipt carries
-    `"clipboard_state": "unknown"` and nothing is retried.
+    `EFFECT_UNKNOWN`: for `slice_paste` the clipboard may hold the caller
+    text and the paste chord may have been delivered, so that receipt also
+    carries `"clipboard_state": "unknown"`. Nothing is retried.
   - **Honest automation.** This layer performs ordinary, visible automation.
     It never imitates or disguises itself as a human: no randomized or
     human-like motion/timing, no fingerprint/user-agent/viewport changes are
@@ -145,15 +199,21 @@ pin, and serves MCP over stdio (newline-delimited JSON-RPC 2.0:
 
 | Variable                   | Meaning                                        |
 |----------------------------|------------------------------------------------|
-| `MMOS_CU_RUNTIME`          | runtime.json path override                     |
-| `MMOS_CU_STATE_DIR`        | lease + pacing directory (default `<here>/state/`) |
-| `MMOS_CU_SCRATCH`          | caller scratch dir; only place `keep_path` may write |
-| `MMOS_CU_PRESENCE_MIN_IDLE`| human-idle threshold seconds (default 180)     |
-| `MMOS_CU_PACING_SECONDS`   | min interval between slice paste/send sequences on one window (default 180) |
-| `MMOS_CU_DENY`             | deny.json path override                        |
+| `MMOS_CU_RUNTIME`          | runtime.json path override (must be inside this tool's folder) |
+| `MMOS_CU_STATE_DIR`        | lease + pacing directory, default `<here>/state/` (must be inside this tool's folder) |
+| `MMOS_CU_PRESENCE_MIN_IDLE`| human-idle threshold seconds; default 180, values below it refuse unless `MMOS_CU_TEST_MODE=1` |
+| `MMOS_CU_PACING_SECONDS`   | minimum interval between input-delivering acts; default 180, values below it refuse unless `MMOS_CU_TEST_MODE=1` |
+| `MMOS_CU_DENY`             | deny.json path override (must be inside this tool's folder) |
+| `MMOS_CU_TEST_MODE`        | `1` = explicit test-only escape: permits sub-default thresholds and out-of-layer paths. Never set in production. |
 | `MMOS_CU_VISION_MODEL`     | vision model (default `minimax-m3.1-flash`)    |
-| `ANTHROPIC_BASE_URL`       | vision endpoint base URL                       |
+| `ANTHROPIC_BASE_URL`       | vision endpoint base URL (loopback only)       |
 | `ANTHROPIC_AUTH_TOKEN`     | vision token, read at call time only           |
+
+`MMOS_CU_STATE_DIR`, `MMOS_CU_DENY` and `MMOS_CU_RUNTIME` are layer-scoped:
+they must resolve inside `tools/mmos_computer_use/` (or a subdirectory).
+Anything outside refuses at startup unless `MMOS_CU_TEST_MODE=1`, so an
+environment change cannot silently move the lease, deny list or pinned
+binary out from under the layer.
 
 runtime.json (schema `mmos.computer_use.runtime/v1`) additionally accepts the
 optional keys `presence_min_idle_seconds`, `pacing_seconds`,
@@ -192,20 +252,20 @@ interface and carries no `--input-strategy`.
 | MCP action        | peekaboo command                                                                  |
 |-------------------|------------------------------------------------------------------------------------|
 | `apps`            | `app list --json` (+ `window list --app <name> --json` per non-denied app)         |
-| `windows(app)`    | `window list --app <app> --json`                                                    |
+| `windows(app)`    | `window list --app=<app> --json` (title regexes applied to every returned window) |
 | `inspect(window_id)` | `see --window-id N --json --tree --no-screenshot` (AX tree, bounded to 400 lines) |
-| `capture(window_id, ocr)` | `see --window-id N --json --path <staging>/window.png [--ocr]` (staging dir deleted in `finally`) |
+| `capture(window_id, ocr)` | `see --window-id N --json --path <staging>/window.png [--ocr]` (staging dir deleted in `finally`; reply is metadata + optional OCR text only) |
 | `press(window_id, element_ref)` | `see --window-id N --json` then `action AXPress --on <elem> --snapshot <id> --json` |
-| `set_text(window_id, element_ref, text)` | `see --window-id N --json` then `set-value --value <text> --on <elem> --snapshot <id> --json` (direct AX value; never typing, never clipboard) |
+| `set_text(window_id, element_ref, text)` | `see --window-id N --json` then `set-value --value=<text> --on <elem> --snapshot <id> --json` (equal-sign form so a leading `-` is never a flag; direct AX value, never typing, never clipboard) |
 | `keys(window_id, chord)` | `see --window-id N --json` then `press <chord> --snapshot <id> --json` (single chord only, from the navigation/editing allowlist — return, escape, tab, space, delete, forwarddelete, home, end, pageup, pagedown, arrows — plus shift+arrow; system-global chords like `cmd+space`/`cmd+tab` and ALL cmd/ctrl/option modifier chords are refused with `CHORD_NOT_ALLOWED`) |
 | `scroll(window_id, direction, amount, element_ref?)` | `see --window-id N --json` then `scroll --direction D --amount K --snapshot <id> [--on <scrollable-elem>] --json` |
 | `pointer_click(window_id, element_ref? \| x, y)` | element form: `see` then `click --snapshot <id> --on <elem> --json`. Coordinate form (last resort): bounds validated from the snapshot's `coordinate_context`, then `click --window-id N --at x,y --snapshot <id> --json` — `--window-id` is kept only here because peekaboo treats `--at` as global without a window target |
-| `slice_front(app, window_id \| title)` | deny gate on the app, window resolved by id or unique case-insensitive title substring, then `see --window-id N --json` and ONE `action AXRaise --snapshot <id> [--on <window-elem>] --foreground --json`; the receipt observes the window's title + window_id after raising |
-| `slice_click(window_id, element_ref \| x, y)` | `see` then ONE `click --snapshot <id> --on <elem> --foreground --json` (element form) or `click --window-id N --at x,y --snapshot <id> --foreground --json` (coordinate last resort) |
-| `slice_paste(window_id, text, element_ref?)` | optional focus: `click --on <field> --foreground`; then ONE `paste --text <text> --app <app> --window-id N --json` (sets clipboard, delivers the paste chord, restores the previous clipboard — never typing, no `--input-strategy`); confirm reads the target field's AX value back via a fresh `see` (`paste_confirmed`/`restored` in the receipt) |
+| `slice_front(app, window_id \| title)` | deny gate on the app, window resolved by id or unique case-insensitive title substring; a given `window_id` must appear in that app's window list (`WINDOW_APP_MISMATCH` otherwise), and no window of the app may carry a deny-listed title. Then `see --window-id N --json` and ONE `action AXRaise --snapshot <id> [--on <window-elem>] --foreground --json`; the receipt observes the window's title + window_id after raising (or reports `confirm_skipped` if a human became active) |
+| `slice_click(window_id, element_ref \| x, y)` | `see` then ONE `click --snapshot <id> --on <elem> --foreground --json` (element form) or `click --window-id N --at x,y --snapshot <id> --foreground --json` (coordinate last resort, deny-overlay gated) |
+| `slice_paste(window_id, text, element_ref?)` | optional focus: `click --on <field> --foreground`; then ONE `paste --text=<text> --app=<app> --window-id N --json` (equal-sign forms; sets clipboard, delivers the paste chord, restores the previous clipboard — never typing, no `--input-strategy`); confirm reads the target field's AX value back via a fresh `see` (`paste_confirmed`; `restored` comes only from the documented top-level `clipboard_restored` receipt field) |
 | `slice_send(window_id, element_ref)` | challenge scan of the window's AX text (+ OCR if present) BEFORE dispatch; then ONE `click --snapshot <id> --on <send-elem> --foreground --json`; a challenge match is a terminal `CHALLENGE_DETECTED` refusal with zero dispatches. `slice_click` and `slice_paste` run the same scan before their input-delivering dispatch |
-| `slice_look(window_id, question?)` | `see --tree --no-screenshot` + `see --path <staging>` → accessibility text + capture; the vision relay is included when configured, accessibility text alone is acceptable when it is not |
-| `vision_ask(window_id, question)` | `see --tree --no-screenshot` + `see --path <staging>` then in-memory HTTP vision call |
+| `slice_look(window_id, question?)` | `see --tree --no-screenshot` + `see --path <staging>` → accessibility text (and the vision model's TEXT answer when a loopback relay is configured); the PNG itself is never returned |
+| `vision_ask(window_id, question)` | `see --tree --no-screenshot` + `see --path <staging>` then an in-memory HTTP call to a LOOPBACK vision endpoint; returns text + elements only |
 | `lease_*` / `presence` | no peekaboo call (file lease / `ioreg -c IOHIDSystem`)                         |
 
 Verified live 2026-11-11 against Peekaboo 4.2.2 on a real window: the
@@ -232,15 +292,19 @@ at it.)
 ## Tests
 
 ```sh
-python3 -m unittest tests.test_mmos_bcu_computer_use -v
+python3 -m unittest tests/test_mmos_bcu_computer_use.py tests/test_mmos_bcu_cli.py
+/usr/bin/python3 -m unittest tests/test_mmos_bcu_computer_use.py tests/test_mmos_bcu_cli.py
 ```
 
-(or `python3 -m unittest tests/test_mmos_bcu_computer_use.py -v`). The tests
-are pure unit tests: no screen access, no real peekaboo interaction, no
-network beyond an in-process fake HTTP server. The adapter is exercised
+The tests are pure unit tests: no screen access, no real peekaboo interaction,
+no network beyond an in-process fake HTTP server. The adapter is exercised
 against a fake peekaboo shell script in a temp dir (asserting `--no-remote`
 is always passed, the SHA-256 pin is enforced, and dispatch call counts stay
-at exactly one — the no-retry property).
+at exactly one — the no-retry property). When
+`FAKE_PEEKABOO_FIXTURES=<dir>` is set, the fake replays the **real** captures
+in `tests/fixtures/peekaboo/*.json` (see that directory's README); without
+the directory it falls back to the inline fakes. Both interpreters are
+supported (stdlib only).
 
 ## Known gaps / open questions
 
@@ -263,9 +327,9 @@ at exactly one — the no-retry property).
 - `slice_paste`'s confirm reads the field's AX `value`; fields that do not
   expose their content as an AX value will report `paste_confirmed: false`
   even when the paste visually landed.
-- `slice_paste`/`slice_send` pacing is counted from the dispatch attempt
-  (conservative): a dispatch that times out still consumes the pacing
-  window, because its effect is unknown and must not be retried quickly.
+- Pacing is counted from the dispatch attempt (conservative): a dispatch
+  that times out still consumes the pacing window, because its effect is
+  unknown and must not be retried quickly.
 - Text passed to `paste --text` and `set-value --value` is visible in the
   child process argv to any same-machine observer — same-machine trust
   domain, accepted for this supervised local tool.
@@ -279,20 +343,18 @@ at exactly one — the no-retry property).
   re-check between steps to narrow, not eliminate, the window.
 - A capture staging directory under /tmp can be left behind if the process
   is SIGKILLed between creation and the `finally` cleanup.
-- `keep_path` validation and the subsequent write are a TOCTOU pair
-  (symlink swap between the realpath check and the write is not excluded).
-- General-op pacing (non-slice ACT ops) has no per-window interval yet;
-  pacing covers slice paste/send only. Follow-up candidate.
+- The coordinate-click deny-overlay gate checks whether a deny-listed app
+  has an on-screen window, not its live z-order over the click point; live
+  z-order proof is follow-up work.
 - The challenge scan is AX-text-only on peekaboo 4.2.2 (no `--ocr` flag
   exists on `see`): a pixel-rendered challenge (image CAPTCHA) is NOT
   machine-detected — callers must `slice_look` the window and inspect the
-  capture themselves before any send.
+  returned accessibility/vision text before any send.
 - The peekaboo engine persists its own snapshot directory
   (`~/.peekaboo/snapshots`) per `see` call — an engine property outside this
   layer's cleanup; the deny gating still prevents window content returning
   to callers for denied windows.
-- Pacing is keyed on window ids: window churn (close + reopen) resets the
-  interval for the new id.
 - The advisory lease is spoofable by a same-machine process that writes the
   expected owner string — the trust domain is the single machine, not
-  cross-machine security.
+  cross-machine security. The per-acquisition nonce raises the bar against
+  an accidental second holder, not against a hostile same-machine process.

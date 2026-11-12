@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-11T10:09:57Z",
+  "generated_at": "2026-11-11T14:15:13Z",
   "generator": "tools/mmos_browser_use/generate_staging.py",
   "targets": {
     "experiential-claude": {
@@ -25,7 +25,7 @@
     },
     "fabric-unified-router": {
       "claude_json": "/Users/chriswong/.t3/providers/fabric-unified-router/.claude.json",
-      "sha256": "14dfe4ebc4c2196523d8cacb5b3e3450c2c26ed816825ed6fb3481bce647dec9",
+      "sha256": "922765a3ec49d932514815035f3dd8052479b7191855ce52413500f857d02b55",
       "entries": [
         "mmos-computer-use"
       ]

@@ -1,0 +1,269 @@
+{
+ "data": {
+  "is_dialog": false,
+  "window_title": "BCU slice fixture",
+  "application_name": "Python",
+  "capture_mode": "window",
+  "interactable_count": 4,
+  "screenshot_raw": "<stripped: base64 png, 0 chars>",
+  "ui_elements": [
+   {
+    "role": "button",
+    "bounds": {
+     "height": 28,
+     "width": 65,
+     "x": 127,
+     "y": 236
+    },
+    "ax_role": "AXButton",
+    "label": "Send",
+    "id": "elem_1",
+    "is_actionable": true,
+    "is_enabled": true,
+    "title": "Send",
+    "role_description": "button"
+   },
+   {
+    "role": "button",
+    "bounds": {
+     "height": 16,
+     "width": 16,
+     "x": 128,
+     "y": 128
+    },
+    "ax_role": "AXButton",
+    "label": "close button",
+    "id": "elem_2",
+    "is_actionable": true,
+    "is_enabled": true,
+    "role_description": "close button"
+   },
+   {
+    "role": "button",
+    "bounds": {
+     "height": 16,
+     "width": 16,
+     "x": 174,
+     "y": 128
+    },
+    "ax_role": "AXButton",
+    "label": "full screen button",
+    "help": "this button also has an action to zoom the window",
+    "id": "elem_3",
+    "is_actionable": true,
+    "is_enabled": true,
+    "role_description": "full screen button"
+   },
+   {
+    "role": "button",
+    "bounds": {
+     "height": 16,
+     "width": 16,
+     "x": 151,
+     "y": 128
+    },
+    "ax_role": "AXButton",
+    "label": "minimize button",
+    "id": "elem_6",
+    "is_actionable": true,
+    "is_enabled": true,
+    "role_description": "minimize button"
+   },
+   {
+    "role": "group",
+    "bounds": {
+     "height": 14,
+     "width": 14,
+     "x": 175,
+     "y": 129
+    },
+    "ax_role": "AXGroup",
+    "label": "group",
+    "id": "elem_4",
+    "is_actionable": false,
+    "role_description": "group"
+   },
+   {
+    "role": "group",
+    "bounds": {
+     "height": 14,
+     "width": 14,
+     "x": 175,
+     "y": 129
+    },
+    "ax_role": "AXGroup",
+    "label": "group",
+    "id": "elem_5",
+    "is_actionable": false,
+    "role_description": "group"
+   },
+   {
+    "role": "other",
+    "bounds": {
+     "height": 452,
+     "width": 640,
+     "x": 120,
+     "y": 120
+    },
+    "ax_role": "AXWindow",
+    "label": "BCU slice fixture",
+    "id": "elem_0",
+    "is_actionable": false,
+    "title": "BCU slice fixture",
+    "role_description": "standard window"
+   },
+   {
+    "role": "other",
+    "bounds": {
+     "height": 16,
+     "width": 112,
+     "x": 202,
+     "y": 128
+    },
+    "ax_role": "AXStaticText",
+    "label": "BCU slice fixture",
+    "id": "elem_7",
+    "is_actionable": false,
+    "is_enabled": true,
+    "value": "BCU slice fixture",
+    "role_description": "text"
+   }
+  ],
+  "execution_time": 0.9909300804138184,
+  "observation": {
+   "state_snapshot": {
+    "window_count": 0,
+    "display_count": 0,
+    "running_application_count": 0
+   },
+   "warnings": [],
+   "target": {
+    "source": "window-id",
+    "requested_kind": "window-id",
+    "bounds": [
+     [
+      120,
+      120
+     ],
+     [
+      640,
+      452
+     ]
+    ],
+    "resolved_kind": "window-id",
+    "open_if_needed": false,
+    "hints": [],
+    "window_id": 98889
+   },
+   "spans": [
+    {
+     "duration_ms": 0.007458,
+     "metadata": {},
+     "name": "state.snapshot"
+    },
+    {
+     "duration_ms": 2.387,
+     "metadata": {},
+     "name": "target.resolve"
+    },
+    {
+     "duration_ms": 664.548875,
+     "metadata": {
+      "engine": "CGWindowList"
+     },
+     "name": "capture.window"
+    },
+    {
+     "duration_ms": 98.736333,
+     "metadata": {},
+     "name": "detection.ax"
+    },
+    {
+     "duration_ms": 25.449791,
+     "metadata": {},
+     "name": "output.write"
+    },
+    {
+     "duration_ms": 13.938,
+     "metadata": {},
+     "name": "output.raw.write"
+    },
+    {
+     "duration_ms": 11.501042,
+     "metadata": {},
+     "name": "snapshot.write"
+    },
+    {
+     "duration_ms": 968.017208,
+     "metadata": {},
+     "name": "desktop.observe"
+    }
+   ]
+  },
+  "screenshot_annotated": "<stripped: base64 png, 0 chars>",
+  "ui_map": "/Users/chriswong/.peekaboo/snapshots/1794404855625-2444/snapshot.json",
+  "coordinate_context": {
+   "window": {
+    "window_id": 98889,
+    "index": 0,
+    "title": "BCU slice fixture"
+   },
+   "requested_scale": {
+    "logical1x": {}
+   },
+   "origin": "top_left",
+   "output_scale": 1,
+   "logical_space": "global_display_points",
+   "version": 1,
+   "native_scale": 1,
+   "display": {
+    "index": 0
+   },
+   "logical_bounds": [
+    [
+     120,
+     120
+    ],
+    [
+     640,
+     452
+    ]
+   ],
+   "reference_id": "1794404855625-2444",
+   "delivered_image_size": [
+    640,
+    452
+   ]
+  },
+  "element_count": 8,
+  "snapshot_id": "1794404855625-2444"
+ },
+ "success": true,
+ "target_receipt": {
+  "process_start_identity_decimal": "1794395772541729",
+  "process_start_identity": 1794395772541729,
+  "window_id": 98889,
+  "pid": 49829
+ },
+ "debug_logs": [
+  "[2026-11-11T13:47:35.624Z] DEBUG: Runtime host: local (in-process)",
+  "[2026-11-11T13:47:35.625Z] VERBOSE [Operation]: Starting operation {menubar=false, hasAnalyzePrompt=false, operation=see_command, mode=auto, annotate=false, app=none}",
+  "[2026-11-11T13:47:35.625Z] VERBOSE [Performance]: Starting timer 'see_command'",
+  "[2026-11-11T13:47:35.644Z] VERBOSE [Capture]: Starting capture and detection phase",
+  "[2026-11-11T13:47:35.644Z] VERBOSE [Capture]: Using desktop observation pipeline {target=window-id:98889}",
+  "[2026-11-11T13:47:35.644Z] VERBOSE [Operation]: Starting operation {mode=window, operation=capture_phase}",
+  "[2026-11-11T13:47:35.644Z] VERBOSE [Performance]: Starting timer 'capture_phase'",
+  "[2026-11-11T13:47:36.615Z] VERBOSE [Operation]: Operation completed {mode=window, success=true, operation=capture_phase}",
+  "[2026-11-11T13:47:36.615Z] VERBOSE [Performance]: Timer 'capture_phase' completed {duration_ms=970}",
+  "[2026-11-11T13:47:36.615Z] VERBOSE [Performance]: Desktop observation span {span=state.snapshot, duration_ms=0}",
+  "[2026-11-11T13:47:36.615Z] VERBOSE [Performance]: Desktop observation span {span=target.resolve, duration_ms=2}",
+  "[2026-11-11T13:47:36.615Z] VERBOSE [Performance]: Desktop observation span {span=capture.window, duration_ms=665}",
+  "[2026-11-11T13:47:36.615Z] VERBOSE [Performance]: Desktop observation span {span=detection.ax, duration_ms=99}",
+  "[2026-11-11T13:47:36.615Z] VERBOSE [Performance]: Desktop observation span {span=output.write, duration_ms=25}",
+  "[2026-11-11T13:47:36.615Z] VERBOSE [Performance]: Desktop observation span {span=output.raw.write, duration_ms=14}",
+  "[2026-11-11T13:47:36.615Z] VERBOSE [Performance]: Desktop observation span {span=snapshot.write, duration_ms=12}",
+  "[2026-11-11T13:47:36.615Z] VERBOSE [Performance]: Desktop observation span {span=desktop.observe, duration_ms=968}",
+  "[2026-11-11T13:47:36.616Z] VERBOSE [Capture]: Capture completed successfully {screenshotSize=11560, snapshotId=1794404855625-2444, elementCount=8}"
+ ],
+ "note": "real peekaboo 4.2.2 output, own fixture window 98889 (\"BCU slice fixture\"), 2026-11-11; screenshot base64 stripped"
+}

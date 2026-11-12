@@ -104,8 +104,8 @@ Granted):
                                           observation every ACT dispatches on.
   * see --window-id N --json --path F  -> capture ONE window to a staging file
                                           (staging file is deleted in finally;
-                                          kept only if keep_path is given and
-                                          lies under MMOS_CU_SCRATCH)
+                                          no copy is kept and no image bytes
+                                          ever enter a reply)
   * action AXPress --snapshot S --on REF --input-strategy actionOnly --no-remote
         --json                         -> AX action, executed in BACKGROUND
   * action AXRaise --snapshot S [--on winElem] --foreground --json
@@ -150,13 +150,18 @@ Config:   tools/mmos_computer_use/runtime.json (or runtime.json.dev when
 Requires Python 3.9+ stdlib only.
 """
 
+import contextlib
+import hashlib
 import json
+import math
 import os
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 import urllib.parse
 import urllib.request
 
@@ -166,7 +171,7 @@ RUNTIME_SCHEMA = "mmos.computer_use.runtime/v1"
 DENY_SCHEMA = "mmos.computer_use.deny/v1"
 TOOL_NAME = "mmos_computer_use"
 SERVER_NAME = "mmos-computer-use-mcp"
-SERVER_VERSION = "0.2.0"
+SERVER_VERSION = "0.3.0"
 PROTOCOL_VERSION = "2025-06-18"
 
 # Every operation the single tool exposes.
@@ -184,17 +189,31 @@ WINDOW_OPS = {"inspect", "capture", "press", "set_text", "keys", "scroll",
               "pointer_click", "vision_ask", "slice_click", "slice_paste",
               "slice_send", "slice_look"}
 ACT_OPS = {"press", "set_text", "keys", "scroll", "pointer_click"}
+# Every op whose dispatch can change the page: once one of these has been
+# handed to peekaboo, a failure is EFFECT_UNKNOWN unless the code is in the
+# proven pre-dispatch set below (H1).
+DISPATCH_ACT_OPS = ACT_OPS | {"slice_front", "slice_click", "slice_paste",
+                              "slice_send"}
 # Slice ops that pace per target window (one sequence per interval).
 PACED_SLICE_OPS = {"slice_paste", "slice_send"}
-# slice_paste failures that are PROVABLY pre-dispatch (nothing was sent,
-# clipboard untouched) and may be reported NOT_APPLIED. Any other
-# dispatch-phase failure maps to EFFECT_UNKNOWN (paste truthfulness).
-PASTE_CLEAN_PRE_DISPATCH_CODES = {
+# Failures that are PROVABLY pre-dispatch (nothing was sent, clipboard
+# untouched) for EVERY act op, not just paste, and may be reported
+# NOT_APPLIED. FOREGROUND_REQUIRED is included: peekaboo reports it without
+# performing the act. Any other dispatch-phase failure maps to EFFECT_UNKNOWN.
+ACT_CLEAN_PRE_DISPATCH_CODES = {
     "WINDOW_IDENTITY_UNKNOWN", "DENY_LISTED", "LEASE_NOT_HELD",
-    "LEASE_OWNER_REQUIRED", "PRESENCE_UNKNOWN", "HUMAN_ACTIVE",
+    "LEASE_NOT_OWNER", "LEASE_OWNER_REQUIRED", "LEASE_NONCE_INVALID",
+    "PRESENCE_UNKNOWN", "HUMAN_ACTIVE",
     "HUMAN_ACTIVE_MID_SEQUENCE", "PACING_WAIT", "CHALLENGE_DETECTED",
     "ELEMENT_NOT_FOUND", "ELEMENT_REF_INVALID", "TEXT_REQUIRED",
-    "WINDOW_ID_REQUIRED", "SNAPSHOT_UNAVAILABLE",
+    "WINDOW_ID_REQUIRED", "SNAPSHOT_UNAVAILABLE", "FOREGROUND_REQUIRED",
+    "COORDS_REQUIRED", "WINDOW_BOUNDS_UNKNOWN", "POINT_OUTSIDE_WINDOW",
+    "SLICE_TARGET_REQUIRED", "SLICE_TARGET_AMBIGUOUS",
+    "SLICE_TARGET_NOT_FOUND", "WINDOW_APP_MISMATCH",
+    "DENY_OVERLAY", "DENY_OVERLAY_UNVERIFIED",
+    # Proven pre-dispatch peekaboo refusals (typed from live captures —
+    # see _typed_preflight_refusal): nothing was invoked, so NOT_APPLIED.
+    "ELEMENT_NOT_ACTIONABLE", "SNAPSHOT_STALE",
 }
 
 MAX_TREELINES = 400
@@ -268,12 +287,13 @@ TOOL_DESCRIPTION = (
     "retrying. SLICE operations drive one named window end-to-end "
     "(slice_front raise, slice_click, slice_paste whole-text paste, "
     "slice_send, slice_look) with a 180 s human-idle default, mid-sequence "
-    "presence aborts, per-window pacing between paste/send sequences, and a "
-    "challenge stop on every input-delivering slice act. The keys op accepts "
+    "presence aborts, shared pre-act challenge + pacing gates, and a "
+    "challenge stop on every input-delivering act. The keys op accepts "
     "an allowlist of navigation/editing chords only. vision_ask captures one "
-    "window in memory and asks a vision model (https or loopback endpoint "
-    "only) for an answer plus clickable elements with normalized 0-1000 "
-    "coordinates. Every operation names exactly one window_id or app; "
+    "window in memory and asks a vision model (loopback endpoint only) for a "
+    "TEXT answer plus clickable elements with normalized 0-1000 "
+    "coordinates; no operation ever returns image bytes. Every operation "
+    "names exactly one window_id or app; "
     "credential/password managers, System Settings, terminal emulators and "
     "Script Editor are deny-listed and refuse all operations. The layer "
     "performs ordinary visible automation only: no human imitation, no "
@@ -301,12 +321,12 @@ TOOL_SCHEMA = {
         "amount": {"type": "integer", "minimum": 1, "maximum": 50},
         "x": {"type": "integer"}, "y": {"type": "integer"},
         "ocr": {"type": "boolean", "description": "capture: include OCR text"},
-        "keep_path": {"type": "string",
-                      "description": "capture: save PNG here; must be under "
-                                     "the MMOS_CU_SCRATCH directory"},
         "question": {"type": "string", "description": "vision_ask question"},
         "element_hints": {"type": "array", "items": {"type": "string"}},
         "owner": {"type": "string", "description": "Lease owner id"},
+        "lease_nonce": {"type": "string",
+                        "description": "Random nonce returned by "
+                                       "lease_acquire; REQUIRED on every act"},
         "ttl_seconds": {"type": "integer", "minimum": 5, "maximum": 3600},
         "allow_foreground": {
             "type": "boolean", "default": False,
@@ -327,12 +347,60 @@ class RefuseError(Exception):
 
 
 class OpError(Exception):
-    """Bounded, typed operation failure surfaced as a cause code."""
+    """Bounded, typed operation failure surfaced as a cause code.
+
+    `dispatched` is set by the adapter to True for any failure raised AFTER
+    the peekaboo subprocess was launched for an act/paste dispatch: from
+    that point the event may have reached the app, so only a proven
+    pre-dispatch refusal may be reported NOT_APPLIED (H1).
+    """
 
     def __init__(self, code, detail=""):
         super().__init__(("%s: %s" % (code, detail)) if detail else code)
         self.code = code
         self.detail = detail[:MAX_ERROR_TEXT]
+        self.dispatched = False
+
+
+# ── numeric + environment guards ─────────────────────────────────────────────
+
+def _finite_number(value, code, detail, refuse=False):
+    """float(value) requiring a finite number (M1: NaN/inf never disable a
+    gate or lease bound). Raises RefuseError(code) when `refuse` (startup
+    thresholds), OpError(code) otherwise (operation-time values)."""
+    error_class = RefuseError if refuse else OpError
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise error_class(code, detail)
+    if not math.isfinite(number):
+        raise error_class(code, detail)
+    return number
+
+
+def _test_mode():
+    """True only when MMOS_CU_TEST_MODE=1 (documented test-only escape:
+    thresholds below the defaults and env paths outside the layer are then
+    accepted so unit tests can wire a scratch state dir / fake runtime)."""
+    return os.environ.get("MMOS_CU_TEST_MODE") == "1"
+
+
+def _inside_layer(path):
+    real = os.path.realpath(path)
+    layer = os.path.realpath(HERE)
+    return real == layer or real.startswith(layer.rstrip(os.sep) + os.sep)
+
+
+def _env_path_override(env_name, value):
+    """Validate an MMOS_CU_* path override: it may only point INSIDE the
+    layer's own folder (tools/mmos_computer_use/ or a subdir); anything
+    outside refuses at startup (M2). MMOS_CU_TEST_MODE=1 is the documented
+    test-only escape."""
+    if not _inside_layer(value) and not _test_mode():
+        raise RefuseError(
+            "ENV_PATH_OUTSIDE_LAYER",
+            "%s must point inside %s" % (env_name, os.path.realpath(HERE)))
+    return value
 
 
 # ── runtime pin ──────────────────────────────────────────────────────────────
@@ -380,7 +448,7 @@ def load_runtime(path):
         if value is None:
             return None
         if isinstance(value, bool) or not isinstance(value, (int, float)) \
-                or value < minimum:
+                or not math.isfinite(value) or value < minimum:
             raise RefuseError("RUNTIME_%s" % key.upper(), repr(value))
         return value
 
@@ -417,7 +485,7 @@ def load_runtime(path):
 def resolve_runtime_path():
     override = os.environ.get("MMOS_CU_RUNTIME")
     if override:
-        return override
+        return _env_path_override("MMOS_CU_RUNTIME", override)
     primary = os.path.join(HERE, "runtime.json")
     if os.path.isfile(primary):
         return primary
@@ -432,17 +500,29 @@ DEFAULT_DENY = {
         "Keychain Access", "1Password", "Bitwarden", "Dashlane",
         "Proton Pass", "Keeper", "Enpass", "Strongbox", "System Settings",
         "Passwords",
+        # M6: further password managers and the system credential prompts.
+        "KeePassXC", "LastPass", "SecurityAgent", "System Preferences",
         # Terminal emulators and the script editor: a shell or script window
         # is an arbitrary-command surface, not a document window.
         "Terminal", "iTerm", "iTerm2", "Script Editor",
     ],
     "bundle_ids": [
         "com.apple.KeychainAccess", "com.apple.Passwords",
-        "com.apple.systempreferences", "com.1password.1password",
+        "com.apple.systempreferences", "com.apple.SystemPreferences",
+        "com.1password.1password", "com.agilebits.onepassword7",
         "com.bitwarden.desktop",
+        "org.keepassxc.keepassxc", "com.lastpass.LastPass",
+        "com.apple.SecurityAgent", "me.proton.pass",
+        "com.km.keeperdesktop", "in.sinew.enpass",
+        "com.strongbox.lukilabs", "com.markmcguill.strongbox",
+        "com.dashlane.dashlane",
         "com.apple.Terminal", "com.apple.ScriptEditor.id",
     ],
-    "title_regexes": [],
+    # Case-insensitive window-title patterns (M6): a credential entry field
+    # in ANY app is refused, not only in a known password-manager process.
+    "title_regexes": [
+        "password", "passkey", "saved passwords", "settings/passwords",
+    ],
     "extra_app_names": [],
     "extra_bundle_ids": [],
     "extra_title_regexes": [],
@@ -476,7 +556,10 @@ class DenyList:
                 if not isinstance(value, list) or \
                         not all(isinstance(item, str) for item in value):
                     raise RefuseError("DENY_LIST_FIELD", key)
-                entries[key] = value
+                # M6 merge semantics: the file ADDS to the built-in defaults
+                # (union), it never replaces them. An empty file means the
+                # defaults only.
+                entries[key] = entries[key] + value
         merged_names = entries["app_names"] + entries["extra_app_names"]
         merged_bundles = entries["bundle_ids"] + entries["extra_bundle_ids"]
         merged_titles = entries["title_regexes"] + entries["extra_title_regexes"]
@@ -486,17 +569,18 @@ class DenyList:
                 patterns.append(re.compile(pattern, re.IGNORECASE))
             except re.error:
                 raise RefuseError("DENY_LIST_REGEX", pattern)
-        return cls({n.lower() for n in merged_names},
-                   {b.lower() for b in merged_bundles}, patterns)
+        return cls({_canonical(n) for n in merged_names},
+                   {_canonical(b) for b in merged_bundles}, patterns)
 
-    def matches(self, app_name, bundle_id, window_title):
-        if app_name and app_name.lower() in self.app_names:
+    def matches(self, app_name, bundle_id, window_title=None):
+        if app_name and _canonical(app_name) in self.app_names:
             return "app_name"
-        if bundle_id and bundle_id.lower() in self.bundle_ids:
+        if bundle_id and _canonical(bundle_id) in self.bundle_ids:
             return "bundle_id"
         if window_title:
+            title = unicodedata.normalize("NFC", window_title)
             for pattern in self.title_regexes:
-                if pattern.search(window_title):
+                if pattern.search(title):
                     return "title_regex"
         return None
 
@@ -527,20 +611,31 @@ class Presence:
         runtime_value = runtime.get("presence_min_idle_seconds") \
             if isinstance(runtime, dict) else None
         if min_idle_seconds is not None:
-            self.min_idle = float(min_idle_seconds)
+            self.min_idle = _finite_number(min_idle_seconds,
+                                           "PRESENCE_MIN_IDLE_INVALID",
+                                           repr(min_idle_seconds),
+                                           refuse=True)
         elif raw:
-            try:
-                self.min_idle = float(raw)
-            except ValueError:
-                self.min_idle = DEFAULT_MIN_IDLE_SECONDS
-            else:
-                if self.min_idle < MIN_IDLE_FLOOR_SECONDS:
-                    raise RefuseError(
-                        "PRESENCE_MIN_IDLE_FLOOR",
-                        "MMOS_CU_PRESENCE_MIN_IDLE %r is below the %.0fs "
-                        "floor" % (raw, MIN_IDLE_FLOOR_SECONDS))
+            self.min_idle = _finite_number(
+                raw, "PRESENCE_MIN_IDLE_INVALID",
+                "MMOS_CU_PRESENCE_MIN_IDLE %r is not a finite number" % raw,
+                refuse=True)
+            if self.min_idle < DEFAULT_MIN_IDLE_SECONDS and not _test_mode():
+                # M2: the env override may only make the gate STRICTER than
+                # the default; a lower value refuses at startup.
+                raise RefuseError(
+                    "PRESENCE_MIN_IDLE_STRICTER_ONLY",
+                    "MMOS_CU_PRESENCE_MIN_IDLE %r is below the %.0fs default"
+                    % (raw, DEFAULT_MIN_IDLE_SECONDS))
+            if self.min_idle < MIN_IDLE_FLOOR_SECONDS:
+                raise RefuseError(
+                    "PRESENCE_MIN_IDLE_FLOOR",
+                    "MMOS_CU_PRESENCE_MIN_IDLE %r is below the %.0fs "
+                    "floor" % (raw, MIN_IDLE_FLOOR_SECONDS))
         elif runtime_value is not None:
-            self.min_idle = float(runtime_value)
+            self.min_idle = _finite_number(
+                runtime_value, "PRESENCE_MIN_IDLE_INVALID",
+                repr(runtime_value), refuse=True)
             if self.min_idle < MIN_IDLE_FLOOR_SECONDS:
                 raise RefuseError(
                     "PRESENCE_MIN_IDLE_FLOOR",
@@ -591,17 +686,86 @@ def _atomic_write(path, payload):
         raise
 
 
+def _owner_digest(owner):
+    """Unrecoverable digest of a lease owner id (status output only)."""
+    return hashlib.sha256((owner or "").encode("utf-8")).hexdigest()[:12]
+
+
+# A lease.lock older than this (or whose recorded pid is gone) is treated as
+# abandoned by a crashed holder and may be recovered (M4).
+STALE_LOCK_SECONDS = 60.0
+
+
+def _lock_holder_alive(info):
+    """True when the pid recorded in a lockfile still exists on this host."""
+    pid = info.get("pid") if isinstance(info, dict) else None
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists, owned by someone else
+    except OSError:
+        return True
+    return True
+
+
+def _lease_clocks(lease):
+    """(mono_at, mono_expires_at) when usable on this boot, else (None, None).
+
+    Persisted lease timestamps are wall-clock for cross-process/restart
+    readability; the monotonic pair is preferred for the expiry gate so a
+    wall-clock jump cannot extend or shorten a hold. A sample from a previous
+    boot (mono in the future) is ignored.
+    """
+    mono_at = lease.get("mono_at")
+    mono_exp = lease.get("mono_expires_at")
+    if isinstance(mono_at, (int, float)) and isinstance(mono_exp, (int, float)) \
+            and math.isfinite(mono_at) and math.isfinite(mono_exp):
+        if 0.0 <= mono_at <= time.monotonic() + 1.0:
+            return mono_at, mono_exp
+    return None, None
+
+
+def _lease_active(lease, now_wall, now_mono):
+    """True while the persisted lease is unexpired (monotonic preferred)."""
+    _, mono_exp = _lease_clocks(lease)
+    if mono_exp is not None:
+        return mono_exp > now_mono
+    expires = lease.get("expires_at")
+    if not isinstance(expires, (int, float)):
+        return False
+    return expires > now_wall
+
+
+def _lease_remaining(lease, now_wall, now_mono):
+    mono_at, mono_exp = _lease_clocks(lease)
+    if mono_exp is not None:
+        return max(0.0, mono_exp - now_mono)
+    expires = lease.get("expires_at")
+    if isinstance(expires, (int, float)):
+        return max(0.0, expires - now_wall)
+    return None
+
+
 class Lease:
     """Single-holder advisory lease persisted as JSON next to a lock file.
 
     Acquire is atomic: an O_CREAT|O_EXCL lockfile serializes contenders, then
     the holder writes lease.json. A lease whose expires_at is in the past is
     treated as abandoned by a crashed holder and may be taken over. Every ACT
-    re-checks ownership and renews the expiry (heartbeat).
+    re-checks ownership AND the per-acquisition nonce, then renews the expiry
+    (heartbeat): the owner string is unauthenticated (same-machine trust), so
+    every act must carry the nonce handed out by lease_acquire
+    (LEASE_NONCE_INVALID otherwise).
     """
 
     def __init__(self, state_dir=None):
         override = os.environ.get("MMOS_CU_STATE_DIR")
+        if override:
+            override = _env_path_override("MMOS_CU_STATE_DIR", override)
         self.state_dir = state_dir or override or os.path.join(HERE, "state")
         self.lease_path = os.path.join(self.state_dir, "lease.json")
         self.lock_path = os.path.join(self.state_dir, "lease.lock")
@@ -616,137 +780,298 @@ class Lease:
             return None
         return data
 
-    def _write_locked(self, payload):
-        lock_fd = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-                          0o600)
+    def _stale_lock(self):
+        """True when lease.lock is abandoned (dead pid or old age)."""
         try:
-            _atomic_write(self.lease_path, payload)
+            with open(self.lock_path, "r", encoding="utf-8") as handle:
+                info = json.load(handle)
+        except (OSError, ValueError):
+            info = None
+        if isinstance(info, dict):
+            created = info.get("created_at")
+            if isinstance(created, (int, float)) and \
+                    time.time() - created > STALE_LOCK_SECONDS:
+                return True
+            return not _lock_holder_alive(info)
+        # Unparseable lock content: recover only by age.
+        try:
+            age = time.time() - os.path.getmtime(self.lock_path)
+        except OSError:
+            return False
+        return age > STALE_LOCK_SECONDS
+
+    def _acquire_lock(self):
+        """Take lease.lock with O_CREAT|O_EXCL.
+
+        A pre-existing lock is LEASE_CONTENDED (typed, never FileExistsError/
+        INTERNAL). If it is provably stale (recorded pid gone, or older than
+        STALE_LOCK_SECONDS) it is recovered once and the exclusivity retried.
+        """
+        os.makedirs(self.state_dir, exist_ok=True)
+        for attempt in (0, 1):
+            try:
+                fd = os.open(self.lock_path,
+                             os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            except FileExistsError:
+                if attempt == 0 and self._stale_lock():
+                    try:
+                        os.unlink(self.lock_path)
+                    except OSError:
+                        pass
+                    continue
+                raise OpError("LEASE_CONTENDED",
+                              "lease.lock is held by another acquire")
+            payload = json.dumps({"pid": os.getpid(),
+                                  "created_at": time.time()})
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+            return
+        raise OpError("LEASE_CONTENDED",
+                      "lease.lock contention; single-shot acquire")
+
+    @contextlib.contextmanager
+    def _critical(self):
+        """The O_EXCL critical section: read+check+write all happen inside."""
+        self._acquire_lock()
+        try:
+            yield
         finally:
             try:
                 os.unlink(self.lock_path)
             except OSError:
                 pass
 
+    def _write_locked(self, payload):
+        """Write lease.json; caller MUST already hold lease.lock."""
+        _atomic_write(self.lease_path, payload)
+
+    def _verify_write(self, owner, nonce):
+        """Re-read after writing: a non-cooperating writer that landed a
+        different hold is detected here rather than silently accepted (M3)."""
+        check = self._read()
+        if not check or check.get("owner") != owner or \
+                check.get("nonce") != nonce:
+            raise OpError("LEASE_CONTENDED",
+                          "lease.json changed under the critical section; "
+                          "refused")
+        return check
+
     def acquire(self, owner, ttl_seconds=DEFAULT_LEASE_TTL):
         if not owner or not isinstance(owner, str):
             raise OpError("LEASE_OWNER_REQUIRED", "owner id missing")
-        try:
-            ttl = float(ttl_seconds)
-        except (TypeError, ValueError):
-            raise OpError("LEASE_TTL_INVALID", repr(ttl_seconds))
+        ttl = _finite_number(ttl_seconds, "LEASE_TTL_INVALID",
+                             repr(ttl_seconds))
         if ttl < 5 or ttl > 3600:
             raise OpError("LEASE_TTL_INVALID", repr(ttl_seconds))
         os.makedirs(self.state_dir, exist_ok=True)
         now = time.time()
-        existing = self._read()
-        if existing:
-            expires = existing.get("expires_at")
-            if isinstance(expires, (int, float)) and expires > now:
+        now_mono = time.monotonic()
+        nonce = secrets.token_hex(16)
+        with self._critical():
+            existing = self._read()
+            if existing and _lease_active(existing, now, now_mono):
                 if existing.get("owner") == owner:
-                    # Already held by this owner: refresh the heartbeat.
+                    # Already held by this owner: refresh the heartbeat
+                    # and return the SAME nonce (the live acquisition's).
+                    nonce = existing.get("nonce") or nonce
                     self._write_locked({
-                        "owner": owner, "acquired_at":
-                            existing.get("acquired_at", now),
-                        "expires_at": now + ttl, "heartbeat_at": now})
-                    return {"held": True, "owner": owner, "renewed": True,
+                        "owner": owner,
+                        "nonce": nonce,
+                        "acquired_at": existing.get("acquired_at", now),
+                        "expires_at": now + ttl,
+                        "heartbeat_at": now,
+                        "mono_at": now_mono,
+                        "mono_expires_at": now_mono + ttl})
+                    self._verify_write(owner, nonce)
+                    return {"held": True, "owner": owner,
+                            "renewed": True, "nonce": nonce,
                             "expires_at": now + ttl}
-                raise OpError("LEASE_HELD", "owner=%s expires_in=%.0fs" % (
-                    (existing.get("owner") or "")[:8] + "…", expires - now))
-            # Expired lease: prior holder crashed or let it lapse; take over.
-        payload = {"owner": owner, "acquired_at": now,
-                   "expires_at": now + ttl, "heartbeat_at": now}
-        try:
+                remaining = _lease_remaining(existing, now, now_mono) or 0.0
+                raise OpError("LEASE_HELD",
+                              "owner=%s expires_in=%.0fs" % (
+                                  _owner_digest(existing.get("owner")),
+                                  remaining))
+            # Expired lease: prior holder crashed or let it lapse.
+            payload = {"owner": owner, "nonce": nonce, "acquired_at": now,
+                       "expires_at": now + ttl, "heartbeat_at": now,
+                       "mono_at": now_mono,
+                       "mono_expires_at": now_mono + ttl}
             self._write_locked(payload)
-        except FileExistsError:
-            raise OpError("LEASE_CONTENDED",
-                          "another acquire holds the lockfile; single-shot")
+            self._verify_write(owner, nonce)
         return {"held": True, "owner": owner, "took_over": bool(existing),
-                "expires_at": now + ttl}
+                "nonce": nonce, "expires_at": now + ttl}
 
     def release(self, owner):
-        lease = self._read()
-        if not lease:
-            return {"released": True, "note": "no lease"}
-        if lease.get("owner") != owner:
-            raise OpError("LEASE_NOT_OWNER",
-                          "held by %s" % ((lease.get("owner") or "")[:8] + "…"))
-        try:
-            os.unlink(self.lease_path)
-        except OSError:
-            pass
-        return {"released": True}
+        """Release takes the SAME critical section as acquire/renew."""
+        with self._critical():
+            lease = self._read()
+            if not lease:
+                return {"released": True, "note": "no lease"}
+            if lease.get("owner") != owner:
+                raise OpError("LEASE_NOT_OWNER",
+                              "held by %s"
+                              % _owner_digest(lease.get("owner")))
+            try:
+                os.unlink(self.lease_path)
+            except OSError:
+                pass
+            return {"released": True}
 
     def status(self):
         lease = self._read()
         if not lease:
             return {"held": False}
-        expires = lease.get("expires_at")
-        remaining = None
-        if isinstance(expires, (int, float)):
-            remaining = round(max(0.0, expires - time.time()), 3)
+        remaining = _lease_remaining(lease, time.time(), time.monotonic())
+        if remaining is not None:
+            remaining = round(remaining, 3)
         owner = lease.get("owner")
         out = {"held": bool(remaining), "expires_in_seconds": remaining}
         if isinstance(owner, str) and owner:
-            # Owner id is redacted in status output (first 8 chars + ellipsis);
+            # Owner id is redacted to an unrecoverable sha256 digest (M5);
             # acquire/release still require the EXACT owner string.
-            out["owner"] = owner[:8] + "…"
+            out["owner"] = _owner_digest(owner)
             out["owner_redacted"] = True
         return out
 
-    def require_and_renew(self, owner, ttl_seconds=DEFAULT_LEASE_TTL):
-        """Gate for ACT ops: verifies ownership, renews expiry in place."""
-        lease = self._read()
-        now = time.time()
-        if not lease or lease.get("owner") != owner:
-            raise OpError("LEASE_NOT_HELD",
-                          "acquire the lease with lease_acquire first")
-        expires = lease.get("expires_at")
-        if not isinstance(expires, (int, float)) or expires <= now:
-            raise OpError("LEASE_NOT_HELD", "lease expired; re-acquire")
-        self._write_locked({
-            "owner": owner,
-            "acquired_at": lease.get("acquired_at", now),
-            "expires_at": now + float(ttl_seconds), "heartbeat_at": now})
+    def require_and_renew(self, owner, ttl_seconds=None, nonce=None):
+        """Gate for ACT ops: verifies ownership AND the acquisition nonce,
+        then renews the expiry in place.
+
+        The TTL is preserved from the acquisition unless an explicit
+        ttl_seconds is given (renewal never silently resets the hold to the
+        default).
+
+        M3: read + ownership/nonce checks + write happen INSIDE the O_EXCL
+        critical section, and the write is verified by re-read. A takeover
+        interleaved between the read and the write is detected and refused
+        (LEASE_CONTENDED) instead of being silently overwritten."""
+        with self._critical():
+            lease = self._read()
+            now = time.time()
+            now_mono = time.monotonic()
+            if not lease or lease.get("owner") != owner:
+                raise OpError("LEASE_NOT_HELD",
+                              "acquire the lease with lease_acquire first")
+            if not _lease_active(lease, now, now_mono):
+                raise OpError("LEASE_NOT_HELD", "lease expired; re-acquire")
+            expires = lease.get("expires_at")
+            if not nonce or not isinstance(nonce, str) \
+                    or lease.get("nonce") != nonce:
+                raise OpError(
+                    "LEASE_NONCE_INVALID",
+                    "act must carry the nonce returned by lease_acquire")
+            acquired_at = lease.get("acquired_at", now)
+            if ttl_seconds is not None:
+                ttl = _finite_number(ttl_seconds, "LEASE_TTL_INVALID",
+                                     repr(ttl_seconds))
+                if ttl < 5 or ttl > 3600:
+                    raise OpError("LEASE_TTL_INVALID", repr(ttl_seconds))
+            elif _lease_clocks(lease)[1] is not None:
+                # Preserve the acquired TTL (never reset to the default),
+                # measured on the monotonic pair when available.
+                mono_at, mono_exp = _lease_clocks(lease)
+                ttl = max(5.0, mono_exp - mono_at)
+            elif isinstance(expires, (int, float)) and \
+                    isinstance(acquired_at, (int, float)):
+                ttl = max(5.0, expires - acquired_at)
+            else:
+                ttl = DEFAULT_LEASE_TTL
+            self._write_locked({
+                "owner": owner, "nonce": nonce, "acquired_at": acquired_at,
+                "expires_at": now + ttl, "heartbeat_at": now,
+                "mono_at": now_mono, "mono_expires_at": now_mono + ttl})
+            self._verify_write(owner, nonce)
         return True
 
 
 # ── pacing ───────────────────────────────────────────────────────────────────
 
-class Pacer:
-    """Per-target-window pacing between slice_paste / slice_send sequences.
+def _monotonic_elapsed(entry, now_wall, now_mono):
+    """Seconds elapsed since a persisted {"at", "mono"} pacing entry.
 
-    The completion time of the last paste/send sequence on a window id is
-    persisted in pacing.json under the state dir; a second paste/send on the
-    SAME window inside the configured interval is refused with PACING_WAIT
-    (seconds remaining). The interval defaults to 180 s; priority:
-    explicit constructor argument > MMOS_CU_PACING_SECONDS env >
-    runtime.json pacing_seconds > DEFAULT_PACING_SECONDS. One worker at a
-    time is already guaranteed by the lease; pacing additionally spaces
-    repeated sequences on the same window.
+    Prefers the monotonic sample (a wall-clock jump must not shorten or
+    lengthen a gate). The monotonic value is only trusted when it is
+    plausible for THIS boot (0 < mono <= now); after a reboot the persisted
+    sample can be larger than the fresh counter, and the wall clock is the
+    safe fallback.
+    """
+    mono = entry.get("mono")
+    if isinstance(mono, (int, float)) and math.isfinite(mono) and \
+            0.0 < mono <= now_mono + 1.0:
+        return now_mono - mono
+    at = entry.get("at")
+    if isinstance(at, (int, float)) and math.isfinite(at):
+        return now_wall - at
+    return None
+
+
+def _canonical(text):
+    """NFC-normalize, trim and casefold a string for deny/pacing matching."""
+    if not isinstance(text, str):
+        return ""
+    return unicodedata.normalize("NFC", text).strip().casefold()
+
+
+def pacing_key(app_name, window_title, window_id=None):
+    """M8 pacing identity: owning app identity + normalized window title.
+
+    The window id is NOT part of the key (it is only recorded alongside), so
+    closing and reopening the same app window does not reset the interval.
+    Falls back to the window id only when no identity at all is resolvable.
+    """
+    app = _canonical(app_name)
+    title = _canonical(window_title)
+    if app or title:
+        return "app:%s|title:%s" % (app, title)
+    return "window:%s" % window_id
+
+
+class Pacer:
+    """Pacing between acts that can change a page or send, keyed by the M8
+    identity (owning app + normalized window title), never the window id.
+
+    The last dispatch time for a key is persisted in pacing.json under the
+    state dir; a second act on the SAME key inside the configured interval
+    is refused with PACING_WAIT (seconds remaining). The interval defaults
+    to 180 s; priority: explicit constructor argument >
+    MMOS_CU_PACING_SECONDS env > runtime.json pacing_seconds >
+    DEFAULT_PACING_SECONDS. One worker at a time is already guaranteed by
+    the lease; pacing additionally spaces repeated acts on the same target.
     """
 
     def __init__(self, state_dir=None, seconds=None, runtime=None):
         override = os.environ.get("MMOS_CU_STATE_DIR")
+        if override:
+            override = _env_path_override("MMOS_CU_STATE_DIR", override)
         self.state_dir = state_dir or override or os.path.join(HERE, "state")
         self.path = os.path.join(self.state_dir, "pacing.json")
         raw = os.environ.get("MMOS_CU_PACING_SECONDS")
         runtime_value = runtime.get("pacing_seconds") \
             if isinstance(runtime, dict) else None
         if seconds is not None:
-            self.seconds = float(seconds)
+            self.seconds = _finite_number(seconds, "PACING_SECONDS_INVALID",
+                                          repr(seconds), refuse=True)
         elif raw:
-            try:
-                self.seconds = float(raw)
-            except ValueError:
-                self.seconds = DEFAULT_PACING_SECONDS
-            else:
-                if self.seconds < PACING_FLOOR_SECONDS:
-                    raise RefuseError(
-                        "PACING_SECONDS_FLOOR",
-                        "MMOS_CU_PACING_SECONDS %r is below the %.0fs floor"
-                        % (raw, PACING_FLOOR_SECONDS))
+            self.seconds = _finite_number(
+                raw, "PACING_SECONDS_INVALID",
+                "MMOS_CU_PACING_SECONDS %r is not a finite number" % raw,
+                refuse=True)
+            if self.seconds < DEFAULT_PACING_SECONDS and not _test_mode():
+                # M2: the env override may only make the gate STRICTER than
+                # the default; a lower value refuses at startup.
+                raise RefuseError(
+                    "PACING_SECONDS_STRICTER_ONLY",
+                    "MMOS_CU_PACING_SECONDS %r is below the %.0fs default"
+                    % (raw, DEFAULT_PACING_SECONDS))
+            if self.seconds < PACING_FLOOR_SECONDS:
+                raise RefuseError(
+                    "PACING_SECONDS_FLOOR",
+                    "MMOS_CU_PACING_SECONDS %r is below the %.0fs floor"
+                    % (raw, PACING_FLOOR_SECONDS))
         elif runtime_value is not None:
-            self.seconds = float(runtime_value)
+            self.seconds = _finite_number(
+                runtime_value, "PACING_SECONDS_INVALID",
+                repr(runtime_value), refuse=True)
             if self.seconds < PACING_FLOOR_SECONDS:
                 raise RefuseError(
                     "PACING_SECONDS_FLOOR",
@@ -763,22 +1088,37 @@ class Pacer:
             return {}
         return data if isinstance(data, dict) else {}
 
-    def check(self, window_id):
-        """Refuse with PACING_WAIT when the last paste/send sequence on this
-        window is still inside the interval. No write, no dispatch."""
-        last = self._read().get(str(window_id))
-        if isinstance(last, (int, float)):
-            remaining = self.seconds - (time.time() - last)
+    def check(self, key):
+        """Refuse with PACING_WAIT when the last act on this key is still
+        inside the interval. No write, no dispatch."""
+        last = self._read().get(str(key))
+        now_wall = time.time()
+        now_mono = time.monotonic()
+        if isinstance(last, dict):
+            elapsed = _monotonic_elapsed(last, now_wall, now_mono)
+        elif isinstance(last, (int, float)):
+            # Legacy entry (bare wall-clock timestamp).
+            elapsed = now_wall - last
+        else:
+            elapsed = None
+        if elapsed is not None:
+            remaining = self.seconds - elapsed
             if remaining > 0:
                 raise OpError("PACING_WAIT",
-                              "%.0fs remaining until the next slice paste/send "
-                              "sequence may target window %s"
-                              % (remaining, window_id))
+                              "%.0fs remaining until the next act may target "
+                              "%s" % (remaining, key))
 
-    def record(self, window_id):
-        """Record the dispatch attempt time for this window (atomic write)."""
+    def record(self, key, window_id=None):
+        """Record the dispatch attempt time for this key (atomic write).
+
+        Raises OSError from the write; callers AFTER a dispatch must swallow
+        it and report state_write:"failed" on the act receipt (M9).
+        """
         data = self._read()
-        data[str(window_id)] = time.time()
+        entry = {"at": time.time(), "mono": time.monotonic()}
+        if window_id is not None:
+            entry["window_id"] = window_id
+        data[str(key)] = entry
         os.makedirs(self.state_dir, exist_ok=True)
         _atomic_write(self.path, data)
 
@@ -795,6 +1135,21 @@ def _bounded(text, limit=MAX_ERROR_TEXT):
     return (text or "").strip().replace("\n", " ")[:limit]
 
 
+def _stdout_error_message(data):
+    """The real peekaboo error shape: ``error: {code, message}`` (an object
+    on stdout) — distinct from the legacy ``errors: [...]`` list. Returns
+    the message string for CLASSIFICATION only (never quoted verbatim into
+    a receipt, which may carry window content)."""
+    if not isinstance(data, dict):
+        return ""
+    error = data.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+        if isinstance(message, str):
+            return message
+    return ""
+
+
 def _is_foreground_required(text):
     """True when a peekaboo failure says the element/action needs the app to
     be frontmost. Detection is intentionally narrow: the message must name
@@ -803,8 +1158,67 @@ def _is_foreground_required(text):
     low = (text or "").lower()
     if "foreground" not in low:
         return False
+    # "require" subsumes require/requires/required — the real capture's
+    # message is "Raw key presses require explicit foreground consent ..."
+    # (press_foreground_required_error.json).
     return any(marker in low for marker in (
-        "required", "requires", "refused", "refusal", "only", "needs"))
+        "require", "refused", "refusal", "only", "needs"))
+
+
+def _refusal_proven_no_mutation(data):
+    """True when peekaboo's own structured output proves NOTHING was
+    dispatched for this refusal: ``error.mutation_dispatched`` (or
+    ``outcome.mutation_dispatched``) is literally false, or the top-level
+    ``effect`` is "refused" (peekaboo's explicit pre-dispatch refusal
+    marker — real capture: click_snapshot_stale_refused.json). Such a
+    receipt may be reported NOT_APPLIED; an unparseable/absent payload
+    stays conservative (may have dispatched → EFFECT_UNKNOWN, H1)."""
+    if not isinstance(data, dict):
+        return False
+    for source in (data.get("error"), data.get("outcome"), data):
+        if isinstance(source, dict) and \
+                source.get("mutation_dispatched") is False:
+            return True
+    if data.get("effect") == "refused":
+        return True
+    return False
+
+
+def _typed_preflight_refusal(data):
+    """Typed clean refusal for structured errors peekaboo raised BEFORE any
+    dispatch, proven by live captures (tests/fixtures/peekaboo/):
+
+    - INTERNAL_SWIFT_ERROR "No accessibility element is available for
+      action invocation" (click_actiononly_no_ax_element.json): the target
+      element is AX-VISIBLE but not AX-ACTIONABLE (Tk buttons); peekaboo
+      found nothing to invoke → nothing dispatched → ELEMENT_NOT_ACTIONABLE.
+    - SNAPSHOT_STALE with effect "refused"
+      (click_snapshot_stale_refused.json): the click never ran.
+
+    Returns an OpError (dispatched=False) or None when the payload is not
+    one of these proven shapes."""
+    if not isinstance(data, dict):
+        return None
+    error = data.get("error")
+    if not isinstance(error, dict):
+        return None
+    code = error.get("code")
+    message = str(error.get("message", "")).lower()
+    if code == "INTERNAL_SWIFT_ERROR" and \
+            "no accessibility element is available" in message:
+        refused = OpError(
+            "ELEMENT_NOT_ACTIONABLE",
+            "target element is AX-visible but not AX-actionable; nothing "
+            "was invoked")
+        refused.dispatched = False
+        return refused
+    if code == "SNAPSHOT_STALE" and data.get("effect") == "refused":
+        refused = OpError("SNAPSHOT_STALE",
+                          "snapshot invalidated by an earlier command; "
+                          "nothing was dispatched")
+        refused.dispatched = False
+        return refused
+    return None
 
 
 def _deep_find(obj, keys):
@@ -866,8 +1280,10 @@ class PeekabooAdapter:
                                     timeout=timeout, check=False,
                                     env=_child_env())
         except subprocess.TimeoutExpired:
-            raise OpError("DISPATCH_TIMEOUT",
-                          "peekaboo %s exceeded %.0fs" % (args[0], timeout))
+            error = OpError("DISPATCH_TIMEOUT",
+                            "peekaboo %s exceeded %.0fs" % (args[0], timeout))
+            error.dispatched = True  # the subprocess ran; effect unknown (H1)
+            raise error
         except OSError as error:
             raise OpError("DISPATCH_UNAVAILABLE", str(error))
         stdout = result.stdout or ""
@@ -877,20 +1293,49 @@ class PeekabooAdapter:
             data = None
         if result.returncode != 0 or not isinstance(data, dict):
             # Detail carries stderr only; stdout may embed window content and
-            # must never flow into a receipt or error message.
-            if _is_foreground_required(result.stderr):
-                raise OpError("FOREGROUND_REQUIRED", _bounded(result.stderr))
-            raise OpError("CLI_ERROR", "rc=%s %s" % (
+            # must never flow into a receipt or error message. The real CLI
+            # reports its refusal reason as a structured error object on
+            # stdout (real capture: press_foreground_required_error.json),
+            # so classification (never quoted verbatim) reads it too.
+            message = _stdout_error_message(data)
+            if _is_foreground_required(result.stderr) or \
+                    _is_foreground_required(message):
+                error = OpError("FOREGROUND_REQUIRED",
+                                _bounded(result.stderr) or _bounded(message))
+                # A consent refusal dispatches nothing by definition (real
+                # capture: mutation_dispatched:false).
+                error.dispatched = False
+                raise error
+            preflight = _typed_preflight_refusal(data)
+            if preflight is not None:
+                raise preflight
+            error = OpError("CLI_ERROR", "rc=%s %s" % (
                 result.returncode, _bounded(result.stderr)))
+            error.dispatched = not _refusal_proven_no_mutation(data)
+            raise error
         if data.get("success") is False:
             errors = data.get("errors")
             message = ""
             if isinstance(errors, list) and errors:
                 first = errors[0]
                 message = first if isinstance(first, str) else json.dumps(first)
+            if not message:
+                message = _stdout_error_message(data)
+            # stdout may embed window content; the receipt quotes stderr
+            # first and falls back to the structured error message only when
+            # stderr says nothing.
+            detail = _bounded(result.stderr) or _bounded(message) or \
+                "peekaboo failed"
             if _is_foreground_required(message):
-                raise OpError("FOREGROUND_REQUIRED", _bounded(message))
-            raise OpError("CLI_ERROR", _bounded(message or "peekaboo failed"))
+                error = OpError("FOREGROUND_REQUIRED", detail)
+                error.dispatched = False
+                raise error
+            preflight = _typed_preflight_refusal(data)
+            if preflight is not None:
+                raise preflight
+            error = OpError("CLI_ERROR", detail)
+            error.dispatched = not _refusal_proven_no_mutation(data)
+            raise error
         return data.get("data", data)
 
     # ── SEE ──
@@ -913,27 +1358,99 @@ class PeekabooAdapter:
             })
         return out
 
-    def list_windows(self, app):
-        data = self.run_json(["window", "list", "--app", app, "--json"],
-                             SEE_TIMEOUT_S)
+    def _map_windows(self, data):
         windows = data.get("windows") if isinstance(data, dict) else None
         if not isinstance(windows, list):
             raise OpError("CLI_OUTPUT_INVALID", "window list: no windows array")
+        info = data.get("target_application_info")
+        if not isinstance(info, dict):
+            info = {}
         out = []
         for window in windows:
             if not isinstance(window, dict):
                 continue
             out.append({
                 "window_id": window.get("window_id", window.get("windowID")),
-                "title": window.get("title"),
+                "title": window.get("title", window.get("window_title")),
                 "owner_pid": window.get("owner_pid", window.get("pid")),
-                # Resolved app identity when the CLI reports it per window;
+                # H6: real peekaboo reports is_frontmost per window; true
+                # means the window is the topmost on screen (nothing can
+                # cover it). Kept verbatim; absent stays absent (fail-closed
+                # consumers treat missing as not-frontmost).
+                "is_frontmost": window.get("is_frontmost"),
+                "window_index": window.get("window_index"),
+                # Resolved app identity when the CLI reports it per window
+                # (real peekaboo reports it once, in target_application_info);
                 # the windows op deny-checks and filters on it (FIX 8).
-                "app": window.get("app", window.get("app_name")),
+                "app": window.get("app", window.get("app_name",
+                                                    info.get("app_name"))),
                 "bundle_id": window.get("bundle_id",
-                                        window.get("app_bundle_id")),
+                                        window.get("app_bundle_id",
+                                                   info.get("bundle_id"))),
             })
         return out
+
+    def list_windows(self, app):
+        data = self.run_json(["window", "list", "--app=%s" % app, "--json"],
+                             SEE_TIMEOUT_S)
+        return self._map_windows(data)
+
+    def owning_pid(self, window_id, app):
+        """The pid that owns window_id, or None when unresolvable.
+
+        Enumerates `app list` rows matching the app name and lists each
+        pid's windows until the owner is found. This is the stable
+        targeting form on this host: `--app NAME` is ambiguous across
+        same-name processes (AMBIGUOUS_APP_IDENTIFIER, real captures) and
+        plain `see` carries no pid — paste and other window-targeted
+        dispatches resolve the pid once, here, before dispatch.
+        """
+        try:
+            apps = self.run_json(["app", "list", "--json"], SEE_TIMEOUT_S)
+        except OpError:
+            return None
+        rows = apps.get("apps") if isinstance(apps, dict) else None
+        if not isinstance(rows, list):
+            return None
+        for row in rows:
+            if not isinstance(row, dict) or row.get("name") != app:
+                continue
+            pid = row.get("pid")
+            if not isinstance(pid, int) or isinstance(pid, bool):
+                continue
+            try:
+                data = self.run_json(
+                    ["window", "list", "--pid=%d" % pid, "--json"],
+                    SEE_TIMEOUT_S)
+            except OpError:
+                continue
+            windows = data.get("windows") \
+                if isinstance(data, dict) else None
+            if isinstance(windows, list) and any(
+                    isinstance(w, dict) and w.get("window_id") == window_id
+                    for w in windows):
+                return pid
+        return None
+
+    def windows_of_window(self, window_id, app):
+        """Window list for the app that owns window_id.
+
+        `window list --app NAME` fails when several processes share the app
+        name (two Chromes, several Pythons on this host — real captures),
+        which would make every frontmost check fail closed on unreadable
+        evidence. Fallback: resolve the owning pid (see owning_pid) and
+        return only that pid's rows (the ambiguity stays resolved).
+        """
+        try:
+            return self.list_windows(app)
+        except OpError:
+            pid = self.owning_pid(window_id, app)
+            if pid is None:
+                raise
+            data = self.run_json(
+                ["window", "list", "--pid=%d" % pid, "--json"],
+                SEE_TIMEOUT_S)
+            return self._map_windows(data)
 
     def inspect_window(self, window_id):
         """Accessibility tree of ONE window as bounded indented text."""
@@ -955,7 +1472,7 @@ class PeekabooAdapter:
 
         Returns (png_bytes, meta, staging_dir). The caller MUST remove
         staging_dir in a finally block. The image never outlives the call
-        unless keep_path (validated against MMOS_CU_SCRATCH) is supplied.
+        and is never returned to the session.
         """
         staging = tempfile.mkdtemp(prefix="mmos-cu-")
         target = os.path.join(staging, "window.png")
@@ -985,22 +1502,54 @@ class PeekabooAdapter:
 
         Acts always use the runtime's act_input_strategy (actionOnly) so AX
         actions are preferred and no synthetic keystrokes are generated.
+
+        Dispatch marking lives in run_json (it sees the structured payload):
+        a refusal peekaboo proves dispatched nothing stays NOT_APPLIED-
+        eligible; every other post-spawn failure is `dispatched` so the
+        caller reports EFFECT_UNKNOWN (H1).
         """
-        data = self.run_json(args, timeout, strategy=self.act_input_strategy)
-        return data
+        return self.run_json(args, timeout, strategy=self.act_input_strategy)
 
     def paste(self, args, timeout=PASTE_TIMEOUT_S):
         """Single dispatch of `peekaboo paste`; outcome read back once.
 
         paste is NOT an element-targeted AX act: it carries --text plus
-        --app/--window-id targeting and is dispatched WITHOUT
+        --pid/--window-id targeting and is dispatched WITHOUT
         --input-strategy (the input is the paste chord itself, not element
         targeting). Still exactly one subprocess, --no-remote always,
         ANTHROPIC_* stripped from the child environment, never retried.
         The command sets the clipboard, delivers the paste chord, and
-        restores the previous clipboard.
+        restores the previous clipboard. Dispatch marking: run_json.
         """
         return self.run_json(args, timeout, with_strategy=False)
+
+    def press_chord(self, args, timeout=ACT_TIMEOUT_S):
+        """Single dispatch of `peekaboo press <chord>`; outcome read back once.
+
+        A chord press is synthetic key delivery, not an element-targeted AX
+        action: like paste it is dispatched WITHOUT --input-strategy. Under
+        the runtime's actionOnly strategy a chord has no delivery mechanism
+        (live red: rc=1, unparseable stdout, empty stderr); without the flag
+        peekaboo delivers the chord background on an exact window selector
+        (real capture press_chord_window_background.json). Still one
+        subprocess, --no-remote always, never retried; dispatch marking in
+        run_json (H1).
+        """
+        return self.run_json(args, timeout, with_strategy=False)
+
+    def window_focus(self, window_id, timeout=ACT_TIMEOUT_S):
+        """Focus (raise) ONE window by exact id; outcome read back once.
+
+        The window-level raise op (live A/B 2026-11-11): `window focus
+        --window-id N` returns rc=0 with {action, app_name, window_title,
+        new_bounds}; an elementless `action AXRaise` is ALWAYS refused
+        ("--on is required") and `window focus` takes neither
+        --input-strategy nor --foreground (both refused). One subprocess,
+        --no-remote always, never retried; dispatch marking in run_json.
+        """
+        return self.run_json(
+            ["window", "focus", "--window-id", str(window_id), "--json"],
+            timeout, with_strategy=False)
 
 
 def _top_find(obj, keys):
@@ -1017,8 +1566,10 @@ def _top_find(obj, keys):
     return None
 
 
-_IDENTITY_APP_KEYS = ["app", "app_name", "application"]
-_IDENTITY_BUNDLE_KEYS = ["bundle_id", "app_bundle_id"]
+_IDENTITY_APP_KEYS = ["app", "app_name", "application",
+                      "application_name"]
+_IDENTITY_BUNDLE_KEYS = ["bundle_id", "app_bundle_id",
+                         "application_bundle_id"]
 _IDENTITY_TITLE_KEYS = ["window_title", "title"]
 
 
@@ -1155,7 +1706,12 @@ def element_id_of(element):
 
 def render_tree(data, max_lines=MAX_TREELINES):
     """Render a peekaboo `see --tree` payload as bounded indented text with
-    stable element paths usable as act targets."""
+    stable element paths usable as act targets.
+
+    A plain `see` (no --tree) carries no tree object — but its flat
+    ui_elements list is the same accessibility content; it renders as
+    bounded flat lines so look/vision prompts still carry AX text (live
+    slice_look red: Tk window, plain see, tree empty → empty answer)."""
     lines = []
     tree = _deep_find(data, ["tree", "text_tree", "accessibility_tree"])
     if isinstance(tree, str):
@@ -1183,6 +1739,19 @@ def render_tree(data, max_lines=MAX_TREELINES):
                     walk(children, depth + 1)
 
         walk(tree, 0)
+    if not lines:
+        for element in snapshot_elements(data):
+            if len(lines) >= max_lines:
+                break
+            if not isinstance(element, dict):
+                continue
+            role = str(element.get("role", "element"))
+            label = str(element.get("label", ""))[:60]
+            element_id = element_id_of(element)
+            text = "%s: %s" % (role, label)
+            if element_id:
+                text += "  [@%s]" % element_id
+            lines.append(text[:MAX_LINE_CHARS])
     if not lines:
         return "(accessibility tree unavailable for this window)"
     lines = lines[:max_lines]
@@ -1316,20 +1885,24 @@ class VisionClient:
         return bool(token and self.base_url)
 
     def _require_secure_endpoint(self):
-        """The vision endpoint must be https, or plain http only on the
-        loopback (localhost / 127.0.0.1 / ::1); anything else would send the
-        captured window image and token over an unencrypted link."""
+        """The vision endpoint is LOOPBACK ONLY (H4 principal ruling).
+
+        The captured window image and the bearer token may leave the process
+        only toward localhost / 127.0.0.1 / ::1, over http or https. Any
+        other host is refused even over https, so a misconfigured router
+        cannot exfiltrate window captures.
+        """
         try:
             parsed = urllib.parse.urlparse(self.base_url or "")
         except ValueError:
             raise OpError("VISION_ENDPOINT_INSECURE",
                           "endpoint URL unparseable; refused")
         host = (parsed.hostname or "").lower()
-        if parsed.scheme != "https" and \
+        if parsed.scheme not in ("http", "https") or \
                 host not in ("localhost", "127.0.0.1", "::1"):
             raise OpError("VISION_ENDPOINT_INSECURE",
-                          "endpoint scheme/host refused; https or loopback "
-                          "http only")
+                          "endpoint must be loopback (localhost/127.0.0.1/"
+                          "::1, http or https); refused")
 
     def ask(self, png_bytes, question, element_hints=None):
         if not question or not isinstance(question, str):
@@ -1431,26 +2004,6 @@ def _validate_vision_hints(hints):
                       % VISION_HINTS_MAX_TOTAL_CHARS)
 
 
-# ── keep_path guard ──────────────────────────────────────────────────────────
-
-def validate_keep_path(keep_path):
-    """keep_path must be absolute and inside MMOS_CU_SCRATCH, else refuse."""
-    if not keep_path or not isinstance(keep_path, str):
-        raise OpError("KEEP_PATH_REQUIRED", "keep_path missing")
-    if not os.path.isabs(keep_path):
-        raise OpError("KEEP_PATH_NOT_ABSOLUTE", keep_path)
-    scratch = os.environ.get("MMOS_CU_SCRATCH")
-    if not scratch:
-        raise OpError("KEEP_PATH_NO_SCRATCH",
-                      "MMOS_CU_SCRATCH is not set; keeping captures is off")
-    real_keep = os.path.realpath(keep_path)
-    real_scratch = os.path.realpath(scratch)
-    if real_keep != real_scratch and not real_keep.startswith(
-            real_scratch.rstrip(os.sep) + os.sep):
-        raise OpError("KEEP_PATH_OUTSIDE_SCRATCH", keep_path)
-    return keep_path
-
-
 # ── tool dispatch ────────────────────────────────────────────────────────────
 
 class ToolContext:
@@ -1492,6 +2045,90 @@ def _deny_gate_window(ctx, meta):
     return identity
 
 
+def _deny_overlay_gate(ctx):
+    """H6-INTERIM: refuse a coordinate click while ANY deny-listed app has an
+    on-screen window.
+
+    Evidence is read at click time: app list (visible apps only), then the
+    window list of each deny-matched app. A window of a deny-listed app may
+    float over the target, so a blind coordinate click could land inside a
+    password manager. Unreadable evidence fails closed
+    (DENY_OVERLAY_UNVERIFIED). Element-targeted clicks are unaffected.
+    """
+    try:
+        apps = ctx.adapter.list_apps()
+    except OpError as error:
+        raise OpError("DENY_OVERLAY_UNVERIFIED",
+                      "app list unavailable (%s); coordinate click refused"
+                      % error.code)
+    for app in apps:
+        if not isinstance(app, dict) or app.get("is_hidden"):
+            continue
+        name = app.get("name")
+        bundle = app.get("bundle_id")
+        if not ctx.deny.matches(name, bundle, None):
+            continue
+        ident = name or bundle or "deny-listed app"
+        try:
+            windows = ctx.adapter.list_windows(name or bundle or "")
+        except OpError as error:
+            raise OpError("DENY_OVERLAY_UNVERIFIED",
+                          "%s window list unavailable (%s); coordinate click "
+                          "refused" % (ident, error.code))
+        if windows:
+            raise OpError("DENY_OVERLAY",
+                          "%s has an on-screen window; coordinate click "
+                          "refused" % ident)
+    return True
+
+
+def _frontmost_gate(ctx, snap, window_id):
+    """H6: a coordinate click requires the target window to be the globally
+    frontmost window at click time.
+
+    `window list` reports per-window `is_frontmost`; the real capture
+    (tests/fixtures/peekaboo/window_list_fixture.json) shows a window with
+    anything above it in z-order has is_frontmost:false while is_key stays
+    true, so is_frontmost:true proves this window is the topmost on screen
+    and NOTHING can cover the click point. Evidence is read fresh at click
+    time; a missing window, unreadable list, or absent is_frontmost field
+    fails closed. Element-targeted clicks are unaffected (the element is
+    pinned through the snapshot, not the screen point).
+    """
+    identity = window_identity(snap)
+    app = identity["app_name"] or identity["bundle_id"] or ""
+    if not app:
+        raise OpError("WINDOW_NOT_FRONTMOST",
+                      "owning application unresolvable; coordinate click "
+                      "refused")
+    try:
+        resolve = getattr(ctx.adapter, "windows_of_window", None)
+        windows = (resolve(window_id, app) if callable(resolve)
+                   else ctx.adapter.list_windows(app))
+    except OpError as error:
+        raise OpError("WINDOW_NOT_FRONTMOST",
+                      "window list unavailable (%s); coordinate click refused"
+                      % error.code)
+    row = None
+    for candidate in windows:
+        if isinstance(candidate, dict) and \
+                candidate.get("window_id") == window_id:
+            row = candidate
+            break
+    if row is None:
+        raise OpError("WINDOW_GONE",
+                      "window %s no longer present in %s's window list"
+                      % (window_id, app))
+    if row.get("is_frontmost") is not True:
+        raise OpError("WINDOW_NOT_FRONTMOST",
+                      "window %s is not the frontmost window "
+                      "(is_frontmost=%r, window_index=%r); a window above it "
+                      "could intercept a coordinate click"
+                      % (window_id, row.get("is_frontmost"),
+                         row.get("window_index")))
+    return True
+
+
 def _act_gate(ctx, args, window_id):
     """Deny list, then lease (renewed), then human-presence gate.
 
@@ -1500,7 +2137,8 @@ def _act_gate(ctx, args, window_id):
     """
     meta = ctx.adapter.inspect_window(window_id)
     _deny_gate_window(ctx, meta)
-    ctx.lease.require_and_renew(args.get("owner"))
+    ctx.lease.require_and_renew(args.get("owner"),
+                                   nonce=args.get("lease_nonce"))
     state = ctx.presence.gate_ok()
     if state["human_active"]:
         raise OpError("HUMAN_ACTIVE",
@@ -1511,7 +2149,8 @@ def _act_gate(ctx, args, window_id):
 
 def _foreground_gate(ctx, args):
     """Re-check lease + human presence for an opt-in foreground dispatch."""
-    ctx.lease.require_and_renew(args.get("owner"))
+    ctx.lease.require_and_renew(args.get("owner"),
+                                   nonce=args.get("lease_nonce"))
     state = ctx.presence.gate_ok()
     if state["human_active"]:
         raise OpError("HUMAN_ACTIVE",
@@ -1527,7 +2166,8 @@ def _act_observe(ctx, args, window_id):
     --json`` (identity, ui_elements, coordinate_context), then the deny list
     on that read. Returns (snapshot, snapshot_id).
     """
-    ctx.lease.require_and_renew(args.get("owner"))
+    ctx.lease.require_and_renew(args.get("owner"),
+                                   nonce=args.get("lease_nonce"))
     state = ctx.presence.gate_ok()
     if state["human_active"]:
         raise OpError("HUMAN_ACTIVE",
@@ -1542,25 +2182,29 @@ def _act_observe(ctx, args, window_id):
     return snap, snapshot_id
 
 
-def _dispatch_act(ctx, args, base_argv):
-    """One background dispatch. A foreground-required refusal is a terminal
-    NOT_APPLIED unless the caller opted in, in which case it becomes ONE NEW
-    act after the gates are re-checked. Never a retry of the same dispatch.
+def _dispatch_act(ctx, args, base_argv, dispatcher=None):
+    """ONE dispatch whose mode comes from the explicit caller flag ONLY.
+
+    M10-CODE: there is no error-text-driven escalation. allow_foreground is
+    false by default -> one background dispatch, and a FOREGROUND_REQUIRED
+    failure is terminal NOT_APPLIED. allow_foreground=true -> the lease and
+    presence gates are re-run and the SINGLE dispatch carries --foreground
+    (never a background attempt first, never a retry).
+
+    `dispatcher` selects the adapter entry (act vs press_chord: a chord is
+    synthetic delivery and must not carry the actionOnly strategy).
 
     Returns (result_meta, used_foreground).
     """
-    allow = bool(args.get("allow_foreground"))
-    try:
-        return ctx.adapter.act(list(base_argv)), False
-    except OpError as error:
-        if error.code != "FOREGROUND_REQUIRED" or not allow:
-            raise
-    _foreground_gate(ctx, args)
-    return ctx.adapter.act(list(base_argv) + ["--foreground"]), True
+    dispatch = dispatcher or ctx.adapter.act
+    if bool(args.get("allow_foreground")):
+        _foreground_gate(ctx, args)
+        return dispatch(list(base_argv) + ["--foreground"]), True
+    return dispatch(list(base_argv)), False
 
 
 def _act_receipt(ctx, args, window_id, op, element_ref, result_meta,
-                 snapshot_id, element=None, foreground=False):
+                 snapshot_id, element=None, foreground=False, extra=None):
     parts = ["snapshot=%s" % snapshot_id]
     if element is not None:
         parts.append("element=%s role=%s label=%s" % (
@@ -1573,13 +2217,20 @@ def _act_receipt(ctx, args, window_id, op, element_ref, result_meta,
             parts.append(_bounded(json.dumps(summary), 80))
     return receipt(op, window_id, element_ref, "APPLIED",
                    observed=" ".join(parts) or "peekaboo reported success",
-                   foreground=foreground)
+                   foreground=foreground, extra=extra)
 
 
 def handle_tool_call(ctx, args):
     """Dispatch one tools/call. Returns an MCP result dict."""
     if not isinstance(args, dict):
         return _error_result("INVALID_ARGUMENTS", "arguments must be an object")
+    # The schema declares additionalProperties:false; enforce it here too so
+    # a removed field (notably keep_path, H4) is a typed refusal and never
+    # silently ignored.
+    unknown = sorted(set(args) - set(TOOL_SCHEMA["properties"]))
+    if unknown:
+        return _error_result("INVALID_ARGUMENTS",
+                             "unknown argument(s): %s" % ", ".join(unknown))
     action = args.get("action")
     if action not in ACTIONS:
         return _error_result("UNKNOWN_ACTION", repr(action))
@@ -1587,17 +2238,31 @@ def handle_tool_call(ctx, args):
     try:
         return handler(ctx, args)
     except OpError as error:
+        if (getattr(error, "dispatched", False)
+                and str(action) in DISPATCH_ACT_OPS
+                and error.code not in ACT_CLEAN_PRE_DISPATCH_CODES):
+            # H1: the dispatch STARTED, so the event may have landed. Only
+            # a proven pre-dispatch refusal may claim NOT_APPLIED.
+            payload = receipt(str(action), args.get("window_id"),
+                              args.get("element_ref"), "EFFECT_UNKNOWN",
+                              cause=error)
+            if str(action) == "slice_paste":
+                payload["clipboard_state"] = "unknown"
+            return {"content": [{"type": "text",
+                                 "text": json.dumps(payload)}],
+                    "isError": True}
         if error.code in ("LEASE_NOT_HELD", "LEASE_HELD", "LEASE_NOT_OWNER",
                           "LEASE_OWNER_REQUIRED", "LEASE_TTL_INVALID",
+                          "LEASE_NONCE_INVALID",
+                          "LEASE_CONTENDED",
                           "HUMAN_ACTIVE", "PRESENCE_UNKNOWN", "DENY_LISTED",
-                          "WINDOW_IDENTITY_UNKNOWN", "KEEP_PATH_NOT_ABSOLUTE",
-                          "KEEP_PATH_NO_SCRATCH", "KEEP_PATH_OUTSIDE_SCRATCH",
+                          "WINDOW_IDENTITY_UNKNOWN",
                           "CHORD_GLOBAL", "CHORD_INVALID",
                           "CHORD_NOT_ALLOWED",
                           "COORDS_REQUIRED", "WINDOW_BOUNDS_UNKNOWN",
                           "POINT_OUTSIDE_WINDOW", "APP_REQUIRED",
                           "WINDOW_ID_REQUIRED", "VISION_QUESTION_REQUIRED",
-                          "VISION_UNCONFIGURED", "KEEP_PATH_REQUIRED",
+                          "VISION_UNCONFIGURED",
                           "CLI_OUTPUT_INVALID", "CAPTURE_EMPTY",
                           "ELEMENT_REF_REQUIRED", "ELEMENT_REF_INVALID",
                           "ELEMENT_NOT_FOUND", "SNAPSHOT_UNAVAILABLE",
@@ -1607,7 +2272,8 @@ def handle_tool_call(ctx, args):
                           "CHALLENGE_DETECTED", "SLICE_TARGET_REQUIRED",
                           "SLICE_TARGET_AMBIGUOUS", "SLICE_TARGET_NOT_FOUND",
                           "VISION_ENDPOINT_INSECURE", "HINTS_TOO_LONG",
-                          "QUESTION_TOO_LONG"):
+                          "QUESTION_TOO_LONG",
+                          "DENY_OVERLAY", "DENY_OVERLAY_UNVERIFIED"):
             payload = receipt(str(action), args.get("window_id"),
                               args.get("element_ref"), "NOT_APPLIED",
                               cause=error)
@@ -1675,7 +2341,7 @@ def _op_windows(ctx, args):
         if not isinstance(window, dict):
             continue
         matched = ctx.deny.matches(window.get("app"), window.get("bundle_id"),
-                                   None)
+                                   window.get("title"))
         if matched:
             raise OpError("DENY_LISTED",
                           "resolved window entry matched by %s" % matched)
@@ -1705,11 +2371,14 @@ def _op_inspect(ctx, args):
 
 
 def _op_capture(ctx, args):
+    """Capture returns METADATA + AX/OCR text only (H4 principal ruling).
+
+    The PNG never enters an MCP/CLI reply and is never persisted by this
+    layer: the image is held in memory just long enough to measure it and is
+    deleted with the staging directory before the receipt is returned.
+    """
     window_id = _require_window_id(args)
     ocr = bool(args.get("ocr"))
-    keep_path = args.get("keep_path")
-    if keep_path is not None:
-        validate_keep_path(keep_path)  # refuse BEFORE capturing
     # Identity BEFORE capture: resolve the window's owning app with the
     # screenshot-less observe and deny-gate it BEFORE the pixel capture is
     # dispatched. A denied window is never captured, not even into staging.
@@ -1721,24 +2390,12 @@ def _op_capture(ctx, args):
         # Deny check on the freshly captured window's identity, before the
         # bytes leave the process.
         _deny_gate_window(ctx, meta)
-        import base64
-        content = [{"type": "text",
-                    "text": json.dumps({
-                        "op": "capture", "status": "OK",
-                        "window_id": window_id,
-                        "bytes": len(png),
-                        "ocr_text": extract_ocr(meta) if ocr else None})}]
-        content.append({"type": "image",
-                        "data": base64.b64encode(png).decode("ascii"),
-                        "mimeType": "image/png"})
-        if keep_path:
-            with open(keep_path, "wb") as handle:
-                handle.write(png)
-            try:
-                os.chmod(keep_path, 0o600)
-            except OSError:
-                pass
-        return {"content": content, "isError": False}
+        return _text_result({
+            "op": "capture", "status": "OK",
+            "window_id": window_id,
+            "bytes": len(png),
+            "image_returned": False,
+            "ocr_text": extract_ocr(meta) if ocr else None})
     finally:
         if staging:
             import shutil
@@ -1754,6 +2411,7 @@ def _op_press(ctx, args):
         raise OpError("ELEMENT_REF_REQUIRED",
                       "element_ref from inspect is required")
     snap, snapshot_id = _act_observe(ctx, args, window_id)
+    key = _shared_act_gate(ctx, snap, window_id, "press")
     element = resolve_element(snap, element_ref)
     element_id = element_id_of(element)
     if not element_id:
@@ -1762,9 +2420,11 @@ def _op_press(ctx, args):
     meta, foreground = _dispatch_act(ctx, args, [
         "action", "AXPress", "--on", element_id,
         "--snapshot", snapshot_id, "--json"])
-    return _text_result(_act_receipt(ctx, args, window_id, "press",
-                                     element_ref, meta, snapshot_id,
-                                     element, foreground))
+    state_write = _pace_record(ctx, key, window_id)
+    return _text_result(_act_receipt(
+        ctx, args, window_id, "press", element_ref, meta, snapshot_id,
+        element, foreground,
+        extra={"state_write": state_write} if state_write else None))
 
 
 def _op_set_text(ctx, args):
@@ -1777,17 +2437,20 @@ def _op_set_text(ctx, args):
     if not isinstance(text, str):
         raise OpError("TEXT_REQUIRED", "text must be a string")
     snap, snapshot_id = _act_observe(ctx, args, window_id)
+    key = _shared_act_gate(ctx, snap, window_id, "set_text")
     element = resolve_element(snap, element_ref)
     element_id = element_id_of(element)
     if not element_id:
         raise OpError("ELEMENT_NOT_FOUND",
                       "resolved element has no id in the fresh snapshot")
     meta, foreground = _dispatch_act(ctx, args, [
-        "set-value", "--value", text, "--on", element_id,
+        "set-value", "--value=%s" % text, "--on", element_id,
         "--snapshot", snapshot_id, "--json"])
-    return _text_result(_act_receipt(ctx, args, window_id, "set_text",
-                                     element_ref, meta, snapshot_id,
-                                     element, foreground))
+    state_write = _pace_record(ctx, key, window_id)
+    return _text_result(_act_receipt(
+        ctx, args, window_id, "set_text", element_ref, meta, snapshot_id,
+        element, foreground,
+        extra={"state_write": state_write} if state_write else None))
 
 
 def _op_keys(ctx, args):
@@ -1813,12 +2476,24 @@ def _op_keys(ctx, args):
             "left/right/up/down only" % (
                 chord, "{" + ", ".join(sorted(CHORD_ALLOWLIST)) + "}"))
     # press takes no element; the fresh exact-window snapshot is the receipt
-    # that authorizes background key delivery.
-    _snap, snapshot_id = _act_observe(ctx, args, window_id)
+    # that authorizes background key delivery. The dispatch carries BOTH the
+    # exact --window-id selector and the snapshot receipt (the proven form:
+    # press_chord_window_background.json delivered background on --window-id;
+    # a 16:08Z probe showed --snapshot alone also delivers once the strategy
+    # flag is gone — the live rc=1 refusal was the actionOnly strategy, which
+    # leaves a synthetic chord with no delivery mechanism). A chord is
+    # synthetic key delivery: it goes through press_chord (no
+    # --input-strategy, same as paste).
+    snap, snapshot_id = _act_observe(ctx, args, window_id)
+    key = _shared_act_gate(ctx, snap, window_id, "keys", chord=lowered)
     meta, foreground = _dispatch_act(ctx, args, [
-        "press", chord, "--snapshot", snapshot_id, "--json"])
-    return _text_result(_act_receipt(ctx, args, window_id, "keys", None, meta,
-                                     snapshot_id, None, foreground))
+        "press", chord, "--window-id", str(window_id),
+        "--snapshot", snapshot_id, "--json"],
+        dispatcher=ctx.adapter.press_chord)
+    state_write = _pace_record(ctx, key, window_id)
+    return _text_result(_act_receipt(
+        ctx, args, window_id, "keys", None, meta, snapshot_id, None,
+        foreground, extra={"state_write": state_write} if state_write else None))
 
 
 SCROLLABLE_ROLE_HINTS = ("scrollarea", "scrollview", "scrollbar", "webarea",
@@ -1862,6 +2537,7 @@ def _op_scroll(ctx, args):
             or not 1 <= amount <= 50:
         raise OpError("AMOUNT_INVALID", repr(amount))
     snap, snapshot_id = _act_observe(ctx, args, window_id)
+    _shared_act_gate(ctx, snap, window_id, "scroll")
     element, element_id = _scroll_target(snap, args.get("element_ref"))
     argv = ["scroll", "--direction", direction, "--amount", str(amount),
             "--snapshot", snapshot_id]
@@ -1884,6 +2560,7 @@ def _op_pointer_click(ctx, args):
         if not isinstance(element_ref, str) or not element_ref:
             raise OpError("ELEMENT_REF_INVALID", repr(element_ref))
         snap, snapshot_id = _act_observe(ctx, args, window_id)
+        key = _shared_act_gate(ctx, snap, window_id, "pointer_click")
         element = resolve_element(snap, element_ref)
         element_id = element_id_of(element)
         if not element_id:
@@ -1892,13 +2569,18 @@ def _op_pointer_click(ctx, args):
         meta, foreground = _dispatch_act(ctx, args, [
             "click", "--snapshot", snapshot_id, "--on", element_id,
             "--json"])
-        return _text_result(_act_receipt(ctx, args, window_id,
-                                         "pointer_click", element_ref, meta,
-                                         snapshot_id, element, foreground))
+        state_write = _pace_record(ctx, key, window_id)
+        return _text_result(_act_receipt(
+            ctx, args, window_id, "pointer_click", element_ref, meta,
+            snapshot_id, element, foreground,
+            extra={"state_write": state_write} if state_write else None))
     if not has_coords:
         raise OpError("COORDS_REQUIRED",
                       "element_ref, or integer x,y required")
     snap, snapshot_id = _act_observe(ctx, args, window_id)
+    _frontmost_gate(ctx, snap, window_id)  # H6: coordinate click only
+    _deny_overlay_gate(ctx)  # H6-INTERIM: coordinate click only
+    key = _shared_act_gate(ctx, snap, window_id, "pointer_click")
     bounds = window_bounds(snap)
     if not bounds:
         raise OpError("WINDOW_BOUNDS_UNKNOWN",
@@ -1914,9 +2596,10 @@ def _op_pointer_click(ctx, args):
     meta, foreground = _dispatch_act(ctx, args, [
         "click", "--window-id", str(window_id), "--at", "%d,%d" % (x, y),
         "--snapshot", snapshot_id, "--json"])
-    return _text_result(_act_receipt(ctx, args, window_id, "pointer_click",
-                                     None, meta, snapshot_id, None,
-                                     foreground))
+    state_write = _pace_record(ctx, key, window_id)
+    return _text_result(_act_receipt(
+        ctx, args, window_id, "pointer_click", None, meta, snapshot_id, None,
+        foreground, extra={"state_write": state_write} if state_write else None))
 
 
 # ── SLICE ops ────────────────────────────────────────────────────────────────
@@ -1948,6 +2631,45 @@ def _challenge_scan(ctx, snap, args, op):
                       % (hit["pattern"], hit["quote"]))
 
 
+# The minimum pacing set from the brief: every act that can change a page
+# or send, plus keys enter/return (other plain navigation keys are not paced).
+PACED_ACT_OPS = {"press", "set_text", "pointer_click", "slice_click",
+                 "slice_paste", "slice_send"}
+PACED_KEY_CHORDS = {"enter", "return"}
+
+
+def _shared_act_gate(ctx, snap, window_id, op, chord=None):
+    """THE single pre-act gate for every act that can change a page or send
+    (H3): challenge scan on the fresh snapshot, then pacing on the M8 key.
+
+    Returns the pacing key when this act is paced (the caller records it
+    after the dispatch), else None. A challenge hit or PACING_WAIT raises
+    BEFORE any dispatch. Never duplicated per handler.
+    """
+    _challenge_scan(ctx, snap, None, op)
+    paced = op in PACED_ACT_OPS or (
+        op == "keys" and _canonical(chord) in PACED_KEY_CHORDS)
+    if not paced:
+        return None
+    identity = window_identity(snap)
+    key = pacing_key(identity["app_name"], identity["window_title"], window_id)
+    ctx.pacer.check(key)
+    return key
+
+
+def _pace_record(ctx, key, window_id=None):
+    """Record the dispatch attempt for `key`; None on success, "failed" when
+    the state write raises OSError (M9: never turns a completed act into a
+    refusal)."""
+    if key is None:
+        return None
+    try:
+        ctx.pacer.record(key, window_id)
+    except OSError:
+        return "failed"
+    return None
+
+
 def _slice_sequence_gate(ctx, completed, step):
     """Presence check before ONE named step of a slice sequence.
 
@@ -1969,10 +2691,26 @@ def _slice_sequence_gate(ctx, completed, step):
                   % (state["human_idle_seconds"], ctx.presence.min_idle, step))
 
 
+def _confirm_skipped(ctx):
+    """Post-dispatch CONFIRM-step presence check (H2).
+
+    The act has ALREADY completed when this runs. A human who became
+    active (or an unreadable idle state) must skip the confirm read, never
+    turn the completed act into NOT_APPLIED: the caller returns APPLIED with
+    confirm_skipped naming why. Returns None when the confirm may proceed.
+    """
+    try:
+        state = ctx.presence.gate_ok()
+    except OpError as error:
+        return error.code
+    return "HUMAN_ACTIVE" if state.get("human_active") else None
+
+
 def _slice_observe(ctx, args, window_id, completed):
     """Slice observe step: lease renew + presence + ONE fresh snapshot +
     deny list on the window identity. Appends the completed step."""
-    ctx.lease.require_and_renew(args.get("owner"))
+    ctx.lease.require_and_renew(args.get("owner"),
+                                   nonce=args.get("lease_nonce"))
     _slice_sequence_gate(ctx, completed, "observe")
     snap = ctx.adapter.snapshot_window(window_id)
     _deny_gate_window(ctx, snap)
@@ -1987,10 +2725,24 @@ def _slice_observe(ctx, args, window_id, completed):
 def _slice_act(ctx, args, argv, completed, label):
     """Slice act step: lease renew + presence re-check, then ONE dispatch
     with --foreground appended. No background attempt first, no retry."""
-    ctx.lease.require_and_renew(args.get("owner"))
+    ctx.lease.require_and_renew(args.get("owner"),
+                                   nonce=args.get("lease_nonce"))
     _slice_sequence_gate(ctx, completed, "act")
     meta = ctx.adapter.act(list(argv) + ["--foreground"])
     completed.append("act:%s" % label)
+    return meta
+
+
+def _slice_focus_act(ctx, args, window_id, completed):
+    """Window-level focus (raise) step: lease renew + presence re-check,
+    then ONE `window focus --window-id` dispatch (adapter.window_focus).
+    No --foreground (the focus op IS the raise; the flag is refused), no
+    --input-strategy, no background attempt first, no retry."""
+    ctx.lease.require_and_renew(args.get("owner"),
+                                   nonce=args.get("lease_nonce"))
+    _slice_sequence_gate(ctx, completed, "act")
+    meta = ctx.adapter.window_focus(window_id)
+    completed.append("act:window focus window_id=%s" % window_id)
     return meta
 
 
@@ -2031,6 +2783,29 @@ def _slice_front_select(ctx, args):
         if not isinstance(window_id, int) or isinstance(window_id, bool):
             raise OpError("WINDOW_IDENTITY_UNKNOWN",
                           "window list returned no integer window_id")
+    # M6: the named app must actually own the requested window, and no
+    # window of that app may carry a deny-listed title. A caller cannot
+    # smuggle "window 999 of TextEdit" past the app identity check.
+    try:
+        windows = ctx.adapter.list_windows(app)
+    except OpError:
+        windows = []
+    target = None
+    for window in windows:
+        if not isinstance(window, dict):
+            continue
+        if window.get("window_id") == window_id:
+            target = window
+        matched = ctx.deny.matches(window.get("app") or app,
+                                   window.get("bundle_id"),
+                                   window.get("title"))
+        if matched:
+            raise OpError("DENY_LISTED",
+                          "window entry matched by %s" % matched)
+    if target is None:
+        raise OpError("WINDOW_APP_MISMATCH",
+                      "window_id %s is not a window of %r"
+                      % (window_id, app))
     return app, window_id, (title if has_title else None)
 
 
@@ -2038,25 +2813,33 @@ def _op_slice_front(ctx, args):
     app, window_id, title = _slice_front_select(ctx, args)
     completed = []
     snap, snapshot_id = _slice_observe(ctx, args, window_id, completed)
-    # Target the Window-role element when the snapshot exposes one.
-    elem_id = None
-    for element in snapshot_elements(snap):
-        if isinstance(element, dict) and \
-                "window" in str(element.get("role", "")).lower():
-            elem_id = element_id_of(element)
-            if elem_id:
-                break
-    argv = ["action", "AXRaise", "--snapshot", snapshot_id, "--json"]
-    if elem_id:
-        argv += ["--on", elem_id]
-    _slice_act(ctx, args, argv, completed,
-               "AXRaise window_id=%s%s" % (
-                   window_id, " elem=%s" % elem_id if elem_id else ""))
-    # Confirm: observe the window's title + window_id after raising.
-    _slice_sequence_gate(ctx, completed, "confirm")
+    # Raise via the WINDOW-LEVEL focus op, never an element action: an
+    # elementless `action AXRaise` is always refused by peekaboo
+    # ("--on is required", live rc=1 real capture raise_a/b) and Tk-host
+    # snapshots expose no Window-role element to target. `window focus
+    # --window-id N` is exact, needs no element, and takes neither
+    # --input-strategy nor --foreground (live A/B 2026-11-11 focus_c/d).
+    _slice_focus_act(ctx, args, window_id, completed)
+    # Confirm: observe the window's title + window_id after raising. The
+    # raise already completed, so an active human only SKIPS the readback.
+    target_extra = {"app": app}
+    if title:
+        target_extra["title_selector"] = title
+    skipped = _confirm_skipped(ctx)
+    if skipped:
+        observed = ("raised window_id=%s; confirm skipped (%s)"
+                    % (window_id, skipped))
+        return _text_result(receipt("slice_front", window_id, None, "APPLIED",
+                                    observed=observed, foreground=True,
+                                    target_extra=target_extra,
+                                    extra={"confirm_skipped": skipped,
+                                           "steps": list(completed)}))
     observed_title = None
     try:
-        for window in ctx.adapter.list_windows(app):
+        resolve = getattr(ctx.adapter, "windows_of_window", None)
+        windows = (resolve(window_id, app) if callable(resolve)
+                   else ctx.adapter.list_windows(app))
+        for window in windows:
             if window.get("window_id") == window_id:
                 observed_title = window.get("title")
                 break
@@ -2065,12 +2848,10 @@ def _op_slice_front(ctx, args):
     except OpError as error:
         observed_title = "(readback failed: %s)" % error.code
     observed = "raised window_id=%s title=%s" % (window_id, observed_title)
-    target_extra = {"app": app}
-    if title:
-        target_extra["title_selector"] = title
     return _text_result(receipt("slice_front", window_id, None, "APPLIED",
                                 observed=observed, foreground=True,
-                                target_extra=target_extra))
+                                target_extra=target_extra,
+                                extra={"steps": list(completed)}))
 
 
 def _op_slice_click(ctx, args):
@@ -2083,8 +2864,11 @@ def _op_slice_click(ctx, args):
         raise OpError("COORDS_REQUIRED", "element_ref, or integer x,y required")
     completed = []
     snap, snapshot_id = _slice_observe(ctx, args, window_id, completed)
-    # Challenge scan BEFORE any click dispatch (a click is an input too).
-    _challenge_scan(ctx, snap, args, "slice_click")
+    if element_ref is None:
+        _frontmost_gate(ctx, snap, window_id)  # H6: coordinate click only
+        _deny_overlay_gate(ctx)  # H6-INTERIM: coordinate click only
+    # Shared pre-act gate BEFORE any click dispatch (challenge + pacing).
+    key = _shared_act_gate(ctx, snap, window_id, "slice_click")
     if element_ref is not None:
         if not isinstance(element_ref, str) or not element_ref:
             raise OpError("ELEMENT_REF_INVALID", repr(element_ref))
@@ -2112,15 +2896,21 @@ def _op_slice_click(ctx, args):
         label = "click at=(%d,%d)" % (x, y)
         ref = None
     _slice_act(ctx, args, argv, completed, label)
+    state_write = _pace_record(ctx, key, window_id)
+    extra = {"steps": list(completed)}
+    if state_write:
+        extra["state_write"] = state_write
     return _text_result(receipt("slice_click", window_id, ref, "APPLIED",
-                                observed=label, foreground=True))
+                                observed=label, foreground=True, extra=extra))
 
 
-def _paste_argv(ctx, text, app_name, window_id):
-    """paste dispatch: --text + --app/--window-id targeting, no
-    --input-strategy (the adapter's paste() path omits it). Optional
-    --focus-timeout/--restore-delay come from runtime.json only."""
-    argv = ["paste", "--text", text, "--app", app_name,
+def _paste_argv(ctx, text, app_name, window_id, pid):
+    """paste dispatch: --text + --pid/--window-id targeting, no
+    --input-strategy (the adapter's paste() path omits it). Targeting is by
+    PID, never `--app NAME` (ambiguous across same-name processes — the
+    live rc=1 paste refusal; the M11 captures all delivered with --pid).
+    Optional --focus-timeout/--restore-delay come from runtime.json only."""
+    argv = ["paste", "--text=%s" % text, "--pid=%d" % pid,
             "--window-id", str(window_id), "--json"]
     runtime = ctx.runtime if isinstance(ctx.runtime, dict) else {}
     focus_ms = runtime.get("paste_focus_timeout_ms")
@@ -2143,11 +2933,11 @@ def _op_slice_paste(ctx, args):
     if element_ref is not None and (not isinstance(element_ref, str)
                                     or not element_ref):
         raise OpError("ELEMENT_REF_INVALID", repr(element_ref))
-    ctx.pacer.check(window_id)  # PACING_WAIT between paste/send sequences
     completed = []
     snap, snapshot_id = _slice_observe(ctx, args, window_id, completed)
-    # Challenge scan BEFORE any dispatch (the focus click is an input too).
-    _challenge_scan(ctx, snap, args, "slice_paste")
+    # Shared pre-act gate BEFORE any dispatch (the focus click is an input
+    # too): challenge + PACING_WAIT at the M8 key.
+    key = _shared_act_gate(ctx, snap, window_id, "slice_paste")
     app_name = window_identity(snap)["app_name"]
     if not app_name:
         raise OpError("WINDOW_IDENTITY_UNKNOWN",
@@ -2165,61 +2955,103 @@ def _op_slice_paste(ctx, args):
                     "--json"], completed, "focus_click:%s" % elem_id)
     # The paste chord is the ONLY key event in the slice; never character
     # keystrokes. Pacing is counted from the dispatch attempt onward.
-    ctx.lease.require_and_renew(args.get("owner"))
+    # Targeting resolves the owning PID once, before dispatch (--app is
+    # ambiguous on same-name hosts; unresolvable identity refuses).
+    pid = ctx.adapter.owning_pid(window_id, app_name)
+    if pid is None:
+        raise OpError("WINDOW_IDENTITY_UNKNOWN",
+                      "owning pid not resolvable for window %s; paste "
+                      "refused (--app targeting is ambiguous)" % window_id)
+    ctx.lease.require_and_renew(args.get("owner"),
+                                   nonce=args.get("lease_nonce"))
     _slice_sequence_gate(ctx, completed, "act")
+    # M10 law for paste: background is the default single dispatch; the
+    # opt-in flag (and only the flag) adds --foreground. On this host a
+    # background paste into a Tk window returns the unconfirmed-outcome
+    # refusal with mutation_dispatched:true → honest EFFECT_UNKNOWN (real
+    # capture paste_background_unconfirmed.json); the foreground paste
+    # delivers (paste_foreground_unconfirmed_but_delivered.json + fixture
+    # FIELD line).
+    allow_fg = bool(args.get("allow_foreground"))
+    paste_argv = _paste_argv(ctx, text, app_name, window_id, pid)
+    if allow_fg:
+        _foreground_gate(ctx, args)
+        paste_argv = paste_argv + ["--foreground"]
+    state_write = None
     try:
-        paste_meta = ctx.adapter.paste(
-            _paste_argv(ctx, text, app_name, window_id))
+        paste_meta = ctx.adapter.paste(paste_argv)
     except OpError as error:
         # Failure truthfulness (security-fix pass): once the paste dispatch
-        # has been ATTEMPTED, only the clean pre-dispatch refusal codes are
-        # provably "nothing happened". Any other dispatch-phase failure
-        # (CLI_ERROR, FOREGROUND_REQUIRED, ...) may have set the clipboard
-        # and/or delivered the paste chord — report EFFECT_UNKNOWN, never
-        # NOT_APPLIED. DISPATCH_TIMEOUT / DISPATCH_UNAVAILABLE already map
-        # to EFFECT_UNKNOWN in the handler and pass through unchanged.
+        # has been ATTEMPTED (run_json marked it dispatched=True), only a
+        # refusal peekaboo proved dispatched nothing (mutation_dispatched
+        # false, or a clean pre-dispatch code) may report NOT_APPLIED.
+        # Any other dispatch-phase failure may have set the clipboard
+        # and/or delivered the paste chord — report EFFECT_UNKNOWN.
+        # DISPATCH_TIMEOUT / DISPATCH_UNAVAILABLE already map correctly in
+        # the handler and pass through unchanged.
         if error.code in ("DISPATCH_TIMEOUT", "DISPATCH_UNAVAILABLE"):
             raise
-        if error.code not in PASTE_CLEAN_PRE_DISPATCH_CODES:
+        if getattr(error, "dispatched", False) and \
+                error.code not in ACT_CLEAN_PRE_DISPATCH_CODES:
             raise OpError("EFFECT_UNKNOWN",
                           "paste dispatch failed in flight; effect unknown "
                           "(%s: %s)" % (error.code, error.detail))
         raise
     finally:
-        ctx.pacer.record(window_id)
+        state_write = _pace_record(ctx, key, window_id)
     completed.append("act:paste window_id=%s" % window_id)
-    restored_raw = _deep_find(paste_meta, ["clipboard_restored", "restored",
-                                           "previous_clipboard_restored"])
+    # `restored` comes from the documented receipt key only (top level or
+    # inside coordinate_context); a nested decoy inside a ui_element must
+    # never be read as the clipboard confirmation.
+    restored_raw = _top_find(paste_meta, ["clipboard_restored"])
+    if restored_raw is None:
+        coord = _top_find(paste_meta, ["coordinate_context"])
+        if isinstance(coord, dict):
+            restored_raw = _top_find(coord, ["clipboard_restored"])
     restored = bool(restored_raw)
     restore_reported = restored_raw is not None
-    # Confirm: fresh see, read the target field's AX value back.
-    _slice_sequence_gate(ctx, completed, "confirm")
+    # Confirm: fresh see, read the target field's AX value back. The paste
+    # already dispatched, so an active human only SKIPS this readback (H2).
+    skipped = _confirm_skipped(ctx)
     paste_confirmed = False
     note = ""
-    try:
-        fresh = ctx.adapter.snapshot_window(window_id)
-        _deny_gate_window(ctx, fresh)
-        if element_ref is not None:
-            element = resolve_element(fresh, element_ref)
-            value = element.get("value")
-            paste_confirmed = isinstance(value, str) and text in value
-        else:
-            paste_confirmed = any(
-                isinstance(e.get("value"), str) and text in e["value"]
-                for e in snapshot_elements(fresh) if isinstance(e, dict))
-    except OpError as error:
-        paste_confirmed = False
-        note = " (confirm read failed: %s)" % error.code
+    if skipped:
+        note = " (confirm skipped: %s)" % skipped
+    else:
+        try:
+            fresh = ctx.adapter.snapshot_window(window_id)
+            _deny_gate_window(ctx, fresh)
+            if element_ref is not None:
+                element = resolve_element(fresh, element_ref)
+                value = element.get("value")
+                paste_confirmed = isinstance(value, str) and text in value
+            else:
+                paste_confirmed = any(
+                    isinstance(e.get("value"), str) and text in e["value"]
+                    for e in snapshot_elements(fresh) if isinstance(e, dict))
+        except OpError as error:
+            paste_confirmed = False
+            note = " (confirm read failed: %s)" % error.code
     observed = ("paste dispatched; field AX value read back; "
                 "paste_confirmed=%s restored=%s%s") % (
         paste_confirmed, restored, note)
     if not restore_reported:
         observed += " (restore not reported by peekaboo)"
-    extra = {"paste_confirmed": bool(paste_confirmed), "restored": restored}
+    extra = {"paste_confirmed": bool(paste_confirmed), "restored": restored,
+             "steps": list(completed),
+             # Stated explicitly both ways (unlike other receipts, which
+             # only mark foreground=True): a background paste may come back
+             # unconfirmed (EFFECT_UNKNOWN) while a foreground paste is a
+             # consented steal-focus — the caller must see which one ran.
+             "foreground": allow_fg}
+    if skipped:
+        extra["confirm_skipped"] = skipped
+    if state_write:
+        extra["state_write"] = state_write
     if not restore_reported:
         extra["restore_reported"] = False
     return _text_result(receipt("slice_paste", window_id, element_ref,
-                                "APPLIED", observed=observed, foreground=True,
+                                "APPLIED", observed=observed,
                                 target_extra={"app": app_name}, extra=extra))
 
 
@@ -2229,30 +3061,33 @@ def _op_slice_send(ctx, args):
     if not element_ref or not isinstance(element_ref, str):
         raise OpError("ELEMENT_REF_REQUIRED",
                       "the send control's element_ref is required")
-    ctx.pacer.check(window_id)  # PACING_WAIT between paste/send sequences
     completed = []
     snap, snapshot_id = _slice_observe(ctx, args, window_id, completed)
-    # Challenge check BEFORE any send dispatch, on the window's AX text (and
-    # OCR text if present in the snapshot). A match STOPS the layer:
-    # terminal NOT_APPLIED, bounded quote, no retry.
-    _challenge_scan(ctx, snap, args, "slice_send")
+    # Shared pre-act gate BEFORE any send dispatch: challenge scan + pacing.
+    # A match STOPS the layer: terminal NOT_APPLIED, bounded quote, no retry.
+    key = _shared_act_gate(ctx, snap, window_id, "slice_send")
     element = resolve_element(snap, element_ref)
     elem_id = element_id_of(element)
     if not elem_id:
         raise OpError("ELEMENT_NOT_FOUND",
                       "resolved element has no id in the fresh snapshot")
-    ctx.lease.require_and_renew(args.get("owner"))
+    ctx.lease.require_and_renew(args.get("owner"),
+                                   nonce=args.get("lease_nonce"))
     _slice_sequence_gate(ctx, completed, "act")
+    state_write = None
     try:
         ctx.adapter.act(["click", "--on", elem_id, "--snapshot",
                          snapshot_id, "--json"] + ["--foreground"])
     finally:
-        ctx.pacer.record(window_id)
+        state_write = _pace_record(ctx, key, window_id)
     completed.append("act:send_click:%s" % elem_id)
+    extra = {"steps": list(completed)}
+    if state_write:
+        extra["state_write"] = state_write
     return _text_result(receipt("slice_send", window_id, element_ref,
                                 "APPLIED",
                                 observed="send control %s clicked" % elem_id,
-                                foreground=True))
+                                foreground=True, extra=extra))
 
 
 def _op_slice_look(ctx, args):
@@ -2280,12 +3115,10 @@ def _op_slice_look(ctx, args):
                     raise
                 payload["vision_note"] = "%s: accessibility text only" \
                     % error.code
-        import base64
-        content = [{"type": "text", "text": json.dumps(payload)}]
-        content.append({"type": "image",
-                        "data": base64.b64encode(png).decode("ascii"),
-                        "mimeType": "image/png"})
-        return {"content": content, "isError": False}
+        # H4: AX text + the vision model's TEXT answer only; the PNG never
+        # enters the reply.
+        payload["image_returned"] = False
+        return _text_result(payload)
     finally:
         if staging:
             import shutil
@@ -2381,7 +3214,11 @@ def _text_result(payload, is_error=False):
 
 def build_context():
     runtime = load_runtime(resolve_runtime_path())
-    deny_path = os.environ.get("MMOS_CU_DENY") or os.path.join(HERE, "deny.json")
+    deny_path = os.environ.get("MMOS_CU_DENY")
+    if deny_path:
+        deny_path = _env_path_override("MMOS_CU_DENY", deny_path)
+    else:
+        deny_path = os.path.join(HERE, "deny.json")
     deny = DenyList.load(deny_path)
     lease = Lease()
     presence = Presence(runtime=runtime)

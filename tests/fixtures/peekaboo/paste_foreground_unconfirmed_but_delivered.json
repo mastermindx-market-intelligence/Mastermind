@@ -1,0 +1,31 @@
+{
+ "effect": "unverifiable",
+ "data": null,
+ "debug_logs": [
+  "[2026-11-11T14:58:21.080Z] DEBUG: Runtime host: local (in-process)"
+ ],
+ "success": false,
+ "outcome": {
+  "retry_safe": false,
+  "requires_fresh_observation": true,
+  "route": "local",
+  "retry_safety": "unsafe",
+  "state": "indeterminate",
+  "delivery_mechanism": "composite",
+  "mutation_dispatched": true,
+  "effect": "unverifiable",
+  "dispatch_state": "may_have_dispatched",
+  "escalation": "observe_before_retry",
+  "evidence": "completion_unknown",
+  "delivery_mode": "foreground"
+ },
+ "error": {
+  "details": "Paste hotkey did not return a confirmed outcome.",
+  "mutation_dispatched": true,
+  "hint": "Observe the target and clipboard before deciding whether to retry the paste.",
+  "retry_safe": false,
+  "message": "Paste hotkey did not return a confirmed outcome.",
+  "code": "INTERACTION_FAILED"
+ },
+ "note": "real peekaboo 4.2.2 FOREGROUND paste on own fixture, 2026-11-11: INTERACTION_FAILED \"Paste hotkey did not return a confirmed outcome\", mutation_dispatched:true \u2014 YET the fixture log shows FIXTURE FIELD CAPTURE-PASTE-FG, i.e. the paste WAS delivered. Peekaboo can report an unconfirmed outcome for an input that actually landed: the server must treat this as EFFECT_UNKNOWN (H1), never NOT_APPLIED."
+}

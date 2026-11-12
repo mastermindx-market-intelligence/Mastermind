@@ -11,6 +11,22 @@ returns). Exit codes: 0 a receipt was produced (read its status field —
 refusals are receipts, not process errors); 1 startup refused (config,
 pin, deny-list load); 2 usage error. Never retry a nonzero-exit or
 uncertain-status action; the receipt is the whole answer.
+
+Every act/slice/vision subcommand needs BOTH --owner and the --lease-nonce
+returned by `lease_acquire`: the lease is single-holder and each
+acquisition has its own nonce (SERVER_VERSION 0.3.0). Missing or wrong
+nonce is a typed LEASE_NONCE_INVALID receipt, not a transport error.
+
+Environment (M2 hardening):
+  MMOS_CU_PRESENCE_MIN_IDLE / MMOS_CU_PACING_SECONDS may only make the
+    gates STRICTER than their defaults (below the floor refuses at
+    startup).
+  MMOS_CU_STATE_DIR / MMOS_CU_DENY / MMOS_CU_RUNTIME may only point
+    INSIDE this tool's own folder (tools/mmos_computer_use/ or a subdir);
+    anything outside refuses at startup.
+  MMOS_CU_TEST_MODE=1 is the explicit test-only escape that permits
+    sub-floor thresholds and out-of-layer paths. Never set it in
+    production: it exists so the unit tests can drive the gates cheaply.
 """
 import argparse
 import json
@@ -26,7 +42,7 @@ import server  # noqa: E402  (same directory; the MCP server module)
 INT_KEYS = {"window_id", "x", "y", "ttl_seconds", "amount"}
 BOOL_KEYS = {"ocr", "allow_foreground"}
 STR_KEYS = {"app", "title", "element_ref", "text", "chord", "direction",
-            "question", "owner", "keep_path"}
+            "question", "owner", "lease_nonce"}
 
 
 def build_parser():
@@ -51,11 +67,12 @@ def build_parser():
         "y": (["--y"], {"type": int}),
         "ocr": (["--ocr"], {"action": "store_true",
                             "help": "capture: include OCR text"}),
-        "keep_path": (["--keep-path"], {"help": "capture: PNG path (scratch)"}),
         "question": (["--question"], {"help": "vision_ask question"}),
         "element_hints": (["--element-hint"], {"action": "append",
                                                "dest": "element_hints"}),
         "owner": (["--owner"], {"help": "lease owner id"}),
+        "lease_nonce": (["--lease-nonce"],
+                        {"help": "nonce from lease_acquire (required on acts)"}),
         "ttl_seconds": (["--ttl-seconds"], {"type": int}),
         "allow_foreground": (["--allow-foreground"], {"action": "store_true"}),
     }
@@ -63,18 +80,29 @@ def build_parser():
         "apps": [],
         "windows": ["app"],
         "inspect": ["window_id"],
-        "capture": ["window_id", "ocr", "keep_path"],
-        "press": ["window_id", "element_ref"],
-        "set_text": ["window_id", "element_ref", "text"],
-        "keys": ["window_id", "chord"],
-        "scroll": ["window_id", "direction", "amount"],
-        "pointer_click": ["window_id", "element_ref", "x", "y"],
-        "slice_front": ["app", "window_id", "title"],
-        "slice_click": ["window_id", "element_ref", "x", "y"],
-        "slice_paste": ["window_id", "text", "element_ref"],
-        "slice_send": ["window_id", "element_ref"],
-        "slice_look": ["window_id"],
-        "vision_ask": ["window_id", "question", "element_hints"],
+        "capture": ["window_id", "ocr"],
+        # Every act/slice/vision action carries the lease owner AND the
+        # acquisition nonce (M5): both are required by the server gate.
+        "press": ["window_id", "element_ref", "owner", "lease_nonce",
+                  "allow_foreground"],
+        "set_text": ["window_id", "element_ref", "text", "owner",
+                     "lease_nonce"],
+        "keys": ["window_id", "chord", "owner", "lease_nonce",
+                 "allow_foreground"],
+        "scroll": ["window_id", "direction", "amount", "owner",
+                   "lease_nonce", "allow_foreground"],
+        "pointer_click": ["window_id", "element_ref", "x", "y", "owner",
+                          "lease_nonce"],
+        "slice_front": ["app", "window_id", "title", "owner",
+                        "lease_nonce"],
+        "slice_click": ["window_id", "element_ref", "x", "y", "owner",
+                        "lease_nonce"],
+        "slice_paste": ["window_id", "text", "element_ref", "owner",
+                        "lease_nonce", "allow_foreground"],
+        "slice_send": ["window_id", "element_ref", "owner", "lease_nonce"],
+        "slice_look": ["window_id", "question", "owner", "lease_nonce"],
+        "vision_ask": ["window_id", "question", "element_hints", "owner",
+                       "lease_nonce"],
         "lease_acquire": ["owner", "ttl_seconds"],
         "lease_release": ["owner"],
         "lease_status": [],

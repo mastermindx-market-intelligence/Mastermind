@@ -4,6 +4,9 @@
 Generic script — works on any home passed via --home. Prints one VERIFY line
 per staged entry (PRESENT / ABSENT / PRESENT_MISMATCH) plus the current
 sha256 of the file. Exits 0 only when every staged entry is present and equal.
+
+--mcp-root DIR compares against the entry pointing at DIR/mmos-computer-use/
+(as written by an install run with the same --mcp-root).
 """
 import argparse
 import hashlib
@@ -15,6 +18,9 @@ EXIT_BAD_HOME = 2
 EXIT_HOME_NOT_FOUND = 3
 EXIT_STAGING_MISSING = 4
 EXIT_INVALID_JSON = 6
+
+MCP_ROOT_DEFAULT = "/Users/chriswong/.t3/mcp"
+SERVER_DIR_NAME = "mmos-computer-use"
 
 
 def fail(code, message):
@@ -28,6 +34,9 @@ def parse_args(description):
                         help="path to the provider-home .claude.json to inspect")
     parser.add_argument("--staging-dir", default=None,
                         help="staged tree root (default: directory containing this script)")
+    parser.add_argument("--mcp-root", default=None, metavar="DIR",
+                        help="MCP server root used by the install being verified "
+                             "(default: " + MCP_ROOT_DEFAULT + ")")
     return parser.parse_args()
 
 
@@ -50,6 +59,17 @@ def load_entries(entries_path):
     return entries
 
 
+def resolve_entries(entries, mcp_root):
+    resolved = {}
+    target_args = [str(mcp_root / SERVER_DIR_NAME / "server.py")]
+    for key, value in entries.items():
+        if key == SERVER_DIR_NAME and isinstance(value, dict):
+            value = dict(value)
+            value["args"] = target_args
+        resolved[key] = value
+    return resolved
+
+
 def sha256_file(path):
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -63,6 +83,8 @@ def main():
     home = resolve_home(args.home)
     base = Path(args.staging_dir) if args.staging_dir else Path(__file__).resolve().parent
     entries = load_entries(base / home.parent.name / "entries.json")
+    mcp_root = Path(args.mcp_root) if args.mcp_root else Path(MCP_ROOT_DEFAULT)
+    entries = resolve_entries(entries, mcp_root)
     try:
         data = json.loads(home.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:

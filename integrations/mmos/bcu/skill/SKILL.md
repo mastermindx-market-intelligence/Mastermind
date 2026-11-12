@@ -65,6 +65,24 @@ build one.
   password panes) are refused. Do not work around a refusal via another app,
   browser, or surface.
 
+## Honest automation
+
+This layer performs ordinary, visible automation only. It never disguises
+itself as a human: no human-like or randomized motion or timing, and no
+fingerprint, user-agent or viewport changes — ever, on any surface. Text is
+delivered whole (paste), never synthesized key-by-key.
+
+On any challenge — CAPTCHA, "are you a robot", sign-in/log-in prompts,
+rate-limit, "too many requests", "unusual activity" or "access denied"
+notices — the layer **stops**: it reports what it saw, marks the send as
+`NOT_APPLIED` / `CHALLENGE_DETECTED`, and does not retry. Solving challenges,
+signing in, or working around rate limits is never attempted by this layer.
+
+Pacing and presence gates are safety properties, never obstacles to route
+around: if the layer refuses because a human is active or a sequence is too
+soon, you wait; you never re-dispatch to dodge the refusal, and you never
+take the need for a gate as a hint to find another way in.
+
 ## Coordinates
 
 `vision_ask` returns coordinates normalized 0–1000 relative to the captured

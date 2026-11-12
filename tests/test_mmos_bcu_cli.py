@@ -9,7 +9,9 @@ peekaboo, screen, or network is touched. Run from the checkout root:
 import io
 import json
 import os
+import shutil
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -35,6 +37,12 @@ class FakeAdapter(object):
         return [{"window_id": 11, "title": "Fixtured main"}]
 
 
+# State dirs created by make_ctx (Lease/Pacer default to the REAL
+# tools/mmos_computer_use/state — a live proof lease there must never be
+# visible to, or mutated by, a unit test). Cleaned in tearDown.
+_STATE_DIRS = []
+
+
 def make_ctx():
     runtime = {
         "peekaboo_bin": "/bin/true",
@@ -42,10 +50,12 @@ def make_ctx():
         "presence_min_idle_seconds": 1.0,
         "pacing_seconds": 1.0,
     }
+    state = tempfile.mkdtemp(prefix="mmos-cu-cli-state-")
+    _STATE_DIRS.append(state)
     deny = server.DenyList.load(os.path.join(TOOL_DIR, "deny.json"))
-    lease = server.Lease()
+    lease = server.Lease(state_dir=state)
     presence = server.Presence(runtime=runtime)
-    pacer = server.Pacer(runtime=runtime)
+    pacer = server.Pacer(state_dir=state, runtime=runtime)
     adapter = FakeAdapter()
     vision = server.VisionClient()
     return server.ToolContext(runtime, deny, lease, presence, adapter,
@@ -53,6 +63,10 @@ def make_ctx():
 
 
 class CliTests(unittest.TestCase):
+    def tearDown(self):
+        while _STATE_DIRS:
+            shutil.rmtree(_STATE_DIRS.pop(), ignore_errors=True)
+
     def run_cli(self, argv, ctx):
         out = io.StringIO()
         with mock.patch.object(sys, "stdout", out):
@@ -124,6 +138,57 @@ class CliTests(unittest.TestCase):
         receipt = json.loads(out.strip())
         self.assertEqual(receipt.get("status"), "OK")
         self.run_cli(["lease_release", "--owner", "cli-test"], ctx=ctx)
+
+    def test_lease_nonce_flag_maps(self):
+        # M5: every act carries the acquisition nonce; the CLI flag must
+        # reach the handler as lease_nonce, exactly once.
+        captured = {}
+
+        def fake_handler(ctx, arguments):
+            captured.update(arguments)
+            return {"content": [{"type": "text", "text":
+                    json.dumps({"status": "NOT_APPLIED",
+                                "cause": "fake"})}], "isError": False}
+
+        with mock.patch.object(server, "handle_tool_call", fake_handler):
+            code, _ = self.run_cli(
+                ["keys", "--window-id", "11", "--chord", "return",
+                 "--owner", "agent-a", "--lease-nonce", "abc123"],
+                ctx=make_ctx())
+        self.assertEqual(code, 0)
+        self.assertEqual(captured.get("lease_nonce"), "abc123")
+        self.assertEqual(captured.get("owner"), "agent-a")
+
+    def test_allow_foreground_flag_maps(self):
+        # M10 CLI gap (live proof red): --allow-foreground must be accepted
+        # by the keys/press/scroll subparsers and reach the handler as a
+        # real bool. It was missing from per_action, so the live CLI proof
+        # died with "unrecognized arguments: --allow-foreground".
+        captured = {}
+
+        def fake_handler(ctx, arguments):
+            captured.update(arguments)
+            return {"content": [{"type": "text", "text":
+                    json.dumps({"status": "NOT_APPLIED",
+                                "cause": "fake"})}], "isError": False}
+
+        for argv in (
+                ["keys", "--window-id", "11", "--chord", "return",
+                 "--owner", "agent-a", "--lease-nonce", "abc123",
+                 "--allow-foreground"],
+                ["press", "--window-id", "11", "--element-ref", "btn1",
+                 "--owner", "agent-a", "--lease-nonce", "abc123",
+                 "--allow-foreground"],
+                ["scroll", "--window-id", "11", "--direction", "down",
+                 "--amount", "3", "--owner", "agent-a",
+                 "--lease-nonce", "abc123", "--allow-foreground"]):
+            captured.clear()
+            with mock.patch.object(server, "handle_tool_call",
+                                   fake_handler):
+                code, _ = self.run_cli(argv, ctx=make_ctx())
+            self.assertEqual(code, 0, argv)
+            self.assertIs(captured.get("allow_foreground"), True, argv)
+            self.assertEqual(captured.get("action"), argv[0])
 
     def test_startup_refusal_exit_1(self):
         refuse = mock.patch.object(

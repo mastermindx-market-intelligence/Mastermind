@@ -1,0 +1,54 @@
+{
+ "effect": "unverifiable",
+ "outcome": {
+  "evidence": "delivery_accepted",
+  "dispatch_state": "dispatched",
+  "route": "local",
+  "dispatched_unit_count": 1,
+  "delivery_mechanism": "window_targeted_events",
+  "delivery_mode": "background",
+  "effect": "unverifiable",
+  "retry_safe": false,
+  "retry_safety": "unsafe",
+  "mutation_dispatched": true,
+  "escalation": "observe_before_retry",
+  "requires_fresh_observation": true,
+  "state": "dispatched_unverified"
+ },
+ "target_identity": {
+  "pid": 49829,
+  "process_start_identity_decimal": "1794395772541729",
+  "kind": "window",
+  "window_id": 98889
+ },
+ "debug_logs": [
+  "[2026-11-11T14:35:51.110Z] DEBUG: Runtime host: local (in-process)"
+ ],
+ "success": true,
+ "target_receipt": {
+  "pid": 49829,
+  "process_start_identity_decimal": "1794395772541729",
+  "window_id": 98889,
+  "process_start_identity": 1794395772541729
+ },
+ "data": {
+  "requestedText": "FG-PROBE",
+  "keyPresses": 8,
+  "executionTime": 0.769787073135376,
+  "deliveryMode": "background",
+  "targetPID": 49829,
+  "totalCharacters": 8,
+  "literalCharactersTyped": 8,
+  "specialKeyPresses": 0,
+  "typedText": "FG-PROBE",
+  "actions": [
+   {
+    "value": "FG-PROBE",
+    "kind": "text"
+   }
+  ],
+  "targetWindowID": 98889,
+  "profile": "linear"
+ },
+ "note": "real peekaboo 4.2.2 background type receipt (exact --pid + --window-id pins background delivery), own fixture, 2026-11-11"
+}

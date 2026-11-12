@@ -1,0 +1,31 @@
+{
+ "success": false,
+ "debug_logs": [
+  "[2026-11-11T15:09:54.725Z] DEBUG: Runtime host: local (in-process)"
+ ],
+ "error": {
+  "hint": "Observe the target and clipboard before deciding whether to retry the paste.",
+  "mutation_dispatched": true,
+  "details": "Paste hotkey did not return a confirmed outcome.",
+  "message": "Paste hotkey did not return a confirmed outcome.",
+  "retry_safe": false,
+  "code": "INTERACTION_FAILED"
+ },
+ "effect": "unverifiable",
+ "outcome": {
+  "effect": "unverifiable",
+  "delivery_mechanism": "composite",
+  "dispatch_state": "may_have_dispatched",
+  "retry_safe": false,
+  "evidence": "completion_unknown",
+  "requires_fresh_observation": true,
+  "escalation": "observe_before_retry",
+  "delivery_mode": "foreground",
+  "retry_safety": "unsafe",
+  "mutation_dispatched": true,
+  "route": "local",
+  "state": "indeterminate"
+ },
+ "data": null,
+ "note": "M11 probe C (foreground, \"=\" form): receipt says success:false \"Paste hotkey did not return a confirmed outcome\" (dispatched:true), but the fixture log shows FIXTURE FIELD CAPTURE-PASTE-FG-dash-probe-C \u2014 the literal dash-prefixed text WAS delivered. Full M11 result: space form parses the value as an option token (broken); \"=\" form accepts and delivers dash-prefixed text literally. Server repair: always build \"--text=<value>\". Also a third case of delivered-but-reported-unconfirmed (H1)."
+}

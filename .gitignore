@@ -104,3 +104,6 @@ research/evidence/ohf_p0/**
 
 # Pinned Rakazo qualification installs its exact contract deps locally.
 integrations/rakazo_qualification/node_modules/
+
+# mmos computer-use runtime state (live lease/pacing; never committed)
+tools/mmos_computer_use/state/

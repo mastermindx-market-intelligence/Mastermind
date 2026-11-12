@@ -1,0 +1,34 @@
+{
+ "debug_logs": [
+  "[2026-11-11T16:00:26.861Z] DEBUG: Runtime host: local (in-process)"
+ ],
+ "success": true,
+ "outcome": {
+  "state": "dispatched_unverified",
+  "escalation": "observe_before_retry",
+  "mutation_dispatched": true,
+  "delivery_mode": "background",
+  "retry_safety": "unsafe",
+  "dispatched_unit_count": 2,
+  "dispatch_state": "dispatched",
+  "retry_safe": false,
+  "requires_fresh_observation": true,
+  "route": "local",
+  "evidence": "delivery_accepted",
+  "effect": "unverifiable",
+  "delivery_mechanism": "window_targeted_events"
+ },
+ "effect": "unverifiable",
+ "data": {
+  "keys": [
+   "return"
+  ],
+  "deliveryMode": "background",
+  "targetWindowID": 98889,
+  "executionTime": 0.37848198413848877,
+  "totalPresses": 1,
+  "count": 1,
+  "targetPID": 49829
+ },
+ "note": "real peekaboo 4.2.2, own fixture pid 49829 window 98889, 2026-11-11: press <chord> --window-id WITHOUT --snapshot delivers background, dispatched_unverified, retry_safety unsafe"
+}
