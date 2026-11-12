@@ -1461,6 +1461,41 @@ def test_the_legacy_return_op_is_adopted_by_the_oldest_child():
     assert not any("OLD" in b for b in bodies)       # answer, not the stale
 
 
+def test_equal_createdAt_tie_breaks_on_id_not_served_order():
+    # Delta-4 D4-2: two finished children carry the SAME createdAt — the
+    # order cannot come from the timestamp, and the children list serves
+    # newest-activity-first, so a bare createdAt sort keeps the served
+    # order and hands the legacy unsuffixed op (the true oldest's turn)
+    # to whichever row the board served first. The tie needs a stable
+    # second key — the id — so the legacy op is adopted deterministically
+    # by ch-1, the true oldest under the tie-break, and the newest-served
+    # child's answer is never the one dropped at delivery.
+    issues, ask_op, child1 = blocked_parent_with_done_child()
+    child1 = dict(child1, createdAt="2026-11-11T10:00:00.000Z")
+    child2 = dict(child1, id="ch-2", identifier="MMO-3",
+                  assigneeAgentId="ag-vega", title="Review it",
+                  createdAt="2026-11-11T10:00:00.000Z")   # the TIE
+    issues["is-1"]["blockedBy"] = board.blocked_by(child1, child2)
+    pc = FakePaperclip(issues=issues)
+    pc.child_rows["is-1"] = [child2, child1]   # served order puts ch-2 first
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    pc.comment_rows["ch-2"] = [board.served_comment(
+        "the review agrees", author_agent_id="ag-vega")]
+    legacy = f"{ask_op}-ret"
+    t3 = FakeT3(messages=[("user", "r1", f"[{legacy}]\n\nthe ask came back"),
+                          ("assistant", "r1", "OLD: the file has 12 lines")],
+                replies=["SECOND: the review agrees"])
+    assert run_with_roster(pc, t3, {}) == 0
+    assert len(t3.sends) == 1
+    assert "MMO-3" in t3.sends[0]            # ch-2, freshly sent under its own op
+    assert "MMO-2" not in t3.sends[0]        # ch-1 owns the legacy turn, no resend
+    assert pc.issues["is-1"]["status"] == "in_review"
+    bodies = [c[2] for c in pc.calls if c[0] == "comment"
+              and not c[2].startswith("[t2-carrier]")]
+    assert bodies == ["SECOND: the review agrees"]   # one delivery, the run's
+    assert not any("OLD" in b for b in bodies)       # answer, not the stale
+
+
 def test_three_finished_children_served_newest_first_return_oldest_first():
     # Delta-3 N1, the required three-child fixture: the children list serves
     # newest-activity-first (captured children_query_dev.json — the done,

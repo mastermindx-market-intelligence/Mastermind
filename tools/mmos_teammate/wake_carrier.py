@@ -1819,9 +1819,13 @@ def handle_return(pc, t3, issue, ask_op, opts, me_id):
     # children_query_dev.json), so the first row the walk sees is the NEWEST
     # child. The legacy unsuffixed return op belongs to the OLDEST child —
     # the single-child era's turn is the first child's answer — so it is
-    # adopted by the earliest createdAt, never by walk position.
+    # adopted by the earliest createdAt, never by walk position. Delta-4
+    # D4-2: an equal-createdAt tie breaks on the id, the same stable second
+    # key _true_oldest_id uses, so the adoption site and the D4-1 guard can
+    # never disagree about who owns the legacy turn.
     oldest_id = min(done_rows,
-                    key=lambda row: row.get("createdAt") or "").get("id")
+                    key=lambda row: (row.get("createdAt") or "",
+                                     row.get("id") or "")).get("id")
     for idx, child in enumerate(done_rows):
         ret_op = _return_op(ask_op, child, single)
         # The single-child era addressed its return turn with the unsuffixed
@@ -2138,7 +2142,8 @@ def ordered_oldest_first(rows):
     more rows where any lacks the timestamp the read is refused
     (CarrierError): an order this code cannot derive fails loudly, it never
     flows silently newest-first. Fewer than two rows have no order to get
-    wrong and pass through unchanged."""
+    wrong and pass through unchanged. Delta-4 D4-2: an equal-createdAt tie
+    is broken by the id as a stable second key, never by the served order."""
     rows = list(rows)
     if len(rows) < 2:
         return rows
@@ -2148,7 +2153,7 @@ def ordered_oldest_first(rows):
             f"{missing} of {len(rows)} rows carry no createdAt; the served "
             "newest-first order cannot be corrected to oldest-first, "
             "refusing the read")
-    rows.sort(key=lambda row: row["createdAt"])
+    rows.sort(key=lambda row: (row["createdAt"], row.get("id") or ""))
     return rows
 
 
