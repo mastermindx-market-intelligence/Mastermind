@@ -1,0 +1,13 @@
+{
+  "observedAt": "2026-11-07T08:19:37.019838+00:00",
+  "source": "386578f66392ae79a1759a0d216c102509277fba",
+  "bridgeSha256": "b0eb627ccc2f01b5a4b52539450d3f2172cc7b5d7daaeb8064e2c88d363bff90",
+  "calls": {
+    "create": 0,
+    "send": 0,
+    "resume": 0,
+    "cancel": 0
+  },
+  "errorClass": "TimeoutError",
+  "closedCode": null
+}

@@ -517,7 +517,10 @@ def _stub_cli_bridge(monkeypatch, result: dict) -> list[dict]:
     import types
     import brain as brain_pkg
     calls: list[dict] = []
+    from brain import cli_bridge as actual_bridge
     mod = types.ModuleType("brain.cli_bridge")
+    # Preserve the real pure selector; only the native provider call is stubbed.
+    mod._application_fabric_selected = actual_bridge._application_fabric_selected
 
     def reason_sync(prompt, **kw):
         calls.append({"prompt": prompt, **kw})
@@ -815,3 +818,23 @@ def test_context_request_transitions_fail_closed_and_repair(monkeypatch):
     assert [row["id"] for row in published] == [directive_id]
     assert mai.directives()[0]["status"] == "published"
     assert pl.context_requests()[0]["status"] == "published_to_orchestrator"
+
+
+def test_build_review_sweeps_private_tail_before_truncation(monkeypatch):
+    _arm_llm_review(monkeypatch)
+    _stub_cli_bridge(monkeypatch, {"ok": True, "text": "ordinary prose. " * 160 + "MASTERMIND_PRIVATE"})
+    review = mai._build_review(2, mai.settings())
+    assert "llm_assessment" not in review
+
+
+def test_cycle_claim_survives_business_crash_without_repeating_steps(monkeypatch):
+    import pytest
+    def crash(*args, **kwargs):
+        raise KeyboardInterrupt("synthetic interruption")
+    monkeypatch.setattr(mai, "_cycle_snapshot", crash)
+    with pytest.raises(KeyboardInterrupt):
+        mai.run_cycle("2026-11-06")
+    result = mai.run_cycle("2026-11-07")
+    assert result == {"ok": False, "held": "original_incomplete", "asof": "2026-11-06", "loop_n": 1}
+    assert mai.loop_log() == []
+    assert mai.status()["review_runtime"]["state"] == "held"

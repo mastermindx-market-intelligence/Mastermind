@@ -1,0 +1,285 @@
+# Shadow risk-budget parameters — PBR (program issue #1693), lane L-S5.
+# Spec: docs/superpowers/specs/2026-10-22-pbr-pm-facts-thesis-risk-budget.md (§4.3).
+#
+# Scope: parameters for brain/shadow_risk_budget.py (evidence-conditioned risk
+# budget) and the price-basis bridge in brain/facts.py (§2.2(ii)).  This budget
+# is SHADOW-ONLY in this wave: it is not wired into decision submission, the
+# allocator, or any settlement path (frozen law 2 / law 23; settlement boundary
+# §8.7).  The categorical conviction caps are deliberately NOT recorded here —
+# they remain inputs supplied by the caller as data, read from the sizing
+# policy in force, never re-declared by this file.
+#
+# Anti-fitting rule (spec §4.3, binding): every number below is chosen from a
+# stated general principle and from none of the program's recorded case
+# outcomes.  No parameter may be revised to hit a number for any single case.
+# Any change bumps `version`, adds a justification, and re-runs the full case
+# suite; a regression in the positive control fails the change.
+#
+# Parameter shape: every leaf parameter is a mapping with `value` plus a
+# written `justification`.  A parameter without a justification is invalid
+# (load_params refuses it).
+
+schema: pbr.shadow_risk_budget_params.v1
+version: 1
+frozen_at: "2026-10-22T08:42:55Z"
+freeze_owner: pbr-seat   # seat ruling Q3 (2026-10-22): owner for the program's life; after closeout config/authority_map.yml governs.
+freeze_record:
+  owner_assigned_at: "2026-10-22T12:53:22Z"
+  change_rule: >-
+    Any change to a parameter value or justification bumps `version` and
+    requires a seat ruling row in the RESEARCH ledger of program #1693.
+  first_freeze: >-
+    Every parameter value and justification below is unchanged from the first
+    freeze at frozen_at (file sha256 57b2099f6c79daeff5a93ed27140707a881a0e1a5f66b55e9430a146b93a75ce,
+    recorded before any test file existed). This revision changes only
+    freeze_owner, this freeze_record block and the bridge description (Q2).
+
+justification_policy: >-
+  Every leaf parameter carries its own `justification`, grounded in portfolio-
+  construction principles (diversification bounds, tolerable mistake sizing,
+  evidence independence, point-in-time honesty) and in no realized outcome of
+  any position.  Ratios and weights are dimensionless fractions of portfolio
+  NAV unless stated otherwise.  A parameter may be questioned, but only with a
+  new principle, never with a case result.
+
+price_basis_bridge:
+  description: >-
+    Tolerance band for the §2.2(ii) price-basis bridge: the ratio of a claimed
+    price (target, trail stop, invalidation level) to a qualifying reference
+    mark: an ECON union-mark store record with provenance.  A CALLER_SUPPLIED
+    mark never qualifies (seat ruling Q2) and yields BASIS_UNRECONCILED, never
+    a pass.  Outside the band, and without an explicit bridge in the
+    fact's basis, the claim is BASIS_UNRECONCILED — an unexplained scale or
+    basis discontinuity finding, never a claim that any mark was wrong.
+  tolerance_band:
+    low:
+      value: 0.5
+      justification: >-
+        A same-basis, same-currency price claim on the same share class sits,
+        in ordinary research practice, within a factor of two of the
+        instrument's decision-time mark: trailing stops are placed inside
+        roughly thirty percent of spot, and twelve-to-eighteen-month targets
+        inside roughly plus-or-minus fifty percent.  A ratio below one half is
+        therefore far more likely a basis discontinuity (split or
+        consolidation ratio, depositary or share-class ratio, cents versus
+        dollars, wrong instrument) than a genuine view, and must be bridged
+        before the level can support a decision.  The bound is the
+        log-symmetric partner of the upper bound, so the screen is not biased
+        toward long or short claims.
+    high:
+      value: 2.0
+      justification: >-
+        Mirror of the lower bound on the log scale: a claimed level more than
+        twice the reference mark is treated as an unexplained scale
+        discontinuity requiring an explicit currency, adjustment or split
+        reconciliation in the record.  Keeping the band log-symmetric around
+        1.0 prevents the screen from embedding any directional view, and the
+        bridge escape hatch keeps legitimately aggressive long-horizon claims
+        usable when the record states the reconciliation.
+
+role_loss_budgets:
+  description: >-
+    Per-role adverse-scenario loss budgets as a fraction of portfolio NAV, and
+    the generic stress move used to convert a loss budget into a weight
+    ceiling: role_budget_weight = max_adverse_nav_fraction /
+    stress_move_assumption.  The conversion is stated once and applies to
+    every role, so role budgets stay mutually proportional and no role's
+    number is tuned in isolation.
+  derivation_note: >-
+    A loss budget is the honest quantity (the role declares how much of the
+    portfolio it may lose in its adverse scenario); a weight ceiling is the
+    derived, checkable quantity.  Dividing by one shared stress move keeps the
+    derivation auditable and identical for all roles.
+  stress_move_assumption:
+    value: 0.30
+    justification: >-
+      One generic severe-but-plausible adverse move for a single common-stock
+      position, applied to every role: a thirty percent idiosyncratic drawdown
+      is the conventional sizing stress for a concentrated research book and
+      is deliberately rounded, generic, and derived from no recorded
+      position.  It is an assumption about forward scenario severity, not an
+      estimate of any name's volatility, and it is the single conversion
+      constant between declared loss budgets and weight ceilings.
+  starter:
+    description: >-
+      An initiation: a new or re-initiated position whose own record does not
+      yet claim multi-cycle confirmation.
+    max_adverse_nav_fraction:
+      value: 0.015
+      justification: >-
+        A position whose own record presents it as unproven must be able to
+        run its entire adverse scenario inside a routine single-name mistake
+        allowance.  One and a half percent of portfolio NAV is the largest
+        loss a single initiation error may cost without impairing the next
+        cycle's capacity to take new risk; the number follows from tolerable
+        mistake sizing, not from any realized loss, and it is what makes a
+        "starter" label connect to an explicit budget instead of coexisting
+        with a full cap.
+  established:
+    description: >-
+      A position with an open episode that carries confirmed, multi-source
+      evidence and a recorded falsifier set.
+    max_adverse_nav_fraction:
+      value: 0.045
+      justification: >-
+        A position that has paid the evidence toll — independent source
+        families, primary material, recorded falsifiers — may risk three times
+        a starter's allowance: the thesis has survived initial scrutiny, and
+        its adverse scenario is conditioned on stated, checkable failure
+        points.  Three times is the smallest whole-number step that recognizes
+        confirmation without approaching the level at which one name could
+        dominate a cycle's outcome.
+  risk_reduction:
+    description: >-
+      A position already being reduced (trim or exit); its forward direction
+      is risk-removing.
+    max_adverse_nav_fraction:
+      value: 0.060
+      justification: >-
+        Reducing a position adds no new risk, so its budget is the most
+        generous of the three roles and exists mainly so the waterfall stays
+        comparable and a reduction is never blocked by sizing arithmetic
+        (missing or degraded evidence must never silently liquidate a name).
+        The allowance is bounded by the same single-name mistake logic as the
+        other roles and is set above the established allowance exactly because
+        the action removes exposure rather than adding it.
+
+evidence_multiplier:
+  description: >-
+    Multiplicative haircut applied to the running weight for evidence quality.
+    Composition drivers (source-family count, primary mix, technical coverage)
+    multiply, are floored, and never zero; the recorded-fact driver (a
+    contradicted or basis-unreconciled supporting fact) multiplies by zero.
+    Reliability and independence carry the weight, not raw source count.
+  multiplier_floor:
+    value: 0.30
+    justification: >-
+      A composition haircut deeper than seventy percent would make the
+      evidence step, rather than the declared role budget, the de-facto sizer
+      for every weakly evidenced name, which would let an evidence screen
+      silently replace the deterministic allocator.  The floor keeps the
+      haircut an adjustment that preserves a monotone ordering by evidence
+      quality, while contradicted or unreconciled findings bypass it
+      entirely; it is a structural bound on one step's authority, not a
+      judgment about any name.
+  source_family_factor:
+    "1":
+      value: 0.6
+      justification: >-
+        One independent source family cannot distinguish a signal from that
+        family's own blind spots: its failure modes are unobservable from
+        inside it, and several dashboards reading one underlying series are
+        still one family.  The haircut is heavy but not zeroing, because a
+        single family can still be primary and checkable; the discount prices
+        the missing independence, which corroboration requires.
+    "2":
+      value: 0.8
+      justification: >-
+        Two independent families is the classical corroboration minimum; the
+        residual discount reflects that two families can still share an
+        upstream dependency the record cannot exclude, so full credit waits
+        for a third independent family rather than being granted at the
+        minimum.
+    "3plus":
+      value: 1.0
+      justification: >-
+        Beyond three independent families, additional count adds little
+        discriminatory power to an initiation decision: independence and
+        reliability carry the weight, not the number of sources, so the table
+        saturates.  Saturation also removes any incentive to stack correlated
+        sources to dress up a weak record.
+  primary_mix_factor:
+    primary_dominant:
+      value: 1.0
+      justification: >-
+        When the record's evidence is mostly primary material (filings and
+        company releases) the numbers are closest to their source and no
+        interpretation discount applies.
+    mixed:
+      value: 0.9
+      justification: >-
+        A record mixing primary and derived sources inherits part of the
+        derived layer's interpretation risk: vendor and model readings of
+        primary data add one layer of transform that the decision cannot
+        inspect directly, and a ten percent discount is the proportionate
+        charge for that layer.
+    derived_only:
+      value: 0.75
+      justification: >-
+        Evidence that is entirely vendor-derived or model-interpreted contains
+        no primary source, so every number is at least one interpretation away
+        from the underlying facts.  A quarter's discount marks the record as
+        dependent on an unexamined transform without pretending the derived
+        layer is worthless; primary-versus-derived mix is exactly the
+        distinction a source-count screen would miss.
+  technical_coverage_factor:
+    ok:
+      value: 1.0
+      justification: >-
+        Price and liquidity context is complete enough to corroborate the
+        claim, so no completeness discount applies.  Coverage is a
+        completeness proxy, not a truth signal, and grants no positive credit
+        beyond neutrality.
+    degraded:
+      value: 0.85
+      justification: >-
+        Degraded coverage means the record itself states that price or
+        liquidity context cannot fully corroborate the claim; the discount is
+        mild because the limitation is disclosed in the record rather than
+        discovered, and a disclosed limitation is already partly priced by the
+        decision that recorded it.
+    absent:
+      value: 0.7
+      justification: >-
+        With no coverage the claim cannot be checked against market context at
+        all, which is a strictly weaker position than a disclosed degradation,
+        but still not a zero: the fact is recorded and checkable later, and an
+        evidence screen must never silently liquidate or exclude a name on
+        missing data alone.
+  unreconciled_fact_factor:
+    value: 0.0
+    justification: >-
+      A supporting fact that is CONTRADICTED by primary evidence, or
+      BASIS_UNRECONCILED against its reference mark, removes the eligibility of
+      a risk-increasing action outright: contradiction is not averaged away,
+      and a stated level whose basis does not reconcile cannot condition size.
+      The evidence step therefore multiplies by zero rather than by any finite
+      discount.  The rule is conditional on the recorded evidence, never on the
+      instrument, so any name with such a finding is treated identically.
+
+concentration:
+  description: >-
+    Concentration ceilings in weight space, applied after the role and
+    evidence steps.  Each is a generic diversification bound expressed as a
+    weight so it is checkable before any loss estimate exists; the step value
+    is the minimum of the single-name ceiling and the remaining room under the
+    issuer and correlated-event caps.
+  max_single_name_weight:
+    value: 0.15
+    justification: >-
+      Generic ceiling for one name in a concentrated long-only book of common
+      stocks: at the shared thirty percent stress move, a fifteen percent
+      weight costs about four and a half percent of NAV in the adverse
+      scenario, the boundary beyond which a single thesis error stops being a
+      routine mistake and starts impairing the cycle.  The bound is stated
+      independently of any book's existing allocator limits so it can audit
+      them rather than inherit them.
+  same_issuer_total_cap:
+    value: 0.20
+    justification: >-
+      All instruments of one issuer — share classes, depositary receipts,
+      correlated listings — share one credit, one disclosure stream and one
+      failure mode, so total exposure to that single point of failure is
+      capped.  The cap sits above the single-name ceiling only to admit a
+      small second listing alongside a full single-name position; it exists to
+      stop a thesis from being doubled through correlated paper, not to
+      reward issuance structure.
+  correlated_event_cap:
+    value: 0.25
+    justification: >-
+      Distinct issuers can still be one bet when they share a single catalyst
+      — one event, one ruling, one supply dependency.  A quarter of the book
+      is the largest share of NAV permitted to depend on any single event
+      resolving one way, keeping the remaining three quarters unentangled from
+      that resolution; the cap is charged only with exposure the record
+      declares as overlapping, never with a sector label alone.

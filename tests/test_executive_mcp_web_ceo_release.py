@@ -169,7 +169,7 @@ def test_one_app_client_reads_create_no_lifecycle_and_submit_creates_one_job(
                 read_schema=CEO_WEB_CEO_V2_READ_SCHEMA))
         readers.bind_fabric_source(
             bounded_runtime=lambda: service._namespace_custody.bound_runtime(service._require_runtime()),
-            armed={}, runtime_identity={"root": "readonly:installed-executive-runtime", "db_present": True, "identity": None})
+            armed={}, runtime_identity={"root": None, "db_present": True, "identity": None})
         await service.start()
         try:
             bound = dataclasses.replace(settings, read_from_ceo_ingress=True,

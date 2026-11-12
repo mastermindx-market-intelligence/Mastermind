@@ -1,0 +1,47 @@
+{
+  "schema": "mastermind.plain-original-collection-source.v1",
+  "at": "2026-10-13T22:25:30.195624+00:00",
+  "base_sha256": "f4c03c18c443e39114e2eaec07401aad1f619519323f2bd265a5c025a56d8f44",
+  "candidate_sha256": "a866741df19d6fad5a4bf4dbdfcf8bdeb67e158723dee37c23bc6390cbd78f95",
+  "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "scopes": {
+    "fabric-manifest-framing-review-01a11e90-v1": {
+      "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+      "parent": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+      "host": "mb",
+      "packet_path": "/Volumes/Mastermind/agent-workspaces/claude/44ff44e73b840f81/fabric-start-publication-20261012-fb76f8a5c8c5e179/integrations/session_bridge/artifact_manifest_framing/REVIEW_PACKET.txt",
+      "packet_sha256": "e7fb39a83f6e7456fe976c83f88f95602e2164bb00acfdf36f7aaade7e272f88",
+      "support_digest": "4014714eb8865585f11b2a0120975479c10f0567cad968c5a57e5101f8c8f114",
+      "destination": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/fabric-manifest-framing-review-01a11e90-v1-collection-v1"
+    },
+    "mm-os-incident-custody-direct-review-20261013-01a104e6": {
+      "root": "01a104e6-58f8-76d3-8d99-1302a1cca072",
+      "parent": "01a104e6-58f8-76d3-8d99-1302a1cca072",
+      "host": "ubuntu1",
+      "packet_path": "/Volumes/Mastermind/evidence/mastermind-os-noir-product-convergence-20261003-astra-001/production-continuation-20261010/issuer-custody-repair-20261013/direct-preventive-review-packet.md",
+      "packet_sha256": "dc3bfd8aaf0358c160c7290def2b3d3c6ef45893e1042620346e8ee7070d588c",
+      "support_digest": "4014714eb8865585f11b2a0120975479c10f0567cad968c5a57e5101f8c8f114",
+      "destination": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/mm-os-incident-custody-direct-review-20261013-01a104e6-collection-v1"
+    }
+  },
+  "tests": {
+    "focused_and_artifact_compatibility": {
+      "pass": 71,
+      "failure": 0,
+      "skipped": 0,
+      "receipt": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/PLAIN_FINAL_71.xml",
+      "sha256": "ed32a5feaf6da868e7687787be7ceb3fff58a9ecc4e473b465a424757188cf97"
+    },
+    "readback_counterexamples": {
+      "old_failed": 6,
+      "receipt": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/PLAIN_READBACK_RED.xml",
+      "sha256": "5f65cc68694e73f6e84bb0e57c662d3571f7de2d16d6b21ff8e1c014db04cd23"
+    }
+  },
+  "state": "INSTALLED_AND_ORIGINAL_PARENT_PLAIN_RETURN_CONSUMED",
+  "no_new_dispatch_or_lifecycle": true,
+  "proof_scope": "retained remote packet equality and process stdout capture at collection; not producer root authentication or causal packet execution attestation",
+  "installation_receipt": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/PLAIN_COLLECTOR_INSTALL.json",
+  "installation_receipt_sha256": "f24e46043d444e0bfdebc6aa3c5aba634cd90ecb05f61143bfea898e57052d98",
+  "security_review_sha256": "c22df6e2ce5fc5d9a3544d46b391703f6cc098c9a903cc9fb2577ce38f03197f"
+}

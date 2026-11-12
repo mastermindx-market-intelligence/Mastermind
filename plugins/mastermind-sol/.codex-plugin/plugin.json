@@ -1,6 +1,6 @@
 {
   "name": "mastermind-sol",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Governed Chairman and CEO workflows for current-source recovery, company-state reconciliation, bounded CEO-intent drafting, return review, pull-request review, and durable closeout.",
   "author": {
     "name": "Mastermind-X"

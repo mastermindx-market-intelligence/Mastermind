@@ -1,0 +1,26 @@
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "scripts": [
+    {
+      "name": "Check project team",
+      "command": "/path/to/qualified/mastermind-t3-team.pyz check examples/t3_project_teams/mastermind-os-template.json",
+      "icon": "configure",
+      "runOnWorktreeCreate": false,
+      "runOnSettle": false
+    },
+    {
+      "name": "Inspect project graph",
+      "command": "/path/to/qualified/mastermind-t3-team.pyz graph examples/t3_project_teams/mastermind-os-template.json",
+      "icon": "configure",
+      "runOnWorktreeCreate": false,
+      "runOnSettle": false
+    },
+    {
+      "name": "Prepare COO launch request",
+      "command": "/path/to/qualified/mastermind-t3-team.pyz launch-request examples/t3_project_teams/mastermind-os-template.json --project-id REPLACE_WITH_EXACT_PROJECT --request-id replace-with-owned-operation --environment-id REPLACE_WITH_EXACT_ENVIRONMENT",
+      "icon": "configure",
+      "runOnWorktreeCreate": false,
+      "runOnSettle": false
+    }
+  ]
+}

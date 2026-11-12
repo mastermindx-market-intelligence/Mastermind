@@ -1,0 +1,8 @@
+--- a/native_remote.py
++++ b/native_remote.py
+@@ -220 +220 @@
+-def terminal(here, key, mode, model, env, started, rc, *, timing=None):
++def terminal(here, key, mode, model, env, started, rc, *, timing=None, output_binding=None):
+@@ -244,0 +245,2 @@
++    if output_binding is not None:
++        value["output_binding"] = output_binding

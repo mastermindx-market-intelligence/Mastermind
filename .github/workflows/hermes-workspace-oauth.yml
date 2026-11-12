@@ -1,0 +1,46 @@
+name: Hermes Workspace OAuth engine
+
+on:
+  pull_request:
+    paths:
+      - 'integrations/hermes_qualification/workspace_oauth_privacy/**'
+      - 'integrations/hermes_harness/native_executive_consumer.py'
+      - 'integrations/hermes_harness/native_mcp.py'
+      - 'integrations/hermes_harness/native_agentos_context.py'
+      - 'integrations/hermes_runtime/native_agentos_memory.py'
+      - 'ops/executive_os/native_gateway_sources.py'
+      - 'ops/executive_os/release_manifest.py'
+      - 'tests/test_hermes_vendor_derivation.py'
+      - 'tests/test_hermes_workspace_oauth.py'
+      - '.github/workflows/hermes-workspace-oauth.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hermes-workspace-oauth-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  original-oauth-engine:
+    name: Pinned OAuth and Streamable HTTP engine
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the recorded qualification environment
+        run: python -m pip install --disable-pip-version-check -r integrations/hermes_qualification/workspace_oauth_privacy/requirements.txt
+      - name: Run the original engine against in-process HTTP fixtures
+        run: python -m pytest -o addopts= -q --tb=short integrations/hermes_qualification/workspace_oauth_privacy/engine_cases.py --junitxml=workspace-oauth-engine.xml
+      - name: Retain the exact job result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-oauth-engine
+          path: workspace-oauth-engine.xml
+          if-no-files-found: error

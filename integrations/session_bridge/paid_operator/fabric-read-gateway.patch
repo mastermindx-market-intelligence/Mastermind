@@ -1,0 +1,64 @@
+--- a/gateway.mjs
++++ b/gateway.mjs
+@@ -72,0 +73 @@
++import { FABRIC_OPERATOR_TOOLS, FABRIC_OPERATOR_NAMES, createOperatorHandler } from './fabric-operator.mjs';
+@@ -495 +496 @@
+-  if (typeof p === 'string' && p.length > 0) return 'p:' + p;
++  if (typeof p === 'string' && p.length > 0) return 'p:' + p + (auth.fabricOperator ? ':operator:' + auth.fabricOperator.digest : '');
+@@ -870 +871 @@
+-  constructor({ id, principalKey, principalTag, cfg, lists, stats, onDestroyed, owner }) {
++  constructor({ id, principalKey, principalTag, cfg, lists, stats, onDestroyed, owner, operatorDelegation = false }) {
+@@ -919,0 +921 @@
++    this.fabricOperator = cfg.fabricOperatorInvoke && operatorDelegation ? createOperatorHandler(cfg.fabricOperatorInvoke) : null;
+@@ -923,0 +926 @@
++    if (FABRIC_OPERATOR_NAMES.has(name) && !this.fabricOperator) return false;
+@@ -928,0 +932 @@
++    if (this.fabricOperator) tools.push(...FABRIC_OPERATOR_TOOLS);
+@@ -1148,0 +1153,6 @@
++    }
++
++    if (this.fabricOperator && FABRIC_OPERATOR_NAMES.has(name)) {
++      this.bumpTool(name);
++      try { return await this.fabricOperator(name, request?.params?.arguments, extra?.authInfo); }
++      catch { return { isError: true, content: [{ type: 'text', text: '{"state":"OPERATOR_TRANSPORT_UNVERIFIED","retry_authorized":false}' }] }; }
+@@ -2012,0 +2023 @@
++        operatorDelegation: Boolean(req.auth?.fabricOperator),
+--- a/tailnet-gateway.mjs
++++ b/tailnet-gateway.mjs
+@@ -20,0 +21 @@
++import { FABRIC_OPERATOR_TOOLS, makeControllerInvoker, operatorAuth } from './fabric-operator.mjs';
+@@ -95,0 +97,13 @@
++  let operatorInvoke = null;
++  if (config.fabricOperator !== undefined) {
++    const settings = config.fabricOperator;
++    if (accountLabel !== 'fabric-read' || settings === null || Array.isArray(settings)
++        || typeof settings !== 'object' || Object.keys(settings).sort().join(',') !== 'ownerPath,python') {
++      throw new TailnetGatewayConfigError('fabric operator configuration refused');
++    }
++    operatorInvoke = makeControllerInvoker(settings);
++    config.fabricOperatorInvoke = operatorInvoke;
++    config.toolAllowlist = [...config.toolAllowlist, ...FABRIC_OPERATOR_TOOLS.map(t => t.name)];
++    delete config.fabricOperator;
++  }
++
+@@ -126 +140,2 @@
+-  const auth = createTunnelAuth({ accountLabel });
++  const baseAuth = createTunnelAuth({ accountLabel });
++  const auth = operatorInvoke ? operatorAuth(baseAuth, operatorInvoke) : baseAuth;
+--- a/private_service.py
++++ b/private_service.py
+@@ -82,0 +83 @@
++    "fabric-operator.mjs",
+@@ -99 +100,2 @@
+-LEGACY_STAGE_FILES_V5 = tuple(name for name in STAGE_FILES if name != TAILNET_GATEWAY_NAME)
++LEGACY_STAGE_FILES_V6 = tuple(name for name in STAGE_FILES if name != "fabric-operator.mjs")
++LEGACY_STAGE_FILES_V5 = tuple(name for name in LEGACY_STAGE_FILES_V6 if name != TAILNET_GATEWAY_NAME)
+@@ -106,0 +109 @@
++        frozenset(LEGACY_STAGE_FILES_V6),
+@@ -615,0 +619,6 @@
++    if account == "fabric-read":
++        owner_path = user_root / ".claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/fabric_operator_owner.py"
++        if owner_path.is_symlink() or not owner_path.is_file():
++            raise SystemExit("operator owner must be installed and qualified before gateway activation")
++        config["fabricOperator"] = {"python": str(Path(sys.executable).resolve()), "ownerPath": str(owner_path)}
++

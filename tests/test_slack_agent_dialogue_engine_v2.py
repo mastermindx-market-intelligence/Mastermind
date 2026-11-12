@@ -2780,3 +2780,28 @@ def test_v2_valid_relay_packet_remains_positive_control() -> None:
     assert observed.packet == packet
     assert classified.consultation_packet_count == 1
     assert classified.consultation_packet_ineligible_count == 0
+
+
+def test_read_bound_parent_returns_canonical_frame_without_effect():
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    client.add_parent(parent_message(author=BOT))
+    result = run(make_engine(client).read_bound_parent(context=context(), thread_ts=THREAD_TS))
+    assert result.thread_ts == THREAD_TS
+    assert result.parent == parent_value()
+    assert client.parent_post_call_count == client.post_call_count == 0
+
+
+@pytest.mark.parametrize("case", ["foreign_thread", "allowed_human", "duplicate", "mutated", "absent"])
+def test_read_bound_parent_refuses_unproven_parent(case):
+    client = InMemorySlackClient(relay_bot_user_id=BOT)
+    parent = parent_message(author=SOL1 if case == "allowed_human" else BOT)
+    if case == "mutated":
+        parent = dataclasses.replace(parent, edited=True)
+    if case != "absent":
+        client.add_parent(parent)
+    if case == "duplicate":
+        client.add_parent(parent_message(author=BOT, ts="1787471000.000002"))
+    with pytest.raises(DialogueEngineError):
+        run(make_engine(client).read_bound_parent(
+            context=context(), thread_ts="1787471000.000003" if case == "foreign_thread" else THREAD_TS))
+    assert client.parent_post_call_count == client.post_call_count == 0

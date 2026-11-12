@@ -7,7 +7,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-import test_executive_mcp_app_composition as existing
+from tests import test_executive_mcp_app_composition as existing
 from integrations.executive_mcp import server
 from ops.executive_os import executive_mcp_entry as entry
 
@@ -35,16 +35,31 @@ def test_actual_outer_dispatch_and_path_fence(settings):
             assert (await client.get('/workspace/mission/current?work_ref=WS:ONE&root_job_id=JOB-001')).status_code == 200
             assert (await client.get('/workspace/window/current')).status_code == 200
             assert workspace.calls[-1][1] == b'work_ref=WS:ONE&root_job_id=JOB-001'
+            mission_result = (
+                '/workspace/mission-result/current?work_ref=WS:ONE&root_job_id=JOB-001'
+                '&job_id=JOB-002&attempt_id=ATT-' + ('ab' * 16)
+                + '&result_envelope_digest=' + ('cd' * 32)
+            )
+            assert (await client.get(mission_result)).status_code == 200
+            assert workspace.calls[-1] == (
+                '/workspace/mission-result/current',
+                mission_result.split('?', 1)[1].encode(),
+            )
             calls = len(workspace.calls) + len(content.calls)
             for url, method in [('/workspace/programs/current?x=1','GET'),('/workspace/work/current?x=1','GET'),
                                 ('/workspace/window/current?x=1','GET'),
                                 ('/workspace/programs/current/','GET'),('/workspace/work/current/','GET'),
+                                ('/workspace/mission-result/current/','GET'),
                                 ('/workspace%2Fprograms/current','GET'),
+                                ('/workspace%2Fmission-result/current','GET'),
                                 ('/workspace/programs/current','POST'),('/workspace/work/current','POST'),
+                                ('/workspace/mission-result/current','POST'),
+                                ('/workspace/mission-result/current','HEAD'),
                                 ('/workspace/window/current','HEAD'),
                                 ('/mcp?x=1','POST')]:
                 assert (await client.request(method,url)).status_code == 404
-            assert (await client.get('/workspace/programs/current',headers=[('Authorization','Bearer a'),('Authorization','Bearer b')])).status_code in (400,401)
+            for path in ('/workspace/programs/current', mission_result):
+                assert (await client.get(path,headers=[('Authorization','Bearer a'),('Authorization','Bearer b')])).status_code in (400,401)
             assert len(workspace.calls)+len(content.calls)==calls
             assert (await client.get('/mcp')).status_code == 404
     asyncio.run(check())
@@ -54,17 +69,40 @@ def test_absent_mounts_keep_legacy_closed(settings):
     app = server.build_executive_mcp_app(settings, audit_sink=existing.Sink())
     async def check():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url=entry.PUBLIC_ORIGIN) as client:
-            for path in ('/workspace/programs/current','/workspace/work/current','/workspace/mission/current','/workspace/window/current','/os/'):
+            for path in ('/workspace/programs/current','/workspace/work/current','/workspace/mission/current','/workspace/mission-result/current','/workspace/window/current','/os/'):
                 assert (await client.get(path)).status_code==404
     asyncio.run(check())
 
 
-@pytest.fixture
-def static_source(tmp_path,monkeypatch):
+def test_byok_fixed_route_uses_existing_outer_fence(settings):
+    workspace = Mount()
+    app = server.build_executive_mcp_app(settings, audit_sink=existing.Sink(), workspace_app=workspace)
+    async def check():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=entry.PUBLIC_ORIGIN) as client:
+            path = '/workspace/byok/roles/current'
+            assert (await client.get(path)).status_code == 200
+            assert workspace.calls == [(path, b'')]
+            for method, target in [('GET', path+'?host=ubuntu1'), ('GET', path+'/'),
+                    ('GET', '/workspace/byok%2Froles/current'), ('HEAD', path), ('POST', path)]:
+                assert (await client.request(method, target)).status_code == 404
+            assert (await client.get(path, headers=[('Authorization', 'Bearer a'),
+                ('Authorization', 'Bearer b')])).status_code in (400, 401)
+            assert workspace.calls == [(path, b'')]
+    asyncio.run(check())
+
+
+@pytest.fixture(params=["legacy", "noir"])
+def static_source(tmp_path,monkeypatch,request):
     source=tmp_path/'sealed-release';dist=source/'app/mastermind_os/dist';(dist/'assets').mkdir(parents=True)
     (dist/'index.html').write_text('<link rel="stylesheet" href="/os/assets/index-abc.css"><script src="/os/assets/index-def.js"></script>')
     (dist/'assets/index-abc.css').write_text('body { color: white; }')
     (dist/'assets/index-def.js').write_text('console.log("fixture");')
+    if request.param == "noir":
+        for name in ("assets/atelier-office-image.jpg", "assets/Manrope-Variable-font.ttf", "assets/Inter-Variable-font.woff2",
+                     "licenses/fonts/Inter-OFL.txt", "licenses/fonts/Manrope-OFL.txt", "licenses/fonts/Manrope-FONTLOG.txt"):
+            path = dist/name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"sealed fixture bytes")
     monkeypatch.setattr(entry,'require_sealed_path',lambda *a,**k:None)
     return source
 
@@ -78,6 +116,17 @@ def test_asset_manifest_and_callback_headers(static_source,settings):
     async def check():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url=entry.PUBLIC_ORIGIN) as client:
             index=await client.get('/os/')
+            for item in manifest['files']:
+                route = '/os/' if item['path'] == 'index.html' else '/os/' + item['path']
+                asset = await client.get(route)
+                assert asset.status_code == 200
+                assert asset.headers['content-type'] == item['mime']
+                assert asset.headers['cache-control'] == 'no-store'
+                assert asset.headers['x-content-type-options'] == 'nosniff'
+                assert "font-src 'self'" in asset.headers['content-security-policy']
+                assert asset.content == (dist/item['path']).read_bytes()
+                if route != '/os/':
+                    assert (await client.get(route + '?x=1')).status_code == 404
             for path in ('/os/auth/callback?code=secret&state=opaque','/os/?work_ref=WS:ONE&root_job_id=JOB-001'):
                 reply=await client.get(path);assert reply.status_code==200 and reply.content==index.content
                 assert b'secret' not in reply.content
@@ -88,6 +137,16 @@ def test_asset_manifest_and_callback_headers(static_source,settings):
                 assert [tokens for tokens in directives if tokens and tokens[0] == 'connect-src'] == [
                     ['connect-src', "'self'", 'https://dev-eo0jf8us5mup7wd5.us.auth0.com']
                 ]
+                assert [tokens for tokens in directives if tokens and tokens[0] == 'frame-src'] == [
+                    ['frame-src', "'self'", 'https://dev-eo0jf8us5mup7wd5.us.auth0.com']
+                ]
+                ancestors = [tokens for tokens in directives if tokens and tokens[0] == 'frame-ancestors']
+                assert ancestors == [['frame-ancestors', "'self'" if path.startswith('/os/auth/callback')
+                                      else "'none'"]]
+            # The callback can be framed only by its own origin; no broad framing grant
+            # is allowed to reach the app shell, static assets, or bearer APIs.
+            assert "frame-ancestors 'none'" in index.headers['content-security-policy']
+            assert "frame-ancestors 'none'" in (await client.get('/os/assets/index-def.js')).headers['content-security-policy']
             assert (await client.get('/os/assets/index-def.js')).headers['content-type']=='text/javascript; charset=utf-8'
             for path in ('/os/?x=1','/os/?work_ref=WS:ONE','/os/auth/callback?code=a&code=b',
                          '/os/auth/callback?next=https://evil.example','/os/assets/index-def.js?x=1',
@@ -263,7 +322,7 @@ def test_public_mount_transport_fence_precedes_dispatch(settings, static_source)
         workspace_app=workspace, os_app=entry.load_os_app(static_source))
     async def check():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url=entry.PUBLIC_ORIGIN) as client:
-            for path in ('/workspace/programs/current', '/os/', '/os/auth/callback'):
+            for path in ('/workspace/programs/current', '/workspace/mission-result/current', '/os/', '/os/auth/callback'):
                 assert (await client.get(path)).status_code == 200
                 assert (await client.get(path,headers={'Origin':entry.PUBLIC_ORIGIN})).status_code == 200
                 before = len(workspace.calls)
@@ -391,6 +450,7 @@ def test_selected_profile_keeps_optional_mount_absence(settings, profile):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                     base_url=entry.PUBLIC_ORIGIN) as client:
             for path in ("/workspace/programs/current", "/workspace/mission/current",
+                         "/workspace/mission-result/current",
                          "/workspace/window/current", "/os/"):
                 assert (await client.get(path)).status_code == 404
     asyncio.run(check())
@@ -410,7 +470,14 @@ def test_selected_profile_keeps_workspace_dispatch(settings, profile):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                     base_url=entry.PUBLIC_ORIGIN) as client:
             assert (await client.get("/workspace/programs/current")).status_code == 200
-            assert workspace.calls
+            mission_result = (
+                "/workspace/mission-result/current?work_ref=WS:ONE&root_job_id=JOB-001"
+                "&job_id=JOB-002&attempt_id=ATT-" + ("ab" * 16)
+                + "&result_envelope_digest=" + ("cd" * 32)
+            )
+            assert (await client.get(mission_result)).status_code == 200
+            query = mission_result.split("?", 1)[1].encode()
+            assert ("/workspace/mission-result/current", query) in workspace.calls
     asyncio.run(check())
 
 
@@ -510,3 +577,43 @@ def test_public_mount_trusts_only_loopback_forwarded_scheme(settings):
                 assert (await client.get('/workspace/programs/current',headers={'X-Forwarded-Proto':'https'})).status_code==expected
         assert len(mount.calls)==1
     asyncio.run(check())
+
+
+@pytest.mark.parametrize('fault', ['missing-license', 'changed-license', 'extra-license', 'renamed-font', 'partial-six', 'empty-directory'])
+def test_noir_asset_and_license_layout_is_closed(static_source, fault):
+    dist = static_source/'app/mastermind_os/dist'
+    if not (dist/'licenses').exists():
+        # The parameterized legacy layout also refuses an arbitrary new asset/directory.
+        (dist/'unexpected').mkdir()
+        with pytest.raises(ValueError): entry.build_os_asset_manifest(static_source)
+        return
+    manifest = entry.build_os_asset_manifest(static_source)
+    (dist/'asset-manifest.json').write_text(json.dumps(manifest))
+    license = dist/'licenses/fonts/Inter-OFL.txt'
+    if fault == 'missing-license': license.unlink()
+    elif fault == 'changed-license': license.write_text('changed')
+    elif fault == 'extra-license': (dist/'licenses/fonts/foreign.txt').write_text('extra')
+    elif fault == 'renamed-font': (dist/'assets/Manrope-Variable-font.ttf').rename(dist/'assets/foreign.ttf')
+    elif fault == 'partial-six':
+        for path in (dist/'licenses/fonts').iterdir(): path.unlink()
+    else: (dist/'unexpected').mkdir()
+    with pytest.raises(ValueError): entry.load_os_app(static_source)
+
+
+def test_static_owner_independently_refuses_partial_or_foreign_layouts():
+    from integrations.mastermind_executive_app.os_assets import os_asset_mimes
+    base = ['index.html', 'assets/index-css.css', 'assets/index-js.js']
+    noir = base + ['assets/atelier-office-image.jpg', 'assets/Manrope-Variable-font.ttf',
+                   'assets/Inter-Variable-font.woff2', 'licenses/fonts/Inter-OFL.txt',
+                   'licenses/fonts/Manrope-OFL.txt', 'licenses/fonts/Manrope-FONTLOG.txt']
+    valid = {('/os/' if n == 'index.html' else '/os/'+n): (b'x', m) for n,m in os_asset_mimes(noir).items()}
+    server.OsStaticApp(valid)
+    for size in (4, 5, 6, 7, 8):
+        partial = dict(list(valid.items())[:size])
+        with pytest.raises(ValueError): server.OsStaticApp(partial)
+    foreign = dict(valid)
+    foreign['/os/licenses/fonts/foreign.txt'] = foreign.pop('/os/licenses/fonts/Inter-OFL.txt')
+    with pytest.raises(ValueError): server.OsStaticApp(foreign)
+    wrong_mime = dict(valid)
+    wrong_mime['/os/licenses/fonts/Inter-OFL.txt'] = (b'x', 'text/html; charset=utf-8')
+    with pytest.raises(ValueError): server.OsStaticApp(wrong_mime)

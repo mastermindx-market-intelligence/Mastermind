@@ -15,20 +15,34 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import inspect
 import json
 import os
+import re
 import shutil
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import yaml
 
 import bot  # noqa: F401
 
+from brain import provider_failure  # pure typing module — no brain/bot/app imports
 from common.redaction import sanitize_external_text
 
 _ROOT = Path(__file__).resolve().parent.parent
 _CFG = _ROOT / "config" / "agents.yml"
+# Stable browser-safe failure code. Raw provider/SDK exceptions remain internal for
+# classification and telemetry but must never be streamed to the user surface.
+CHAT_ERROR_CODE = "advisor_chat_unavailable"
+CHAT_ERROR_MESSAGE = "Mastermind AI is temporarily unavailable. Please retry."
+
+
+def public_chat_error_event() -> dict[str, str]:
+    """Return the stable, browser-safe chat failure envelope."""
+    return {"type": "error", "code": CHAT_ERROR_CODE, "error": CHAT_ERROR_MESSAGE}
 
 # Headless reasoning must never open a permission prompt. Keep this adapter-level
 # invariant independent of user/project Claude settings and config drift.
@@ -47,6 +61,101 @@ try:
     _SDK = True
 except Exception:                       # SDK not installed -> subprocess fallback
     _SDK = False
+
+
+class ProviderStartRefused(RuntimeError):
+    """Veto before an SDK/subprocess/model effect; no retry/fallback allowed."""
+
+
+@dataclass(frozen=True, slots=True)
+class _ProviderRefusalRunBinding:
+    """Identity owned by one existing Claude invocation, not an effect verdict."""
+
+    run_id: str
+    book: str
+    role: str
+
+
+_REFUSAL_RUN_ID = re.compile(r"[A-Za-z0-9_.:+-]{1,160}\Z")
+
+
+def _valid_refusal_run_binding(value) -> bool:
+    return (
+        type(value) is _ProviderRefusalRunBinding
+        and type(value.run_id) is str
+        and _REFUSAL_RUN_ID.fullmatch(value.run_id) is not None
+        and type(value.book) is str
+        and value.book in _CLAUDE_BOOK_SERVERS
+        and type(value.role) is str
+        and 0 < len(value.role) <= 64
+        and value.role.isascii()
+    )
+
+
+def _bind_provider_refusal_run(
+    exc: ProviderStartRefused, run_id: str | None, book: str | None, role: str,
+) -> None:
+    """Attach only this invocation's identity; ambiguity stays unavailable.
+
+    Early waterfall/Codex dispatch and low-level transports do not own this
+    run-log identity and must not call this helper. Metadata never enters the
+    exception's args/text or grants provider, retry or submission authority.
+    """
+    if type(exc) is not ProviderStartRefused:
+        return
+    binding = _ProviderRefusalRunBinding(run_id, book, role)
+    fields = exc.__dict__
+    if type(fields) is not dict:
+        return
+    key = "_provider_refusal_run"
+    if not _valid_refusal_run_binding(binding):
+        fields[key] = None
+    elif key not in fields:
+        fields[key] = binding
+    elif not _valid_refusal_run_binding(fields[key]) or fields[key] != binding:
+        # An explicit unavailable state cannot be rebound by a later wrapper.
+        fields[key] = None
+
+
+def provider_refusal_run_id(
+    exc: BaseException, *, book: str, role: str = "deep",
+) -> str | None:
+    """Return the exact locally bound ID only to its matching book/role."""
+    if (type(exc) is not ProviderStartRefused
+            or type(book) is not str or type(role) is not str):
+        return None
+    fields = exc.__dict__
+    if type(fields) is not dict:
+        return None
+    binding = fields.get("_provider_refusal_run")
+    if (not _valid_refusal_run_binding(binding)
+            or binding.book != book or binding.role != role):
+        return None
+    return binding.run_id
+
+
+def _require_provider_start(guard: Callable[[], None] | None) -> None:
+    """Existing provider's last local veto, bracketed by prospective selection checks."""
+    _require_legacy_application_unselected()
+    if guard is None:
+        _require_legacy_application_unselected()
+        return
+    if not callable(guard) or inspect.iscoroutinefunction(guard):
+        raise ProviderStartRefused("source admission revoked before provider start")
+    try:
+        verdict = guard()
+    except Exception:
+        raise ProviderStartRefused("source admission revoked before provider start") from None
+    if verdict is not None:
+        try:
+            close = getattr(verdict, "close", None)
+            if callable(close):
+                close()
+        except Exception:
+            # Cleanup cannot turn an invalid verdict into a retry-classified error.
+            pass
+        raise ProviderStartRefused("source admission revoked before provider start")
+    _require_legacy_application_unselected()
 
 
 def _block_kind(b) -> str:
@@ -92,20 +201,52 @@ def cli_path() -> str | None:
 
 def _selected_backend(override: str | None = None) -> str:
     """Resolve routing without evaluating a broken project config ahead of an explicit override."""
-    if override:
+    if override is not None:
         return str(override).strip().lower()
     env = os.environ.get("BOT_LLM_BACKEND")
-    if env:
-        return env.strip().lower()
+    if env is not None:
+        selected = env.strip().lower()
+        return "fabric" if selected == "fabric" and _application_fabric_selected() else selected
     try:
         return str(_cfg().get("backend", "waterfall")).strip().lower()
     except Exception:
         return "waterfall"
 
 
+def _application_fabric_selected() -> bool:
+    """MM presence or an explicit Fabric BOT/config selection is exclusive."""
+    if "MM_PROVIDER_APPLICATION_MODE" in os.environ:
+        return True
+    if os.environ.get("BOT_LLM_BACKEND", "").strip().lower() == "fabric":
+        return True
+    if os.environ.get("BOT_LLM_BACKEND") is not None:
+        return False
+    try:
+        return str(_cfg().get("backend", "")).strip().lower() == "fabric"
+    except Exception:
+        return False
+
+
+def _fabric_tools_unavailable() -> dict:
+    return {"ok": False, "text": None, "backend": "fabric",
+            "error": "fabric_tools_unavailable"}
+
+
+def _require_legacy_application_unselected() -> None:
+    """A fresh pre-dispatch fence, never cached routing or eligibility."""
+    if _application_fabric_selected():
+        raise ProviderStartRefused("fabric_tools_unavailable")
+
+
 def available() -> bool:
     """True if the configured subscription CLI backend is reachable."""
+    if _application_fabric_selected():
+        return False
     selected = _selected_backend()
+    if _application_fabric_selected():
+        return False
+    if selected not in {"waterfall", "codex", "cli", "sdk"}:
+        return False
     if selected == "waterfall":
         try:
             from brain import provider_waterfall
@@ -118,6 +259,9 @@ def available() -> bool:
             return codex_bridge.available()
         except Exception:
             return False
+    # Config/backend resolution can itself change the live application selector.
+    if _application_fabric_selected():
+        return False
     return bool(cli_path()) and _SDK
 
 
@@ -215,6 +359,89 @@ def _subscription_env(env_name: str | None = None) -> dict:
     return e
 
 
+def _new_sdk_diagnostic(run_id, book, role, candidate_ordinal):
+    """Build one passive candidate collector before SDK option/provider work."""
+    if not run_id:
+        return None
+    state = {"collector": None, "observation_failed": False}
+    try:
+        from brain.sdk_diagnostics import SDKInvocationDiagnostics
+        sdk_version = cli_version = None
+        try:
+            from importlib.metadata import version
+            sdk_version = version("claude-agent-sdk")
+        except Exception:
+            pass
+        try:
+            from claude_agent_sdk._cli_version import __cli_version__
+            cli_version = __cli_version__
+        except Exception:
+            pass
+        state["collector"] = SDKInvocationDiagnostics(
+            run_id=run_id, book=book, role=role, candidate_ordinal=candidate_ordinal,
+            sdk_version=sdk_version, cli_version=cli_version,
+        )
+    except Exception:
+        pass
+    return state
+
+
+def _observe_sdk_diagnostic(state, *, message=None, query_entered=False):
+    """Observe without changing the original SDK handler or its scalar result."""
+    if state is None or state["collector"] is None:
+        return
+    try:
+        if query_entered:
+            state["collector"].mark_query_entered()
+        else:
+            state["collector"].observe_message(message)
+    except Exception:
+        state["observation_failed"] = True
+
+
+def _record_sdk_diagnostic(state, run_id, end_state, exception=None):
+    """Best-effort nested event; never a classifier input or success verdict.
+
+    The collector caps its canonical UTF-8 envelope at 16 KiB. The existing
+    logger ASCII-escapes that envelope; its complete row has a different byte
+    size. Missing appends cannot be represented as successful capture.
+    """
+    if not run_id:
+        return
+    try:
+        from brain import runlog
+        if state is None or state["collector"] is None:
+            runlog.log_step(
+                run_id, "provider_diagnostic", "SDK diagnostic unavailable",
+                "The diagnostic collector could not be initialized; execution effects remain unverified.",
+                provider_diagnostic_capture={"status": "unavailable", "reason": "collector_unavailable"},
+            )
+            return
+        try:
+            envelope = state["collector"].finish(end_state, exception)
+        except Exception:
+            runlog.log_step(
+                run_id, "provider_diagnostic", "SDK diagnostic unavailable",
+                "Diagnostic finalization failed; execution effects remain unverified.",
+                provider_diagnostic_capture={"status": "unavailable", "reason": "finalization_failed"},
+            )
+            return
+        partial = state["observation_failed"]
+        runlog.log_step(
+            run_id, "provider_diagnostic",
+            "SDK diagnostic capture partial" if partial else "SDK invocation diagnostics",
+            ("Some diagnostic observations failed. " if partial else "") +
+            "Counts cover observed SDK messages only; execution effects have not been reconciled.",
+            provider_diagnostic=envelope,
+            provider_diagnostic_capture={
+                "status": "partial" if partial else "available",
+                "reason": "observer_call_failed" if partial else "collector_projection_available",
+            },
+        )
+    except Exception:
+        pass
+
+
 async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
                  system: str | None = None, append_system: str | None = None,
                  allowed_tools: list[str] | None = None, add_dirs: list[str] | None = None,
@@ -224,13 +451,17 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
                  log_run: bool = True,
                  book: str | None = None,
                  seat: str | None = None,
-                 record_book: str | None = None) -> dict:
+                 record_book: str | None = None,
+                 before_provider_start: Callable[[], None] | None = None) -> dict:
     """Run a headless Claude Code reasoning pass. With arm=True, attaches MCP tools (read the
     dashboard + write conclusions back) + WebSearch/WebFetch and runs a multi-turn research loop.
     Pass `mcp_servers` (with a matching `allowed_tools`) to arm a CUSTOM tool surface — e.g. the
     autonomous desk's free-form trade tools — instead of the default gated bot server. Returns
     {ok, text, model, role, armed, tools_used, cost_usd, session_id, usage, backend, error,
-     key_id}.
+     key_id}. The codex backend adds ``failed_write_tools`` (attempted write tools whose call
+    status was "failed"); when non-empty, ``ok`` is False, ``error`` is the fixed
+    ``codex_bridge.WRITE_TOOL_FAILURE_ERROR`` and the tool effect is UNKNOWN — reconcile the
+    book state rather than treating the turn as not applied or replaying it.
 
     book: when the caller will record cost against cost_guard themselves (e.g. bot/autonomous.py
     which knows its exact PORTFOLIO_ID book name), pass the book name here so cli_bridge skips
@@ -267,7 +498,63 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
         book=book,
         seat=seat,
         record_book=record_book,
+        **({"before_provider_start": before_provider_start}
+           if before_provider_start is not None else {}),
     )
+
+
+async def reason_private_ephemeral(
+    prompt: str,
+    *,
+    role: str = "deep",
+    model: str | None = None,
+    cwd: str | None = None,
+    max_turns: int = 1,
+) -> dict:
+    """One private, no-tools, no-session reasoning turn through the incumbent provider owner.
+
+    This is deliberately narrower than reason(): callers cannot arm tools, add directories,
+    attach MCP, resume sessions, or enable Mastermind run/thinking logs. Claude may run only
+    through the Agent SDK with empty setting sources and explicit native non-persistence;
+    an SDK error fails closed instead of falling through to the ambient CLI subprocess.
+    """
+    if type(max_turns) is not int or max_turns != 1:
+        raise ValueError("private_ephemeral_requires_one_turn")
+    return await _reason(
+        prompt,
+        role=role,
+        model=model,
+        allowed_tools=[],
+        add_dirs=[],
+        max_turns=1,
+        cwd=cwd,
+        arm=False,
+        resume=None,
+        mcp_servers={},
+        log_run=False,
+        book=None,
+        seat="private-ephemeral",
+        record_book="system",
+        _private_ephemeral=True,
+    )
+
+
+def reason_private_ephemeral_sync(prompt: str, **kw) -> dict:
+    return asyncio.run(reason_private_ephemeral(prompt, **kw))
+
+
+# A reported SDK terminal error is not evidence of a pre-start auth/quota failure.
+# Keep this owned outcome outside the string classifiers that authorize replay.
+_SDK_TERMINAL_ERROR = "sdk_terminal_error"
+
+
+class _SDKTerminalAfterToolUse(Exception):
+    """Carry an owned terminal outcome and its original iterator exception."""
+
+    def __init__(self, result: dict, original_exception: Exception):
+        super().__init__(_SDK_TERMINAL_ERROR)
+        self.result = result
+        self.original_exception = original_exception
 
 
 async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
@@ -281,12 +568,29 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                   seat: str | None = None,
                   record_book: str | None = None,
                   _backend_override: str | None = None,
-                  _oauth_candidates: list[dict] | None = None) -> dict:
-    """Internal dispatcher with explicit provider overrides for the shared pool."""
+                  _subscription_slots: list[dict] | None = None,
+                  _private_ephemeral: bool = False,
+                  before_provider_start: Callable[[], None] | None = None) -> dict:
+    """Internal dispatcher with explicit provider overrides for the shared pool.
+
+    ``_subscription_slots`` contains slot IDs, environment-variable names and
+    optional cooling metadata. Credential values are resolved separately when
+    constructing the selected transport environment.
+    """
+    if _application_fabric_selected():
+        return _fabric_tools_unavailable()
+    _veto_kw = ({"before_provider_start": before_provider_start}
+                if before_provider_start is not None else {})
     selected_backend = _selected_backend(_backend_override)
+    if selected_backend not in {"waterfall", "codex", "cli", "sdk"}:
+        return {"ok": False, "text": None, "backend": selected_backend,
+                "error": "fabric_tools_unavailable" if selected_backend == "fabric"
+                else "backend_unsupported"}
     if selected_backend == "waterfall":
+        _require_legacy_application_unselected()
         from brain import provider_waterfall
-        return await provider_waterfall.reason(
+        _require_legacy_application_unselected()
+        result = await provider_waterfall.reason(
             prompt,
             role=role,
             model=model,
@@ -303,9 +607,16 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
             book=book,
             seat=seat,
             record_book=record_book,
+            **({"_private_ephemeral": True} if _private_ephemeral else {}),
+            **_veto_kw,
         )
+        # A late selector cannot erase an already-observed terminal, usage,
+        # failed tool effect, session, latency or error. Preserve the evidence.
+        return result
     if selected_backend == "codex":
+        _require_legacy_application_unselected()
         from brain import codex_bridge
+        _require_legacy_application_unselected()
         _codex_t0 = time.monotonic()
         result = await codex_bridge.reason(
             prompt,
@@ -324,6 +635,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
             book=book,
             seat=seat,
             record_book=record_book,
+            **_veto_kw,
         )
         try:
             _record_cli_cost(
@@ -364,7 +676,9 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 pass
         return result
     _t0 = time.monotonic()  # response-ledger latency clock (whole turn, entry→result)
+    _require_legacy_application_unselected()
     c = _cfg()
+    _require_legacy_application_unselected()
     rc = c.get("reasoning", {})
     if arm:
         if mcp_servers is None:
@@ -391,10 +705,18 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
             "text": None,
             "error": delegation_error,
         }
+    _require_legacy_application_unselected()
     dirs = _abs_dirs(add_dirs if add_dirs is not None else rc.get("add_dirs", []))
     turns = max_turns or rc.get("max_turns", 1)
     workdir = cwd or str(_ROOT)
     base = {"model": mdl, "role": role, "armed": arm}
+    if _private_ephemeral:
+        if arm or resume is not None or tools != [] or dirs != [] or mcp_servers not in ({}, None):
+            return {**base, "ok": False, "backend": "none", "text": None,
+                    "error": "private ephemeral reasoning boundary violated"}
+        if turns != 1:
+            return {**base, "ok": False, "backend": "none", "text": None,
+                    "error": "private ephemeral reasoning requires one turn"}
 
     if not cli_path():
         return {**base, "ok": False, "backend": "none", "text": None,
@@ -418,8 +740,8 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
     try:
         from brain import key_rotor as _kr
         _pool = (
-            list(_oauth_candidates)
-            if _oauth_candidates is not None
+            list(_subscription_slots)
+            if _subscription_slots is not None
             else _kr.candidates()
         )
     except Exception:
@@ -433,21 +755,47 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
     # candidate's reasoning trace; cleared per candidate so a failed-over key's
     # partial thinking is discarded with its result (same rule as the macro lanes).
     _think_box: list = []
+    # LOG/EVIDENCE side channel (see _via_sdk docstring): the failed candidate's
+    # typed provider-failure evidence; cleared per candidate like _think_box.
+    _failure_box: dict = {}
 
-    for _cand in _cands_to_try:
+    for _candidate_ordinal, _cand in enumerate(_cands_to_try):
+        if _application_fabric_selected():
+            if result is None:
+                _require_legacy_application_unselected()
+            break
         _key_id: str | None = _cand["key_id"] if _cand is not None else None
         _env_name: str | None = _cand["env_name"] if _cand is not None else None
 
         _sdk_exc_repr: str | None = None
         _think_box.clear()
+        _failure_box.clear()
 
         if _SDK:
+            _sdk_diagnostic = _new_sdk_diagnostic(_run_id, book, role, _candidate_ordinal)
+            _sdk_call_finished = False
             try:
                 result = await _via_sdk(
                     prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
                     _HEADLESS_PERMISSION_MODE, mcp_servers, resume, arm,
                     run_id=_run_id, env_name=_env_name, thinking_out=_think_box,
+                    failure_out=_failure_box,
+                    **({"_diagnostic": _sdk_diagnostic}
+                       if _sdk_diagnostic is not None else {}),
+                    **({"private_ephemeral": True} if _private_ephemeral else {}),
+                    **_veto_kw,
                 )
+                used_key_id = _key_id
+                _sdk_call_finished = True
+                _record_sdk_diagnostic(_sdk_diagnostic, _run_id, "exhausted")
+                # The SDK observed an error terminal. A tool-capable attempt may
+                # already have effects; its answer text cannot authorize another
+                # credential attempt, including when it resembles auth/quota text.
+                if result.get("error") == _SDK_TERMINAL_ERROR:
+                    used_key_id = _key_id
+                    # Evidence-only attachment: never read by the break/failover logic.
+                    result["provider_failure_evidence"] = dict(_failure_box)
+                    break
                 # THE CRUX: classify the result TEXT — org-disabled banners arrive as
                 # ok-looking results whose text contains the subscription-disabled message.
                 _classified = None
@@ -478,6 +826,42 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 used_key_id = _key_id
                 break
 
+            except _SDKTerminalAfterToolUse as _terminal:
+                # The handler already saw tool use and an error terminal before
+                # its iterator raised. Preserve that owned outcome; exception
+                # prose cannot authorize replay of the potentially applied turn.
+                result = _terminal.result
+                if not _sdk_call_finished:
+                    _sdk_call_finished = True
+                    try:
+                        _record_sdk_diagnostic(
+                            _sdk_diagnostic, _run_id, "raised", _terminal.original_exception,
+                        )
+                    except BaseException:
+                        # A diagnostic failure cannot replace the owned terminal.
+                        pass
+                used_key_id = _key_id
+                # Evidence-only attachment, not the condition for this fence.
+                result["provider_failure_evidence"] = dict(_failure_box)
+                break
+            except ProviderStartRefused as _refusal:
+                _bind_provider_refusal_run(_refusal, _run_id, book, role)
+                if _application_fabric_selected() and result is not None:
+                    # An earlier candidate may have started or completed effects.
+                    # This typed refusal belongs to the refused rung, not the turn's
+                    # observed accounting. Preserve the prior terminal as written.
+                    break
+                if not _sdk_call_finished:
+                    _sdk_call_finished = True
+                    try:
+                        _record_sdk_diagnostic(_sdk_diagnostic, _run_id, "raised", _refusal)
+                    except BaseException:
+                        # Diagnostic failure cannot replace the original local refusal.
+                        pass
+                # This veto stops the next provider entry; an earlier invocation
+                # may already have effects. Never classify it as auth/quota,
+                # rotate keys, fall back, or infer that the whole turn was unapplied.
+                raise
             except Exception as e:
                 # Two derivations of the same exception, on purpose.
                 #
@@ -503,6 +887,16 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     try:
                         _classified = _kr.classify_failure(_sdk_exc_classify)
                     except Exception:
+                        pass
+
+                # Freeze the existing exception strings and classification first.
+                # Rich diagnostic fields never become cooling/fallback inputs.
+                if not _sdk_call_finished:
+                    _sdk_call_finished = True
+                    try:
+                        _record_sdk_diagnostic(_sdk_diagnostic, _run_id, "raised", e)
+                    except BaseException:
+                        # Preserve the already pending SDK failure and its legacy fallback.
                         pass
 
                 if _classified and _pool and _key_id is not None:
@@ -534,22 +928,37 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     except Exception:
                         pass
 
-                    if arm:
-                        # Armed requires SDK; no subprocess fallback
+                    if arm or _private_ephemeral:
+                        # Armed and private-ephemeral paths are SDK-only; never fall through
+                        # to the less-controlled subprocess after private evidence was supplied.
                         result = {**base, "ok": False, "backend": "none", "text": None,
-                                  "error": _sdk_exc_repr or "armed research needs the Agent SDK + a subscription credential"}
+                                  "error": _sdk_exc_repr or (
+                                      "private ephemeral reasoning requires the Agent SDK"
+                                      if _private_ephemeral
+                                      else "armed research needs the Agent SDK + a subscription credential"
+                                  ),
+                                  # Evidence-only attachment from the handler's box.
+                                  "provider_failure_evidence": dict(_failure_box)}
                         used_key_id = _key_id
                         break
 
-                    # Fall through to subprocess for non-armed, non-key-failure SDK errors.
+                    # Fall through only for ordinary non-armed, non-key-failure SDK errors.
                     # Discard the errored SDK call's partial thinking — the subprocess
                     # result it would ride with is a different generation (and the CLI
                     # JSON backend exposes no thinking blocks at all).
                     _think_box.clear()
-                    result = await _via_subprocess(
-                        prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
-                        _HEADLESS_PERMISSION_MODE, base, env_name=_env_name,
-                    )
+                    try:
+                        result = await _via_subprocess(
+                            prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
+                            _HEADLESS_PERMISSION_MODE, base, env_name=_env_name,
+                            **_veto_kw,
+                        )
+                    except ProviderStartRefused as _refusal:
+                        _bind_provider_refusal_run(_refusal, _run_id, book, role)
+                        if _application_fabric_selected() and result is not None:
+                            break
+                        raise
+                    used_key_id = _key_id
                     # Classify subprocess result for key failure too
                     _classified2 = None
                     if _pool and _key_id is not None:
@@ -573,20 +982,42 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                         except Exception:
                             pass
                         continue
-                    used_key_id = _key_id
                     break
 
+            except BaseException as _sdk_interruption:
+                if not _sdk_call_finished:
+                    try:
+                        _record_sdk_diagnostic(
+                            _sdk_diagnostic, _run_id, "interrupted", _sdk_interruption,
+                        )
+                    except BaseException:
+                        # A diagnostic failure must not replace the original interruption.
+                        pass
+                raise
+
         elif not _SDK:
-            # No SDK at all — subprocess only
-            if arm:
+            # Private evidence is never sent through the subprocess fallback.
+            if arm or _private_ephemeral:
                 result = {**base, "ok": False, "backend": "none", "text": None,
-                          "error": "armed research needs the Agent SDK + a subscription credential"}
+                          "error": (
+                              "private ephemeral reasoning requires the Agent SDK"
+                              if _private_ephemeral
+                              else "armed research needs the Agent SDK + a subscription credential"
+                          )}
                 used_key_id = _key_id
                 break
-            result = await _via_subprocess(
-                prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
-                _HEADLESS_PERMISSION_MODE, base, env_name=_env_name,
-            )
+            try:
+                result = await _via_subprocess(
+                    prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
+                    _HEADLESS_PERMISSION_MODE, base, env_name=_env_name,
+                    **_veto_kw,
+                )
+            except ProviderStartRefused as _refusal:
+                _bind_provider_refusal_run(_refusal, _run_id, book, role)
+                if _application_fabric_selected() and result is not None:
+                    break
+                raise
+            used_key_id = _key_id
             _classified3 = None
             if _pool and _key_id is not None:
                 try:
@@ -612,44 +1043,45 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
             used_key_id = _key_id
             break
     else:
-        # All candidates exhausted without a usable result
-        try:
-            _freeze = _kr.all_cooling_info()
-        except Exception:
-            _freeze = {"all_cooling": True, "earliest_reset": ""}
-        _err_msg = (f"all pool keys cooling/dead; "
-                    f"earliest_reset={_freeze.get('earliest_reset', 'unknown')}")
-        try:
-            from brain import runlog as _rl
-            if _run_id:
-                _rl.log_step(_run_id, "key rotation", "pool exhausted", _err_msg)
-        except Exception:
-            pass
-        # WELL-KNOWN MARKER (federation / retry-at-reset): the book jobs discard reason()'s
-        # return value and reason() never raises, so an all-pool-cooling no-decision would be
-        # invisible to the scheduler.  Record a queryable run-event so app/scheduler.py can detect
-        # it (by book + time window) and schedule a one-shot retry at the pool's earliest reset.
-        # Best-effort — a logging miss must never change the returned result.
-        try:
-            from control_plane import run_events as _re
-            _re.append({
-                "kind": "brain_pool_exhausted",
-                "job": "",                 # the book job name is unknown here; scheduler keys on book
-                "book": str(book or ""),
-                "step": "rotation",
-                "status": "error",
-                "severity": "ADVISORY_ONLY",
-                "actor": "cli_bridge",
-                "extra": {
-                    "all_cooling": bool(_freeze.get("all_cooling", True)),
-                    "earliest_reset": str(_freeze.get("earliest_reset", "") or ""),
-                    "run_id": str(_run_id or ""),
-                },
-            })
-        except Exception:  # noqa: BLE001
-            pass
-        result = {**base, "ok": False, "backend": "none", "text": None,
-                  "error": _err_msg, "freeze_info": _freeze}
+        if not (_application_fabric_selected() and result is not None):
+            # All candidates exhausted without a usable result
+            try:
+                _freeze = _kr.all_cooling_info()
+            except Exception:
+                _freeze = {"all_cooling": True, "earliest_reset": ""}
+            _err_msg = (f"all pool keys cooling/dead; "
+                        f"earliest_reset={_freeze.get('earliest_reset', 'unknown')}")
+            try:
+                from brain import runlog as _rl
+                if _run_id:
+                    _rl.log_step(_run_id, "key rotation", "pool exhausted", _err_msg)
+            except Exception:
+                pass
+            # WELL-KNOWN MARKER (federation / retry-at-reset): the book jobs discard reason()'s
+            # return value and reason() never raises, so an all-pool-cooling no-decision would be
+            # invisible to the scheduler.  Record a queryable run-event so app/scheduler.py can detect
+            # it (by book + time window) and schedule a one-shot retry at the pool's earliest reset.
+            # Best-effort — a logging miss must never change the returned result.
+            try:
+                from control_plane import run_events as _re
+                _re.append({
+                    "kind": "brain_pool_exhausted",
+                    "job": "",                 # the book job name is unknown here; scheduler keys on book
+                    "book": str(book or ""),
+                    "step": "rotation",
+                    "status": "error",
+                    "severity": "ADVISORY_ONLY",
+                    "actor": "cli_bridge",
+                    "extra": {
+                        "all_cooling": bool(_freeze.get("all_cooling", True)),
+                        "earliest_reset": str(_freeze.get("earliest_reset", "") or ""),
+                        "run_id": str(_run_id or ""),
+                    },
+                })
+            except Exception:  # noqa: BLE001
+                pass
+            result = {**base, "ok": False, "backend": "none", "text": None,
+                      "error": _err_msg, "freeze_info": _freeze}
 
     if result is None:
         result = {**base, "ok": False, "backend": "none", "text": None,
@@ -732,18 +1164,47 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
 async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns, workdir, perm,
                    mcp_servers, resume, arm, run_id: str | None = None,
                    env_name: str | None = None,
-                   thinking_out: list | None = None) -> dict:
+                   thinking_out: list | None = None,
+                   failure_out: dict | None = None,
+                   before_provider_start: Callable[[], None] | None = None,
+                   _diagnostic: dict | None = None,
+                   private_ephemeral: bool = False) -> dict:
     """thinking_out: optional side-channel list; when provided, the turn's reasoning
     trace (a list of `mastermind.response_log.v1` thinking segments) is appended as ONE
     element. LEAK LAW (mirrors macro brain_gateway): thinking is LOG-ONLY — it rides
     this side channel to brain/thinking_log and is NEVER placed in the returned result
-    dict, so no caller (decision paths included) can consume it."""
+    dict, so no caller (decision paths included) can consume it.
+    failure_out: optional side-channel dict, same LOG/EVIDENCE discipline as thinking_out:
+    the handler fills it INCREMENTALLY with the bounded evidence that types a provider
+    failure (brain/provider_failure.v1) while the SDK stream is still alive, so an
+    exception after the evidence still leaves the box filled.  Evidence-only — never a
+    retry/failover/cooling input — and it never carries response or prompt text."""
+    _require_legacy_application_unselected()
     # Claude Agent SDK intentionally loads no filesystem settings by default.  The regional PMs
     # may delegate only through this repository's reviewed, read-only `.claude/agents` profiles,
     # so opt into the project source explicitly (never user/local settings from the VPS account).
-    opts = _Options(model=mdl, allowed_tools=tools, add_dirs=dirs, cwd=workdir,
-                    max_turns=turns, permission_mode=perm, env=_subscription_env(env_name),
-                    setting_sources=["project"])
+    if private_ephemeral:
+        opts = _Options(
+            model=mdl,
+            allowed_tools=[],
+            add_dirs=[],
+            cwd=workdir,
+            max_turns=1,
+            permission_mode="dontAsk",
+            env=_subscription_env(env_name),
+            setting_sources=[],
+            extra_args={
+                "safe-mode": None,
+                "no-chrome": None,
+                "no-session-persistence": None,
+                "strict-mcp-config": None,
+            },
+        )
+        opts.mcp_servers = {}
+    else:
+        opts = _Options(model=mdl, allowed_tools=tools, add_dirs=dirs, cwd=workdir,
+                        max_turns=turns, permission_mode=perm, env=_subscription_env(env_name),
+                        setting_sources=["project"])
     if mcp_servers:
         opts.mcp_servers = mcp_servers
     if resume:
@@ -753,6 +1214,7 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
     if append_system:
         opts.append_system_prompt = append_system
     text, cost, sid, usage, used = None, None, None, None, []
+    terminal_error = False
     _think: list[dict] = []   # LOG-ONLY reasoning capture (see thinking_out)
     _round = 0                # assistant-message counter → segment "round"
 
@@ -764,64 +1226,135 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
         _rl = None
         _log = None
 
-    async for msg in _sdk_query(prompt=prompt, options=opts):
-        if hasattr(msg, "result"):                         # ResultMessage
-            text = getattr(msg, "result", None) or text
-            cost = getattr(msg, "total_cost_usd", None)
-            sid = getattr(msg, "session_id", None)
-            usage = getattr(msg, "usage", None)
-        elif hasattr(msg, "content"):                      # AssistantMessage: collect text + tool calls
-            _round += 1
-            for b in (getattr(msg, "content", []) or []):
-                bt = _block_kind(b)
-                if bt == "thinking":
-                    # Reasoning block — capture for the response ledger only.
-                    _txt = getattr(b, "thinking", "")
-                    if not _txt and isinstance(b, dict):
-                        _txt = b.get("thinking") or ""
-                    _txt = str(_txt or "")
-                    if _txt.strip():
+    # The first SDK query iteration may start a remote provider/model effect.
+    # Evaluate the source owner's veto AFTER SDK/MCP option preparation and
+    # immediately BEFORE handing it to the original SDK owner.
+    _require_legacy_application_unselected()
+    _require_provider_start(before_provider_start)
+    _require_legacy_application_unselected()
+    if failure_out is not None:
+        try:
+            failure_out["tool_activity_observed"] = False
+        except Exception:
+            pass
+    _observe_sdk_diagnostic(_diagnostic, query_entered=True)
+    _sdk_stream = aiter(_sdk_query(prompt=prompt, options=opts))
+    _terminal_iterator_exception = None
+    while True:
+        try:
+            msg = await anext(_sdk_stream)
+        except StopAsyncIteration:
+            break
+        except ProviderStartRefused:
+            raise
+        except Exception as exc:
+            # These are existing handler-owned operational fields, independent
+            # of failure_out. No tool use or no failed terminal keeps the legacy
+            # exception path. Handler/observer errors are outside this catch.
+            if not (terminal_error and used):
+                raise
+            _terminal_iterator_exception = exc
+            break
+        try:
+            if hasattr(msg, "result"):                         # ResultMessage
+                # Preserve an explicit error even if a later terminal says success.
+                # A subtype named "success" and nonempty text cannot override it.
+                terminal_error = terminal_error or getattr(msg, "is_error", None) is True
+                text = getattr(msg, "result", None) or text
+                cost = getattr(msg, "total_cost_usd", None)
+                sid = getattr(msg, "session_id", None)
+                usage = getattr(msg, "usage", None)
+                if failure_out is not None:
+                    try:
+                        _f_is_error = getattr(msg, "is_error", None)
+                        if isinstance(_f_is_error, bool):
+                            failure_out["result_is_error"] = _f_is_error
+                        _f_subtype = getattr(msg, "subtype", None)
+                        if isinstance(_f_subtype, str) and provider_failure._RESULT_SUBTYPE_RE.fullmatch(_f_subtype):
+                            failure_out["result_subtype"] = _f_subtype
+                        _f_status = getattr(msg, "api_error_status", None)
+                        if isinstance(_f_status, int) and not isinstance(_f_status, bool):
+                            failure_out["api_error_status"] = _f_status
+                    except Exception:
+                        pass
+            elif hasattr(msg, "content"):                      # AssistantMessage: collect text + tool calls
+                _round += 1
+                if failure_out is not None:
+                    try:
+                        _f_lit = provider_failure.sdk_assistant_error_literal(
+                            getattr(msg, "error", None))
+                        if _f_lit:
+                            failure_out["assistant_error"] = _f_lit   # latest wins
+                    except Exception:
+                        pass
+                for b in (getattr(msg, "content", []) or []):
+                    bt = _block_kind(b)
+                    if bt == "thinking":
+                        # Reasoning block — capture for the response ledger only.
+                        _txt = getattr(b, "thinking", "")
+                        if not _txt and isinstance(b, dict):
+                            _txt = b.get("thinking") or ""
+                        _txt = str(_txt or "")
+                        if _txt.strip():
+                            _think.append({"round": _round, "phase": "tool",
+                                           "model": mdl, "text": _txt})
+                    elif bt == "redacted_thinking":
+                        # Text unavailable by design; the segment still records that the
+                        # model reasoned here, so the trace doesn't silently look shorter.
                         _think.append({"round": _round, "phase": "tool",
-                                       "model": mdl, "text": _txt})
-                elif bt == "redacted_thinking":
-                    # Text unavailable by design; the segment still records that the
-                    # model reasoned here, so the trace doesn't silently look shorter.
-                    _think.append({"round": _round, "phase": "tool",
-                                   "model": mdl, "text": "", "redacted": True})
-                elif bt == "text" and getattr(b, "text", ""):
-                    chunk = b.text
-                    text = (text or "") + chunk if text is None else chunk
-                    # log reasoning chunk
-                    if run_id and _log:
-                        try:
-                            _log(run_id, "reasoning", "assistant text",
-                                 chunk[:2000])
-                        except Exception:
-                            pass
-                elif bt == "tool_use":
-                    name = getattr(b, "name", "?")
-                    used.append(name)
-                    # log tool call
-                    if run_id and _log:
-                        try:
-                            inp = getattr(b, "input", {}) or {}
-                            _log(run_id, "tool_call", f"call {name}",
-                                 json.dumps(inp, default=str)[:2000],
-                                 tool=name, args=inp)
-                        except Exception:
-                            pass
-        # ToolResult messages (some SDK versions)
-        elif hasattr(msg, "tool_use_id") or (getattr(msg, "type", "") == "tool_result"):
-            if run_id and _log:
-                try:
-                    content = getattr(msg, "content", "") or ""
-                    if isinstance(content, list):
-                        content = " ".join(
-                            getattr(c, "text", str(c)) for c in content)
-                    _log(run_id, "tool_result", "tool result",
-                         str(content)[:2000], result=str(content)[:2000])
-                except Exception:
-                    pass
+                                       "model": mdl, "text": "", "redacted": True})
+                    elif bt == "text" and getattr(b, "text", ""):
+                        chunk = b.text
+                        text = (text or "") + chunk if text is None else chunk
+                        # log reasoning chunk
+                        if run_id and _log:
+                            try:
+                                _log(run_id, "reasoning", "assistant text",
+                                     chunk[:2000])
+                            except Exception:
+                                pass
+                    elif bt == "tool_use":
+                        if failure_out is not None:
+                            try:
+                                failure_out["tool_activity_observed"] = True
+                            except Exception:
+                                pass
+                        name = getattr(b, "name", "?")
+                        used.append(name)
+                        # log tool call
+                        if run_id and _log:
+                            try:
+                                inp = getattr(b, "input", {}) or {}
+                                _log(run_id, "tool_call", f"call {name}",
+                                     json.dumps(inp, default=str)[:2000],
+                                     tool=name, args=inp)
+                            except Exception:
+                                pass
+            # ToolResult messages (some SDK versions)
+            elif hasattr(msg, "tool_use_id") or (getattr(msg, "type", "") == "tool_result"):
+                if failure_out is not None:
+                    try:
+                        failure_out["tool_activity_observed"] = True
+                    except Exception:
+                        pass
+                if run_id and _log:
+                    try:
+                        content = getattr(msg, "content", "") or ""
+                        if isinstance(content, list):
+                            content = " ".join(
+                                getattr(c, "text", str(c)) for c in content)
+                        _log(run_id, "tool_result", "tool result",
+                             str(content)[:2000], result=str(content)[:2000])
+                    except Exception:
+                        pass
+        except BaseException:
+            try:
+                _observe_sdk_diagnostic(_diagnostic, message=msg)
+            except BaseException:
+                pass
+            raise
+        else:
+            _observe_sdk_diagnostic(_diagnostic, message=msg)
 
     # The last assistant message is the synthesis — retag its segments so the
     # upstream FIRST-(N-1)+LAST truncation keeps the decision segment and the
@@ -835,13 +1368,20 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
         thinking_out.append(_think)
     # LEAK LAW: `_think` must never be added to this result dict — callers feed
     # result["text"] into decision paths, and thinking is log-only by contract.
-    return {"ok": bool(text), "text": text, "model": mdl, "role": role, "armed": arm,
-            "tools_used": used, "cost_usd": cost, "session_id": sid,
-            "usage": _as_dict(usage), "backend": "sdk"}
+    result = {"ok": bool(text) and not terminal_error, "text": text,
+              "model": mdl, "role": role, "armed": arm,
+              "tools_used": used, "cost_usd": cost, "session_id": sid,
+              "usage": _as_dict(usage), "backend": "sdk",
+              **({"error": _SDK_TERMINAL_ERROR} if terminal_error else {})}
+    if _terminal_iterator_exception is not None:
+        raise _SDKTerminalAfterToolUse(result, _terminal_iterator_exception) from _terminal_iterator_exception
+    return result
 
 
 async def _via_subprocess(prompt, mdl, role, system, append_system, tools, dirs, turns, workdir, perm, base,
-                          env_name: str | None = None) -> dict:
+                          env_name: str | None = None,
+                          before_provider_start: Callable[[], None] | None = None) -> dict:
+    _require_legacy_application_unselected()
     # NOTE: `--output-format json` returns only the final result text — no content
     # blocks arrive here, so this backend has no thinking to capture; the response
     # ledger still logs the turn (with thinking=[]) from reason().
@@ -855,9 +1395,14 @@ async def _via_subprocess(prompt, mdl, role, system, append_system, tools, dirs,
         argv += ["--system-prompt", system]
     if append_system:
         argv += ["--append-system-prompt", append_system]
+    # Prepare argv and environment before the original caller's final veto.
+    # The same callback runs once, immediately before the process effect.
+    _require_legacy_application_unselected()
+    env = _subscription_env(env_name)
+    _require_provider_start(before_provider_start)
     proc = await asyncio.create_subprocess_exec(
         *argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE, cwd=workdir, env=_subscription_env(env_name))
+        stderr=asyncio.subprocess.PIPE, cwd=workdir, env=env)
     out, err = await proc.communicate(prompt.encode())
     try:
         j = json.loads(out.decode() or "{}")
@@ -963,6 +1508,16 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
     ~600 chars of streamed text + any error event to detect key failure and mark_cooling
     so the NEXT chat turn rotates to a healthy key.
     """
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
+    selected_backend = _selected_backend()
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
+    if selected_backend not in {"waterfall", "cli", "sdk"}:
+        yield {"type": "error", "error": "backend_chat_unsupported"}
+        return
     if not _SDK:
         yield {"type": "error", "error": "reasoning needs the Claude Agent SDK + a subscription credential"}
         return
@@ -970,9 +1525,15 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
         yield {"type": "error", "error": "claude CLI not installed (npm i -g @anthropic-ai/claude-code)"}
         return
 
-    from brain import bot_mcp
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
+    from brain import bot_mcp, cognition_mcp
     rc = _cfg().get("reasoning", {})
     mdl = resolve_model(role)
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
 
     # Pick first healthy candidate for this stream turn
     _stream_key_id: str | None = None
@@ -987,22 +1548,39 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
     except Exception:
         _pool = []
 
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
+    env = _subscription_env(_stream_env_name)
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
     opts = _Options(
         model=mdl,
-        allowed_tools=bot_mcp.armed_allowed_tools(),
+        allowed_tools=list(dict.fromkeys(
+            [*bot_mcp.armed_allowed_tools(), *cognition_mcp.allowed_tools()]
+        )),
         add_dirs=_abs_dirs(rc.get("add_dirs", [])),
         cwd=str(_ROOT),
         max_turns=max_turns or rc.get("research_max_turns", 16),
         permission_mode=_HEADLESS_PERMISSION_MODE,
-        env=_subscription_env(_stream_env_name),
+        env=env,
         setting_sources=["project"],
     )
-    opts.mcp_servers = {bot_mcp.SERVER_NAME: bot_mcp.build_server()}
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
+    opts.mcp_servers = {
+        bot_mcp.SERVER_NAME: bot_mcp.build_server(),
+        cognition_mcp.SERVER_NAME: cognition_mcp.build_server(),
+    }
     if resume:
         opts.resume = resume
     if append_system:
         opts.append_system_prompt = append_system
-
+    if _application_fabric_selected():
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
     sid, cost, used = resume, None, []
     # Buffer the first ~600 chars of streamed text for post-stream key-failure detection
     _text_buffer = ""
@@ -1029,6 +1607,11 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
                 pass
         return {"type": "tool_result"}
 
+    try:
+        _require_provider_start(None)
+    except ProviderStartRefused:
+        yield {"type": "error", "error": "fabric_tools_unavailable"}
+        return
     emitted_text = False
     _stream_error: str | None = None
     try:
@@ -1088,7 +1671,7 @@ async def chat_stream(prompt: str, *, resume: str | None = None,
     except Exception as e:                                      # surface, don't crash the stream
         _stream_error = repr(e)[:600]
         _error_buffer = _stream_error
-        yield {"type": "error", "error": repr(e)[:300]}
+        yield public_chat_error_event()
 
     # Post-stream key-failure detection — mark_cooling so the NEXT turn rotates.
     # Always scan the TRUNCATED buffer: the final chunk can push it past 600 chars

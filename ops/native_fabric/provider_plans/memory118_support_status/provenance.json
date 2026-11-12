@@ -1,0 +1,38 @@
+{
+  "accepted_memory_count": 118,
+  "actual_conflict_resolution": "New command stays AFTER unchanged Memory all-original guard; no exception. Native desiredpolicy only incumbent ../orch/fabric via owner_path. Actual manual .support.json is flat exact source-generation map; canonical digest reused from exact bundle helper, no envelope fallback; historical guard generation remains unbound.",
+  "actual_runtime_observation": "Root native40 d19f5c6a independent of these source fixtures",
+  "base_count": 116,
+  "base_selection": {
+    "generation": "ef30408e91cd2d29df5b7f92fa0ad0873e06ed91a8d9ce3fbc90050b4752c879",
+    "previous": "774f98693ec805f5e37fe99c94e5e2d2789c7255210274750da4816ace6347ea",
+    "schema": "native-code-selection.v1",
+    "sequence": 40
+  },
+  "changes_vs_memory": {
+    "additions": [
+      "ext/support_policy_status.py"
+    ],
+    "replacements": [
+      "ext/artifact_delivery.py",
+      "ext/fabric_task.py"
+    ],
+    "unchanged_rows": 116
+  },
+  "combined_count": 119,
+  "component_head": "a71596314bf00ceac9d7edf1d2ba1902d1bf7db4",
+  "memory_head": "39cf966d88b31c50d80c8f6a8802272565ce1ac5",
+  "memory_input_return_sha256": "5b10fa5fa67d5601ede56db1a3af47e50aff908adbb4605b0ebc6bfa7bcaae16",
+  "memory_profile_sha256": "a4a02cc7a7342f814e4451698cd417d1336d6582e5748ac638316ef6ffabe299",
+  "protected_dependency": "Pending original Memory2229 source release remains distinct; no replacement/native selection",
+  "reader_sources": {
+    "artifact_delivery.py": "d71de2433f95aac499e2a34393ab623aaeb33becc0220737da817cc2b9b79f2d",
+    "artifact_reader.py": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469",
+    "fabric_policy_snapshot.py": "a711a79f89f135d0434bea1161da3cd0d786522998904e692f316b5e5628ba20",
+    "lane_runtime.py": "a2d1ebea4ee948cd9e34fc9268ae3c043297619c81354592369da119df7a595f",
+    "support_bundle.py": "afbfa147cf44083e9e47e916c50b3368737f6730a270af8e974793f4bf507822",
+    "support_policy_status.py": "3edf6de5a6cd8fc20978f4453cdb80bc87e78603c7bf9404a2daa03cfe9b015b"
+  },
+  "runtime_effects": false,
+  "schema": "mastermind.support_policy_source_union.v1"
+}

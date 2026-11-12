@@ -1,0 +1,19 @@
+{
+  "command": [
+    "/Volumes/Mastermind/agent-workspaces/web/hermes-capacity-routing-completion-20261107-c4/combined-qualification-20261108/hermes-combined/scripts/run_tests.sh",
+    "tests/test_fallback_family_first.py",
+    "tests/tui_gateway/test_omit_messages_resume_bounded_ack.py",
+    "tests/tui_gateway/test_kanban_resume_guard.py",
+    "tests/tui_gateway/test_protocol.py",
+    "tests/tui_gateway/test_tui_gateway_server.py",
+    "-k",
+    "family or session_resume or omit_messages_resume or gateway_resume",
+    "-q",
+    "--tb=short"
+  ],
+  "live_runtime_modified": false,
+  "log_sha256": "0f7565792c1cfc308847a103752604ade608a431b0e40d1526303af5e373283c",
+  "returncode": 0,
+  "schema": "mastermind.hermes_h4_combined_native_regressions.v1",
+  "seconds": 30.75
+}

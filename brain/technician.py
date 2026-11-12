@@ -202,7 +202,235 @@ def _wait(rationale: str, *, confidence: float = 0.0) -> dict:
             "confidence": round(_clamp01(confidence), 3), "rationale": str(rationale)[:600]}
 
 
+
+# Fabric extends the existing per-name artifact. The native application owner
+# retains admission, account choice, usage, close, and portfolio workload policy.
+_FABRIC_KEY = "_fabric_technician"
+_FABRIC_LANE = "mastermind-technician"
+_FABRIC_WORKLOAD = "portfolio_analysis"
+_FABRIC_MAX_TOKENS = 1500
+
+
+def _fabric_location(asof, ticker, inp, *, create=False):
+    import re
+    supplied = inp.get("ticker") if isinstance(inp, dict) else None
+    if ticker and supplied and str(ticker).upper() != str(supplied).upper():
+        raise ValueError("technician_ticker_conflict")
+    tk = str(ticker or supplied or "UNK").upper()
+    day = str(asof)[:10] if asof else date.today().isoformat()
+    if (re.fullmatch(r"[A-Z0-9][A-Z0-9._^-]{0,31}", tk) is None
+            or date.fromisoformat(day).isoformat() != day):
+        raise ValueError("technician_artifact_identity_invalid")
+    base = Path(_ARTIFACTS).absolute()
+    if base.is_symlink():
+        raise ValueError("technician_artifact_root_invalid")
+    if create:
+        base.mkdir(parents=True, exist_ok=True)
+    root = base.resolve(strict=create)
+    path = root / day / tk / "technician.json"
+    return root, path, day, tk
+
+
+def _fabric_presence(path):
+    """Pure local discriminator; a corrupt existing artifact is a barrier."""
+    import stat
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        return False
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 4 * 1024 * 1024:
+            raise ValueError("technician_artifact_invalid")
+        raw = stream.read(4 * 1024 * 1024 + 1)
+    value = json.loads(raw)
+    if type(value) is not dict:
+        raise ValueError("technician_artifact_invalid")
+    return _FABRIC_KEY in value
+
+
+def _fabric_owner():
+    from brain import fabric_inference
+    modes, shared, root = fabric_inference._owner()
+    from engine import catalyst_tone as cache
+    if Path(cache.__file__).resolve().parent.parent != root:
+        raise ImportError("technician_cache_owner_mismatch")
+    return modes, shared, root, cache
+
+
+def _fabric_source(root, day, ticker):
+    return {"consumer": "mastermind-technician", "root": str(root), "asof": day, "ticker": ticker}
+
+
+def _fabric_prompt(inp):
+    return json.dumps(inp, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+
+
+def _fabric_public(row):
+    # A held row may retain a parseable model result. It is evidence, not an
+    # eligible verdict. The artifact must still expose conservative WAIT.
+    receipt = row["receipt"]
+    if (row["state"] == "terminal" and row["result"] is not None
+            and receipt is not None and not receipt["effect_unknown"]
+            and receipt["close"] == {"disposition": "closed", "closed": True,
+                                     "effect_unknown": False, "attempted": True}):
+        return {**row["result"], "model": receipt["served_model"], "served_by": receipt["provider"]}
+    reason = ("Fabric original pending or held — fail-conservative WITHHOLD."
+              if row["state"] != "terminal" else
+              "Fabric returned no usable result — fail-conservative WITHHOLD.")
+    return {**_wait(reason), "model": None, "served_by": None}
+
+
+def _fabric_document(value, root, day, ticker, cache):
+    if value is None:
+        return None
+    if (type(value) is not dict or value.get("agent") != "technician"
+            or not {"agent", "input", "verdict"} <= set(value)):
+        raise ValueError("technician_artifact_invalid")
+    if _FABRIC_KEY not in value:
+        return value
+    if set(value) != {"agent", "input", "verdict", _FABRIC_KEY}:
+        raise ValueError("technician_artifact_fields_invalid")
+    owned = value[_FABRIC_KEY]
+    if (type(owned) is not dict or set(owned) != {"schema", "cache", "requests"}
+            or owned["schema"] != "mastermind.technician.fabric.v1"
+            or type(owned["requests"]) is not dict):
+        raise ValueError("technician_original_invalid")
+    state = cache._fabric_cache_value(owned["cache"], _fabric_source(root, day, ticker))
+    if not state["entries"] or set(owned["requests"]) != {r["operation_id"] for r in state["entries"]}:
+        raise ValueError("technician_request_set_invalid")
+    for row in state["entries"]:
+        request = owned["requests"][row["operation_id"]]
+        if (type(request) is not dict or set(request) != {"input", "system", "user", "context", "max_tokens"}
+                or type(request["input"]) is not dict or _strip_forbidden(request["input"]) != request["input"]
+                or request["input"].get("ticker") != ticker
+                or request["system"] != _TECHNICIAN_SYS + _JSON_ONLY
+                or request["user"] != _fabric_prompt(request["input"])
+                or request["max_tokens"] != _FABRIC_MAX_TOKENS
+                or request["context"] != {"asof": day, "ticker": ticker, "input": request["input"],
+                                         "workload": _FABRIC_WORKLOAD}):
+            raise ValueError("technician_frozen_input_invalid")
+        commitment = {"system": request["system"], "user": request["user"],
+                      "max_tokens": request["max_tokens"], "context": request["context"]}
+        if row.get("schema") == cache._AUTO_CACHE_ENTRY:
+            commitment.update(application_inspection=row["inspection"], application_mode=row["mode_id"])
+            original, actual = cache._cache_auto_request(row["operation_id"],
+                request["system"], request["user"], request["max_tokens"])
+            if row["request"] != actual:
+                raise ValueError("technician_request_changed")
+            cache._cache_auto_validate(row, original)
+        if (row["input_digest"] != cache._cache_hash(commitment)
+                or row["result"] is not None and row["result"] != _normalise_reply(row["text"], strict=True)):
+            raise ValueError("technician_result_changed")
+    current = state["entries"][-1]
+    if (value["input"] != owned["requests"][current["operation_id"]]["input"]
+            or value["verdict"] != _fabric_public(current)):
+        raise ValueError("technician_projection_changed")
+    return value
+
+
+def _fabric_assess(inp, *, asof=None, ticker=None):
+    try:
+        modes, shared, macro_root, cache = _fabric_owner()
+        root, path, day, tk = _fabric_location(asof, ticker, inp, create=True)
+        if not isinstance(inp, dict) or tk == "UNK":
+            return _wait("Technician input unavailable — fail-conservative WITHHOLD.")
+        clean = cache._cache_decode(cache._cache_json(_strip_forbidden(inp)))
+        clean["ticker"] = tk
+        source = _fabric_source(root, day, tk)
+        def read():
+            return _fabric_document(cache._cache_read(path), root, day, tk, cache)
+        with cache._cache_lock(path, root):
+            doc = read()
+            if doc is not None and _FABRIC_KEY in doc:
+                saved = doc[_FABRIC_KEY]
+                if any(r["state"] != "terminal" for r in saved["cache"]["entries"]):
+                    return _wait("Fabric original pending or held — fail-conservative WITHHOLD.")
+                prior = next((r for r in reversed(saved["cache"]["entries"])
+                              if saved["requests"][r["operation_id"]]["input"] == clean), None)
+                if prior is not None:
+                    if prior["operation_id"] != saved["cache"]["entries"][-1]["operation_id"]:
+                        return _wait("Technician input has a newer original — fail-conservative WITHHOLD.")
+                    return _fabric_public(prior)
+        # BOT/config Fabric selection without a valid host application mode stays
+        # exclusive and unavailable; no default mode or native CLI is invented.
+        if not cli_bridge._application_fabric_selected() or shared.application_mode_id() is None:
+            return _wait("Fabric application selection unavailable — fail-conservative WITHHOLD.")
+        selected, factory = modes.configured_application_fabric(
+            lane=_FABRIC_LANE, workload_profile=_FABRIC_WORKLOAD, root=macro_root)
+        cfg = {"provider_order": ["fabric"], "workload_profile": _FABRIC_WORKLOAD,
+               "max_tokens": _FABRIC_MAX_TOKENS}
+        if selected is not True or type(factory) is not modes.ApplicationFabricFactory:
+            return _wait("Fabric application binding unavailable — fail-conservative WITHHOLD.")
+        inspection = factory.inspect(cfg)  # Pure qualification, before an original claim.
+        mode_id = shared.application_mode_id()
+        request = {"input": clean, "system": _TECHNICIAN_SYS + _JSON_ONLY,
+                   "user": _fabric_prompt(clean), "max_tokens": _FABRIC_MAX_TOKENS,
+                   "context": {"asof": day, "ticker": tk, "input": clean, "workload": _FABRIC_WORKLOAD}}
+        def load_cache():
+            current = read()
+            return (current[_FABRIC_KEY]["cache"] if current and _FABRIC_KEY in current
+                    else cache._fabric_cache_value(None, source))
+        def store_cache(value):
+            current = read()
+            owned = (current[_FABRIC_KEY] if current and _FABRIC_KEY in current else
+                     {"schema": "mastermind.technician.fabric.v1",
+                      "cache": cache._fabric_cache_value(None, source), "requests": {}})
+            before = owned["cache"]["entries"]
+            rows = value["entries"]
+            if len(rows) not in (len(before), len(before) + 1):
+                raise ValueError("technician_original_count_changed")
+            if len(rows) == len(before) + 1:
+                if (rows[:-1] != before or rows[-1]["state"] != "pending"
+                        or rows[-1]["inspection"] != inspection or rows[-1]["mode_id"] != mode_id):
+                    raise ValueError("technician_claim_changed")
+                owned["requests"][rows[-1]["operation_id"]] = cache._cache_decode(cache._cache_json(request))
+            else:
+                changed = [(old, new) for old, new in zip(before, rows) if old != new]
+                if (len(changed) != 1 or changed[0][0]["state"] != "pending"
+                        or changed[0][1]["state"] not in ("terminal", "held")
+                        or any(old["operation_id"] != new["operation_id"] for old, new in zip(before, rows))):
+                    raise ValueError("technician_original_transition_invalid")
+            owned["cache"] = value
+            newest = rows[-1]
+            document = {"agent": "technician", "input": owned["requests"][newest["operation_id"]]["input"],
+                        "verdict": _fabric_public(newest), _FABRIC_KEY: owned}
+            _fabric_document(document, root, day, tk, cache)
+            cache._cache_save(path, document)
+            read()
+        observed = cache._fabric_cached_document(path=path, root=macro_root, cache_root=root,
+            logical_source=source, cfg=cfg, lane=_FABRIC_LANE,
+            system=request["system"], user=request["user"], input_context=request["context"],
+            validate=lambda text: _normalise_reply(text, strict=True),
+            load_cache=load_cache, store_cache=store_cache, startup_workload=_FABRIC_WORKLOAD)
+        if observed is None or observed["receipt"] is None:
+            return _wait("Fabric original unavailable or held — fail-conservative WITHHOLD.")
+        with cache._cache_lock(path, root):
+            current = read()
+            row = next(r for r in current[_FABRIC_KEY]["cache"]["entries"]
+                       if r["operation_id"] == observed["receipt"]["operation_id"])
+            return _fabric_public(row)
+    except Exception:
+        return _wait("Fabric original unavailable or held — fail-conservative WITHHOLD.")
+
+
 def technician_assess(inp: dict, *, asof: str | None = None, ticker: str | None = None) -> dict:
+    """Use the existing artifact for selected model-only analysis and recovery."""
+    try:
+        _, path, day, tk = _fabric_location(asof, ticker, inp)
+        if _fabric_presence(path) or cli_bridge._application_fabric_selected():
+            return _fabric_assess(inp, asof=day, ticker=tk)
+        before = path.read_bytes() if path.exists() else None
+        verdict = _legacy_assess(inp, asof=day, ticker=tk)
+        if (cli_bridge._application_fabric_selected() or _fabric_presence(path)
+                or (path.read_bytes() if path.exists() else None) != before):
+            return _wait("Technician selection or original changed — fail-conservative WITHHOLD.")
+        return verdict
+    except Exception:
+        return _wait("Technician original unavailable — fail-conservative WITHHOLD.")
+
+
+def _legacy_assess(inp: dict, *, asof: str | None = None, ticker: str | None = None) -> dict:
     """Rule on the entry timing for one name. Returns ``{agent, verdict, confidence, rationale}`` with
     ``verdict ∈ {"now","staged_starter","wait"}``.
 
@@ -231,7 +459,22 @@ def technician_assess(inp: dict, *, asof: str | None = None, ticker: str | None 
     if not isinstance(res, dict) or not res.get("ok"):
         return _wait("Technician LLM returned no usable result — fail-conservative WITHHOLD.")
 
-    j = _parse_json(res.get("text"))
+    return _normalise_reply(res.get("text"))
+
+
+def _normalise_reply(text, *, strict=False):
+    j = _parse_json(text)
+    if strict:
+        try:
+            json.dumps(j, allow_nan=False)
+            if isinstance(j, dict) and "confidence" in j:
+                import math
+                if isinstance(j["confidence"], bool) or not math.isfinite(float(j["confidence"])):
+                    j = None
+        except (ValueError, TypeError):
+            j = None
+    if not isinstance(j, dict):
+        j = None
     if not j:
         return _wait("Technician reply did not parse as JSON — fail-conservative WITHHOLD.")
 
@@ -246,7 +489,6 @@ def technician_assess(inp: dict, *, asof: str | None = None, ticker: str | None 
         return _wait(f"Technician returned an unrecognised verdict ({j.get('verdict')!r}) — "
                      "coerced to conservative WITHHOLD.", confidence=j.get("confidence", 0.0))
 
-    _ = (tk, asof)  # ticker/asof are for the caller's artifact keying, not the verdict shape
     return {
         "agent": "technician",
         "verdict": verdict,
@@ -255,17 +497,75 @@ def technician_assess(inp: dict, *, asof: str | None = None, ticker: str | None 
     }
 
 
+def _legacy_write_artifact(root, path, inp, verdict):
+    """The stdlib writer shares the same selected-owner lock inode.
+
+    Unselected persistence does not require Macro imports. Recheck ownership
+    under technician.json.lock so a late native completion cannot erase a claim.
+    """
+    import fcntl
+    import stat
+    import tempfile
+    current = root
+    for part in path.parent.relative_to(root).parts:
+        child = current / part
+        child.mkdir(exist_ok=True)
+        if child.is_symlink() or not child.is_dir():
+            raise ValueError("technician_artifact_directory_invalid")
+        current = child
+    fd = os.open(str(path) + ".lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    temporary = None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError("technician_artifact_lock_invalid")
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if cli_bridge._application_fabric_selected() or _fabric_presence(path):
+            return None
+        raw = json.dumps({"agent": "technician", "input": inp, "verdict": verdict},
+                         indent=2, default=str).encode()
+        with tempfile.NamedTemporaryFile(dir=path.parent, prefix="technician.json.tmp-",
+                                         delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        if path.read_bytes() != raw:
+            raise ValueError("technician_artifact_readback_mismatch")
+        return str(path.parent)
+    finally:
+        os.close(fd)
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+
+
 def _write_artifact(asof: str | None, ticker: str | None, inp: dict | None,
                     verdict: dict | None) -> str | None:
-    """Persist the Technician verdict to ``data/committee/<asof>/<TICKER>/technician.json`` (mirrors
-    where the committee writes ``sentinel.json``). Best-effort; never raises."""
-    _inp_tk = inp.get("ticker") if isinstance(inp, dict) else None
-    d = _ARTIFACTS / (str(asof)[:10] if asof else date.today().isoformat()) / (
-        str(ticker or _inp_tk or "UNK").upper())
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "technician.json").write_text(json.dumps(
-        {"agent": "technician", "input": inp, "verdict": verdict}, indent=2, default=str))
-    return str(d)
+    """Fence the legacy writer against the existing selected artifact owner."""
+    root, path, day, tk = _fabric_location(asof, ticker, inp, create=True)
+    if not (_fabric_presence(path) or cli_bridge._application_fabric_selected()):
+        return _legacy_write_artifact(root, path, inp, verdict)
+    _, _, _, cache = _fabric_owner()
+    with cache._cache_lock(path, root):
+        current = _fabric_document(cache._cache_read(path), root, day, tk, cache)
+        if current is not None and _FABRIC_KEY in current:
+            rows = current[_FABRIC_KEY]["cache"]["entries"]
+            clean = _strip_forbidden(inp) if isinstance(inp, dict) else inp
+            if isinstance(clean, dict):
+                clean = {**clean, "ticker": tk}
+            if (any(r["state"] != "terminal" for r in rows)
+                    or current["input"] != clean or current["verdict"] != verdict):
+                return None
+            return str(path.parent)  # Already atomically published with the original receipt.
+        if cli_bridge._application_fabric_selected():
+            return None
+        cache._cache_save(path, {"agent": "technician", "input": inp, "verdict": verdict})
+        return str(path.parent)
 
 
 def run(ticker: str, *, entry_signal: dict | None, tech: dict | None,
@@ -274,15 +574,30 @@ def run(ticker: str, *, entry_signal: dict | None, tech: dict | None,
     """Convenience wrapper: build the blind input → assess → persist the artifact, in one call.
 
     Returns the verdict dict (fail-conservative ``"wait"`` when no LLM is available). The artifact is
-    written best-effort; a persistence failure never changes the returned verdict. Never raises."""
+    written best-effort for native calls. Fabric results require the matching original artifact
+    to be confirmed before delivery; unresolved publication returns conservative wait. Never raises."""
     try:
         inp = technician_input(ticker, entry_signal=entry_signal, tech=tech,
                                anticipation=anticipation, options=options)
     except Exception:  # noqa: BLE001 — an input-build failure still yields a conservative verdict
         inp = {"ticker": str(ticker or "").upper()}
-    verdict = technician_assess(inp, asof=asof, ticker=ticker)
     try:
-        _write_artifact(asof, ticker, inp, verdict)
-    except Exception:  # noqa: BLE001 — persistence is best-effort
+        _, path, day, tk = _fabric_location(asof, ticker, inp)
+        fabric_owned = _fabric_presence(path) or cli_bridge._application_fabric_selected()
+    except Exception:
+        return _wait("Technician artifact identity invalid — fail-conservative WITHHOLD.")
+    verdict = technician_assess(inp, asof=day, ticker=tk)
+    published = None
+    try:
+        published = _write_artifact(day, tk, inp, verdict)
+    except Exception:  # noqa: BLE001 — unselected legacy persistence remains best-effort
         pass
+    if published is None:
+        try:
+            fabric_owned = (fabric_owned or cli_bridge._application_fabric_selected()
+                            or _fabric_presence(path))
+        except Exception:
+            fabric_owned = True  # An unreadable original cannot become a legacy result.
+        if fabric_owned:
+            return _wait("Technician artifact unavailable — fail-conservative WITHHOLD.")
     return verdict

@@ -218,6 +218,8 @@ def _make_app(
     authorize: Any = lambda _p: True,
     now: Any = lambda: NOW,
     policy: ResourcePolicy | None = None,
+    authorize_discovery: Any = None,
+    authorize_actions: Any = None,
 ) -> tuple[TestClient, _FakeWorkspaceClient]:
     """Build a synchronous TestClient around a fake installed owner client.
 
@@ -230,6 +232,8 @@ def _make_app(
         authenticator=_authenticator(rsa_key, policy=policy),
         now=now,
         authorize_principal=authorize,
+        authorize_discovery=authorize_discovery,
+        authorize_actions=authorize_actions,
         client=client,
     )
     app = create_workspace_app(config)

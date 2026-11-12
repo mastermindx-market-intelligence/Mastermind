@@ -16,6 +16,20 @@ the generic file/process tools that happened to be visible first.
 For an attended ChatGPT Paper task, discover the **exact Paper action family** on the current tool
 surface before making a capability claim.
 
+**Do not confuse default active-file context with exact-target serviceability.** A `paper_inspect`
+result of `DOCUMENT_UNAVAILABLE` means only that the adapter could not resolve its default/foreground
+context. When the intended exact `fileId` is already known, this is **not** a Paper outage and is not
+an edit blocker by itself. On a direct Business route, make one read-only
+`paper_read(tool="get_basic_info", arguments={"fileId": exact_id})`; a successful explicit read
+bootstraps the guarded target snapshot (and current schema receipt) used by `paper_prepare`/`paper_edit`
+even while another file is user-active or no default active context exists. On a legacy Studio route,
+a successful explicit-file read proves that target is readable even if `paper_inspect` failed, but do
+not invent a target snapshot or claim write readiness unless that carrier actually returns the required
+guard. Report the narrow state (`DEFAULT_CONTEXT_UNAVAILABLE`, `EXACT_TARGET_READABLE`, etc.) instead
+of the blanket claim “Paper is broken.” A transport error such as an MCP 404/timeout is likewise a
+transport observation, not evidence that Paper Desktop, login, the document, or the write schema is
+broken.
+
 **Business direct route.** After explicit enrollment and accepted scratch-file proof, use the private
 Mastermind Paper app as this workspace's normal Paper carrier. Read
 `docs/PAPER_DIRECT_CHATGPT.md` for its exact staged/accepted tool set. Never infer enrollment from
@@ -51,11 +65,18 @@ the workspace's accepted primary route.
    When that contract lists `paper_prepare` but the ChatGPT tool surface omits it, classify
    **STUDIO_TOOL_PUBLICATION_DRIFT / EFFECT_NONE**. Do **not** use generic Studio
    `start_process`, filesystem tools, Desktop Commander, raw `open_file`, shell, or UI automation
-   to reproduce the transition. ChatGPT MCP apps use an admin-approved **frozen tool snapshot**;
-   server-side tool additions do not automatically appear in chats. Recover the **same Studio Direct
-   app** through its workspace action-catalog ceremony: for a draft/dev app, re-scan/recreate it as
-   needed; for a published Business app, current OpenAI behavior requires recreate + republish rather
-   than assuming an in-place server update will refresh actions. Then start a fresh chat/tool selection,
+   to reproduce the transition. ChatGPT can retain an older approved tool definition after the MCP server changes; do not
+   assume the current chat has refreshed metadata. Recover the **same Studio Direct app** through the
+   platform's current action-catalog lifecycle. For a developer-mode MCP connection, deploy the change,
+   use its **Refresh** action, confirm the advertised metadata changed, and then start a new conversation.
+   For a published Plugin Directory plugin, use its continuous-review/rescan path. For a
+   published custom workspace MCP app, **Business and Enterprise/Edu** admins can
+   **Refresh the existing published custom MCP tool definitions in workspace
+   settings** without recreation, with app-management permission and a valid
+   connection. Review/publish updated actions. Enterprise/Edu Action control also
+   permits per-action Refresh. An unavailable Refresh path is a platform/admin gate,
+   not permission to replace the app. Keep reusing the existing tunnel/backend;
+   never create a parallel duplicate connection. Then start a fresh chat/tool selection,
    re-run `paper_inspect`, and invoke the surfaced `paper_prepare(file_id)` directly. Only after
    that same-app publication path is actually unavailable or explicitly refused is file transition
    an exact human/platform gate. Re-inspect the target file before any edit.
@@ -84,6 +105,29 @@ For native MCP clients, use only the Paper actions exposed and approved in that 
 never grants permission, and sealed workers do not inherit ambient plugins or Executive grants.
 
 
+## Non-destructive cross-file cleanup
+
+A user request to **relocate or consolidate** misplaced Paper pages is not automatically a
+requirement to preserve their internal page/artboard/node identities. First inspect the exact
+source and destination files and check whether the user or another admitted writer already
+copied the destination. Define acceptance in visible content, component quality, working
+navigation/references and absence of unwanted duplicates—not an identity-preserving transport
+API unless the assignment actually requires unchanged internal IDs.
+
+If the actual catalog supports an authorized direct move, use it. Otherwise, where already
+supported and permitted, **copy or reconstruct into the verified destination, compare and repair,
+then retire the old version only after destination verification and an authorized deletion path**.
+An unsupported cross-file move is a blocker for that method, not proof that destination inspection,
+existing-copy verification, in-place editing, reference repair or other in-scope cleanup cannot
+proceed. If the exposed Paper tool family cannot copy/create/delete, state that exact limitation;
+do not invent calls, switch carriers after a denial, or use raw filesystem/UI workarounds against
+the guarded bridge. Preserve originals and report any cleanup that remains unperformed.
+
+Do not require another human design-signoff for routine reversible choices already covered by
+the current assignment. When one target or operation is genuinely blocked, continue safe,
+path-disjoint approved Paper work or reference cleanup through its legitimate owner; do not
+declare the entire commissioned reorganization complete on the strength of an assessment.
+
 ## Scope the design
 
 Define the user's task, primary persona, target screen, meaningful states and
@@ -94,13 +138,47 @@ the same page. Prefer disjoint board/artboard/node target sets. For known same-b
 overlap, partition node targets and re-read/re-plan before the next bounded edit rather
 than acquiring a file-wide or page-wide lease.
 
+## Load and apply the human design contract
+
+Paper capability is not design readiness. Before substantive composition, read the existing
+content and visual owners in `mastermindx-market-intelligence/macro`:
+
+- `docs/DESIGN_DOCTRINE.md` — human-facing content, hierarchy and disclosure law;
+- `research/MASTER_PRODUCT_DESIGN_SYSTEM_V1.md` — visual grammar, archetypes and components;
+- the target product's current accepted navigation and interaction contract.
+
+Resolve Macro's current canonical `main` commit, record it separately from the Sol Skillpack
+pin, and read both design documents at that same Macro commit. This cross-repository product
+source is not a replacement for atomic same-commit Skillpack loading. A candidate PR is not
+accepted doctrine. If the design owner cannot be read, preserve that exact design-source gap;
+connection diagnosis may continue, but do not invent a parallel design system or call an
+ungrounded composition compliant. Apply any actual source conflict before the affected edit.
+
+The designer's first deliverable is a coherent reading and navigation model, not an artboard
+count. Name what an intended user should recognize in 3–4 seconds: subject, main assessment
+and useful next step, with material limitations visible where they matter. Preserve depth in
+well-named destinations and accessible disclosure. Descriptions and subtext are optional;
+word budgets are ceilings, not quotas to fill beneath every heading.
+
+Use the shared shell, tokens and interaction grammar. Consolidate competing studies of one
+product by mapping their useful jobs and evidence into one current framework. Do not stack
+their panels, erase research depth, merge incompatible cohorts or multiply theme/device
+variants before repairing the primary journey. Different page jobs may use different accepted
+archetypes; one grammar does not mean one identical card grid everywhere.
+
+A useful next step can be investigation, comparison or waiting for current data. It need not
+be a trade. Never create a signal, fused score, rank, size or execution permission to make a
+design seem decisive. Translate owner-issued states faithfully; move internal filenames,
+CI/PR status and governance instructions out of the customer glance path without hiding risk.
+
 ## Inspect, design and verify
 
-1. Inspect the active file and existing artboards. Confirm the intended document.
-   If there is no stable ID or artboard anchor, stop at the typed binding refusal;
-   do not guess a file. Keep the user from switching the active document mid-task.
-   Re-inspect immediately before the first mutation because another UI/client may have changed the
-   active page or file after an earlier capability probe.
+1. Resolve the intended exact document and existing artboards. If there is no stable ID or artboard
+   anchor, stop at the typed binding refusal; do not guess a file. For explicit-file direct routes,
+   user-active focus is not an ownership or availability requirement and may change concurrently;
+   bootstrap/re-read the exact target by `fileId`. For legacy current-context operations, re-inspect
+   immediately before the first mutation because another UI/client may have changed the active page
+   or file after an earlier capability probe.
 2. Read the live catalog once for exact upstream schemas. Never guess Paper tool
    argument names. Prefer existing tokens and components over arbitrary styles.
 3. Plan small, useful visual changes. Get a fresh snapshot guard immediately before each bounded

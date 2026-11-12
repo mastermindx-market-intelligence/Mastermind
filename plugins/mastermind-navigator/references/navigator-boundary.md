@@ -20,8 +20,12 @@ Executive OS remains lifecycle owner. Agent OS remains organizational-continuity
 
 The package may read current owner-native observations, normalize them into the closed health envelope, filter them for one explicit role, and recommend the smallest owner-native probe. The recommendation grants no new authority and must be rechecked at the effect boundary.
 
+Selected-project source work is not reclassified as host/process work merely because a shell could perform it. Generic Studio Direct process tools are not a fallback for missing Workbench/source actions. Before any effect begins, unsupported bounded source work may move only through an already-authorized source/build owner. For Mastermind attended-Web status/commit/push, the existing gateway-owned `studio_git_*` actions are a distinct typed publication owner bound to canonical `mmx-workspace`; they are not generic shell and do not become Workbench. After an explicit platform safety or permission refusal, the original operation, including read-only inspection, stays on its carrier while incumbent evidence determines whether dispatch occurred: proven pre-dispatch refusal is `TOOL_DEGRADED / EFFECT_NONE` with no retry, while possible dispatch remains `EFFECT_UNKNOWN` and requires same-carrier reconciliation. Changing surfaces, accounts, tools, models, or providers does not create retry authority.
+
 `UNKNOWN` is not upgraded by a plugin name, a connector listing, a stale boot packet, or confident model prose. `EFFECT_UNKNOWN` stays on the same carrier and owner-native reconciliation path with no blind retry or failover.
 
 ## Installation ceiling
 
 The package-local catalog fragment is integration material only. Repository source, shared-catalog admission, workspace installation, enablement, authentication, callability, organizational authorization, and a real canary are separate states and must be reported separately.
+
+For initial unrefused local artifact inspection, use typed paged file readers within current host/workspace authorization and filesystem bounds; metadata preflight is optional. Retained gateway output and already-started process output retain their own readers. A pure file READ is not a generic process effect merely because shell could emulate it. Genuine separately authorized computation/transformation stays with the existing process owner. This future initial-routing rule cannot reopen or route around a refused read.

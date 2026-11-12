@@ -94,10 +94,16 @@ def _root_evidence(runtime: Any, root_job_id: str):
             per_job.setdefault(attempt.job_id, []).append(attempt)
         if any(len(rows) > ROOT_MAX_ATTEMPTS_PER_JOB for rows in per_job.values()):
             raise ValueError("bounded Runtime Attempt budget invalid")
+        origins = read.classify_root_origins_bounded()
+        if len(origins) != 1 or origins[0].job_id != root_job_id:
+            raise ValueError("bounded root origin membership invalid")
+        root_origin = origins[0]
         provenance_by_job: dict[str, Mapping[str, Any] | None] = {}
         for job in jobs:
             provenance, _warning = _bounded_provenance(
                 runtime, job, creation_event_reader=read.get_creation_event_by_command_id)
+            if job.job_id == root_job_id and root_origin.kind == "LEGACY_CEO":
+                provenance = root_origin.provenance
             provenance_by_job[job.job_id] = provenance
     # The finalized receipt exists only after the observation context closed.
     receipt = read.receipt.to_dict()
@@ -113,8 +119,10 @@ def _bounded_runtime_inputs(runtime: Any) -> tuple[
 
     Discovery and each root have separate finalized observation receipts. The
     root details must agree with discovery's exact root/provenance postimages.
-    An unsupported or failed root invalidates the mapping; omitting it could
-    conceal a second root for the same workstream. No global SAME is minted.
+    Every root receives bounded creation-origin classification. Only a
+    positively proven non-CEO root is excluded; unsupported origins still
+    invalidate the complete mapping. Legacy CEO candidates preserve ambiguity.
+    No global SAME is minted.
     """
     from control_plane.fabric_job_view import _bounded_provenance
 
@@ -130,14 +138,33 @@ def _bounded_runtime_inputs(runtime: Any) -> tuple[
             commands = _eligible_commands(runtime, discovery.roots)
             if len(commands) > MAX_ELIGIBLE_COMMANDS:
                 raise ValueError("eligible creation Event point budget exceeded")
-            selected = set(commands.values())
-            if len(selected) > MAX_SELECTED_ROOTS or len(selected) != len(discovery.roots):
-                raise ValueError("unsupported or duplicate roots prevent complete mapping")
+            if len({job.job_id for job in discovery.roots}) != len(discovery.roots):
+                raise ValueError("duplicate roots prevent complete mapping")
+            origins = read.classify_root_origins_bounded()
+            if ({origin.job_id for origin in origins} != {job.job_id for job in discovery.roots}
+                    or len(origins) != len(discovery.roots)):
+                raise ValueError("root origin mapping is incomplete")
+            by_id = {origin.job_id: origin for origin in origins}
+            selected = [origin for origin in origins if origin.kind != "NON_CEO"]
+            if len(selected) > MAX_SELECTED_ROOTS:
+                raise ValueError("selected root detail budget exceeded")
             roots = {}
             for job in discovery.roots:
-                provenance, warning = _bounded_provenance(
-                    runtime, job, creation_event_reader=read.get_creation_event_by_command_id)
-                if (warning is not None or not isinstance(provenance, Mapping)
+                origin = by_id[job.job_id]
+                if origin.kind == "NON_CEO":
+                    if origin.provenance is not None:
+                        raise ValueError("non-CEO root carries conflicting provenance")
+                    continue
+                if origin.kind == "STRICT_V2_CEO":
+                    provenance, warning = _bounded_provenance(
+                        runtime, job, creation_event_reader=read.get_creation_event_by_command_id)
+                    if warning is not None or provenance != origin.provenance:
+                        raise ValueError("strict root origin provenance changed")
+                elif origin.kind == "LEGACY_CEO":
+                    provenance = origin.provenance
+                else:
+                    raise ValueError("root origin unresolved")
+                if (not isinstance(provenance, Mapping)
                         or not isinstance(provenance.get("workstream"), str)
                         or not provenance["workstream"]):
                     raise ValueError("root creation provenance or workstream unavailable")
@@ -172,8 +199,8 @@ def build_workspace_composer(
     bounded_runtime: Callable[[], Any],
     bindings_path: Path | str | None,
     timeout: float = 240.0,
-) -> Callable[[str], dict[str, Any]]:
-    """Return the ``compose_inputs(generated_at)`` callback for ServerConfig.
+) -> Callable[..., dict[str, Any]]:
+    """Return the installed ``compose_inputs`` callback for ServerConfig.
 
     ``packet_collector`` is the existing
     ``integrations.executive_mcp.installed.InstalledBootPacketCollector``
@@ -184,7 +211,10 @@ def build_workspace_composer(
     explicit unavailable binding — the default HOME location is never
     expanded.  The returned callable raises on failed collection; the
     chairman seam turns that failure into explicit unavailable source inputs
-    and never falls back to the legacy gather.
+    and never falls back to the legacy gather. An explicitly supplied detached
+    ``active_builds_snapshot`` replaces only the active-builds artifact read;
+    omission alone retains that bounded reader. An unavailable supplied value
+    reaches the canonical compositor without an artifact substitution.
     """
     from control_plane import chairman_control_room as ccr
     from control_plane import executive_inbox
@@ -193,11 +223,16 @@ def build_workspace_composer(
     repo = Path(repo_root)
     macro = None if macro_root is None else os.fspath(macro_root)
 
-    def compose_inputs(generated_at: str) -> dict[str, Any]:
+    def compose_inputs(
+        generated_at: str, *, active_builds_snapshot: Any = ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED,
+    ) -> dict[str, Any]:
         packet = packet_collector(
             repo_root=repo, macro_root_flag=macro, now=generated_at, timeout=timeout)
-        active_builds, builds_error = _read_installed_document(
-            ccr._read_active_builds, macro)
+        if active_builds_snapshot is ccr._ACTIVE_BUILDS_SNAPSHOT_OMITTED:
+            active_builds, builds_error = _read_installed_document(
+                ccr._read_active_builds, macro)
+        else:
+            active_builds, builds_error = active_builds_snapshot, None
         agent_os_state, state_error = _read_installed_document(
             ccr._read_agent_os_state, macro)
         if bindings_path is None:
