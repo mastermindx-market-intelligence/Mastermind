@@ -1075,15 +1075,22 @@ def pacing_key(window_id, pid=None):
 
     An unreadable window id is refused, typed — a pace record with no target
     identity would silently allow everything, which is exactly the hole this
-    closes. An unresolvable pid falls back to the exact id alone.
+    closes. The key is ALL-OR-NOTHING (BCU R3 M1): an unresolvable pid is
+    the typed WINDOW_IDENTITY_UNKNOWN refusal, never a pid-less fallback
+    key — a window id recycled by another process must not inherit (or
+    escape) a pace record, and a target whose owner cannot be named is not
+    a target this layer may act on.
     """
     if not isinstance(window_id, int) or isinstance(window_id, bool):
         raise OpError("WINDOW_ID_REQUIRED",
                       "pacing needs an exact integer window_id, got %r"
                       % (window_id,))
-    if isinstance(pid, int) and not isinstance(pid, bool) and pid > 0:
-        return "pid:%d|window:%d" % (pid, window_id)
-    return "window:%d" % window_id
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        raise OpError("WINDOW_IDENTITY_UNKNOWN",
+                      "pacing needs the owning pid from the snapshot's "
+                      "target_receipt for window %d, got %r; act refused "
+                      "before any dispatch" % (window_id, pid))
+    return "pid:%d|window:%d" % (pid, window_id)
 
 
 def target_receipt_pid(meta):

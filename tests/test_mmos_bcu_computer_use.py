@@ -3673,12 +3673,14 @@ class TestPacingKeyIdentity(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="mmos-cu-m8-")
         for key in ("FAKE_PEEKABOO_IDENTITY", "FAKE_PEEKABOO_LOG",
-                    "FAKE_PEEKABOO_WINDOWS_JSON"):
+                    "FAKE_PEEKABOO_WINDOWS_JSON",
+                    "FAKE_PEEKABOO_NO_TARGET_RECEIPT"):
             os.environ.pop(key, None)
 
     def tearDown(self):
         for key in ("FAKE_PEEKABOO_IDENTITY", "FAKE_PEEKABOO_LOG",
-                    "FAKE_PEEKABOO_WINDOWS_JSON"):
+                    "FAKE_PEEKABOO_WINDOWS_JSON",
+                    "FAKE_PEEKABOO_NO_TARGET_RECEIPT"):
             os.environ.pop(key, None)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
@@ -3734,6 +3736,39 @@ class TestPacingKeyIdentity(unittest.TestCase):
                 mmos.pacing_key(bad, 101)
             self.assertEqual(caught.exception.code, "WINDOW_ID_REQUIRED",
                              "for %r" % (bad,))
+
+    def test_pid_less_key_is_removed(self):
+        # BCU R3 M1 (fail-first on 1ae3e29e6): the key is all-or-nothing.
+        # An unresolvable pid is the typed WINDOW_IDENTITY_UNKNOWN refusal,
+        # never the pid-less "window:N" fallback key (which let a recycled
+        # window id inherit or escape a pace record).
+        for bad_pid in (None, 0, -1, "101", True, 101.0):
+            with self.assertRaises(mmos.OpError) as caught:
+                mmos.pacing_key(42, bad_pid)
+            self.assertEqual(caught.exception.code,
+                             "WINDOW_IDENTITY_UNKNOWN",
+                             "for pid %r" % (bad_pid,))
+
+    def test_unresolvable_pid_refuses_before_any_dispatch(self):
+        # BCU R3 M1 (fail-first on 1ae3e29e6): a paced act whose fresh
+        # snapshot carries NO resolvable pid refuses typed — and NOTHING is
+        # dispatched, no pace record written. The old server fell back to
+        # the pid-less key and dispatched anyway.
+        os.environ["FAKE_PEEKABOO_IDENTITY"] = IDENTITY_TEXTEDIT
+        os.environ["FAKE_PEEKABOO_NO_TARGET_RECEIPT"] = "1"
+        ctx = self._ctx()
+        result = mmos.handle_tool_call(ctx, {
+            "action": "keys", "window_id": 42, "chord": "return",
+            "owner": "agent-a", "lease_nonce": ctx.lease_nonce})
+        payload = json.loads(result["content"][0]["text"])
+        self.assertEqual(payload["status"], "NOT_APPLIED", payload)
+        self.assertIn("WINDOW_IDENTITY_UNKNOWN", payload["cause"])
+        dispatched = [c for c in read_calls(ctx)
+                      if c[0] in ("press", "click", "action", "set-value",
+                                  "paste", "scroll")]
+        self.assertEqual(dispatched, [], "nothing may be dispatched")
+        self.assertFalse(os.path.exists(ctx.pacer.path),
+                         "an unresolvable identity writes no pace record")
 
 
 class TestSliceStepsAndStateWrite(unittest.TestCase):
