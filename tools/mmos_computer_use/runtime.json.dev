@@ -1,0 +1,8 @@
+{
+  "comment": "Dev runtime descriptor for the mmos_computer_use server. Copy to runtime.json (or set MMOS_CU_RUNTIME) to activate. The SHA-256 pin is verified against the binary on every server start; a mismatch refuses startup with PIN_MISMATCH.",
+  "schema": "mmos.computer_use.runtime/v1",
+  "peekaboo_bin": "/opt/homebrew/bin/peekaboo",
+  "peekaboo_sha256": "795176aaf84396b24e9e3ad10863ac0f8858e09695e3965e2b80b38c67701d8a",
+  "input_strategy": "actionFirst",
+  "act_input_strategy": "actionOnly"
+}

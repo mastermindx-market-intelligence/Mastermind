@@ -1,0 +1,35 @@
+{
+ "data": {
+  "windows": [
+   {
+    "window_title": "BCU slice fixture",
+    "is_on_screen": true,
+    "is_frontmost": false,
+    "window_id": 98889,
+    "is_key": true,
+    "layer": 0,
+    "window_index": 14,
+    "bounds": {
+     "y": 120,
+     "width": 640,
+     "height": 452,
+     "x": 120
+    },
+    "subrole": "AXStandardWindow"
+   }
+  ],
+  "inventory_completeness": "partial",
+  "inventory_warnings": [
+   "Window list omitted 16 non-renderable or duplicate inventory rows."
+  ],
+  "target_application_info": {
+   "bundle_id": "com.apple.python3",
+   "app_name": "Python",
+   "pid": 49829
+  }
+ },
+ "debug_logs": [
+  "[2026-11-11T13:44:31.740Z] DEBUG: Runtime host: local (in-process)"
+ ],
+ "success": true
+}

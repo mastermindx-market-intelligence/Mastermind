@@ -1,0 +1,65 @@
+{
+  "_note": "M13 rehearsal round 3: default-strategy (synthesized) click --on elem_1 with fresh snapshot: rc=0 success:true effect unverifiable, but the fixture logged NO SENT line - the Tk button did not fire. Element-targeted click does not deliver on this fixture under either strategy; only a bounds coordinate click would, which is DENY_OVERLAY-gated while Terminal is visible (by design).",
+  "data": {
+    "clickLocation": {
+      "x": 159.5,
+      "y": 250
+    },
+    "clickType": "single",
+    "clickedElement": "Button: Send",
+    "deliveryMode": "background",
+    "executionTime": 36.5392689704895,
+    "targetApp": "Python",
+    "targetPoint": {
+      "elementId": "elem_1",
+      "original": {
+        "x": 159.5,
+        "y": 250
+      },
+      "resolved": {
+        "x": 159.5,
+        "y": 250
+      },
+      "snapshotId": "1794448943694-3419",
+      "source": "element",
+      "windowAdjustment": {
+        "status": "unchanged"
+      }
+    },
+    "targetWindowId": 98889,
+    "targetWindowTitle": "BCU slice fixture",
+    "waitTime": 0
+  },
+  "debug_logs": [
+    "[2026-11-12T02:02:24.293Z] DEBUG: Runtime host: local (in-process)"
+  ],
+  "effect": "unverifiable",
+  "outcome": {
+    "delivery_mechanism": "accessibility_action",
+    "delivery_mode": "background",
+    "dispatch_state": "dispatched",
+    "dispatched_unit_count": 1,
+    "effect": "unverifiable",
+    "escalation": "observe_before_retry",
+    "evidence": "delivery_accepted",
+    "mutation_dispatched": true,
+    "requires_fresh_observation": true,
+    "retry_safe": false,
+    "retry_safety": "unsafe",
+    "route": "local",
+    "state": "dispatched_unverified"
+  },
+  "success": true,
+  "target_identity": {
+    "kind": "window",
+    "pid": 49829,
+    "process_start_identity_decimal": "1794395772541729",
+    "window_id": 98889
+  },
+  "target_receipt": {
+    "pid": 49829,
+    "process_start_identity": 1794395772541729,
+    "process_start_identity_decimal": "1794395772541729",
+    "window_id": 98889
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "_note": "M13 rehearsal round 3: click with stale snapshot. rc=1 SNAPSHOT_STALE with effect 'refused' - peekaboo's explicit pre-dispatch refusal marker; maps clean (NOT_APPLIED), never EFFECT_UNKNOWN.",
+  "data": null,
+  "debug_logs": [
+    "[2026-11-12T02:01:24.411Z] DEBUG: Runtime host: local (in-process)"
+  ],
+  "effect": "refused",
+  "error": {
+    "code": "SNAPSHOT_STALE",
+    "message": "Snapshot is stale: the most recent UI snapshot was invalidated because an earlier command changed the desktop. Re-run peekaboo see to refresh."
+  },
+  "success": false
+}
