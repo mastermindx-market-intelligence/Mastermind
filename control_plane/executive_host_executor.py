@@ -32,6 +32,7 @@ import argparse
 import dataclasses
 import datetime as _datetime
 import json
+import math
 import os
 import platform
 import re
@@ -83,6 +84,7 @@ _THRESHOLD_KEYS = frozenset({
 })
 _REQUEST_KEYS = frozenset({"schema", "request_id", "operation", "payload"})
 _RESPONSE_KEYS = frozenset({"schema", "request_id", "operation", "ok", "result"})
+_ERROR_RESPONSE_KEYS = frozenset({"schema", "request_id", "operation", "ok", "error"})
 _PULL_PAYLOAD_KEYS = frozenset({"host_id", "snapshot", "free_local_slots"})
 _HEARTBEAT_PAYLOAD_KEYS = frozenset({"host_id", "snapshot"})
 _RELEASE_PAYLOAD_KEYS = frozenset({
@@ -115,6 +117,21 @@ def _digest(value: Any) -> str:
 
 
 # --- HostReadinessSnapshot.v1 validation ----------------------------------------
+
+
+def _finite_number(value: Any) -> bool:
+    """Whether a typed sensor/threshold value can be compared safely.
+
+    Booleans, strings, NaN/infinity and integers outside finite float range
+    are not observations of available capacity. Keep this check shared by
+    the wire validator and the final pre-start recheck.
+    """
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, ValueError):
+        return False
 
 
 def validate_host_readiness_snapshot(value: Any) -> dict[str, Any]:
@@ -150,20 +167,19 @@ def validate_host_readiness_snapshot(value: Any) -> dict[str, Any]:
             raise HostExecutorError("SNAPSHOT_UNREACHABLE_REASON_MISSING")
     elif value["unreachable_error"] is not None:
         raise HostExecutorError("SNAPSHOT_UNREACHABLE_REASON_PRESENT")
-    if type(value["cores"]) is not int or value["cores"] <= 0:
+    if type(value["cores"]) is not int or value["cores"] <= 0 or not _finite_number(value["cores"]):
         raise HostExecutorError("SNAPSHOT_CORES_INVALID")
     for field in ("ram_gib", "load_1m"):
         number = value[field]
-        if not isinstance(number, (int, float)) or isinstance(number, bool) or number < 0:
+        if not _finite_number(number) or number < 0:
             raise HostExecutorError("SNAPSHOT_NUMERIC_INVALID")
     disk = value["disk_free_gib"]
     if not isinstance(disk, dict) or set(disk) != {"root", "runtime_dir", "runtime_dir_path"}:
         raise HostExecutorError("SNAPSHOT_DISK_INVALID")
-    if not isinstance(disk["root"], (int, float)) or isinstance(disk["root"], bool) or disk["root"] < 0:
+    if not _finite_number(disk["root"]) or disk["root"] < 0:
         raise HostExecutorError("SNAPSHOT_DISK_INVALID")
     if disk["runtime_dir"] is not None and (
-        not isinstance(disk["runtime_dir"], (int, float))
-        or isinstance(disk["runtime_dir"], bool)
+        not _finite_number(disk["runtime_dir"])
         or disk["runtime_dir"] < 0
     ):
         raise HostExecutorError("SNAPSHOT_DISK_INVALID")
@@ -197,13 +213,13 @@ def validate_host_readiness_snapshot(value: Any) -> dict[str, Any]:
     if isinstance(reserve, str):
         if reserve != MEMORY_RESERVE_FORMULA:
             raise HostExecutorError("SNAPSHOT_THRESHOLDS_INVALID")
-    elif isinstance(reserve, (int, float)) and not isinstance(reserve, bool):
+    elif _finite_number(reserve):
         if reserve < DEFAULT_MEMORY_RESERVE_GIB:
             raise HostExecutorError("SNAPSHOT_THRESHOLDS_INVALID")
     else:
         raise HostExecutorError("SNAPSHOT_THRESHOLDS_INVALID")
     floor = thresholds["runtime_floor_gib"]
-    if not isinstance(floor, (int, float)) or isinstance(floor, bool) or floor < 0:
+    if not _finite_number(floor) or floor < 0:
         raise HostExecutorError("SNAPSHOT_THRESHOLDS_INVALID")
     if value["reachable"] is not True and value["eligible_slots"] != 0:
         raise HostExecutorError("SNAPSHOT_UNREACHABLE_MUST_HAVE_ZERO_SLOTS")
@@ -292,7 +308,10 @@ def build_error_response(request: Mapping[str, Any], code: str, detail: str = ""
 def validate_response(value: Any, *, request: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise HostExecutorError("RESPONSE_NOT_OBJECT")
-    if set(value) != _RESPONSE_KEYS:
+    if type(value.get("ok")) is not bool:
+        raise HostExecutorError("RESPONSE_OK_INVALID")
+    expected_keys = _RESPONSE_KEYS if value["ok"] else _ERROR_RESPONSE_KEYS
+    if set(value) != expected_keys:
         raise HostExecutorError("RESPONSE_FIELDS_INVALID")
     if value["schema"] != HOST_EXECUTOR_RESPONSE_SCHEMA:
         raise HostExecutorError("RESPONSE_SCHEMA_UNSUPPORTED")
@@ -300,7 +319,9 @@ def validate_response(value: Any, *, request: Mapping[str, Any]) -> dict[str, An
         raise HostExecutorError("RESPONSE_IDENTITY_MISMATCH")
     if value["ok"] is not True:
         error = value.get("error")
-        if not isinstance(error, dict) or not isinstance(error.get("code"), str):
+        if (not isinstance(error, dict) or set(error) != {"code", "detail"}
+                or not isinstance(error["code"], str) or not error["code"]
+                or not isinstance(error["detail"], str)):
             raise HostExecutorError("RESPONSE_ERROR_INVALID")
         raise HostExecutorError(f"REMOTE_REFUSED:{error['code']}")
     if not isinstance(value["result"], dict):
@@ -331,6 +352,8 @@ def _validate_pull_payload(payload: Mapping[str, Any]) -> None:
     if set(payload) != _PULL_PAYLOAD_KEYS:
         raise HostExecutorError("PAYLOAD_FIELDS_INVALID")
     _validate_host_and_snapshot(payload)
+    if type(payload["free_local_slots"]) is not int or payload["free_local_slots"] < 0:
+        raise HostExecutorError("PAYLOAD_FREE_LOCAL_SLOTS_INVALID")
 
 
 def _validate_heartbeat_payload(payload: Mapping[str, Any]) -> None:
@@ -373,7 +396,12 @@ def _logical_cores() -> int:
         affinity = len(os.sched_getaffinity(0))  # type: ignore[attr-defined]
     except (AttributeError, OSError):
         affinity = 0
-    return max(affinity, os.cpu_count() or 1)
+    count = os.cpu_count()
+    observed = [value for value in (affinity, count)
+                if type(value) is int and value > 0 and _finite_number(value)]
+    if not observed:
+        raise HostExecutorError("PROBE_CORES_UNAVAILABLE")
+    return max(observed)
 
 
 def _memory_gib_linux() -> tuple[float, float]:
@@ -457,9 +485,11 @@ def probe_host_readiness(
     """Collect one real ``HostReadinessSnapshot.v1`` from this host.
 
     User-space reads only (``/proc``, ``sysctl``, ``shutil.disk_usage``);
-    no sudo, no daemons touched.  An unreadable group reports 0.0/unknown,
-    never a healthy guess: thermal is ``unknown`` until a sensor evidence
-    source exists (Rev 4 l.150).
+    no sudo, no daemons touched. Missing core or load evidence raises a
+    typed probe refusal; the pre-start caller returns the original claim.
+    Unavailable memory stays unknown/zero and cannot pass the pressure
+    recheck. Thermal stays ``unknown`` until a sensor evidence source
+    exists (Rev 4 l.150).
     """
 
     settings = dict(thresholds or {})
@@ -478,8 +508,10 @@ def probe_host_readiness(
 
     try:
         load_1m = float(os.getloadavg()[0])
-    except (OSError, ValueError):
-        load_1m = 0.0
+    except (OSError, ValueError) as exc:
+        raise HostExecutorError("PROBE_LOAD_UNAVAILABLE") from exc
+    if not _finite_number(load_1m) or load_1m < 0:
+        raise HostExecutorError("PROBE_LOAD_UNAVAILABLE")
 
     runtime_path = str(runtime_dir) if runtime_dir is not None else os.path.expanduser("~/.hermes")
     root_free = shutil.disk_usage(os.path.expanduser("~")).free / 1024 ** 3
@@ -651,9 +683,11 @@ class HostExecutor:
                 "proposed_thresholds", {}
             ).get("memory_reserve_gib", MEMORY_RESERVE_FORMULA),
         )
-        if isinstance(reserve, str):
+        if reserve == MEMORY_RESERVE_FORMULA:
             return max(DEFAULT_MEMORY_RESERVE_GIB, 0.10 * ram_gib)
-        return max(DEFAULT_MEMORY_RESERVE_GIB, float(reserve))
+        if not _finite_number(reserve) or reserve < DEFAULT_MEMORY_RESERVE_GIB:
+            raise HostExecutorError("PRESSURE_MEMORY_RESERVE_INVALID")
+        return float(reserve)
 
     def local_pressure_ok(
         self, snapshot: Mapping[str, Any] | None = None,
@@ -666,32 +700,52 @@ class HostExecutor:
         silently when the reserve cannot be evaluated -- they refuse.
         """
 
-        raw = snapshot if snapshot is not None else self._probe(
-            self.host_id, role="worker", eligible_slots=self.eligible_slots,
-            runtime_dir=self._runtime_dir, thresholds=self.thresholds,
-        )
-        ram_gib = float(raw.get("ram_gib") or 0.0)
-        available = raw.get("_mem_available_gib")
-        mem_available_gib = float(available) if available is not None else None
-        cores = int(raw.get("cores") or 0)
-        load_1m = float(raw.get("load_1m") or 0.0)
-        if cores > 0 and load_1m / cores > DEFAULT_PRESSURE_REFUSE_LOAD_RATIO:
+        try:
+            raw = snapshot if snapshot is not None else self._probe(
+                self.host_id, role="worker", eligible_slots=self.eligible_slots,
+                runtime_dir=self._runtime_dir, thresholds=self.thresholds,
+            )
+        except (HostExecutorError, OSError, ValueError, OverflowError):
+            # Sensor/read failures cannot escape the original pre-start
+            # release path or turn into a guessed healthy measurement.
+            return False, "local pressure probe unavailable at recheck"
+        if not isinstance(raw, Mapping):
+            return False, "local pressure observations unknown at recheck"
+        cores = raw.get("cores")
+        if type(cores) is not int or cores <= 0 or not _finite_number(cores):
+            return False, "CPU core count unknown at recheck"
+        load_1m = raw.get("load_1m")
+        if not _finite_number(load_1m) or load_1m < 0:
+            return False, "CPU load unknown at recheck"
+        ram_gib = raw.get("ram_gib")
+        if not _finite_number(ram_gib) or ram_gib <= 0:
+            return False, "memory capacity unknown at recheck"
+        mem_available_gib = raw.get("_mem_available_gib")
+        if not _finite_number(mem_available_gib) or mem_available_gib < 0:
+            return False, "memory availability unknown at recheck"
+        if load_1m / cores > DEFAULT_PRESSURE_REFUSE_LOAD_RATIO:
             return False, f"load ratio {load_1m / cores:.2f} exceeds core count"
-        reserve = self._memory_reserve_gib(ram_gib)
-        if mem_available_gib is None:
-            # No trustworthy availability reading: recheck must not guess.
-            if ram_gib > 0:
-                return False, "memory availability unknown at recheck"
-        elif mem_available_gib < reserve:
+        try:
+            reserve = self._memory_reserve_gib(ram_gib)
+        except HostExecutorError:
+            return False, "memory reserve invalid at recheck"
+        if mem_available_gib < reserve:
             return False, f"memory available {mem_available_gib:.1f} GiB below reserve {reserve:.1f} GiB"
-        disk = raw.get("disk_free_gib") or {}
-        runtime_free = disk.get("runtime_dir", disk.get("root"))
-        floor = float(self.thresholds.get(
-            "runtime_floor_gib", (raw.get("proposed_thresholds") or {}).get(
+        disk = raw.get("disk_free_gib")
+        runtime_free = disk.get("runtime_dir") if isinstance(disk, Mapping) else None
+        if not _finite_number(runtime_free):
+            return False, "runtime disk availability unknown at recheck"
+        observed_thresholds = raw.get("proposed_thresholds", {})
+        if not isinstance(observed_thresholds, Mapping):
+            return False, "pressure thresholds invalid at recheck"
+        floor = self.thresholds.get(
+            "runtime_floor_gib", observed_thresholds.get(
                 "runtime_floor_gib", DEFAULT_RUNTIME_FLOOR_GIB),
-        ))
-        if isinstance(runtime_free, (int, float)) and float(runtime_free) < floor:
-            return False, f"runtime disk {float(runtime_free):.1f} GiB below floor {floor:.1f} GiB"
+        )
+        if not _finite_number(floor) or floor < 0:
+            return False, "runtime disk floor invalid at recheck"
+        if runtime_free < floor:
+            return False, f"runtime disk {runtime_free:.1f} GiB below floor {floor:.1f} GiB"
         return True, ""
 
     # -- slots ----------------------------------------------------------------
@@ -962,6 +1016,14 @@ class HostHeartbeatIntake:
             # Zero new claims: the placement authority is never consulted.
             return build_response(valid, {
                 "claim": None, "reason_code": code, "detail": detail,
+                "heartbeat_digest": record["snapshot_digest"],
+            })
+        if payload["free_local_slots"] == 0:
+            # Readiness capacity is not evidence of an available local slot.
+            # Keep the heartbeat, but do not enter the claim authority.
+            return build_response(valid, {
+                "claim": None, "reason_code": "NO_FREE_LOCAL_SLOT",
+                "detail": "free_local_slots=0",
                 "heartbeat_digest": record["snapshot_digest"],
             })
         claim, reason_code, reason_detail = self._claim_for_host(

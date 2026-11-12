@@ -4235,3 +4235,347 @@ def test_supervisor_pre_start_release_branch_releases_once(tmp_path):
     )
     assert successor is not None
     assert successor.attempt.fence_generation == lease.attempt.fence_generation + 1
+
+
+def test_host_executor_protocol_preserves_correlated_remote_refusal():
+    from control_plane.executive_host_executor import build_error_response, validate_response
+
+    request = _hx_pull_request(_hx_snapshot())
+    response = build_error_response(request, "HOST_BUSY", "No new claim admitted")
+    with pytest.raises(HostExecutorError, match="^REMOTE_REFUSED:HOST_BUSY$"):
+        validate_response(response, request=request)
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_host_executor_response_identity_and_shape_are_closed(ok):
+    from control_plane.executive_host_executor import (
+        build_error_response, build_response, validate_response,
+    )
+
+    request = _hx_pull_request(_hx_snapshot())
+    response = (build_response(request, {"claim": None}) if ok else
+                build_error_response(request, "HOST_BUSY"))
+    for field, wrong in (("request_id", "hx-" + "0" * 32),
+                         ("operation", RELEASE_UNSTARTED_OPERATION)):
+        with pytest.raises(HostExecutorError, match="^RESPONSE_IDENTITY_MISMATCH$"):
+            validate_response({**response, field: wrong}, request=request)
+    mixed = {**response, "error" if ok else "result": {}}
+    with pytest.raises(HostExecutorError, match="^RESPONSE_FIELDS_INVALID$"):
+        validate_response(mixed, request=request)
+    if ok:
+        assert validate_response(response, request=request) == response
+
+
+@pytest.mark.parametrize("ok", [0, 1, None, "false"])
+def test_host_executor_response_requires_boolean_outcome(ok):
+    from control_plane.executive_host_executor import build_response, validate_response
+
+    request = _hx_pull_request(_hx_snapshot())
+    response = {**build_response(request, {}), "ok": ok}
+    with pytest.raises(HostExecutorError, match="^RESPONSE_OK_INVALID$"):
+        validate_response(response, request=request)
+
+
+@pytest.mark.parametrize("error", [
+    {"code": "", "detail": ""}, {"code": "BUSY"},
+    {"code": "BUSY", "detail": 1}, {"code": 1, "detail": ""},
+    {"code": "BUSY", "detail": "", "extra": "untrusted"},
+])
+def test_host_executor_remote_error_body_is_closed(error):
+    from control_plane.executive_host_executor import build_error_response, validate_response
+
+    request = _hx_pull_request(_hx_snapshot())
+    response = {**build_error_response(request, "BUSY"), "error": error}
+    with pytest.raises(HostExecutorError, match="^RESPONSE_ERROR_INVALID$"):
+        validate_response(response, request=request)
+
+
+def test_intake_zero_free_local_slots_never_contacts_claim_authority(tmp_path, monkeypatch):
+    runtime, _ = _hx_runtime(tmp_path)
+    _hx_worker(runtime, "worker-a", "ubuntu0")
+    job = _hx_job(runtime, "busy-local-slot")
+    intake = _hx_intake(runtime, tmp_path)
+    calls = []
+    claim_job = runtime.attempts.claim_job
+
+    def observe_claim(*args, **kwargs):
+        calls.append((args, kwargs))
+        return claim_job(*args, **kwargs)
+
+    monkeypatch.setattr(runtime.attempts, "claim_job", observe_claim)
+    request = _hx_pull_request(_hx_snapshot())
+    request["payload"]["free_local_slots"] = 0
+    result = intake.receive(request, now_ms=_HX_NOW)["result"]
+    assert result["claim"] is None and result["reason_code"] == "NO_FREE_LOCAL_SLOT"
+    assert calls == []
+    assert runtime.jobs.get_job(job.job_id).status is JobStatus.QUEUED
+    assert runtime.attempts.list_attempts(job.job_id) == []
+    with runtime.store.read() as connection:
+        assert connection.execute("SELECT * FROM physical_resource_commitments").fetchall() == []
+    assert intake.latest["ubuntu0"]["eligible_slots"] == 1
+
+    # Once the host has a free slot, the same existing authority can claim.
+    request["payload"]["free_local_slots"] = 1
+    result = intake.receive(request, now_ms=_HX_NOW)["result"]
+    assert result["reason_code"] == "CLAIMED" and result["claim"]["job_id"] == job.job_id
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("free_slots", [-1, True, False, 1.0, "1", None, [], {}])
+def test_host_executor_rejects_invalid_free_slot_evidence(tmp_path, free_slots):
+    runtime, _ = _hx_runtime(tmp_path)
+    _hx_worker(runtime, "worker-a", "ubuntu0")
+    job = _hx_job(runtime, "invalid-local-slots")
+    intake = _hx_intake(runtime, tmp_path)
+    request = _hx_pull_request(_hx_snapshot())
+    request["payload"]["free_local_slots"] = free_slots
+    response = intake.receive(request, now_ms=_HX_NOW)
+    assert response["ok"] is False
+    assert response["error"]["code"] == "PAYLOAD_FREE_LOCAL_SLOTS_INVALID"
+    assert intake.received_count == 0
+    assert runtime.attempts.list_attempts(job.job_id) == []
+    assert runtime.jobs.get_job(job.job_id).status is JobStatus.QUEUED
+    with pytest.raises(HostExecutorError, match="^PAYLOAD_FREE_LOCAL_SLOTS_INVALID$"):
+        _hx_build_request(HEARTBEAT_PULL_OPERATION, request["payload"])
+
+
+@pytest.mark.parametrize("runtime_free,root_free", [
+    (None, 1.0), (None, 300.0), (float("nan"), 300.0),
+    (float("inf"), 300.0), ("300", 300.0), (True, 300.0),
+])
+def test_host_executor_refuses_unknown_runtime_disk_before_start(runtime_free, root_free):
+    snapshot = _hx_snapshot()
+    snapshot["disk_free_gib"].update(runtime_dir=runtime_free, root=root_free)
+    transport = _HxTransport()
+    transport.results.append({"released": True})
+    executor = HostExecutor(host_id="ubuntu0", eligible_slots=1,
+                            transport=transport, probe=_HxProbe(snapshot))
+    assignment = _hx_assignment()
+    started, detail = executor.start_claimed(assignment)
+    assert started is False and "runtime disk availability unknown" in detail
+    assert executor.free_local_slots() == 1
+    assert len(transport.requests) == 1
+    release = transport.requests[0]
+    assert release["operation"] == RELEASE_UNSTARTED_OPERATION
+    assert release["payload"]["attempt_id"] == assignment.attempt_id
+    assert release["payload"]["lease_token"] == assignment.lease_token
+    assert release["payload"]["fence_generation"] == assignment.fence_generation
+
+
+@pytest.mark.parametrize("runtime_free,allowed", [(19.0, False), (20.0, True), (300.0, True)])
+def test_host_executor_rechecks_the_runtime_volume_floor(runtime_free, allowed):
+    snapshot = _hx_snapshot()
+    snapshot["disk_free_gib"].update(runtime_dir=runtime_free, root=1.0)
+    executor = HostExecutor(host_id="ubuntu0", eligible_slots=1, probe=_HxProbe(snapshot))
+    ok, detail = executor.local_pressure_ok()
+    assert ok is allowed
+    if allowed:
+        assert detail == ""
+    else:
+        assert "below floor" in detail
+
+
+# Capacity recovery: missing/non-finite sensor evidence is not healthy capacity.
+_HX_INVALID_PRESSURE = [
+    *[("cores", value) for value in (None, 0, -1, True, 1.5, "32", float("nan"), float("inf"))],
+    *[("ram_gib", value) for value in (None, 0, -1, True, "29", float("nan"), float("inf"), 10**400)],
+    *[("_mem_available_gib", value) for value in (None, -1, True, "20", float("nan"), float("inf"), 10**400)],
+    *[("load_1m", value) for value in (None, -1, True, "0.25", float("nan"), float("inf"), 10**400)],
+]
+
+
+@pytest.mark.parametrize("field,value", _HX_INVALID_PRESSURE,
+                         ids=[f"{field}-{index}" for index, (field, _) in enumerate(_HX_INVALID_PRESSURE)])
+def test_host_executor_invalid_cpu_or_memory_returns_original_claim(field, value):
+    snapshot = _hx_snapshot()
+    snapshot[field] = value
+    transport = _HxTransport()
+    transport.results.append({"released": True})
+    executor = HostExecutor(host_id="ubuntu0", eligible_slots=1,
+                            transport=transport, probe=_HxProbe(snapshot))
+    assignment = _hx_assignment()
+    started, detail = executor.start_claimed(assignment)
+    assert started is False and detail
+    assert executor.free_local_slots() == 1
+    assert len(transport.requests) == 1
+    request = transport.requests[0]
+    assert request["operation"] == RELEASE_UNSTARTED_OPERATION
+    assert request["payload"] == {
+        "host_id": assignment.host_id,
+        "attempt_id": assignment.attempt_id,
+        "fence_generation": assignment.fence_generation,
+        "lease_token": assignment.lease_token,
+        "reason": RELEASE_REASON_LOCAL_PRESSURE,
+    }
+
+
+@pytest.mark.parametrize("overrides", [
+    {"ram_gib": None, "_mem_available_gib": None},
+    {"ram_gib": 0, "_mem_available_gib": None},
+    {"proposed_thresholds": {"runtime_floor_gib": float("nan")}},
+    {"proposed_thresholds": {"runtime_floor_gib": float("inf")}},
+    {"proposed_thresholds": {"runtime_floor_gib": True}},
+    {"proposed_thresholds": "not-a-threshold-map"},
+])
+def test_host_executor_unknown_pressure_or_floor_is_not_coerced_to_healthy(overrides):
+    snapshot = _hx_snapshot()
+    snapshot.update(overrides)
+    executor = HostExecutor(host_id="ubuntu0", eligible_slots=1, probe=_HxProbe(snapshot))
+    allowed, detail = executor.local_pressure_ok()
+    assert allowed is False and detail
+
+
+@pytest.mark.parametrize("threshold,value", [
+    ("memory_reserve_gib", float("nan")), ("memory_reserve_gib", float("inf")),
+    ("memory_reserve_gib", True), ("memory_reserve_gib", "untrusted formula"),
+    ("runtime_floor_gib", float("nan")), ("runtime_floor_gib", float("inf")),
+    ("runtime_floor_gib", True), ("runtime_floor_gib", "20"),
+])
+def test_host_executor_invalid_pressure_override_refuses(threshold, value):
+    executor = HostExecutor(host_id="ubuntu0", eligible_slots=1,
+                            probe=_HxProbe(_hx_snapshot()), thresholds={threshold: value})
+    allowed, detail = executor.local_pressure_ok()
+    assert allowed is False and detail
+
+
+_HX_NONFINITE_SNAPSHOT_PATHS = [
+    ("ram_gib",), ("load_1m",), ("disk_free_gib", "root"),
+    ("disk_free_gib", "runtime_dir"),
+    ("proposed_thresholds", "memory_reserve_gib"),
+    ("proposed_thresholds", "runtime_floor_gib"),
+]
+
+
+@pytest.mark.parametrize("path", _HX_NONFINITE_SNAPSHOT_PATHS, ids=["-".join(p) for p in _HX_NONFINITE_SNAPSHOT_PATHS])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), 10**400], ids=["nan", "infinite", "overflow"])
+def test_host_executor_nonfinite_heartbeat_is_refused_before_admission(tmp_path, path, value):
+    runtime, _ = _hx_runtime(tmp_path)
+    _hx_worker(runtime, "worker-a", "ubuntu0")
+    job = _hx_job(runtime, "invalid-sensor-reading")
+    intake = _hx_intake(runtime, tmp_path)
+    request = _hx_pull_request(_hx_snapshot())
+    target = request["payload"]["snapshot"]
+    for part in path[:-1]:
+        target = target[part]
+    target[path[-1]] = value
+    with pytest.raises(HostExecutorError, match="^SNAPSHOT_.*INVALID$"):
+        _hx_validate_snapshot(request["payload"]["snapshot"])
+    response = intake.receive(request, now_ms=_HX_NOW)
+    assert response["ok"] is False and response["error"]["code"].startswith("SNAPSHOT_")
+    assert intake.received_count == 0
+    assert runtime.jobs.get_job(job.job_id).status is JobStatus.QUEUED
+    assert runtime.attempts.list_attempts(job.job_id) == []
+    with runtime.store.read() as connection:
+        assert connection.execute("SELECT * FROM physical_resource_commitments").fetchall() == []
+
+
+@pytest.mark.parametrize("load,available,ram,allowed", [
+    (0.0, 4.0, 29.0, True), (32.0, 4.0, 29.0, True),
+    (32.01, 20.0, 29.0, False), (0.0, 3.99, 29.0, False),
+    (1.0, 10.0, 100.0, True), (1.0, 9.99, 100.0, False),
+])
+def test_host_executor_finite_pressure_boundaries_preserve_existing_policy(load, available, ram, allowed):
+    snapshot = _hx_snapshot(load_1m=load, mem_available_gib=available)
+    snapshot["ram_gib"] = ram
+    executor = HostExecutor(host_id="ubuntu0", eligible_slots=1, probe=_HxProbe(snapshot))
+    result, detail = executor.local_pressure_ok()
+    assert result is allowed
+    assert bool(detail) is (not allowed)
+
+
+def test_host_executor_failed_load_sensor_never_fabricates_zero_load(monkeypatch):
+    from control_plane import executive_host_executor as hx
+
+    monkeypatch.setattr(hx, "_logical_cores", lambda: 8)
+    monkeypatch.setattr(hx, "_memory_gib_macos", lambda: (32.0, 16.0))
+    monkeypatch.setattr(hx, "_memory_gib_linux", lambda: (32.0, 16.0))
+
+    def unavailable():
+        raise OSError("synthetic load sensor unavailable")
+
+    monkeypatch.setattr(hx.os, "getloadavg", unavailable)
+    with pytest.raises(HostExecutorError, match="PROBE_LOAD_UNAVAILABLE"):
+        hx.probe_host_readiness("ubuntu0")
+
+
+def test_host_executor_missing_cpu_sensors_never_fabricate_one_core(monkeypatch):
+    from control_plane import executive_host_executor as hx
+
+    def unavailable(_pid):
+        raise OSError("synthetic affinity sensor unavailable")
+
+    monkeypatch.setattr(hx.os, "sched_getaffinity", unavailable, raising=False)
+    monkeypatch.setattr(hx.os, "cpu_count", lambda: None)
+    with pytest.raises(HostExecutorError, match="PROBE_CORES_UNAVAILABLE"):
+        hx._logical_cores()
+
+
+@pytest.mark.parametrize("failure", [
+    HostExecutorError("PROBE_LOAD_UNAVAILABLE"), OSError("synthetic sensor failure"),
+    ValueError("synthetic malformed sensor"), OverflowError("synthetic overflowing sensor"),
+])
+def test_host_executor_probe_failure_returns_original_unstarted_claim(failure):
+    def unavailable(*args, **kwargs):
+        raise failure
+
+    transport = _HxTransport()
+    transport.results.append({"released": True})
+    executor = HostExecutor(host_id="ubuntu0", eligible_slots=1,
+                            transport=transport, probe=unavailable)
+    assignment = _hx_assignment()
+    started, reason = executor.start_claimed(assignment)
+    assert started is False and "probe unavailable" in reason
+    assert executor.free_local_slots() == 1
+    assert len(transport.requests) == 1
+    assert transport.requests[0]["operation"] == RELEASE_UNSTARTED_OPERATION
+    payload = transport.requests[0]["payload"]
+    assert payload["attempt_id"] == assignment.attempt_id
+    assert payload["fence_generation"] == assignment.fence_generation
+    assert payload["lease_token"] == assignment.lease_token
+
+
+def test_host_executor_invalid_pressure_releases_real_claim_and_preserves_successor_fence(tmp_path):
+    runtime, _ = _hx_runtime(tmp_path)
+    _hx_worker(runtime, "worker-a", "ubuntu0")
+    job = _hx_job(runtime, "unknown-pressure-real-roundtrip")
+    intake = _hx_intake(runtime, tmp_path)
+    requests = []
+
+    class ExistingIntakeTransport:
+        def call(self, request):
+            requests.append(request)
+            return intake.receive(request, now_ms=_HX_NOW)
+
+    probe = _HxProbe(_hx_snapshot())
+    executor = HostExecutor(host_id="ubuntu0", eligible_slots=1,
+                            probe=probe, transport=ExistingIntakeTransport())
+    first = executor.pull_once()
+    assert first.reason_code == "CLAIMED" and first.claimed is not None
+    original = first.claimed
+    probe.snapshot["_mem_available_gib"] = float("nan")
+    started, detail = executor.start_claimed(original)
+    assert started is False and "memory availability unknown" in detail
+    assert runtime.jobs.get_job(job.job_id).status is JobStatus.QUEUED
+    assert executor.free_local_slots() == 1
+    assert [r["operation"] for r in requests] == [HEARTBEAT_PULL_OPERATION, RELEASE_UNSTARTED_OPERATION]
+    release = requests[-1]["payload"]
+    assert release["attempt_id"] == original.attempt_id
+    assert release["fence_generation"] == original.fence_generation
+    assert release["lease_token"] == original.lease_token
+    with runtime.store.read() as connection:
+        rows = connection.execute("SELECT * FROM physical_resource_commitments").fetchall()
+        assert len(rows) == 1
+        commitment = dict(rows[0])
+        assert commitment["state"] == "SETTLED"
+        assert commitment["carrier_id"] == original.attempt_id
+        assert commitment["settlement_event_id"] is not None
+    assert runtime.attempts.get_attempt(original.attempt_id).status is AttemptStatus.FAILED
+
+    probe.snapshot["_mem_available_gib"] = 20.0
+    second = executor.pull_once()
+    assert second.reason_code == "CLAIMED" and second.claimed is not None
+    assert second.claimed.job_id == original.job_id
+    assert second.claimed.attempt_id != original.attempt_id
+    assert second.claimed.fence_generation > original.fence_generation
+    assert len(runtime.attempts.list_attempts(job.job_id)) == 2
+    assert len(requests) == 3
