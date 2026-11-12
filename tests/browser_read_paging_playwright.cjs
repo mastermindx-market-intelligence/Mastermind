@@ -114,6 +114,35 @@ const fixture = `<!doctype html><html><head><title>Conversation fixture</title><
     // move, and the DOM is unchanged.
     const stillValid=await send("validate",null,{},s.snapshot_id);
     assert.equal(stillValid.ok,true,"the observation is not consumed by reads");
+    // text_truncated must reflect the character cap before the cosmetic
+    // strips: a joined text past 1,000,000 characters whose capped tail is
+    // newline padding strips back below the bound, and the old flag (checked
+    // after the strips) said false while the cap had dropped characters.
+    {
+      await page.evaluate(()=>{
+        const pre=document.createElement("pre");
+        pre.id="capedge";
+        pre.setAttribute("role","code");
+        pre.setAttribute("aria-label","cap edge code");
+        pre.textContent="a".repeat(999999)+"\n\n\n\n\n\n";
+        // body.firstChild: the snapshot walker is node-bounded and this
+        // fixture's subtree is already past MAX_NODES, so a body-append
+        // would never be scanned.
+        document.body.insertBefore(pre,document.body.firstChild);
+      });
+      const s2=await snapshot();
+      const edge=s2.elements.find(e=>e.name==="cap edge code");
+      assert.ok(edge,"the cap-edge pre is observable");
+      const r=await send("read",edge.ref,{offset:0},s2.snapshot_id);
+      assert.equal(r.ok,true);
+      assert.equal(r.data.total_characters,999999,"the strip removed the capped trailing newline");
+      assert.equal(r.data.text_truncated,true,"the cap dropped characters: truncated is true");
+      await page.evaluate(()=>document.getElementById("capedge").remove());
+      const control=await snapshot();
+      const article=control.elements.find(e=>e.name==="assistant answer");
+      const ok2=await send("read",article.ref,{offset:0},control.snapshot_id);
+      assert.equal(ok2.data.text_truncated,false,"an ordinary element is not flagged");
+    }
     const after=await page.evaluate(()=>({scrollY:window.scrollY,active:document.activeElement===document.body,
       mutated:document.getElementById("answer").querySelectorAll("*").length}));
     assert.equal(after.scrollY,0,"no scroll");

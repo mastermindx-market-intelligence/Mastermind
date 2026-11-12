@@ -271,10 +271,14 @@
         }
       };
       walk(root);
-      const value = parts.join("").replace(/\n{3,}/g, "\n\n")
-        .replace(/[ \t]+\n/g, "\n").slice(0, READ_MAX_CHARACTERS)
-        .replace(/\n+$/, "").replace(/^\n+/, "");
-      return {value, truncated: truncated || value.length >= READ_MAX_CHARACTERS};
+      const joined = parts.join("").replace(/\n{3,}/g, "\n\n").replace(/[ \t]+\n/g, "\n");
+      const capped = joined.slice(0, READ_MAX_CHARACTERS);
+      const value = capped.replace(/\n+$/, "").replace(/^\n+/, "");
+      // Truncation is decided on the cap itself, before the cosmetic strips:
+      // the strips only remove structural newline padding, so a final value
+      // below the character bound can still be a capped read and must be
+      // reported as truncated, never silently shortened.
+      return {value, truncated: truncated || capped.length < joined.length};
     }
     // Slice one page out of the text: accumulate whole code points until the
     // UTF-8 byte budget is spent, so a surrogate pair is never split and each
