@@ -93,3 +93,11 @@ then escalates the disagreement.
     blind reviewer is started. If that check is not clean, the principal decides what ships.
     There is no further round. Applied first to the browser fill (three items of the final
     check at `768168d40`).
+16. **Install step lists are rehearsed before they reach the principal (2026-11-12).** A lane
+    that writes install steps runs them end to end against a copy first and says so in the
+    steps, with the rehearsal's output. The steps also state what the change does to sessions
+    that are already running. A method that makes running sessions fail is not installed
+    while other programmes have operators at work. Reason: the first browser bridge install
+    passed every check in its step list and still could not reach a browser profile, and the
+    pin change refused browser calls in all running sessions for three minutes until it was
+    rolled back (`br-install-20261112/RESULT.md`).
