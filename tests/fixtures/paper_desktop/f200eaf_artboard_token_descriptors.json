@@ -1,0 +1,198 @@
+{
+  "scope": "observed_tool_descriptors",
+  "catalogSha256": "f200eaf725b38c7895ef2180b80e3e254957093a770582b795685fa5072759bb",
+  "paperVersion": "0.5.18",
+  "observedAt": "2026-11-12",
+  "note": "Exact native create_artboard, create_tokens and set_tokens descriptors from the live Paper 0.5.18 catalog read through the guarded bridge. Not the full f200 catalog.",
+  "tools": {
+    "create_artboard": {
+      "name": "create_artboard",
+      "description": "\nCreates a new artboard (top-level frame) on the canvas.\n- Returns the node ID which you can then use with write_html({mode:'insert-children'}) to add content.\n- Use the styles property to set the artboard size and styles.\n- paper-gen:// URLs in styles (e.g. backgroundImage) generate AI images. ONLY if the user asked; read the \"image-generation\" guide first.\n- Artboards default to `display: \"flex\", flexDirection: \"column\"`\n- The artboard will always be placed in the best empty spot on the canvas.\n- Pass pageId to create the artboard on a specific page. Omit to use the page the user is viewing.\n- Use one of the default sizes below unless the user specifies a size.\n\n**Default sizes by device** (when the user doesn't specify a size):\n  - **Desktop**: 1440 x 900px\n  - **Tablet**: 768 x 1024px\n  - **Mobile**: 390 x 844px — include a status bar at the top. Call `get_guide({ topic: \"mobile-status-bar\" })` for paste-ready markup; do not hand-draw one.\n\nThe suggested device height is just a starting point to set the scene and understand how much space there is for the content above the fold. When wrapping up, if content clips, switch the artboard to `height: \"fit-content\"` via update_styles instead of guessing a new fixed height.\n",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "pageId": {
+            "description": "The page ID that the tool should operate on. When omitted the active page will be used. The active page can change between tool calls, prefer passing explicit page IDs.",
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name for the artboard (shown in the layer tree)."
+          },
+          "styles": {
+            "type": "object",
+            "properties": {
+              "width": {
+                "type": "string",
+                "description": "Width of the artboard as a whole pixel value (e.g. \"1440px\")."
+              },
+              "height": {
+                "type": "string",
+                "description": "Height of the artboard as a whole pixel value (e.g. \"900px\")."
+              }
+            },
+            "required": [
+              "width",
+              "height"
+            ],
+            "additionalProperties": {
+              "type": [
+                "string",
+                "number"
+              ]
+            },
+            "description": "CSS styles for the artboard as a JSON object. Use camelCase property names.\nwidth and height are required — use whole pixel values.\nWhen positioning an artboard make sure to give 80px of space between artboards to avoid overlaps.\nExample: {\"display\": \"flex\", \"flexDirection\": \"column\", \"width\": \"1440px\", \"height\": \"900px\", \"backgroundColor\": \"#f5f5f5\", \"padding\": \"20px\"}"
+          },
+          "fileId": {
+            "type": "string",
+            "description": "The file ID that the tool should operate on."
+          }
+        },
+        "required": [
+          "name",
+          "styles",
+          "fileId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "destructiveHint": true
+      }
+    },
+    "create_tokens": {
+      "name": "create_tokens",
+      "description": "Create one or more design tokens. Each entry needs `type`, `name`, and `value`.\nUse `var(--other-token)` as the value to alias another design token.\nReturns one `{name, result: \"created\"}` (or `{result: \"error\", message}`) per input entry.\nOrder is important. For color tokens define semantic colors before palette colors, with neutral colors first, then primary, secondary, and then accent colors. For all other design token types define them based on the size of the value, smallest first.\nPrefer reusing design tokens before creating new ones.\n",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tokens": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "breakpoint",
+                    "color",
+                    "container",
+                    "fontFamily",
+                    "fontSize",
+                    "fontWeight",
+                    "letterSpacing",
+                    "lineHeight",
+                    "opacity",
+                    "radius",
+                    "spacing"
+                  ],
+                  "description": "Design token type/category."
+                },
+                "name": {
+                  "type": "string",
+                  "pattern": "^--[a-zA-Z0-9_-]+$",
+                  "description": "CSS custom property name. E.g. \"--color-primary\"."
+                },
+                "value": {
+                  "description": "Design token value. For colors, use a CSS color string like \"#ff0000\" or \"oklch(...)\". For sizes (spacing, radius, fontSize, container, breakpoint), use a px string like \"8px\". For fontWeight, use a number (e.g. 400). For lineHeight/letterSpacing, use a string (\"1.5px\") or number. For opacity, use a 0–1 number (e.g. 0.5) or a percent string (e.g. \"50%\"). To alias another design token, use a CSS variable reference like \"var(--color-red)\".",
+                  "type": [
+                    "string",
+                    "number"
+                  ]
+                },
+                "description": {
+                  "description": "Optional human-readable description of what the design token is for and how it should be used. Max 1024 characters.",
+                  "type": "string",
+                  "maxLength": 1024
+                }
+              },
+              "required": [
+                "type",
+                "name",
+                "value"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Design tokens to create. Each entry creates a new design token; duplicate names are allowed but discouraged."
+          },
+          "fileId": {
+            "type": "string",
+            "description": "The file ID that the tool should operate on."
+          }
+        },
+        "required": [
+          "tokens",
+          "fileId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "destructiveHint": true
+      }
+    },
+    "set_tokens": {
+      "name": "set_tokens",
+      "description": "Update or delete existing design tokens by their full CSS variable name. Each entry needs `name`; any of `newName`, `value`, `delete` are optional.\n- Rename: set `newName`.\n- Update value: set `value`. Use `var(--other-token)` to alias.\n- Delete the design token: set `delete: true`.\nReturns one result per input entry. Per-entry errors are reported in-band.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "tokens": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^--[a-zA-Z0-9_-]+$",
+                  "description": "Target design token by its full CSS custom property name (e.g. \"--color-primary\")."
+                },
+                "newName": {
+                  "description": "Optional. Rename the design token. Provide the full CSS custom property name (e.g. \"--color-primary-strong\").",
+                  "type": "string",
+                  "pattern": "^--[a-zA-Z0-9_-]+$"
+                },
+                "value": {
+                  "description": "Optional. New value.",
+                  "type": [
+                    "string",
+                    "number"
+                  ]
+                },
+                "description": {
+                  "description": "Optional human-readable description of what the design token is for and how it should be used. Max 1024 characters. Pass an empty string to clear.",
+                  "type": "string",
+                  "maxLength": 1024
+                },
+                "delete": {
+                  "description": "Optional. If true, deletes the design token entirely.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Design tokens to update or delete, applied sequentially."
+          },
+          "fileId": {
+            "type": "string",
+            "description": "The file ID that the tool should operate on."
+          }
+        },
+        "required": [
+          "tokens",
+          "fileId"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "destructiveHint": true
+      }
+    }
+  }
+}

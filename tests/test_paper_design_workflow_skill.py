@@ -264,3 +264,19 @@ def test_publication_drift_uses_current_same_app_refresh_lifecycle():
     assert "parallel duplicate" in runbook
     assert "Add custom MCP server" in runbook
     assert "Developer Mode is not" in runbook
+
+
+def test_skill_names_files_by_id_and_admits_unseen_images():
+    text = norm(SKILL)
+    for phrase in (
+        "Name the file by id; never act on the file `paper_inspect` happens to show.",
+        "`paper_inspect` takes no file",
+        "`paper_catalog` lists Paper's tools and the write-schema receipt. It does not list files.",
+        'paper_read(tool="get_basic_info", arguments={"fileId": <id>})',
+        '"not visible to me"',
+        "Never describe, rate or approve an image you could not read",
+    ):
+        assert phrase in text
+    for name in ("canvas-designer.md", "design-critic.md", "visual-verifier.md"):
+        brief = norm(ROOT / "skills/mastermind-design-director/agents" / name)
+        assert '"not visible to me"' in brief and "Never act on the file `paper_inspect` shows" in brief

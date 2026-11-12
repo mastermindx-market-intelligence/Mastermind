@@ -105,6 +105,11 @@ REVIEWED_GENERATIONS = {
     "v23": {
         "bridge.py": "7467d4534099657d3fd244641185e57675d5ec6ec2faeddad9d1cca2f5d18523",
     },
+    # Observed Paper 0.5.18 create_artboard/create_tokens/set_tokens descriptors;
+    # v23 remains immutable. Registration alone does not stage or select a runtime.
+    "v24": {
+        "bridge.py": "6c90c46607e64a1de86fc0f2797d2c73dbdf6389ebe04f38b8a6a5e7bee6f1a2",
+    },
 }
 
 

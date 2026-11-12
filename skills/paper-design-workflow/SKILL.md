@@ -16,6 +16,22 @@ the generic file/process tools that happened to be visible first.
 For an attended ChatGPT Paper task, discover the **exact Paper action family** on the current tool
 surface before making a capability claim.
 
+**Name the file by id; never act on the file `paper_inspect` happens to show.**
+- `paper_inspect` takes no file. It reports whatever file is open in Paper Desktop on the Paper host
+  at that moment. A person or another designer may switch that file at any time.
+- `paper_catalog` lists Paper's tools and the write-schema receipt. It does not list files.
+- Every read and edit names its target file: pass `fileId` (and `pageId` where the tool takes one).
+  To see a file's pages, artboards, node count and tokens, call
+  `paper_read(tool="get_basic_info", arguments={"fileId": <id>})`. Then go down by node id
+  (`get_tree_summary`, `get_children`, `get_node_info`, `get_screenshot`).
+- If the brief gives a file name but no id, report that the id is missing. Do not use the active file.
+- If the file `paper_inspect` shows is not your file, that is normal. Note it and carry on by id.
+
+**Say what you cannot see.** Some models cannot read images. If you cannot see a screenshot's
+content, write "not visible to me" with the image path and sha256. Never describe, rate or approve an
+image you could not read. Hand every visual check (layout, contrast, clipping, text in the image) to a
+child or reviewer that can see images, and say in your return that you did so.
+
 **Do not confuse default active-file context with exact-target serviceability.** A `paper_inspect`
 result of `DOCUMENT_UNAVAILABLE` means only that the adapter could not resolve its default/foreground
 context. When the intended exact `fileId` is already known, this is **not** a Paper outage and is not
@@ -105,6 +121,19 @@ For native MCP clients, use only the Paper actions exposed and approved in that 
 never grants permission, and sealed workers do not inherit ambient plugins or Executive grants.
 
 
+## T3 sessions on any host
+
+In T3 Code, read `references/t3-carriers.md` before the first Paper call. It covers which
+carrier you have, how a remote session without Paper tools reads through a short-lived
+child on the Paper host, the **one named canvas writer per document**, and the raw
+`paper` relay. The relay has no snapshot guard and no operation id. Only the named writer
+may use its write tools. After an unclear result, stop, inspect the original target, and
+never repeat the call. Guarded `paper_edit` stays the standard wherever it works.
+
+For design work, load `mastermind-design-director` (studio protocol, specialist child
+briefs, design log) and `mastermind-design-system` (visual law). No UI is built before its
+screens are designed and critiqued in Paper.
+
 ## Scope the design
 
 Define the user's task, primary persona, target screen, meaningful states and
@@ -167,9 +196,11 @@ CI/PR status and governance instructions out of the customer glance path without
    HTML/CSS changes; do not introduce remote assets without authorization.
 5. On `EFFECT_UNKNOWN`, stop writes. Inspect the ORIGINAL file and reconcile the
    exact effect on the same carrier. Never blindly replay or mint a new ID to retry.
-6. Request a screenshot of the changed artboard with its actual live ID. Examine it:
+6. Request a screenshot of the changed artboard with its actual live ID. If you can see images, examine it:
    hierarchy, density, typography, contrast, spacing, responsive behavior, empty/
    loading/error/data states. Fix visible problems, not only schema errors.
+   If you cannot see images, record "not visible to me" with the path and sha256 and hand the visual
+   check to a child that can see; do not describe the image.
 7. After design approval, retrieve JSX using the actual catalog schema. Integrate
    it into existing frontend components/data/auth/state paths in an owned worktree.
    Complete browser proof separately; Paper output alone is not shipped software.

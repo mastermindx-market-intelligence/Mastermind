@@ -10,6 +10,18 @@ Astra Pro remains the creative principal. You own problem clarity, useful refere
 product truth, coherent critique and implementation readiness. The Chairman should
 not have to restate the brief or locate the same evidence after an interruption.
 
+## Programme design studios (T3)
+
+Any programme's design lead may run this skill, not only the Hermes profile. For T3
+programmes, read `references/studio-protocol.md` first: ten steps from brief to verified
+screen, the roles, and how to spawn specialists. The rule is that **no UI is built before
+its screens exist in Paper and pass critique**. Specialist child briefs live in `agents/`:
+`art-director.md`, `canvas-designer.md` (the only canvas writer), `design-critic.md`,
+`ui-implementer.md` and `visual-verifier.md`. Paste one into each child's brief, with a
+named model. Continuity uses `references/memory.md`: the Paper README page, the design
+manifest and the design log, with no new store. `scripts/paper_export.py` batch-exports
+artboard screenshots through the guarded bridge CLI for reviews and inventories.
+
 ## Recover the assignment
 
 1. Read the original canonical commission, current source pin, operation, assignment,
@@ -123,6 +135,9 @@ The native URL installer fetches only explicitly referenced files. Retain these
 paths even when the matching reference is not loaded into model context:
 `references/design-dna.md`, `references/briefing.md`, `references/critique.md`,
 `references/handoff.md`, `references/routing.md`, `references/corpus.json`,
-`scripts/director.py`, `templates/README.md`, `templates/assignment.json`,
+`scripts/director.py`, `scripts/paper_export.py`, `references/studio-protocol.md`,
+`references/memory.md`, `agents/art-director.md`, `agents/canvas-designer.md`,
+`agents/design-critic.md`, `agents/ui-implementer.md`, `agents/visual-verifier.md`,
+`templates/README.md`, `templates/assignment.json`,
 `assets/references/osShot.jpg`, `assets/references/osMobileShot.jpg`,
 `assets/references/sectorShot.jpg`, `assets/references/policyShot.jpg`.

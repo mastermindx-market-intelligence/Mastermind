@@ -81,15 +81,19 @@ class RuntimeStageTests(unittest.TestCase):
         with self.assertRaisesRegex(stage.Refusal, "GENERATION_UNSUPPORTED"):
             stage.stage("v7", root=self.root, _source_dir=self.source)
 
-    def test_current_v23_reviewed_hash_matches_source_and_preserves_history(self):
+    def test_current_v24_reviewed_hash_matches_source_and_preserves_history(self):
         bridge = ROOT / "integrations" / "paper_desktop" / "bridge.py"
         current = load_local(
             "paper_runtime_stage_current_source_pin",
             ROOT / "integrations" / "paper_desktop" / "runtime_stage.py",
         )
         self.assertEqual(
-            current.REVIEWED_GENERATIONS["v23"]["bridge.py"],
+            current.REVIEWED_GENERATIONS["v24"]["bridge.py"],
             current._sha256(bridge.read_bytes()),
+        )
+        self.assertEqual(
+            current.REVIEWED_GENERATIONS["v23"]["bridge.py"],
+            "7467d4534099657d3fd244641185e57675d5ec6ec2faeddad9d1cca2f5d18523",
         )
         self.assertEqual(
             current.REVIEWED_GENERATIONS["v22"]["bridge.py"],
@@ -118,13 +122,13 @@ class RuntimeStageTests(unittest.TestCase):
             "2da2dadada8bba9e78bc31fceba02b67f96d00a5214cf6d78c821d3d30fd0474",
         )
 
-    def test_new_bridge_cannot_relabel_v22_and_drift_cannot_enter_v23(self):
+    def test_new_bridge_cannot_relabel_v23_and_drift_cannot_enter_v24(self):
         current = load_local(
             "paper_runtime_stage_current_generation_refusal",
             ROOT / "integrations/paper_desktop/runtime_stage.py",
         )
         bridge = (ROOT / "integrations/paper_desktop/bridge.py").read_bytes()
-        for generation, data in (("v22", bridge), ("v23", bridge + b"\n# source drift\n")):
+        for generation, data in (("v23", bridge), ("v24", bridge + b"\n# source drift\n")):
             with self.subTest(generation=generation):
                 (self.source / "bridge.py").write_bytes(data)
                 with mock.patch.object(current.venv, "EnvBuilder") as builder, \
