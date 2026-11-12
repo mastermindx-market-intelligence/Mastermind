@@ -591,7 +591,7 @@ mod tests {
         inner.begin_primary_for_test().unwrap();
         let a_state=inner.pending.as_ref().unwrap().state.clone();
         let (a,_,_)=inner.consume(&format!("{CALLBACK}?state={a_state}&code=inert-primary-a")).unwrap();
-        inner.finish_exchange(&a,Ok(token("inert-primary-acquisition"))).unwrap();
+        inner.finish_exchange(&a,Ok(InitialGrant::fixture(token("inert-primary-acquisition")))).unwrap();
         let c_state=inner.pending.as_ref().unwrap().state.clone();
         assert!(inner.pending.as_ref().unwrap().intent==SignInIntent::PrimaryAccount);
         (inner,c_state)

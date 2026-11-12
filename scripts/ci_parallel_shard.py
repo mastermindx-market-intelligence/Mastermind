@@ -62,9 +62,12 @@ _EXPECTED_SCOPE_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth':
          '  trusted_base="$(git rev-parse --verify refs/remotes/origin/master 2>/dev/null || true)"\n'
          'fi\n'
          'if [ -n "$trusted_base" ] &&\n'
+         '   git cat-file -e "${trusted_base}:scripts/__init__.py" 2>/dev/null &&\n'
          '   git cat-file -e "${trusted_base}:scripts/ci_pr_scope.py" 2>/dev/null &&\n'
+         '   git cat-file -e "${trusted_base}:scripts/ci_pr_smoke.py" 2>/dev/null &&\n'
+         '   git cat-file -e "${trusted_base}:control_plane/__init__.py" 2>/dev/null &&\n'
          '   git cat-file -e "${trusted_base}:control_plane/github_review_risk_policy.py" 2>/dev/null; then\n'
-         '  git archive "$trusted_base" scripts/ci_pr_scope.py control_plane/github_review_risk_policy.py |\n'
+         '  git archive "$trusted_base" scripts/__init__.py scripts/ci_pr_scope.py scripts/ci_pr_smoke.py control_plane/__init__.py control_plane/github_review_risk_policy.py |\n'
          '    tar -x -C "$trusted"\n'
          '  if grep -q \'^def classify_merge_group(\' "$trusted/scripts/ci_pr_scope.py"; then\n'
          '    PYTHONPATH="$trusted" python "$trusted/scripts/ci_pr_scope.py" \\\n'
@@ -117,6 +120,15 @@ _EXPECTED_FAST_STEPS = [{'uses': 'actions/checkout@v4', 'with': {'fetch-depth': 
   'if': "${{ needs.pr_scope.outputs.needs_node == 'true' }}",
   'run': 'npm ci --prefix app/mastermind_os --ignore-scripts --no-audit --no-fund\n'
          'npm --prefix app/mastermind_os run typecheck\n'}]
+
+
+# Full pytest shards and the PR fast lane use a GitHub-hosted image. In this
+# organization `ubuntu-latest` can also select persistent, multi-slot
+# self-hosted runners, where this suite's single-tenant host assertions
+# (ancestor directory identity, modes, ACLs, private temp tree) fail
+# independently of the change under test. No self-hosted runner carries this
+# label. Scope classification and the `test` fan-in run no suite.
+HOSTED_TEST_RUNNER = "ubuntu-24.04"
 
 
 def _validate_pin_guards_lane(jobs: dict) -> None:
@@ -172,7 +184,7 @@ def _validate_pr_fast_lane(jobs: dict) -> None:
         or fast.get("if") != _REQUIRED_PR_FAST_IF
         or fast.get("needs") != ["pr_scope"]
         or fast.get("permissions") != {"contents": "read"}
-        or fast.get("runs-on") != "ubuntu-latest"
+        or fast.get("runs-on") != HOSTED_TEST_RUNNER
         or fast.get("timeout-minutes") != 8
         or fast.get("continue-on-error") is not None
     ):
@@ -326,6 +338,8 @@ def validate_parallel_workflow(text: str) -> None:
         or shards.get("continue-on-error") is not None
     ):
         raise ci_pytest.PolicyError("parallel CI must execute all six shard indices")
+    if shards.get("runs-on") != HOSTED_TEST_RUNNER:
+        raise ci_pytest.PolicyError("pytest shards must run on the GitHub-hosted test image")
     if (
         gate.get("name") != "test"
         or gate.get("needs") != ["pr_scope", "pr_fast", "pin_guards", "pytest_shards"]

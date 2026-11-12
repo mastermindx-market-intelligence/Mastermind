@@ -107,7 +107,7 @@ def test_api_self_directed_unreadable_book_reports_unavailable_never_a_funded_bo
         assert data[field] is None, f"{field} must be None, not {data[field]!r}"
     assert data["positions"] == []
     assert data["pending"] == []
-    assert data["error"] == "synthetic"
+    assert data["error"] == "self_directed_unavailable"
     # The market clock does not depend on the account read, so it may still be shown truthfully.
     assert data["market"] == {"is_open": False, "session": "closed", "next_open": None}
 

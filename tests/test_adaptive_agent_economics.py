@@ -78,7 +78,9 @@ def test_admission_class_and_fast_name_are_not_price_evidence(tmp_path):
 
 
 def test_principal_judgment_does_not_become_worker_admission():
-    report = ModelRouter.load().explain_route(WorkRequest("implementation", ambiguity="high"))
+    # OQ-8 (WO-06): the principal-judgment lane is a lead task_kind; critical
+    # risk / high ambiguity no longer inflate worker cognition into it.
+    report = ModelRouter.load().explain_route(WorkRequest("planning"))
     assert report["decision"]["mode"] == "frontier_lead"
     assert report["decision"]["worker_eligible"] is False
     assert _rows(report)["frontier.orchestrator"]["source_disposition"] == "FRONTIER_JUDGMENT_ROUTE"

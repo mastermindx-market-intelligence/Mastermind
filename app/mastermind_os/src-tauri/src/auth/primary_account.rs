@@ -75,7 +75,7 @@ mod tests {
     fn complete(inner: &mut Inner) -> Option<String> {
         let p = consume(inner);
         inner.primary_exchange_current(&p,"public-client").unwrap();
-        inner.finish_exchange(&p,Ok(token()))
+        inner.finish_exchange(&p,Ok(InitialGrant::fixture(token())))
     }
     #[test]
     fn primary_account_stops_after_content_and_preserves_executive_refusal() {
@@ -121,7 +121,7 @@ mod tests {
             let mut i=inner();i.executive_reason=ExecutiveReason::AuthorizationRefused;
             i.begin_primary_sign_in().unwrap();if resource==Resource::Content {complete(&mut i).unwrap();}
             let mut p=consume(&mut i);p.expires=Instant::now()-Duration::from_secs(1);
-            assert!(i.finish_exchange(&p,Ok(token())).is_none());
+            assert!(i.finish_exchange(&p,Ok(InitialGrant::fixture(token()))).is_none());
             assert!(i.token(resource).is_none() && i.pending.is_none() && !i.exchanging);
             assert_eq!(i.reason,Some("AUTH_TRANSACTION_EXPIRED"));
             assert_eq!(i.executive_reason,ExecutiveReason::AuthorizationRefused);
@@ -144,7 +144,7 @@ mod tests {
         let mut i=inner();i.initial_sign_in_transaction().unwrap();
         for resource in [Resource::Acquisition,Resource::Content] {
             let p=consume(&mut i);assert_eq!(p.resource,resource);assert!(p.intent==SignInIntent::LegacyFull);
-            assert!(i.finish_exchange(&p,Ok(token())).is_some());
+            assert!(i.finish_exchange(&p,Ok(InitialGrant::fixture(token()))).is_some());
         }
         assert_eq!(i.pending.as_ref().unwrap().resource,Resource::Executive);
         assert!(i.pending.as_ref().unwrap().intent==SignInIntent::LegacyFull);
@@ -159,7 +159,7 @@ mod tests {
         assert!(i.executive.is_none());assert_eq!(i.executive_reason,ExecutiveReason::AuthorizationRefused);
         i.begin_primary_sign_in().unwrap();let mut p=consume(&mut i);p.resource=Resource::Executive;
         assert!(i.primary_exchange_current(&p,"public-client").is_err());
-        assert!(i.finish_exchange(&p,Ok(token())).is_none());assert!(i.executive.is_none());
+        assert!(i.finish_exchange(&p,Ok(InitialGrant::fixture(token()))).is_none());assert!(i.executive.is_none());
     }
     #[test]
     fn duplicate_primary_gesture_does_not_replace_original_pkce() {
@@ -187,7 +187,7 @@ mod tests {
             if resource==Resource::Content { complete(&mut i).unwrap(); }
             let p=consume(&mut i);i.invalidate();i.begin_primary_sign_in().unwrap();
             let replacement=i.pending.as_ref().unwrap().state.clone();
-            assert!(i.finish_exchange(&p,Ok(token())).is_none());
+            assert!(i.finish_exchange(&p,Ok(InitialGrant::fixture(token()))).is_none());
             assert_eq!(i.pending.as_ref().unwrap().state,replacement);
             assert!(i.acquisition.is_none() && i.content.is_none() && i.executive.is_none());
         }

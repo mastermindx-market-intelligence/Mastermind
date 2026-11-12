@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 
+from control_plane.capacity_economics_projection import BYTEPLUS_POOL_ID
 
 ROOT = Path(__file__).resolve().parents[1]
 LAW = ROOT / "docs" / "EXECUTIVE_SUBSCRIPTION_CAPACITY_ECONOMICS_LAW.md"
@@ -181,3 +182,27 @@ def test_dated_application_does_not_claim_provider_activation_or_purchase_author
         "subscription scale-up decision: hold purchases",
     ):
         assert phrase in memo
+
+
+def test_byteplus_eligibility_is_typed_and_keeps_ineligible_routes_ineligible() -> None:
+    """The projection's BytePlus gate enforces the capacity law, not preview text.
+
+    Law anchor: "No amount of expiring quota makes an ineligible route
+    eligible." The legacy boolean helper is replaced by typed diagnostics;
+    conservative family matching still selects refusals. BytePlus eligibility
+    requires the reviewed commercial path, independently of quota pressure.
+    """
+    assert (
+        "No amount of expiring quota makes an ineligible route eligible"
+    ) in _text(LAW)
+    source = (
+        ROOT / "control_plane" / "capacity_economics_projection.py"
+    ).read_text(encoding="utf-8")
+    assert "_mentions_byteplus" not in source
+    assert "evaluate_byteplus_route_eligibility(" in source
+    assert "mastermind.byteplus_route_eligibility/v1" in source
+    assert "BYTEPLUS_PERSONAL_CODING_PLAN_REFUSED" in source
+    assert "BYTEPLUS_IDENTITY_UNRECOGNIZED_REFUSED" in source
+    assert "BYTEPLUS_ROUTE_REVIEWED_COMMERCIAL" in source
+    assert "personal-coding-plan" in source
+    assert BYTEPLUS_POOL_ID in source
