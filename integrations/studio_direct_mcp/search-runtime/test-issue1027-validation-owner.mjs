@@ -31,6 +31,56 @@ async function fixture(timeout=30, descendants=false) {
   return {m,release,state:globalThis[token]};
 }
 async function check(name,body){try{await body();passed.push(name);console.log('PASS '+name);}catch(e){failures.push({name,error:String(e)});console.error('FAIL '+name+': '+e);}}
+function terminalSnapshot(session) {
+  return structuredClone({
+    isComplete:session.isComplete,isError:session.isError,error:session.error,
+    timedOut:session.timedOut===true,cancelled:session.cancelled===true,
+    maxResultsReached:session.maxResultsReached===true,wasIncomplete:session.wasIncomplete===true,
+    totalMatches:session.totalMatches,totalContextLines:session.totalContextLines,
+    results:session.results,pendingSources:[...session.pendingSources],
+  });
+}
+async function completedResultStaysStable(trigger) {
+  for(const alias of ['fast-alias','slow-alias']) {
+    try {await fs.symlink(root,path.join(root,alias));}
+    catch(error) {if(error.code!=='EEXIST')throw error;}
+  }
+  await configManager.setValue('allowedDirectories',[path.join(root,'fast-alias'),path.join(root,'slow-alias')]);
+  const {m,release,state}=await fixture(5000,true);
+  let disposing;
+  try {
+    const start=await m.startSearch({...options,timeout:1000});
+    await m.waitForCompletion(start.sessionId);
+    const session=m.sessions.get(start.sessionId),admission=[...m.admissions.values()][0];
+    const before=terminalSnapshot(session);
+    assert.equal(before.isComplete,true);assert.equal(before.isError,false);
+    assert.equal(before.timedOut,false);assert.equal(before.cancelled,false);
+    assert.equal(before.totalMatches,1);assert.equal(before.results.length,1);
+    assert.deepEqual(before.pendingSources,[]);
+    assert.equal(state.entered,1);assert.equal(state.exited,0);
+    assert.equal(m.admissions.size,1,'completed search released outstanding validation');
+    let disposed=false;
+    if(trigger==='deadline') {
+      await sleep(Math.max(0,admission.deadline-performance.now())+30);
+      assert.ok(performance.now()>=admission.deadline);
+    } else {
+      assert.ok(performance.now()<admission.deadline,'dispose fixture missed its pre-deadline boundary');
+      disposing=m.dispose().then(()=>{disposed=true;});
+      await sleep(30);
+      assert.equal(disposed,false,'dispose returned before parallel validation settled');
+    }
+    assert.deepEqual(terminalSnapshot(session),before,`completed search terminal state changed after ${trigger}`);
+    assert.equal(state.exited,0);assert.equal(m.admissions.size,1);
+    if(!disposing) {
+      disposing=m.dispose().then(()=>{disposed=true;});
+      await sleep(30);assert.equal(disposed,false);
+      assert.deepEqual(terminalSnapshot(session),before,'dispose relabelled a completed search');
+    }
+    release();await disposing;
+    assert.equal(state.exited,1);assert.equal(m.admissions.size,0);assert.equal(m.sessions.size,0);
+    assert.deepEqual(terminalSnapshot(session),before,'settlement changed completed search evidence');
+  } finally {release();await m.dispose();await configManager.setValue('allowedDirectories',[root]);}
+}
 try {
   await configManager.setValue('allowedDirectories',[root]);
   await fs.writeFile(path.join(root,'one.txt'),'needle\n');
@@ -61,6 +111,8 @@ try {
       release();await disposing;assert.equal(state.exited,1);assert.equal(m.admissions.size,0);
     } finally {release();await configManager.setValue('allowedDirectories',[root]);}
   });
+  await check('completed result survives admission deadline while parallel validation remains live',()=>completedResultStaysStable('deadline'));
+  await check('completed result survives disposal while parallel validation remains live',()=>completedResultStaysStable('disposed'));
   // Separate check continues even if the owner-lifetime assertion fails.
   await check('omitted/true share admission; false stays distinct and exhausts exact filenames',async()=>{
     const {m,release}=await fixture(1000);

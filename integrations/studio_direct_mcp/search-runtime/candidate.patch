@@ -241,7 +241,7 @@
 +        markSettled();
 +      },
 +      stop: reason => {
-+        if (released || admission.stopped) return;
++        if (released || admission.stopped || admission.session?.isComplete) return;
 +        admission.stopped = true;
 +        if (admission.session) {
 +          const session = admission.session;

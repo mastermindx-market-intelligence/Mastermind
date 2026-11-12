@@ -26,6 +26,7 @@ The new source delta adds:
 
 - Deadline reservation before path validation, binary resolution, stat and spawn acknowledgement. Expired asynchronous preflight cannot later spawn. Pending preflight still consumes its permit until actual settlement.
 - At most two preparing/live searches per existing backend-local SearchManager. Completion/cancellation releases a permit only after owned sources settle.
+- A producer-complete search keeps its terminal result unchanged if its admission deadline or disposal arrives while parallel validation is still settling. The permit remains charged and disposal still waits for that real validation work.
 - Identical normalized live requests reuse their existing promise/native handle. The effective `earlyTermination` value is normalized once: omitted/true share a handle, while false remains distinct and exhaustive. This is exact normalized request deduplication, not semantic equivalence across every filesystem alias.
 - At most 32 retained/preparing sessions; excess work is refused without evicting unread handles. Existing cleanup remains the retention owner.
 - Broad root refusal before validation and again after canonical path validation: filesystem/home/temp roots, host collections and workspace/repository collections. Narrow fixture/project/file access still uses existing path admission.
@@ -36,15 +37,17 @@ These guards live in the existing SearchManager, not a separate scheduler, permi
 
 ## Evidence and review repairs
 
-`qualification.json` binds the current patch and evidence digests. New execution: full upstream package build; twelve suites with zero skips; 14 deadline/admission/response checks; three validation-owner/identity checks; 16 real Office checks with 17 actual worker exits and zero residual workers/processes; eleven causal mutations; three owned-command tests.
+`qualification.json` binds the current patch and evidence digests. The 2026-11-12 recovery execution rebuilt the pinned upstream package and passed twelve suites with zero skips: 14 deadline/admission/response checks; five validation-owner/identity checks; 16 real Office checks with 17 actual worker exits and zero residual workers/processes; twelve causal mutations; and three owned-command tests. Earlier qualification remains separately attributed in the receipt.
 
 The Office suite now runs against the real compiled upstream dependency graph, rather than the earlier outer-integration stubs. Hard parser-preemption checks still use a bounded two-second injected stall at actual parser match-context entry, not huge resource stress.
 
-ChatGPT3's review of predecessor `aea331f6ad2d3fe50c6a647caa1b307ae835774c` identified two defects. P1 is covered by before-return cap/deadline settlement and text/structured-output assertions. P2 is covered by a harmless TERM-resistant parent/child/grandchild timeout, observed zero survivors, an unaffected sentinel, and failure when children outlive an otherwise successful command. Exact new-head delta review is still required.
+ChatGPT3's review of predecessor `aea331f6ad2d3fe50c6a647caa1b307ae835774c` identified two defects. P1 is covered by before-return cap/deadline settlement and text/structured-output assertions. P2 is covered by a harmless TERM-resistant parent/child/grandchild timeout, observed zero survivors, an unaffected sentinel, and failure when children outlive an otherwise successful command. Current Web 5A permits source self-check; any actual GitHub protection or binding review requirement still applies. This source receipt is not a GitHub approval.
 
 The subsequent review of `8118114e75b9f3cf3f8ffc665a38d640312347f0` found that the validation response could time out before the underlying operation settled, releasing admission early, and that the deduplication key disagreed with the effective `earlyTermination` default. Both regressions failed before repair. The existing filesystem validation owner now exposes separate `result` and `settled` promises. Search admission waits for actual validation settlement, including parallel allowed-directory realpath lookups, on both failure and completed-search paths. Existing `validatePath` callers retain the same response and access decisions.
 
 The regression stalls inside the actual compiled validation operation, shortens only the fixture's internal timeout, and proves both permits stay charged, a third request is refused, disposal waits, and no late child is spawned. A second lifetime case covers parallel lookups after a successful answer. Omitted/true requests share one admission and native handle; explicit false uses a distinct exhaustive scan. Upstream allowed-directory and symlink-security suites are included to check preserved access behavior. Four additional causal mutations remove those repairs and are detected.
+
+Recovery of PR #1125 found a separate completed-result defect at `fe03a79db814b9b0a0a1c75d00ef9fba872986e0`: a late admission deadline set `timedOut`, and disposal set `cancelled`, even after all search producers had completed successfully. Both new regression cases failed on those original bytes while the three incumbent owner cases still passed. The correction adds only a completed-session guard to the existing admission stop method. Both cases now pass, and a guard-removal mutation reproduces the late-deadline failure. The actual lookup gate remains closed during the terminal-state assertions; admission stays charged and disposal cannot finish until that gate is released. Only `src/search-manager.ts` changes among the seven generated source postimages; the other six remain byte-identical.
 
 An uninterruptible native filesystem operation can keep its permit and disposal pending indefinitely. This repair bounds admission and reports caller deadlines; it does not invent cancellation or claim a hard native-I/O settlement deadline.
 
@@ -52,7 +55,7 @@ Prior V3 22 deterministic checks and earlier mutation evidence remain separately
 
 ## Remaining gates
 
-Host-wide/Executive admission and authenticated operation attribution remain with their existing owners. The backend-local limits do not replace those controls. Worker V8 limits and retained-text accounting do not prove aggregate/native RSS bounds or interruption of arbitrary kernel I/O. The complete upstream suite, required CI, independent delta review and native installed-generation canary remain pending.
+Host-wide/Executive admission and authenticated operation attribution remain with their existing owners. The backend-local limits do not replace those controls. Worker V8 limits and retained-text accounting do not prove aggregate/native RSS bounds or interruption of arbitrary kernel I/O. The complete upstream suite, required CI, any actual protected-review requirement and native installed-generation canary remain pending.
 
 Protected REVIEW_RETURN Step 8B permits clean same-PR procedural release when the technical writer gate is unavailable. RULES_ABSENT requires fresh exact-head re-proof and procedural custody; it is not a requirement to change rules or invent fencing. No release authority is claimed by the receipt itself.
 

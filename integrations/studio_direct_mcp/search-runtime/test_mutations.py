@@ -24,6 +24,7 @@ mutations += [
  ("parallel validation settlement",owner,"pendingWork?.push(lookup);","void lookup;","first path answer released parallel lookup work","test-issue1027-validation-owner.mjs"),
  ("effective early-termination identity",manager,"earlyTermination: options.earlyTermination !== false,","earlyTermination: options.earlyTermination,","same effective true produced different admission","test-issue1027-validation-owner.mjs"),
  ("explicit exhaustive execution",manager,"session.options.earlyTermination &&","true &&","AssertionError","test-issue1027-validation-owner.mjs"),
+ ("completed search terminal immutability",manager,"released || admission.stopped || admission.session?.isComplete","released || admission.stopped","completed search terminal state changed after deadline","test-issue1027-validation-owner.mjs"),
 ]
 runner="""import {spawnSync} from 'node:child_process';import {createTestEnv} from './test/helpers/test-env.js';
 const t=createTestEnv();try{const r=spawnSync(process.execPath,['test/TEST_FILE'],{env:t.env,stdio:'inherit',timeout:15000});process.exitCode=r.status??91;}finally{t.cleanup();}"""
