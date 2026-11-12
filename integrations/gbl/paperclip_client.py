@@ -303,7 +303,14 @@ def _load_or_create_hmac_key(path: Path) -> bytes:
                     "HMAC_KEY_UNWRITABLE",
                     f"cannot write {path}: {type(exc).__name__}") from None
             finally:
-                os.close(handle)
+                try:
+                    os.close(handle)
+                except OSError:
+                    # GBL-5 B4 (panel B old-code #4): the key is already
+                    # fully written (a short write raises typed, above) —
+                    # a failing close must not escape raw past every
+                    # typed guard.
+                    pass
             return data
     except OSError as exc:
         raise GblPaperclipError(

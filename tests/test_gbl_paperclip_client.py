@@ -1708,6 +1708,28 @@ class TestHmacKeyLaw:
                                          "state": "ANSWERED"})
         assert err.value.code == "HMAC_KEY_UNWRITABLE"
 
+    def test_failing_close_after_first_use_write_is_not_a_raw_escape(
+            self, tmp_path, monkeypatch):
+        # GBL-5 B4 (panel B old-code #4): the first-use finally called
+        # os.close(handle) bare — an OSError there escaped RAW, past every
+        # typed guard, after the key was already fully written.  Called
+        # directly (no HTTP fixture) so the patched os.close is scoped to
+        # this one call.
+        state = tmp_path / "state"
+        state.mkdir()
+        path = state / "hmac_v1.key"
+
+        def refusing_close(_fd):
+            raise OSError(9, "simulated bad file descriptor")
+
+        monkeypatch.setattr(pc.os, "close", refusing_close)
+        try:
+            data = pc._load_or_create_hmac_key(path)
+        finally:
+            monkeypatch.undo()
+        assert len(data) == pc.HMAC_KEY_BYTES
+        assert path.read_bytes() == data          # the write itself landed
+
     def test_a_tagged_event_without_a_configured_key_is_typed(self, fake):
         # Not silent "untrusted": a tagged event proves a key exists; a
         # client with no key configured fails closed and visibly.
