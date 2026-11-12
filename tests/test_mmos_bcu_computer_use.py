@@ -4843,6 +4843,81 @@ class TestForegroundPasteGate(unittest.TestCase):
         self.assertEqual(len(pastes), 1)
         self.assertNotIn("--foreground", pastes[0])
 
+    def test_focus_click_is_recorded_at_dispatch_when_a_later_gate_refuses(
+            self):
+        # BCU-MICRO (R3-M3, fail-first on e69774fa6) CLASS RULE: every
+        # dispatched input leaves a pacing record AT its dispatch; a
+        # refusal later in the same sequence does not erase it. Here the
+        # focus click LANDS (a real click in the app), then the gate's
+        # fresh read turns deny-listed and refuses the paste. Old code
+        # wrote the record only in the paste's finally — never reached on
+        # this path — so a second input inside the interval was admitted
+        # with clean receipts. New code: the follow-up press must wait.
+        ctx = self._ctx()
+        real = ctx.adapter.inspect_window
+        calls = []
+
+        def became_denied(window_id):
+            # The observe read (call 1) succeeds; the window turns
+            # deny-listed only at the gate's FRESH read (call 2), AFTER the
+            # named field's focus click was dispatched (the M2 scenario).
+            calls.append(window_id)
+            data = real(window_id)
+            if len(calls) == 1:
+                return data
+            out = dict(data) if isinstance(data, dict) else {}
+            out["app"] = "1Password"
+            out["bundle_id"] = "com.1password.1password"
+            return out
+
+        ctx.adapter.inspect_window = became_denied
+        payload = self._paste(ctx, element_ref="field1")
+        self.assertEqual(payload["status"], "NOT_APPLIED", payload)
+        self.assertIn("DENY_LISTED", payload["cause"])
+        # The refused sequence's receipt still names the focus click as
+        # completed, and exactly one click (zero pastes) was dispatched.
+        self.assertEqual(payload["steps"],
+                         ["observe:snapshot snap-abc123",
+                          "act:focus_click:field1"])
+        self.assertEqual(len([c for c in read_calls(ctx)
+                              if c[0] == "click"]), 1)
+        self.assertEqual([c for c in read_calls(ctx) if c[0] == "paste"], [])
+        self.assertGreaterEqual(len(calls), 2, "the gate never re-read")
+        # The transient overlay is gone again; the NEXT paced act on the
+        # same window inside the interval must hit PACING_WAIT because the
+        # landed focus click left its record at dispatch.
+        ctx.adapter.inspect_window = real
+        second = json.loads(mmos.handle_tool_call(ctx, {
+            "action": "press", "window_id": 42, "element_ref": "btn1",
+            "owner": "agent-a", "lease_nonce": ctx.lease_nonce})
+            ["content"][0]["text"])
+        self.assertEqual(second["status"], "NOT_APPLIED", second)
+        self.assertIn("PACING_WAIT", second["cause"])
+        self.assertEqual(len([c for c in read_calls(ctx)
+                              if c[0] == "action"]), 0,
+                         "the waiting press dispatched an action anyway")
+
+    def test_paste_after_its_own_focus_click_is_not_refused_by_the_record(
+            self):
+        # The R3-M3 record is written when the focus click dispatches, but
+        # the sequence's pacing CHECK already ran once before that click
+        # (_shared_act_gate, one check per op): the paste chord that
+        # follows its own focus click in the SAME sequence must NOT be
+        # refused by the fresh record. The post-paste finally then
+        # refreshes it for the NEXT op.
+        ctx = self._ctx()
+        payload = self._paste(ctx, element_ref="field1",
+                              allow_foreground=False)
+        self.assertEqual(payload["status"], "APPLIED", payload)
+        self.assertEqual(len([c for c in read_calls(ctx)
+                              if c[0] == "click"]), 1)
+        self.assertEqual(len([c for c in read_calls(ctx)
+                              if c[0] == "paste"]), 1)
+        key = mmos.pacing_key(42, 101)
+        with self.assertRaises(mmos.OpError) as caught:
+            ctx.pacer.check(key)
+        self.assertEqual(caught.exception.code, "PACING_WAIT")
+
 
 if __name__ == "__main__":
     unittest.main()

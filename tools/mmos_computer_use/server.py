@@ -3275,9 +3275,29 @@ def _op_slice_paste(ctx, args):
         if not elem_id:
             raise OpError("ELEMENT_NOT_FOUND",
                           "resolved element has no id in the fresh snapshot")
-        _slice_act(ctx, args,
-                   ["click", "--on", elem_id, "--snapshot", snapshot_id,
-                    "--json"], completed, "focus_click:%s" % elem_id)
+        # BCU-MICRO (R3-M3) CLASS RULE: every dispatched input leaves a
+        # pacing record AT its dispatch; a refusal later in the same
+        # sequence does not erase it. The focus click is a real input — a
+        # click lands in the app — but the record used to be written only
+        # in the paste's finally below, so every refusal in between (pid
+        # resolution, lease, presence, either foreground gate, the
+        # paste_chord gate) left the landed click UNRECORDED and a second
+        # input inside the interval was admitted with clean receipts. An
+        # in-flight failure the structured result cannot prove undispatched
+        # records too; a pre-dispatch lease/gate refusal inside _slice_act
+        # dispatched nothing and records nothing. The post-paste record
+        # stays as the refresh. OSError is swallowed per M9 (a failed state
+        # write never turns a dispatched act into a refusal); the receipt's
+        # state_write comes from the paste's finally.
+        try:
+            _slice_act(ctx, args,
+                       ["click", "--on", elem_id, "--snapshot", snapshot_id,
+                        "--json"], completed, "focus_click:%s" % elem_id)
+            _pace_record(ctx, key, window_id)
+        except OpError as error:
+            if getattr(error, "dispatched", False):
+                _pace_record(ctx, key, window_id)
+            raise
     # The paste chord is the ONLY key event in the slice; never character
     # keystrokes. Pacing is counted from the dispatch attempt onward.
     # Targeting uses THE one resolver (BCU R3 H1): the target_receipt pid
@@ -3313,8 +3333,10 @@ def _op_slice_paste(ctx, args):
     # after the gate's fresh reads (which take time) and before the
     # dispatch, in BOTH delivery modes. A person active at this instant
     # refuses with the completed steps (HUMAN_ACTIVE_MID_SEQUENCE) and
-    # nothing is pasted; the refusal is pre-dispatch, so no pace record is
-    # written either (the gate sits before the try/finally below).
+    # nothing is pasted. The refusal is pre-dispatch for the CHORD, so the
+    # chord writes no record of its own; a focus click dispatched earlier
+    # in this sequence KEEPS the record written at its own dispatch
+    # (BCU-MICRO R3-M3 — a refusal never erases a dispatched input).
     _slice_sequence_gate(ctx, completed, "paste_chord")
     state_write = None
     try:
