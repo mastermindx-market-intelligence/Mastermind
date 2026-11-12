@@ -34,7 +34,7 @@ def test_accepted_macro_merge_rule_can_fit_when_composed_with_this_kernel():
         "docs/DELIVERY_WORKFLOW.md",
         "Never bulk-arm/clear other holds",
         "Native review != GitHub APPROVED",
-        "No denied-effect/EFFECT_UNKNOWN carrier swap",
+        "Tool-specific technical errors require diagnosis; reconcile unknown modifying effects",
     ):
         assert guard in block, f"accepted release guard missing: {guard}"
     assert len(block.encode("utf-8")) <= 8000
