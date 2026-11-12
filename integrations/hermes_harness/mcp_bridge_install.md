@@ -2,10 +2,15 @@
 
 Build/checkout commit `NEW = 8eb080b55bcb08a67b83ecca319288fb8168912b` on branch
 `t3/mmos-v4-br`, rollback release `OLD = 5aa30969241163b4abb3e025bc9e52123ee4b478`
-throughout. This runbook's own commits may sit atop `NEW`; they touch only files
-outside the build closure (this doc and non-closure tests), and step 1's hash
-checks pin the tree regardless. The same text is mirrored at
-`~/.mastermind/mmos_evidence/br-20261111/brcompat/`.
+throughout. This runbook's own commits may sit atop `NEW`. The BR-COMPATFIX
+(ruling-15) commits DO touch closure files (`install_browser.py`,
+`tests/test_browser_profiles_fleet.py`) and add `runtime_pin.py`, so an install
+run from that branch head re-curates step 1's manifest at its own head and the
+installed `release_commit` is that head, not `8eb080b5`. That does not move the
+transport compatibility constants: the fix touches no protocol source, so the
+three step-1 runtime hashes and `EXPECTED_CAPABILITY_DIGEST = "1c40ec98…"` hold
+unchanged at the branch head, and the compat admission window is identical. The
+same text is mirrored at `~/.mastermind/mmos_evidence/br-20261111/brcompat/`.
 
 The first install attempt (2026-11-12) followed a 15-file copy procedure and
 **failed at step 5 with every local profile TRANSPORT_HANDSHAKE_FAILED**; it was
@@ -284,66 +289,61 @@ Check after every step; every step has a rollback.
 
 4. **Switch the pin — LAST.** By now every profile runs the new extension and
    a new-code host, and every session in the fleet still holds the old pin and
-   works. First the one-time migration to versioned runtimes (zero behavior
-   change; `current` → `OLD`), run from the repo root:
+   works. The pin writer is `integrations/hermes_harness/runtime_pin.py` —
+   guarded: no default root (`--mmx-root` is required), it never edits the
+   flat live pin files, never writes inside the folder `current` resolves to,
+   never overwrites a delivered `runtimes/<commit>` (ruling 19: a delivery
+   mark is permanent), and switches only by atomic symlink replace. Run from
+   the repo root. First the one-time migration to versioned runtimes (zero
+   behavior change; `current` → `OLD`):
 
    ```bash
    MMX=~/.t3/mcp/mmx-browser
    OLD=5aa30969241163b4abb3e025bc9e52123ee4b478
    NEW=8eb080b55bcb08a67b83ecca319288fb8168912b
-   mkdir -p $MMX/runtimes/$OLD $MMX/runtimes/$NEW
-   cp $MMX/server.js $MMX/runtimes/$OLD/server.js
-   cp $MMX/server.js $MMX/runtimes/$NEW/server.js      # byte-identical, never edited
-   cp $MMX/runtime.json $MMX/runtimes/$OLD/runtime.json  # verbatim live pin
-   python3 - <<'EOF'
-   import json, os, pathlib
-   MMX = pathlib.Path.home()/".t3/mcp/mmx-browser"
-   OLD = "5aa30969241163b4abb3e025bc9e52123ee4b478"
-   NEW = "8eb080b55bcb08a67b83ecca319288fb8168912b"
-   rt = json.load(open(MMX/"runtime.json"))
-   rt["release_commit"] = NEW
-   rt["source_root"] = str(pathlib.Path.home()/".local/share/mastermind-browser-control/releases"/NEW)
-   pins = json.load(open("BUILD-8eb080b5.json"))["files"]
-   for f, h in pins.items():
-       if f in rt["source_files"]: rt["source_files"][f] = h
-   out = MMX/f"runtimes/{NEW}/runtime.json"
-   json.dump(rt, open(out, "w"), indent=2)
-   os.chmod(out, 0o600)   # server.js refuses group/world-writable pins (NATIVE_SOURCE_UNSAFE)
-   os.chmod(MMX/"runtime.json", 0o600)  # cp may not have preserved it
-   os.chmod(MMX/f"runtimes/{OLD}/runtime.json", 0o600)
-   EOF
-   ln -sfn $MMX/runtimes/$OLD $MMX/current   # current -> OLD first: no behavior change yet
+   python3 -m integrations.hermes_harness.runtime_pin migrate \
+     --mmx-root $MMX --old-commit $OLD --new-commit $NEW \
+     --build-manifest BUILD-8eb080b5.json \
+     --new-source-root ~/.local/share/mastermind-browser-control/releases/$NEW
    ```
+
+   It delivers `runtimes/$OLD` (the verbatim flat pin plus a byte-identical
+   `server.js` copy) and `runtimes/$NEW` (the pin updated to the new commit,
+   the new source root, and the closure hashes `BUILD-8eb080b5.json` pins),
+   then points `current` at `OLD` atomically. The flat `$MMX/runtime.json`
+   and `$MMX/server.js` are never edited, so every running server — which
+   captured the flat pin at startup and re-verifies it before each dispatch —
+   is untouched. If installing from the compatfix branch head, `$NEW`, the
+   manifest filename and `--new-source-root` are that head's values instead.
+   Check: stdout JSON `state` = `PIN_MIGRATED`; `readlink $MMX/current` ends
+   `/runtimes/$OLD`; the flat pin files are byte-identical before/after;
+   every `runtimes/*/runtime.json` is mode `0600` (server.js refuses
+   group/world-writable pins with `NATIVE_SOURCE_UNSAFE`).
 
    Then edit `mcpServers.mmx-browser.args` in each of the four provider homes
    (`~/.t3/providers/{experiential-claude,fabric-experiential,fabric-unified-router,fabric-anthropic-oauth}/.claude.json`,
    backup each first) from `…/mmx-browser/server.js` to
-   `…/mmx-browser/current/server.js`. Check: `readlink $MMX/current` ends
-   `/runtimes/$OLD`; each `.claude.json` parses and its last arg is
-   `current/server.js`; a fresh session's read-only `browsers` (no probe)
-   still shows `bridge_release_commit` `5aa309692…`. Then the atomic repoint:
+   `…/mmx-browser/current/server.js`. Check: each `.claude.json` parses and
+   its last arg is `current/server.js`; a fresh session's read-only
+   `browsers` (no probe) still shows `bridge_release_commit` `5aa309692…`.
+   Then the atomic repoint:
 
-   ```python
-   import os, pathlib
-   MMX = pathlib.Path.home()/".t3/mcp/mmx-browser"
-   NEW = "8eb080b55bcb08a67b83ecca319288fb8168912b"
-   cur = MMX/"current"
-   if cur.exists() and not cur.is_symlink():
-       raise SystemExit("current exists and is not a symlink — resolve manually")
-   tmp = MMX/"current.tmp"
-   if tmp.is_symlink() or tmp.exists(): tmp.unlink()
-   tmp.symlink_to(MMX/f"runtimes/{NEW}")
-   os.replace(tmp, cur)   # atomic; no running server is disturbed
+   ```bash
+   python3 -m integrations.hermes_harness.runtime_pin switch --mmx-root $MMX --commit $NEW
    ```
 
-   Check: a fresh session shows `bridge_release_commit` `8eb080b5…` and the
-   actions enum has `read` (44 actions); the old sessions keep answering on
-   `5aa309692…` — rehearsed: same server, same commit and action set before
-   and after the repoint (`logs/rehearsal_switch.log`).
-   Rollback: the same `os.replace` snippet pointed back at `runtimes/$OLD`
-   (and for the migration: restore the four `.claude.json` backups, delete
-   `runtimes/` and `current`; running sessions are untouched either way —
-   they already hold their resolved `server.js`).
+   Check: stdout `state` = `PIN_SWITCHED`; a fresh session shows
+   `bridge_release_commit` `8eb080b5…` and the actions enum has `read`
+   (44 actions); the old sessions keep answering on `5aa309692…` —
+   rehearsed: same server, same commit and action set before and after the
+   repoint (`logs/rehearsal_switch.log`).
+   Rollback: the same `switch` command with `--commit $OLD` — one atomic
+   repoint, no rewrite. To undo the whole migration instead: restore the
+   four `.claude.json` backups so spawns use the flat `$MMX/server.js`
+   again, and LEAVE `runtimes/` and `current` in place — deleting them
+   would break any server spawned via `current/server.js`, which
+   re-verifies `runtime.json` from its own folder on every dispatch.
+   Running sessions are untouched either way.
 
 5. **Verify in a fresh session** (read-only):
    - `browsers` with `probe: true`: the five local profiles `CONNECTED`,
