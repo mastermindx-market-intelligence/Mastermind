@@ -37,6 +37,8 @@ ASK_ID_LEN = 35
 class MemoryStore:
     """The GblAskStore interface, in-memory (the reference fake's shape)."""
 
+    GBL_TEST_DOUBLE = True       # no host delivery lock: see GBL-5 micro 4
+
     def __init__(self):
         self.asks = {}
         self.created = []

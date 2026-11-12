@@ -699,6 +699,81 @@ class PaperclipAskClient:
                 "APPEND_LOCK_UNWRITABLE",
                 f"mint ledger write refused: {exc}") from None
 
+    # ── the delivery ledger (GBL-5 micro 4) ─────────────────────────────
+    #
+    # The result-delivery decision needs a record that cannot lag this
+    # host's own writes.  The issue's comment listing can (proof 1's
+    # read-your-write lag), and deciding from it hands one answer out
+    # twice.  The append ledger FILE, read and written under the same
+    # flock as every append, is that record: one JSON line per delivery,
+    # written BEFORE the CONSUMED post and consulted FIRST.  A record
+    # with no integer ``seq`` is ignored by :meth:`_ledger_floor`, so the
+    # mint floor is unaffected.
+
+    @staticmethod
+    def _ledger_delivered(handle: Any, ask_id: str) -> str | None:
+        """The answer this host has recorded as DELIVERED for the ask.
+
+        ``None`` when no delivery was recorded; the recorded answer id
+        (possibly ``""`` for a legacy ANSWERED record with no answer
+        event) when one was.  Complete JSON lines only — a torn tail
+        line is skipped, never fatal: a lost line can only make the
+        layer fall back to the listing, which is today's behaviour."""
+        delivered: str | None = None
+        try:
+            handle.seek(0)
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue               # torn tail: skipped, not fatal
+                if (isinstance(row, dict) and row.get("ask_id") == ask_id
+                        and row.get("delivered") is True):
+                    value = row.get("answer_id")
+                    delivered = value if isinstance(value, str) else ""
+        except OSError as exc:
+            raise GblPaperclipError(
+                "APPEND_LOCK_UNREADABLE",
+                f"delivery ledger unreadable: {exc}") from None
+        return delivered
+
+    @staticmethod
+    def _ledger_delivery(handle: Any, ask_id: str, answer_id: str) -> None:
+        """Record a delivery BEFORE its CONSUMED post, so a post that
+        fails still leaves the answer withheld rather than deliverable
+        again.  Refuses typed rather than delivering outside the
+        serialised discipline."""
+        try:
+            handle.seek(0, os.SEEK_END)
+            handle.write(json.dumps({"ask_id": ask_id,
+                                     "answer_id": answer_id,
+                                     "delivered": True}) + "\n")
+            handle.flush()
+        except OSError as exc:
+            raise GblPaperclipError(
+                "APPEND_LOCK_UNWRITABLE",
+                f"delivery ledger write refused: {exc}") from None
+
+    def delivered_answer_id(self, ask_id: str) -> str | None:
+        """The host's own delivery record for the ask (see
+        :meth:`_ledger_delivered`), read under the same flock every
+        append takes.  ``None`` means this host has delivered nothing."""
+        with self._append_lock:
+            self._hmac_key()
+            with self._host_append_lock() as lock:
+                return self._ledger_delivered(lock, ask_id)
+
+    def record_delivery(self, ask_id: str, answer_id: str) -> None:
+        """Claim the delivery in the host ledger.  Call under
+        :meth:`result_delivery_lock`, BEFORE the CONSUMED post."""
+        with self._append_lock:
+            self._hmac_key()
+            with self._host_append_lock() as lock:
+                self._ledger_delivery(lock, ask_id, answer_id)
+
     def append_ask_event(self, ask_id: str,
                          event: Mapping[str, Any]) -> None:
         """Append ONE comment carrying the event, stamped by the store

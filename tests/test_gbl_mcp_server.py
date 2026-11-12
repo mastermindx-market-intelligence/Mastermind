@@ -569,6 +569,9 @@ class TestTeamMessage(unittest.IsolatedAsyncioTestCase):
 class RecordingStore:
     """GblAskStore fake (the GBL-2 interface) for a real bridge core."""
 
+    GBL_TEST_DOUBLE = True       # no host delivery lock: see GBL-5 micro 4
+
+
     def __init__(self):
         self.asks: dict[str, dict] = {}
 

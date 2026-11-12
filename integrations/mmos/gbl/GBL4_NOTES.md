@@ -619,3 +619,48 @@ Install is unchanged: no new state file, no new configuration, no restart
 step beyond the ordinary bridge restart for the new code. Suites at this
 round: admission 23, ask_cli 44, bridge 72, mcp_server 28, message_send 27,
 nudge 12, paperclip_client 146 — 352 passed (348 before the four new tests).
+
+### Item 4 (principal's ruling, 10:55Z): the delivery record cannot lag
+
+Item 3 serialised the decision but kept its SOURCE: `_require_ask` reads the
+issue's comment listing, and this store's own proof 1 shows a listing can lag
+a write that has already landed (`comment_visibility_lag`, the reason the mint
+ledger exists). Caller A marks CONSUMED and is served `ANSWER_UNCONSUMED`;
+caller B takes the lock, re-reads, sees a stale `ANSWERED`, finds no trusted
+mark to dedupe against, mints the next number and posts a SECOND `CONSUMED` —
+and is served the answer again. `test_two_callers_share_one_delivery` passed
+only because the fake's lag was 0.
+
+Class rule: a delivery decision is never taken from a read that can be behind
+the host's own writes. The host already has a record that cannot lag: the
+append ledger file, under the same flock.
+
+- The delivery is recorded in the ledger — `append.lock` in the HMAC key's
+  directory, one JSON line `{"ask_id": …, "answer_id": …, "delivered": true}`
+  — under `result_delivery_lock`, BEFORE the `CONSUMED` post, and
+  `fetch_result` consults it FIRST (`delivered_answer_id` /
+  `record_delivery`, both re-entrant with `append_ask_event`). A record with
+  no integer `seq` is ignored by `_ledger_floor`, so the mint floor is
+  unaffected.
+- Recorded ⇒ `CONSUMED`, whatever the listing shows; a lagging listing can
+  no longer hand the answer over twice.
+- If the record lands and the `CONSUMED` post then fails, the answer stays
+  withheld and the caller gets the typed `DELIVERY_MARK_POST_FAILED`; every
+  retry is `CONSUMED`, never a second `ANSWER_UNCONSUMED`. (The minted number
+  of the failed post is skipped, never reused.)
+- The `_delivery_lock` no-op fallback now FAILS CLOSED: a store with no host
+  lock refuses `DELIVERY_LOCK_UNAVAILABLE` typed unless it is an explicitly
+  marked test double (`GBL_TEST_DOUBLE = True` on the three fakes). A store
+  offering the lock but only part of the record capability refuses
+  `DELIVERY_CAPABILITY_INCOMPLETE` rather than deciding from the listing
+  again.
+
+Tests (red at `6e7c5e58a`, output in
+`~/.mastermind/mmos_evidence/gbl-20261111/gbl5/micro/item4-red.txt`):
+`TestDeliveryLedger::test_a_lagging_listing_cannot_deliver_twice` (two client
+objects, the first caller's mark hidden by `comment_visibility_lag`, exactly
+one `ANSWER_UNCONSUMED`, exactly one trusted `CONSUMED` after the reveal) and
+`::test_a_failed_mark_post_withholds_the_answer_and_reports_typed`;
+`TestFetchResult::test_a_store_without_a_delivery_lock_refuses_typed`.
+Suites: admission 23, ask_cli 44, bridge 73, mcp_server 28, message_send 27,
+nudge 12, paperclip_client 148 — 355 passed.

@@ -1537,6 +1537,83 @@ class TestOneDeliveryMarkPerAnswer:
         assert marks[0]["trusted"] is True
 
 
+class TestDeliveryLedger:
+    """GBL-5 micro 4 (principal's ruling, 10:55Z): a delivery decision is
+    never taken from a read that can lag the host's own writes.
+
+    The host lock serialised the decision but the decision SOURCE was the
+    issue's comment listing, which this store's own proof 1 shows can lag
+    a write that has already landed (``comment_visibility_lag``, the
+    reason the mint ledger exists).  Caller A marks CONSUMED and is handed
+    ANSWER_UNCONSUMED; caller B takes the lock, re-reads, sees a stale
+    ANSWERED, finds no trusted CONSUMED to dedupe against, mints the next
+    number and posts a SECOND CONSUMED — and is handed the answer again.
+
+    The host already keeps a record that cannot lag: the append ledger
+    file, held under the same flock.  The delivery (ask id + answer id)
+    is recorded there BEFORE the CONSUMED post and consulted FIRST, so
+    the second caller is CONSUMED whatever the listing shows.
+    """
+
+    def _answered(self, fake):
+        seed = client(fake)
+        row = envelope(ttl_seconds=86400 * 365 * 10)
+        ask_id = row["ask_id"]
+        assert seed.create_ask(row) is None
+        seed.append_ask_event(ask_id, {
+            "type": "answer", "answer_id": "gbm-" + "a" * 32,
+            "idempotency_key": "gb-ans-4",
+            "text": "A harmless fixture answer."})
+        seed.append_ask_event(ask_id, {"type": "state", "state": "ANSWERED"})
+        return seed, ask_id
+
+    def test_a_lagging_listing_cannot_deliver_twice(self, fake):
+        seed, ask_id = self._answered(fake)
+        first = client(fake)                     # two callers, two clients
+        second = client(fake)
+
+        # The first caller's CONSUMED lands but is hidden from the listing
+        # the second caller reads — exactly proof 1's read-your-write lag.
+        fake.state.comment_visibility_lag = 1
+        one = bridge_over(first).fetch_result(principal=PRINCIPAL,
+                                              ask_id=ask_id)
+        assert one["status"] == "ANSWER_UNCONSUMED"
+
+        two = bridge_over(second).fetch_result(principal=PRINCIPAL,
+                                               ask_id=ask_id)
+        assert two["status"] == "CONSUMED"
+
+        # Exactly one hand-over, and exactly one mark once the listing
+        # catches up with the write it had hidden.
+        fake.state.reveal_lagged_comments()
+        marks = [event for event in seed.read_ask(ask_id)["events"]
+                 if event.get("type") == "state"
+                 and event.get("state") == "CONSUMED"]
+        assert len(marks) == 1
+        assert marks[0]["trusted"] is True
+
+    def test_a_failed_mark_post_withholds_the_answer_and_reports_typed(
+            self, fake):
+        seed, ask_id = self._answered(fake)
+        issue_id = fake.state.order[0]
+        fake.state.fail_status[
+            ("POST", f"/api/issues/{issue_id}/comments")] = 403
+
+        core = bridge_over(client(fake))
+        with pytest.raises(GblBridgeError) as caught:
+            core.fetch_result(principal=PRINCIPAL, ask_id=ask_id)
+        assert caught.value.code == "DELIVERY_MARK_POST_FAILED"
+
+        # The delivery is recorded, so the answer stays WITHHELD: the retry
+        # is CONSUMED (never a second ANSWER_UNCONSUMED) and no mark landed.
+        again = bridge_over(client(fake)).fetch_result(
+            principal=PRINCIPAL, ask_id=ask_id)
+        assert again["status"] == "CONSUMED"
+        assert not [event for event in seed.read_ask(ask_id)["events"]
+                    if event.get("type") == "state"
+                    and event.get("state") == "CONSUMED"]
+
+
 class TestEventSeqDuplicateLaw:
     """GBL-5 A3 (proof 1's bricked record) kept the record READABLE by
     demoting the later holder of a duplicate number per event.  GBL-5 R2,

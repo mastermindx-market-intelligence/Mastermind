@@ -46,7 +46,14 @@ class FakeStore:
 
     Repair-round contract: create_ask is create-if-absent (None when
     created, the existing record when present); every append stamps a
-    per-record strictly-increasing ``seq`` and ``trusted: True``."""
+    per-record strictly-increasing ``seq`` and ``trusted: True``.
+
+    GBL-5 micro 4: an explicitly marked TEST DOUBLE — it offers no host
+    delivery lock, so the bridge keeps the plain read for it and refuses
+    ``DELIVERY_LOCK_UNAVAILABLE`` typed for any unmarked store."""
+
+    GBL_TEST_DOUBLE = True
+
 
     def __init__(self, clock=None):
         self.asks: dict[str, dict] = {}
@@ -378,6 +385,19 @@ class TestFetchResult:
         with pytest.raises(GblBridgeError) as err:
             bridge().fetch_result(principal=PRINCIPAL, ask_id="gb-" + "9" * 32)
         assert err.value.code == "ASK_NOT_FOUND"
+
+    def test_a_store_without_a_delivery_lock_refuses_typed(self):
+        # GBL-5 micro 4: the plain unlocked read can hand one answer out
+        # twice, so the no-op fallback fails CLOSED for any store that is
+        # not an explicitly marked test double.
+        class UnmarkedStore(FakeStore):
+            GBL_TEST_DOUBLE = False
+        store = UnmarkedStore()
+        bridge(store).submit_ask(**submit())
+        with pytest.raises(GblBridgeError) as err:
+            bridge(store).fetch_result(principal=PRINCIPAL, ask_id=ASK_ID)
+        assert err.value.code == "DELIVERY_LOCK_UNAVAILABLE"
+        assert "UnmarkedStore" in err.value.detail
 
     def test_open_ask_returns_not_yet(self):
         store = FakeStore()
