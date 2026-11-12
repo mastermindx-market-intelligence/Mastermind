@@ -1,0 +1,76 @@
+{
+  "schema": "mastermind.fabric.router.source_recovery/v1",
+  "recorded_at": "2026-11-12T12:56:02.169426+00:00",
+  "parent": "Mastermind#983 / WS:EXECUTIVE-CAPACITY-FABRIC",
+  "release_carrier": "Mastermind#2367 / fabric-router-codex-oauth-dsh",
+  "protected_source": "81c08810fbacad1391a0dde32893e18fc5207272",
+  "original_remote_head": "d81dbfa973a3b81be1e1592b36e35bd78aabecea",
+  "qualified_integration_commit": "c1e541af11d7d7631662346c295fb30a35d01ed2",
+  "files": {
+    "ops/native_fabric/unified_router/gateway.py": "da057cf20181cea3f3a04d5f3ca341956db074138745b423af4ded29d6e90dcd",
+    "ops/native_fabric/unified_router/service.py": "cd341f73bdabc125904f543856284b699c2467e94aacecc476da85e0ff72fc9b",
+    "ops/native_fabric/unified_router/README.md": "0b577ada2e9d68aec03a0ba48ba0d9c830af1a83b670428b3129f29a931ba815",
+    "tests/test_unified_router_service_lifecycle.py": "620d5c253b7e9c850b9bb4e9fa54d0dace8527ef033273cf61c53aba5e2a1693",
+    "tests/test_capacity_fabric_identity_review.py": "ff4b2abf45432c43adde09be9848af094263d51b9c69490d2c130f5b639ca80d",
+    "app/mastermind_os/src/resources/CapacityFabricRead.test.tsx": "e840707b47eeedb763c6e944244489ec125b92c8578dd551ef996a2afeeb3160"
+  },
+  "source_recovery": {
+    "merge_conflicts_resolved": 14,
+    "default_unified_registration_restored": false,
+    "new_identity_exemptions": 0,
+    "legacy_pending_auth_merge_preserved": true
+  },
+  "lifecycle_repair": {
+    "overlapping_reuseport_listeners": false,
+    "settings_validated_before_listener": true,
+    "drain_basis": "ceil(configured_request_timeout + existing_cleanup_timeout)",
+    "cleanup_seconds": 5,
+    "default_request_deadline_seconds": 1800,
+    "default_graceful_shutdown_seconds": 1805,
+    "socket_cleanup": "normal exit, bind failure, runner failure"
+  },
+  "observed_qualification": [
+    {
+      "scope": "router and lifecycle source",
+      "python": "3.14.7",
+      "passed": 303,
+      "failed": 0,
+      "skipped": 0,
+      "duration_seconds": 17.5
+    },
+    {
+      "scope": "lifecycle discriminator on predecessor",
+      "failed": 8,
+      "runtime": "synthetic settings and socket only"
+    },
+    {
+      "scope": "Capacity UI and authentication cancellation",
+      "passed": 23,
+      "failed": 0,
+      "test_files": 1
+    },
+    {
+      "scope": "committed integration identity and import guards",
+      "python": "3.12.13",
+      "passed": 2,
+      "failed": 0
+    }
+  ],
+  "boundaries": {
+    "author_review": "SELF_REVIEWED",
+    "independent_reviewer_claimed": false,
+    "protected_merge_proven": false,
+    "runtime_changed": false,
+    "provider_calls": false,
+    "quota_balances_inferred": false,
+    "native_selection_restored": false,
+    "consumer_proof_claimed": false
+  },
+  "remaining": [
+    "exact-final-head combined checks and protected release",
+    "original native selection-loss recovery through its existing owner",
+    "authoritative account-resource observations and task-fit qualifications",
+    "actual installed-generation and terminal consumer acceptance"
+  ],
+  "access_fence": "An authenticated local router-status read was blocked before tool execution; no replay, alternate credential path, or inferred runtime result."
+}

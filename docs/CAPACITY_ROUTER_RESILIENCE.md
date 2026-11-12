@@ -548,3 +548,45 @@ The source qualification manifest is
 Protected checks, fresh installed-source/controller custody, safe cutover and real
 consumer acceptance remain separate requirements. No live model call or runtime
 change was made during this qualification.
+
+## Chairman-assigned recovery, 2026-11-12
+
+Original #2367 is retained; no second feature PR or runtime is created. The
+previous operation's staged Auth0/Capacity composition was verified byte-for-byte
+on both nonoverlapping sides and committed without discarding its work. The
+native content publisher did not conclude merge ancestry; the original pending
+merge was completed explicitly and verified before integrating protected source
+`81c08810fbacad1391a0dde32893e18fc5207272`.
+
+Fourteen conflicts were reconciled. Accepted named freshness constants, mounted
+Workspace transport coverage, Experiential's separate Anthropic policy leaf and
+existing-gateway-only T3 defaults remain intact. The source does not restore the
+excluded port8313 default registration. The old producer-literal exemption test
+now checks named contract constants, no residual exemption and negative identity
+injection, rather than pinning literal tokens removed by accepted source. The
+retained Capacity reauthentication-cancellation tests pass (23 UI cases).
+
+The existing service had two concrete lifecycle defects: `SO_REUSEPORT` allowed
+independent process-local bulkheads to accept concurrently, and a fixed 25-second
+shutdown deadline could interrupt requests admitted with a much longer total
+deadline. It now validates/fixes settings before binding, uses one accepting
+listener without `SO_REUSEPORT`, computes graceful shutdown from the existing
+request deadline plus the five-second cleanup bound, and closes its owned socket
+on normal and exceptional exit. Eight synthetic regressions fail on the predecessor;
+303 router/lifecycle tests pass on the repaired bytes. The default source budget
+is 1805 seconds; installed supervisor `ExitTimeOut` and real drain remain separate
+proof. This source patch restarts no service and promises no zero-downtime cutover.
+
+Qualification inputs and file hashes are retained in
+`review_evidence/fabric_router/2026-11-12-source-recovery.json`. Final combined
+head checks, normal protected release and actual consumer evidence belong on the
+original PR. The existing shared-owner admission/physical quota composition remains
+UR7-UR10 work, not a benefit inferred from local `fabric/*` aliases or this repair.
+
+Native controls remain independently unresolved: the original selection and
+launcher loss must be recovered from legitimate owner evidence, not synthesized.
+An authenticated router-status read was blocked before tool execution during this
+recovery; it is not a provider result or permission to replay through another
+credential/tool. No provider call, account/credit change, native selection, service
+restart or runtime acceptance occurred. MISSION_COMPLETE remains false until the
+original accepted consumer and capacity outcomes are proven.

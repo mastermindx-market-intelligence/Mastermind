@@ -7,6 +7,17 @@ load balancing and admission-time failover. It creates no new
 credential store, queue or scheduler: incumbent gateways keep their pools and
 quotas, incumbent config files keep their keys, and this router composes them.
 
+## Source qualification and incumbent ownership
+
+This retained edge candidate is not a global Model Router admission or a new
+provider-quota owner. Its local `fabric/*` aliases are not measured C0-C3 task
+qualifications. The accepted T3 default registration continues to exclude the
+port8313 all-pools entry; integration must consume the existing Model Router,
+Shared Provider Control and applicable Executive/native claim owners first.
+Source release alone does not enroll accounts, authorize a workload, activate
+this service, resolve a missing native selection, or prove installed consumers.
+Existing installed entries and in-flight requests are not migrated by this code.
+
 ## Route kinds
 
 | kind | authorization | example pools |
@@ -74,7 +85,18 @@ health/counters, never keys).
 
 ## Bounded admission and completion
 
-The installed service runs one Uvicorn worker. Its process-wide bulkhead is
+The service accepts through one listener and one Uvicorn worker. It deliberately
+does not enable `SO_REUSEPORT`: overlapping independent processes would multiply
+its process-local ceilings. An occupied listener fails closed, and the candidate
+closes its socket on every normal or exceptional exit. The existing supervisor
+must drain the incumbent before rebinding; this is not a zero-downtime claim.
+The graceful request-drain budget is the configured total request deadline plus
+the gateway's existing five-second cleanup bound, rounded up. Its default is
+1805 seconds, not the former hard-coded 25 seconds. An external supervisor's
+termination deadline must be qualified separately; changing this source does
+not extend launchd's installed `ExitTimeOut` or authorize a service restart.
+
+The service validates and freezes its settings before binding. Its process-wide bulkhead is
 reserved before asynchronous credential reads; route and group reservations
 are acquired without an intervening await. Do not multiply workers and assume
 these local limits become global provider quotas.
