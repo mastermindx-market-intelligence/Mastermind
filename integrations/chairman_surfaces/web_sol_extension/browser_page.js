@@ -7,10 +7,37 @@
   const MAX_ELEMENTS = 120;
   const MAX_NODES = 2000;
   const MAX_TEXT = 10000;
+  // A fill is bounded work: the editor pipeline issues one execCommand pair
+  // per line, so both a line cap (refused before anything is written) and an
+  // insertion time bound (checked inside the loop) keep a fill from freezing
+  // the tab on hostile or pathological input.
+  const MAX_FILL_LINES = 2000;
+  const FILL_TIME_BOUND_MS = 1500;
+  // Ruling 13: a fill's APPLIED means the box held the asked content when it
+  // was read again after the page's pending microtasks and one settle
+  // interval (at most 500 ms; this build uses 250). Awaiting a timer drains
+  // the microtask queue first — the platform runs microtasks before any
+  // timer callback — so one interval covers both, and a page that changes
+  // the box later than the interval is outside the receipt.
+  const FILL_SETTLE_MS = 250;
+  // Paged read: one element's full visible text, one page per call. The
+  // enforced reply ceilings are the worker service's 800,000-byte reply
+  // refusal (RESULT_TOO_LARGE) and the native host's 921,600-byte frame
+  // limit (MAX_MESSAGE_BYTES); no smaller envelope is enforced. The page
+  // content budget (UTF-8 bytes) keeps every serialized reply far under
+  // both, and the extraction is node- and character-bounded so a
+  // pathological subtree cannot hang the read.
+  const READ_PAGE_BYTES = 30720;
+  const READ_MAX_NODES = 20000;
+  const READ_MAX_CHARACTERS = 1000000;
   const ACTIONS = new Set(["snapshot", "validate", "consume", "validate_focus", "focus_ref", "click", "fill",
-    "select", "scroll", "diagnostics"]);
+    "select", "scroll", "read", "diagnostics"]);
   const MUTATIONS = new Set(["focus_ref", "click", "fill", "select", "scroll"]);
-  const SELECTOR = "a[href],button,input,textarea,select,[role],[contenteditable='true'],[tabindex]";
+  // Every contenteditable variant is an editor: the enumerated values are
+  // case-insensitive "true"/"plaintext-only" plus the empty string (which
+  // means true). Discovery must match all of them, not the literal "true".
+  const EDITABLE = ":is([contenteditable=''],[contenteditable='true' i],[contenteditable='plaintext-only' i])";
+  const SELECTOR = `a[href],button,input,textarea,select,[role],${EDITABLE},[tabindex]`;
   const text = (v, n = 160) => String(v || "").replace(/\s+/g, " ").trim().slice(0, n);
   const result = (ok, code, data = null, effect = "NOT_APPLIED") => ({ok, code, data, effect});
 
@@ -68,7 +95,7 @@
       let length = 0, count = 0, node;
       while ((node = walker.nextNode()) && count++ < MAX_NODES && length < MAX_TEXT) {
         const parent = node.parentElement;
-        if (!parent || parent.closest("script,style,noscript,input,textarea,select,[contenteditable='true']") || !visible(parent)) continue;
+        if (!parent || parent.closest(`script,style,noscript,input,textarea,select,${EDITABLE}`) || !visible(parent)) continue;
         const part = text(node.nodeValue, MAX_TEXT - length);
         if (part) {parts.push(part); length += part.length + 1;}
       }
@@ -90,7 +117,12 @@
           name: name(node), disabled: Boolean(node.disabled || node.getAttribute("aria-disabled") === "true"),
           bounds: bounds(node)};
         if (/^(INPUT|TEXTAREA|SELECT)$/.test(node.tagName) || node.isContentEditable) {
-          const value = String(node.isContentEditable ? node.textContent : node.value || "");
+          // For contenteditables, innerText is the editor truth: block
+          // paragraphs read back as line breaks; a raw textContent join would
+          // silently flatten them.
+          const value = String(node.isContentEditable
+            ? (typeof node.innerText === "string" ? node.innerText : node.textContent)
+            : node.value || "");
           item.value = value.slice(0,1000);
           item.value_truncated = value.length > 1000;
           item.read_only = Boolean(node.readOnly);
@@ -115,6 +147,170 @@
         elements, elements_truncated: Boolean(node), scroll_ref: scroller ? "page" : null,
         viewport: {width: win.innerWidth, height: win.innerHeight},
         ready_state: doc.readyState, scope: "top_frame", content_is_untrusted: true});
+    }
+    // What one comparison channel provably does to text. Each step is applied
+    // to BOTH sides of the comparison and named in the receipt when it
+    // actually fired; nothing else is normalized — a dropped or added line
+    // break is a real mismatch.
+    // - value API: normalizes CRLF (and lone CR) to LF; tabs and spaces exact.
+    // - innerText of the editor channel: rendered text — a typed space at a
+    //   line edge or inside a run renders as U+00A0, runs of spaces and tabs
+    //   collapse, spaces at line edges are invisible, an empty block renders
+    //   as a doubled break, and trailing breaks drift. Runs of blank lines
+    //   collapse to one blank line on both sides, so a dropped empty line
+    //   inside a repeated run is indistinguishable — blank-line-render names
+    //   the collapse when it fires.
+    // - textContent of the whole-text fallback: the byte-exact carrier this
+    //   code just wrote; it normalizes nothing, so nothing is normalized.
+    const CRLF_TO_LF = ["crlf-to-lf", t => t.replace(/\r\n?/g, "\n")];
+    const CHANNELS = {
+      value: {read: node => String(node.value || ""), steps: [CRLF_TO_LF]},
+      innerText: {read: node => String(typeof node.innerText === "string" ? node.innerText : node.textContent || ""),
+        steps: [CRLF_TO_LF, ["nbsp-render", t => t.replace(/ /g, " ")],
+          ["whitespace-run-collapse", t => t.replace(/[ \t]+/g, " ")],
+          ["line-edge-spaces", t => t.replace(/ *\n */g, "\n")],
+          ["blank-line-render", t => t.replace(/\n{3,}/g, "\n\n")],
+          ["trailing-newline-drift", t => t.replace(/\n+$/, "")]]},
+      textContent: {read: node => String(node.textContent || ""), steps: []}
+    };
+    function channelFor(node, path) {
+      if (!node.isContentEditable) return CHANNELS.value;
+      return path === "fallback" ? CHANNELS.textContent : CHANNELS.innerText;
+    }
+    function normalize(steps, value, fired) {
+      for (const [name, step] of steps) {
+        const next = step(value);
+        if (next !== value) fired.add(name);
+        value = next;
+      }
+      return value;
+    }
+    function firstDiff(a, b) {
+      const length = Math.min(a.length, b.length);
+      for (let i = 0; i < length; i++) if (a[i] !== b[i]) return i;
+      return a.length === b.length ? -1 : length;
+    }
+    // Compare what the box holds with what was asked, reading the box back
+    // through the channel the insertion actually used. Returns the receipt
+    // payload: either the applied receipt with the fired normalizations, or a
+    // FILL_MISMATCH (never APPLIED) with both lengths and the first differing
+    // offset of the normalized comparison.
+    const settle = () => new Promise(resolve => { win.setTimeout(resolve, FILL_SETTLE_MS); });
+    function fillReceipt(node, asked, path, preFill, stopped) {
+      const channel = channelFor(node, path);
+      const raw = channel.read(node);
+      const fired = new Set();
+      const askedNormalized = normalize(channel.steps, asked, fired);
+      const boxNormalized = normalize(channel.steps, raw, fired);
+      const normalizations = [...fired];
+      const common = {asked_characters: asked.length, box_characters: raw.length,
+        normalizations, insertion_path: path, settle_interval_ms: FILL_SETTLE_MS,
+        read_back: !node.isContentEditable ? "value" : path === "fallback" ? "textContent" : "innerText"};
+      const offset = firstDiff(askedNormalized, boxNormalized);
+      // A time-bound stop reports how far the insertion got and the honest
+      // partial state of the box under its own typed code. When the stop
+      // came after every asked line was inserted, the read-back decides the
+      // effect (ruling 13): APPLIED with the bound disclosed — a false
+      // NOT_APPLIED would invite a duplicate fill of a complete box. The
+      // line count, not the normalized comparison, decides this: a partial
+      // whose un-inserted remainder is only empty lines normalizes equal
+      // (blank-line-render and trailing-newline-drift collapse the missing
+      // tail away), and it must still report the truthful FILL_TIME_BOUND /
+      // NOT_APPLIED.
+      if (stopped) {
+        if (offset === -1 && stopped.linesInserted >= stopped.linesAsked) {
+          return result(true, "OK", {...common,
+            time_bound_exceeded: true,
+            lines_inserted: stopped.linesInserted, time_bound_ms: stopped.timeBoundMs,
+            snapshot_consumed: true, refresh_required: true}, "APPLIED");
+        }
+        const excerpt = raw.slice(0, 40);
+        return result(false, "FILL_TIME_BOUND", {...common,
+          first_diff_offset: offset,
+          mismatch_kind: raw === preFill ? "box-unchanged" : "content-differs",
+          prefill_characters: preFill.length,
+          lines_inserted: stopped.linesInserted, time_bound_ms: stopped.timeBoundMs,
+          snapshot_consumed: true,
+          box_excerpt: excerpt, box_excerpt_is_untrusted: true}, "NOT_APPLIED");
+      }
+      if (offset !== -1) {
+        const excerpt = raw.slice(Math.max(0, offset - 16), Math.max(0, offset - 16) + 40);
+        // mismatch_kind names what the mismatch is: box-unchanged means the
+        // box still holds exactly what it held before the fill — the write
+        // never took (a model-owning editor reverted it); content-differs
+        // means the box holds something else again. Either way the attempt
+        // consumed the observation: the receipt says so, because a retry on
+        // the dead snapshot would be refused.
+        return result(false, "FILL_MISMATCH", {...common, first_diff_offset: offset,
+          mismatch_kind: raw === preFill ? "box-unchanged" : "content-differs",
+          prefill_characters: preFill.length,
+          snapshot_consumed: true,
+          box_excerpt: excerpt, box_excerpt_is_untrusted: true}, "NOT_APPLIED");
+      }
+      return result(true, "OK", {...common, snapshot_consumed: true, refresh_required: true}, "APPLIED");
+    }
+    // One element's visible text for the paged read, with the snapshot's
+    // exclusions: no form fields, no contenteditable (an editor box is not
+    // page content), nothing hidden or sensitive, no script/style/template.
+    // Block elements break lines, <br> breaks a line, whitespace runs
+    // collapse outside <pre>, and <pre> keeps its code shape verbatim. The
+    // walk is node-bounded; truncation is reported, never silent.
+    function elementText(root) {
+      const BLOCK = /^(ADDRESS|ARTICLE|ASIDE|BLOCKQUOTE|DD|DETAILS|DIV|DL|DT|FIGCAPTION|FIGURE|FOOTER|H1|H2|H3|H4|H5|H6|HEADER|HR|LI|MAIN|NAV|OL|P|PRE|SECTION|TABLE|TD|TH|TR|UL)$/;
+      const SKIP = /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|INPUT|TEXTAREA|SELECT|OPTION|BUTTON)$/;
+      const parts = [];
+      let examined = 0, truncated = false;
+      const walk = element => {
+        for (const child of element.childNodes) {
+          if (++examined > READ_MAX_NODES) {truncated = true; return;}
+          if (child.nodeType === 3) {
+            const parent = child.parentElement;
+            if (!parent || !visible(parent) ||
+                parent.closest(`script,style,noscript,template,input,textarea,select,${EDITABLE}`)) continue;
+            const value = child.nodeValue || "";
+            if (!value.trim()) continue;
+            parts.push(parent.closest("pre") ? value : value.replace(/\s+/g, " "));
+          } else if (child.nodeType === 1) {
+            // An ancestor-or-self in an editable STATE ("", true or
+            // plaintext-only, any letter case) marks editor territory: an
+            // editor box is not page content. Non-editable states — false,
+            // an explicit inherit, an invalid value — stay page content, as
+            // at base: only the EDITABLE selector decides, never bare
+            // attribute presence.
+            if (SKIP.test(child.tagName) || child.closest(EDITABLE) || !visible(child)) continue;
+            if (child.tagName === "BR") {parts.push("\n"); continue;}
+            if (BLOCK.test(child.tagName)) {parts.push("\n"); walk(child); parts.push("\n"); continue;}
+            walk(child);
+          }
+        }
+      };
+      walk(root);
+      const joined = parts.join("").replace(/\n{3,}/g, "\n\n").replace(/[ \t]+\n/g, "\n");
+      const capped = joined.slice(0, READ_MAX_CHARACTERS);
+      const value = capped.replace(/\n+$/, "").replace(/^\n+/, "");
+      // Truncation is decided on the cap itself, before the cosmetic strips:
+      // the strips only remove structural newline padding, so a final value
+      // below the character bound can still be a capped read and must be
+      // reported as truncated, never silently shortened.
+      return {value, truncated: truncated || capped.length < joined.length};
+    }
+    // Slice one page out of the text: accumulate whole code points until the
+    // UTF-8 byte budget is spent, so a surrogate pair is never split and each
+    // page makes progress. Offsets are UTF-16 code-unit positions on
+    // code-point boundaries.
+    function readPage(text, offset) {
+      const encoder = new TextEncoder();
+      const chunks = [];
+      let units = 0, bytes = 0, at = offset;
+      while (at < text.length) {
+        const point = text.codePointAt(at);
+        const size = point > 0xFFFF ? 2 : 1;
+        const cost = encoder.encode(String.fromCodePoint(point)).length;
+        if (bytes + cost > READ_PAGE_BYTES && chunks.length) break;
+        chunks.push(String.fromCodePoint(point));
+        units += size; bytes += cost; at += size;
+      }
+      return {content: chunks.join(""), end: offset + units};
     }
     function diagnostics() {
       const entries = win.performance && typeof win.performance.getEntriesByType === "function"
@@ -153,6 +349,91 @@
       if (current.url !== win.location.href) return "TARGET_CHANGED";
       return null;
     }
+    // A fill settles before it is answered (ruling 13): the insertion runs,
+    // input/change fire, then the page gets one settle interval — microtasks
+    // drain first, so a model-owning editor that reverts the box on a
+    // microtask is caught by the read-back instead of being answered APPLIED
+    // synchronously. The dispatch returns a promise only for fill; callers
+    // that await the dispatch value (executeScript awaits settled results)
+    // see the receipt after the settle. A failure inside the continuation is
+    // self-caught: a rejected promise must never escape the page module.
+    async function performFill(node, params) {
+      try {
+        node.focus();
+        // The pre-fill reading through both editable channels, captured
+        // before anything is written, so the receipt can name a reverted
+        // write (box still exactly as before) after the path is known.
+        const preEditable = node.isContentEditable ? {
+          innerText: String(typeof node.innerText === "string" ? node.innerText : node.textContent || ""),
+          textContent: String(node.textContent || "")
+        } : null;
+        const preValue = node.isContentEditable ? null : String(node.value || "");
+        let insertionPath = "editor";
+        if (node.isContentEditable) {
+          // A raw textContent write loses line breaks in editors that own
+          // their model (they re-normalize plain \n to spaces). Insert
+          // through the editor's own pipeline instead: select everything,
+          // then insertText per line with insertParagraph between lines, so
+          // paragraphs become the block structure the editor expects. The
+          // insertion feed normalizes CRLF to LF first — execCommand renders
+          // a CR as a paragraph break of its own, which would double every
+          // CRLF into a blank line.
+          const feed = params.text.replace(/\r\n?/g, "\n");
+          // Returns {inserted, timeBound, linesInserted}: timeBound means the
+          // loop stopped itself at the deadline — the box holds a partial
+          // insertion, reported as FILL_TIME_BOUND, never left mid-loop to
+          // freeze the tab on a slow or hostile editor.
+          const insertViaEditor = () => {
+            const selection = win.getSelection();
+            if (!selection || typeof doc.execCommand !== "function") return {inserted: false, linesInserted: 0};
+            selection.selectAllChildren(node);
+            const lines = feed.split("\n");
+            const deadline = Date.now() + FILL_TIME_BOUND_MS;
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i] && !doc.execCommand("insertText", false, lines[i]))
+                return {inserted: false, linesInserted: i};
+              if (i < lines.length - 1 && !doc.execCommand("insertParagraph"))
+                return {inserted: false, linesInserted: i + 1};
+              if ((i & 63) === 63 && Date.now() > deadline)
+                return {inserted: false, timeBound: true, linesInserted: i + 1};
+            }
+            return {inserted: true, linesInserted: lines.length};
+          };
+          let outcome = {inserted: false, linesInserted: 0};
+          try { outcome = insertViaEditor(); } catch (_) { outcome = {inserted: false, linesInserted: 0}; }
+          if (outcome.timeBound) {
+            await settle();
+            return fillReceipt(node, params.text, insertionPath,
+              preEditable ? preEditable.innerText : preValue,
+              {linesInserted: outcome.linesInserted, linesAsked: feed.split("\n").length,
+                timeBoundMs: FILL_TIME_BOUND_MS});
+          }
+          // Whole-text fallback ONLY when the editor pipeline genuinely
+          // refused (execCommand returned false or threw). Never as a
+          // length-heuristic second guess: innerText collapses runs of
+          // spaces in the render, so a length check mis-judges correct
+          // insertions and destroys their paragraph structure. The honest
+          // verdict on what the box holds is the receipt comparison.
+          if (!outcome.inserted) {node.textContent = params.text; insertionPath = "fallback";}
+        } else {
+          const proto = node.tagName === "INPUT" ? win.HTMLInputElement.prototype : win.HTMLTextAreaElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+          setter.call(node, params.text);
+        }
+        node.dispatchEvent(new win.Event("input", {bubbles: true}));
+        node.dispatchEvent(new win.Event("change", {bubbles: true}));
+        // The receipt is honest about what the box now holds: compare the
+        // read-back with what was asked, normalizing only what this channel
+        // provably normalizes (listed in the receipt). A mismatch is a typed
+        // FILL_MISMATCH with both lengths and the first differing offset —
+        // never APPLIED.
+        await settle();
+        return fillReceipt(node, params.text, insertionPath,
+          preEditable ? preEditable[insertionPath === "fallback" ? "textContent" : "innerText"] : preValue);
+      } catch (_) {
+        return result(false, "ACTION_EFFECT_UNKNOWN", null, "EFFECT_UNKNOWN");
+      }
+    }
     function dispatch(request) {
       let attempted = false;
       try {
@@ -170,19 +451,47 @@
         const node = target.node;
         if (node.disabled || node.getAttribute("aria-disabled") === "true") return result(false, "TARGET_DISABLED");
         const fields = Object.keys(params).sort().join(",");
-        if (action === "fill" && (fields !== "text" || typeof params.text !== "string" || params.text.length > 8000 || params.text.includes("\u0000") ||
+        if (action === "fill" && (fields !== "text" || typeof params.text !== "string" || params.text.length > 30000 || params.text.includes("\u0000") ||
+            (params.text.replace(/\r\n?/g, "\n").match(/\n/g) || []).length > MAX_FILL_LINES ||
             (!/^(INPUT|TEXTAREA)$/.test(node.tagName) && !node.isContentEditable) || node.readOnly ||
             (node.tagName === "INPUT" && !/^(text|search|email|url|tel|number)$/i.test(node.type)))) return result(false, "INPUT_REFUSED");
         if (action === "select" && (fields !== "value" || typeof params.value !== "string" || params.value.length > 512 || node.tagName !== "SELECT" ||
             !Array.from(node.options).some(o => o.value === params.value && !o.disabled))) return result(false, "INPUT_REFUSED");
         if (action === "scroll" && (fields !== "x,y" || ![params.x, params.y].every(n => Number.isInteger(n) && Math.abs(n) <= 3000))) return result(false, "INPUT_REFUSED");
         if (["click", "focus_ref"].includes(action) && fields) return result(false, "INPUT_REFUSED");
+        if (action === "read" && (fields !== "offset" || typeof params.offset !== "number")) return result(false, "INPUT_REFUSED");
         if (action === "click") {
           const b = node.getBoundingClientRect();
           const x = b.x + b.width / 2, y = b.y + b.height / 2;
           if (x < 0 || y < 0 || x >= win.innerWidth || y >= win.innerHeight) return result(false, "TARGET_OFFSCREEN");
           const top = doc.elementFromPoint(x, y);
           if (!top || !(top === node || node.contains(top))) return result(false, "TARGET_OBSCURED");
+        }
+        // Paged read of one element's visible text: it never consumes the
+        // observation and never mutates, scrolls or focuses — it returns
+        // before the one-mutation consumption below. Offset values that
+        // cannot name a page start (negative, non-integer, past the end, or
+        // inside a surrogate pair) are a typed READ_OFFSET_INVALID.
+        // Read-contract limits an operator must know: there is no drift
+        // guard across pages — a page that changes during a paged read can
+        // skip or repeat text; repeated blank lines can hide a dropped
+        // empty line; and for fills, read the box before sending — APPLIED
+        // certifies only the re-read after the settle interval, not what
+        // the page does later.
+        if (action === "read") {
+          const text = elementText(node);
+          const total = text.value.length;
+          const offset = params.offset;
+          const boundary = text.value.charCodeAt(offset);
+          if (!Number.isInteger(offset) || offset < 0 || offset > total ||
+              (offset > 0 && offset < total && boundary >= 0xDC00 && boundary <= 0xDFFF))
+            return result(false, "READ_OFFSET_INVALID", {total_characters: total, content_is_untrusted: true});
+          const page = readPage(text.value, offset);
+          return result(true, "OK", {offset, total_characters: total,
+            next_offset: page.end >= total ? null : page.end,
+            content: page.content, content_is_untrusted: true,
+            text_truncated: text.truncated,
+            exclusions: "script,style,noscript,template,form fields,contenteditable,hidden,sensitive"});
         }
         // One snapshot can authorize at most one mutation, including failed attempts.
         const snapshotId = current.id;
@@ -197,17 +506,7 @@
             url:win.location.href, token:random()};
           return result(true, "OK", {focus_token:prepared.token, snapshot_consumed:true}, "APPLIED");
         }
-        if (action === "fill") {
-          node.focus();
-          if (node.isContentEditable) node.textContent = params.text;
-          else {
-            const proto = node.tagName === "INPUT" ? win.HTMLInputElement.prototype : win.HTMLTextAreaElement.prototype;
-            const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
-            setter.call(node, params.text);
-          }
-          node.dispatchEvent(new win.Event("input", {bubbles: true}));
-          node.dispatchEvent(new win.Event("change", {bubbles: true}));
-        }
+        if (action === "fill") return performFill(node, params);
         if (action === "select") {
           node.value = params.value;
           node.dispatchEvent(new win.Event("input", {bubbles: true}));
@@ -243,7 +542,11 @@
       chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (!request || request.kind !== KIND || !sender || sender.id !== chrome.runtime.id) return false;
         if (!root.__MMX_BROWSER_PAGE_V1__) return false;
-        sendResponse(root.__MMX_BROWSER_PAGE_V1__.dispatch(request));
+        // Fill answers after a settle interval, so dispatch can return a
+        // promise; returning true holds the channel open until it settles.
+        const reply = root.__MMX_BROWSER_PAGE_V1__.dispatch(request);
+        if (reply && typeof reply.then === "function") { reply.then(sendResponse); return true; }
+        sendResponse(reply);
         return true;
       });
     }
