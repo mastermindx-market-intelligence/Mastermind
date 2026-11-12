@@ -173,6 +173,29 @@ _HEX64_RE = re.compile(r"\A[0-9a-f]{64}\Z")
 # contract by construction.
 APPEND_LOCK_NAME = "append.lock"
 
+
+def _sync_ledger_line(handle: Any) -> None:
+    """Push one ledger line all the way to stable storage (GBL-5 micro 5a).
+
+    A ledger line exists to stop a *later* writer from re-issuing a number
+    or handing the same answer out twice.  A line still in a userspace
+    buffer, or in the page cache when the machine loses power, cannot do
+    that: the process that produced it has returned and the next writer
+    reads the file the kernel never wrote.  So every ledger write is
+    followed by ``flush`` → ``os.fsync`` → ``fcntl.F_FULLFSYNC`` where the
+    platform has it (macOS; APFS needs the full sync to reach the platter
+    and not merely the drive cache).
+
+    ``OSError`` is deliberately NOT caught here: both callers map it to the
+    typed ``APPEND_LOCK_UNWRITABLE`` refusal they already own, so a sync
+    that cannot be proven refuses the append instead of letting an
+    unsynced line decide anything."""
+    handle.flush()
+    os.fsync(handle.fileno())
+    full_sync = getattr(fcntl, "F_FULLFSYNC", None)
+    if full_sync is not None:
+        fcntl.fcntl(handle.fileno(), full_sync)
+
 # GBL-5 micro 1, RULING 19(a): the keys only the STORE (or this reader) may
 # set on a surfaced event.  A comment body can carry any JSON key at all, so
 # every one of them is removed from the parsed body BEFORE verification and
@@ -693,7 +716,7 @@ class PaperclipAskClient:
         serialised discipline."""
         try:
             handle.write(json.dumps({"ask_id": ask_id, "seq": seq}) + "\n")
-            handle.flush()
+            _sync_ledger_line(handle)
         except OSError as exc:
             raise GblPaperclipError(
                 "APPEND_LOCK_UNWRITABLE",
@@ -751,7 +774,7 @@ class PaperclipAskClient:
             handle.write(json.dumps({"ask_id": ask_id,
                                      "answer_id": answer_id,
                                      "delivered": True}) + "\n")
-            handle.flush()
+            _sync_ledger_line(handle)
         except OSError as exc:
             raise GblPaperclipError(
                 "APPEND_LOCK_UNWRITABLE",
