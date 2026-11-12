@@ -23,6 +23,11 @@ HTTP_PATH = "integrations/mastermind_workspace_app/app.py"
 EXPECTED = {
     ACTION_PATH: ((135, 58, 61, "int"),),
     HTTP_PATH: ((933, 71, 74, 'int'), (944, 71, 74, 'int'), (952, 71, 74, 'int'), (958, 79, 82, 'int'), (967, 71, 74, 'int'), (977, 71, 74, 'int'), (982, 76, 79, 'int'), (988, 71, 74, 'int')),
+    # 2026-11-11 WO-20 fourth-drift merge (master 8ee0196d, landed #2351):
+    # both parents map every reviewed token to the same merged line,
+    # byte-identically (repin4.py); the merged source equals this branch's
+    # bytes, so the pins keep this branch's digests and coordinates. No new
+    # literal site is qualified.
 }
 
 

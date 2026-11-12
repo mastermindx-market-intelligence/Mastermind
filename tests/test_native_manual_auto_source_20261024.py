@@ -21,6 +21,15 @@ ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
 PATCH = ROOT / "ops/native_fabric/patches/native_generation_manual_preview_20261022.patch"
 FIXTURE = ROOT / "ops/native_fabric/qualification/native_manual_preview_fixture.py"
+# The six converged AUTO pre-release members are busy-scoped sources; the
+# reviewed default candidate/ keeps master's pre-busy bytes.
+BUSY_SOURCE = NATIVE / "candidate/broker_busy_2121"
+
+# The 2121 converge composes the AUTO prelease busy fallback onto the exact
+# current epoch: applying the busy inverses below to the busy source must land
+# on CURRENT_TASK_SHA. The busy task is the converged candidate fabric_task.
+BUSY_TASK_SHA = "0e85036189cc074c3b1a463304f1ccadba82038beadff3b51255c1ef2ec68d66"
+BUSY_PICK_SHA = "c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057"
 HISTORICAL_TASK = ROOT / "research/proposals/fabric_refusal_diagnostics_20261102/fabric_task.py.base"
 PRE_LONG_HORIZON_TASK_SHA = "ca091b1e21f5b9d3349e7ce31ae46dff6173d27b5f36d432179418415f03eb88"
 PRE_POLL255_TASK_SHA = "778f4f3ebf03f5ce93e60081dc8a739ae90fb4cbeb32d01bbcc7b008c813a23b"
@@ -133,6 +142,124 @@ def _pre_ubuntu4_task(value: bytes) -> bytes:
     return value
 
 
+def _pre_busy_task(value: bytes) -> bytes:
+    """Undo only the hash-pinned prelease capacity additions in a copy.
+
+    Retain the exact current native source for the frozen F1/Poll255 inverse.
+    Never rewrite the candidate, runtime or historical fixture.
+    """
+    assert hashlib.sha256(value).hexdigest() == BUSY_TASK_SHA
+    inverses = (
+        (
+            b'            proof = quota_circuit.validate_prelease_refusal(here, rid, root, parent,\n'
+            b'                                                           packet_limit=MAX_RESULT_BYTES)\n'
+            b'            busy = proof["kind"] == "prelease_broker_busy"\n',
+            b'            quota_circuit.validate_prelease_refusal(here, rid, root, parent,\n'
+            b'                                                   packet_limit=MAX_RESULT_BYTES)\n',
+        ),
+        (
+            b'                "state": "TERMINAL_FAILURE", "rc": 75,\n'
+            b'                "signal": "capacity" if busy else "quota",\n'
+            b'                "reason": proof["kind"], "root_id": root, "parent_run_id": parent,\n',
+            b'                "state": "TERMINAL_FAILURE", "rc": 75, "signal": "quota",\n'
+            b'                "reason": "prelease_quota_cooldown", "root_id": root, "parent_run_id": parent,\n',
+        ),
+        (b'    capacity_excluded_pools: list[str] | None = None,\n', b''),
+        (
+            b'    if capacity_excluded_pools is not None:\n'
+            b'        if (type(capacity_excluded_pools) is not list\n'
+            b'                or not 1 <= len(capacity_excluded_pools) < 3\n'
+            b'                or any(type(p) is not str or p not in pick._HOST_POOL_MODES\n'
+            b'                       for p in capacity_excluded_pools)\n'
+            b'                or len(set(capacity_excluded_pools)) != len(capacity_excluded_pools)\n'
+            b'                or request_capacity_preflight is not True\n'
+            b'                or pool is not None or requested_model is not None\n'
+            b'                or prefer is not None or strict_manual_pin):\n'
+            b'            raise FabricTaskError("CAPACITY_EXCLUSION_NOT_QUALIFIED")\n',
+            b'',
+        ),
+        (
+            b'                **({"excluded_pools": capacity_excluded_pools} if capacity_excluded_pools else {}),\n',
+            b'',
+        ),
+    )
+    for newer, older in inverses:
+        assert value.count(newer) == 1
+        value = value.replace(newer, older, 1)
+    assert hashlib.sha256(value).hexdigest() == CURRENT_TASK_SHA
+    return value
+
+
+def _inverse_busy_picker(value: bytes) -> bytes:
+    """Undo only the hash-pinned pool-exclusion selector additions in a copy."""
+    assert hashlib.sha256(value).hexdigest() == BUSY_PICK_SHA
+    inverses = (
+        (
+            b'                excluded_hosts: Optional[List[str]] = None,\n'
+            b'                excluded_pools: Optional[List[str]] = None) -> str:\n'
+            b'    """Select a new request, preserving Grok model affinity on quota exhaustion."""\n',
+            b'                excluded_hosts: Optional[List[str]] = None) -> str:\n'
+            b'    """Select a new request, preserving Grok model affinity on quota exhaustion."""\n',
+        ),
+        (
+            b'    if excluded_pools is not None:\n'
+            b'        common["excluded_pools"] = excluded_pools\n',
+            b'',
+        ),
+        (
+            b'                excluded_hosts: Optional[List[str]] = None,\n'
+            b'                excluded_pools: Optional[List[str]] = None) -> str:\n'
+            b'    """Read-only selection; host name or auto also requires placement eligibility."""\n'
+            b'    if excluded_pools is not None:\n'
+            b'        if (not host or pool is not None or requested_model is not None\n'
+            b'                or type(excluded_pools) is not list\n'
+            b'                or not 1 <= len(excluded_pools) < 3\n'
+            b'                or any(type(item) is not str or item not in _HOST_POOL_MODES\n'
+            b'                       for item in excluded_pools)\n'
+            b'                or len(set(excluded_pools)) != len(excluded_pools)):\n'
+            b'            return "NONE reason=invalid excluded_pools or manual pin"\n',
+            b'                excluded_hosts: Optional[List[str]] = None) -> str:\n'
+            b'    """Read-only selection; host name or auto also requires placement eligibility."""\n',
+        ),
+        (
+            b'            # Only candidates excluded by an already-proven pre-task broker\n'
+            b'            # refusal are removed. Normal economics/quality/independence and\n'
+            b'            # host admission continue in the incumbent single picker.\n'
+            b'            for excluded_pool in excluded_pools or ():\n'
+            b'                routes.pop(excluded_pool, None)\n',
+            b'',
+        ),
+    )
+    for newer, older in inverses:
+        assert value.count(newer) == 1, newer[:70]
+        value = value.replace(newer, older, 1)
+    assert hashlib.sha256(value).hexdigest() == COMPOSED_PICK
+    return value
+
+
+def _busy_member_to_current(stage, relative, source, current):
+    """Invert one busy-scoped member to its pre-busy bytes in this private
+    stage (converge 2121). Default candidate/ members pass through unchanged;
+    the busy picker is inverted and materialized; the busy task is materialized
+    as the staged pre-busy bytes, so the returned pair carries
+    CURRENT_TASK_SHA forward."""
+    if relative == "ext/pick.py":
+        assert sha(source) == BUSY_PICK_SHA
+        pre_busy = _inverse_busy_picker(current)
+        assert hashlib.sha256(pre_busy).hexdigest() == COMPOSED_PICK
+        staged = stage / relative
+        staged.write_bytes(pre_busy)
+        return staged, pre_busy
+    if relative == "ext/fabric_task.py":
+        assert sha(source) == BUSY_TASK_SHA
+        current = _pre_busy_task(current)
+        assert hashlib.sha256(current).hexdigest() == CURRENT_TASK_SHA
+        staged = stage / relative
+        staged.write_bytes(current)
+        return staged, current
+    return source, current
+
+
 def _inverse_manual_member(value: bytes, member: str) -> bytes:
     """Undo only SHA-bound reviewed F1 hunks in disposable source bytes."""
     blob = PATCH.read_bytes()
@@ -205,16 +332,23 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
     assert sha(FIXTURE) == "75edb2345e90f2f5a758020acef494aa9090b4c97e020bbafb6f3ee5be63c794"
     builder = NATIVE / "rollout/build_review_stage.py"
     built = tmp_path / "built"
-    proc = subprocess.run([sys.executable, str(builder), "--output", str(built)],
+    proc = subprocess.run([sys.executable, str(builder), "--output", str(built),
+                           "--broker-busy-epoch"],
                           cwd=ROOT, capture_output=True, text=True, timeout=55)
     assert proc.returncode == 0, proc.stderr[-2500:]
     stage = built / "native-code-stage"
     for relative, (name, original_sha) in SOURCE.items():
-        source = NATIVE / "candidate" / name
+        source = (BUSY_SOURCE if name in ("pick.py", "fabric_task.py")
+                  else NATIVE / "candidate") / name
         # Current source includes later routing and namespace-bound readers.
         # Reconstruct the exact historical F1 epoch only in this private stage.
         current = source.read_bytes()
         assert (stage / relative).read_bytes() == current
+        # Converge 2121: busy-scoped members are inverted to their pre-busy
+        # bytes (materialized inside this private stage) before the frozen
+        # epoch chain below runs; source/current then both carry the
+        # pre-busy epoch forward.
+        source, current = _busy_member_to_current(stage, relative, source, current)
         if relative == "ext/pick.py":
             assert sha(source) == COMPOSED_PICK
             current = _inverse_judgment(_preobserver_picker())
@@ -291,8 +425,8 @@ def test_real_native_auto_pre_effect_source_contract(tmp_path):
     # The historical F1 regression is preserved; independently verify R28
     # judgment routing stays present in the CURRENT composed native source.
     assert all(sha(stage / name) == digest for name, digest in AFTER.items())
-    assert sha(NATIVE / "candidate/pick.py") == COMPOSED_PICK
-    assert sha(NATIVE / "candidate/fabric_task.py") == CURRENT_TASK_SHA
+    assert sha(BUSY_SOURCE / "pick.py") == BUSY_PICK_SHA
+    assert sha(BUSY_SOURCE / "fabric_task.py") == BUSY_TASK_SHA
     assert b'if tc not in {"review", "audit"}' in (
-        NATIVE / "candidate/pick.py").read_bytes()
+        BUSY_SOURCE / "pick.py").read_bytes()
     # Neither stage nor source is published/selected by this test.

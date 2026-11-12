@@ -17,6 +17,8 @@ BODY_SCHEMA = "mastermind.workspace_capacity_fabric.v1"
 OPERATION = "capacity_fabric"
 MAX_RESPONSE_BYTES = 262_144
 MAX_RESOURCES = 256
+MAX_PREVIEW_LIFETIME_SECONDS = 900
+MAX_CONSUMER_RECEIPT_SECONDS = 900
 REASONS = frozenset({"SOURCE_UNAVAILABLE", "SOURCE_CHANGED", "SOURCE_EXPIRED", "RESPONSE_OVER_BUDGET"})
 PRESSURES = frozenset({"UNKNOWN", "HEADROOM_RECORDED", "LOW_ALLOWANCE", "LIMIT_REACHED", "COOLDOWN", "SLOTS_OCCUPIED", "UNAVAILABLE"})
 WINDOW_STATES = frozenset({"CURRENT", "EXHAUSTED", "UNKNOWN", "STALE", "UNQUALIFIED"})
@@ -79,7 +81,7 @@ def validate_result(body, *, now=None):
     if body["availability"] != "AVAILABLE" or body["reason_codes"] != []:
         raise ValueError("invalid_capacity_result")
     observed, expires = timestamp(body["observed_at"]), timestamp(body["expires_at"])
-    if not 0 < expires - observed <= 900:
+    if not 0 < expires - observed <= MAX_PREVIEW_LIFETIME_SECONDS:
         raise ValueError("invalid_capacity_lifetime")
     if now is not None and (type(now) not in (int, float) or not math.isfinite(now) or not observed <= now < expires):
         raise ValueError("invalid_capacity_clock")
@@ -163,7 +165,7 @@ def validate_result(body, *, now=None):
             raise ValueError("invalid_consumer_evidence")
         else:
             stamp = timestamp(row["observed_at"])
-            if not 0 < expires - stamp <= 900 or now is not None and stamp > now:
+            if not 0 < expires - stamp <= MAX_CONSUMER_RECEIPT_SECONDS or now is not None and stamp > now:
                 raise ValueError("invalid_consumer_lifetime")
     recommendations = body["recommendations"]
     if type(recommendations) is not list or len(recommendations) > 6 or len(set(recommendations)) != len(recommendations) or any(x not in ADVICE for x in recommendations):

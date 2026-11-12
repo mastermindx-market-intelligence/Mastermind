@@ -26,7 +26,18 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 import httpx
 
-from control_plane.experiential_plan_policy import PLAN_MODES, PlanRequestRefused, plan_policy_digest, validate_plan_request
+from control_plane.experiential_plan_policy import (
+    PLAN_MODES,
+    PlanRequestRefused,
+    plan_policy_digest,
+    validate_plan_request,
+)
+from ops.native_fabric.experiential_proxy.anthropic_policy import (
+    ANTHROPIC_ENDPOINTS,
+    anthropic_policy_digest,
+    parse_anthropic_models,
+    validate_anthropic_plan_request,
+)
 
 UPSTREAM = "https://api.experientiallabs.ai/v1"
 ALLOWED = {
@@ -35,6 +46,9 @@ ALLOWED = {
     ("POST", "systemone"),
     ("POST", "decisions"),
     ("POST", "embeddings"),
+    # Anthropic Messages wire for agent clients that speak the Claude protocol.
+    ("POST", "messages"),
+    ("POST", "messages/count_tokens"),
     ("GET", "models"),
     # Read-only account observations, opt-in and one-key-only. Never admin writes.
     ("GET", "api/whoami"),
@@ -60,10 +74,15 @@ class Settings:
     max_body_bytes: int = 8 * 1024 * 1024
     enable_account_metadata: bool = False  # off by default; only one provider key can be introspected
     plan_policy: str = "legacy"  # opt-in; exact wire model, no automatic paid spill
+    anthropic_models: tuple[str, ...] = ()  # operator-admitted Anthropic-wire slugs
 
     def __post_init__(self) -> None:
         if type(self.plan_policy) is not str or self.plan_policy not in PLAN_MODES:
             raise ValueError("EXPLABS_PLAN_POLICY must be legacy, free_only or free_and_uncensored")
+        if not isinstance(self.anthropic_models, (tuple, list)) or not all(
+            isinstance(m, str) and m for m in self.anthropic_models
+        ) or len(set(self.anthropic_models)) != len(self.anthropic_models):
+            raise ValueError("anthropic_models must be unique nonempty slugs")
         if not 1 <= len(self.api_keys) <= 4 or not all(self.api_keys):
             raise ValueError("configure 1-4 nonempty EXPLABS_KEY_N values")
         if type(self.enable_account_metadata) is not bool:
@@ -91,6 +110,8 @@ class Settings:
             raise ValueError("EXPLABS_ACCOUNT_METADATA_ENABLED must be 0 or 1")
         return cls(
             plan_policy=os.environ.get("EXPLABS_PLAN_POLICY", "legacy").strip(),
+            anthropic_models=parse_anthropic_models(
+                os.environ.get("EXPLABS_ANTHROPIC_MODELS", "")),
             enable_account_metadata=metadata_flag == "1",
             api_keys=keys,
             proxy_token=os.environ.get("FABRIC_PROXY_TOKEN", "").strip(),
@@ -407,6 +428,10 @@ def create_app(
         snapshot = await request.app.state.admissions.snapshot()
         snapshot.update(plan_policy=cfg.plan_policy,
                         plan_policy_digest=plan_policy_digest(cfg.plan_policy),
+                        anthropic_surface="enabled" if cfg.anthropic_models else "disabled",
+                        anthropic_policy_digest=(
+                            anthropic_policy_digest(cfg.anthropic_models)
+                            if cfg.anthropic_models else None),
                         account_metadata_enabled=cfg.enable_account_metadata,
                         included_funding_state="unverified",
                         included_funding_reason="PLAN_INCLUDED_FUNDING_UNVERIFIED")
@@ -437,28 +462,50 @@ def create_app(
 
         if request.method == "POST":
             expected_policy = request.headers.get("x-fabric-plan-policy")
-            if (cfg.plan_policy != "legacy" or expected_policy is not None) and (
-                expected_policy != plan_policy_digest(cfg.plan_policy)
-            ):
-                return JSONResponse(
-                    {"error": {"message": "gateway plan policy changed",
-                               "type": "plan_policy_error", "code": "PLAN_POLICY_MISMATCH"}},
-                    status_code=HTTPStatus.CONFLICT,
-                )
-            try:
-                lane = validate_plan_request(cfg.plan_policy, endpoint, bytes(body))
-                if lane == "free":
-                    # The public API supplies no account-specific Max entitlement
-                    # or effective continuation readback. A local flag, catalog,
-                    # wallet, or caller assertion cannot authorize wallet-free
-                    # plain-ID inference. Refuse before RPM/slot/upstream send.
-                    raise PlanRequestRefused("PLAN_INCLUDED_FUNDING_UNVERIFIED")
-            except PlanRequestRefused as exc:
-                return JSONResponse(
-                    {"error": {"message": "provider plan request refused",
-                               "type": "plan_policy_error", "code": exc.reason}},
-                    status_code=HTTPStatus.FORBIDDEN,
-                )
+            if endpoint in ANTHROPIC_ENDPOINTS:
+                # The Anthropic surface is admitted only by the operator's
+                # explicit catalogue, so a caller binding header is optional;
+                # when present it must match that exact deployed catalogue.
+                if expected_policy is not None and (
+                    expected_policy != anthropic_policy_digest(cfg.anthropic_models)
+                ):
+                    return JSONResponse(
+                        {"error": {"message": "gateway plan policy changed",
+                                   "type": "plan_policy_error", "code": "PLAN_POLICY_MISMATCH"}},
+                        status_code=HTTPStatus.CONFLICT,
+                    )
+                try:
+                    validate_anthropic_plan_request(
+                        cfg.anthropic_models, endpoint, bytes(body))
+                except PlanRequestRefused as exc:
+                    return JSONResponse(
+                        {"error": {"message": "provider plan request refused",
+                                   "type": "plan_policy_error", "code": exc.reason}},
+                        status_code=HTTPStatus.FORBIDDEN,
+                    )
+            else:
+                if (cfg.plan_policy != "legacy" or expected_policy is not None) and (
+                    expected_policy != plan_policy_digest(cfg.plan_policy)
+                ):
+                    return JSONResponse(
+                        {"error": {"message": "gateway plan policy changed",
+                                   "type": "plan_policy_error", "code": "PLAN_POLICY_MISMATCH"}},
+                        status_code=HTTPStatus.CONFLICT,
+                    )
+                try:
+                    lane = validate_plan_request(cfg.plan_policy, endpoint, bytes(body))
+                    if lane == "free":
+                        # The public API supplies no account-specific Max entitlement
+                        # or effective continuation readback. A local flag, catalog,
+                        # wallet, or caller assertion cannot authorize wallet-free
+                        # plain-ID inference. Refuse before RPM/slot/upstream send.
+                        raise PlanRequestRefused("PLAN_INCLUDED_FUNDING_UNVERIFIED")
+                except PlanRequestRefused as exc:
+                    return JSONResponse(
+                        {"error": {"message": "provider plan request refused",
+                                   "type": "plan_policy_error", "code": exc.reason}},
+                        status_code=HTTPStatus.FORBIDDEN,
+                    )
 
         admissions: SlidingWindowAdmissions = request.app.state.admissions
         disconnected = asyncio.Event()

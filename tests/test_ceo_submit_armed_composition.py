@@ -1678,6 +1678,11 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # dispatch call and stays a no-op ({}) on unenrolled hosts. The
     # installed event-loop anchor AST is unchanged and only this full-file
     # fingerprint moves.
+    # Capacity Fabric adds a read-only factory input outside the installed wrapper.
+    # 2026-11-11 WO-20 fourth-drift merge (master 8ee0196d, landed #2351): the
+    # merged phase1c equals this branch's bytes, so the fingerprint and the
+    # reviewed installed event-loop anchor keep this branch's values. No new
+    # literal site is qualified.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'

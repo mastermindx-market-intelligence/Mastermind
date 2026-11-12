@@ -228,6 +228,118 @@ def test_unsafe_matrix_or_required_fanin_regression_is_refused(
         fan.validate_parallel_workflow(changed)
 
 
+def test_workflow_root_key_set_is_pinned() -> None:
+    import yaml
+
+    text = _WORKFLOW.read_text(encoding="utf-8")
+    # The released workflow still passes with the exact root key pin active.
+    fan.validate_parallel_workflow(text)
+    payload = yaml.load(text, Loader=cip._WorkflowYAMLLoader)
+    assert set(payload) == fan._WORKFLOW_ROOT_KEYS == {
+        "name", "on", "permissions", "concurrency", "jobs",
+    }
+    # The loader must keep the bare `on:` trigger a string, never a YAML 1.1
+    # boolean, or the root key pin could never match the real file.
+    assert "on" in payload and True not in payload
+
+
+@pytest.mark.parametrize(
+    ("preimage", "mutation"),
+    [
+        # A workflow-level defaults.run.shell applies to every job's run step:
+        # injected shell text could exit 0 ahead of each real command while
+        # every per-job structure check still passes.
+        (
+            "permissions:\n  contents: read\n",
+            'defaults:\n  run:\n    shell: "bash -c \'exit 0\' #"\n'
+            "permissions:\n  contents: read\n",
+        ),
+        # A workflow-level env entry reaches every step (npm_config_dry_run
+        # neuters install/typecheck lanes); the root key pin must refuse it.
+        (
+            "permissions:\n  contents: read\n",
+            'env:\n  npm_config_dry_run: "true"\n'
+            "permissions:\n  contents: read\n",
+        ),
+    ],
+)
+def test_workflow_level_defaults_or_env_injection_is_refused(
+    preimage: str, mutation: str
+) -> None:
+    baseline = _WORKFLOW.read_text(encoding="utf-8")
+    assert baseline.count(preimage) == 1
+    with pytest.raises(cip.PolicyError, match="root keys"):
+        fan.validate_parallel_workflow(baseline.replace(preimage, mutation, 1))
+
+
+_EXIT0_DEFAULTS = (
+    "    defaults:\n      run:\n        shell: \"bash -c 'exit 0' #\"\n")
+
+
+@pytest.mark.parametrize(
+    ("header", "injected", "message"),
+    [
+        # defaults.run.shell on the fan-in gate: its run step names no shell,
+        # so the job default would make it exit 0 without reading any shard.
+        ("  test:\n    # Metadata-only edits publish no required test result, even a skipped one.\n", _EXIT0_DEFAULTS, "test gate job keys"),
+        ("  test:\n    # Metadata-only edits publish no required test result, even a skipped one.\n",
+         '    env:\n      CI_PYTEST_SKIP: "1"\n', "test gate job keys"),
+        ("  pytest_shards:\n    name: pytest shard ${{ matrix.index }}\n",
+         _EXIT0_DEFAULTS, "test gate job keys"),
+        ("  pytest_shards:\n    name: pytest shard ${{ matrix.index }}\n",
+         "    services:\n      cache:\n        image: redis\n", "test gate job keys"),
+        # The scope job decides the mode; a job default could force mode=fast.
+        ("  pr_scope:\n    name: PR test scope\n", _EXIT0_DEFAULTS,
+         "PR fast job keys"),
+        ("  pr_scope:\n    name: PR test scope\n",
+         "    container: ubuntu:24.04\n", "PR fast job keys"),
+        ("  pr_fast:\n    name: PR fast checks\n",
+         '    env:\n      npm_config_dry_run: "true"\n', "PR fast job keys"),
+    ],
+)
+def test_job_level_defaults_env_or_runtime_injection_is_refused(
+    header: str, injected: str, message: str
+) -> None:
+    baseline = _WORKFLOW.read_text(encoding="utf-8")
+    assert baseline.count(header) == 1
+    job_line, name_line = header.splitlines(keepends=True)
+    changed = baseline.replace(header, job_line + injected + name_line, 1)
+    with pytest.raises(cip.PolicyError, match=message):
+        fan.validate_parallel_workflow(changed)
+
+
+@pytest.mark.parametrize(
+    ("preimage", "mutation"),
+    [
+        ("name: CI\n", "name: Evil CI\n"),
+        ("  cancel-in-progress: true\n", "  cancel-in-progress: false\n"),
+        ("  group: ci-${{ github.workflow }}-${{ github.ref }}",
+         "  group: ci-${{ github.run_id }}"),
+    ],
+)
+def test_workflow_name_and_concurrency_are_pinned(
+    preimage: str, mutation: str
+) -> None:
+    baseline = _WORKFLOW.read_text(encoding="utf-8")
+    assert baseline.startswith("name: CI\n")
+    assert baseline.count(preimage) == 1
+    with pytest.raises(cip.PolicyError, match="name must stay|metadata edits"):
+        fan.validate_parallel_workflow(baseline.replace(preimage, mutation, 1))
+
+
+def test_yaml_merge_keys_stay_unconstructible() -> None:
+    baseline = _WORKFLOW.read_text(encoding="utf-8")
+    root_permissions = "permissions:\n  contents: read\n"
+    gate_header = "  test:\n    # Metadata-only edits publish no required test result, even a skipped one.\n"
+    assert baseline.count(root_permissions) == 1
+    assert baseline.count(gate_header) == 1
+    changed = baseline.replace(
+        root_permissions, "permissions: &perm\n  contents: read\n", 1
+    ).replace(gate_header, "  test:\n    <<: *perm\n", 1)
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(changed)
+
+
 def test_all_matrix_shards_exactly_cover_canonical_discovery_once() -> None:
     gate = cip.resolve_gate(_ROOT)
     included = gate["included"]
@@ -500,6 +612,32 @@ def test_released_paper_prepare_gate_cannot_be_omitted_or_weakened(mutation):
         )
     else:
         qual_steps.append(dict(guard))
+    with pytest.raises(cip.PolicyError):
+        fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
+
+
+@pytest.mark.parametrize("mutation", ["gate-working-directory", "gate-shell", "gate-id", "step-before-gate", "step-after-gate", "setup-changed", "checkout-removed"])
+def test_fan_in_job_steps_are_pinned_exactly(mutation):
+    # The gate's last command re-runs repository plan code; an extra key or
+    # step could point it at a different (stub) copy of that code.
+    import yaml
+    workflow = yaml.load(_WORKFLOW.read_text(), Loader=cip._WorkflowYAMLLoader)
+    steps = workflow["jobs"]["test"]["steps"]
+    gate = steps[-1]
+    if mutation == "gate-working-directory":
+        gate["working-directory"] = "integrations/studio_direct_mcp"
+    elif mutation == "gate-shell":
+        gate["shell"] = "bash"
+    elif mutation == "gate-id":
+        gate["id"] = "gate"
+    elif mutation == "step-before-gate":
+        steps.insert(len(steps) - 1, {"name": "x", "run": "echo 'import sys' > scripts/ci_pytest.py"})
+    elif mutation == "step-after-gate":
+        steps.append({"name": "x", "run": "true"})
+    elif mutation == "setup-changed":
+        steps[2]["run"] = "python -m pip install PyYAML"
+    else:
+        del steps[0]
     with pytest.raises(cip.PolicyError):
         fan.validate_parallel_workflow(yaml.safe_dump(workflow, sort_keys=False))
 

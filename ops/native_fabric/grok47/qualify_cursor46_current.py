@@ -119,6 +119,12 @@ def sha(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+# A separate closed AUTO prelease fallback adds pool-exclusion selector code.
+# Its exact full-source SHA is admitted here without treating an arbitrary
+# caller-edited picker as a qualified installed/manual Cursor predecessor.
+BROKER_BUSY_PICKER_SHA256 = "c433384faab5862a05dcc4bd84273ee1b5aa9293271166079c2874375e46a057"
+
+
 def apply_reviewed_hunks(raw: bytes) -> bytes:
     """Pure source transform. No historical release or installed file is mutated."""
     text = raw.decode("utf-8")
@@ -140,6 +146,7 @@ def apply_reviewed_hunks(raw: bytes) -> bytes:
     if output == raw:
         raise ValueError("no_candidate_change")
     return output
+
 
 
 def patched(raw: bytes, predecessor: str) -> bytes:
@@ -247,6 +254,35 @@ def main() -> None:
     parser.add_argument("--release-stage", type=Path)
     args = parser.parse_args()
     print(json.dumps(run(args.installed_store, args.release_stage), sort_keys=True))
+
+
+# Additive override (converge 2121): re-bind apply_reviewed_hunks so the
+# broker-busy epoch above takes the same reviewed transform. The upstream
+# definition above stays byte-identical to master; only the epoch admission
+# is layered on, and every other source hashes route to upstream unchanged.
+_APPLY_REVIEWED_HUNKS_UPSTREAM = apply_reviewed_hunks
+
+
+def apply_reviewed_hunks(raw: bytes) -> bytes:
+    """Upstream transform, plus the admitted broker-busy picker epoch."""
+    if sha(raw) != BROKER_BUSY_PICKER_SHA256:
+        return _APPLY_REVIEWED_HUNKS_UPSTREAM(raw)
+    text = raw.decode("utf-8")
+    original_overlay = HISTORICAL_OVERLAY.read_text(encoding="utf-8")
+    old, new = APPLICATION_AFFINITY_BEFORE, APPLICATION_AFFINITY_AFTER
+    if text.count(old) != 1 or text.count(new) != 0:
+        raise ValueError("reviewed_application_selector_hunk_identity_mismatch")
+    text = text.replace(old, new, 1)
+    for old, new in CHANGES[1:]:
+        if (text.count(old) != 1 or text.count(new) != 0
+                or original_overlay.count(old) != 1):
+            raise ValueError("reviewed_selector_hunk_identity_mismatch")
+        text = text.replace(old, new, 1)
+    ast.parse(text, filename="qualified-native-cursor46-pick.py")
+    output = text.encode("utf-8")
+    if output == raw:
+        raise ValueError("no_candidate_change")
+    return output
 
 
 if __name__ == "__main__":

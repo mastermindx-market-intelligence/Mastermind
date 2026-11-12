@@ -178,3 +178,10 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
 # 2026-11-11 WO-20 master merge (feat/mmos-v1-integration-merge): both parents'
 # reviewed tokens map byte-identically onto the merged source; only the whole-source
 # digest and line coordinates are requalified. No new literal site is qualified.
+# Capacity Fabric adds one fixed read before the catalog. The original Company
+# listener, catalog response branch and six qualified literals are preserved.
+# 2026-11-11 WO-20 fourth-drift merge (master 8ee0196d, landed #2351):
+# both parents map every reviewed token to the same merged line,
+# byte-identically (repin4.py); the merged source equals this branch's
+# bytes, so the pins keep this branch's digests and coordinates. No new
+# literal site is qualified.

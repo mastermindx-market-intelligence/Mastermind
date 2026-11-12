@@ -674,6 +674,11 @@ REVIEWED_FILES['control_plane/workspace_control_room_actions.py'] = {
 # reviewed tokens map byte-identically onto the merged source; only the whole-source
 # digest and line coordinates are requalified. No new literal site is qualified.
 REVIEWED_FILES['integrations/mastermind_workspace_app/app.py'] = {'sha256': '5aefe400aa824d768b746b3a4b8575da1f67216faf3cc9ed5e3b30b1977f2a42', 'sites': ((933, 71, 74, 'int', '400'), (944, 71, 74, 'int', '403'), (952, 71, 74, 'int', '400'), (958, 79, 82, 'int', '400'), (967, 71, 74, 'int', '400'), (977, 71, 74, 'int', '403'), (982, 76, 79, 'int', '503'), (988, 71, 74, 'int', '403'))}
+# 2026-11-11 WO-20 fourth-drift merge (master 8ee0196d, landed #2351):
+# both parents map every reviewed token to the same merged line,
+# byte-identically (repin4.py); the merged source equals this branch's
+# bytes, so the pins keep this branch's digests and coordinates. No new
+# literal site is qualified.
 
 # Source-only stateless H1 packet: fixed outer byte length/permission mode and
 # native transport UID. Exact file hash, AST Constants and whole tokens only.
@@ -746,6 +751,11 @@ REVIEWED_FILES['app/mastermind_os/src-tauri/src/terminal_session_core.rs'] = {'s
 # lines above the handler; the same four reviewed denial operands are
 # byte-identical and shift by four more lines.
 REVIEWED_FILES['control_plane/workspace_read_service.py'] = {'sha256': '4666348f25299d01df1d57dd1d06d5e656f1dcf9f469e76480cbc69dbb34d2f1', 'sites': ((723, 93, 96, 'int', '403'), (725, 56, 59, 'int', '403'), (732, 46, 49, 'int', '403'), (733, 56, 59, 'int', '403'))}
+# 2026-11-11 WO-20 fourth-drift merge (master 8ee0196d, landed #2351):
+# both parents map every reviewed token to the same merged line,
+# byte-identically (repin4.py); the merged source equals this branch's
+# bytes, so the pins keep this branch's digests and coordinates. No new
+# literal site is qualified.
 # S14 reviewed private-directory comparison (Root + independent89cb). This
 # single permission check grants no identity or chmod capability. Any path,
 # token-coordinate or complete-postimage drift restores ordinary D8 scrutiny.
@@ -821,6 +831,11 @@ REVIEWED_FILES['app/mastermind_os/src/resources/capacity-fabric.css'] = {'sha256
 # reviewed tokens map byte-identically onto the merged source; only the whole-source
 # digest and line coordinates are requalified. No new literal site is qualified.
 REVIEWED_FILES['app/mastermind_os/src-tauri/src/auth.rs'] = {'sha256': '8b939d76e742a0f7f0190cc330a60644481a66df1285720ef8a16deb32aac2d9', 'sites': ((3971, 68, 71, 'int', '503'), (3976, 69, 72, 'int', '503'), (3980, 67, 70, 'int', '503'))}
+# 2026-11-11 WO-20 fourth-drift merge (master 8ee0196d, landed #2351):
+# both parents map every reviewed token to the same merged line,
+# byte-identically (repin4.py); the merged source equals this branch's
+# bytes, so the pins keep this branch's digests and coordinates. No new
+# literal site is qualified.
 REVIEWED_FILES['app/mastermind_os/src/fixtures/discovery-correction-owner.json'] = {
     # Inert PR number from the actual temporary-Git test owner, not a UID.
     'sha256': '363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f',
@@ -945,6 +960,11 @@ REVIEWED_FILES['ops/executive_os/mcp_auth_audit_directories.py'] = {'sha256': 'e
 # 2026-11-09 merge (MERGE_MASTER_20261109); master independently re-pinned in
 # #2377/#2386. Both sides carried byte-identical pin value and sites here;
 # recomputed against the merged source at this merge — no side was picked.
+# Re-pinned after the accepted manual-pool enumeration (xai, anthropic-oauth,
+# openai-codex) changed only this whole-file identity and moved the same two
+# reason-length tokens by nine lines (48->57, 271->280). Their enclosing
+# validation expressions are unchanged; no new identity site is qualified.
+# Previous source SHA 9b26d8e1aa4d95db804f3e821e82d6c45b5bcdf3482d7823b6d578a9daa8e976.
 REVIEWED_FILES["integrations/hermes_attended_fabric/native.py"] = {
     "sha256": "7b6d14ea2e041f98573627925340f00c4b6e6c3cfde5a16e297aa3a52079a0bf",
     "sites": ((57, 65, 68, "int", "500"), (280, 60, 63, "int", "500")),

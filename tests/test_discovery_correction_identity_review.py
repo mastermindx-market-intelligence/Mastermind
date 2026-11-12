@@ -16,6 +16,11 @@ RECORDS = {
     # reviewed tokens map byte-identically onto the merged source; only the whole-source
     # digest and line coordinates are requalified. No new literal site is qualified.
     "app/mastermind_os/src-tauri/src/auth.rs": ('8b939d76e742a0f7f0190cc330a60644481a66df1285720ef8a16deb32aac2d9', ((3971, 68, 71, 'int', '503'), (3976, 69, 72, 'int', '503'), (3980, 67, 70, 'int', '503'))),
+# 2026-11-11 WO-20 fourth-drift merge (master 8ee0196d, landed #2351):
+# both parents map every reviewed token to the same merged line,
+# byte-identically (repin4.py); the merged source equals this branch's
+# bytes, so the pins keep this branch's digests and coordinates. No new
+# literal site is qualified.
     "app/mastermind_os/src/fixtures/discovery-correction-owner.json": (
         "363eb680b3a7f982e4fedb8496598b7127ed719c2d1c802831e330bc74ab803f",
         ((163, 18, 21, "int", "401"),)),

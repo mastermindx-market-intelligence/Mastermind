@@ -37,6 +37,11 @@ STATUS_SITES = ((6056, 66, 69, 'int'), (6069, 74, 77, 'int'), (6071, 75, 78, 'in
 
 # 2026-11-09 MMOS composition pin move: commit a751d78cc (PR #2316 WO-05)
 # shifts the same three reviewed backend operands to 226/416/511.
+# 2026-11-11 WO-20 fourth-drift merge (master 8ee0196d, landed #2351):
+# both parents map every reviewed token to the same merged line,
+# byte-identically (repin4.py); the merged source equals this branch's
+# bytes, so the pins keep this branch's digests and coordinates. No new
+# literal site is qualified.
 BACKEND_SITES = (
     (226, 73, 76, "int"),
     (416, 78, 81, "int"),
