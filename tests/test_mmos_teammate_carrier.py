@@ -1313,6 +1313,32 @@ def test_a_foreign_marker_child_cannot_freeze_the_task():
     assert evil == []          # the foreign child never entered anything
 
 
+def test_an_unattributed_marker_child_is_refused_not_silently_dropped():
+    # Delta-4 D4-5: a marker-matching child whose row carries NO
+    # createdByAgentId is neither mine nor foreign — it cannot be
+    # attributed. The old gate silently dropped it from the family
+    # (rc 0, "leaving it for a person", no board trace, every wake), and
+    # the same row in the return edge or reuse scan would be dropped or
+    # duplicated the same silent way. The identity gate now has an
+    # explicit cannot-attribute arm: CarrierError, loud, once per wake —
+    # a person decides what the unattributed child is.
+    issues, ask_op, child = blocked_parent_with_done_child()
+    child = dict(child)
+    child.pop("createdByAgentId", None)        # the board served no author
+    pc = FakePaperclip(issues=issues)          # child IS the recorded blocker
+    pc.child_rows["is-1"] = [child]
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    t3 = FakeT3(replies=["SHOULD NOT SEND"])
+    with pytest.raises(wc.CarrierError):
+        run_with_roster(pc, t3, {})
+    assert t3.sends == []                      # nothing entered the thread
+    assert any("did not complete" in (c[2] if c[0] == "comment" else "")
+               for c in pc.calls)              # loud, not silent
+    assert not any(c[0] == "comment" and "12 lines" in c[2]
+                   for c in pc.calls)          # nothing delivered
+    assert pc.issues["is-1"]["status"] == "blocked"
+
+
 def test_a_forged_child_beside_the_carriers_own_never_gates_the_return():
     # Delta-3 N9 rewrite of the M2-era expectation: a marker-matching child
     # SOMEONE ELSE created beside the carrier's own is simply not family —

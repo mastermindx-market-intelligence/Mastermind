@@ -2545,10 +2545,27 @@ def _run_carrier_locked(pc, t3_factory, opts, me, binding, thread_id):
         # every wake. A family child is one THIS carrier created
         # (createdByAgentId, served on list and full rows alike); author
         # identity decides, not text.
-        ask_children = [row for row in untruncated_children(
-                            pc, issue["id"], me.get("id"))
-                        if row.get("createdByAgentId") == me.get("id")
-                        and is_ask_child_of(row, issue)]
+        # Delta-4 D4-5: the identity gate has an explicit cannot-attribute
+        # arm. A marker-matching row with NO createdByAgentId is neither
+        # mine nor foreign, and this gate runs BEFORE the return edge and
+        # the reuse scan of the same wake — dropping the row silently here
+        # was also the silent drop there (a stranded return edge, or a
+        # duplicate ask over a child that might be the family's). Refuse
+        # loudly instead: a person decides what the unattributed child is.
+        ask_children = []
+        for row in untruncated_children(pc, issue["id"], me.get("id")):
+            if not is_ask_child_of(row, issue):
+                continue
+            owner = row.get("createdByAgentId")
+            if not owner:
+                raise CarrierError(
+                    f"ask child {row.get('identifier') or row.get('id')} of "
+                    f"{issue.get('identifier')} carries no createdByAgentId; "
+                    "whose child it is cannot be attributed — refusing "
+                    "loudly instead of dropping or duplicating it")
+            if owner == me.get("id"):
+                ask_children.append(row)
+            # else: another agent's child — not family (N9), never a freeze
         # Attack findings 5 and 9 (attack round): the marker is derivable
         # from public issue text, so a forged or duplicate marker-matching
         # child can hijack the return edge or hold it shut forever. The
