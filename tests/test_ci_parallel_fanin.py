@@ -31,7 +31,7 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_six_full_shards() -> No
     assert shards["strategy"]["matrix"]["index"] == [0, 1, 2, 3, 4, 5]
     assert shards["strategy"]["fail-fast"] is False
     assert shards["strategy"]["max-parallel"] == 6
-    assert shards["runs-on"] == "ubuntu-24.04"
+    assert shards["runs-on"] in fan.PYTEST_SHARDS_RUNNERS
     assert shards["env"] == {"CI_PYTEST_WORKERS": "4"}
     assert type(shards["timeout-minutes"]) is int
     assert 45 <= shards["timeout-minutes"] <= 75
@@ -1067,7 +1067,9 @@ def test_test_executing_jobs_cannot_leave_the_hosted_image(job: str, runner) -> 
     import yaml
 
     workflow = yaml.load(_WORKFLOW.read_text(encoding="utf-8"), Loader=cip._WorkflowYAMLLoader)
-    assert workflow["jobs"][job]["runs-on"] == fan.HOSTED_TEST_RUNNER == "ubuntu-24.04"
+    allowed = fan.PYTEST_SHARDS_RUNNERS if job == "pytest_shards" else (fan.HOSTED_TEST_RUNNER,)
+    assert workflow["jobs"][job]["runs-on"] in allowed
+    assert fan.HOSTED_TEST_RUNNER == "ubuntu-24.04"
     # Scope classification and the fan-in run no suite and keep the shared label.
     assert workflow["jobs"]["pr_scope"]["runs-on"] == "ubuntu-latest"
     assert workflow["jobs"]["test"]["runs-on"] == "ubuntu-latest"
