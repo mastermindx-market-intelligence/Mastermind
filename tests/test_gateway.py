@@ -79,3 +79,28 @@ def test_inline_system_without_a_prefix_keeps_all_text_blocks(send):
     body, = calls
     assert body["system"] == blocks
     assert body["messages"] == [{"role": "user", "content": "request"}]
+
+
+@pytest.mark.parametrize("output_config", [
+    {"effort": "low"},
+    {"format": {"type": "json_schema", "schema": {
+        "type": "object", "properties": {"ok": {"type": "boolean"}},
+        "required": ["ok"], "additionalProperties": False,
+    }}},
+    {"effort": "high", "format": {"type": "json_schema", "schema": {
+        "type": "object", "properties": {"answer": {"type": "string"}},
+        "required": ["answer"], "additionalProperties": False,
+    }}},
+])
+def test_request_output_config_survives_message_option_cleanup(send, output_config):
+    response, calls = send({
+        "messages": [{"role": "user", "content": "request",
+                      "output_config": {"effort": "medium"}}],
+        "output_config": output_config,
+        "unknown_option": True,
+    })
+    assert response.status_code == 200
+    body, = calls
+    assert body["output_config"] == output_config
+    assert body["messages"] == [{"role": "user", "content": "request"}]
+    assert "unknown_option" not in body

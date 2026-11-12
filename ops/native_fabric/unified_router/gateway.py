@@ -463,7 +463,7 @@ def _sanitize_messages(payload: dict) -> None:
 _ALLOWED_TOP_LEVEL = frozenset({
     "model", "messages", "system", "max_tokens", "stop_sequences", "stream",
     "temperature", "top_k", "top_p", "metadata", "tools", "tool_choice",
-    "thinking", "service_tier", "container", "mcp_servers", "betas",
+    "thinking", "output_config", "service_tier", "container", "mcp_servers", "betas",
 })
 
 
@@ -477,6 +477,9 @@ def _sanitize_payload(payload: dict) -> None:
     ``context_management``. Stripping is strictly better than a 400 because the
     upstream would refuse the field anyway; every drop is logged so the drifting
     client stays visible.
+
+    Request-level output_config is valid and retains effort/schema intent;
+    only its misplaced per-message occurrence is removed below.
     """
     extra = [key for key in payload if key not in _ALLOWED_TOP_LEVEL]
     for key in extra:
