@@ -20,6 +20,8 @@ from scripts import ci_pytest
 
 _REQUIRED_SHARDS_IF = "${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode == 'full')) }}"
 _REQUIRED_QUALIFICATION_IF = _REQUIRED_SHARDS_IF
+_REQUIRED_NATIVE_IF = _REQUIRED_SHARDS_IF
+_NATIVE_BODY_SHA256 = "45a932b84fd3ec7b47bb50d8aceabc8bd3e56c0f88c90533549b8ce0cfc3863e"
 _REQUIRED_PR_FAST_IF = "${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && needs.pr_scope.result == 'success' && needs.pr_scope.outputs.mode != 'full' }}"
 _REQUIRED_PIN_GUARDS_IF = "${{ !cancelled() }}"
 
@@ -243,6 +245,7 @@ _PR_FAST_JOB_KEYS = frozenset(
 _PYTEST_SHARDS_JOB_KEYS = frozenset(
     {"name", "needs", "if", "permissions", "runs-on", "timeout-minutes",
      "strategy", "env", "steps"})
+_NATIVE_JOB_KEYS = frozenset({"name", "needs", "if", "permissions", "runs-on", "env", "timeout-minutes", "steps"})
 _TEST_GATE_JOB_KEYS = frozenset(
     {"name", "needs", "if", "runs-on", "timeout-minutes", "steps"})
 _PIN_GUARDS_JOB_KEYS = frozenset(
@@ -459,13 +462,13 @@ _REQUIRED_GATE_RUN = ('set -euo pipefail\n'
  '  fi\n'
  '  case "$PR_SCOPE_MODE" in\n'
  '    full)\n'
- '      if [ "$SHARDS_STATUS" != success ] || [ "$QUAL_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then\n'
+ '      if [ "$SHARDS_STATUS" != success ] || [ "$QUAL_STATUS" != success ] || [ "$NATIVE_STATUS" != success ] || [ "$PR_FAST_STATUS" != skipped ]; then\n'
  '        echo "critical/unqualified source must pass all six pytest shards"\n'
  '        exit 1\n'
  '      fi\n'
  '      ;;\n'
  '    fast|smoke)\n'
- '      if [ "$PR_FAST_STATUS" != success ] || [ "$SHARDS_STATUS" != skipped ] || [ "$QUAL_STATUS" != skipped ]; then\n'
+ '      if [ "$PR_FAST_STATUS" != success ] || [ "$SHARDS_STATUS" != skipped ] || [ "$QUAL_STATUS" != skipped ] || [ "$NATIVE_STATUS" != skipped ]; then\n'
  '        echo "eligible source must pass its exact fast/smoke check"\n'
  '        exit 1\n'
  '      fi\n'
@@ -482,7 +485,7 @@ _REQUIRED_GATE_RUN = ('set -euo pipefail\n'
  '  # proof still require complete coverage.\n'
  '  if [ "$SHARDS_STATUS" != success ] || [ "$QUAL_STATUS" != success ] ||\n'
  '     [ "$PR_FAST_STATUS" != skipped ] || [ "$PR_SCOPE_STATUS" != skipped ] ||\n'
- '     [ "$GUARDS_STATUS" != success ]; then\n'
+ '     [ "$GUARDS_STATUS" != success ] || [ "$NATIVE_STATUS" != success ]; then\n'
  '    echo "integration/release CI must pass the full matrix"\n'
  '    exit 1\n'
  '  fi\n'
@@ -491,6 +494,61 @@ _REQUIRED_GATE_RUN = ('set -euo pipefail\n'
  '# Source-scoped checks never change canonical discovery.\n'
  'python scripts/ci_pytest.py --plan-only --jobs 6\n')
 
+
+
+
+def _validate_native_admission_lane(jobs: dict, shard_steps: list[dict]) -> None:
+    """Require the unchanged native admission test on its own full-mode job."""
+    job = jobs["native_admission"]
+    if not isinstance(job, dict) or set(job) != _NATIVE_JOB_KEYS:
+        raise ci_pytest.PolicyError("native admission job keys drifted")
+    if (job.get("name") != "Native application admission gates"
+            or job.get("needs") != ["pr_scope"]
+            or job.get("if") != _REQUIRED_NATIVE_IF
+            or job.get("permissions") != {"contents": "read", "actions": "read"}
+            or job.get("runs-on") != HOSTED_TEST_RUNNER
+            or job.get("env") != {"CI_PYTEST_WORKERS": "4"}
+            or type(job.get("timeout-minutes")) is not int
+            or not 25 <= job["timeout-minutes"] <= 45):
+        raise ci_pytest.PolicyError("native admission must be mandatory on a hosted full-mode job")
+    steps = job.get("steps")
+    if (not isinstance(steps, list) or len(steps) != 12
+            or any(not isinstance(s, dict) for s in steps)):
+        raise ci_pytest.PolicyError("native admission source, execution or diagnostics missing")
+    if steps[:8] != shard_steps[:8]:
+        raise ci_pytest.PolicyError("native admission must retain exact shard source/toolchain")
+    fast = [s for s in shard_steps if isinstance(s, dict) and
+            s.get("name") == "Fast source-bound release preflight"]
+    diag = [s for s in shard_steps if isinstance(s, dict) and
+            s.get("name") == "Prepare fixed test diagnostics"]
+    if len(fast) != 1 or len(diag) != 1 or steps[8] != fast[0] or steps[9] != diag[0]:
+        raise ci_pytest.PolicyError("native admission must retain preflight and diagnostics")
+    native = steps[10]
+    if (native.get("name") != "Verify native application admission and dispatch custody"
+            or set(native) != {"name", "run"}
+            or not isinstance(native.get("run"), str)
+            or hashlib.sha256(native["run"].encode()).hexdigest() != _NATIVE_BODY_SHA256):
+        raise ci_pytest.PolicyError("native admission exact command body drifted")
+    upload = steps[11]
+    if (set(upload) != {"name", "if", "uses", "with"}
+            or upload.get("name") != "Upload native admission diagnostics"
+            or upload.get("if") != "always()"
+            or upload.get("uses") != "actions/upload-artifact@v4"
+            or upload.get("with") != {
+                "name": "native-admission-fixed-diagnostics",
+                "path": ("${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-unit/ci-fixed-diagnostics.json\n"
+                         "${{ env.MMX_CI_FIXED_DIAGNOSTICS_DIR }}/native-admission-rollout/ci-fixed-diagnostics.json\n"),
+                "if-no-files-found": "warn",
+                "retention-days": 3,
+                "compression-level": 0,
+            }):
+        raise ci_pytest.PolicyError("native admission diagnostic archive drifted")
+    if any(s.get("continue-on-error") is not None or
+           (i != 11 and s.get("if") is not None) for i, s in enumerate(steps)):
+        raise ci_pytest.PolicyError("native admission cannot skip or suppress failures")
+    if any(isinstance(s, dict) and s.get("name") ==
+           "Verify native application admission and dispatch custody" for s in shard_steps):
+        raise ci_pytest.PolicyError("native admission must not serialize shard five")
 
 
 def validate_parallel_workflow(text: str) -> None:
@@ -512,7 +570,7 @@ def validate_parallel_workflow(text: str) -> None:
     if payload.get("concurrency") != _REQUIRED_CONCURRENCY:
         raise ci_pytest.PolicyError("metadata edits must not cancel source/base qualification")
     jobs = payload.get("jobs")
-    if not isinstance(jobs, dict) or set(jobs) != {"pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards", "test"}:
+    if not isinstance(jobs, dict) or set(jobs) != {"pr_scope", "pr_fast", "pin_guards", "qualification", "native_admission", "pytest_shards", "test"}:
         raise ci_pytest.PolicyError("parallel CI requires one trusted scope, PR fast check, pin guards, qualification gates, shards, and test gate")
     _validate_pr_fast_lane(jobs)
     _validate_pin_guards_lane(jobs)
@@ -556,7 +614,7 @@ def validate_parallel_workflow(text: str) -> None:
         )
     if (
         gate.get("name") != _REQUIRED_GATE_NAME
-        or gate.get("needs") != ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards"]
+        or gate.get("needs") != ["pr_scope", "pr_fast", "pin_guards", "qualification", "native_admission", "pytest_shards"]
         or gate.get("if") != _REQUIRED_GATE_IF
         or gate.get("continue-on-error") is not None
     ):
@@ -588,6 +646,7 @@ def validate_parallel_workflow(text: str) -> None:
     gate_steps = gate.get("steps", [])
     if not isinstance(shard_steps, list) or not isinstance(gate_steps, list):
         raise ci_pytest.PolicyError("parallel CI steps are missing")
+    _validate_native_admission_lane(jobs, shard_steps)
     # GitHub step expressions address IDs rather than displayed names. A later
     # duplicate, including one with different casing, could shadow the pinned
     # previous_ci producer and falsely report reuse=true to skip pytest. Require
@@ -596,7 +655,7 @@ def validate_parallel_workflow(text: str) -> None:
     seen_step_ids: set[str] = set()
     for step in (*jobs["pr_scope"]["steps"], *jobs["pr_fast"]["steps"],
                  *jobs["pin_guards"]["steps"], *jobs["qualification"]["steps"],
-                 *shard_steps, *gate_steps):
+                 *jobs["native_admission"]["steps"], *shard_steps, *gate_steps):
         if not isinstance(step, dict):
             raise ci_pytest.PolicyError("parallel CI steps must be mappings")
         if "id" not in step:
@@ -677,13 +736,6 @@ def validate_parallel_workflow(text: str) -> None:
         or runner.get("if") != "${{ steps.previous_ci.outputs.reuse != 'true' }}"
     ):
         raise ci_pytest.PolicyError("prior merged CI proof must fail closed before every shard")
-    native = [step for step in shard_steps
-              if step.get("name") == "Verify native application admission and dispatch custody"]
-    if (len(native) != 1 or native[0].get("if") != "matrix.index == 5"
-            or shard_steps.index(native[0]) >= shard_steps.index(proof)):
-        raise ci_pytest.PolicyError(
-            "native admission gate must run once on assigned shard five before reuse proof"
-        )
     # CI Lightning F3: the five non-pytest qualification gates moved out of
     # shard zero into the parallel qualification job (their exact trusted
     # bodies are pinned by _EXPECTED_QUALIFICATION_STEPS). They must not
@@ -738,6 +790,7 @@ def validate_parallel_workflow(text: str) -> None:
             "PR_FAST_STATUS": "${{ needs.pr_fast.result }}",
             "GUARDS_STATUS": "${{ needs.pin_guards.result }}",
             "QUAL_STATUS": "${{ needs.qualification.result }}",
+            "NATIVE_STATUS": "${{ needs.native_admission.result }}",
             "SHARDS_STATUS": "${{ needs.pytest_shards.result }}",
         }
         or code != _REQUIRED_GATE_RUN

@@ -30,12 +30,12 @@ def test_proof_inventory_matches_the_actual_workflow(event):
     jobs = yaml.safe_load(workflow.read_text())["jobs"]
     # Expand only the current, explicitly qualified matrix; no generic workflow
     # interpreter or permissive support for future qualification lanes.
-    assert set(jobs) == {"pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards", "test"}
+    assert set(jobs) == {"pr_scope", "pr_fast", "pin_guards", "qualification", "native_admission", "pytest_shards", "test"}
     matrix = jobs["pytest_shards"]["strategy"]["matrix"]
     assert matrix == {"index": [0, 1, 2, 3, 4, 5]}
     assert jobs["pytest_shards"]["name"] == "pytest shard ${{ matrix.index }}"
     names = [f"pytest shard {index}" for index in matrix["index"]]
-    for key in ("pr_scope", "pr_fast", "pin_guards", "qualification", "test"):
+    for key in ("pr_scope", "pr_fast", "pin_guards", "qualification", "native_admission", "test"):
         assert "strategy" not in jobs[key]
         name = jobs[key]["name"]
         if key == "test":
@@ -99,14 +99,14 @@ def auxiliary(data, name="PR fast checks"):
     return next(job for job in data["jobs"]["jobs"] if job["name"] == name)
 
 
-def test_captured_full_eleven_job_run_qualifies():
+def test_projected_full_twelve_job_run_qualifies():
     data = subject()
     result, reads = evaluate(data)
     assert result == 42548210214
     assert len(reads) == 5
 
 
-@pytest.mark.parametrize("name", [f"pytest shard {i}" for i in range(6)] + ["test", "PR test scope", "Pin and identity guards", "Non-pytest qualification gates", "PR fast checks"])
+@pytest.mark.parametrize("name", [f"pytest shard {i}" for i in range(6)] + ["test", "PR test scope", "Pin and identity guards", "Non-pytest qualification gates", "Native application admission gates", "PR fast checks"])
 def test_every_job_is_required_even_when_total_count_matches_the_missing_inventory(name):
     data = subject()
     data["jobs"]["jobs"] = [job for job in data["jobs"]["jobs"] if job["name"] != name]
@@ -261,3 +261,15 @@ def test_metadata_edit_name_cannot_qualify_a_prior_source_run():
     data = subject()
     auxiliary(data, "test")["name"] = name
     assert evaluate(data)[0] is None
+
+
+def test_native_admission_step_missing_or_skipped_never_reuses_merge_group():
+    for verdict in ('missing', 'skipped', 'failure'):
+        data = subject()
+        native = auxiliary(data, 'Native application admission gates')
+        gate = next(s for s in native['steps'] if s['name'] == 'Verify native application admission and dispatch custody')
+        if verdict == 'missing':
+            native['steps'].remove(gate)
+        else:
+            gate['conclusion'] = verdict
+        assert evaluate(data)[0] is None

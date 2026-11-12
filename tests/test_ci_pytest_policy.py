@@ -1098,14 +1098,14 @@ def test_hosted_gate_stays_a_single_required_check_job():
         (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
         Loader=cip._WorkflowYAMLLoader,
     )
-    assert list(workflow["jobs"]) == ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards", "test"]
+    assert list(workflow["jobs"]) == ["pr_scope", "pr_fast", "pin_guards", "qualification", "native_admission", "pytest_shards", "test"]
     job = workflow["jobs"]["test"]
     assert "strategy" not in job
     from scripts import ci_parallel_shard as fan
     assert job["name"] == fan._REQUIRED_GATE_NAME
     assert job["runs-on"] == "ubuntu-latest"
     assert job["if"] == fan._REQUIRED_GATE_IF
-    assert job["needs"] == ["pr_scope", "pr_fast", "pin_guards", "qualification", "pytest_shards"]
+    assert job["needs"] == ["pr_scope", "pr_fast", "pin_guards", "qualification", "native_admission", "pytest_shards"]
     gate_steps = [
         step for step in job["steps"]
         if step.get("name") == "Run repository test gate"
@@ -1116,6 +1116,7 @@ def test_hosted_gate_stays_a_single_required_check_job():
     assert gate["env"]["GUARDS_STATUS"] == "${{ needs.pin_guards.result }}"
     assert '[ "$GUARDS_STATUS" != success ]' in gate["run"]
     assert gate["env"]["QUAL_STATUS"] == "${{ needs.qualification.result }}"
+    assert gate["env"]["NATIVE_STATUS"] == "${{ needs.native_admission.result }}"
     assert '[ "$QUAL_STATUS" != success ]' in gate["run"]
     assert '[ "$QUAL_STATUS" != skipped ]' in gate["run"]
     assert 'if [ "$EVENT_TYPE" = "pull_request" ] || [ "$EVENT_TYPE" = "merge_group" ]; then' in gate["run"]
