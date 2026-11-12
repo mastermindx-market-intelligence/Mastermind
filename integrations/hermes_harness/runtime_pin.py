@@ -61,6 +61,16 @@ def _refuse_live_folder(mmx_root, target):
                            + str(live) + " that running mmx-browser servers have loaded; a live pin folder is never written")
 
 
+def _refuse_delivered(mmx_root, commit, what):
+    """An existing delivery is permanent (ruling 19): refuse, never overwrite
+    — a delivered folder may be the one running servers loaded."""
+    target = Path(mmx_root).expanduser() / "runtimes" / commit
+    pin = target / "runtime.json"
+    if pin.exists() or pin.is_symlink() or (target / "server.js").exists():
+        raise RuntimeError(what + ": " + str(pin) + " is already delivered; a delivery mark is "
+                           "permanent (ruling 19) and a delivered pin folder may be live — it is never overwritten")
+
+
 def deliver(mmx_root, commit, runtime_document, server_bytes):
     """Write ``runtimes/<commit>/{runtime.json,server.js}`` exactly once.
 
@@ -68,15 +78,12 @@ def deliver(mmx_root, commit, runtime_document, server_bytes):
     overwritten — a delivered folder may be the one running servers loaded.
     """
     _check_commit(commit)
+    _refuse_delivered(mmx_root, commit, "pin writer refused")
     target = Path(mmx_root).expanduser() / "runtimes" / commit
-    pin = target / "runtime.json"
-    if pin.exists() or pin.is_symlink() or (target / "server.js").exists():
-        raise RuntimeError("pin writer refused: " + str(pin) + " is already delivered; a delivery mark is "
-                           "permanent (ruling 19) and a delivered pin folder may be live — it is never overwritten")
     _refuse_live_folder(mmx_root, target)
     content = runtime_document if isinstance(runtime_document, bytes) else json_bytes(runtime_document)
     write_owned(target / "server.js", server_bytes, 0o600)
-    write_owned(pin, content, 0o600)
+    write_owned(target / "runtime.json", content, 0o600)
     return target
 
 
@@ -160,6 +167,14 @@ def migrate(mmx_root, old_commit, new_commit, build_manifest, new_source_root=No
     if (not isinstance(manifest, dict) or manifest.get("schema") != BUILD_SCHEMA
             or manifest.get("source_commit") != new_commit or not isinstance(manifest.get("files"), dict)):
         raise RuntimeError("build manifest does not name the new commit " + new_commit + ": " + str(build_manifest))
+    # Plan 48 (BR-MICRO2 item 1): an apply that can refuse does so before its
+    # first write — both versioned targets are fully checked (not delivered,
+    # not the live folder; the manifest was validated above) before
+    # runtimes/<OLD> is created, so a refusal leaves the whole tree unchanged
+    # instead of half-migrated.
+    for commit in (old_commit, new_commit):
+        _refuse_delivered(mmx_root, commit, "pin migration refused")
+        _refuse_live_folder(mmx_root, mmx / "runtimes" / commit)
     server_bytes = read_owned(flat_server)
     # runtimes/<OLD>: the verbatim live pin — the exact rollback target.
     deliver(mmx_root, old_commit, document, server_bytes)
