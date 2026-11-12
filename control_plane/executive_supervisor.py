@@ -3055,6 +3055,35 @@ class ExecutiveSupervisor:
             raise SupervisorError("direct native claim returned an invalid fresh lease")
         return await self._start_claimed_job(job_id, outcome, _direct_native_access=access)
 
+    def release_claim_before_start(
+        self, job_id: str, lease: AttemptLease, *, reason: str,
+    ) -> None:
+        """WO-15 pre-start branch: return an UNSTARTED claim, never launch.
+
+        Called when a HostExecutor's local pressure recheck refuses a claim
+        after ``claim_job`` succeeded but before any process existed.  The
+        ORIGINAL claim is released exactly once through the WO-14 authority
+        (``AttemptRegistry.release_unstarted_claim``): the Job returns to
+        QUEUED, the host slot / root concurrency / shared quota commitment
+        settles, and the next claim gets a fresh fence generation.  Orchestration
+        retries stay with the COO retry owner (typed refusal propagates).
+        Lease expiry NEVER reaches this branch -- expiry is not proof of
+        stop, only presence verification is.
+        """
+
+        lease = lease  # AttemptLease, already validated by claim_job
+        if lease.attempt.job_id != job_id:
+            raise SupervisorError("release lease does not belong to the claimed Job")
+        try:
+            self.runtime.attempts.release_unstarted_claim(
+                lease.attempt.attempt_id,
+                fence_generation=lease.attempt.fence_generation,
+                lease_token=lease.lease_token,
+                reason=reason,
+            )
+        except StateConflict as exc:
+            raise SupervisorError(f"pre-start release refused: {exc}") from exc
+
     async def start_cycle_job(
         self, job_id: str, *, command_id: str
     ) -> ActiveRun | OrchestrationDispatchOutcome:
