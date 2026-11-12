@@ -165,39 +165,70 @@ class PreparedUpgrade(unittest.TestCase):
             write_owned(release/"BUILD.json",json_bytes(manifest));releases.append((release,manifest))
         return base,chrome,enrollment,releases
 
-    def test_known_prepared_assets_upgrade_loaded_and_unloaded(self):
-        for loaded in (False,True):
-            with self.subTest(loaded=loaded),tempfile.TemporaryDirectory(prefix="mb-") as directory:
-                root=Path(directory);base,chrome,enrollment,releases=self.fixture(root)
-                with patch.object(Path,"home",return_value=root):
-                    inventory,receipts=install_profiles(*releases[0],base,Path(sys.executable),enrollment)
-                    prepared=Path(receipts[0]["extension_path"]);asset=prepared/"census.css";old=asset.read_bytes()
-                    if loaded:
-                        write_owned(chrome/"Default/Secure Preferences",json_bytes({"extensions":{"settings":{
-                            routes.EXTENSION_ID:{"path":str(prepared),"disable_reasons":[]}}}}))
-                    # An unrelated enrolled row must survive the update.
-                    document=json.loads(inventory.read_bytes());other=dict(document["profiles"][0],browser_id="a"*64,alias="unrelated")
-                    document["profiles"].append(other);write_owned(inventory,json_bytes(document),expected=digest(inventory.read_bytes()))
-                    _,updated=install_profiles(*releases[1],base,Path(sys.executable),enrollment,prior_source="1"*40)
-                    self.assertNotEqual(asset.read_bytes(),old)
-                    self.assertEqual(asset.with_name(asset.name+".previous."+digest(old)[:16]).read_bytes(),old)
-                    self.assertEqual(updated[0]["activation"],"CHROME_RELOAD_REQUIRED" if loaded else "CHROME_LOAD_REQUIRED")
-                    self.assertIn(other,json.loads(inventory.read_bytes())["profiles"])
-                    before=inventory.read_bytes()
-                    install_profiles(*releases[1],base,Path(sys.executable),enrollment,prior_source="1"*40)
-                    self.assertEqual(inventory.read_bytes(),before)
+    def test_known_prepared_assets_upgrade_an_unloaded_staging_root_in_place(self):
+        # The staging folder is not loaded by any Chrome, so re-installing into
+        # the same staging root updates the prepared assets in place (CAS with
+        # a .previous backup) — an unrelated enrolled row survives, and a rerun
+        # is a byte-identical no-op.
+        with tempfile.TemporaryDirectory(prefix="mb-") as directory:
+            root=Path(directory);base,chrome,enrollment,releases=self.fixture(root)
+            staging=root/"staging"
+            with patch.object(Path,"home",return_value=root):
+                inventory,receipts=install_profiles(*releases[0],base,Path(sys.executable),enrollment,staging_root=staging)
+                prepared=Path(receipts[0]["extension_path"]);asset=prepared/"census.css";old=asset.read_bytes()
+                # An unrelated enrolled row must survive the update.
+                document=json.loads(inventory.read_bytes());other=dict(document["profiles"][0],browser_id="a"*64,alias="unrelated")
+                document["profiles"].append(other);write_owned(inventory,json_bytes(document),expected=digest(inventory.read_bytes()))
+                _,updated=install_profiles(*releases[1],base,Path(sys.executable),enrollment,prior_source="1"*40,staging_root=staging)
+                self.assertNotEqual(asset.read_bytes(),old)
+                self.assertEqual(asset.with_name(asset.name+".previous."+digest(old)[:16]).read_bytes(),old)
+                self.assertEqual(updated[0]["activation"],"CHROME_LOAD_REQUIRED")
+                self.assertIn(other,json.loads(inventory.read_bytes())["profiles"])
+                before=inventory.read_bytes()
+                install_profiles(*releases[1],base,Path(sys.executable),enrollment,prior_source="1"*40,staging_root=staging)
+                self.assertEqual(inventory.read_bytes(),before)
+
+    def test_staging_root_a_chrome_has_loaded_refuses_the_prepared_rewrite(self):
+        # BR-COMPATFIX (MED-1): once Chrome has loaded from the staged folder,
+        # re-installing into the same staging root is refused by name instead
+        # of rewriting loaded bytes under a running service worker. The move
+        # to new bytes is the operator's reload from a fresh staging root.
+        with tempfile.TemporaryDirectory(prefix="mb-") as directory:
+            root=Path(directory);base,chrome,enrollment,releases=self.fixture(root)
+            staging=root/"staging"
+            with patch.object(Path,"home",return_value=root):
+                inventory,receipts=install_profiles(*releases[0],base,Path(sys.executable),enrollment,staging_root=staging)
+                prepared=Path(receipts[0]["extension_path"])
+                write_owned(chrome/"Default/Secure Preferences",json_bytes({"extensions":{"settings":{
+                    routes.EXTENSION_ID:{"path":str(prepared),"disable_reasons":[]}}}}))
+                asset=prepared/"census.css";old=asset.read_bytes()
+                inventory_before=inventory.read_bytes()
+                with self.assertRaises(RuntimeError) as caught:
+                    install_profiles(*releases[1],base,Path(sys.executable),enrollment,prior_source="1"*40,staging_root=staging)
+                self.assertIn(str(prepared),str(caught.exception))
+                self.assertEqual(asset.read_bytes(),old)
+                self.assertEqual(inventory.read_bytes(),inventory_before)
+                self.assertFalse((releases[1][0]/"chrome").exists())
+                # The upgrade path is a fresh per-release staging root: the
+                # loaded folder keeps its bytes and the receipt asks for a reload.
+                fresh=root/"staging-next"
+                _,updated=install_profiles(*releases[1],base,Path(sys.executable),enrollment,prior_source="1"*40,staging_root=fresh)
+                self.assertEqual(asset.read_bytes(),old)
+                self.assertEqual(updated[0]["activation"],"CHROME_RELOAD_REQUIRED")
+                self.assertEqual(Path(updated[0]["extension_path"]),fresh/"Chrome-mastermindx")
 
     def test_edited_source_or_generated_identity_refuses_before_writes(self):
         for name in ("census.css","instance_config.js"):
             with self.subTest(name=name),tempfile.TemporaryDirectory(prefix="mb-") as directory:
                 root=Path(directory);base,chrome,enrollment,releases=self.fixture(root)
+                staging=root/"staging"
                 with patch.object(Path,"home",return_value=root):
-                    inventory,receipts=install_profiles(*releases[0],base,Path(sys.executable),enrollment)
+                    inventory,receipts=install_profiles(*releases[0],base,Path(sys.executable),enrollment,staging_root=staging)
                     prepared=Path(receipts[0]["extension_path"]);asset=prepared/name;asset.write_bytes(b"local writer")
                     native_path=Path(receipts[0]["native_host_manifest"])
                     before=(inventory.read_bytes(),native_path.read_bytes())
                     with self.assertRaisesRegex(RuntimeError,"prepared extension changed"):
-                        install_profiles(*releases[1],base,Path(sys.executable),enrollment,prior_source="1"*40)
+                        install_profiles(*releases[1],base,Path(sys.executable),enrollment,prior_source="1"*40,staging_root=staging)
                     self.assertEqual(asset.read_bytes(),b"local writer")
                     self.assertEqual((inventory.read_bytes(),native_path.read_bytes()),before)
                     self.assertFalse((releases[1][0]/"chrome").exists())
