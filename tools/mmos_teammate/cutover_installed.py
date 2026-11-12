@@ -12,6 +12,17 @@ The agent's earlier run command is saved first and `rollback` puts it back.
                                   install this checkout's carrier file for an
                                   agent that is already moved (the file is
                                   shared, so this updates every moved agent)
+    cutover_installed.py rebind-thread <spec.json> [--dry-run]
+                                  give a moved teammate whose conversation
+                  sits on ANOTHER provider instance a fresh primary
+                  conversation on its OWN instance (ruling 20): start the
+                  new thread, verify its provider by read-back, then write
+                  the binding through the same writer the move used. The
+                  old conversation is never sent into, archived or renamed.
+    cutover_installed.py rebind-rollback <spec.json>
+                                  put the last rebind's old thread id back
+                                  (the carrier then refuses wakes again —
+                                  the honest pre-rebind state)
 
 One agent per spec, on purpose: agents are moved one at a time. Nothing here
 creates an agent, a company, an issue or a wake. The principal runs this; a
@@ -21,12 +32,14 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from setup_teammate import (Http, die, expand, log, write_binding,  # noqa: E402
-                            blockers, open_assigned_issues, rows_of)
+                            blockers, open_assigned_issues, rows_of,
+                            t3_output_json)
 
 OPEN_STATES = ("todo", "in_progress", "in_review", "blocked")
 PREIMAGE_KEYS = ("adapterType", "adapterConfig", "runtimeConfig", "metadata")
@@ -479,16 +492,326 @@ def cmd_refresh_carrier(spec):
     return 0
 
 
+# --- ruling 20: a teammate is its own provider instance, not its -----------
+# --- conversation. When a conversation has been moved to another provider ---
+# --- instance, the carrier rightly refuses every wake. The repair is a     ---
+# --- fresh primary conversation ON the teammate's instance — never a write ---
+# --- to the T3 state database, never a send into the old conversation.     ---
+
+# A board status of `error` is the provider-mismatch fault a rebind repairs
+# (ruling 20): reported, never a refusal. Every other non-idle state still
+# refuses — a rebind is not a general-purpose unstick.
+REBIND_OK_STATES = ("idle", "error")
+
+
+def t3_installed(spec, args):
+    """Run the t3 CLI against the team server the installed spec names.
+
+    The carrier's own law (T3Thread._run): the run token and run identity
+    never ride into the CLI's environment (nothing PAPERCLIP_* passes), and a
+    server that is not on the CLI's default port must be named or the CLI
+    dials the default instead."""
+    t3 = spec["t3"]
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith("PAPERCLIP_")}
+    env["T3CODE_HOME"] = expand(t3["home"])
+    env["T3CODE_PORT"] = str(int(t3["port"]))
+    return subprocess.run([expand(t3["t3_bin"]), *args],  # noqa: S603
+                          capture_output=True, text=True,
+                          cwd=expand(t3.get("cwd") or "/tmp"), env=env,
+                          timeout=900)
+
+
+def thread_facts(spec, thread_id, messages=5):
+    """(thread dict, messages) of one conversation, READ ONLY.
+
+    An answer this build cannot shape-read is UNKNOWN, never an empty thread
+    (the carrier's messages() law): a rebind decided on a misread could point
+    the binding at a thread that does not exist."""
+    proc = t3_installed(spec, ["thread", "show", thread_id, "--json",
+                               "--messages", str(messages)])
+    if proc.returncode != 0:
+        die(f"t3 thread show failed for {thread_id} (exit {proc.returncode}):"
+            f" {proc.stderr.strip()[:300]}")
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        die(f"t3 thread show for {thread_id} returned a non-JSON answer; the "
+            "thread is unknown this run — not rebinding on a misread")
+    if (not isinstance(data, dict)
+            or not isinstance(data.get("thread"), dict)
+            or not isinstance(data.get("messages"), list)
+            or not all(isinstance(item, dict) for item in data["messages"])):
+        die(f"t3 thread show for {thread_id} returned a shape this build does "
+            "not read; the thread is unknown this run — not rebinding on a "
+            "misread")
+    return data["thread"], data["messages"]
+
+
+def instance_of(thread, messages):
+    """The provider instance a conversation actually runs on (ruling 20).
+    The carrier's own read: the first message that names an instance, then
+    the thread object; never what a caller asked for."""
+    for row in messages:
+        got = row.get("providerInstanceId") or row.get("provider_instance_id")
+        if got:
+            return got
+    return (thread.get("providerInstanceId")
+            or thread.get("provider_instance_id"))
+
+
+def read_result_file(spec):
+    """The move's record. Missing or unreadable is a REFUSAL, not "no record"
+    (Panel-2 M12 law: a corrupt record must not silently disable a guard)."""
+    path = os.path.join(expand(spec["agent_dir"]), "cutover-result.json")
+    if not os.path.exists(path):
+        die(f"no move record at {path}; rebind-thread is for a teammate this "
+            "tool already moved — run `apply` first")
+    try:
+        with open(path) as fh:
+            doc = json.load(fh)
+    except ValueError:
+        die(f"{path} exists but is not readable JSON; the rebind cannot be "
+            "recorded — inspect the file first")
+    if not isinstance(doc, dict):
+        die(f"{path} is not a JSON object; the rebind cannot be recorded — "
+            "inspect the file first")
+    return path, doc
+
+
+def rebind_fence(spec, agent, open_issues, live):
+    """Reasons a rebind must not run. NOT the move's blockers list: `error`
+    is the fault a rebind repairs (see REBIND_OK_STATES), and a live run in
+    the WHOLE company refuses (ruling 20's ordered fence), not only this
+    agent's."""
+    out = []
+    if agent.get("name") != spec.get("agent_name"):
+        out.append(f"agent name is {agent.get('name')!r}, spec says "
+                   f"{spec.get('agent_name')!r}")
+    if agent.get("companyId") != spec["company_id"]:
+        out.append("agent belongs to a different company")
+    if agent.get("status") not in REBIND_OK_STATES:
+        out.append(f"agent status is {agent.get('status')!r}; rebind-thread "
+                   "runs on idle or error")
+    heartbeat = (agent.get("runtimeConfig") or {}).get("heartbeat") or {}
+    if heartbeat.get("enabled"):
+        out.append("the agent's timer heartbeat is still on (fence it first)")
+    if open_issues:
+        out.append(f"{len(open_issues)} open issue(s) assigned: "
+                   + ", ".join(str(i.get("identifier"))
+                               for i in open_issues[:5]))
+    if live:
+        out.append(f"{len(live)} live run(s) in this company; wait for them "
+                   "to end")
+    if not is_ours(agent, carrier_paths(spec)[0]):
+        out.append("the agent does not run this checkout's carrier; use "
+                   "`apply` to move it")
+    return out
+
+
+def binding_for_rebind(spec, agent, doc):
+    """The live binding a rebind replaces the thread id of. The LIVE binding
+    is the truth (the R13 law); the spec must agree with it except where an
+    earlier recorded rebind moved it on — a rotate or a foreign write refuses."""
+    live = ((agent.get("metadata") or {}).get("teammate") or {}).get("t3")
+    if not isinstance(live, dict) or not live.get("primaryThreadId"):
+        die("the agent carries no teammate.t3 binding; its state is unclear — "
+            "inspect the agent before rebinding")
+    for key in ("providerInstanceId", "projectId"):
+        if not live.get(key):
+            die(f"the live binding has no {key}; its state is unclear — "
+                "inspect the agent before rebinding")
+    if not isinstance(spec.get("binding"), dict):
+        die("spec has no binding object; the provider instance and project "
+            "must come from the spec")
+    live_core, spec_core = binding_core(live), binding_core(spec["binding"])
+    if live_core != spec_core:
+        known = [r.get("newThreadId") for r in (doc.get("rebinds") or [])
+                 if isinstance(r, dict) and not r.get("rolledBackAt")]
+        if live_core.get("primaryThreadId") not in known:
+            die(f"the live binding's thread is "
+                f"{live_core.get('primaryThreadId')!r}, the spec says "
+                f"{spec_core.get('primaryThreadId')!r}, and no recorded "
+                "rebind explains the difference (rotated?); refresh the "
+                "spec's binding before rebinding")
+    return live
+
+
+def cmd_rebind_thread(spec, dry_run=False):
+    """Give a moved teammate a fresh primary conversation on its OWN provider
+    instance (ruling 20). Refuses with a live company run or open work; a
+    board status of `error` is reported, not refused. The old conversation is
+    only ever READ (once, before anything changes, so the record holds its
+    state at rebind time) — never sent into, archived or renamed. No adapter
+    PATCH rides this command: the sole board write is the binding, through
+    the SAME writer the move used."""
+    http = Http(spec["paperclip_base"])
+    agent, open_issues, live = read_state(http, spec)
+    found = rebind_fence(spec, agent, open_issues, live)
+    if found:
+        die("not rebinding: " + "; ".join(found))
+    result_path, doc = read_result_file(spec)
+    if doc.get("rolledBackAt"):
+        die(f"the move this record describes was rolled back at "
+            f"{doc['rolledBackAt']}; rebind-thread is for a live move")
+    live_binding = binding_for_rebind(spec, agent, doc)
+    old_id = live_binding["primaryThreadId"]
+
+    notes = []
+    if agent.get("status") == "error":
+        notes.append("board status is 'error' — the provider-mismatch fault "
+                     "a rebind repairs; reported, not a blocker")
+    old_thread, old_messages = thread_facts(spec, old_id)
+    old_instance = instance_of(old_thread, old_messages)
+    if old_instance and old_instance == live_binding.get("providerInstanceId"):
+        notes.append(f"the old conversation already reports its provider as "
+                     f"{old_instance!r}; a rebind is harmless but may be "
+                     "unneeded — continuing")
+    model = ((spec.get("t3") or {}).get("model") or spec.get("model")
+             or old_thread.get("model"))
+    title = f"{spec['agent_name']} primary " + time.strftime("%Y-%m-%d")
+    sha_before = sha256_file(result_path)
+
+    new_id = new_instance = new_model = revision = None
+    wrote = []
+    if dry_run:
+        notes.append("dry run: no thread started, no binding written, no "
+                     "file written")
+    else:
+        if not model:
+            die("no model for the new thread: the spec carries none and the "
+                "old conversation's model is unreadable; put t3.model in the "
+                "spec")
+        message = spec.get("rebind_message") or (
+            f"Primary conversation rebind for {spec['agent_name']}, "
+            + time.strftime("%Y-%m-%d") + ". Reply with just: READY")
+        started = t3_output_json(t3_installed(spec, [
+            "thread", "start", str(live_binding["projectId"]), message,
+            "--provider", str(live_binding["providerInstanceId"]),
+            "--model", str(model), "--title", title, "--wait", "--json"]),
+            "t3 thread start")
+        if not isinstance(started, dict) or not started.get("threadId"):
+            die("t3 thread start returned no threadId; nothing was written — "
+                "inspect the answer")
+        new_id = started["threadId"]
+        # The provider is proven by what the SERVER says the new thread ran
+        # on, never by what we asked for. A mismatch refuses BEFORE any
+        # write: the stray thread is left exactly as it is and a person
+        # decides what happens to it.
+        new_thread, new_messages = thread_facts(spec, new_id)
+        new_instance = instance_of(new_thread, new_messages)
+        new_model = new_thread.get("model")
+        if new_instance != live_binding.get("providerInstanceId"):
+            die(f"the new thread {new_id} reports provider instance "
+                f"{new_instance!r}, wanted "
+                f"{live_binding['providerInstanceId']!r}; NOT writing the "
+                "binding. The stray thread is left as it is — a person "
+                "decides what happens to it")
+        if new_model and model and new_model != model:
+            die(f"the new thread {new_id} reports model {new_model!r}, asked "
+                f"for {model!r}; NOT writing the binding. The stray thread "
+                "is left as it is — a person decides what happens to it")
+        written = write_binding(http, spec["agent_id"],
+                                dict(live_binding, primaryThreadId=new_id))
+        revision = [live_binding.get("bindingRevision"),
+                    written.get("bindingRevision")]
+        record = {
+            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "oldThreadId": old_id,
+            "oldProviderInstanceId": old_instance,
+            "newThreadId": new_id,
+            "newProviderInstanceId": new_instance,
+            "model": model, "title": title,
+            "bindingRevisionFrom": revision[0],
+            "bindingRevisionTo": revision[1],
+        }
+        doc = dict(doc)
+        doc["rebinds"] = [*(doc.get("rebinds") or []), record]
+        try:
+            write_config_file(result_path, doc)
+        except BaseException:
+            log(f"the binding moved to {new_id} but the record at "
+                f"{result_path} was NOT written; before the next rebind, "
+                f"update the spec's binding.primaryThreadId to {new_id}")
+            raise
+        wrote.append({"path": result_path, "sha256Before": sha_before,
+                      "sha256After": sha256_file(result_path)})
+    print(json.dumps({
+        "agent": agent.get("name"), "boardStatus": agent.get("status"),
+        "dryRun": bool(dry_run), "notes": notes,
+        "oldThreadId": old_id,
+        "oldThread": {"providerInstanceId": old_instance,
+                      "model": old_thread.get("model"),
+                      "messagesSeen": len(old_messages)},
+        "newThreadId": new_id,
+        "newThread": {"providerInstanceId": new_instance, "model": new_model},
+        "title": title, "model": model,
+        "bindingRevision": revision, "wrote": wrote,
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, indent=2))
+    return 0
+
+
+def cmd_rebind_rollback(spec):
+    """Put the last rebind's old thread id back. After this the carrier
+    refuses wakes again — the honest pre-rebind state (the old conversation
+    is still on another provider instance). Never touches either
+    conversation; the sole board write is the binding."""
+    http = Http(spec["paperclip_base"])
+    agent, open_issues, live = read_state(http, spec)
+    found = rebind_fence(spec, agent, open_issues, live)
+    if found:
+        die("not rolling the rebind back: " + "; ".join(found))
+    result_path, doc = read_result_file(spec)
+    rebinds = [r for r in (doc.get("rebinds") or []) if isinstance(r, dict)]
+    target = next((r for r in reversed(rebinds)
+                   if not r.get("rolledBackAt")), None)
+    if target is None:
+        die(f"no rebind to roll back is recorded at {result_path}")
+    live = ((agent.get("metadata") or {}).get("teammate") or {}).get("t3")
+    if not isinstance(live, dict) or \
+            live.get("primaryThreadId") != target.get("newThreadId"):
+        die(f"the live binding is not the rebind's new thread "
+            f"({target.get('newThreadId')!r}); refusing — inspect the agent")
+    sha_before = sha256_file(result_path)
+    written = write_binding(http, spec["agent_id"],
+                            dict(live, primaryThreadId=target["oldThreadId"]))
+    doc = dict(doc)
+    doc["rebinds"] = [dict(r, rolledBackAt=time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime())) if r is target else r
+        for r in rebinds]
+    write_config_file(result_path, doc)
+    print(json.dumps({
+        "agent": agent.get("name"), "boardStatus": agent.get("status"),
+        "restoredThreadId": target["oldThreadId"],
+        "retiredThreadId": target["newThreadId"],
+        "bindingRevision": [live.get("bindingRevision"),
+                            written.get("bindingRevision")],
+        "wrote": [{"path": result_path, "sha256Before": sha_before,
+                   "sha256After": sha256_file(result_path)}],
+        "note": "the carrier refuses wakes again: the restored conversation "
+                "is on another provider instance (the pre-rebind state)",
+        "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, indent=2))
+    return 0
+
+
 COMMANDS = {"check": cmd_check, "apply": cmd_apply, "rollback": cmd_rollback,
-            "refresh-carrier": cmd_refresh_carrier}
+            "refresh-carrier": cmd_refresh_carrier,
+            "rebind-thread": cmd_rebind_thread,
+            "rebind-rollback": cmd_rebind_rollback}
 
 
 def main():
-    if len(sys.argv) != 3 or sys.argv[1] not in COMMANDS:
+    dry_run = "--dry-run" in sys.argv[2:]
+    args = [a for a in sys.argv[1:] if a != "--dry-run"]
+    if len(args) != 2 or args[0] not in COMMANDS or \
+            (dry_run and args[0] != "rebind-thread"):
         die("usage: cutover_installed.py check|apply|rollback|refresh-carrier "
-            "<spec.json>")
-    spec = json.load(open(sys.argv[2]))
-    return COMMANDS[sys.argv[1]](spec)
+            "<spec.json> · rebind-thread <spec.json> [--dry-run] · "
+            "rebind-rollback <spec.json>")
+    spec = json.load(open(args[1]))
+    if args[0] == "rebind-thread":
+        return cmd_rebind_thread(spec, dry_run=dry_run)
+    return COMMANDS[args[0]](spec)
 
 
 if __name__ == "__main__":
