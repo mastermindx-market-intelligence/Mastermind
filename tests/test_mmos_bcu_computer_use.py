@@ -2448,11 +2448,16 @@ class TestRuntimeGateFloors(unittest.TestCase):
                 os.environ["MMOS_CU_PACING_SECONDS"] = saved
 
     def test_runtime_dict_presence_floor_refused(self):
+        # BCU R2 item 2: without the harness marker the STRICTER_ONLY check
+        # fires first (TestSessionCannotLoosenFloors covers that); with the
+        # marker the sub-default value reaches the absolute 1 s floor.
+        os.environ["MMOS_CU_TEST_MODE"] = "1"  # reach the floor check
         with self.assertRaises(mmos.RefuseError) as caught:
             mmos.Presence(runtime={"presence_min_idle_seconds": 0.5})
         self.assertEqual(caught.exception.code, "PRESENCE_MIN_IDLE_FLOOR")
 
     def test_runtime_dict_pacing_floor_refused(self):
+        os.environ["MMOS_CU_TEST_MODE"] = "1"  # reach the floor check
         with self.assertRaises(mmos.RefuseError) as caught:
             mmos.Pacer(runtime={"pacing_seconds": 0.5})
         self.assertEqual(caught.exception.code, "PACING_SECONDS_FLOOR")
@@ -4128,6 +4133,7 @@ class TestSessionCannotLoosenFloors(unittest.TestCase):
     """
 
     def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mmos-cu-floors-")
         self.saved = {key: os.environ.pop(key, None)
                       for key in ("MMOS_CU_TEST_MODE",
                                   "MMOS_CU_PRESENCE_MIN_IDLE",
@@ -4139,6 +4145,7 @@ class TestSessionCannotLoosenFloors(unittest.TestCase):
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _state(self):
         return os.path.join(self.tmp, "state")
@@ -4194,25 +4201,21 @@ class TestSessionCannotLoosenFloors(unittest.TestCase):
         # A real server child: no pytest in its process, so MMOS_CU_TEST_MODE=1
         # (which any session could set) must NOT be test mode. The child's
         # scratch paths are outside the layer, so startup has to refuse.
-        self.tmp = tempfile.mkdtemp(prefix="mmos-cu-floors-")
-        try:
-            bin_path = make_fake_peekaboo(self.tmp)
-            runtime = write_runtime(self.tmp, bin_path)
-            env = dict(os.environ)
-            env.pop("MMOS_CU_PRESENCE_MIN_IDLE", None)
-            env.pop("MMOS_CU_PACING_SECONDS", None)
-            env.update({
-                "MMOS_CU_TEST_MODE": "1",
-                "MMOS_CU_RUNTIME": runtime,
-                "MMOS_CU_STATE_DIR": os.path.join(self.tmp, "state"),
-                "MMOS_CU_DENY": os.path.join(self.tmp, "deny.json"),
-            })
-            proc = subprocess.run(
-                [sys.executable, os.path.join(TOOL_DIR, "server.py")],
-                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE, env=env, text=True, timeout=30)
-        finally:
-            shutil.rmtree(self.tmp, ignore_errors=True)
+        bin_path = make_fake_peekaboo(self.tmp)
+        runtime = write_runtime(self.tmp, bin_path)
+        env = dict(os.environ)
+        env.pop("MMOS_CU_PRESENCE_MIN_IDLE", None)
+        env.pop("MMOS_CU_PACING_SECONDS", None)
+        env.update({
+            "MMOS_CU_TEST_MODE": "1",
+            "MMOS_CU_RUNTIME": runtime,
+            "MMOS_CU_STATE_DIR": os.path.join(self.tmp, "state"),
+            "MMOS_CU_DENY": os.path.join(self.tmp, "deny.json"),
+        })
+        proc = subprocess.run(
+            [sys.executable, os.path.join(TOOL_DIR, "server.py")],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, env=env, text=True, timeout=30)
         self.assertEqual(proc.returncode, 1, proc.stderr)
         self.assertIn("startup refused", proc.stderr)
         self.assertIn("ENV_PATH_OUTSIDE_LAYER", proc.stderr)
