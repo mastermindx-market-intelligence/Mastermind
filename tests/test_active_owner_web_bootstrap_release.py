@@ -49,7 +49,7 @@ def test_live_account_owner_and_exact_safety_fences_are_in_installed_fence():
         "HANDOFF_SOURCE_LINK_V1",
         "Native CRITICAL keeps actual distinct review",
         "no blanket independent technical/source review",
-        "Explicit safety/permission denial ends that action",
+        "Restrict only proven denied effects",
         "EFFECT_UNKNOWN",
         "never self-approve/self-merge/falsify/bypass",
     ):
