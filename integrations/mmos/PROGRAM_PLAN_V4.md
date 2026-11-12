@@ -2099,3 +2099,24 @@ DeepSeek worker with the same eight points.
 - Computer use: three medium findings from the last review are fixed in one small round, then the principal reads the entry point and decides the merge. The shipped entry point of a restraining layer takes no argument that chooses its rules, its binary or its state.
 
 **Next, in order.** The Chairman reloads the extension in five Chrome profiles. Then the principal switches the pin and verifies with a fresh session. The other lanes are unchanged from section 49.
+
+## 54. Amendment, 2026-11-12 18:58 UTC: memory link merged; its pattern is closed
+
+**What changed.** The last pattern fix for the memory link is merged as source at `bb25d97d3`. Nothing is installed yet.
+
+**What the principal's check found.**
+
+- Lines that start with a teammate's name survive. 30 of 37 secret forms nobody had listed are removed.
+- Seven forms still leak: Windows line ends with the value on the next line, a blank line between label and value, a short flag with the value attached, an all-capitals name with no separator, a label in one sentence and the value in the next, a dash used as the separator, and an XML tag. These are stated as limits in the install list.
+- Some ordinary lines are cut and refused on save, for example a line about Auth0 or OAuth with a colon, or "Token budget: …". The install list tells operators to write such notes without the colon.
+- The proposed fix for the Auth0 case was refused. It would have let `password2: X` through.
+- The new pattern is slow on a very long line (4 seconds at 60 KB, 0.005 seconds before). Every input but one is capped before it reaches the pattern, and that one is short in practice. The fix goes on the later list.
+
+**Class rule.** A change to a pattern is timed on a long input against the version before it, as well as probed with both lists.
+
+**Rulings.**
+
+- The memory link lane is closed for code. A form that leaks is added to the limit sentence, not fixed in a round.
+- An over-removal is never traded for a leak.
+
+**Next, in order.** The principal installs the memory link for Secretary, Assurance and Design Lead from the rewritten list, one change at a time, with any restart announced to the Chairman first. The bridge still waits on the Chairman's five reloads. The other lanes are unchanged from section 49.
