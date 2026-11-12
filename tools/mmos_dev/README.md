@@ -6,6 +6,33 @@
 `~/.paperclip`) — every command re-checks the target's identity and refuses
 (exit 3) on the default instance, reserved ports, or a non-loopback host.
 
+## Direct-start launcher (deputy ruling 14)
+
+`up` never invokes the CLI's `run`/`test-drive` wrappers: their doctor step
+resolves store paths against `~/.paperclip`, and one abandoned launch joined
+the real database for 90 seconds. Instead `up` writes a
+`launch-server.mjs` into the instance dir and runs it with node; it imports
+`startServer()` from the managed CLI install
+(`~/.paperclip/cli/current/node_modules/@paperclipai/server`) directly, with
+`PAPERCLIP_HOME`, `PAPERCLIP_INSTANCE_ID` and `PAPERCLIP_CONFIG` pinned to
+the dev instance (the server falls back to `~/.paperclip/instances/default`
+when those are unset). The config the script writes pins
+`server.port`, `database.embeddedPostgresPort` and
+`database.embeddedPostgresDataDir` explicitly.
+
+`up` reads the start banner (server log) BEFORE making any request, then
+calls the instance ready only after three isolation checks pass:
+
+- (a) no socket on TCP:54329 held by the launcher pid or any of its children
+  (the dev embedded PostgreSQL runs as a direct child);
+- (b) the database listener is the configured dev port, serving the dev data
+  dir, and the banner names that same port;
+- (c) the banner/log names neither port 54329 nor any path under
+  `~/.paperclip/instances/default`.
+
+Any failure kills the launched process tree, prints exactly one line
+`PAPERCLIP-DEV: REAL STORE REFUSED` (reason on stderr) and exits 3.
+
 ```
 tools/mmos_dev/paperclip_dev.sh up      # create config (first run), launch, seed company
 tools/mmos_dev/paperclip_dev.sh status  # url, company id, pid, installed modules

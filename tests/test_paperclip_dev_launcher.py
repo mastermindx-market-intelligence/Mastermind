@@ -170,6 +170,8 @@ def harness(tmp_path: Path):
     bin_dir.mkdir()
     state = tmp_path / "state"
     state.mkdir()
+    for sub in ("cmd", "listeners", "children", "conn"):
+        (state / sub).mkdir()
     banner_file = tmp_path / "banner.txt"
 
     _write_stub(bin_dir / "node", NODE_STUB)
