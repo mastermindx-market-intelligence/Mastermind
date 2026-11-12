@@ -40,23 +40,38 @@ refused typed; the connector cannot cause an ask.
 `git merge-base --is-ancestor 8dad45083 26c754bfd` exits 0 (verified by the lane); all 17
 digests below re-taken at 26c754bfd equal the 8dad45083 values (verified by the lane).
 
-### P0-2 BLOCKER — the real board port is refused by the shipped code
-`integrations/gbl/paperclip_client.py` line ~98: `RESERVED_PORTS = frozenset({3100, 3179})`;
-`validate_paperclip_base_url` refuses them. The assignment names the real board as
-`http://127.0.0.1:3100`. At both trunk head and 8dad45083 a spec naming 3100 makes the runner exit
-typed (`BASE_URL_NOT_ALLOWED`) **before binding anything** — the rehearsal proved this refusal path
-via the runner's `from_spec` call. Two ways forward, principal's choice:
-- **(a) reviewed change to RESERVED_PORTS** (e.g. remove 3100, or add an explicit
-  `allow_reserved_port: true` spec field gated behind the same review). This edits
-  `integrations/gbl/paperclip_client.py` — a critical surface (base-URL law, ruling 3/17): needs
-  its own review and tests; the lane was forbidden to edit `integrations/gbl/*.py`.
-- **(b) dedicated board instance for the bridge on a non-reserved port**, leaving the law untouched
-  (ruling 14 launcher law applies to any dev board; a *production* second instance is the
-  principal's call and needs its own data-ownership statement).
-- **Check:** `python3.12 - <<'EOF'` … `PaperclipAskClient.from_spec(spec_path)` constructs without a
-  typed refusal, against the chosen base_url.
-- **Rollback:** revert the reviewed change / stop the dedicated instance; nothing else depends on
-  the choice until step 5.
+### P0-2 RESOLVED (option (a), principal ruling 2026-11-12 14:13Z) — pending review + merge
+`integrations/gbl/paperclip_client.py`: `RESERVED_PORTS = frozenset({3100, 3179})` and
+`validate_paperclip_base_url` refused both — the real board is `http://127.0.0.1:3100`, so a spec
+naming it exited typed **before binding anything**. The principal ruled option **(a)**, narrow
+shape, implemented on branch **`t3/mmos-v4-gbl-prodboard`** (head `1e22d7d00`, from trunk
+`ec473b034`; the gbl surface is byte-identical between 26c754bfd and ec473b034, so the digest
+table below still describes trunk):
+- `validate_paperclip_base_url(url, *, production_board=False)` — the default law is UNCHANGED
+  (3100 and 3179 refuse); `True` admits EXACTLY port 3100 and changes nothing else; **3179 is
+  never admitted by anything**.
+- Only `PaperclipAskClient.from_spec` passes True, and only when the spec carries
+  `paperclip.production_board: true` AND its realpath is exactly
+  `<home>/.mastermind/gbl/spec.json` — home from the PASSWORD DATABASE for the current uid
+  (`pwd.getpwuid`), never `$HOME` — AND the file is a regular non-symlink file, owned by the
+  current uid, mode exactly 0600. The field at any other path, mode, owner or value is the typed
+  refusal **`PRODUCTION_BOARD_NOT_ALLOWED_HERE`**; it never silently falls back.
+- `create_service_agent` and every direct caller keep refusing 3100 — the principal creates the
+  Grok Bridge agent BY HAND (step 4).
+- 16 new tests, each failing first on ec473b034; suites 379/379 rc=0. The step-5 construct check
+  was re-run against the rehearsal COPY with the home lookup pointed at the rehearsal root by
+  test injection: canonical spec constructs at 3100, non-canonical path refuses typed, absent
+  field keeps the default law — **zero requests to 3100** (`prodboard-check` record).
+- Digests change for exactly two of the 17 files at `1e22d7d00`: `paperclip_client.py`
+  `92041e15f96f71f2c8a42f90a91d993eff0f4d1b236ce522a7709f5a668a48e9` and (optional LATER.md item
+  b: OSError on the door exchange now maps to typed `BRIDGE_UNREACHABLE`) `mcp_server.py`
+  `9dc041ecce52bb1a3c0a13af18b99eb5bab75e18ff8ae2bd383fee91d763bdc0`. Re-take the table at the
+  merge commit.
+- **Check:** the branch's own tests + the construct-check record above; after merge, step 5's
+  check IS the production proof.
+- **Rollback:** revert the merge — the law returns to refusing both ports; nothing else in this
+  list depends on the change (every other step is unaffected).
+- A distinct read-only reviewer is started by the principal on the diff (this lane started none).
 
 ### P0-3 checkout + digest verification at the merged head
 - **Check:** in the checkout the spec's `repo` will name (at 26c754bfd or a descendant),
@@ -70,10 +85,10 @@ via the runner's `from_spec` call. Two ways forward, principal's choice:
 | 9ca56fb5a74603c25d2270b5054ce95bb4c7f4d34ad62582ef9f73af461e57fc | integrations/gbl/__init__.py |
 | 7a27d6f21ccf1739229185272b2b81d054ee38f9a259c114f90f3850d4f74e52 | integrations/gbl/admission.py |
 | e006e38affccd5bdc2fbc69ea45ff6c652b2c486b5dbd3e7b82620c47b7c19fe | integrations/gbl/bridge_service.py |
-| adc1486af987014ebf4e1c25e24c54c84ab70b2de4356d7874d75ddddfb548c1 | integrations/gbl/mcp_server.py |
+| adc1486af987014ebf4e1c25e24c54c84ab70b2de4356d7874d75ddddfb548c1 | integrations/gbl/mcp_server.py *(changes to `9dc041ec…63bdc0` at prodboard head 1e22d7d00 — LATER.md item (b), typed BRIDGE_UNREACHABLE)* |
 | c3140af9ce9e4b691cc9f1e3b0e5f62b19e81de729fb1c2e7893249fd96b7548 | integrations/gbl/message_send.py |
 | ba5096b1cb7fbf2a3daf95e72bdf1078d506093c68b025a04446b710f4b9fe56 | integrations/gbl/nudge.py |
-| d4ba0f61b7b641fb3bbe9be23d6b5b61f44791e1e4cf48cd26292e177dc608ec | integrations/gbl/paperclip_client.py *(still carries RESERVED_PORTS — P0-2 open)* |
+| d4ba0f61b7b641fb3bbe9be23d6b5b61f44791e1e4cf48cd26292e177dc608ec | integrations/gbl/paperclip_client.py *(trunk still refuses 3100; changes to `92041e15…668a48e9` at prodboard head 1e22d7d00 — P0-2 option (a) opt-in, see P0-2)* |
 | 91a5d32c0ab4da1cb0e51d1b4fd9cd59ffc527400000bd808f0cc75fc5e5bd3d | common/gbl_contract.py |
 | 2bba37cb178b53dc4a9cccee7eeb40a1493dfe168a7fbb70f978cf6da6078738 | tools/gbl/gbl_ask.py |
 | abcc8c4fccf8c2da8eadafd508f328515087346f0636d7cefdcd43a29b170d8a | tools/gbl/specs/grok_bridge_dev.json |
@@ -111,8 +126,10 @@ evidence until the principal places them):
   existing key**; no pre-create is needed (the GBL4_NOTES `umask 077 && head -c 32 /dev/urandom`
   pre-create option remains available but the rehearsal proved lazy creation works). The key
   never crosses the wire, a log, or argv.
-- **Real board address:** `http://127.0.0.1:3100` — **see the P0-2 BLOCKER**: the shipped
-  base-URL law refuses 3100 until the principal resolves it.
+- **Real board address:** `http://127.0.0.1:3100` — admitted ONLY via
+  `paperclip.production_board: true` in the canonical spec (P0-2 option (a), branch
+  `t3/mmos-v4-gbl-prodboard`; see P0-2 and step 5). Until that branch is merged, the shipped law
+  still refuses 3100 and the runner exits typed before binding anything.
 - **Grok Bridge agent fields:** `<PRINCIPAL FILLS>` — company_id, agent_id (agent created in step
   4; role must be `general`, the board rejects `service` with HTTP 400; adapter `process`; no
   heartbeat).
@@ -167,9 +184,16 @@ Copy staged `gbl_bridge_runner.py` → `~/.mastermind/gbl/gbl_bridge_runner.py`,
   `/opt/homebrew/bin/python3.12 -m py_compile` exits 0.
 - **Rollback:** `rm ~/.mastermind/gbl/gbl_bridge_runner.py` (nothing references it yet).
 
-### 3. Resolve P0-2 (BLOCKER) — choose (a) reviewed RESERVED_PORTS change or (b) dedicated board
-instance; record the choice in this file's history before step 5.
-- **Check / Rollback:** as stated in P0-2.
+### 3. Merge the P0-2 fix (option (a) ruled by the principal 2026-11-12 14:13Z)
+The choice is RECORDED: option (a), narrow — branch `t3/mmos-v4-gbl-prodboard` (head `1e22d7d00`
+from trunk `ec473b034`). This step is now: the principal runs the distinct read-only review, then
+merges the branch through the protected path, and re-takes this list's digest table at the merge
+commit (only `paperclip_client.py` and `mcp_server.py` change).
+- **Check:** trunk head contains `1e22d7d00`'s change —
+  `python3.12 -c "from integrations.gbl.paperclip_client import validate_paperclip_base_url as v; print(v('http://127.0.0.1:3100', production_board=True))"`
+  prints the URL, and `v('http://127.0.0.1:3100')` (default) still raises ValueError.
+- **Rollback:** revert the merge — the law returns to refusing both reserved ports; no other step
+  depends on it.
 
 ### 4. Create the production board agent (principal-only — a lane may never create a board agent)
 On the REAL board (read-only for lanes): create agent **"Grok Bridge"**, role `general`
@@ -183,12 +207,20 @@ returned `company_id` / `agent_id` into the spec template.
 ### 5. Place the spec
 Fill every `<PRINCIPAL FILLS>` (repo checkout path at the merged head; company_id/agent_id from
 step 4; OAuth policy fields — issuer, authorization_servers=[issuer], jwks_uri same scheme/host/
-port, policy_id; edge port if 3193 was taken). Save as `~/.mastermind/gbl/spec.json`, `chmod 600`.
+port, policy_id; edge port if 3193 was taken). **Add `"production_board": true` to the
+`paperclip` block** — this is the principal's act at placement time (the staged template ships
+WITHOUT the field, and no spec in `tools/gbl/specs` may ever carry it; a test scans for that).
+The file's identity IS the gate: save it exactly at `~/.mastermind/gbl/spec.json` as a REGULAR
+file (never a symlink), owned by the current uid, `chmod 600` exactly — the home is taken from
+the password database, not `$HOME`. The field at any other path/mode/owner, or any non-`true`
+value, is the typed refusal `PRODUCTION_BOARD_NOT_ALLOWED_HERE` (no silent fallback).
 Admission/allowlist/environments stay `[]`. No `routine` block.
 - **Check:** `/opt/homebrew/bin/python3.12 - <<'EOF'` importing `PaperclipAskClient.from_spec`
   from the repo and constructing against the spec — exits clean (this is exactly the runner's own
-  startup gate; it refuses 3100 until step 3 is done, refuses a missing hmac dir, requires
-  base_url/company_id/agent_id/hmac_key_path).
+  startup gate; with the field + canonical placement it admits 3100, without them it refuses;
+  it refuses a missing hmac dir and requires base_url/company_id/agent_id/hmac_key_path). This
+  check was rehearsed against the copy with the home lookup pointed at the rehearsal root by
+  test injection — all three arms pass, zero requests to 3100.
 - **Rollback:** `rm ~/.mastermind/gbl/spec.json`.
 
 ### 6. Install + bootstrap the bridge launchd job (principal-only)
@@ -319,9 +351,11 @@ second ANSWER_UNCONSUMED). Consumers — the asker wake above all — MUST branc
 line, never on the exit code or on whether text is present.
 
 ## Open dependencies (surface, not silent)
-1. **P0-2 RESERVED_PORTS blocker — STILL OPEN at 26c754bfd** (its `paperclip_client.py` is
-   byte-equal to 8dad45083, so the 3100 refusal stands): install cannot reach step 5's check
-   until the principal picks option (a) or (b).
+1. **P0-2 — option (a) ruled and implemented, AWAITING the principal's distinct read-only review
+   + protected merge**: branch `t3/mmos-v4-gbl-prodboard` (head `1e22d7d00` from trunk
+   `ec473b034`). Until it is merged, trunk still refuses 3100 and step 5 cannot pass; step 3 is
+   the merge step. Re-take the digest table at the merge commit (only `paperclip_client.py` and
+   `mcp_server.py` change).
 2. **GBL-5 not merged**: `ask_return.py` absent; the nudge intake's production caller (the carrier
    "asked-for work returned" wake) and the control-socket carrier-result seam have no production
    caller at 26c754bfd. Consequence: canary proof 1 (delegate) is blocked; flow 2 (question via
