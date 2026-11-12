@@ -133,6 +133,21 @@ class F200ArtboardTokenTests(unittest.TestCase):
                         schema["required"] = [r for r in schema["required"] if r != "fileId"]
                     self._held(cat, name)
 
+    def test_extra_optional_root_property_is_never_forwarded(self):
+        # The contract may admit a new optional root property, but no call that uses it is dispatched.
+        for name in NAMES:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as tmp:
+                cat = observed_catalog()
+                cat[name]["inputSchema"]["properties"]["vendorExtra"] = {"type": "string"}
+                c = Client(cat)
+                guard = b.snapshot(c, FILE_ID)["snapshot_sha256"]
+                c.calls.clear()
+                with self.assertRaisesRegex(b.Refusal, "UNREVIEWED_TOOL_ARGUMENTS"):
+                    b.execute("edit", tool=name, arguments={**ARGS[name], "vendorExtra": "x"},
+                              expected_snapshot=guard, operation_id=f"extra-{name}", allow_write=True,
+                              client=c, lock_root=Path(tmp))
+                self.assertEqual([x for x in c.calls if x[0] == name], [])
+
 
 if __name__ == "__main__":
     unittest.main()
