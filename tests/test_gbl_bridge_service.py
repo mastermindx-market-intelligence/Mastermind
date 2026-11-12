@@ -586,10 +586,33 @@ class TestSocketService:
             server.close()
 
     def test_refuses_uid_not_in_table_without_calling_core(self, tmp_path):
+        # LATER.md (principal 13:27Z): the server answers PEER_NOT_ALLOWED
+        # and closes BEFORE reading (refuse-before-read is the law and stays
+        # the law), so the client's sendall can race the closed socket and
+        # raise BrokenPipeError/ECONNRESET.  Tolerate the closed socket ON
+        # SEND only; the refusal frame and the untouched core remain the
+        # assertions.
+        from common.gbl_contract import decode_gbl_frame, encode_gbl_frame
         core = FakeCore()
         server = _server(tmp_path, core, (os.getuid() + 1,))
         try:
-            response = _exchange(server, REQUEST)
+            client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            client.settimeout(10.0)
+            try:
+                client.connect(str(server.config.socket_path))
+                try:
+                    client.sendall(encode_gbl_frame(REQUEST))
+                except (BrokenPipeError, ConnectionResetError):
+                    pass      # the door already refused and closed — the race
+                buffer = b""
+                while not buffer.endswith(b"\n"):
+                    chunk = client.recv(4096)
+                    if not chunk:
+                        break
+                    buffer += chunk
+            finally:
+                client.close()
+            response = decode_gbl_frame(buffer)
             assert response["ok"] is False
             assert response["error"]["code"] == "PEER_NOT_ALLOWED"
             assert core.calls == []

@@ -49,6 +49,7 @@ from integrations.gbl.mcp_server import (
     TOOL_SCHEMA_DIGEST,
     TOOL_SPECS,
     BridgeClient,
+    GblEdgeError,
     create_gbl_mcp_app,
     tool_schema_digest,
     tool_schema_snapshot,
@@ -659,6 +660,227 @@ class TestRealBridgeSocket(unittest.IsolatedAsyncioTestCase):
             token=self.harness.token()))
         assert result["result"]["status"] == "ANSWER_UNCONSUMED"
         assert result["result"]["answer"] == "The bot's harmless fixture answer."
+
+
+# ── Door transport failures surface typed (LATER.md, principal 13:27Z;
+#    MED-1 repair, review of 1e22d7d00: pre-send vs post-send law) ───────────
+
+
+def _drain_request(conn):
+    """Read one newline-terminated request frame (best effort)."""
+    buf = b""
+    while not buf.endswith(b"\n"):
+        chunk = conn.recv(4096)
+        if not chunk:
+            return buf
+        buf += chunk
+    return buf
+
+
+class TestBridgeClientTransportErrors(unittest.TestCase):
+    """Typed transport-failure law (MED-1): a failure BEFORE sendall
+    completed (socket(), connect, partial sendall) is BRIDGE_UNREACHABLE —
+    the door refuses before it reads, so nothing was processed.  ANY loss
+    AFTER the request went out (recv timeout, reset mid-reply, EOF before
+    the frame's newline, empty reply) is BRIDGE_REPLY_LOST: the bridge may
+    have completed the op, the effect is unknown, and the caller must
+    replay with the SAME idempotency_key — never a fresh one.  No raw
+    OSError escapes the edge either way."""
+
+    # -- pre-send: UNREACHABLE (regression guards; typed on base too) --------
+
+    def test_missing_socket_is_typed_bridge_unreachable(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            client = BridgeClient(Path(tmp) / "no-such.sock")
+            with self.assertRaises(GblEdgeError) as ctx:
+                client.call("status", {"principal": "probe",
+                                       "ask_id": "gb-fixture-1"})
+            self.assertEqual(ctx.exception.code, "BRIDGE_UNREACHABLE")
+            self.assertEqual(ctx.exception.detail, "FileNotFoundError")
+
+    def test_stale_socket_connect_refused_is_unreachable(self):
+        # A socket path that exists with no listener behind it: connect()
+        # raises ConnectionRefusedError BEFORE any byte was sent — the
+        # request definitely did not land, so it stays UNREACHABLE.
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "stale.sock"
+            stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            stale.bind(str(path))
+            stale.close()          # the path file remains; nobody listens
+            client = BridgeClient(path)
+            with self.assertRaises(GblEdgeError) as ctx:
+                client.call("status", {"principal": "probe",
+                                       "ask_id": "gb-fixture-2"})
+            self.assertEqual(ctx.exception.code, "BRIDGE_UNREACHABLE")
+            self.assertEqual(ctx.exception.detail, "ConnectionRefusedError")
+
+    # -- post-send: REPLY_LOST (new behaviour; these fail on 1e22d7d00) ------
+
+    def test_timeout_after_send_is_reply_lost(self):
+        # A door that accepts the request and then never replies: recv times
+        # out AFTER sendall completed — the bridge may still be working (its
+        # store budget exceeds the edge's), so the effect is UNKNOWN.
+        import tempfile
+        from integrations.gbl import mcp_server
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "gbl.sock")
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            server.bind(path)
+            server.listen(1)
+            held = []
+
+            def _accept_and_hold():
+                try:
+                    connection, _ = server.accept()
+                except OSError:
+                    return
+                held.append(connection)      # never reply, never close
+
+            threading.Thread(target=_accept_and_hold, daemon=True).start()
+            original = mcp_server.BRIDGE_TIMEOUT_SECONDS
+            mcp_server.BRIDGE_TIMEOUT_SECONDS = 0.2
+            try:
+                client = BridgeClient(path)
+                with self.assertRaises(GblEdgeError) as ctx:
+                    client.call("status", {"principal": "probe",
+                                           "ask_id": "gb-fixture-3"})
+                self.assertEqual(ctx.exception.code, "BRIDGE_REPLY_LOST")
+                self.assertIn("TimeoutError", ctx.exception.detail)
+                self.assertIn("SAME idempotency_key", ctx.exception.detail)
+            finally:
+                mcp_server.BRIDGE_TIMEOUT_SECONDS = original
+                for connection in held:
+                    try:
+                        connection.close()
+                    except OSError:
+                        pass
+                server.close()
+
+    def test_reset_mid_reply_is_reply_lost(self):
+        # The door reads the request, starts a reply, then hard-resets
+        # (SO_LINGER 0).  Whether the client sees the partial bytes then
+        # ECONNRESET or an immediate ECONNRESET, the classification is the
+        # same: the request WAS sent, so the effect is unknown → REPLY_LOST.
+        import struct
+        import tempfile
+        partial = b'{"schema": "mastermind.gbl.response.v1", "ok": tru'
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "gbl.sock")
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            server.bind(path)
+            server.listen(1)
+
+            def _accept_partial_reset():
+                try:
+                    connection, _ = server.accept()
+                except OSError:
+                    return
+                try:
+                    _drain_request(connection)
+                    connection.sendall(partial)       # no newline: mid-frame
+                    connection.setsockopt(
+                        socket.SOL_SOCKET, socket.SO_LINGER,
+                        struct.pack("ii", 1, 0))      # next close sends RST
+                except OSError:
+                    pass
+                finally:
+                    try:
+                        connection.close()
+                    except OSError:
+                        pass
+
+            threading.Thread(target=_accept_partial_reset,
+                             daemon=True).start()
+            try:
+                client = BridgeClient(path)
+                with self.assertRaises(GblEdgeError) as ctx:
+                    client.call("status", {"principal": "probe",
+                                           "ask_id": "gb-fixture-4"})
+                self.assertEqual(ctx.exception.code, "BRIDGE_REPLY_LOST")
+                self.assertIn("SAME idempotency_key", ctx.exception.detail)
+            finally:
+                server.close()
+
+    def test_eof_before_newline_is_reply_lost(self):
+        # The door reads the request and closes WITHOUT any reply: the
+        # client's recv sees EOF with an empty buffer.  That is a lost
+        # reply (effect unknown), never BRIDGE_PROTOCOL — a decode error
+        # over an empty buffer reads as "nothing happened" and invites a
+        # fresh-key retry.
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "gbl.sock")
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            server.bind(path)
+            server.listen(1)
+
+            def _accept_drain_close():
+                try:
+                    connection, _ = server.accept()
+                except OSError:
+                    return
+                try:
+                    _drain_request(connection)
+                except OSError:
+                    pass
+                finally:
+                    try:
+                        connection.close()
+                    except OSError:
+                        pass
+
+            threading.Thread(target=_accept_drain_close, daemon=True).start()
+            try:
+                client = BridgeClient(path)
+                with self.assertRaises(GblEdgeError) as ctx:
+                    client.call("status", {"principal": "probe",
+                                           "ask_id": "gb-fixture-5"})
+                self.assertEqual(ctx.exception.code, "BRIDGE_REPLY_LOST")
+                self.assertIn("SAME idempotency_key", ctx.exception.detail)
+            finally:
+                server.close()
+
+    def test_partial_reply_then_eof_is_reply_lost(self):
+        # Same law with PARTIAL reply bytes on the wire: a clean close after
+        # an incomplete frame is EOF before the newline → REPLY_LOST, not a
+        # decode failure over the torn frame.
+        import tempfile
+        partial = b'{"schema": "mastermind.gbl.response.v1"'
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "gbl.sock")
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            server.bind(path)
+            server.listen(1)
+
+            def _accept_partial_close():
+                try:
+                    connection, _ = server.accept()
+                except OSError:
+                    return
+                try:
+                    _drain_request(connection)
+                    connection.sendall(partial)   # no newline: torn frame
+                except OSError:
+                    pass
+                finally:
+                    try:
+                        connection.close()        # clean FIN after the bytes
+                    except OSError:
+                        pass
+
+            threading.Thread(target=_accept_partial_close,
+                             daemon=True).start()
+            try:
+                client = BridgeClient(path)
+                with self.assertRaises(GblEdgeError) as ctx:
+                    client.call("status", {"principal": "probe",
+                                           "ask_id": "gb-fixture-6"})
+                self.assertEqual(ctx.exception.code, "BRIDGE_REPLY_LOST")
+                self.assertIn("SAME idempotency_key", ctx.exception.detail)
+            finally:
+                server.close()
 
 
 # ── One real HTTP listener on 127.0.0.1, ephemeral, stopped in the test ─────

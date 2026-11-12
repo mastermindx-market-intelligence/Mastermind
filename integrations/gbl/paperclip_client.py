@@ -61,6 +61,7 @@ import hmac
 import http.client
 import json
 import os
+import pwd
 import re
 import secrets
 import stat
@@ -86,6 +87,9 @@ __all__ = [
     "GblPaperclipServerError",
     "GblPaperclipRedirectError",
     "GblPaperclipTransportError",
+    "PRODUCTION_BOARD_FIELD",
+    "PRODUCTION_BOARD_PORT",
+    "PRODUCTION_BOARD_SPEC_RELPATH",
     "PaperclipAskClient",
     "create_service_agent",
     "validate_paperclip_base_url",
@@ -96,6 +100,18 @@ __all__ = [
 # reserved-port law of tools/mmos_dev/paperclip_dev.sh, restated for this
 # client because it must hold at every call site, not only in the controller.
 RESERVED_PORTS = frozenset({3100, 3179})
+
+# P0-2 option (a) — principal ruling 2026-11-12 14:13Z, narrow shape: the
+# REAL production board is 127.0.0.1:3100, and exactly that port may be
+# admitted by an explicit opt-in that only PaperclipAskClient.from_spec can
+# make, and only for the ONE canonical production spec file below.  3179 is
+# never admitted by anything, opt-in or not.  The opt-in never widens any
+# other rule of the base-URL law and never falls back silently: the field in
+# a spec at any other path, with any other mode or owner, or with any
+# non-true value, is the typed refusal PRODUCTION_BOARD_NOT_ALLOWED_HERE.
+PRODUCTION_BOARD_PORT = 3100
+PRODUCTION_BOARD_FIELD = "production_board"
+PRODUCTION_BOARD_SPEC_RELPATH = (".mastermind", "gbl", "spec.json")
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
@@ -238,10 +254,23 @@ class GblPaperclipTransportError(GblPaperclipError):
     """Timeout / unreachable / unparseable transport failure."""
 
 
-def validate_paperclip_base_url(url: str) -> str:
+def validate_paperclip_base_url(url: str, *,
+                                production_board: bool = False) -> str:
     """The base-URL law: required, http, loopback host, explicit port in
     range 1..65535 and not reserved, no userinfo, no query/fragment.
-    Returns the normalized URL."""
+    Returns the normalized URL.
+
+    ``production_board=True`` (P0-2 option (a), principal ruling 2026-11-12)
+    admits EXACTLY port 3100 — the real production board — and changes
+    nothing else; 3179 stays reserved under every flag.  Only
+    :meth:`PaperclipAskClient.from_spec` may pass True, and only after
+    :func:`_require_canonical_production_spec` has proven the spec file is
+    the canonical 0600 uid-owned regular file at
+    ``<pwd-home>/.mastermind/gbl/spec.json``.  Every other caller keeps the
+    default (False) and keeps refusing both reserved ports."""
+    if not isinstance(production_board, bool):
+        raise ValueError(
+            f"production_board must be a bool, got {type(production_board)}")
     if not isinstance(url, str) or not url:
         raise ValueError("paperclip base url is required")
     if "://" not in url:
@@ -263,7 +292,8 @@ def validate_paperclip_base_url(url: str) -> str:
         raise ValueError(
             "paperclip base url must carry an explicit port "
             f"(no implicit default): {url!r}")
-    if port in RESERVED_PORTS:
+    if port in RESERVED_PORTS and not (production_board
+                                       and port == PRODUCTION_BOARD_PORT):
         raise ValueError(
             f"paperclip base url port {port} is reserved and never targeted")
     if not 1 <= port <= 65535:
@@ -280,6 +310,63 @@ def _split_host_port(host_port: str) -> tuple[str, int | None]:
         return host, (int(port[1:]) if port.startswith(":") else None)
     host, sep, port = host_port.partition(":")
     return host, (int(port) if sep and port.isdigit() else None)
+
+
+def _current_uid() -> int:
+    """The running uid.  Its own function so tests inject it; production
+    code never overrides it."""
+    return os.getuid()
+
+
+def _current_home() -> str:
+    """The home directory from the PASSWORD DATABASE for the current uid —
+    deliberately NOT ``$HOME``/``os.path.expanduser``: an environment
+    variable any caller can set must never steer the production-board gate.
+    Its own function so tests inject a temp root; production code never
+    overrides it."""
+    return pwd.getpwuid(os.getuid()).pw_dir
+
+
+def _require_canonical_production_spec(spec_path: Path) -> None:
+    """The opt-in gate (P0-2 option (a), principal ruling 2026-11-12):
+    ``paperclip.production_board: true`` is honored ONLY when the spec file
+    IS the one canonical production spec —
+
+    * a REGULAR file that is NOT a symlink;
+    * owned by the current uid, mode exactly 0600;
+    * whose realpath is exactly ``<home>/.mastermind/gbl/spec.json``, home
+      from the password database (:func:`_current_home`), never ``$HOME``.
+
+    Any deviation is the typed refusal ``PRODUCTION_BOARD_NOT_ALLOWED_HERE``.
+    There is NO fallback: the flag never silently degrades to the default
+    law (which would refuse 3100 with an unrelated error and mask a
+    misplaced or tampered production spec)."""
+    code = "PRODUCTION_BOARD_NOT_ALLOWED_HERE"
+    try:
+        info = os.lstat(spec_path)
+    except OSError as exc:
+        raise GblPaperclipError(
+            code, f"cannot state {spec_path}: {type(exc).__name__}") from None
+    if stat.S_ISLNK(info.st_mode):
+        raise GblPaperclipError(
+            code, f"{spec_path} is a symlink; the production spec must be a "
+            "regular file at the canonical path")
+    if not stat.S_ISREG(info.st_mode):
+        raise GblPaperclipError(
+            code, f"{spec_path} is not a regular file")
+    if info.st_uid != _current_uid():
+        raise GblPaperclipError(
+            code, f"{spec_path} is not owned by the current uid")
+    mode = stat.S_IMODE(info.st_mode)
+    if mode != 0o600:
+        raise GblPaperclipError(
+            code, f"{spec_path} mode is {mode:03o}; the production spec must "
+            "be exactly 0600")
+    expected = os.path.join(_current_home(), *PRODUCTION_BOARD_SPEC_RELPATH)
+    if os.path.realpath(spec_path) != os.path.realpath(expected):
+        raise GblPaperclipError(
+            code, f"paperclip.{PRODUCTION_BOARD_FIELD} is honored only at "
+            f"{expected}; {spec_path} is another path")
 
 
 def _canonical(value: Mapping[str, Any]) -> str:
@@ -460,8 +547,15 @@ class PaperclipAskClient:
                  service_agent_id: str, *,
                  hmac_key_path: str | Path | None = None,
                  headers: Mapping[str, str] | None = None,
-                 timeout_seconds: float = 15.0):
-        self._base = validate_paperclip_base_url(base_url)
+                 timeout_seconds: float = 15.0,
+                 _production_board: bool = False):
+        # _production_board is PRIVATE to from_spec (P0-2 option (a)): it may
+        # be True only after _require_canonical_production_spec has proven
+        # the spec file is the canonical 0600 uid-owned regular file at
+        # <pwd-home>/.mastermind/gbl/spec.json.  No other caller passes it;
+        # direct construction keeps refusing 3100 and 3179.
+        self._base = validate_paperclip_base_url(
+            base_url, production_board=_production_board)
         self._company_seg = _quote_segment(company_id, what="company_id",
                                            typed=False)
         self._agent_id = _quote_segment(service_agent_id,
@@ -513,7 +607,18 @@ class PaperclipAskClient:
         """Build the client from a GBL-4 dev roster spec JSON file (the
         ``paperclip`` block: base_url, company_id, agent_id,
         hmac_key_path — the key path is REQUIRED: a spec that omits it
-        would configure a trust-absent client, which is refused)."""
+        would configure a trust-absent client, which is refused).
+
+        ``paperclip.production_board: true`` (P0-2 option (a), principal
+        ruling 2026-11-12 14:13Z) is the ONLY opt-in to the real board port
+        3100, and this method is the ONLY caller that may honor it — after
+        :func:`_require_canonical_production_spec` proves the spec file is
+        the canonical ``<pwd-home>/.mastermind/gbl/spec.json`` (regular
+        file, not a symlink, uid-owned, mode exactly 0600).  The field in a
+        spec at any other path, with any other mode or owner, or with any
+        non-true value, is the typed refusal
+        ``PRODUCTION_BOARD_NOT_ALLOWED_HERE`` — never a silent fallback to
+        the default law.  3179 stays refused under every flag."""
         try:
             spec = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
@@ -525,8 +630,19 @@ class PaperclipAskClient:
                       "hmac_key_path"):
             if not block.get(field):
                 raise ValueError(f"spec {path} paperclip.{field} is required")
+        production = False
+        if PRODUCTION_BOARD_FIELD in block:
+            if block[PRODUCTION_BOARD_FIELD] is not True:
+                raise GblPaperclipError(
+                    "PRODUCTION_BOARD_NOT_ALLOWED_HERE",
+                    f"spec {path} paperclip.{PRODUCTION_BOARD_FIELD} must be "
+                    "the boolean true or absent — no other value opts in and "
+                    "nothing falls back silently")
+            _require_canonical_production_spec(Path(path))
+            production = True
         return cls(block["base_url"], block["company_id"], block["agent_id"],
-                   hmac_key_path=block["hmac_key_path"])
+                   hmac_key_path=block["hmac_key_path"],
+                   _production_board=production)
 
     # -- the GblAskStore interface --------------------------------------------
 

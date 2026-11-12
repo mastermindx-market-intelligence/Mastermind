@@ -155,7 +155,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         description=(
             "Post the bot's answer to one ask addressed to this principal. "
             "Idempotent by (ask_id, idempotency_key); a replay of the same "
-            "key with new answer text is a CONFLICT."
+            "key with new answer text is a CONFLICT. A BRIDGE_REPLY_LOST "
+            "error means the effect is unknown: replay with the SAME "
+            "idempotency_key, never a fresh one."
         ),
         # H1: ONE shared schema — the public argument set is the contract's
         # ANSWER_ARGUMENT_KEYS minus the authenticated principal, and the
@@ -173,7 +175,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "Delegate one bounded job to an admitted teammate target. The "
             "ask id is minted from (principal, target, idempotency_key); "
             "same key and content returns the same ask, changed content is "
-            "a CONFLICT."
+            "a CONFLICT. A BRIDGE_REPLY_LOST error means the effect is "
+            "unknown: replay with the SAME idempotency_key, never a fresh "
+            "one."
         ),
         input_schema=_object(
             {"target": _string(max_length=256),
@@ -189,7 +193,9 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
             "Send one quoted-data message to a thread on an admitted "
             "environment, only to a (environment, thread) row the "
             "principal switched on. One send per idempotency key, held by "
-            "the [gb-<id>] marker."
+            "the [gb-<id>] marker. A BRIDGE_REPLY_LOST error means the "
+            "effect is unknown: replay with the SAME idempotency_key, "
+            "never a fresh one."
         ),
         input_schema=_object(
             {"environment_id": _string(max_length=256),
@@ -256,9 +262,10 @@ def tool_schema_digest() -> str:
 
 # Deliberately literal: any reviewed schema/description/annotation change
 # must update this value explicitly and is therefore visible in review.
-# Repair H1 re-pin: team.answer's public argument is now "answer" (the
-# shared contract schema), advertised caps enforced at the edge.
-TOOL_SCHEMA_DIGEST = "d29615d2bfff3f12676b144340bdf38269cfae8e4334ed636aff04b5d9c30c4e"
+# Prodboard R1 re-pin (MED-1): the three effectful descriptions now carry
+# the BRIDGE_REPLY_LOST replay sentence (SAME idempotency_key, never a
+# fresh one); schemas and annotations unchanged.
+TOOL_SCHEMA_DIGEST = "4389c7eb363519755b56fd2f1cc75b3b3ef251ac43eadb0ba70933fd84de6434"
 
 
 def build_tool_models() -> list[mcp_types.Tool]:
@@ -290,19 +297,50 @@ class BridgeClient:
         except HostFrameError:
             raise GblEdgeError("FRAME_TOO_LARGE",
                                "bridge request exceeds the frame cap") from None
-        with socket_module.socket(socket_module.AF_UNIX,
-                                  socket_module.SOCK_STREAM) as connection:
-            connection.settimeout(BRIDGE_TIMEOUT_SECONDS)
-            connection.connect(str(self._path))
-            connection.sendall(frame)
-            buffer = b""
-            while not buffer.endswith(b"\n"):
-                chunk = connection.recv(4096)
-                if not chunk:
-                    break
-                buffer += chunk
-                if len(buffer) > MAX_BRIDGE_RESPONSE_BYTES:
-                    raise GblEdgeError("BRIDGE_RESPONSE_TOO_LARGE")
+        # MED-1 (prodboard R1, review of 1e22d7d00): the send boundary
+        # splits the transport law in two.  Before sendall completes
+        # (socket(), connect, or a partial sendall) the door refuses BEFORE
+        # it reads, so the request definitely did not land: typed
+        # BRIDGE_UNREACHABLE, bounded detail = exception class name.  Once
+        # sendall has returned, the bridge may have completed the op and
+        # only the reply was lost (recv timeout — the 10 s edge budget is
+        # shorter than the store's worst-case paginated read plus create —
+        # or a reset mid-reply): the effect is UNKNOWN, so a distinct typed
+        # code BRIDGE_REPLY_LOST tells the caller to replay with the SAME
+        # idempotency_key, never a fresh one.  No raw OSError escapes.
+        request_sent = False
+        lost_hint = ("effect unknown — the request was sent and no complete "
+                     "reply arrived; replay with the SAME idempotency_key, "
+                     "never a fresh one")
+        try:
+            with socket_module.socket(socket_module.AF_UNIX,
+                                      socket_module.SOCK_STREAM) as connection:
+                connection.settimeout(BRIDGE_TIMEOUT_SECONDS)
+                connection.connect(str(self._path))
+                connection.sendall(frame)
+                request_sent = True
+                buffer = b""
+                while not buffer.endswith(b"\n"):
+                    chunk = connection.recv(4096)
+                    if not chunk:
+                        break
+                    buffer += chunk
+                    if len(buffer) > MAX_BRIDGE_RESPONSE_BYTES:
+                        raise GblEdgeError("BRIDGE_RESPONSE_TOO_LARGE")
+        except OSError as exc:
+            if request_sent:
+                raise GblEdgeError(
+                    "BRIDGE_REPLY_LOST",
+                    f"{type(exc).__name__}: {lost_hint}") from None
+            raise GblEdgeError("BRIDGE_UNREACHABLE",
+                               type(exc).__name__) from None
+        if request_sent and not buffer.endswith(b"\n"):
+            # EOF before the newline — an empty or partial reply after the
+            # request went out.  Same unknown-effect law as a post-send
+            # OSError; this must never surface as a decode error, which
+            # reads as "nothing happened" and invites a fresh-key retry.
+            raise GblEdgeError("BRIDGE_REPLY_LOST",
+                               f"EOF before newline: {lost_hint}")
         try:
             response = decode_gbl_frame(buffer)
         except HostFrameError:
