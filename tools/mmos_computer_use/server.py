@@ -157,6 +157,7 @@ Config:   tools/mmos_computer_use/runtime.json (or runtime.json.dev when
 Requires Python 3.9+ stdlib only.
 """
 
+import argparse
 import contextlib
 import hashlib
 import json
@@ -239,11 +240,16 @@ DEFAULT_PACING_SECONDS = 180.0
 # test harness (a broken test must not disable a gate silently).
 MIN_IDLE_FLOOR_SECONDS = 1.0
 PACING_FLOOR_SECONDS = 1.0
-# BCU repair round 2, item 2 (ruling ESC 12): the 180 s DEFAULTS are also the
-# PRODUCTION floors — in code. Outside the test harness no configuration
-# source (runtime.json, an MMOS_CU_* env override, or a constructor argument)
-# may set a presence or pacing threshold below the default. A restrained
-# session must not be able to loosen the limits that restrain it.
+# BCU repair round 2 item 2 (ruling ESC 12), hardened by round 3 H2 (ruling
+# ESC 14): the 180 s DEFAULTS are the PRODUCTION floors IN CODE. Every value
+# arriving from the environment or from runtime.json is refused below them,
+# UNCONDITIONALLY — there is no test-mode flag any more, because any flag a
+# session can influence is a flag a session can forge (the old
+# ``"pytest" in sys.modules`` check was defeatable via
+# PYTHONPATH/sitecustomize). The only sub-default path left is an in-process
+# constructor argument (unit-test injection), and it still never goes below
+# the absolute 1 s floor. A subprocess test passes paths as launch
+# ARGUMENTS, never as environment variables.
 DEFAULT_LEASE_TTL = 120
 SEE_TIMEOUT_S = 30.0
 ACT_TIMEOUT_S = 15.0
@@ -398,36 +404,24 @@ def _finite_number(value, code, detail, refuse=False):
     return number
 
 
-def _test_mode():
-    """True only when THIS process is being run by the unit-test harness.
+def _config_source_floor(value, default, code, label):
+    """Refuse ANY configured threshold looser than the 180 s default.
 
-    The decisive flag is the loaded ``pytest`` module: the runner imports the
-    tests in-process, so only the harness can set it. ``MMOS_CU_TEST_MODE=1``
-    alone is NEVER enough — the MCP server's environment comes from the
-    session/provider configuration, so a session can export anything there
-    and must not be able to switch the 180 s floors off or point the state,
-    deny and runtime paths outside this layer.
-
-    A subprocess test that legitimately needs the harness flag starts its
-    child under the test framework itself (see
-    test_mmos_bcu_computer_use.TestTestModeIsHarnessOwned).
+    BCU R3 H2 (ruling ESC 14): UNCONDITIONAL — no test-mode flag exists any
+    more. The R2 ``"pytest" in sys.modules`` check was forgeable (a session
+    can load pytest into the server process via PYTHONPATH/sitecustomize),
+    and any flag reachable from the environment is a flag a session can set.
+    The floors hold IN CODE for every value arriving from the environment or
+    from runtime.json. Unit tests use constructor injection (which never
+    reaches this check) plus a fake clock; a subprocess test passes paths as
+    launch ARGUMENTS (main() --state-dir/--runtime/--deny).
     """
-    return (os.environ.get("MMOS_CU_TEST_MODE") == "1"
-            and "pytest" in sys.modules)
-
-
-def _harness_only_floor(value, default, code, label):
-    """Refuse a threshold LOOSER than the 180 s default outside the harness.
-
-    BCU R2 item 2: the default IS the production floor. Only the in-process
-    test harness (``_test_mode``) may go lower, and never below the absolute
-    floor checked separately by the caller.
-    """
-    if value < default and not _test_mode():
+    if value < default:
         raise RefuseError(
             code,
-            "%s %r is looser than the %.0fs default; only the test harness "
-            "may lower it" % (label, value, default))
+            "%s %r is looser than the %.0fs default; the default is the "
+            "production floor for every environment/runtime.json value"
+            % (label, value, default))
 
 
 def _inside_layer(path):
@@ -439,9 +433,13 @@ def _inside_layer(path):
 def _env_path_override(env_name, value):
     """Validate an MMOS_CU_* path override: it may only point INSIDE the
     layer's own folder (tools/mmos_computer_use/ or a subdir); anything
-    outside refuses at startup (M2). MMOS_CU_TEST_MODE=1 is the documented
-    test-only escape."""
-    if not _inside_layer(value) and not _test_mode():
+    outside refuses at startup (M2).
+
+    BCU R3 H2: UNCONDITIONAL — the former MMOS_CU_TEST_MODE escape is gone
+    (a session-settable flag can never loosen a rule). A harness subprocess
+    that needs scratch paths passes them as launch ARGUMENTS instead
+    (main() --state-dir/--runtime/--deny)."""
+    if not _inside_layer(value):
         raise RefuseError(
             "ENV_PATH_OUTSIDE_LAYER",
             "%s must point inside %s" % (env_name, os.path.realpath(HERE)))
@@ -497,9 +495,12 @@ def load_runtime(path):
             raise RefuseError("RUNTIME_%s" % key.upper(), repr(value))
         return value
 
+    # BCU R3 H2: runtime.json is a file source — its thresholds carry the
+    # UNCONDITIONAL 180 s production floor already at load time (the
+    # Presence/Pacer runtime-dict paths re-check it independently).
     presence_min_idle = _number("presence_min_idle_seconds",
-                                MIN_IDLE_FLOOR_SECONDS)
-    pacing = _number("pacing_seconds", PACING_FLOOR_SECONDS)
+                                DEFAULT_MIN_IDLE_SECONDS)
+    pacing = _number("pacing_seconds", DEFAULT_PACING_SECONDS)
     paste_focus_ms = _number("paste_focus_timeout_ms", 0)
     paste_restore_ms = _number("paste_restore_delay_ms", 0)
     challenge_extra = data.get("challenge_patterns_extra")
@@ -648,9 +649,12 @@ class Presence:
 
     Threshold priority: explicit constructor argument > MMOS_CU_PRESENCE_MIN_IDLE
     env > runtime.json presence_min_idle_seconds > DEFAULT_MIN_IDLE_SECONDS
-    (180 s for ALL acts, slice and non-slice alike). Outside the test harness
-    180 s is a FLOOR: every lower value refuses at startup, whatever source it
-    came from (BCU R2 item 2).
+    (180 s for ALL acts, slice and non-slice alike).
+
+    BCU R3 H2: 180 s is an UNCONDITIONAL floor for every value arriving from
+    the environment or runtime.json — no flag switches it off. The only
+    sub-default path is an in-process constructor argument (unit-test
+    injection), and it never goes below the absolute 1 s floor.
     """
 
     def __init__(self, min_idle_seconds=None, ioreg_bin=None, runtime=None):
@@ -658,13 +662,13 @@ class Presence:
         runtime_value = runtime.get("presence_min_idle_seconds") \
             if isinstance(runtime, dict) else None
         if min_idle_seconds is not None:
+            # Constructor injection: the test path (H2). Not reachable from
+            # a session's environment or any file; still never below the
+            # absolute floor (a broken test must not disable the gate).
             self.min_idle = _finite_number(min_idle_seconds,
                                            "PRESENCE_MIN_IDLE_INVALID",
                                            repr(min_idle_seconds),
                                            refuse=True)
-            _harness_only_floor(self.min_idle, DEFAULT_MIN_IDLE_SECONDS,
-                                "PRESENCE_MIN_IDLE_STRICTER_ONLY",
-                                "min_idle_seconds")
             if self.min_idle < MIN_IDLE_FLOOR_SECONDS:
                 raise RefuseError(
                     "PRESENCE_MIN_IDLE_FLOOR",
@@ -675,27 +679,20 @@ class Presence:
                 raw, "PRESENCE_MIN_IDLE_INVALID",
                 "MMOS_CU_PRESENCE_MIN_IDLE %r is not a finite number" % raw,
                 refuse=True)
-            _harness_only_floor(self.min_idle, DEFAULT_MIN_IDLE_SECONDS,
-                                "PRESENCE_MIN_IDLE_STRICTER_ONLY",
-                                "MMOS_CU_PRESENCE_MIN_IDLE %r" % raw)
-            if self.min_idle < MIN_IDLE_FLOOR_SECONDS:
-                raise RefuseError(
-                    "PRESENCE_MIN_IDLE_FLOOR",
-                    "MMOS_CU_PRESENCE_MIN_IDLE %r is below the %.0fs "
-                    "floor" % (raw, MIN_IDLE_FLOOR_SECONDS))
+            # UNCONDITIONAL: any env value below the 180 s default refuses
+            # (this also covers the absolute floor: 1 s < 180 s).
+            _config_source_floor(self.min_idle, DEFAULT_MIN_IDLE_SECONDS,
+                                 "PRESENCE_MIN_IDLE_STRICTER_ONLY",
+                                 "MMOS_CU_PRESENCE_MIN_IDLE %r" % raw)
         elif runtime_value is not None:
             self.min_idle = _finite_number(
                 runtime_value, "PRESENCE_MIN_IDLE_INVALID",
                 repr(runtime_value), refuse=True)
-            _harness_only_floor(self.min_idle, DEFAULT_MIN_IDLE_SECONDS,
-                                "PRESENCE_MIN_IDLE_STRICTER_ONLY",
-                                "runtime presence_min_idle_seconds %r"
-                                % (runtime_value,))
-            if self.min_idle < MIN_IDLE_FLOOR_SECONDS:
-                raise RefuseError(
-                    "PRESENCE_MIN_IDLE_FLOOR",
-                    "runtime presence_min_idle_seconds %r is below the "
-                    "%.0fs floor" % (runtime_value, MIN_IDLE_FLOOR_SECONDS))
+            # UNCONDITIONAL for runtime.json values (H2).
+            _config_source_floor(self.min_idle, DEFAULT_MIN_IDLE_SECONDS,
+                                 "PRESENCE_MIN_IDLE_STRICTER_ONLY",
+                                 "runtime presence_min_idle_seconds %r"
+                                 % (runtime_value,))
         else:
             self.min_idle = DEFAULT_MIN_IDLE_SECONDS
         self.ioreg_bin = ioreg_bin or "/usr/sbin/ioreg"
@@ -1116,11 +1113,12 @@ class Pacer:
     The last dispatch time for a key is persisted in pacing.json under the
     state dir; a second act on the SAME key inside the configured interval
     is refused with PACING_WAIT (seconds remaining). The interval defaults
-    to 180 s (also the production floor outside the test harness); priority:
-    explicit constructor argument > MMOS_CU_PACING_SECONDS env >
-    runtime.json pacing_seconds > DEFAULT_PACING_SECONDS. One worker at a
-    time is already guaranteed by the lease; pacing additionally spaces
-    repeated acts on the same target.
+    to 180 s — an UNCONDITIONAL floor for every environment/runtime.json
+    value (BCU R3 H2); priority: explicit constructor argument (the test
+    injection path) > MMOS_CU_PACING_SECONDS env > runtime.json
+    pacing_seconds > DEFAULT_PACING_SECONDS. One worker at a time is
+    already guaranteed by the lease; pacing additionally spaces repeated
+    acts on the same target.
     """
 
     def __init__(self, state_dir=None, seconds=None, runtime=None):
@@ -1133,11 +1131,11 @@ class Pacer:
         runtime_value = runtime.get("pacing_seconds") \
             if isinstance(runtime, dict) else None
         if seconds is not None:
+            # Constructor injection: the test path (H2). Not reachable from
+            # a session's environment or any file; still never below the
+            # absolute floor (a broken test must not disable the gate).
             self.seconds = _finite_number(seconds, "PACING_SECONDS_INVALID",
                                           repr(seconds), refuse=True)
-            _harness_only_floor(self.seconds, DEFAULT_PACING_SECONDS,
-                                "PACING_SECONDS_STRICTER_ONLY",
-                                "pacing seconds")
             if self.seconds < PACING_FLOOR_SECONDS:
                 raise RefuseError(
                     "PACING_SECONDS_FLOOR",
@@ -1148,27 +1146,20 @@ class Pacer:
                 raw, "PACING_SECONDS_INVALID",
                 "MMOS_CU_PACING_SECONDS %r is not a finite number" % raw,
                 refuse=True)
-            _harness_only_floor(self.seconds, DEFAULT_PACING_SECONDS,
-                                "PACING_SECONDS_STRICTER_ONLY",
-                                "MMOS_CU_PACING_SECONDS %r" % raw)
-            if self.seconds < PACING_FLOOR_SECONDS:
-                raise RefuseError(
-                    "PACING_SECONDS_FLOOR",
-                    "MMOS_CU_PACING_SECONDS %r is below the %.0fs floor"
-                    % (raw, PACING_FLOOR_SECONDS))
+            # UNCONDITIONAL: any env value below the 180 s default refuses
+            # (this also covers the absolute floor: 1 s < 180 s).
+            _config_source_floor(self.seconds, DEFAULT_PACING_SECONDS,
+                                 "PACING_SECONDS_STRICTER_ONLY",
+                                 "MMOS_CU_PACING_SECONDS %r" % raw)
         elif runtime_value is not None:
             self.seconds = _finite_number(
                 runtime_value, "PACING_SECONDS_INVALID",
                 repr(runtime_value), refuse=True)
-            _harness_only_floor(self.seconds, DEFAULT_PACING_SECONDS,
-                                "PACING_SECONDS_STRICTER_ONLY",
-                                "runtime pacing_seconds %r"
-                                % (runtime_value,))
-            if self.seconds < PACING_FLOOR_SECONDS:
-                raise RefuseError(
-                    "PACING_SECONDS_FLOOR",
-                    "runtime pacing_seconds %r is below the %.0fs floor"
-                    % (runtime_value, PACING_FLOOR_SECONDS))
+            # UNCONDITIONAL for runtime.json values (H2).
+            _config_source_floor(self.seconds, DEFAULT_PACING_SECONDS,
+                                 "PACING_SECONDS_STRICTER_ONLY",
+                                 "runtime pacing_seconds %r"
+                                 % (runtime_value,))
         else:
             self.seconds = DEFAULT_PACING_SECONDS
 
@@ -3397,29 +3388,42 @@ def _text_result(payload, is_error=False):
 
 # ── MCP stdio server ─────────────────────────────────────────────────────────
 
-def build_context():
-    runtime = load_runtime(resolve_runtime_path())
-    deny_path = os.environ.get("MMOS_CU_DENY")
-    if deny_path:
-        deny_path = _env_path_override("MMOS_CU_DENY", deny_path)
-    else:
-        deny_path = os.path.join(HERE, "deny.json")
+def build_context(state_dir=None, runtime_path=None, deny_path=None):
+    """Assemble the production context.
+
+    BCU R3 H2: the optional arguments are LAUNCH-argument injection
+    (main() --state-dir/--runtime/--deny) — the only path-override
+    mechanism left, used by the harness round-trip test and an explicit
+    operator launch line. Environment variables still select only among
+    IN-LAYER paths (MMOS_CU_DENY/MMOS_CU_RUNTIME) and can never lower a
+    floor; nothing a session can set by environment or file loosens a rule.
+    """
+    runtime = load_runtime(runtime_path or resolve_runtime_path())
+    if deny_path is None:
+        deny_path = os.environ.get("MMOS_CU_DENY")
+        if deny_path:
+            deny_path = _env_path_override("MMOS_CU_DENY", deny_path)
+        else:
+            deny_path = os.path.join(HERE, "deny.json")
     deny = DenyList.load(deny_path)
-    lease = Lease()
+    lease = Lease(state_dir=state_dir)
     presence = Presence(runtime=runtime)
-    pacer = Pacer(runtime=runtime)
+    pacer = Pacer(state_dir=state_dir, runtime=runtime)
     adapter = PeekabooAdapter(runtime)
     vision = VisionClient()
     return ToolContext(runtime, deny, lease, presence, adapter, vision, pacer)
 
 
-def serve(stdin=None, stdout=None):
-    """MCP loop. Readable/writable streams are injectable for tests."""
+def serve(stdin=None, stdout=None, state_dir=None, runtime_path=None,
+          deny_path=None):
+    """MCP loop. Readable/writable streams are injectable for tests; the
+    path arguments are the launch-argument injection path (H2)."""
     stdin = stdin if stdin is not None else sys.stdin
     stdout = stdout if stdout is not None else sys.stdout
 
     try:
-        ctx = build_context()
+        ctx = build_context(state_dir=state_dir, runtime_path=runtime_path,
+                            deny_path=deny_path)
     except RefuseError as error:
         sys.stderr.write("%s: startup refused: %s\n" % (SERVER_NAME, error))
         return 1
@@ -3504,8 +3508,30 @@ def serve(stdin=None, stdout=None):
     return 0
 
 
-def main():
-    return serve()
+def main(argv=None):
+    """Entry point.
+
+    BCU R3 H2: launch ARGUMENTS (never environment variables) are the only
+    path-override mechanism. --state-dir/--runtime/--deny exist for the
+    harness round-trip test (which passes its scratch state path as an
+    argument) and for an explicit operator launch line; the 180 s floors and
+    the in-layer env-path rule hold unconditionally either way.
+    """
+    parser = argparse.ArgumentParser(
+        prog=SERVER_NAME,
+        description="Restrained computer-use MCP server (stdio).")
+    parser.add_argument("--state-dir", default=None,
+                        help="lease/pacing state folder (default: the "
+                             "built-in state folder)")
+    parser.add_argument("--runtime", default=None,
+                        help="runtime descriptor path (default: the pinned "
+                             "in-layer runtime.json / runtime.json.dev)")
+    parser.add_argument("--deny", default=None,
+                        help="deny-list path (default: the in-layer "
+                             "deny.json)")
+    args = parser.parse_args(argv)
+    return serve(state_dir=args.state_dir, runtime_path=args.runtime,
+                 deny_path=args.deny)
 
 
 if __name__ == "__main__":

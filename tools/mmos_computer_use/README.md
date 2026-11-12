@@ -65,8 +65,8 @@ Design summary:
      acquired TTL (it never silently resets to the default).
   2. a human-idle screen (`ioreg -c IOHIDSystem` HIDIdleTime >= threshold,
      default **180 s** for ALL acts, env `MMOS_CU_PRESENCE_MIN_IDLE` or
-     runtime.json `presence_min_idle_seconds`; both sources refuse values
-     below the 180 s default unless `MMOS_CU_TEST_MODE=1`), and
+     runtime.json `presence_min_idle_seconds`; both sources UNCONDITIONALLY
+     refuse values below the 180 s default — there is no test-mode flag), and
   3. the deny-list pass on the window identity read by the act's own fresh
      snapshot.
   A blocked act is a `NOT_APPLIED` receipt with cause `LEASE_NOT_HELD` or
@@ -147,7 +147,7 @@ Design summary:
     so an unleased caller gets `LEASE_NOT_HELD` and cannot read pacing state.
   - **Pacing identity.** A minimum interval (default **180 s**, env
     `MMOS_CU_PACING_SECONDS` or runtime.json `pacing_seconds`; env values
-    below the default refuse at startup unless `MMOS_CU_TEST_MODE=1`)
+    below the default UNCONDITIONALLY refuse at startup — no test-mode flag)
     between two input-delivering acts. The key is the M8 identity —
     `app:<owning app>|title:<NFC, casefolded title>` — NOT the window id,
     so closing and reopening the same app window does not reset the
@@ -201,25 +201,29 @@ pin, and serves MCP over stdio (newline-delimited JSON-RPC 2.0:
 |----------------------------|------------------------------------------------|
 | `MMOS_CU_RUNTIME`          | runtime.json path override (must be inside this tool's folder) |
 | `MMOS_CU_STATE_DIR`        | lease + pacing directory, default `<here>/state/` (must be inside this tool's folder) |
-| `MMOS_CU_PRESENCE_MIN_IDLE`| human-idle threshold seconds; default 180, values below it refuse unless `MMOS_CU_TEST_MODE=1` |
-| `MMOS_CU_PACING_SECONDS`   | minimum interval between input-delivering acts; default 180, values below it refuse unless `MMOS_CU_TEST_MODE=1` |
+| `MMOS_CU_PRESENCE_MIN_IDLE`| human-idle threshold seconds; default 180, values below it refuse UNCONDITIONALLY |
+| `MMOS_CU_PACING_SECONDS`   | minimum interval between input-delivering acts; default 180, values below it refuse UNCONDITIONALLY |
 | `MMOS_CU_DENY`             | deny.json path override (must be inside this tool's folder) |
-| `MMOS_CU_TEST_MODE`        | `1` = explicit test-only escape: permits sub-default thresholds and out-of-layer paths. Never set in production. |
 | `MMOS_CU_VISION_MODEL`     | vision model (default `minimax-m3.1-flash`)    |
 | `ANTHROPIC_BASE_URL`       | vision endpoint base URL (loopback only)       |
 | `ANTHROPIC_AUTH_TOKEN`     | vision token, read at call time only           |
 
 `MMOS_CU_STATE_DIR`, `MMOS_CU_DENY` and `MMOS_CU_RUNTIME` are layer-scoped:
 they must resolve inside `tools/mmos_computer_use/` (or a subdirectory).
-Anything outside refuses at startup unless `MMOS_CU_TEST_MODE=1`, so an
-environment change cannot silently move the lease, deny list or pinned
-binary out from under the layer.
+Anything outside refuses at startup UNCONDITIONALLY, so an environment
+change cannot silently move the lease, deny list or pinned binary out from
+under the layer. A harness subprocess that needs scratch paths passes them
+as server launch ARGUMENTS (`--state-dir`, `--runtime`, `--deny`), never as
+environment variables.
 
 runtime.json (schema `mmos.computer_use.runtime/v1`) additionally accepts the
 optional keys `presence_min_idle_seconds`, `pacing_seconds`,
 `paste_focus_timeout_ms`, `paste_restore_delay_ms` and
 `challenge_patterns_extra` (list of extra case-insensitive challenge
-patterns); a wrong-typed value refuses startup.
+patterns); a wrong-typed value refuses startup. The two threshold keys obey
+the same unconditional 180 s floor as their environment counterparts: a
+runtime.json value below the default refuses startup
+(`RUNTIME_PRESENCE_MIN_IDLE_SECONDS` / `RUNTIME_PACING_SECONDS`).
 
 ## Registration (MCP client config)
 

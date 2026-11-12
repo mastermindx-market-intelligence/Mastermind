@@ -2,10 +2,13 @@
 
 The CLI must be a thin transport over the same server dispatch: identical
 receipts, identical gates. These tests inject a fake context so no real
-peekaboo, screen, or network is touched. Run from the checkout root UNDER
-PYTEST (BCU R2 item 2: the server's test mode is "MMOS_CU_TEST_MODE=1 AND
-pytest loaded in-process"; make_ctx's 1 s thresholds refuse outside the
-harness):
+peekaboo, screen, or network is touched.
+
+BCU R3 H2: there is no test-mode flag any more. make_ctx's 1 s thresholds
+arrive by CONSTRUCTOR INJECTION (Presence(min_idle_seconds=...),
+Pacer(seconds=...)) — the only sub-default path — so this suite runs the
+same way in or outside pytest, and no environment variable can loosen a
+floor:
 
     python3 -m pytest tests/test_mmos_bcu_cli.py
 """
@@ -28,23 +31,6 @@ if CHECKOUT not in sys.path:
 import cli  # noqa: E402
 import server  # noqa: E402
 
-_SAVED_TEST_MODE = None
-
-
-def setUpModule():
-    # BCU R2 item 2: the harness escape for make_ctx's sub-default (1 s)
-    # thresholds. Meaningful only because this module runs inside pytest.
-    global _SAVED_TEST_MODE
-    _SAVED_TEST_MODE = os.environ.get("MMOS_CU_TEST_MODE")
-    os.environ["MMOS_CU_TEST_MODE"] = "1"
-
-
-def tearDownModule():
-    if _SAVED_TEST_MODE is None:
-        os.environ.pop("MMOS_CU_TEST_MODE", None)
-    else:
-        os.environ["MMOS_CU_TEST_MODE"] = _SAVED_TEST_MODE
-
 
 class FakeAdapter(object):
     def __init__(self):
@@ -64,18 +50,20 @@ _STATE_DIRS = []
 
 
 def make_ctx():
+    # H2: the runtime dict carries NO threshold keys — environment and
+    # runtime.json values are unconditionally floored at 180 s. The 1 s
+    # test thresholds arrive by constructor injection, the only
+    # sub-default path (the absolute 1 s floor still applies there).
     runtime = {
         "peekaboo_bin": "/bin/true",
         "peekaboo_sha256": "0" * 64,
-        "presence_min_idle_seconds": 1.0,
-        "pacing_seconds": 1.0,
     }
     state = tempfile.mkdtemp(prefix="mmos-cu-cli-state-")
     _STATE_DIRS.append(state)
     deny = server.DenyList.load(os.path.join(TOOL_DIR, "deny.json"))
     lease = server.Lease(state_dir=state)
-    presence = server.Presence(runtime=runtime)
-    pacer = server.Pacer(state_dir=state, runtime=runtime)
+    presence = server.Presence(min_idle_seconds=1.0)
+    pacer = server.Pacer(state_dir=state, seconds=1.0)
     adapter = FakeAdapter()
     vision = server.VisionClient()
     return server.ToolContext(runtime, deny, lease, presence, adapter,

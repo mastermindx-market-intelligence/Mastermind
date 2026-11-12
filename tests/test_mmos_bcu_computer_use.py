@@ -5,10 +5,15 @@ Pure unit tests: no screen access, no real peekaboo interaction, no network
 beyond an in-process fake HTTP server. The peekaboo adapter is exercised
 against a fake peekaboo shell script in a temp dir.
 
-Run from the checkout root UNDER PYTEST (BCU R2 item 2: the server's test
-mode is "MMOS_CU_TEST_MODE=1 AND pytest loaded in-process", so sub-default
-thresholds refuse when this file is run by a plain unittest loader):
+Run from the checkout root:
     python3 -m pytest tests/test_mmos_bcu_computer_use.py
+
+BCU R3 H2: the server has NO test-mode flag any more — the 180 s floors are
+unconditional in code for every environment/runtime.json value. Sub-default
+thresholds in these tests come from constructor injection (Presence/
+Pacer/_StubPresence arguments), and the subprocess round trip passes its
+scratch paths as server launch ARGUMENTS (--state-dir/--runtime/--deny),
+never as environment variables.
 """
 
 import base64
@@ -430,14 +435,9 @@ class TestPresenceParser(unittest.TestCase):
         self.assertIsNone(mmos.parse_ioreg_idle(""))
 
     def test_active_below_threshold(self):
-        # BCU R2 item 2: only the in-process harness may set a sub-180 s
-        # threshold (the marker alone is never enough — pytest must also be
-        # the running framework, as it is here).
-        os.environ["MMOS_CU_TEST_MODE"] = "1"
-        try:
-            presence = mmos.Presence(min_idle_seconds=8.0)
-        finally:
-            os.environ.pop("MMOS_CU_TEST_MODE", None)
+        # BCU R3 H2: sub-180 s thresholds come from constructor injection
+        # (the in-process test path); no env marker exists or is needed.
+        presence = mmos.Presence(min_idle_seconds=8.0)
         self.assertEqual(presence.min_idle, 8.0)
 
 
@@ -1189,25 +1189,23 @@ class TestMcpFraming(unittest.TestCase):
         with open(deny, "w") as handle:
             json.dump(mmos.DEFAULT_DENY, handle)
         self.env = dict(os.environ)
+        # BCU R3 H2: NO MMOS_CU_* path/threshold env for the child — a
+        # subprocess test passes its scratch paths as launch ARGUMENTS. The
+        # only env the child gets is the fake-peekaboo harness plumbing.
+        for key in ("MMOS_CU_TEST_MODE", "MMOS_CU_RUNTIME",
+                    "MMOS_CU_STATE_DIR", "MMOS_CU_DENY",
+                    "MMOS_CU_PRESENCE_MIN_IDLE", "MMOS_CU_PACING_SECONDS"):
+            self.env.pop(key, None)
         self.env.update({
-            "MMOS_CU_TEST_MODE": "1",  # documented test-only env escape (M2)
-            "MMOS_CU_RUNTIME": write_runtime(self.tmp, bin_path),
-            "MMOS_CU_STATE_DIR": os.path.join(self.tmp, "state"),
-            "MMOS_CU_DENY": deny,
             "FAKE_PEEKABOO_LOG": log,
             "FAKE_PEEKABOO_IDENTITY": IDENTITY_TEXTEDIT,
         })
-        # BCU R2 item 2: the test harness is only in force when pytest itself
-        # is loaded in the process. This round trip runs the server as a real
-        # child, so the child imports pytest before executing server.py —
-        # MMOS_CU_TEST_MODE=1 alone is deliberately not enough.
         server_py = os.path.join(TOOL_DIR, "server.py")
-        bootstrap = (
-            "import pytest, sys\n"
-            "__file__ = sys.argv[1]\n"
-            "exec(compile(open(__file__).read(), __file__, 'exec'))\n")
         self.proc = subprocess.Popen(
-            [sys.executable, "-c", bootstrap, server_py],
+            [sys.executable, server_py,
+             "--runtime", write_runtime(self.tmp, bin_path),
+             "--state-dir", os.path.join(self.tmp, "state"),
+             "--deny", deny],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, env=self.env, text=True, bufsize=1)
 
@@ -1307,9 +1305,9 @@ class TestServeInProcess(unittest.TestCase):
                                  "MMOS_CU_DENY", "FAKE_PEEKABOO_LOG",
                                  "FAKE_PEEKABOO_IDENTITY",
                                  "MMOS_CU_TEST_MODE")}
-            os.environ["MMOS_CU_TEST_MODE"] = "1"  # test-only escape (M2)
-            os.environ["MMOS_CU_RUNTIME"] = write_runtime(tmp, bin_path)
-            os.environ["MMOS_CU_STATE_DIR"] = os.path.join(tmp, "state")
+            for key in ("MMOS_CU_TEST_MODE", "MMOS_CU_RUNTIME",
+                        "MMOS_CU_STATE_DIR", "MMOS_CU_DENY"):
+                os.environ.pop(key, None)  # BCU R3 H2: no env path escapes
             os.environ["FAKE_PEEKABOO_LOG"] = log
             requests = io.StringIO(json.dumps({
                 "id": 1, "method": "initialize",
@@ -1322,7 +1320,11 @@ class TestServeInProcess(unittest.TestCase):
                     "name": "mmos_computer_use", "arguments": {
                         "action": "windows", "app": "1Password"}}}) + "\n")
             captured = io.StringIO()
-            rc = mmos.serve(stdin=requests, stdout=captured)
+            # BCU R3 H2: scratch paths arrive as launch-argument injection,
+            # never as environment variables.
+            rc = mmos.serve(stdin=requests, stdout=captured,
+                            runtime_path=write_runtime(tmp, bin_path),
+                            state_dir=os.path.join(tmp, "state"))
             self.assertEqual(rc, 0)
             lines = [json.loads(line) for line in
                      captured.getvalue().splitlines() if line.strip()]
@@ -1366,20 +1368,36 @@ class TestSlicePresenceDefaults(unittest.TestCase):
         self.assertEqual(mmos.Presence().min_idle, 180.0)
 
     def test_env_override(self):
-        os.environ["MMOS_CU_TEST_MODE"] = "1"  # sub-default value (M2)
+        # BCU R3 H2: env may only make the gate STRICTER (>= 180 s).
+        os.environ["MMOS_CU_PRESENCE_MIN_IDLE"] = "300"
+        self.assertEqual(mmos.Presence().min_idle, 300.0)
         os.environ["MMOS_CU_PRESENCE_MIN_IDLE"] = "45"
-        self.assertEqual(mmos.Presence().min_idle, 45.0)
+        with self.assertRaises(mmos.RefuseError) as caught:
+            mmos.Presence()
+        self.assertEqual(caught.exception.code,
+                         "PRESENCE_MIN_IDLE_STRICTER_ONLY")
 
     def test_runtime_key_override(self):
-        os.environ["MMOS_CU_TEST_MODE"] = "1"  # harness escape (BCU R2 item 2)
-        presence = mmos.Presence(runtime={"presence_min_idle_seconds": 90})
-        self.assertEqual(presence.min_idle, 90.0)
+        # BCU R3 H2: runtime.json may only make the gate STRICTER.
+        presence = mmos.Presence(runtime={"presence_min_idle_seconds": 300})
+        self.assertEqual(presence.min_idle, 300.0)
+        with self.assertRaises(mmos.RefuseError) as caught:
+            mmos.Presence(runtime={"presence_min_idle_seconds": 90})
+        self.assertEqual(caught.exception.code,
+                         "PRESENCE_MIN_IDLE_STRICTER_ONLY")
 
     def test_env_beats_runtime_key(self):
-        os.environ["MMOS_CU_TEST_MODE"] = "1"  # sub-default value (M2)
-        os.environ["MMOS_CU_PRESENCE_MIN_IDLE"] = "45"
-        presence = mmos.Presence(runtime={"presence_min_idle_seconds": 90})
-        self.assertEqual(presence.min_idle, 45.0)
+        os.environ["MMOS_CU_PRESENCE_MIN_IDLE"] = "300"
+        presence = mmos.Presence(runtime={"presence_min_idle_seconds": 240})
+        self.assertEqual(presence.min_idle, 300.0)
+
+    def test_constructor_injection_is_the_sub_default_path(self):
+        # BCU R3 H2 (fail-first on 1ae3e29e6): the constructor argument is
+        # the ONLY sub-default path — no marker, no pytest check, in code.
+        self.assertEqual(mmos.Presence(min_idle_seconds=8.0).min_idle, 8.0)
+        with self.assertRaises(mmos.RefuseError) as caught:
+            mmos.Presence(min_idle_seconds=0.5)
+        self.assertEqual(caught.exception.code, "PRESENCE_MIN_IDLE_FLOOR")
 
     def test_runtime_rejects_bad_presence_value(self):
         tmp = tempfile.mkdtemp(prefix="mmos-cu-rt-")
@@ -1443,20 +1461,34 @@ class TestPacer(unittest.TestCase):
         pacer.check(43)  # a different window is unaffected
 
     def test_env_seconds(self):
-        os.environ["MMOS_CU_TEST_MODE"] = "1"  # sub-default value (M2)
+        # BCU R3 H2: env may only make pacing STRICTER (>= 180 s).
+        os.environ["MMOS_CU_PACING_SECONDS"] = "300"
+        self.assertEqual(self._pacer().seconds, 300.0)
         os.environ["MMOS_CU_PACING_SECONDS"] = "5"
-        self.assertEqual(self._pacer().seconds, 5.0)
+        with self.assertRaises(mmos.RefuseError) as caught:
+            self._pacer()
+        self.assertEqual(caught.exception.code, "PACING_SECONDS_STRICTER_ONLY")
 
     def test_runtime_seconds(self):
-        os.environ["MMOS_CU_TEST_MODE"] = "1"  # harness escape (BCU R2 item 2)
-        pacer = self._pacer(runtime={"pacing_seconds": 60})
-        self.assertEqual(pacer.seconds, 60.0)
+        # BCU R3 H2: runtime.json may only make pacing STRICTER.
+        pacer = self._pacer(runtime={"pacing_seconds": 300})
+        self.assertEqual(pacer.seconds, 300.0)
+        with self.assertRaises(mmos.RefuseError) as caught:
+            self._pacer(runtime={"pacing_seconds": 60})
+        self.assertEqual(caught.exception.code, "PACING_SECONDS_STRICTER_ONLY")
 
     def test_env_beats_runtime_seconds(self):
-        os.environ["MMOS_CU_TEST_MODE"] = "1"  # sub-default value (M2)
-        os.environ["MMOS_CU_PACING_SECONDS"] = "5"
-        pacer = self._pacer(runtime={"pacing_seconds": 60})
-        self.assertEqual(pacer.seconds, 5.0)
+        os.environ["MMOS_CU_PACING_SECONDS"] = "300"
+        pacer = self._pacer(runtime={"pacing_seconds": 240})
+        self.assertEqual(pacer.seconds, 300.0)
+
+    def test_constructor_injection_is_the_sub_default_path(self):
+        # BCU R3 H2: the constructor argument is the ONLY sub-default path;
+        # the absolute 1 s floor still holds even for it.
+        self.assertEqual(self._pacer(seconds=5.0).seconds, 5.0)
+        with self.assertRaises(mmos.RefuseError) as caught:
+            self._pacer(seconds=0.5)
+        self.assertEqual(caught.exception.code, "PACING_SECONDS_FLOOR")
 
     def test_default_is_180_seconds(self):
         self.assertEqual(mmos.DEFAULT_PACING_SECONDS, 180.0)
@@ -2422,13 +2454,15 @@ class TestRuntimeGateFloors(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_env_presence_floor_refused(self):
+        # BCU R3 H2: unconditional — a sub-default env value is refused with
+        # STRICTER_ONLY (the 180 s floor fires long before the 1 s floor).
         saved = os.environ.pop("MMOS_CU_PRESENCE_MIN_IDLE", None)
         try:
-            os.environ["MMOS_CU_TEST_MODE"] = "1"  # reach the floor check
             os.environ["MMOS_CU_PRESENCE_MIN_IDLE"] = "0.5"
             with self.assertRaises(mmos.RefuseError) as caught:
                 mmos.Presence()
-            self.assertEqual(caught.exception.code, "PRESENCE_MIN_IDLE_FLOOR")
+            self.assertEqual(caught.exception.code,
+                             "PRESENCE_MIN_IDLE_STRICTER_ONLY")
         finally:
             if saved is None:
                 os.environ.pop("MMOS_CU_PRESENCE_MIN_IDLE", None)
@@ -2438,11 +2472,11 @@ class TestRuntimeGateFloors(unittest.TestCase):
     def test_env_pacing_floor_refused(self):
         saved = os.environ.pop("MMOS_CU_PACING_SECONDS", None)
         try:
-            os.environ["MMOS_CU_TEST_MODE"] = "1"  # reach the floor check
             os.environ["MMOS_CU_PACING_SECONDS"] = "0.5"
             with self.assertRaises(mmos.RefuseError) as caught:
                 mmos.Pacer()
-            self.assertEqual(caught.exception.code, "PACING_SECONDS_FLOOR")
+            self.assertEqual(caught.exception.code,
+                             "PACING_SECONDS_STRICTER_ONLY")
         finally:
             if saved is None:
                 os.environ.pop("MMOS_CU_PACING_SECONDS", None)
@@ -2450,19 +2484,39 @@ class TestRuntimeGateFloors(unittest.TestCase):
                 os.environ["MMOS_CU_PACING_SECONDS"] = saved
 
     def test_runtime_dict_presence_floor_refused(self):
-        # BCU R2 item 2: without the harness marker the STRICTER_ONLY check
-        # fires first (TestSessionCannotLoosenFloors covers that); with the
-        # marker the sub-default value reaches the absolute 1 s floor.
-        os.environ["MMOS_CU_TEST_MODE"] = "1"  # reach the floor check
+        # BCU R3 H2: unconditional for the runtime-dict path too.
         with self.assertRaises(mmos.RefuseError) as caught:
             mmos.Presence(runtime={"presence_min_idle_seconds": 0.5})
-        self.assertEqual(caught.exception.code, "PRESENCE_MIN_IDLE_FLOOR")
+        self.assertEqual(caught.exception.code,
+                         "PRESENCE_MIN_IDLE_STRICTER_ONLY")
 
     def test_runtime_dict_pacing_floor_refused(self):
-        os.environ["MMOS_CU_TEST_MODE"] = "1"  # reach the floor check
         with self.assertRaises(mmos.RefuseError) as caught:
             mmos.Pacer(runtime={"pacing_seconds": 0.5})
-        self.assertEqual(caught.exception.code, "PACING_SECONDS_FLOOR")
+        self.assertEqual(caught.exception.code, "PACING_SECONDS_STRICTER_ONLY")
+
+    def test_runtime_file_below_default_refused(self):
+        # BCU R3 H2 (fail-first on 1ae3e29e6): a runtime.json FILE carrying a
+        # below-default-but-above-1s threshold (90/60) must refuse at load —
+        # the old code accepted anything >= 1.0 from the file.
+        tmp = tempfile.mkdtemp(prefix="mmos-cu-rtfile-")
+        try:
+            bin_path = make_fake_peekaboo(tmp)
+            for key, value, code in (
+                    ("presence_min_idle_seconds", 90,
+                     "RUNTIME_PRESENCE_MIN_IDLE_SECONDS"),
+                    ("pacing_seconds", 60, "RUNTIME_PACING_SECONDS")):
+                path = os.path.join(tmp, "runtime-%s.json" % key)
+                with open(path, "w") as handle:
+                    json.dump({"schema": mmos.RUNTIME_SCHEMA,
+                               "peekaboo_bin": bin_path,
+                               "peekaboo_sha256": mmos.sha256_file(bin_path),
+                               key: value}, handle)
+                with self.assertRaises(mmos.RefuseError) as caught:
+                    mmos.load_runtime(path)
+                self.assertEqual(caught.exception.code, code)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 class TestVisionEndpointScheme(unittest.TestCase):
@@ -2673,9 +2727,9 @@ class TestFiniteNumbers(unittest.TestCase):
 
 
 class TestEnvStrictness(unittest.TestCase):
-    """M2: gate env vars may only make gates STRICTER than the 180 s
-    defaults (unless MMOS_CU_TEST_MODE=1); state/deny/runtime env paths may
-    only point inside the layer's own folder."""
+    """M2 + BCU R3 H2: gate env vars may only make gates STRICTER than the
+    180 s defaults — UNCONDITIONALLY, with no test-mode escape; state/deny/
+    runtime env paths may only point inside the layer's own folder."""
 
     def setUp(self):
         self.saved = {k: os.environ.get(k) for k in
@@ -2695,10 +2749,19 @@ class TestEnvStrictness(unittest.TestCase):
         with self.assertRaises(mmos.RefuseError):
             mmos.Presence()
 
-    def test_presence_below_default_ok_in_test_mode(self):
+    def test_marker_and_pytest_do_not_unlock_env_floors(self):
+        # BCU R3 H2 (fail-first on 1ae3e29e6): the R2 "harness" was
+        # MMOS_CU_TEST_MODE=1 AND pytest-in-sys.modules — and THIS test runs
+        # inside pytest, i.e. in exactly the context the old escape treated
+        # as the harness (a session can forge it via PYTHONPATH/
+        # sitecustomize). The floor must hold anyway: no flag unlocks it.
         os.environ["MMOS_CU_PRESENCE_MIN_IDLE"] = "90"
         os.environ["MMOS_CU_TEST_MODE"] = "1"
-        self.assertEqual(mmos.Presence().min_idle, 90.0)
+        self.assertIn("pytest", sys.modules)  # the old decisive condition
+        with self.assertRaises(mmos.RefuseError) as caught:
+            mmos.Presence()
+        self.assertEqual(caught.exception.code,
+                         "PRESENCE_MIN_IDLE_STRICTER_ONLY")
 
     def test_pacing_below_default_refused(self):
         os.environ["MMOS_CU_PACING_SECONDS"] = "90"
@@ -4133,12 +4196,14 @@ class TestDenyBeforePixels(unittest.TestCase):
 
 
 class TestSessionCannotLoosenFloors(unittest.TestCase):
-    """BCU R2 item 2 (R-M4 / ESC 12): 180 s is a PRODUCTION FLOOR in code.
+    """BCU R2 item 2 (R-M4 / ESC 12) + BCU R3 H2 (ESC 14): 180 s is a
+    PRODUCTION FLOOR in code, UNCONDITIONALLY.
 
-    runtime.json, an MMOS_CU_* env value or a constructor argument may make a
-    threshold STRICTER, never looser. Only the unit-test harness may go below
-    it, and the harness is "MMOS_CU_TEST_MODE=1 AND pytest loaded in this
-    process" — an MCP session cannot make pytest load itself.
+    runtime.json or an MMOS_CU_* env value may make a threshold STRICTER,
+    never looser — no flag switches that off any more (the R2 pytest-module
+    check was forgeable). The only sub-default path is an in-process
+    constructor argument (unit-test injection), still bounded by the
+    absolute 1 s floor.
     """
 
     def setUp(self):
@@ -4178,11 +4243,14 @@ class TestSessionCannotLoosenFloors(unittest.TestCase):
         self.assertEqual(caught.exception.code,
                          "PRESENCE_MIN_IDLE_STRICTER_ONLY")
 
-    def test_presence_constructor_cannot_lower_the_floor(self):
+    def test_presence_constructor_is_the_injected_test_path(self):
+        # BCU R3 H2 (fail-first on 1ae3e29e6): constructor injection is the
+        # sanctioned sub-default path — the old code refused it without the
+        # forgeable flag. The absolute 1 s floor still holds for it.
+        self.assertEqual(mmos.Presence(min_idle_seconds=8.0).min_idle, 8.0)
         with self.assertRaises(mmos.RefuseError) as caught:
-            mmos.Presence(min_idle_seconds=8.0)
-        self.assertEqual(caught.exception.code,
-                         "PRESENCE_MIN_IDLE_STRICTER_ONLY")
+            mmos.Presence(min_idle_seconds=0.5)
+        self.assertEqual(caught.exception.code, "PRESENCE_MIN_IDLE_FLOOR")
 
     def test_pacer_runtime_cannot_lower_the_floor(self):
         with self.assertRaises(mmos.RefuseError) as caught:
@@ -4196,10 +4264,13 @@ class TestSessionCannotLoosenFloors(unittest.TestCase):
             mmos.Pacer(state_dir=self._state())
         self.assertEqual(caught.exception.code, "PACING_SECONDS_STRICTER_ONLY")
 
-    def test_pacer_constructor_cannot_lower_the_floor(self):
+    def test_pacer_constructor_is_the_injected_test_path(self):
+        # BCU R3 H2 (fail-first on 1ae3e29e6): see the Presence twin above.
+        self.assertEqual(
+            mmos.Pacer(state_dir=self._state(), seconds=10).seconds, 10.0)
         with self.assertRaises(mmos.RefuseError) as caught:
-            mmos.Pacer(state_dir=self._state(), seconds=10)
-        self.assertEqual(caught.exception.code, "PACING_SECONDS_STRICTER_ONLY")
+            mmos.Pacer(state_dir=self._state(), seconds=0.5)
+        self.assertEqual(caught.exception.code, "PACING_SECONDS_FLOOR")
 
     def test_stricter_values_are_still_accepted(self):
         self.assertEqual(mmos.Presence(min_idle_seconds=300).min_idle, 300.0)
@@ -4225,6 +4296,40 @@ class TestSessionCannotLoosenFloors(unittest.TestCase):
             [sys.executable, os.path.join(TOOL_DIR, "server.py")],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, env=env, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 1, proc.stderr)
+        self.assertIn("startup refused", proc.stderr)
+        self.assertIn("ENV_PATH_OUTSIDE_LAYER", proc.stderr)
+        self.assertNotIn("ready", proc.stderr)
+
+    def test_forged_harness_bootstrap_does_not_unlock_the_layer(self):
+        # BCU R3 H2 (fail-first on 1ae3e29e6): the FULL R2 forgery — a child
+        # that imports pytest before executing server.py (as a session could
+        # arrange via PYTHONPATH/sitecustomize) plus MMOS_CU_TEST_MODE=1 and
+        # out-of-layer env paths. The old harness check treated exactly this
+        # child as the test harness and started READY; the floors and the
+        # in-layer path rule must now hold in code, with no flag at all.
+        bin_path = make_fake_peekaboo(self.tmp)
+        runtime = write_runtime(self.tmp, bin_path)
+        env = dict(os.environ)
+        env.pop("MMOS_CU_PRESENCE_MIN_IDLE", None)
+        env.pop("MMOS_CU_PACING_SECONDS", None)
+        env.update({
+            "MMOS_CU_TEST_MODE": "1",
+            "MMOS_CU_RUNTIME": runtime,
+            "MMOS_CU_STATE_DIR": os.path.join(self.tmp, "state"),
+            "MMOS_CU_DENY": os.path.join(self.tmp, "deny.json"),
+        })
+        server_py = os.path.join(TOOL_DIR, "server.py")
+        bootstrap = (
+            "import pytest, sys\n"
+            "path = sys.argv[1]\n"
+            "sys.argv = [path]\n"
+            "__file__ = path\n"
+            "exec(compile(open(path).read(), path, 'exec'))\n")
+        proc = subprocess.run(
+            [sys.executable, "-c", bootstrap, server_py],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, env=env, text=True, timeout=60)
         self.assertEqual(proc.returncode, 1, proc.stderr)
         self.assertIn("startup refused", proc.stderr)
         self.assertIn("ENV_PATH_OUTSIDE_LAYER", proc.stderr)
