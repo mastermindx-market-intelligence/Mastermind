@@ -2062,3 +2062,24 @@ DeepSeek worker with the same eight points.
 - A stale empty lock in the shared git store was removed by the principal after a check that no process held it. Lanes still report such a file and stop.
 
 **Next, in order.** Unchanged from section 49.
+
+## 52. Amendment, 2026-11-12 17:33 UTC: bridge repair round merged; its install waits for a byte-exact settings change and a rehearsed undo
+
+**What changed.** The browser bridge's second repair round is merged as source at `2186a6684`. The pin migration now checks both targets before its first write. An unreadable profile registration refuses the install by profile name. Nothing is installed.
+
+**What the principal's read found.**
+
+- The new command that repoints the browser entry in the four provider settings files writes each whole file back in a different key order and encoding. The real files are not in that order, and the largest one is rewritten by running sessions every few minutes. A one-value change would rewrite all of it.
+- The undo for the installer step (moving the saved previous files back and removing the new release) was not in the rehearsal. The first install attempt had to be undone, so this undo is rehearsed before it is needed.
+
+**Class rules.**
+
+- A change to one value in a settings file that other programs own leaves every byte outside that value as it was. The test compares bytes.
+- An undo is part of the install list. It is rehearsed with a whole-tree comparison against the state before the step.
+
+**Rulings.**
+
+- One last small round on the bridge lane: the settings change replaces the one value in the raw bytes and refuses before any write when the old value is not found exactly once; a failed write is reported as what it is; the list states what a second run does after a partial result; the installer step's undo is rehearsed on the scratch copy with zero differences.
+- One final install list for the trunk commit that holds that round. The Chairman sitting request is sent only after the installer step has run on the real root.
+
+**Next, in order.** Unchanged from section 49.
