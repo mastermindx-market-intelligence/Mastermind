@@ -440,7 +440,6 @@ class _PackageSnapshot:
         self._fds: list[int] = []
         self._directories: list[tuple[int, int | None, str, str, os.stat_result, tuple[str, ...], bool]] = []
         self._lexical: list[tuple[int, int | None, str, str, os.stat_result, tuple[str, ...], bool]] = []
-        self._supplied_root_opened = False
 
     @staticmethod
     def _same_identity(left: os.stat_result, right: os.stat_result) -> bool:
@@ -577,7 +576,6 @@ class _PackageSnapshot:
                 return
             fd = next_fd
             self._lexical.append(self._directories[-1])
-        self._supplied_root_opened = True
         for top in (".agents", "plugins"):
             top_fd = self._open_directory(top, fd, top)
             if top_fd is not None:
@@ -612,8 +610,52 @@ class _PackageSnapshot:
             settle_link(entry, strict=True)
         for entry in self._lexical[:-1]:
             settle_link(entry, strict=False)
+        # Final bracket on the supplied root is identity-only: concurrent CI
+        # jobs legitimately create and remove entries beside the package
+        # inventory (tmpdir fixtures in sibling pytest shards), and the root's
+        # own listing/metadata carries no package-trust signal. Post-settle
+        # replacement of the inventory tops is instead detected by re-pinning
+        # .agents and plugins through O_NOFOLLOW descriptors below, so sibling
+        # churn never flips the verdict while an inventory swap still fails
+        # closed.
         if self._lexical:
-            settle_link(self._lexical[-1], strict=self._supplied_root_opened)
+            settle_link(self._lexical[-1], strict=False)
+        self._settle_repin_inventory_tops()
+
+    def _settle_repin_inventory_tops(self) -> None:
+        """Re-open the inventory tops no-follow and compare identity.
+
+        Detects a post-settle replacement of ``.agents`` or ``plugins``
+        (rename-aside plus symlink or directory swap) that the identity-only
+        root bracket above no longer compares listings for. Uses ``os.open``
+        descriptors rather than ``os.stat`` so the historical V13/V14
+        stat-sequence contract stays untouched. A captured top only exists
+        after capability admission opened it, so the descriptor flags and the
+        lexical root fd are guaranteed valid here; admission and symlink
+        refusals leave nothing captured and this pass is a no-op.
+        """
+        for top in (".agents", "plugins"):
+            captured = next(
+                (entry for entry in self._directories if entry[3] == top), None
+            )
+            if captured is None:
+                continue
+            fd, _parent_fd, _name, relative, initial, _names, _strict = captured
+            flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+            try:
+                reopened = os.open(top, flags, dir_fd=self._lexical[-1][0])
+                try:
+                    if not self._same_identity(initial, os.fstat(reopened)):
+                        self._filesystem_invalid(
+                            relative, "package directory changed during validation"
+                        )
+                finally:
+                    os.close(reopened)
+            except (OSError, TypeError):
+                # Removed or replaced inventory top: fail closed either way.
+                self._filesystem_invalid(
+                    relative, "package directory changed during validation"
+                )
 
     def close(self) -> None:
         for fd in reversed(self._fds):
