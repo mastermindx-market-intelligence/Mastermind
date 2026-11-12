@@ -82,6 +82,11 @@ evidence files in `~/.mastermind/mmos_evidence/rl-20261111/`.
 > exact name (incl. deferred ones loaded via ToolSearch);
 > `mcp__web_reader__webReader` still executes server-side with no hook
 > (W1) and is closed only by the router change (W4, real root).
+> The upstream web reader was offered to teammates on the morning of
+> 2026-11-11 and was not offered that evening; nothing in these limits
+> controls it, so check the offered tool list after any route change.
+> A single ABSENT read proves nothing: on 2026-11-12 one fresh teammate
+> session offered it while two others minutes apart did not.
 
 ## 1. How a teammate session actually launches
 
