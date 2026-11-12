@@ -2264,3 +2264,88 @@ class TestSpecLoading:
         path.write_text(json.dumps(spec))
         with pytest.raises(ValueError):
             PaperclipAskClient.from_spec(path)
+
+
+class TestDurableLedgerLines:
+    """GBL-5 micro 5a (principal, 11:45Z): a ledger line is ON DISK before
+    the writer that produced it returns.
+
+    Both ledger lines decide what this host must never do again — re-issue
+    a taken number (mint ledger) and hand the same answer out twice
+    (delivery ledger).  A line still sitting in a buffered stream when the
+    process dies cannot make that decision, so each write is followed by
+    flush → ``os.fsync`` → ``F_FULLFSYNC`` (macOS).  A sync that fails
+    refuses typed with the existing ``APPEND_LOCK_UNWRITABLE``: nothing is
+    posted and no answer is handed over.
+    """
+
+    @staticmethod
+    def _boom(*_args, **_kwargs):
+        raise OSError("sync refused (fixture)")
+
+    @staticmethod
+    def _answered(fake):
+        seed = client(fake)
+        row = envelope(ttl_seconds=86400 * 365 * 10)
+        ask_id = row["ask_id"]
+        assert seed.create_ask(row) is None
+        seed.append_ask_event(ask_id, {
+            "type": "answer", "answer_id": "gbm-" + "a" * 32,
+            "idempotency_key": "gb-ans-5a",
+            "text": "A harmless fixture answer."})
+        seed.append_ask_event(ask_id, {"type": "state", "state": "ANSWERED"})
+        return seed, ask_id
+
+    def test_a_failed_mint_sync_refuses_and_posts_nothing(self, fake,
+                                                          monkeypatch):
+        seed = client(fake)
+        row = envelope()
+        assert seed.create_ask(row) is None
+        comments = f"/api/issues/{fake.state.order[0]}/comments"
+        monkeypatch.setattr(pc, "_sync_ledger_line", self._boom,
+                            raising=False)
+
+        with pytest.raises(GblPaperclipError) as caught:
+            seed.append_ask_event(row["ask_id"],
+                                  {"type": "state", "state": "ANSWERED"})
+
+        assert caught.value.code == "APPEND_LOCK_UNWRITABLE"
+        assert count(fake, "POST", comments) == 0
+
+    def test_a_failed_delivery_sync_refuses_and_hands_nothing_over(
+            self, fake, monkeypatch):
+        seed, ask_id = self._answered(fake)
+        comments = f"/api/issues/{fake.state.order[0]}/comments"
+        before = count(fake, "POST", comments)
+        monkeypatch.setattr(pc, "_sync_ledger_line", self._boom,
+                            raising=False)
+
+        with pytest.raises(GblPaperclipError) as caught:
+            bridge_over(client(fake)).fetch_result(principal=PRINCIPAL,
+                                                   ask_id=ask_id)
+
+        assert caught.value.code == "APPEND_LOCK_UNWRITABLE"
+        # No CONSUMED post landed, so nothing was marked *or* handed over.
+        assert count(fake, "POST", comments) == before
+        assert not [event for event in seed.read_ask(ask_id)["events"]
+                    if event.get("type") == "state"
+                    and event.get("state") == "CONSUMED"]
+
+    def test_both_ledger_writes_sync_the_line(self, fake, monkeypatch):
+        original = getattr(pc, "_sync_ledger_line", None)
+        assert original is not None, "ledger writes must sync the line"
+        calls = []
+
+        def recording(handle):
+            calls.append(handle)
+            return original(handle)
+
+        monkeypatch.setattr(pc, "_sync_ledger_line", recording)
+        seed = client(fake)
+        row = envelope(ttl_seconds=86400 * 365 * 10)
+        ask_id = row["ask_id"]
+        assert seed.create_ask(row) is None
+        seed.append_ask_event(ask_id, {"type": "state", "state": "ANSWERED"})
+        seed.record_delivery(ask_id, "gbm-" + "a" * 32)
+
+        assert len(calls) == 2      # one mint line, one delivery line
