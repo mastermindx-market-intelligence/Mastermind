@@ -2,10 +2,9 @@
 # Platform: Darwin / arm64
 # Revalidation interpreter: CPython 3.12.10 on Darwin / arm64; isolated official pip-tools 7.6.1
 # Source: pyproject.toml (extra "dev")
-# pyproject.toml sha256: 4e63347b97982a51ce4bc733fba866506bec13f26ff4f1c6fd9f4b0b9eba1037
-# Recompiled after adding [tool.setuptools.package-data] for the host-bound GitHub App
-# plugin. No dependency or extra changed: recompiled with --reuse-hashes and without
-# --upgrade, so every package pin, extra and artifact hash below is unchanged.
+# pyproject.toml sha256: cd6ecdee0c2083ef3e1bb01f5945994ebc4d7888d070b81c2c84cc4dad4b6206
+# Recompiled for the claude-agent-sdk>=0.2.151 floor. The prior lock already pinned
+# 0.2.151; the complete package, annotation and hash body is byte-identical.
 # Regenerate: pip-compile --generate-hashes --reuse-hashes --quiet --extra dev --output-file requirements/gate-macos-arm64-py312.lock --no-emit-index-url --no-emit-trusted-host pyproject.toml
 # Official default PyPI index, PIP_CONFIG_FILE=/dev/null; no --no-index flag supplied.
 #
