@@ -33,7 +33,10 @@ IDENTIFIER = re.compile(r'[A-Za-z_][A-Za-z0-9_]{0,127}\Z')
 # .git-less, read-only Docker snapshot. They are cooperative diagnostics only.
 H1_GATE_PHASES = {
     'SOURCE_PREPARATION': 'public_source_archive',
+    'DOCKER_LOAD': 'h1-fixture-image.tar',
+    'DOCKER_TAG': 'mastermind-h1-noacl:fixture-cache',
     'DOCKER_BUILD': 'tests/h1_ci_fixture/Dockerfile',
+    'DOCKER_SAVE': 'h1-fixture-image.tar',
     'DOCKER_RUN': 'tests/h1_ci_fixture',
     'INITIALIZER_PYTEST': 'tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire',
     'INITIALIZER_POSITIVE_VALIDATOR': 'tests/h1_ci_fixture/require_positive.py',

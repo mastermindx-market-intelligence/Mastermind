@@ -50,7 +50,7 @@ full.
 
 | Verified tier | Pull request | Merge group (whole integrated candidate) |
 | --- | --- | --- |
-| FAST | `mode=fast`: `pr_fast` source/whitespace checks; shards and qualification job skipped | `mode=fast` (since #2129): the same `pr_fast` checks on the exact queue candidate; shards and qualification job skipped |
+| FAST | `mode=fast`: `pr_fast` source/whitespace checks; the web application typecheck also runs in `pr_fast` when the FAST diff itself touches `app/mastermind_os/` (reachable only via visual-asset-only diffs, which stay FAST while setting `needs_node=true`); shards and qualification job skipped | `mode=fast` (since #2129): the same `pr_fast` checks on the exact queue candidate; shards and qualification job skipped |
 | STANDARD | `mode=smoke`: `pr_fast` checks + bounded source-proximate Python tests; web app typecheck when `app/mastermind_os/` is touched | `mode=full`, reason `MERGE_GROUP_STANDARD_REQUIRES_FULL` (since #2439): all six pytest shards and the qualification job; never smoke |
 | CRITICAL | `mode=full`: all six pytest shards and the qualification job | `mode=full`: all six pytest shards and the qualification job |
 | HOLD (unverifiable) | `mode=full`, fail closed | `mode=full`, fail closed |

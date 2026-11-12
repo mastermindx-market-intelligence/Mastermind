@@ -113,18 +113,35 @@ def _load_cap_s1_generation():
     )
 
 
-def _load_cap_s1_profile():
-    registry = ExecutionCapabilityRegistry.load(CAP_S1_V4_FIXTURE, source_root=REPO_ROOT)
+def _load_cap_s1_profile(source_root: Path):
+    """Resolve the reviewed profile against a private, immutable package copy.
+
+    ``verify_capability_package_source`` also retains the ``source_root`` fd and
+    compares its complete stat identity at the terminal fence. Loading with
+    ``REPO_ROOT`` therefore races unrelated xdist workers which create/remove
+    repository-root fixture directories (for example
+    ``.gateway-owner-fixture-*`` from tests/test_os_gateway_publication_owner.py).
+    """
+    registry = ExecutionCapabilityRegistry.load(CAP_S1_V4_FIXTURE, source_root=source_root)
     return registry.resolve(CAP_S1_PROFILE_ID)
 
 
+def _copy_cap_s1_package(tmp_path: Path, generation, name: str) -> Path:
+    source_root = tmp_path / name
+    package_dest = source_root / generation.package_root
+    package_dest.parent.mkdir(parents=True, exist_ok=True)
+    if not package_dest.exists():
+        shutil.copytree(REPO_ROOT / generation.package_root, package_dest)
+    return source_root
+
+
 def _installed_release_origin_root(tmp_path: Path, generation) -> Path:
-    """Sol wave-3 review (5087139217, finding M6): ``INSTALLED_RELEASE``
-    now requires the origin root's own basename to equal the generation's
+    """Build the release-shaped origin from a private package copy.
+
+    Sol wave-3 review (5087139217, finding M6): ``INSTALLED_RELEASE``
+    requires the origin root's own basename to equal the generation's
     exact ``source_commit`` (the Executive installer's ``releases/<sha>``
-    layout) -- a bare checkout root no longer authenticates. This helper
-    builds that small, real (non-symlink) release-shaped origin by copying
-    only the already-reviewed package subtree, never the whole repository.
+    layout) -- a bare checkout root no longer authenticates.
     """
     release_root = tmp_path / "cap-s1-release-root" / generation.source_commit
     package_dest = release_root / generation.package_root
@@ -141,7 +158,8 @@ def _stage_cap_s1_binding(
     schema_supports_skill_input_path: bool = True,
 ) -> CodexSkillCanaryBinding:
     generation = _load_cap_s1_generation()
-    profile = _load_cap_s1_profile()
+    source_root = _copy_cap_s1_package(tmp_path, generation, "cap-s1-registry-source-root")
+    profile = _load_cap_s1_profile(source_root)
     attempt_root = tmp_path / "cap-s1-attempt-root"
     attempt_root.mkdir(parents=True, exist_ok=True)
     origin_root = _installed_release_origin_root(tmp_path, generation)

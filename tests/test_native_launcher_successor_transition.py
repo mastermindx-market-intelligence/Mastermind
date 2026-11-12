@@ -45,7 +45,8 @@ def source_owners(tmp_path_factory):
     # Build current source first, then restore the exact historical B11 target.
     # Later ordinary generations must not relabel that one finite transition.
     target = root / 'current'
-    with mock.patch.object(sys, 'argv', ['builder', '--output', str(target)]), \
+    with mock.patch.object(sys, 'argv', ['builder', '--output', str(target),
+                                         '--broker-busy-epoch']), \
             contextlib.redirect_stdout(io.StringIO()):
         builder.main()
     current_raw = (target / 'native-manifest.json').read_bytes()

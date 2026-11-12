@@ -293,7 +293,11 @@ def test_direct_validation_refuses_noncanonical_timestamp(observed_at: str) -> N
 @pytest.mark.parametrize(
     "event_id",
     [
-        str(uuid.uuid1()),
+        # Fixed literals, not live uuid1()/uuid5() calls: collection-time
+        # generation gives every pytest-xdist worker a different test id and
+        # aborts the shard at the cross-worker collection check. The ids stay
+        # noncanonical uuid1/uuid5 forms for the refusal assertion below.
+        "8643627a-dd9c-11f1-ae73-7ced8d53eb1e",
         str(uuid.uuid5(uuid.NAMESPACE_DNS, "mastermind")),
         str(FIXED_UUID).upper(),
         "not-a-uuid",

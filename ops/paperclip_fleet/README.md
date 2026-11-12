@@ -1,6 +1,6 @@
 # Installed Paperclip fleet baseline
 
-**Configuration verified; end-to-end readiness is held.** This directory records
+**Configuration verified; real task completion is still being qualified.** This directory records
 the existing MastermindX Paperclip company and its 13 Hermes agents on the M2
 host. It is a one-shot integration baseline, not a second fleet manager.
 
@@ -22,11 +22,11 @@ complete path has **not yet passed**.
 | Model provider | Existing `capacity-fabric` retained in all profiles; adapter provider `auto` leaves selection to Hermes |
 | Adapter model | Explicitly mirrors each existing profile: Engineering `claude-fable-5.1`, Marketing `deepseek-v4.1-flash-uncensored`, other 11 `glm-5.3` |
 | Adapter executable | Absolute `/Users/chriswong/.local/bin/hermes`, independent of launchd PATH |
-| Session context | `persistSession=false`; nonsecret current-run identity enabled through the native Hermes passthrough |
+| Session context | `persistSession=false`, `quiet=true` on all 13; nonsecret current-run identity uses native Hermes passthrough |
 | Memory | Existing `omh` in all 13 profiles; no new memory backend |
 | Same-profile concurrency | `maxConcurrentRuns=1`; existing timer heartbeats remain disabled |
 | Recovery | Existing hourly database backups, 30-day retention; fresh backup before cutover |
-| Experimental flags | Beta skills and isolated-workspace flags remain false |
+| Experimental flags | Beta skills false; explicitly approved isolated-workspace flag true; other flags preserved |
 
 The managed instructions require the existing Paperclip skill and current
 Mastermind source law, preserve live writers and task ownership, and return
@@ -123,13 +123,32 @@ the restart report and actual health before any retry.
 
 The fresh pre-cutover database backup was
 `paperclip-20261109-181411.sql.gz` (365,501 bytes) under the instance backup
-directory. Existing hourly/30-day policy was preserved. Restore into a separate
-test instance was not exercised; do not claim disaster-recovery proof.
+directory. Existing hourly/30-day policy was preserved. At 04:47:42 UTC the exact
+archive passed complete gzip reading and native restoration into a newly created
+empty sibling database on an isolated temporary cluster: 301 public tables,
+373 applied/journal migrations, zero pending migrations, zero invalid indexes
+and zero unvalidated constraints. All thirteen current agent identities and the
+existing company matched. One retained terminated agent is excluded by native
+list semantics. Temporary process, listener and directory were reclaimed;
+production health/listeners and the original archive hash were unchanged.
+
+This is database-only recovery proof. The local encrypted-secrets provider also
+requires the same `secrets/master.key`, and local objects live in `data/storage`.
+Both paths are included by the existing Time Machine configuration, but no
+completed backup covering them is available. The configured volume UUID
+`F9E6A707-17C6-40E6-A83D-42519F1D1A1D` is absent from connected disk inventory;
+its exact native lookup reports `Could not find disk`. Automatic Time Machine
+backups are disabled. Existing Hermes/Executive backup owners do not establish
+Paperclip file/key coverage. Recover the existing destination, or resolve a
+replacement through the existing backup owner, before claiming file/key restore.
+No key contents were read or copied during this diagnosis.
 
 Host AC sleep was already disabled and automatic restart after power loss was
 already enabled. Those power settings were inspected, not changed. The service
-is a user LaunchAgent; cold boot/login and physical-power-loss recovery have not
-been tested.
+is a user LaunchAgent in `gui/501`. FileVault is on and no automatic-login user
+is configured; availability therefore follows the existing unlock/login path.
+Cold boot/login and physical-power-loss recovery have not been tested. No login,
+encryption or service-scope settings were changed.
 
 Useful existing surfaces:
 
@@ -138,64 +157,82 @@ Useful existing surfaces:
 - native service definition:
   `~/Library/LaunchAgents/ing.paperclip.paperclipai.plist`
 
-## Original consumer test and exact hold
+## Original consumer test and continuation
 
 Preserve **MAS-2**, issue `4f8769dc-1c3f-41f7-bdec-08f137f551ef`, assigned to
-Product. Do not create a replacement task or discard its private workspace.
+Product. The original native skill-link mismatch was reconciled only for this
+operation's four links after complete inventory equivalence. Early runs then
+failed before prompt delivery on gateway timeout and workspace classification.
 
-The initial native skill-sync/runtime mismatch was reconciled only for the four
-links owned by this operation, after preimage and full-inventory equivalence.
-Run `5c5905a4-f2d6-4a79-a2b6-753e50e6523a` then spawned Hermes, proving that
-specific repair. It failed before model input with a gateway TimeoutError;
-later read-only gateway attachment succeeded. Neither fact proves a model run.
+The Chairman subsequently approved the instance-wide isolated-workspace setting
+and continuation. The supported API enabled it and saved the original task's
+explicit `project_primary` strategy. That approval boundary is resolved.
 
-The subsequent native retry
-`75c70f6e-58f3-444b-ae24-00fef35bbbc9` failed workspace validation. Its private
-non-Git attempt directory was inferred as a Git worktree. Current binding:
+A single native retry request
+`22a758a5-58e7-4dc7-a710-bbe626dba021` led, through Paperclip's native retry
+lifecycle, to run `c54dc873-bb58-465e-801b-98c352cf9e5b`. It reached real
+glm-5.3 execution, `skill_view` and terminal. Nonsecret run/task identity was
+present; temporary API/runtime-tool credentials were absent. Paperclip rejected
+the empty-bearer request before effect. Model output and memory-recall logs do
+not establish the required Fabric receipt or OMH marker.
 
-- workspace `d9acdda2-21f5-4ad3-a79e-718d4191be53`;
-- binding revision `2`;
-- preference `reuse_existing`;
-- isolated-workspace mode retained;
-- local environment `7addd6ae-551a-4193-977a-753501c54b77`.
+The run was cancelled once through its native endpoint at
+`2026-11-10T03:13:11.936Z`; the Hermes admission and session are terminal.
+No canary remains running. Do not retry until the required credential
+capability is installed and read back.
 
-A scoped fix to explicitly select `workspaceStrategy.type=project_primary`
-was preflighted, not executed. This release strips those fields while the native
-instance flag `enableIsolatedWorkspaces` is false.
+## Credential integration
 
-**Automatic approval review rejected enabling that instance-wide experimental
-flag**, because it affects future tasks and the shared fleet beyond this canary,
-and it required explicit authorization for that scope. Readback remained false.
-Do not retry through another surface, clear isolation, rehome the task or create
-a duplicate canary to evade the decision. The exact next approval is permission
-to enable that one instance-wide setting, then correct and qualify this same
-original workspace/task.
+[HERMES_GATEWAY_INTEGRATION.md](HERMES_GATEWAY_INTEGRATION.md) describes the
+implemented source candidate in
+[integrations/paperclip_hermes](../../integrations/paperclip_hermes/README.md).
+It extends existing local launch custody, plugin registration and finite
+admission. The Paperclip declaration stays at the plugin edge. It introduces
+no static run keys, daemon credential environment, provider account, memory
+backend or lifecycle queue.
 
-## Remaining harness integration
+The first release supports local/in-process finite execution and refuses
+unsupported managed/remote/background/delegated credential scope. Base-source
+qualification is superseded by 128 passing native tests on the exact installed
+source composition, preserving 85 existing changed/new source files and generated
+contract inputs. Six edge-contract and ten readiness fixtures pass separately.
+The full native source check still fails on the same 3 footgun and 13 Ruff
+findings as the installed baseline; the other 12 checks pass. Test success is
+not live activation, and known release holds remain binding.
 
-[HERMES_GATEWAY_INTEGRATION.md](HERMES_GATEWAY_INTEGRATION.md) records the exact
-credential/context compatibility findings and a design using Hermes' incumbent
-private launch-secret custody. It is **not an implemented or deployed patch**.
+The plugin matches the producer's 48-hour API JWT and independently expiring
+one-hour runtime-tools token. It excludes the persistent agent-identity private
+key from launch payload and child environments; identity signing is not provided.
 
-The inspected checkout is newer than the running gateway. Existing generic
-client-env filtering excludes the two Paperclip run secrets. No supported plugin
-hook was found that closes this contract, and a static agent key cannot replace
-the run JWT plus runtime-tool grant. Preserve the filter and original issuers.
+The current gateway identity and work inventory must be read from native
+lifecycle control. The 04:58:56 UTC observation found nineteen active work units:
+nine chats, four in-process crons and six managed units. All four crons were
+restart-unsafe and not wedged. The earlier CEO execution completed/delivered at
+04:58:19 UTC; do not replay it. Native restart waiting is not proof that current
+work has settled. No source overwrite, drain or
+Hermes restart has been performed by this operation. Preserve that work and use
+the incumbent guarded lifecycle when the concrete finite cutover is ready.
 
-After the original task's workspace is unblocked, qualify the actual gateway
-revision and real path before composing any required patch with user-owned
-source changes. Then require two distinct run identities, a Capacity Fabric
-receipt, a real permitted tool call, OMH continuity and durable same-issue
-return. Representative leadership/delegation, optional skill materialization
-and recovery during active work remain acceptance steps.
+After activation, require capability and enabled-plugin readback before adding
+the nonsecret required-binding marker to the native Paperclip adapter. Complete
+the original authenticated same-issue return, runtime-tool call, actual Fabric
+route/accounting and OMH write/read proof, followed by a second run/profile and
+leadership skill materialization.
 
-## Evidence and ownership
+## Source and evidence
 
-- [Post-restart fleet audit](evidence/2026-11-10-configuration-qualification.json)
-- [Mission and remaining task tree](../../docs/superpowers/plans/2026-11-09-paperclip-fleet-readiness.md)
-- [Gateway compatibility design](HERMES_GATEWAY_INTEGRATION.md)
+- Baseline PR #2399 merged at
+  `dee7a38a1e184e38cdcdd75889223d5b0ec27414` through native protected controls.
+- The exact merged operational helper was installed and hash-verified; the
+  follow-up source makes the already applied quiet=true repair reproducible.
+  The fleet application was not rerun.
+- [Original configuration evidence](evidence/2026-11-10-configuration-qualification.json)
+  remains a historical snapshot.
+- [Credential qualification evidence](evidence/2026-11-10-credential-qualification.json)
+  records exact source/check results and runtime activation limits.
+- [Credential implementation and qualification](../../integrations/paperclip_hermes/README.md)
+  records source scope, checks and remaining acceptance.
+- [Canonical operation plan](../../docs/superpowers/plans/2026-11-09-paperclip-fleet-readiness.md)
+  records the current task tree and reconciled effects.
 
-The audit intentionally contains only nonsecret inventory, hashes and bounded
-runtime facts. No private memories or credentials are included. Mastermind
-GitHub owns this evidence; Paperclip owns issue/run state; Hermes/OMH retain bot
-continuity; Capacity Fabric retains inference admission, routing and accounting.
+Full fleet readiness remains open until the actual consumer outcomes are proven.

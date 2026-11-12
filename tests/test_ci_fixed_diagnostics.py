@@ -249,18 +249,19 @@ def test_workflow_retains_job_limit_and_bounds_upload_opportunity():
     assert job['steps'].index(step)<job['steps'].index(upload)
 
 
-@pytest.mark.parametrize(('phase', 'expected_annotations'), [
-    ('SOURCE_PREPARATION', ['SOURCE_PREPARATION']),
-    ('DOCKER_BUILD', ['DOCKER_BUILD']),
-    ('DOCKER_RUN', ['DOCKER_RUN']),
-    ('INITIALIZER_PYTEST', ['INITIALIZER_PYTEST', 'DOCKER_RUN']),
-    ('INITIALIZER_POSITIVE_VALIDATOR', ['INITIALIZER_POSITIVE_VALIDATOR', 'DOCKER_RUN']),
-    ('PROVIDER_PYTEST', ['PROVIDER_PYTEST', 'DOCKER_RUN']),
-    ('PROVIDER_POSITIVE_VALIDATOR', ['PROVIDER_POSITIVE_VALIDATOR', 'DOCKER_RUN']),
-    ('REPORTER_UNAVAILABLE', []),
-    ('SUCCESS', []),
+@pytest.mark.parametrize(('cache_restored', 'phase'), [
+    (restored, phase)
+    for restored in ('true', 'false', '')
+    for phase in [
+        'SOURCE_PREPARATION',
+        *(('DOCKER_LOAD', 'DOCKER_TAG') if restored == 'true'
+          else ('DOCKER_BUILD', 'DOCKER_SAVE')),
+        'DOCKER_RUN', 'INITIALIZER_PYTEST', 'INITIALIZER_POSITIVE_VALIDATOR',
+        'PROVIDER_PYTEST', 'PROVIDER_POSITIVE_VALIDATOR',
+        'REPORTER_UNAVAILABLE', 'SUCCESS',
+    ]
 ])
-def test_h1_workflow_retains_closed_phase_and_original_exit(tmp_path, phase, expected_annotations):
+def test_h1_workflow_retains_closed_phase_and_original_exit(tmp_path, cache_restored, phase):
     import yaml
     from scripts.ci_pytest import _WorkflowYAMLLoader
 
@@ -289,11 +290,10 @@ elif command == 'tar':
     sys.stdin.buffer.read()
     sys.exit(0)
 elif command == 'docker':
-    stage = 'DOCKER_BUILD' if args[0] == 'build' else 'DOCKER_RUN'
-    if stage == 'DOCKER_RUN' and fault != stage:
-        assert args[-4:-1] == ['/bin/sh', '-eu', '-c']
-        script = args[-1].replace('/usr/bin/python3.12', shlex.quote(os.environ['H1_FIXTURE_PYTHON']))
-        sys.exit(subprocess.run(['/bin/sh', '-eu', '-c', script]).returncode)
+    verbs = {'build': 'DOCKER_BUILD', 'load': 'DOCKER_LOAD', 'tag': 'DOCKER_TAG',
+             'save': 'DOCKER_SAVE', 'run': 'DOCKER_RUN'}
+    assert args[0] in verbs
+    stage = verbs[args[0]]
 elif 'h1-gate-failure' in args:
     if fault == 'REPORTER_UNAVAILABLE':
         sys.exit(9)
@@ -311,9 +311,14 @@ else:
     sys.exit(88)
 with open(os.environ['H1_FIXTURE_TRACE'], 'a') as trace:
     trace.write(stage + '\\n')
-if fault == stage or fault == 'REPORTER_UNAVAILABLE' and stage == 'DOCKER_BUILD':
+acquisition = 'DOCKER_LOAD' if os.environ['H1_FIXTURE_IMAGE_RESTORED'] == 'true' else 'DOCKER_BUILD'
+if fault == stage or fault == 'REPORTER_UNAVAILABLE' and stage == acquisition:
     print('PRIVATE_CANARY command detail', file=sys.stderr)
     sys.exit(17)
+if command == 'docker' and args[0] == 'run':
+    assert args[-4:-1] == ['/bin/sh', '-eu', '-c']
+    script = args[-1].replace('/usr/bin/python3.12', shlex.quote(os.environ['H1_FIXTURE_PYTHON']))
+    sys.exit(subprocess.run(['/bin/sh', '-eu', '-c', script]).returncode)
 ''')
     shim.chmod(0o700)
     for name in ('git', 'tar', 'docker', 'python', 'python3.12'):
@@ -322,24 +327,28 @@ if fault == stage or fault == 'REPORTER_UNAVAILABLE' and stage == 'DOCKER_BUILD'
     result = subprocess.run(['/bin/bash', '-c', command], cwd=root, env={
         **os.environ, 'PATH': str(bin_dir) + os.pathsep + os.environ['PATH'],
         'RUNNER_TEMP': str(tmp_path), 'H1_FIXTURE_FAULT': phase,
+        'H1_FIXTURE_IMAGE_RESTORED': cache_restored,
         'H1_FIXTURE_TRACE': str(trace), 'H1_FIXTURE_PYTHON': str(bin_dir / 'python3.12'),
         'H1_FIXTURE_REPORTER': str(root / 'scripts/ci_fixed_diagnostics.py'),
     }, capture_output=True, text=True, timeout=15)
     annotations = [line for line in result.stdout.splitlines() if line.startswith('::error ')]
     assert all('PRIVATE_CANARY' not in line and str(tmp_path) not in line for line in annotations)
     facts = [json.loads(line.split('::', 2)[2]) for line in annotations]
+    inner_phases = ['INITIALIZER_PYTEST', 'INITIALIZER_POSITIVE_VALIDATOR',
+                    'PROVIDER_PYTEST', 'PROVIDER_POSITIVE_VALIDATOR']
+    expected_annotations = ([] if phase in ('REPORTER_UNAVAILABLE', 'SUCCESS')
+                            else [phase, 'DOCKER_RUN'] if phase in inner_phases else [phase])
     assert [fact['phase'] for fact in facts] == expected_annotations
     assert all(set(fact) == {'schema', 'phase', 'target', 'exit_code'} and fact['exit_code'] == 17
                and fact['schema'] == 'mastermind.ci.h1_gate_failure.v1' for fact in facts)
     assert result.returncode == (0 if phase == 'SUCCESS' else 17)
     executed = trace.read_text().splitlines()
-    phases = ['SOURCE_PREPARATION', 'DOCKER_BUILD', 'INITIALIZER_PYTEST',
-              'INITIALIZER_POSITIVE_VALIDATOR', 'PROVIDER_PYTEST', 'PROVIDER_POSITIVE_VALIDATOR']
-    stop = 'DOCKER_BUILD' if phase == 'REPORTER_UNAVAILABLE' else phase
+    cache_phases = (['DOCKER_LOAD', 'DOCKER_TAG'] if cache_restored == 'true'
+                    else ['DOCKER_BUILD', 'DOCKER_SAVE'])
+    phases = ['SOURCE_PREPARATION', *cache_phases, 'DOCKER_RUN', *inner_phases]
+    stop = cache_phases[0] if phase == 'REPORTER_UNAVAILABLE' else phase
     if phase == 'SUCCESS':
         expected_commands = phases
-    elif phase == 'DOCKER_RUN':
-        expected_commands = phases[:2] + ['DOCKER_RUN']
     else:
         expected_commands = phases[:phases.index(stop) + 1]
     assert executed == expected_commands

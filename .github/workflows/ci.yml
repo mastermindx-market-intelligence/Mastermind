@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   merge_group:
     types: [checks_requested]
   push:
@@ -13,7 +14,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # A title/body edit must not cancel a genuine source/base qualification.
+  # Unknown edited payloads remain on the ordinary, fully checked path.
+  group: ci-${{ github.workflow }}-${{ github.ref }}${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) && '-metadata' || '' }}
   cancel-in-progress: true
 
 jobs:
@@ -21,7 +24,7 @@ jobs:
   # A changing/unverifiable queue, CI, security or source-law diff runs full CI.
   pr_scope:
     name: PR test scope
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) }}
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -37,6 +40,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # Every runner needs the declared interpreter before protected classification.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -102,6 +106,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # Fast and smoke routes both execute Python before any optional tests.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -287,6 +292,12 @@ jobs:
     # Scope classification and the `test` fan-in execute no suite and stay on
     # `ubuntu-latest`.
     runs-on: ubuntu-24.04
+    # Each shard's resolved module list runs under pytest-xdist on the same
+    # hosted 4-vCPU runner: identical module set and verdicts, each module
+    # whole on one worker (--dist loadfile, see scripts/ci_pytest.py).
+    # Rollback: set to "1" (or "0") to restore today's exact serial argv.
+    env:
+      CI_PYTEST_WORKERS: "4"
     # Keep every prerequisite and the full 45-minute repository allowance.
     # Actual setup took ~23m; a successful test/upload then crossed job60 in
     # cleanup. Job75 + fan-in8 =83, within the retained 100-minute CI budget.
@@ -396,8 +407,29 @@ jobs:
       # Require the positive in an isolated non-root Linux account whose HOME
       # has no ACL, with real /usr/bin/python3.12, real process and observer.
       # This Docker environment has no provider/host credentials or network.
+      # Fixture image acquisition is outage-hardened: since 2026-11-11 the
+      # hosted runners intermittently cannot reach any Ubuntu archive during
+      # docker build (Ign … InRelease, then "E: Unable to locate package
+      # python3.12") while the same archives answer from outside GitHub. The
+      # image is a pure function of the pinned Dockerfile (no COPY, digest-
+      # pinned base), so restore the exact built bytes from the Actions cache
+      # keyed by that Dockerfile's hash. apt runs only on a genuine cache
+      # miss (first build, Dockerfile change or eviction) and then the
+      # original build command runs unchanged. Every event restores read-only;
+      # only a protected master push may save under this key, so a pull
+      # request can never write the cache that master, merge groups and other
+      # pull requests restore (and caches are immutable per key anyway).
+      - name: Restore cached H1 fixture image
+        if: matrix.index == 2
+        id: h1_fixture_image_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/h1-fixture-image.tar
+          key: docker-fixture-h1-${{ runner.arch }}-ubuntu-24.04-68ee22004a91-${{ hashFiles('tests/h1_ci_fixture/Dockerfile') }}
       - name: H1 required real Linux no-ACL positive journey
         if: matrix.index == 2
+        env:
+          H1_FIXTURE_IMAGE_RESTORED: ${{ steps.h1_fixture_image_cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
           h1_phase=SOURCE_PREPARATION
@@ -415,9 +447,23 @@ jobs:
           # checkout Git metadata and its authentication config stay outside.
           git archive --format=tar HEAD | tar -x -C "$H1_CI_SOURCE"
           chmod 0555 "$H1_CI_SOURCE"
-          h1_phase=DOCKER_BUILD
-          docker build --file tests/h1_ci_fixture/Dockerfile \
-            --tag mastermind-h1-noacl:${{ github.sha }} tests/h1_ci_fixture
+          # Identical image bytes either way: the cached tar is a docker save
+          # of an image built from this exact Dockerfile; the load restores
+          # its layer/config unchanged and only the local tag differs. The
+          # run below is byte-identical in both branches.
+          if [ "$H1_FIXTURE_IMAGE_RESTORED" = "true" ]; then
+            h1_phase=DOCKER_LOAD
+            docker load --input "$RUNNER_TEMP/h1-fixture-image.tar"
+            h1_phase=DOCKER_TAG
+            docker tag mastermind-h1-noacl:fixture-cache mastermind-h1-noacl:${{ github.sha }}
+          else
+            h1_phase=DOCKER_BUILD
+            docker build --file tests/h1_ci_fixture/Dockerfile \
+              --tag mastermind-h1-noacl:${{ github.sha }} \
+              --tag mastermind-h1-noacl:fixture-cache tests/h1_ci_fixture
+            h1_phase=DOCKER_SAVE
+            docker save --output "$RUNNER_TEMP/h1-fixture-image.tar" mastermind-h1-noacl:fixture-cache
+          fi
           h1_phase=DOCKER_RUN
           docker run --rm --network=none --cap-drop=ALL \
             --security-opt=no-new-privileges --read-only \
@@ -451,6 +497,17 @@ jobs:
               /usr/bin/python3.12 -I -B /repo/tests/h1_ci_fixture/require_provider_entry.py /tmp/h1-provider-entry.xml
               echo "::notice title=H1 isolated provider module fixture proof::all 23 exact nodes passed; zero skipped, failures or errors; CI fixture only"
             '
+
+      # Publish the freshly built fixture image only from protected master
+      # pushes: pull requests and merge groups restore read-only, and a failed
+      # journey step (above) suppresses this save. A duplicate-key save (cache
+      # seeded concurrently) only warns; it cannot fail the shard.
+      - name: Save H1 fixture image for protected runs
+        if: ${{ matrix.index == 2 && github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.h1_fixture_image_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/h1-fixture-image.tar
+          key: docker-fixture-h1-${{ runner.arch }}-ubuntu-24.04-68ee22004a91-${{ hashFiles('tests/h1_ci_fixture/Dockerfile') }}
 
       - name: Prepare fixed test diagnostics
         run: |
@@ -509,8 +566,21 @@ jobs:
 
       # A root-only finite owner must have positive proof, not skipped tests.
       # The container receives only tracked public source and disposable tmpfs.
+      # Same outage hardening as the H1 fixture above: the image is a pure
+      # function of the pinned Dockerfile, so restore the previously built
+      # bytes from the Actions cache and run apt only on a genuine cache miss.
+      # Pull requests restore read-only; only a protected master push saves.
+      - name: Restore cached application transport fixture image
+        if: matrix.index == 0
+        id: application_transport_image_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/application-transport-image.tar
+          key: docker-fixture-application-transport-${{ runner.arch }}-ubuntu-24.04-68ee22004a91-${{ hashFiles('tests/application_tunnel_ci/Dockerfile') }}
       - name: Verify closed application transport in isolated root fixtures
         if: matrix.index == 0
+        env:
+          APPLICATION_TRANSPORT_IMAGE_RESTORED: ${{ steps.application_transport_image_cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
           application_transport_source="$(mktemp -d "${RUNNER_TEMP}/application-transport-source.XXXXXX")"
@@ -518,14 +588,32 @@ jobs:
           git archive --format=tar HEAD | tar -x -C "$application_transport_source"
           # The isolated root has no DAC override; expose only this public archive.
           chmod 0755 "$application_transport_source"
-          docker build --file tests/application_tunnel_ci/Dockerfile \
-            --tag mastermind-application-transport:${{ github.sha }} tests/application_tunnel_ci
+          # Identical image bytes either way (see the H1 fixture note above);
+          # the run below is byte-identical in both branches.
+          if [ "$APPLICATION_TRANSPORT_IMAGE_RESTORED" = "true" ]; then
+            docker load --input "$RUNNER_TEMP/application-transport-image.tar"
+            docker tag mastermind-application-transport:fixture-cache mastermind-application-transport:${{ github.sha }}
+          else
+            docker build --file tests/application_tunnel_ci/Dockerfile \
+              --tag mastermind-application-transport:${{ github.sha }} \
+              --tag mastermind-application-transport:fixture-cache tests/application_tunnel_ci
+            docker save --output "$RUNNER_TEMP/application-transport-image.tar" mastermind-application-transport:fixture-cache
+          fi
           docker run --rm --network=none --cap-drop=ALL \
             --security-opt=no-new-privileges --read-only \
             --tmpfs /tmp:rw,noexec,nosuid,nodev,mode=1777 \
             --tmpfs /fixture:rw,exec,nosuid,nodev,mode=0755 \
             --mount "type=bind,src=${application_transport_source},dst=/repo,readonly" \
             mastermind-application-transport:${{ github.sha }}
+
+      # Publish the freshly built fixture image only from protected master
+      # pushes, mirroring the H1 save gate above.
+      - name: Save application transport fixture image for protected runs
+        if: ${{ matrix.index == 0 && github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.application_transport_image_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/application-transport-image.tar
+          key: docker-fixture-application-transport-${{ runner.arch }}-ubuntu-24.04-68ee22004a91-${{ hashFiles('tests/application_tunnel_ci/Dockerfile') }}
 
       # Use a separate pinned owner fixture; keep the ordinary Macro vendor pin.
       # This executes before any full-suite reuse decision, including merge_group.
@@ -625,7 +713,7 @@ jobs:
             tests/integration/test_fabric_regional_portfolio_composition.py \
             tests/integration/test_fabric_chat_browser.py \
             ops/native_fabric/quota_continuity \
-            ops/native_fabric/experiential_proxy/gateway.py |
+            ops/native_fabric/experiential_proxy/gateway.py ops/native_fabric/experiential_proxy/anthropic_policy.py |
             tar -x -C "$brain_composition_root"
           mkdir -p "$brain_composition_root/vendor/macro"
           # Isolate synthetic owner configuration in a copy of the exact source.
@@ -679,7 +767,17 @@ jobs:
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
             -p test_fabric_text_cross_pool_auto.py -v
           python -m pip install --disable-pip-version-check playwright==1.62.0
-          python -m playwright install --with-deps chromium
+          # The hosted Ubuntu 24.04 image ships Chrome/Chromium and therefore
+          # the shared libraries playwright's chromium needs; only the browser
+          # binary itself comes from the Playwright CDN. Prefer the full apt
+          # dependency install, but an Ubuntu archive outage (observed
+          # 2026-11-11) must not block this gate when those libraries already
+          # exist on the image. Nothing is weakened: the browser test below
+          # still has to launch chromium for real, so a genuinely missing
+          # library fails this gate honestly.
+          python -m playwright install --with-deps chromium ||
+            { echo "::warning title=playwright apt dependencies unavailable::using preinstalled runner image libraries";
+              python -m playwright install chromium; }
           PYTHONPATH="$brain_composition_root" python -m unittest discover -s tests/integration \
             -p test_fabric_chat_browser.py -v
 
@@ -700,7 +798,12 @@ jobs:
         # runner loss can still prevent artifact delivery. No exit is inferred
         # from a final module summary; fixed lifecycle evidence is separate.
         timeout-minutes: 45
-        run: python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}
+        # Default fixtures must not be writable by group or other users.
+        # Preserve requested 0750/0755 modes; private fixtures request 0700/0600.
+        # Runtime ownership checks and existing file modes remain unchanged.
+        run: |
+          umask 022
+          python -m scripts.ci_parallel_shard --jobs 6 --index ${{ matrix.index }}
 
       - name: Upload fixed test diagnostics
         if: always()
@@ -720,9 +823,11 @@ jobs:
   # native merge_group candidates. Every skipped matrix requires a proven
   # exact integrated fast/smoke check; a missing or failed check stays red.
   test:
-    name: test
+    # Metadata-only edits publish no required test result, even a skipped one.
+    # Real source/base events retain the same name and strict always() fan-in.
+    name: ${{ (github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) && 'PR metadata edit' || 'test' }}
     needs: [pr_scope, pr_fast, pin_guards, qualification, pytest_shards]
-    if: ${{ always() }}
+    if: ${{ always() && !(github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.changes.base == null && (github.event.changes.title != null || github.event.changes.body != null)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:

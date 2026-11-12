@@ -1667,11 +1667,12 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # same AST; retain every path, membership and mutation refusal below.
     # The reviewed pure Memory-validator extraction also preserves that
     # anchor and the imports; only the full-source fingerprint changes.
+    # Capacity Fabric adds a read-only factory input outside the installed wrapper.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'dd09c1cfa20f75beee02dd9102356032bcfe6bdf813d55ab72451f1470fb35e1'):
+            'eb33b3f4982f8248515dd03e0842a58ade6e624628272945ca0c8d088f876bdf'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
