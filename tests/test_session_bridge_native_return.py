@@ -16,6 +16,7 @@ from control_plane.execution_return_projection import (
     project_execution_return,
     validate_execution_return,
 )
+from control_plane.remote_worker_transport import TransportEffect, TransportError
 from integrations.session_bridge.hermes_native_return import (
     HermesExecutionReturnDeliverer,
     HermesReturnDeliveryError,
@@ -83,7 +84,19 @@ class FakeNativeSession:
         self.error = error
         self.requests = []
 
-    async def request(self, binding, native_request):
+    def require_binding(self, binding):
+        pass
+
+    def require_submit(self, binding):
+        pass
+
+    async def request(self, binding, native_request, *, before_write=None):
+        if getattr(self.error, "code", None) == "binding_unavailable":
+            raise self.error
+        if native_request["operation"] == "submit":
+            if not callable(before_write):
+                raise TransportError("before_write_required", TransportEffect.NO_EFFECT)
+            before_write("submit", json.loads(json.dumps(native_request)))
         self.requests.append({"binding": binding, "native_request": native_request})
         if self.error is not None:
             raise self.error
@@ -177,7 +190,7 @@ def test_clean_refusal_receipt_and_terminal_redelivery():
     assert len(transport.sends) == 1
 
 
-def test_arbitrary_exception_is_a_clean_refusal_with_generic_code():
+def test_untyped_exception_is_unknown_without_proof_of_no_effect():
     class ExplodingTransport(FakeTransport):
         async def send(self, **kwargs):
             await super().send(**kwargs)
@@ -185,8 +198,8 @@ def test_arbitrary_exception_is_a_clean_refusal_with_generic_code():
 
     transport = ExplodingTransport()
     receipt = run(HermesExecutionReturnDeliverer(transport).deliver(record()))
-    assert receipt["state"] == "refused"
-    assert receipt["refusal_code"] == "TRANSPORT_REFUSED"
+    assert receipt["state"] == "unknown"
+    assert receipt["refusal_code"] is None
 
 
 def test_invalid_record_is_refused_before_any_send():
@@ -246,15 +259,23 @@ def native_target():
             "authority_epoch": 4, "revision": 9, "execution_generation": 2}
 
 
+def native_admission(reference="adm-42"):
+    return {"admission_id": reference, "status": "queued", "sequence": 1,
+            "ref": {"profile_id": "engineering", "session_id": CONVERSATION},
+            "authority_epoch": 4, "execution_generation": None, "outcome": None}
+
+
 def test_adapter_submits_the_closed_native_request_through_the_seam():
     session = FakeNativeSession(result={
         "schema": "mastermind.hermes_secretary_native_control/v1",
         "status": "ADMITTED",
-        "admission": {"admission_id": "adm-42", "status": "queued"},
+        "admission": native_admission(),
     })
     transport = SecretaryNativeSendTransport(
         session, native_binding(), target=native_target())
-    receipt = run(HermesExecutionReturnDeliverer(transport).deliver(record()))
+    originals = []
+    receipt = run(HermesExecutionReturnDeliverer(transport).deliver(
+        record(), before_write=lambda original: originals.append(original)))
     assert receipt["state"] == "delivered"
     assert receipt["transport_ref"] == "adm-42"
     assert len(session.requests) == 1
@@ -265,6 +286,8 @@ def test_adapter_submits_the_closed_native_request_through_the_seam():
     assert native_request["target"]["session_id"] == CONVERSATION
     assert native_request["submission_id"] == receipt["submission_id"]
     assert json.loads(native_request["text"])["schema"] == "mastermind.execution_return/v1"
+    assert originals[0]["request"] == native_request
+    assert originals[0]["binding"] == binding
 
 
 def test_adapter_refuses_a_conversation_mismatch_before_dispatch():
@@ -286,22 +309,23 @@ def test_adapter_maps_native_status_law():
         session = FakeNativeSession(result=result, error=error)
         transport = SecretaryNativeSendTransport(
             session, native_binding(), target=native_target())
-        return run(HermesExecutionReturnDeliverer(transport).deliver(record()))
+        return run(HermesExecutionReturnDeliverer(transport).deliver(
+            record(), before_write=lambda original: None))
 
-    observed = receipt_for({"schema": "x", "status": "OBSERVED",
-                            "admission": {"admission_id": "adm-9", "status": "terminal"}})
+    observed = receipt_for({"schema": "mastermind.hermes_secretary_native_control/v1", "status": "OBSERVED",
+                            "admission": native_admission("adm-9")})
     assert observed["state"] == "delivered" and observed["transport_ref"] == "adm-9"
 
-    refused = receipt_for({"schema": "x", "status": "REFUSED", "reason": "SESSION_BUSY"})
+    refused = receipt_for({"schema": "mastermind.hermes_secretary_native_control/v1", "status": "REFUSED", "reason": "SESSION_BUSY"})
     assert refused["state"] == "refused" and refused["refusal_code"] == "SESSION_BUSY"
 
-    not_submitted = receipt_for({"schema": "x", "status": "NOT_SUBMITTED"})
+    not_submitted = receipt_for({"schema": "mastermind.hermes_secretary_native_control/v1", "status": "NOT_SUBMITTED"})
     assert not_submitted["state"] == "refused" and not_submitted["refusal_code"] == "NOT_SUBMITTED"
 
-    effect_unknown = receipt_for({"schema": "x", "status": "EFFECT_UNKNOWN"})
+    effect_unknown = receipt_for({"schema": "mastermind.hermes_secretary_native_control/v1", "status": "EFFECT_UNKNOWN"})
     assert effect_unknown["state"] == "unknown"
 
-    ambiguous_shape = receipt_for({"schema": "x", "status": "SOMETHING_ELSE"})
+    ambiguous_shape = receipt_for({"schema": "mastermind.hermes_secretary_native_control/v1", "status": "SOMETHING_ELSE"})
     assert ambiguous_shape["state"] == "unknown"  # post-dispatch unreadable ⇒ ambiguous
 
     class GuardError(Exception):

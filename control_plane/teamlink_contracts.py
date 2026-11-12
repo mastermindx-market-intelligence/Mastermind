@@ -15,7 +15,8 @@ Rules encoded here (design §1, §2, §4, §5):
   operation_key, body/context)[:32] — so a duplicate transport delivery of the
   same operation_key + content is recognised as the SAME message, never new
   work (mirrors ``decision_id_for_binding``);
-* same ``operation_key`` + changed content ⇒ REFUSED (``verify_duplicate``),
+* same ``operation_key`` + changed immutable envelope ⇒ REFUSED
+  (``verify_duplicate``), even when an old message ID is copied;
   exactly like ``submit_ceo_intent``;
 * ``delivery_state`` is monotonic over
   ``admitted → picked_up → executed → replied → consumed``; a regression is a
@@ -58,7 +59,8 @@ PACKET_ID_RE = re.compile(r"^tlp-[0-9a-f]{32}$")
 # Same grammar and 96-char ceiling as the Session Bridge operation_key.
 OPERATION_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,95}$")
 REQUEST_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
-ISO_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?([+-]\d{2}:?\d{2}|Z)")
+# The wire caps the hour at 23 even on runtimes that normalize 24:00 to tomorrow.
+ISO_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):\d{2}:\d{2}(\.\d+)?([+-]\d{2}:?\d{2}|Z)")
 
 # The WO-17 correlation keys, verbatim (executive_decision_ledger
 # JSONL_CORRELATION_KEYS).  TeamLink copies these from an admitted
@@ -145,13 +147,22 @@ def _iso(value: Any, label: str) -> str:
     text = _text(value, label, maximum=64, minimum=1)
     if ISO_PATTERN.fullmatch(text) is None:
         _invalid(f"INVALID_{label}")
+    offset = re.search(r"([+-])(\d{2}):?(\d{2})$", text)
+    if offset and (int(offset[2]) > 23 or int(offset[3]) > 59):
+        _invalid(f"INVALID_{label}")
+    try:
+        parsed = _parse_iso(text)
+        if parsed.utcoffset() is None:
+            _invalid(f"INVALID_{label}")
+    except (ValueError, OverflowError):
+        _invalid(f"INVALID_{label}")
     return text
 
 
 def _principal(value: Any, label: str) -> dict:
     row = _exact_keys(value, ("side", "id"),
                       ("side", "id", "thread_ref"), f"{label}_PRINCIPAL")
-    if row["side"] not in PRINCIPAL_SIDES:
+    if type(row["side"]) is not str or row["side"] not in PRINCIPAL_SIDES:
         _invalid(f"INVALID_{label}_PRINCIPAL_SIDE")
     _text(row["id"], f"{label}_PRINCIPAL_ID", maximum=PRINCIPAL_ID_MAX, minimum=1)
     if "thread_ref" in row:
@@ -207,9 +218,9 @@ def validate_team_link_message(value: Any) -> dict:
     _correlation(msg["correlation"])
     _principal(msg["from"], "FROM")
     _principal(msg["to"], "TO")
-    if msg["kind"] not in MESSAGE_KINDS:
+    if type(msg["kind"]) is not str or msg["kind"] not in MESSAGE_KINDS:
         _invalid("INVALID_KIND")
-    if msg["intent"] not in MESSAGE_INTENTS:
+    if type(msg["intent"]) is not str or msg["intent"] not in MESSAGE_INTENTS:
         _invalid("INVALID_INTENT")
     _text(msg["body"], "BODY", maximum=BODY_MAX_CHARS, minimum=1)
     refs = msg["context_refs"]
@@ -223,21 +234,46 @@ def validate_team_link_message(value: Any) -> dict:
             _invalid("INVALID_REPLY_TO")
     _integer(msg["hop_count"], "HOP_COUNT", minimum=0)
     _integer(msg["max_hops"], "MAX_HOPS", minimum=0, maximum=MAX_HOPS_CEILING)
-    if msg["delivery_state"] not in DELIVERY_STATES:
+    if type(msg["delivery_state"]) is not str or msg["delivery_state"] not in DELIVERY_STATES:
         _invalid("INVALID_DELIVERY_STATE")
     _iso(msg["expires_at"], "EXPIRES_AT")
     return msg
 
 
 def verify_duplicate(original: dict, repeat: dict) -> str:
-    """Idempotency law (design §1.3, §8): same operation_key + same content ⇒
-    'same_message' (the deterministic id matches); same key + changed content
-    ⇒ 'refused_content_changed'.  A different key is not a duplicate at all."""
-    if repeat.get("operation_key") != original.get("operation_key"):
+    """Compare validated immutable envelopes, never trust an ID-only match.
+
+    The v1 mint remains compatible with existing operations and Unicode vectors;
+    it is a content label, not sender authentication or destination authority.
+    Delivery state and hop count are owner observations, not request identity.
+    Equal identity does not authorize resetting either observation or replaying
+    an effect. The existing original-operation owner retains that responsibility.
+    """
+    first = _immutable_envelope(original)
+    second = _immutable_envelope(repeat)
+    if second["operation_key"] != first["operation_key"]:
         return "different_operation_key"
-    if repeat.get("message_id") == original.get("message_id"):
+    if first == second:
         return "same_message"
     return "refused_content_changed"
+
+
+def _principal_identity(principal: dict) -> dict:
+    return {"side": principal["side"], "id": principal["id"],
+            "thread_ref": principal.get("thread_ref")}
+
+
+def _immutable_envelope(value: dict) -> dict:
+    msg = validate_team_link_message(value)
+    return {
+        **{key: msg[key] for key in (
+            "schema", "message_id", "operation_key", "kind", "intent", "body",
+            "context_refs", "max_hops", "expires_at")},
+        "from": _principal_identity(msg["from"]),
+        "to": _principal_identity(msg["to"]),
+        "correlation": {key: msg["correlation"].get(key) for key in CORRELATION_KEYS},
+        "reply_to": msg.get("reply_to"),
+    }
 
 
 def advance_delivery(current: str, target: str) -> str:
@@ -273,10 +309,13 @@ def is_expired(record: dict, now: datetime | None = None) -> bool:
     """True when ``expires_at`` has passed (message dead / packet must be
     re-fetched, never acted on).  An unparseable timestamp is expired: an
     expiry a consumer cannot read provides no protection."""
-    moment = now or datetime.now(timezone.utc)
+    moment = datetime.now(timezone.utc) if now is None else now
     try:
-        return _parse_iso(record["expires_at"]) <= moment
-    except (KeyError, TypeError, ValueError, AttributeError):
+        if not isinstance(moment, datetime) or moment.utcoffset() is None:
+            return True
+        expiry = record["expires_at"]
+        return _parse_iso(_iso(expiry, "EXPIRES_AT")) <= moment
+    except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
         return True
 
 
@@ -285,8 +324,9 @@ def may_forward(message: dict, now: datetime | None = None) -> tuple[bool, str]:
     asked to forward a message whose hop_count would reach max_hops refuses
     (``hop_breach`` — ledger note + human ping, exchange stops).  An expired
     message is dead even below max_hops."""
-    if now is not None and is_expired(message, now):
+    if is_expired(message, now):
         return False, "expired"
+    validate_team_link_message(message)
     if message["hop_count"] + 1 >= message["max_hops"]:
         return False, "hop_breach"
     return True, ""
@@ -299,13 +339,18 @@ def requires_model_turn(message: dict) -> bool:
 
 
 def is_ping_pong_echo(sent: dict, received: dict) -> bool:
-    """Echo guard (design §5.5): a message whose (from, kind, intent,
-    reply_to) mirrors the one just sent to the same peer is dropped as a
-    ping-pong echo — record consumed, never reply."""
-    return (received["from"]["id"] == sent["to"]["id"]
-            and received["kind"] == sent["kind"]
-            and received["intent"] == sent["intent"]
-            and received.get("reply_to") == sent.get("reply_to"))
+    """Recognize an exact semantic mirror between the same two principals.
+
+    Another thread, side, operation, body or correlation is not an echo. The
+    sender-dependent v1 message ID changes on reversal and is excluded, as are
+    the two mutable transport observations. Hop limits still bound other loops.
+    """
+    first = _immutable_envelope(sent)
+    second = _immutable_envelope(received)
+    first.pop("message_id")
+    second.pop("message_id")
+    first["from"], first["to"] = first["to"], first["from"]
+    return first == second
 
 
 def followup_requires_new_key(settled_question: dict, follow_up: dict) -> bool:

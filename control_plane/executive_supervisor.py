@@ -2491,6 +2491,13 @@ class ExecutiveSupervisor:
                 commission.get("verified_local_path") if commission is not None else None
             ),
         }
+        from control_plane.t3_native_composition import is_t3_supervisor_adapter
+        if is_t3_supervisor_adapter(self.adapter, self.runtime):
+            # The native assistant answer has no CLI --output-schema channel.
+            # Bind the actual ordinary result contract into the original prompt.
+            # Native sealed-role admission remains subject to its existing gate.
+            packet["result_schema"] = worker_result_schema(
+                job_id=job.job_id, run_id=attempt.attempt_id, worker_id=attempt.worker_id)
         from control_plane.project_execution_admission import input_for_job, COMMISSION_PATH as PROJECT_EXECUTION_COMMISSION
         if commission is not None and commission.get("path") == PROJECT_EXECUTION_COMMISSION:
             project_input = input_for_job(self, job)
@@ -2759,6 +2766,11 @@ class ExecutiveSupervisor:
         any profile requesting one is refused before process launch.
         """
 
+        from control_plane.t3_native_composition import (
+            is_t3_supervisor_adapter, require_governed_native_execution,
+        )
+        if is_t3_supervisor_adapter(self.adapter, self.runtime):
+            require_governed_native_execution()
         profile_id = str(job.constraints.get("execution_profile_id") or "")
         paid = paid_supervisor.is_paid_adapter(self.adapter)
         if paid and profile_id != "fabric.paid.glm.sealed-input.v1":
@@ -3372,7 +3384,19 @@ class ExecutiveSupervisor:
             raise SupervisorError(f"Codex launch failed: {type(exc).__name__}: {exc}") from exc
 
     async def _collect_with_heartbeats(self, active: ActiveRun) -> CollectionReceipt:
-        task = asyncio.create_task(self.adapter.collect_result(active.process_ref))
+        from control_plane.t3_native_composition import (
+            is_t3_supervisor_adapter, require_governed_native_execution,
+        )
+        native = is_t3_supervisor_adapter(self.adapter, self.runtime)
+        if native:
+            # The current synchronous MCP owner is also not admitted to block
+            # this lease loop. Refuse before any wait/read or terminal effect.
+            require_governed_native_execution()
+        native_waiting = native
+        wait_ms = max(1, min(30_000, int(self.heartbeat_interval_seconds * 1000)))
+        task = asyncio.create_task(
+            self.adapter.wait_status(active.process_ref, timeout_ms=wait_ms)
+            if native else self.adapter.collect_result(active.process_ref))
         attempt = active.lease.attempt
         direct=_is_direct_native_job(self._job(attempt.job_id))
         cancel_entered=False
@@ -3382,13 +3406,29 @@ class ExecutiveSupervisor:
                     {task}, timeout=self.heartbeat_interval_seconds
                 )
                 if task in done:
-                    return task.result()
+                    if not native_waiting:
+                        return task.result()
+                    state = task.result()
+                    native_waiting = state not in {
+                        WorkerRunStatus.SUCCEEDED, WorkerRunStatus.FAILED,
+                        WorkerRunStatus.CANCELLED, WorkerRunStatus.TIMED_OUT,
+                        WorkerRunStatus.INVALID_RESULT,
+                    }
+                    task = asyncio.create_task(
+                        self.adapter.wait_status(active.process_ref, timeout_ms=wait_ms)
+                        if native_waiting else self.adapter.collect_result(active.process_ref))
                 job = self._job(attempt.job_id)
                 if job.status == JobStatus.CANCEL_REQUESTED:
-                    if not direct:
+                    if native:
+                        if not cancel_entered:
+                            cancel_entered = True
+                            original_cancel = self.adapter.cancel_report(attempt.attempt_id)
+                            if original_cancel is None or not original_cancel.requested:
+                                await self.adapter.cancel(active.process_ref, "durable native cancellation request")
+                    elif not direct:
                         await self.adapter.cancel(active.process_ref, "durable cancellation request")
                         return await task
-                    if not cancel_entered:
+                    elif not cancel_entered:
                         cancel_entered=True
                         first=self.runtime.reserve_direct_native_cancel_call(attempt.attempt_id,
                             fence_generation=attempt.fence_generation,lease_token=active.lease.lease_token)
@@ -3407,7 +3447,7 @@ class ExecutiveSupervisor:
                     lease_token=active.lease.lease_token,
                 )
         except Exception:
-            if not task.done() and direct and cancel_entered:
+            if not task.done() and (direct or native) and cancel_entered:
                 # The original cancel may have executed. Do not use generic
                 # ownership-loss cleanup to issue that same effect a second time.
                 task.cancel()
@@ -4366,9 +4406,22 @@ class ExecutiveSupervisor:
         fence = attempt.fence_generation
         token = active.lease.lease_token
         seal_path: Path | None = None
+        from control_plane.t3_native_composition import (
+            is_t3_supervisor_adapter, qualify_native_collection, retain_native_control_result,
+            require_governed_native_execution,
+        )
+        if is_t3_supervisor_adapter(self.adapter, self.runtime):
+            require_governed_native_execution()
+        native = (qualify_native_collection(self, active, receipt)
+                  if is_t3_supervisor_adapter(self.adapter, self.runtime) else None)
 
         async def ensure_sealed() -> Path:
             nonlocal seal_path
+            if seal_path is None and native is not None:
+                try:
+                    seal_path = retain_native_control_result(self, active, receipt, receipt_path)
+                except Exception as exc:
+                    raise TerminalAssignmentSealError("native Control result retention is unproven") from exc
             if seal_path is None and paid_supervisor.is_paid_adapter(self.adapter):
                 # Only Control input/result retention; remote cleanup is a
                 # separate original-owned paid receipt, never a fake UID sweep.
@@ -4418,7 +4471,7 @@ class ExecutiveSupervisor:
             return self.runtime.attempts.acknowledge_cancel(attempt.attempt_id,
                 fence_generation=fence,lease_token=token,direct_terminal=terminal)
 
-        if receipt.result.exit_code is None:
+        if native is None and receipt.result.exit_code is None:
             raise SupervisorError(
                 "recovered local worker has no truthful durable OS exit code; "
                 "the original Attempt remains quarantined"
@@ -4426,7 +4479,12 @@ class ExecutiveSupervisor:
         current_attempt = self.runtime.attempts.get_attempt(attempt.attempt_id)
         if current_attempt is None:
             raise SupervisorError("terminal Attempt disappeared before exit evidence")
-        if current_attempt.exit_code is None:
+        if native is not None:
+            if (current_attempt.exit_code is not None or current_attempt.pid is not None
+                    or current_attempt.pgid is not None
+                    or not self._process_ref_matches_attempt(active.process_ref, current_attempt)):
+                raise SupervisorError("native terminal evidence differs from the durable provider identity")
+        elif current_attempt.exit_code is None:
             self.runtime.attempts.record_process_exit(
                 attempt.attempt_id,
                 fence_generation=fence,
@@ -4447,7 +4505,8 @@ class ExecutiveSupervisor:
         await self._prepare_fabric_cleanup(active, operation="terminal")
         job = self._job(attempt.job_id)
         if job.status == JobStatus.CANCEL_REQUESTED:
-            await self._settle_recovered_terminal_owner(active)
+            if native is None:
+                await self._settle_recovered_terminal_owner(active)
             await ensure_sealed()
             cancelled = await acknowledge_cancel()
             return cancelled, (), None, await ensure_sealed()
@@ -4601,6 +4660,19 @@ class ExecutiveSupervisor:
         attempt = self.runtime.attempts.get_attempt(active.lease.attempt.attempt_id)
         if attempt is None:  # pragma: no cover - FK and transaction invariants
             raise SupervisorError("terminal attempt disappeared")
+        # The terminal transaction invokes the synchronous optional hook.
+        # In this async path finish_job owns the await, after durable seal
+        # and attempt readback, before returning to its original caller.
+        # No detached task, second return owner or background retry is added.
+        return_seam = getattr(self.runtime.attempts, "_execution_return_seam", None)
+        deliver_return = getattr(return_seam, "deliver_async", None)
+        if callable(deliver_return):
+            try:
+                await deliver_return(job=job, status=attempt.status)
+            except Exception:
+                # Return failure cannot undo the terminal seal. The installed
+                # wiring retains its original intent for qualified readback.
+                pass
         return SupervisorReceipt(
             job=job,
             attempt=attempt,

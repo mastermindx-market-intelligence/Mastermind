@@ -1,0 +1,145 @@
+{
+  "message": {
+    "schema": "TeamLinkMessage.v1",
+    "message_id": "tlm-00000000000000000000000000000000",
+    "operation_key": "estate-graph-original-1",
+    "correlation": {
+      "root_run_ref": null,
+      "immediate_parent_run_ref": null,
+      "logical_child_key": null,
+      "preview_id": null,
+      "decision_id": "decision-original",
+      "attempt_ref": null,
+      "fence_counter": 3,
+      "request_digest": "abababababababababababababababababababababababababababababababab"
+    },
+    "from": {
+      "side": "hermes_profile",
+      "id": "engineering",
+      "thread_ref": null
+    },
+    "to": {
+      "side": "t3_host_thread",
+      "id": "m2studio",
+      "thread_ref": "thread-original"
+    },
+    "kind": "instruction",
+    "intent": "actionable",
+    "body": "Return the scoped result to the original parent.",
+    "context_refs": [
+      "WS:ORIGINAL",
+      "source:one"
+    ],
+    "reply_to": null,
+    "hop_count": 0,
+    "max_hops": 3,
+    "delivery_state": "admitted",
+    "expires_at": "2099-11-09T18:00:00Z"
+  },
+  "immutableChanges": [
+    {
+      "path": "message_id",
+      "value": "tlm-11111111111111111111111111111111"
+    },
+    {
+      "path": "from.side",
+      "value": "t3_host_thread"
+    },
+    {
+      "path": "from.id",
+      "value": "product"
+    },
+    {
+      "path": "from.thread_ref",
+      "value": "other-parent"
+    },
+    {
+      "path": "to.side",
+      "value": "hermes_profile"
+    },
+    {
+      "path": "to.id",
+      "value": "another-host"
+    },
+    {
+      "path": "to.thread_ref",
+      "value": "another-thread"
+    },
+    {
+      "path": "correlation.root_run_ref",
+      "value": "changed-root_run_ref"
+    },
+    {
+      "path": "correlation.immediate_parent_run_ref",
+      "value": "changed-immediate_parent_run_ref"
+    },
+    {
+      "path": "correlation.logical_child_key",
+      "value": "changed-logical_child_key"
+    },
+    {
+      "path": "correlation.preview_id",
+      "value": "changed-preview_id"
+    },
+    {
+      "path": "correlation.decision_id",
+      "value": "changed-decision_id"
+    },
+    {
+      "path": "correlation.attempt_ref",
+      "value": "changed-attempt_ref"
+    },
+    {
+      "path": "correlation.fence_counter",
+      "value": 4
+    },
+    {
+      "path": "correlation.request_digest",
+      "value": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    {
+      "path": "kind",
+      "value": "question"
+    },
+    {
+      "path": "intent",
+      "value": "informational"
+    },
+    {
+      "path": "body",
+      "value": "Changed assignment"
+    },
+    {
+      "path": "context_refs",
+      "value": [
+        "source:one",
+        "WS:ORIGINAL"
+      ]
+    },
+    {
+      "path": "reply_to",
+      "value": "tlm-22222222222222222222222222222222"
+    },
+    {
+      "path": "max_hops",
+      "value": 4
+    },
+    {
+      "path": "expires_at",
+      "value": "2099-11-10T18:00:00Z"
+    }
+  ],
+  "invalidDates": [
+    "2026-02-30T12:00:00Z",
+    "2025-02-29T12:00:00Z",
+    "2026-13-01T12:00:00Z",
+    "2026-00-01T12:00:00Z",
+    "2026-11-09T24:00:00Z",
+    "2099-12-31T24:00:00.000-08:00",
+    "2026-11-09T12:60:00Z",
+    "2026-11-09T12:00:60Z",
+    "2026-11-09T12:00:00+24:00",
+    "2026-11-09T12:00:00+00:60",
+    "0000-01-01T12:00:00Z"
+  ]
+}

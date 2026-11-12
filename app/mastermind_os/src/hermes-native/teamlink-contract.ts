@@ -10,8 +10,13 @@
  * field names; UI adaptation happens in views, not in this contract.
  */
 export class TeamLinkContractError extends Error {
-  constructor(public code: string, public detail: string = "") {
+  code: string;
+  detail: string;
+
+  constructor(code: string, detail = "") {
     super(detail ? `${code}: ${detail}` : code);
+    this.code = code;
+    this.detail = detail;
   }
 }
 function invalid(code: string, detail = ""): never { throw new TeamLinkContractError(code, detail); }
@@ -115,8 +120,24 @@ function integer(value: unknown, label: string, minimum: number, maximum?: numbe
 }
 function iso(value: unknown, label: string): string {
   const s = text(value, label, 64, 1);
-  if (!isoPattern.test(s)) invalid(`INVALID_${label}`);
+  if (!validIso(s)) invalid(`INVALID_${label}`);
   return s;
+}
+
+// Date.parse normalizes impossible calendar days on some engines. Match the
+// Python contract before parsing so an invalid deadline cannot gain lifetime.
+function validIso(value: string): boolean {
+  if (value.length > 64 || !isoPattern.test(value)) return false;
+  const year = Number(value.slice(0, 4)), month = Number(value.slice(5, 7));
+  const day = Number(value.slice(8, 10));
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > days[month - 1]!
+      || Number(value.slice(11, 13)) > 23 || Number(value.slice(14, 16)) > 59
+      || Number(value.slice(17, 19)) > 59) return false;
+  const offset = value.match(/([+-])(\d{2}):?(\d{2})$/);
+  if (offset && (Number(offset[2]) > 23 || Number(offset[3]) > 59)) return false;
+  return Number.isFinite(Date.parse(value));
 }
 
 const principalSides = new Set(["hermes_profile", "t3_host_thread"]);
@@ -291,12 +312,41 @@ export async function mintMessageId(senderId: string, operationKey: string,
   return "tlm-" + hex.slice(0, 32);
 }
 
-/** Idempotency law (design §1.3): same operation_key + same deterministic id
- * ⇒ 'same_message'; same key + changed content ⇒ 'refused_content_changed'. */
+// Stable property order and optional/null normalization match Python's
+// immutable-envelope equality. Existing v1 message IDs stay unchanged: they
+// are content labels, not authentication or proof of destination authority.
+function principalIdentity(value: TeamLinkPrincipal): TeamLinkPrincipal {
+  return { side: value.side, id: value.id, thread_ref: value.thread_ref ?? null };
+}
+
+function immutableEnvelope(value: TeamLinkMessage) {
+  const msg = parseTeamLinkMessage(value);
+  return {
+    schema: msg.schema, message_id: msg.message_id, operation_key: msg.operation_key,
+    from: principalIdentity(msg.from), to: principalIdentity(msg.to),
+    correlation: {
+      root_run_ref: msg.correlation.root_run_ref ?? null,
+      immediate_parent_run_ref: msg.correlation.immediate_parent_run_ref ?? null,
+      logical_child_key: msg.correlation.logical_child_key ?? null,
+      preview_id: msg.correlation.preview_id ?? null,
+      decision_id: msg.correlation.decision_id ?? null,
+      attempt_ref: msg.correlation.attempt_ref ?? null,
+      fence_counter: msg.correlation.fence_counter ?? null,
+      request_digest: msg.correlation.request_digest ?? null,
+    },
+    kind: msg.kind, intent: msg.intent, body: msg.body, context_refs: msg.context_refs,
+    reply_to: msg.reply_to ?? null, max_hops: msg.max_hops, expires_at: msg.expires_at,
+  };
+}
+
+/** Compare complete immutable envelopes, even if the supplied ID is copied.
+ * Only hop_count/delivery_state are mutable observations. Equal identity does
+ * not authorize resetting those owner observations or replaying an effect. */
 export function verifyDuplicate(original: TeamLinkMessage, repeat: TeamLinkMessage):
     "same_message" | "refused_content_changed" | "different_operation_key" {
-  if (repeat.operation_key !== original.operation_key) return "different_operation_key";
-  return repeat.message_id === original.message_id ? "same_message" : "refused_content_changed";
+  const first = immutableEnvelope(original), second = immutableEnvelope(repeat);
+  if (second.operation_key !== first.operation_key) return "different_operation_key";
+  return JSON.stringify(first) === JSON.stringify(second) ? "same_message" : "refused_content_changed";
 }
 
 const deliveryRank = new Map(DELIVERY_CHAIN.map((state, index) => [state as string, index]));
@@ -322,7 +372,8 @@ export function advanceDelivery(current: string, target: string): string {
 /** True when expires_at has passed (message dead / packet must be re-fetched,
  * never acted on). An unreadable expiry provides no protection ⇒ expired. */
 export function isExpired(record: { expires_at?: unknown }, now: Date = new Date()): boolean {
-  if (typeof record.expires_at !== "string") return true;
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) return true;
+  if (typeof record.expires_at !== "string" || !validIso(record.expires_at)) return true;
   const moment = Date.parse(record.expires_at);
   return Number.isNaN(moment) ? true : moment <= now.getTime();
 }
@@ -331,7 +382,8 @@ export function isExpired(record: { expires_at?: unknown }, now: Date = new Date
  * whose hop_count would reach max_hops is refused (hop_breach). An expired
  * message is dead even below max_hops. */
 export function mayForward(message: TeamLinkMessage, now?: Date): [boolean, "hop_breach" | "expired" | ""] {
-  if (now !== undefined && isExpired(message, now)) return [false, "expired"];
+  if (isExpired(message, now)) return [false, "expired"];
+  parseTeamLinkMessage(message);
   return message.hop_count + 1 >= message.max_hops ? [false, "hop_breach"] : [true, ""];
 }
 
@@ -341,14 +393,14 @@ export function requiresModelTurn(message: TeamLinkMessage): boolean {
   return message.intent === "actionable";
 }
 
-/** Echo guard (design §5.5): a received message whose (from, kind, intent,
- * reply_to) mirrors the one just sent to the same peer is a ping-pong echo —
- * drop it, record consumed, never reply. */
+/** Exact semantic mirror with both full principals reversed. Independent
+ * operations, threads or content are not echoes. The sender-dependent ID and
+ * mutable transport observations are excluded; hop limits bound other loops. */
 export function isPingPongEcho(sent: TeamLinkMessage, received: TeamLinkMessage): boolean {
-  return received.from.id === sent.to.id
-    && received.kind === sent.kind
-    && received.intent === sent.intent
-    && received.reply_to === sent.reply_to;
+  const { message_id: _sentId, ...first } = immutableEnvelope(sent);
+  const { message_id: _receivedId, ...second } = immutableEnvelope(received);
+  [first.from, first.to] = [first.to, first.from];
+  return JSON.stringify(first) === JSON.stringify(second);
 }
 
 /** Answers settle (design §5.4): after question → answer the subject is

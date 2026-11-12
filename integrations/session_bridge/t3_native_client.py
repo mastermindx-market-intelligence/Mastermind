@@ -14,6 +14,11 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
+from common.t3_native_read_contract import (
+    NativeReadConflict, NativeReadUnavailable, qualify_read_page, qualify_wait,
+    read_full_item as read_native_full_item,
+)
+
 MAX_BYTES = 262_144
 MAX_TEXT = 32_768
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/%+@-]{0,511}\Z")
@@ -348,30 +353,15 @@ class T3NativeClient:
 
     def _qualify_read(self, thread: Thread, value: dict, cursor: Cursor | None,
                       limit: int) -> None:
-        detail, items = value.get("thread"), value.get("items")
-        if (type(detail) is not dict or detail.get("threadId") != thread.thread_id
-                or detail.get("projectId") != self.scope.project_id):
-            raise Conflict("Native observation changed thread/project identity")
-        if (type(items) is not list or len(items) > limit or type(value.get("hasMore")) is not bool
-                or type(value.get("recentRuns")) is not list):
-            raise Unavailable("Incomplete native observation")
-        positions = []
-        for item in items:
-            if (type(item) is not dict or type(item.get("position")) is not int
-                    or item["position"] < 0 or type(item.get("textTruncated")) is not bool
-                    or item.get("text") is not None and type(item["text"]) is not str):
-                raise Unavailable("Malformed native timeline item")
-            positions.append(item["position"])
-        if positions != sorted(set(positions)):
-            raise Unavailable("Native timeline is unordered or duplicated")
-        if cursor is not None and positions and positions[0] <= cursor.position:
-            raise Conflict("Native timeline repeated an already consumed position")
-        nxt = value.get("nextPosition")
-        if nxt is not None and (type(nxt) is not int or nxt < 0
-                                or cursor is not None and nxt <= cursor.position):
-            raise Unavailable("Native cursor did not advance")
-        if value["hasMore"] and (nxt is None or not positions or nxt < positions[-1]):
-            raise Unavailable("Native page has no recoverable continuation")
+        try:
+            qualify_read_page(value, thread_id=thread.thread_id,
+                              project_id=self.scope.project_id,
+                              after_position=None if cursor is None else cursor.position,
+                              limit=limit)
+        except NativeReadConflict as exc:
+            raise Conflict(str(exc)) from exc
+        except NativeReadUnavailable as exc:
+            raise Unavailable(str(exc)) from exc
 
     async def read_full_item(self, thread: Thread, item: Mapping[str, Any],
                              *, max_chunks: int = 8) -> tuple[str | None, bool]:
@@ -381,38 +371,18 @@ class T3NativeClient:
                 or item.get("sourceThreadId") != tid
                 or type(item.get("textTruncated")) is not bool):
             raise ValueError("Original exact native text item required")
-        item_id = _id(item.get("itemId"), "item_id")
-        run_id = item.get("runId")
-        text = item["text"]
-        if len(text.encode()) > MAX_TEXT:
-            return None, False
-        if not item["textTruncated"]:
-            return text, True
-        offset = item.get("nextTextOffset")
-        if type(offset) is not int or offset <= 0:
-            raise Unavailable("Truncated native text has no continuation offset")
-        for _ in range(max_chunks):
-            result = await self._call("t3_thread_read", {
-                "threadId": tid, "itemId": item_id, "textOffset": offset,
-                "maxCharsPerItem": 8192, "runLimit": 1})
-            self._qualify_read(thread, result, None, 1)
-            rows = result["items"]
-            if len(rows) != 1:
-                raise Conflict("Original native text item disappeared")
-            chunk = rows[0]
-            if (chunk.get("itemId") != item_id or chunk.get("runId") != run_id
-                    or chunk.get("sourceThreadId") != tid or type(chunk.get("text")) is not str):
-                raise Conflict("Native text expansion changed identity")
-            text += chunk["text"]
-            if len(text.encode()) > MAX_TEXT:
-                return None, False
-            if chunk["textTruncated"] is False:
-                return text, True
-            nxt = chunk.get("nextTextOffset")
-            if type(nxt) is not int or nxt <= offset:
-                raise Unavailable("Native text offset did not advance")
-            offset = nxt
-        return None, False
+        _id(item.get("itemId"), "item_id")
+        try:
+            return await read_native_full_item(
+                item, thread_id=tid,
+                read=lambda args: self._call("t3_thread_read", args),
+                qualify=lambda value: self._qualify_read(thread, value, None, 1),
+                max_chunks=max_chunks, max_bytes=MAX_TEXT,
+            )
+        except NativeReadConflict as exc:
+            raise Conflict(str(exc)) from exc
+        except NativeReadUnavailable as exc:
+            raise Unavailable(str(exc)) from exc
 
     async def launch(self, *, request_id: str, title: str, prompt: str,
                      model: str, base_sha: str | None = None,
@@ -479,9 +449,11 @@ class T3NativeClient:
             raise ValueError("Explicit child-settlement mode required")
         value = await self._call("t3_thread_wait", {"threadId": tid, "runId": run.run_id,
             "timeoutMs": timeout_ms, "untilDelegatedWorkSettled": include_children})
-        if (value.get("threadId") != tid or value.get("runId") != run.run_id
-                or type(value.get("timedOut")) is not bool or type(value.get("status")) is not str):
-            raise Conflict("Native wait no longer identifies the original run")
+        try:
+            qualify_wait(value, thread_id=tid, run_id=run.run_id,
+                         exact_result=not include_children)
+        except NativeReadConflict as exc:
+            raise Conflict(str(exc)) from exc
         return value
 
     async def stop(self, thread: Thread, *, request_id: str, run_id: str | None = None,
