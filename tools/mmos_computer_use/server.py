@@ -2894,9 +2894,14 @@ def _slice_sequence_gate(ctx, completed, step):
     if not state["human_active"]:
         return state
     if completed:
-        raise OpError("HUMAN_ACTIVE_MID_SEQUENCE",
-                      "human became active before step %r; completed steps: %s"
-                      % (step, ", ".join(completed) or "none"))
+        error = OpError(
+            "HUMAN_ACTIVE_MID_SEQUENCE",
+            "human became active before step %r; completed steps: %s"
+            % (step, ", ".join(completed) or "none"))
+        # BCU R3 M3: the completed steps travel in the receipt too, not
+        # only in the cause text.
+        error.extra = {"steps": list(completed)}
+        raise error
     raise OpError("HUMAN_ACTIVE",
                   "human idle %.1fs < %.1fs threshold; %s refused"
                   % (state["human_idle_seconds"], ctx.presence.min_idle, step))
@@ -3199,6 +3204,13 @@ def _op_slice_paste(ctx, args):
         # completed steps and the honest pasteboard claim (M2).
         _paste_foreground_gate(ctx, args, snap, window_id, completed)
         paste_argv = paste_argv + ["--foreground"]
+    # BCU R3 M3: ONE presence check IMMEDIATELY before the paste chord —
+    # after the gate's fresh reads (which take time) and before the
+    # dispatch, in BOTH delivery modes. A person active at this instant
+    # refuses with the completed steps (HUMAN_ACTIVE_MID_SEQUENCE) and
+    # nothing is pasted; the refusal is pre-dispatch, so no pace record is
+    # written either (the gate sits before the try/finally below).
+    _slice_sequence_gate(ctx, completed, "paste_chord")
     state_write = None
     try:
         paste_meta = ctx.adapter.paste(paste_argv)

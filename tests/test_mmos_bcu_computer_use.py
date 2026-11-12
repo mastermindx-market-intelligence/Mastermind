@@ -2826,7 +2826,12 @@ class TestConfirmAfterHumanActive(unittest.TestCase):
 
     def test_slice_paste_human_active_at_confirm_is_applied(self):
         os.environ["FAKE_PEEKABOO_FIELD_VALUE"] = "hello there"
+        # BCU R3 M3: the paste path now consumes one MORE presence check
+        # immediately before the chord (observe, act, paste_chord, then
+        # confirm) — the human becomes active at the FOURTH check, after
+        # the dispatch, so the receipt stays APPLIED with confirm_skipped.
         ctx = self._ctx(presence_sequence=[
+            {"human_idle_seconds": 30.0, "human_active": False},
             {"human_idle_seconds": 30.0, "human_active": False},
             {"human_idle_seconds": 30.0, "human_active": False},
             {"human_idle_seconds": 1.0, "human_active": True}])
@@ -4553,6 +4558,41 @@ class TestForegroundPasteGate(unittest.TestCase):
         self.assertEqual(
             len([c for c in read_calls(ctx) if c[0] == "click"]), 1)
         self.assertGreaterEqual(len(calls), 2, "the gate never re-read")
+
+    def test_presence_recheck_immediately_before_the_chord(self):
+        # BCU R3 M3 (fail-first on 1ae3e29e6): ONE presence check runs
+        # IMMEDIATELY before the paste chord — after the foreground gate's
+        # fresh reads, which take time. A person who became active there
+        # refuses with the completed steps named, and NOTHING is pasted.
+        idle = {"human_idle_seconds": 30.0, "human_active": False}
+        active = {"human_idle_seconds": 0.5, "human_active": True}
+        ctx = build_ctx(self.tmp,
+                        presence_sequence=[idle, idle, idle, active])
+        acquire_lease(ctx)
+        os.environ["FAKE_PEEKABOO_IDENTITY"] = IDENTITY_TEXTEDIT
+        payload = self._paste(ctx)  # allow_foreground=True
+        self.assertEqual(payload["status"], "NOT_APPLIED", payload)
+        self.assertIn("HUMAN_ACTIVE_MID_SEQUENCE", payload["cause"])
+        self.assertIn("observe:snapshot snap-abc123", payload["cause"])
+        self.assertEqual(payload["steps"], ["observe:snapshot snap-abc123"])
+        self.assertEqual([c for c in read_calls(ctx) if c[0] == "paste"], [],
+                         "nothing may be pasted")
+
+    def test_presence_recheck_before_the_background_chord_too(self):
+        # M3 covers the background dispatch as well: the check sits before
+        # ctx.adapter.paste, whichever delivery mode was chosen.
+        idle = {"human_idle_seconds": 30.0, "human_active": False}
+        active = {"human_idle_seconds": 0.5, "human_active": True}
+        ctx = build_ctx(self.tmp,
+                        presence_sequence=[idle, idle, active])
+        acquire_lease(ctx)
+        os.environ["FAKE_PEEKABOO_IDENTITY"] = IDENTITY_TEXTEDIT
+        payload = self._paste(ctx, allow_foreground=False)
+        self.assertEqual(payload["status"], "NOT_APPLIED", payload)
+        self.assertIn("HUMAN_ACTIVE_MID_SEQUENCE", payload["cause"])
+        self.assertEqual(payload["steps"], ["observe:snapshot snap-abc123"])
+        self.assertEqual([c for c in read_calls(ctx) if c[0] == "paste"], [],
+                         "nothing may be pasted")
 
     def test_background_paste_is_not_gated_on_frontmost(self):
         # The gate is scoped to the foreground chord: the background paste is
