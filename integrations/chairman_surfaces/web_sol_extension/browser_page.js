@@ -209,11 +209,16 @@
       const offset = firstDiff(askedNormalized, boxNormalized);
       // A time-bound stop reports how far the insertion got and the honest
       // partial state of the box under its own typed code. When the stop
-      // came after everything was inserted, the read-back decides the
+      // came after every asked line was inserted, the read-back decides the
       // effect (ruling 13): APPLIED with the bound disclosed — a false
-      // NOT_APPLIED would invite a duplicate fill of a complete box.
+      // NOT_APPLIED would invite a duplicate fill of a complete box. The
+      // line count, not the normalized comparison, decides this: a partial
+      // whose un-inserted remainder is only empty lines normalizes equal
+      // (blank-line-render and trailing-newline-drift collapse the missing
+      // tail away), and it must still report the truthful FILL_TIME_BOUND /
+      // NOT_APPLIED.
       if (stopped) {
-        if (offset === -1) {
+        if (offset === -1 && stopped.linesInserted >= stopped.linesAsked) {
           return result(true, "OK", {...common,
             time_bound_exceeded: true,
             lines_inserted: stopped.linesInserted, time_bound_ms: stopped.timeBoundMs,
@@ -397,7 +402,8 @@
             await settle();
             return fillReceipt(node, params.text, insertionPath,
               preEditable ? preEditable.innerText : preValue,
-              {linesInserted: outcome.linesInserted, timeBoundMs: FILL_TIME_BOUND_MS});
+              {linesInserted: outcome.linesInserted, linesAsked: feed.split("\n").length,
+                timeBoundMs: FILL_TIME_BOUND_MS});
           }
           // Whole-text fallback ONLY when the editor pipeline genuinely
           // refused (execCommand returned false or threw). Never as a

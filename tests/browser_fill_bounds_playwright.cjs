@@ -12,6 +12,7 @@ const fixture = `<!doctype html><html><head><title>Fill bounds fixture</title></
   <div id="plain" contenteditable="true" role="textbox" aria-label="plain editable"></div>
   <div id="slow" contenteditable="true" role="textbox" aria-label="slow editor"></div>
   <div id="trickle" contenteditable="true" role="textbox" aria-label="trickle editor"></div>
+  <div id="tail" contenteditable="true" role="textbox" aria-label="tail editor"></div>
   <textarea id="area" aria-label="plain textarea"></textarea>
 </body></html>`;
 (async()=>{
@@ -44,6 +45,7 @@ const fixture = `<!doctype html><html><head><title>Fill bounds fixture</title></
       // any machine load. (Literals here because page.evaluate carries no
       // Node bindings.)
       const trickle=document.getElementById("trickle");
+      const tail=document.getElementById("tail");
       const realNow=Date.now.bind(Date);
       window.__clockExtra=0;
       window.__clockFrozenAt=0;
@@ -56,6 +58,14 @@ const fixture = `<!doctype html><html><head><title>Fill bounds fixture</title></
           if(!window.__clockFrozenAt)window.__clockFrozenAt=realNow();
           trickleCalls+=1;
           if(trickleCalls>3840)window.__clockExtra+=12;
+        }
+        // The tail editor: every call costs 20 synthetic ms from the first,
+        // so the FIRST checkpoint (line 64) is already past the 1500 ms
+        // bound and the loop stops with 64 lines inserted, deterministic on
+        // any load.
+        if((cmd==="insertText"||cmd==="insertParagraph") && sel && tail.contains(sel.anchorNode)){
+          if(!window.__clockFrozenAt)window.__clockFrozenAt=realNow();
+          window.__clockExtra+=20;
         }
         return slowAwareExec(cmd,ui,val);
       };
@@ -116,12 +126,37 @@ const fixture = `<!doctype html><html><head><title>Fill bounds fixture</title></
       const ok=await send("fill",plain.ref,"still alive",after.snapshot_id);
       assert.equal(ok.effect,"APPLIED","the tab is responsive after the bound stop");
     }
+    // Ruling 15 item 2: a stop at the time bound reports APPLIED only when
+    // every asked line was inserted. This fill asks 130 lines whose tail
+    // past line 64 is empty only; the loop stops at the FIRST checkpoint
+    // (64 lines in). The normalized comparison cannot tell the box from the
+    // ask — blank-line-render and trailing-newline-drift collapse the
+    // missing empty tail away — but 66 asked lines are absent, so the
+    // receipt must say FILL_TIME_BOUND / NOT_APPLIED with lines_inserted,
+    // whatever the normalized comparison says.
+    {
+      await page.evaluate(()=>{window.__clockFrozenAt=0;window.__clockExtra=0;});
+      const s=await snapshot();
+      const el=await element("tail editor",s);
+      const asked=Array.from({length:130},(_,i)=>i<64?"tail "+i:"").join("\n");
+      const r=await send("fill",el.ref,asked,s.snapshot_id);
+      assert.equal(r.code,"FILL_TIME_BOUND","an empty-tail partial stop is never APPLIED");
+      assert.equal(r.effect,"NOT_APPLIED");
+      assert.equal(r.data.lines_inserted,64,"the receipt says how far the insertion got");
+      assert.equal(r.data.time_bound_ms,1500);
+      const held=await page.evaluate(()=>document.getElementById("tail").innerText);
+      assert.equal(held.split("\n").filter(l=>l.trim()).length,64,
+        "the box genuinely holds only the first 64 content lines");
+      assert.equal(held.includes("tail 63"),true);
+      assert.equal(held.includes("tail 64"),false,"the un-inserted tail is really absent");
+    }
     // Ruling 13 / p2#2: a stop at the time bound AFTER everything was
     // inserted reports what the read-back saw — APPLIED with the bound
     // disclosed — never a false NOT_APPLIED that invites a duplicate fill.
     // The trickle editor passes every checkpoint inside the bound and only
     // exceeds it at the last line's checkpoint, with all 1984 lines in.
     {
+      await page.evaluate(()=>{window.__clockFrozenAt=0;window.__clockExtra=0;});
       const s=await snapshot();
       const el=await element("trickle editor",s);
       const text=Array.from({length:1984},(_,i)=>"trickle "+i).join("\n");
@@ -141,6 +176,7 @@ const fixture = `<!doctype html><html><head><title>Fill bounds fixture</title></
       cases:["30,000-newline fill refused pre-insertion, snapshot intact",
              "cap boundary: 2000 lines fill, 2001 refused",
              "slow editor stops under the time bound with typed FILL_TIME_BOUND and honest partial state",
-             "bound exceeded after everything inserted: APPLIED with time_bound_exceeded, never a false NOT_APPLIED"]}));
+             "bound exceeded after everything inserted: APPLIED with time_bound_exceeded, never a false NOT_APPLIED",
+             "empty-tail partial stop: FILL_TIME_BOUND / NOT_APPLIED with lines_inserted, never a normalization-hidden APPLIED"]}));
   } finally {await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
