@@ -2590,20 +2590,13 @@ def _run_carrier_locked(pc, t3_factory, opts, me, binding, thread_id):
         # was also the silent drop there (a stranded return edge, or a
         # duplicate ask over a child that might be the family's). Refuse
         # loudly instead: a person decides what the unattributed child is.
-        ask_children = []
-        for row in untruncated_children(pc, issue["id"], me.get("id")):
-            if not is_ask_child_of(row, issue):
-                continue
-            owner = row.get("createdByAgentId")
-            if not owner:
-                raise CarrierError(
-                    f"ask child {row.get('identifier') or row.get('id')} of "
-                    f"{issue.get('identifier')} carries no createdByAgentId; "
-                    "whose child it is cannot be attributed — refusing "
-                    "loudly instead of dropping or duplicating it")
-            if owner == me.get("id"):
-                ask_children.append(row)
-            # else: another agent's child — not family (N9), never a freeze
+        # Delta-5 D4-5 scope (final check finding 4): the arm binds only a
+        # child this wake's RECORDED blockers name. A marker-matching row
+        # outside the blocker relation — a person-created child, which the
+        # board serves with createdByAgentId null by construction — is
+        # neither adopted nor a halt; the carrier's own child is never
+        # unattributed (the server stamps the creating agent, D4-6), so
+        # the scoped arm still catches every row that could be family.
         # Attack findings 5 and 9 (attack round): the marker is derivable
         # from public issue text, so a forged or duplicate marker-matching
         # child can hijack the return edge or hold it shut forever. The
@@ -2611,6 +2604,23 @@ def _run_carrier_locked(pc, t3_factory, opts, me, binding, thread_id):
         # summaries) is the binding: only a child in it can satisfy or
         # suppress the return edge.
         blocker_ids = recorded_blocker_ids(issue)
+        ask_children = []
+        for row in untruncated_children(pc, issue["id"], me.get("id")):
+            if not is_ask_child_of(row, issue):
+                continue
+            owner = row.get("createdByAgentId")
+            if not owner:
+                if row.get("id") in blocker_ids:
+                    raise CarrierError(
+                        f"ask child {row.get('identifier') or row.get('id')} "
+                        f"of {issue.get('identifier')} carries no "
+                        "createdByAgentId; whose child it is cannot be "
+                        "attributed — refusing loudly instead of dropping "
+                        "or duplicating it")
+                continue   # not a recorded blocker: not this wake's to decide
+            if owner == me.get("id"):
+                ask_children.append(row)
+            # else: another agent's child — not family (N9), never a freeze
         if ask_children and not blocker_ids:
             # Panel-2 M2: the create can succeed while the block PATCH fails
             # — the child is visible, the relation is not — and parking the

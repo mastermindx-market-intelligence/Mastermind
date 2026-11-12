@@ -1329,6 +1329,31 @@ def test_a_foreign_marker_child_cannot_freeze_the_task():
     assert evil == []          # the foreign child never entered anything
 
 
+def test_an_unattributed_marker_child_outside_the_blockers_does_not_halt():
+    # Delta-5 D4-5 scope (final check finding 4, probe 22 vs base 21): the
+    # cannot-attribute arm fired for ANY marker-matching row with no
+    # createdByAgentId, even one the wake's recorded blockers never name —
+    # a person-created child (the board serves createdByAgentId null for
+    # those by construction) froze a task the base completed. The arm now
+    # binds only a child the RECORDED blockers name: an unattributed row
+    # outside the relation is neither adopted nor a halt — the carrier's
+    # own child is never unattributed (the server stamps the creating
+    # agent; D4-6 probe), so nothing real is being waved through.
+    issues, ask_op, child = blocked_parent_with_done_child()
+    bystander = dict(child, id="ch-evil", identifier="MMO-666",
+                     assigneeAgentId="ag-anyone", status="todo",
+                     description=f"Asked by Mira on MMO-1 [{ask_op}]")
+    bystander.pop("createdByAgentId", None)   # the person-created shape
+    pc = FakePaperclip(issues=issues)         # blockers: [ch-1] only
+    pc.child_rows["is-1"] = [dict(child), bystander]
+    pc.comment_rows["ch-1"] = [atlas_answer("t45_alpha.txt has 12 lines")]
+    t3 = FakeT3(replies=["FINAL: the file has 12 lines"])
+    assert run_with_roster(pc, t3, {}) == 0   # the wake is not halted
+    assert len(t3.sends) == 1 and f"[{ask_op}-ret]" in t3.sends[0]
+    assert "MMO-666" not in t3.sends[0]       # the bystander never feeds
+    assert pc.issues["is-1"]["status"] == "in_review"
+
+
 def test_an_unattributed_marker_child_is_refused_not_silently_dropped():
     # Delta-4 D4-5: a marker-matching child whose row carries NO
     # createdByAgentId is neither mine nor foreign — it cannot be
