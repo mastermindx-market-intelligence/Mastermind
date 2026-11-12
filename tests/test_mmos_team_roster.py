@@ -851,6 +851,28 @@ class TestPaperclipBinding:
         assert "mcp:bound-elsewhere" in out
         assert "state" in out  # the message says what to do
 
+    def test_unknown_binding_refusal_names_the_rebind_command(
+            self, tmp_path, fake_t3, monkeypatch, capsys):
+        """RF-MEMLINK R3 item 5 (principal ruling 17:05Z): message only, no
+        logic change. The refusal must name the rebind command — the record
+        moves through it, never a hand edit of the state file — and must
+        still create nothing. Fails first at 899f62509 ("record it in")."""
+        spec = self.with_binding(tmp_path)
+        make_db(spec, [])  # nothing live: apply would create
+        monkeypatch.setattr(team_roster, "paperclip_binding",
+                            lambda s, m: "mcp:bound-elsewhere")
+        with pytest.raises(SystemExit):
+            team_roster.ensure_threads(spec, PROJECT)
+        assert fake_t3.calls == [], \
+            "no thread may be created while the binding is unknown"
+        out = capsys.readouterr().err
+        assert "mcp:bound-elsewhere" in out
+        assert "rebind-thread" in out
+        assert "cutover_installed.py" in out
+        assert "record it in" not in out, \
+            "the refusal must no longer suggest hand-editing the state file"
+        assert "state" in out  # it still names where the record lives
+
     def test_bound_to_different_thread_than_roster_refuses(
             self, tmp_path, fake_t3, monkeypatch):
         spec = self.with_binding(tmp_path)

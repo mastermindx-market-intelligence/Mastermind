@@ -24,6 +24,26 @@ TEAMMATE_RE = re.compile(r"^[a-z0-9-]+$")
 TAG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 CHILD_PATH = "/usr/bin:/bin"
 
+# The credential label words, shared by the flag form and the label form
+# (principal rulings 17:05Z + 18:10Z). Labels: password, passwd, pwd,
+# passphrase, passcode, secret, token, api key (space, '_', '-' or none),
+# authorization, auth, bearer, cookie, credential — each with an optional
+# plural — the four Chinese labels 密码 密钥 口令 令牌 (ruling 18:10Z F),
+# and "pass" as a WHOLE WORD only (never passage or compass).
+# BOUNDARY (ruling 18:10Z A): after its optional plural s, a label word is
+# NOT followed by a lowercase letter and not by two capital letters — so
+# secretKey, dbPassword, authKey, SECRET_KEY, GITHUB_TOKEN, client_secret
+# and PASSWORDS: still match, while Secretary, SECRETARY, Author,
+# authentication, tokenizer, passwordless, secretariat and authored do
+# not. Accepted limit: an all-capitals run-on name (SECRETKEY=X).
+_CRED_LABELS = (
+    r"(?:(?i:password|passwd|pwd|passphrase|passcode|secret|token"
+    r"|api[ _-]?key|authorization|auth|bearer|cookie|credential)s?"
+    r"|密码|密钥|口令|令牌"
+    r"|\b(?i:pass)\b)"
+    r"(?![a-z]|[A-Z]{2})"
+)
+
 CREDENTIAL_RE = re.compile(
     r"(sk-[A-Za-z0-9_-]+"
     r"|ghp_[A-Za-z0-9]+"
@@ -31,24 +51,38 @@ CREDENTIAL_RE = re.compile(
     r"|xox[a-zA-Z]?-[A-Za-z0-9-]+"
     r"|AKIA[A-Z0-9]+"
     r"|eyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9._-]*"
+    # An address with userinfo loses everything between "://" and the
+    # LAST '@' before the first '/' or space, with or without a colon
+    # (ruling 18:10Z E); a bare user name goes too — that is accepted.
+    # The host may stay. Without any '@' (http://host:8080/) the address
+    # is left alone.
+    r"|[A-Za-z][A-Za-z0-9+.-]*://[^\s/]*@"
     # A private key header removes everything through the matching END
     # line — or, when there is none, to the end of the text (principal
     # ruling 16:10Z, repair round 2).
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?"
     r"(?:-----END [A-Z ]*PRIVATE KEY-----[^\n]*|\Z)"
+    # FLAG FORM (ruling 18:10Z D): a dash-led label word, then spaces,
+    # then a value — "--password X", "--token X", "-password X" — removes
+    # from the flag to the end of the line.
+    r"|-{1,2}" + _CRED_LABELS + r"[ \t]+[^\n]*"
     # A label form removes everything from the label to the END OF ITS
-    # LINE — no attempt is made to find where the value ends. Over-removal
-    # is accepted; a leaked value is not (principal ruling 16:10Z, which
-    # replaces the round-1/round-2 value-end approach). The label is the
-    # word — whatever quotes or punctuation hug it — followed ON THE SAME
-    # LINE by ':' or '='; a plural 's' is swallowed too, and "api key"
-    # takes a space, '_', '-' or no separator. The value part `[^\n]*`
-    # may match empty, so the bare "password:" and "token =" labels still
-    # match: memory_save's refusal uses this same pattern and stays at
-    # least as strong as before.
-    r"|(?i:password|passwd|pwd|passphrase|secret|token|api[ _-]?key"
-    r"|authorization|bearer|cookie|credential)s?"
-    r"[^\w\s]*[ \t]*[:=][^\n]*"
+    # LINE. R3 states the rule AS WRITTEN (principal ruling 17:05Z): a
+    # label word, then ANYTHING on the same line up to a separator, then
+    # the rest of the line goes — "password for the router: X",
+    # "token (github): X" and "the admin password is: X" all match. No
+    # attempt is made to find where the value ends; over-removal is
+    # accepted ("token budget: 24K per minute" loses its tail), a leaked
+    # value is not. SEPARATORS (ruling 18:10Z B): ':' '=' full-width
+    # '：' '＝' and '|' (a table row "| password | X |"). NEXT-LINE VALUE
+    # (ruling 18:10Z C): when the separator is the last thing on the
+    # label's line (trailing spaces allowed), the following line is
+    # removed too — this covers pretty-printed JSON and a YAML block.
+    # The gap and the value may both match empty, so the bare
+    # "password:" and "token =" labels still match: memory_save's
+    # refusal uses this same pattern and stays at least as strong.
+    r"|" + _CRED_LABELS + r"[^\n]*?[:=：＝|]"
+    r"(?:[ \t]*\n[^\n]*|[^\n]*)"
     # Bare "Bearer <token>" with no colon at all (round-1 refusal case):
     # kept so the save refusal stays at least as strong.
     r"|(?i:bearer)[ \t]+\S+)"
