@@ -2381,3 +2381,160 @@ class TestRfTitleBindingRenameSkip:
         assert "A — quality" in out
         assert "binding" in out
         assert "INCOMPLETE" not in out
+
+
+# --- RF-TITLE-MICRO (principal RULING ESC 16, 2026-11-12) --------------------
+#     A skip that protects a live conversation is decided by a fact that
+#     stays true on every later run — the board binding names the thread —
+#     never by a label describing how the thread was found: once the first
+#     apply saves the bound id to the state file, resolve_threads reports
+#     recoveredBy "state" (team_roster.py:1384) and the da8e96dc5 skip no
+#     longer fires, renaming the live conversation from the second apply on.
+#     Every skip test here runs the COMMAND TWICE, decides nothing by a
+#     hand-set recoveredBy, and makes the rename driver itself raise.
+#     LOW-2: the apply report gives the LIVE title for a skipped
+#     conversation — a report never states a title that is not on it.
+#     Tests (a) and (b) fail first on da8e96dc5.
+
+
+class TestRfTitleMicroSkip:
+    LIVE = "A primary 2026-11-12 13:20Z"
+
+    def apply_env(self, tmp_path, monkeypatch, db_threads, state, binding,
+                  driver="raise"):
+        """The full apply harness: real resolve/commit/rename, fake board
+        GET, and a rename driver that RAISES when called (default) so any
+        attempt to rename a bound conversation fails the test on the driver
+        itself, not only on the report."""
+        home, _settings = fake_home(tmp_path)
+        (home / "userdata" / "environment-id").write_text("env-1")
+        spec = load(tmp_path, binding_raw(tmp_path))
+        profile = os.path.join(spec["server"]["root"], "browser")
+        os.makedirs(profile, mode=0o700)
+        spec["browser_profile"] = profile
+        spec["browser_node"] = "/bin/echo"
+        make_db(spec, db_threads)
+        write_roster_state(spec, state)
+        monkeypatch.setattr(team_roster, "acquire_apply_lock", lambda s: None)
+        monkeypatch.setattr(team_roster, "ensure_project", lambda s: PROJECT)
+        monkeypatch.setattr(team_roster, "session_processes", lambda *p: [])
+        monkeypatch.setattr(team_roster, "write_urls_file",
+                            lambda s, t: "/tmp/urls.json")
+        monkeypatch.setattr(team_roster, "paperclip_binding",
+                            lambda s, m: binding.get(m["name"]))
+        real_run = subprocess.run
+        driver_calls = []
+
+        def run(argv, *args, **kwargs):
+            if not any("roster_browser.js" in str(a) for a in argv):
+                return real_run(argv, *args, **kwargs)
+            driver_calls.append(list(argv))
+            if driver == "raise":
+                raise AssertionError(
+                    "the rename driver was called against a conversation "
+                    "the board binding names")
+            # driver == "serve": a successful rename with the durable
+            # projection read-back the real rename_threads demands
+            import sqlite3
+            Path(argv[-1]).write_text(json.dumps({"threadId": argv[5]}))
+            with sqlite3.connect(team_roster.db_path(spec)) as conn:
+                conn.execute(
+                    "UPDATE orchestration_v2_projection_threads "
+                    "SET title=?, payload_json=? WHERE thread_id=?",
+                    (argv[7], json.dumps({"id": argv[5],
+                                          "projectId": PROJECT,
+                                          "title": argv[7],
+                                          "pinnedAt": None,
+                                          "providerInstanceId": "a"}),
+                     argv[5]))
+            class Proc:
+                returncode = 0
+                stdout = "RENAME_DONE"
+                stderr = ""
+            return Proc()
+
+        monkeypatch.setattr(team_roster.subprocess, "run", run)
+        return spec, driver_calls
+
+    def report_of(self, capsys):
+        out = capsys.readouterr().out
+        report = json.loads(out[out.index("{"):])
+        return out, {r["name"]: r for r in report["teammates"]}
+
+    def test_a_apply_twice_after_a_binding_move_never_renames(
+            self, tmp_path, fake_t3, monkeypatch, capsys):
+        """(a)+(c): the binding moves A from t-old to t-new, whose live title
+        is the rebind tool's, not the roster's. Apply 1 skips (da8e96dc5
+        already did); apply 1 also SAVES the bound id, so apply 2 resolves
+        t-new with recoveredBy 'state' — on da8e96dc5 the driver is called
+        and the test fails there. After the fix both applies skip on the
+        binding's presence, print the note and end rc 0."""
+        spec, driver_calls = self.apply_env(tmp_path, monkeypatch, [
+            {"threadId": "t-old", "title": "A — quality", "instance": "a"},
+            {"threadId": "t-new", "title": self.LIVE, "instance": "a"},
+            {"threadId": "b-1", "title": "B — design", "instance": "b"},
+        ], {"A": state_entry("a", "t-old"), "B": state_entry("b", "b-1")},
+            {"A": "t-new", "B": "b-1"})
+        state_path = os.path.join(spec["server"]["root"], "run",
+                                  "team_roster_state.json")
+        for apply_no in (1, 2):
+            capsys.readouterr()
+            assert team_roster.cmd_apply(spec) == 0, f"apply {apply_no}"
+            out, by_name = self.report_of(capsys)
+            assert by_name["A"]["threadId"] == "t-new"
+            assert by_name["A"]["renamed"] is False
+            # LOW-2: the report states the LIVE title, never the wanted one
+            assert by_name["A"]["threadTitle"] == self.LIVE, \
+                f"apply {apply_no} report states a title not on the " \
+                "conversation"
+            assert "binding" in out and self.LIVE in out
+            assert "INCOMPLETE" not in out
+        assert driver_calls == [], "the driver ran against a bound thread"
+        assert fake_t3.calls == [], "following a binding creates nothing"
+        # the label DID flip after apply 1 — the skip must not depend on it
+        state = json.load(open(state_path))
+        assert state["teammates"]["A"]["threadId"] == "t-new"
+        assert state["teammates"]["A"]["recoveredBy"] == "state"
+
+    def test_b_bound_id_equals_recorded_id_still_skips(
+            self, tmp_path, fake_t3, monkeypatch, capsys):
+        """(b)+(c): the state file already records the bound id (the real
+        root's shape today) and the live title differs from the roster's.
+        recoveredBy is 'state' from the FIRST apply, so da8e96dc5 drives the
+        browser immediately; the binding presence must decide the skip."""
+        spec, driver_calls = self.apply_env(tmp_path, monkeypatch, [
+            {"threadId": "t1", "title": self.LIVE, "instance": "a"},
+            {"threadId": "b-1", "title": "B — design", "instance": "b"},
+        ], {"A": state_entry("a", "t1"), "B": state_entry("b", "b-1")},
+            {"A": "t1", "B": "b-1"})
+        for apply_no in (1, 2):
+            capsys.readouterr()
+            assert team_roster.cmd_apply(spec) == 0, f"apply {apply_no}"
+            out, by_name = self.report_of(capsys)
+            assert by_name["A"]["threadId"] == "t1"
+            assert by_name["A"]["renamed"] is False
+            assert by_name["A"]["threadTitle"] == self.LIVE   # LOW-2
+            assert "binding" in out and self.LIVE in out
+        assert driver_calls == [], "the driver ran against a bound thread"
+        assert fake_t3.calls == []
+
+    def test_d_unbound_stale_title_is_still_renamed(
+            self, tmp_path, fake_t3, monkeypatch, capsys):
+        """(d): a thread found with NO binding (state record) and a stale
+        title keeps the rename path — the driver runs, the durable read-back
+        verifies, the report says renamed with the new title."""
+        spec, driver_calls = self.apply_env(
+            tmp_path, monkeypatch, [
+                {"threadId": "t1", "title": "A — old", "instance": "a"},
+                {"threadId": "b-1", "title": "B — design", "instance": "b"},
+            ], {"A": state_entry("a", "t1"), "B": state_entry("b", "b-1")},
+            {"A": None, "B": None}, driver="serve")
+        assert team_roster.cmd_apply(spec) == 0
+        out, by_name = self.report_of(capsys)
+        assert by_name["A"]["renamed"] is True
+        assert by_name["A"]["threadTitle"] == "A — quality"
+        assert len(driver_calls) == 1 and driver_calls[0][2] == "rename"
+        assert driver_calls[0][5] == "t1"             # the known thread id
+        assert driver_calls[0][6] == "A — old"        # the live title drives
+        assert driver_calls[0][7] == "A — quality"    # the wanted title
+        assert fake_t3.calls == []

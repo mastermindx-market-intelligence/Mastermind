@@ -449,13 +449,18 @@ class TestRenameApplication:
 
 
 class TestBindingResolvedRenameSkip:
-    """RF-TITLE (principal ruling, 2026-11-12): the board binding owns which
-    conversation is a teammate's primary; the roster does not rename a
-    conversation it resolved THROUGH the binding. The title difference is a
-    printed note and apply ends rc 0. A thread the roster itself minted keeps
-    today's rename behaviour. The skip tests fail first at d92d1863f."""
+    """RF-TITLE (principal ruling, 2026-11-12) + RF-TITLE-MICRO (RULING
+    ESC 16): the board binding owns which conversation is a teammate's
+    primary; the roster does not rename a conversation the binding names.
+    The skip is decided by the `bound` fact set at resolution time, never by
+    the recoveredBy label — these fixtures carry the SECOND-apply shape
+    (recoveredBy "state", bound True), where the da8e96dc5 label-keyed skip
+    no longer fired. The title difference is a printed note and apply ends
+    rc 0. A thread the roster itself minted keeps today's rename behaviour.
+    The apply-level twice-through tests live in test_mmos_team_roster.py
+    (TestRfTitleMicroSkip); the first-round skip tests failed at d92d1863f."""
 
-    def threads(self, spec, tmp_path, a_recovered_by):
+    def threads(self, spec, tmp_path, a_bound):
         profile = tmp_path / "t3-team" / "browser"
         profile.mkdir(parents=True, mode=0o700)
         (tmp_path / "t3-team" / "home" / "userdata").mkdir(parents=True)
@@ -471,13 +476,14 @@ class TestBindingResolvedRenameSkip:
                              else "B — product"),
             "title": team_roster.teammate_title(m),
             "pinnedAt": None,
-            "recoveredBy": a_recovered_by if m["name"] == "A" else "state",
+            "recoveredBy": "state",
+            "bound": a_bound if m["name"] == "A" else False,
         } for m in spec["teammates"]}
 
     def test_binding_resolved_thread_is_skipped_with_a_note(
             self, tmp_path, monkeypatch, capsys):
         spec = load(tmp_path, make_spec(tmp_path))
-        threads = self.threads(spec, tmp_path, "binding")
+        threads = self.threads(spec, tmp_path, True)
 
         def boom(*args, **kwargs):
             raise AssertionError(
@@ -487,6 +493,9 @@ class TestBindingResolvedRenameSkip:
         renames, failures = team_roster.rename_threads(spec, threads)
         assert failures == []
         assert renames == {"A": False, "B": False}
+        # LOW-2: the report title is the LIVE one — never a title that is
+        # not on the conversation
+        assert threads["A"]["title"] == "A primary 2026-11-12"
         out = capsys.readouterr().out
         assert "A primary 2026-11-12" in out   # the live title
         assert "A — quality" in out            # the roster title
@@ -495,9 +504,10 @@ class TestBindingResolvedRenameSkip:
     def test_a_minted_thread_still_renames_as_today(self, tmp_path,
                                                     monkeypatch):
         """A thread the roster itself minted (here: recovered through its own
-        state record) keeps the browser rename and the durable read-back."""
+        state record, no binding) keeps the browser rename and the durable
+        read-back."""
         spec = load(tmp_path, make_spec(tmp_path))
-        threads = self.threads(spec, tmp_path, "state")
+        threads = self.threads(spec, tmp_path, False)
         make_db(spec, [{"threadId": "t1", "title": "A primary 2026-11-12",
                         "instance": "a"}])
         calls = []
