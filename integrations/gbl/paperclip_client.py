@@ -453,6 +453,7 @@ class PaperclipAskClient:
         existing = self.read_ask(ask_id)  # exact-key resolution; typed errors
         if existing is not None:          # propagate honestly
             return existing
+        self._refuse_ambiguous_create(ask_id)
         payload = {
             "title": _issue_title(envelope),
             "description": f"{_ASK_MARKER_LINE}\n{_canonical(envelope)}",
@@ -575,6 +576,25 @@ class PaperclipAskClient:
 
     def _issue_seg(self, value: Any) -> str:
         return _quote_segment(value, what="issue_id", typed=True)
+
+    def _refuse_ambiguous_create(self, ask_id: str) -> None:
+        """Panel B delta-2 F1: the ask reads as ABSENT, but an issue whose
+        TITLE carries the exact ``[ask_id]`` token means the record's marker
+        line was removed (a foreign edit) — creating now would mint a
+        duplicate whose empty record strands the stored events on the old
+        issue.  Refuse, typed; the repair (restore the description) is
+        out-of-band.  The bracketed token is exact by construction: ask ids
+        are a fixed ``gb-`` + 32-hex shape, so the closing bracket cannot
+        belong to a longer id."""
+        token = f"[{ask_id}]"
+        for row in self._iter_issues():
+            title = row.get("title")
+            if isinstance(title, str) and token in title:
+                raise GblPaperclipError(
+                    "AMBIGUOUS_CREATE",
+                    f"ask {ask_id} reads absent but issue {row.get('id')} "
+                    f"carries its title token — the record's marker was "
+                    f"removed; restore the description instead of creating")
 
     def _issue_for(self, ask_id: str) -> dict[str, Any] | None:
         """The issue whose STORED envelope carries exactly this ask id.

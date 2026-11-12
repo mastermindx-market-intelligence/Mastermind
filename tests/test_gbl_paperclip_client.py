@@ -757,6 +757,57 @@ class TestCreateIfAbsent:
         assert count(fake, "POST", ISSUES_PATH) == 1
 
 
+class TestAmbiguousCreateGuard:
+    """Panel B delta-2 F1: a foreign edit that removes the marker line
+    entirely makes the ask read as ABSENT; a create replay of the same
+    deterministic ask id must REFUSE (typed ``AMBIGUOUS_CREATE``) rather
+    than mint a duplicate whose empty record strands the stored events."""
+
+    def test_marker_removal_replay_refuses_and_strands_nothing(self, fake):
+        ask_client = client(fake)
+        row = envelope()
+        assert ask_client.create_ask(row) is None
+        ask_id = row["ask_id"]
+        ask_client.append_ask_event(
+            ask_id, {"type": "answer", "answer_id": "gbm-" + "a" * 32,
+                     "idempotency_key": "a-1",
+                     "text": "A harmless fixture answer."})
+        issue_id = fake.state.order[0]
+        original = fake.state.issues[issue_id]["description"]
+        # A foreign edit blanks the description: no marker, no envelope.
+        fake.state.issues[issue_id]["description"] = \
+            "human prose, the record line removed"
+        assert ask_client.read_ask(ask_id) is None      # reads as ABSENT
+        with pytest.raises(GblPaperclipError) as err:
+            ask_client.create_ask(row)                  # the replay
+        assert err.value.code == "AMBIGUOUS_CREATE"
+        # No duplicate was minted and nothing was sent.
+        assert len(fake.state.order) == 1
+        assert count(fake, "POST", ISSUES_PATH) == 1    # only the original
+        # The stored answer is not stranded: the original issue still
+        # holds its event comments, and restoring the description (the
+        # out-of-band repair) reads the full record back.
+        comments = fake.state.comments[issue_id]
+        assert len(comments) == 1 and "harmless fixture answer" in \
+            str(comments[0]["body"])
+        fake.state.issues[issue_id]["description"] = original
+        record = ask_client.read_ask(ask_id)
+        assert record is not None and record["ask_id"] == ask_id
+        assert [e["type"] for e in record["events"]] == ["answer"]
+        assert all(e["trusted"] is True for e in record["events"])
+
+    def test_the_guard_is_keyed_to_the_exact_ask_id(self, fake):
+        # A different ask's create is never refused by this ask's issue:
+        # the token is the exact bracketed id of the ask being created.
+        ask_client = client(fake)
+        row = envelope(key="k-1")
+        assert ask_client.create_ask(row) is None
+        issue_id = fake.state.order[0]
+        fake.state.issues[issue_id]["description"] = "marker removed"
+        assert ask_client.create_ask(envelope(key="k-2")) is None  # created
+        assert len(fake.state.order) == 2           # the lawful second issue
+
+
 # ── EFFECT_UNKNOWN: a lost create is reconciled by read-back, never retried ──
 
 

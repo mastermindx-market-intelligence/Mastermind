@@ -414,6 +414,26 @@ directory must not be group- or other-writable (`chmod 750`/`755` fine,
 the key file must be a regular file — a symlink, even to a valid key,
 is refused (`HMAC_KEY_IS_SYMLINK`).
 
+## Final round (panel B delta 2, ruling 12, 2026-11-11)
+
+Delta check 2 at `337b145d1`: 4/4 delta-1 items CLOSED, no new HIGH,
+409/409. Final items:
+
+- **F1 (MED, fixed — marker-removal replay duplicate)** — a foreign edit
+  that deletes the marker line makes the ask read as ABSENT, and a
+  create replay minted a duplicate issue whose empty record became the
+  resolver, stranding the original answer.  `create_ask`'s absence path
+  now cross-checks the exact `[ask_id]` title token across the company
+  (titles only — no description parsing, so no new F2 exposure) and
+  refuses with the typed `AMBIGUOUS_CREATE` before any POST.  Exactness
+  is by construction: ask ids are a fixed `gb-`+32-hex shape, so the
+  closing bracket cannot belong to a longer id; a different ask's
+  create is never refused by this ask's issue (tested).  The repair for
+  the operator is out-of-band (restore the description); with no
+  duplicate minted, the stored events survive and the record reads back
+  intact once restored — tested end-to-end including the trusted answer
+  event.
+
 
 
 `TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest
