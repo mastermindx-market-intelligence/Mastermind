@@ -3092,6 +3092,86 @@ class TestVisionEndpointLoopbackOnly(unittest.TestCase):
                          "injected-token")
 
 
+class TestVisionEndpointPinned(unittest.TestCase):
+    """BCU R3 L6: the vision endpoint is pinned IN CODE to the router's
+    loopback address (DEFAULT_VISION_BASE_URL). The environment is never an
+    endpoint source: an ANTHROPIC_BASE_URL that differs from the pin — even
+    another LOOPBACK port — refuses before any request is built. The
+    sha-pinned runtime descriptor may name the endpoint explicitly, but
+    load_runtime validates it loopback-only at startup."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mmos-cu-l6-")
+        self.old_base = os.environ.get("ANTHROPIC_BASE_URL")
+        os.environ.pop("ANTHROPIC_BASE_URL", None)
+
+    def tearDown(self):
+        if self.old_base is None:
+            os.environ.pop("ANTHROPIC_BASE_URL", None)
+        else:
+            os.environ["ANTHROPIC_BASE_URL"] = self.old_base
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _runtime_with_vision(self, vision_base_url):
+        bin_path = make_fake_peekaboo(self.tmp)
+        path = os.path.join(self.tmp, "runtime-vision.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"schema": mmos.RUNTIME_SCHEMA,
+                       "peekaboo_bin": bin_path,
+                       "peekaboo_sha256": mmos.sha256_file(bin_path),
+                       "input_strategy": "actionFirst",
+                       "vision_base_url": vision_base_url}, handle)
+        return path
+
+    def test_pin_is_the_router_address_in_code(self):
+        client = mmos.VisionClient(token="injected-token")
+        self.assertEqual(mmos.DEFAULT_VISION_BASE_URL,
+                         "http://127.0.0.1:8313")
+        self.assertEqual(client.base_url, mmos.DEFAULT_VISION_BASE_URL)
+        client._require_secure_endpoint()  # the pin itself must pass
+
+    def test_env_another_loopback_port_is_refused(self):
+        # The L6 attack shape: a session that controls the server env
+        # points ANTHROPIC_BASE_URL at its OWN loopback listener and
+        # receives the captured PNG + x-api-key. Another loopback port is
+        # not the pin: refuse with VISION_ENDPOINT_INSECURE BEFORE any
+        # request is built — never follow it (the pre-L6 server followed
+        # the env and reached VISION_UNAVAILABLE only after connecting).
+        os.environ["ANTHROPIC_BASE_URL"] = "http://127.0.0.1:9999"
+        client = mmos.VisionClient(token="injected-token")
+        with self.assertRaises(mmos.OpError) as caught:
+            client.ask(b"\x89PNGfake", "question")
+        self.assertEqual(caught.exception.code, "VISION_ENDPOINT_INSECURE")
+
+    def test_env_matching_the_pin_is_not_a_conflict(self):
+        os.environ["ANTHROPIC_BASE_URL"] = "http://127.0.0.1:8313"
+        client = mmos.VisionClient(token="injected-token")
+        client._require_secure_endpoint()  # must not raise
+
+    def test_runtime_descriptor_may_name_the_loopback_endpoint(self):
+        path = self._runtime_with_vision("http://127.0.0.1:8313")
+        runtime = mmos.load_runtime(path)
+        self.assertEqual(runtime["vision_base_url"], "http://127.0.0.1:8313")
+        client = mmos.VisionClient(token="injected-token", runtime=runtime)
+        self.assertEqual(client.base_url, "http://127.0.0.1:8313")
+        client._require_secure_endpoint()  # must not raise
+
+    def test_runtime_descriptor_non_loopback_refused_at_load(self):
+        path = self._runtime_with_vision("http://example.com")
+        with self.assertRaises(mmos.RefuseError) as caught:
+            mmos.load_runtime(path)
+        self.assertEqual(caught.exception.code, "RUNTIME_VISION_BASE_URL")
+
+    def test_injected_base_url_still_loopback_checked(self):
+        # Constructor injection (test-only path) is exempt from the
+        # pin-equality check, never from the loopback rule (H4).
+        client = mmos.VisionClient(base_url="http://example.com",
+                                   token="injected-token")
+        with self.assertRaises(mmos.OpError) as caught:
+            client.ask(b"\x89PNGfake", "question")
+        self.assertEqual(caught.exception.code, "VISION_ENDPOINT_INSECURE")
+
+
 class TestDenyListNewEntries(unittest.TestCase):
     """M6: the built-in list gains the named password managers and settings
     surfaces (names + bundle ids), title_regexes match window titles, and a

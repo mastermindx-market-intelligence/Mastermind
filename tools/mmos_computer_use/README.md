@@ -113,12 +113,20 @@ Design summary:
   synthesized keystrokes.
 - **Vision, in memory.** `vision_ask` captures one window into a private
   staging directory, sends the PNG (base64, in-process via `urllib.request`
-  with headers — never curl/argv) to the configured Anthropic-protocol vision
-  endpoint with the token read from `ANTHROPIC_AUTH_TOKEN` **at call time
-  only**, and returns `{answer, elements, model}` where elements carry
-  normalized 0–1000 image coordinates. **The endpoint must be loopback**
-  (`localhost` / `127.0.0.1` / `::1`, http or https); any other host is
-  refused `VISION_ENDPOINT_INSECURE` even with https. Prompt text is capped:
+  with headers — never curl/argv) to the Anthropic-protocol vision endpoint
+  with the token read from `ANTHROPIC_AUTH_TOKEN` **at call time only**, and
+  returns `{answer, elements, model}` where elements carry normalized
+  0–1000 image coordinates. **The endpoint is pinned in code to the local
+  router** (`DEFAULT_VISION_BASE_URL`, BCU R3 L6); the sha-pinned runtime
+  descriptor may name it explicitly via a loopback-only `vision_base_url`
+  key (any other value refuses startup with `RUNTIME_VISION_BASE_URL`). The
+  environment never supplies the endpoint: an `ANTHROPIC_BASE_URL` that
+  differs from the pin refuses `VISION_ENDPOINT_INSECURE` before any
+  request — **even another loopback port**, so a session that controls the
+  server env cannot redirect captures to its own listener. The endpoint
+  must in any case be loopback (`localhost` / `127.0.0.1` / `::1`, http or
+  https); any other host is refused `VISION_ENDPOINT_INSECURE` even with
+  https. Prompt text is capped:
   `question` ≤ 2000 chars (`QUESTION_TOO_LONG`), caller `element_hints` ≤ 20
   entries, 120 chars each, 1200 chars total (`HINTS_TOO_LONG`); over-limit
   input is refused before any capture or network dispatch. Image
@@ -210,7 +218,7 @@ pin, and serves MCP over stdio (newline-delimited JSON-RPC 2.0:
 | `MMOS_CU_PACING_SECONDS`   | minimum interval between input-delivering acts; default 180, values below it refuse UNCONDITIONALLY |
 | `MMOS_CU_DENY`             | deny.json path override (must be inside this tool's folder) |
 | `MMOS_CU_VISION_MODEL`     | vision model (default `minimax-m3.1-flash`)    |
-| `ANTHROPIC_BASE_URL`       | vision endpoint base URL (loopback only)       |
+| `ANTHROPIC_BASE_URL`       | **NOT an endpoint source** (BCU R3 L6): the endpoint is pinned in code to the router (`DEFAULT_VISION_BASE_URL`, optionally named by the runtime descriptor's loopback-only `vision_base_url` key). A set value that differs from the pin refuses every vision call `VISION_ENDPOINT_INSECURE` — even another loopback port |
 | `ANTHROPIC_AUTH_TOKEN`     | vision token, read at call time only           |
 
 `MMOS_CU_STATE_DIR`, `MMOS_CU_DENY` and `MMOS_CU_RUNTIME` are layer-scoped:

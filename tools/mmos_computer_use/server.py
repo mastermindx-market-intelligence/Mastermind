@@ -146,10 +146,13 @@ FOREGROUND_REQUIRED rather than a silent focus steal. Window enumeration and
 the AX tree ARE reachable via CLI flags, so the fallback of running
 ``peekaboo mcp serve`` and speaking MCP to it is NOT used.
 
-Secrets: the vision call reads ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL from
-the environment at call time only, uses urllib.request with headers (never
-curl/argv), and never stores, logs or writes the token or image bytes. Child
-peekaboo processes get an environment with ANTHROPIC_* variables stripped.
+Secrets: the vision call reads ANTHROPIC_AUTH_TOKEN from the environment at
+call time only, uses urllib.request with headers (never curl/argv), and never
+stores, logs or writes the token or image bytes. The ENDPOINT is pinned in
+code to the local router (DEFAULT_VISION_BASE_URL, BCU R3 L6): the
+environment never supplies it, and an ANTHROPIC_BASE_URL that differs from
+the pin refuses even on another loopback port. Child peekaboo processes get
+an environment with ANTHROPIC_* variables stripped.
 
 Run:      python3 tools/mmos_computer_use/server.py
 Config:   tools/mmos_computer_use/runtime.json (or runtime.json.dev when
@@ -260,6 +263,13 @@ ACT_TIMEOUT_S = 15.0
 PASTE_TIMEOUT_S = 60.0
 VISION_TIMEOUT_S = 90.0
 DEFAULT_VISION_MODEL = "minimax-m3.1-flash"
+# BCU R3 L6: the vision endpoint is PINNED IN CODE to the local router's
+# address. The environment is never an endpoint source (a conflicting
+# ANTHROPIC_BASE_URL refuses at call time, even on another loopback port),
+# and the sha-pinned runtime descriptor may name the endpoint only through
+# the load_runtime-validated `vision_base_url` key (loopback form or
+# startup refusal). Nothing a session can set by environment loosens this.
+DEFAULT_VISION_BASE_URL = "http://127.0.0.1:8313"
 
 # Honest automation: this layer performs ordinary, visible automation only.
 # It never imitates or disguises itself as a human — no randomized or
@@ -461,6 +471,22 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
+def _loopback_url_ok(url):
+    """True only for an http(s) URL whose host is loopback
+    (localhost / 127.0.0.1 / ::1). Shared by the startup validation of the
+    runtime descriptor's vision_base_url (BCU R3 L6) and the call-time
+    endpoint check (H4)."""
+    if not isinstance(url, str):
+        return False
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme in ("http", "https") and \
+        host in ("localhost", "127.0.0.1", "::1")
+
+
 def load_runtime(path):
     """Load and VERIFY the pinned peekaboo runtime descriptor.
 
@@ -514,6 +540,13 @@ def load_runtime(path):
             raise RefuseError("RUNTIME_CHALLENGE_PATTERNS_EXTRA",
                               repr(challenge_extra))
         challenge_extra = list(challenge_extra)
+    # BCU R3 L6: the descriptor MAY name the vision endpoint explicitly,
+    # but only in loopback form — validated here at startup. The
+    # environment is never an endpoint source; an absent key means the
+    # code pin (DEFAULT_VISION_BASE_URL).
+    vision_base = data.get("vision_base_url")
+    if vision_base is not None and not _loopback_url_ok(vision_base):
+        raise RefuseError("RUNTIME_VISION_BASE_URL", repr(vision_base))
     if not os.path.isfile(binary):
         raise RefuseError("RUNTIME_BIN_MISSING", binary)
     try:
@@ -529,7 +562,8 @@ def load_runtime(path):
             "pacing_seconds": pacing,
             "paste_focus_timeout_ms": paste_focus_ms,
             "paste_restore_delay_ms": paste_restore_ms,
-            "challenge_patterns_extra": challenge_extra or []}
+            "challenge_patterns_extra": challenge_extra or [],
+            "vision_base_url": vision_base}
 
 
 def resolve_runtime_path():
@@ -1979,13 +2013,25 @@ VISION_HINTS_MAX_TOTAL_CHARS = 1200
 class VisionClient:
     """Anthropic-protocol vision request over urllib. The token is read from
     the environment at CALL time only and never stored, logged or passed on
-    argv. Image bytes/base64 never appear in logs, errors or files."""
+    argv. Image bytes/base64 never appear in logs, errors or files.
 
-    def __init__(self, model=None, base_url=None, token=None, timeout=VISION_TIMEOUT_S):
+    BCU R3 L6: the ENDPOINT is pinned — the code default
+    (DEFAULT_VISION_BASE_URL) or the load_runtime-validated
+    `vision_base_url` key of the sha-pinned runtime descriptor. The
+    environment never supplies it; a constructor-injected base_url is the
+    test-only path (still loopback-checked)."""
+
+    def __init__(self, model=None, base_url=None, token=None,
+                 timeout=VISION_TIMEOUT_S, runtime=None):
         self.model = model or os.environ.get("MMOS_CU_VISION_MODEL") \
             or DEFAULT_VISION_MODEL
-        self.base_url = (base_url if base_url is not None
-                         else os.environ.get("ANTHROPIC_BASE_URL"))
+        self._injected_base_url = base_url is not None
+        if base_url is not None:
+            self.base_url = base_url  # test-only injection path
+        else:
+            runtime = runtime if isinstance(runtime, dict) else {}
+            self.base_url = runtime.get("vision_base_url") \
+                or DEFAULT_VISION_BASE_URL
         self.token = token  # injected only by tests; production reads env
         self.timeout = timeout
 
@@ -1996,8 +2042,10 @@ class VisionClient:
             raise OpError("VISION_UNCONFIGURED",
                           "ANTHROPIC_AUTH_TOKEN not set in this process")
         if not self.base_url:
+            # Unreachable via the pin (always non-empty); guards an
+            # injected empty value.
             raise OpError("VISION_UNCONFIGURED",
-                          "ANTHROPIC_BASE_URL not set in this process")
+                          "vision endpoint unresolved")
         return token
 
     def configured(self):
@@ -2009,21 +2057,31 @@ class VisionClient:
         return bool(token and self.base_url)
 
     def _require_secure_endpoint(self):
-        """The vision endpoint is LOOPBACK ONLY (H4 principal ruling).
+        """The vision endpoint is LOOPBACK ONLY (H4 principal ruling) and
+        PINNED to the router address (BCU R3 L6).
 
         The captured window image and the bearer token may leave the process
-        only toward localhost / 127.0.0.1 / ::1, over http or https. Any
-        other host is refused even over https, so a misconfigured router
-        cannot exfiltrate window captures.
+        only toward localhost / 127.0.0.1 / ::1, over http or https, and
+        only toward the PIN: DEFAULT_VISION_BASE_URL in code, or the
+        load_runtime-validated vision_base_url key of the sha-pinned runtime
+        descriptor. ANTHROPIC_BASE_URL is not an endpoint source; when it is
+        set to anything different from the pin the call REFUSES
+        (VISION_ENDPOINT_INSECURE) rather than silently following it — a
+        session that controls the server env cannot redirect captures and
+        the x-api-key header to its own loopback listener, not even on
+        another loopback port. A constructor-injected base_url (test-only
+        path) is exempt from the pin-equality check, never from the loopback
+        check.
         """
-        try:
-            parsed = urllib.parse.urlparse(self.base_url or "")
-        except ValueError:
-            raise OpError("VISION_ENDPOINT_INSECURE",
-                          "endpoint URL unparseable; refused")
-        host = (parsed.hostname or "").lower()
-        if parsed.scheme not in ("http", "https") or \
-                host not in ("localhost", "127.0.0.1", "::1"):
+        if not self._injected_base_url:
+            env_url = os.environ.get("ANTHROPIC_BASE_URL")
+            if env_url and env_url.rstrip("/") != \
+                    (self.base_url or "").rstrip("/"):
+                raise OpError(
+                    "VISION_ENDPOINT_INSECURE",
+                    "endpoint is pinned to the router address; an "
+                    "ANTHROPIC_BASE_URL override is refused")
+        if not _loopback_url_ok(self.base_url):
             raise OpError("VISION_ENDPOINT_INSECURE",
                           "endpoint must be loopback (localhost/127.0.0.1/"
                           "::1, http or https); refused")
@@ -3482,7 +3540,9 @@ def build_context(state_dir=None, runtime_path=None, deny_path=None):
     presence = Presence(runtime=runtime)
     pacer = Pacer(state_dir=state_dir, runtime=runtime)
     adapter = PeekabooAdapter(runtime)
-    vision = VisionClient()
+    # L6: the endpoint pin travels with the validated runtime descriptor;
+    # the environment is never an endpoint source.
+    vision = VisionClient(runtime=runtime)
     return ToolContext(runtime, deny, lease, presence, adapter, vision, pacer)
 
 
