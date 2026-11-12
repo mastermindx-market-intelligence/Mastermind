@@ -4265,9 +4265,16 @@ class TestForegroundPasteGate(unittest.TestCase):
     def test_deny_after_the_observe_refuses_before_the_chord(self):
         ctx = self._ctx()
         real = ctx.adapter.inspect_window
+        calls = []
 
         def became_denied(window_id):
+            # The slice's opening observe (call 1) succeeds; the window only
+            # turns deny-listed by the gate's FRESH read (call 2) immediately
+            # before the chord — exactly the race the gate exists for.
+            calls.append(window_id)
             data = real(window_id)
+            if len(calls) == 1:
+                return data
             out = dict(data) if isinstance(data, dict) else {}
             out["app"] = "1Password"
             out["bundle_id"] = "com.1password.1password"
@@ -4280,6 +4287,7 @@ class TestForegroundPasteGate(unittest.TestCase):
         self.assertIs(payload["pasted"], False)
         self.assertEqual(payload["clipboard_state"], "unchanged")
         self.assertEqual([c for c in read_calls(ctx) if c[0] == "paste"], [])
+        self.assertGreaterEqual(len(calls), 2, "the gate never re-read")
 
     def test_frontmost_lost_refuses_before_the_chord(self):
         ctx = self._ctx()
@@ -4299,8 +4307,16 @@ class TestForegroundPasteGate(unittest.TestCase):
 
     def test_unreadable_gate_evidence_is_a_typed_refusal(self):
         ctx = self._ctx()
+        real = ctx.adapter.inspect_window
+        calls = []
 
         def unreadable(window_id):
+            # The observe read works; only the gate's fresh read (call 2+)
+            # comes back unreadable — the paste must then refuse pre-dispatch
+            # with the typed PASTE_GATE_UNVERIFIED, never dispatch blind.
+            calls.append(window_id)
+            if len(calls) == 1:
+                return real(window_id)
             raise mmos.OpError("DISPATCH_UNAVAILABLE", "see failed")
 
         ctx.adapter.inspect_window = unreadable
@@ -4310,6 +4326,7 @@ class TestForegroundPasteGate(unittest.TestCase):
         self.assertIs(payload["pasted"], False)
         self.assertEqual(payload["clipboard_state"], "unchanged")
         self.assertEqual([c for c in read_calls(ctx) if c[0] == "paste"], [])
+        self.assertGreaterEqual(len(calls), 2, "the gate never re-read")
 
     def test_background_paste_is_not_gated_on_frontmost(self):
         # The gate is scoped to the foreground chord: the background paste is
