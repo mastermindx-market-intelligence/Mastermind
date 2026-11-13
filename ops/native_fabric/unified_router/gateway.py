@@ -619,6 +619,10 @@ def create_app(cfg: Settings | None = None, *,
         try:
             yield
         finally:
+            await app.state.model_policy.flush_checkpoint()
+            writer = app.state.model_policy._checkpoint_task
+            if writer is not None:
+                await asyncio.shield(writer)
             await app.state.upstream.aclose()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
@@ -634,6 +638,7 @@ def create_app(cfg: Settings | None = None, *,
         app.state.model_policy.configure_persistence(
             app.state.settings.state_dir / "admission-window-v1.json",
             uncertainty_s=app.state.settings.upstream_timeout_s + 60)
+        app.state.model_policy.async_checkpoints = True
     from ops.native_fabric.unified_router import overflow as _fabric_overflow  # overflow add-on
     _fabric_overflow.install(app, __import__("sys").modules[__name__])
     app.state.config_refresh = ConfigRefresh(app.state.settings.routes_path, app.state.settings.routes_digest)
@@ -906,9 +911,24 @@ def create_app(cfg: Settings | None = None, *,
                     selected_at = time.monotonic()
                     admission = None if counting else routing.begin(
                         route, resolved, payload, session, profile, time.monotonic(), fingerprint)
-                    if admission and admission.effective_max_tokens is not None and routing.persistence_error:
+                    if admission and admission.effective_max_tokens is not None:
+                        try:
+                            durable = await routing.flush_checkpoint()
+                            disconnected = durable and await request.is_disconnected()
+                        except BaseException:
+                            routing.finish(admission, no_send=True)
+                            raise
+                        if not durable:
+                            routing.finish(admission, no_send=True)
+                            return JSONResponse({"error": {"code": "FABRIC_ADMISSION_STATE_UNAVAILABLE"}}, status_code=503)
+                        if disconnected:
+                            routing.finish(admission, no_send=True)
+                            return JSONResponse({"error": {"code": "FABRIC_CLIENT_DISCONNECTED"}}, status_code=499)
+                    remaining = cfg.upstream_timeout_s if admission is None else (
+                        cfg.upstream_timeout_s - (time.monotonic() - admission.started))
+                    if remaining <= 0:
                         routing.finish(admission, no_send=True)
-                        return JSONResponse({"error": {"code": "FABRIC_ADMISSION_STATE_UNAVAILABLE"}}, status_code=503)
+                        return JSONResponse({"error": {"code": "FABRIC_ADMISSION_DEADLINE"}}, status_code=503)
                     send_count += 1
                     state.attempts += 1
                     if send_count > 1:
@@ -916,7 +936,7 @@ def create_app(cfg: Settings | None = None, *,
                     if waiting:
                         routing.waiters.pop(nonce, None); waiting = False
                     try:
-                        async with asyncio.timeout(cfg.upstream_timeout_s):
+                        async with asyncio.timeout(remaining):
                             response = await invoke(route, resolved, admission)
                     except _Retryable as exc:
                         code = exc.reason

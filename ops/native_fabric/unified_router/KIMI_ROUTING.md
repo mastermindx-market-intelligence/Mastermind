@@ -29,6 +29,8 @@ Model weights are preferences when a resource is eligible, not traffic quotas. M
 
 `admission_state.py` persists the existing admission owner's rolling charges, active reservations, provider observations and route cooldowns through an atomic, owner-only file. Clean restarts restore recent charges. Interrupted active requests retain a conservative resource hold through the upstream uncertainty window. A first install with no prior ledger waits one rolling minute before strict Kimi admission. A corrupt or unwritable ledger fails closed for strict resources and reports the error; unrelated routes remain available.
 
+Checkpoint I/O runs outside the request event loop. One writer serializes immutable snapshots and coalesces routine updates, while strict Kimi admissions wait for their own reservation revision to become durable before sending upstream. Cancelling that wait cannot cancel the disk writer or replay a request. A failed write latches an error instead of creating a retry storm. Graceful shutdown flushes remaining changes. This is necessary on the M2, where measured synchronous checkpoint writes took approximately 0.45 seconds each.
+
 `/routingz` reports configured and effective caps, charged/reserved input and output, in-flight occupancy, remaining headroom, provider observations and freshness, recovery holds, persistence health, profile weights and effective request ceilings. These diagnostics distinguish local estimates from upstream observations. The source manifest includes the admission-state module and measures the actual runtime source.
 
 ## Direct M2 rollout

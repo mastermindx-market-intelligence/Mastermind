@@ -5,17 +5,18 @@ import hashlib
 import json
 import math
 import time
+import threading
 from pathlib import Path
 
 import httpx
 import pytest
 
-from .gateway import Settings, create_app, _routes_from_document
-from .model_policy import ModelPolicyState, prefix_signature
-from .routes import Route, RouteState, RateWindow
-from .overflow import Overflow
-from .config_refresh import read_document
-from .gateway import _retry_after_s
+from ops.native_fabric.unified_router.gateway import Settings, create_app, _routes_from_document
+from ops.native_fabric.unified_router.model_policy import ModelPolicyState, prefix_signature
+from ops.native_fabric.unified_router.routes import Route, RouteState, RateWindow
+from ops.native_fabric.unified_router.overflow import Overflow
+from ops.native_fabric.unified_router.config_refresh import read_document
+from ops.native_fabric.unified_router.gateway import _retry_after_s
 
 TOKEN = "test-only-router-token-abcdefghijklmnopqrstuvwxyz"
 KIMI = "kimi-k3.1-pro"
@@ -295,3 +296,146 @@ def test_valid_long_retry_after_is_preserved_across_restart(tmp_path):
     assert p.checkpoint()
     _, restored = state(tmp_path); restored.configure_persistence(path)
     assert restored.route_state.cooldown_until["seat1"] > time.monotonic() + 1209590
+
+
+@pytest.mark.parametrize("mode", ['success', 'cancel', 'disconnect', 'deadline'])
+def test_durable_send_barrier_does_not_block_health_or_send_abandoned_work(tmp_path, monkeypatch, mode):
+    from ops.native_fabric.unified_router import admission_state
+    monkeypatch.setenv('KIMI_TEST_TOKEN', 'fixture-only')
+    entered, release = threading.Event(), threading.Event()
+    original = admission_state.write
+    writes, sends = [], []
+    disconnected = {'value': False}
+    if mode == 'disconnect':
+        from starlette.requests import Request
+        async def is_disconnected(self):
+            return disconnected['value']
+        monkeypatch.setattr(Request, 'is_disconnected', is_disconnected)
+    def slow_write(path, raw):
+        writes.append(json.loads(raw))
+        if len(writes) == 1:
+            entered.set()
+            if not release.wait(5):
+                raise OSError("controlled test persistence timeout")
+        original(path, raw)
+    monkeypatch.setattr(admission_state, "write", slow_write)
+    def send(request):
+        saved = json.loads((tmp_path / "admission-window-v1.json").read_text())
+        assert saved['pending'], "upstream send preceded durable reservation"
+        sends.append(request)
+        return response(request)
+    async def run():
+        cfg = configuration(tmp_path)
+        if mode == 'deadline':
+            cfg = dataclasses.replace(cfg, upstream_timeout_s=.02)
+        cfg.model_routing['persist_admission_state'] = True
+        app = create_app(cfg, transport=httpx.MockTransport(send))
+        p = app.state.model_policy; p.recovery_until.clear()
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, client=('127.0.0.1', 1)), base_url="http://test") as client:
+                pending = asyncio.create_task(client.post('/v1/messages', json=body(KIMI, 128),
+                    headers={'Authorization': 'Bearer ' + TOKEN}))
+                try:
+                    assert await asyncio.to_thread(entered.wait, 3), (pending.result().status_code, pending.result().text) if pending.done() else 'request still waiting'
+                    assert not sends and not pending.done()
+                    assert (await client.get('/healthz')).status_code == 200
+                    if mode == 'cancel':
+                        pending.cancel()
+                        with pytest.raises(asyncio.CancelledError):
+                            await pending
+                        assert not p.active and not sends
+                    elif mode == 'disconnect':
+                        disconnected['value'] = True
+                    elif mode == 'deadline':
+                        await asyncio.sleep(.04)
+                finally:
+                    release.set()
+                if mode != 'cancel':
+                    result = await pending
+                    expected = {'success': 200, 'disconnect': 499, 'deadline': 503}[mode]
+                    assert result.status_code == expected
+                    assert len(sends) == (1 if mode == 'success' else 0)
+                    if mode == 'deadline':
+                        assert result.json()['error']['code'] == 'FABRIC_ADMISSION_DEADLINE'
+                assert await p.flush_checkpoint()
+                saved = json.loads((tmp_path / 'admission-window-v1.json').read_text())
+                assert not saved['pending'] and not p.active
+                assert p.durable_revision == p.checkpoint_revision
+    asyncio.run(run())
+
+
+def test_async_checkpoint_coalesces_updates_without_stale_overwrite(tmp_path, monkeypatch):
+    from ops.native_fabric.unified_router import admission_state
+    entered, release = threading.Event(), threading.Event()
+    original = admission_state.write
+    writes = []
+    def slow_write(path, raw):
+        writes.append(json.loads(raw))
+        if len(writes) == 1:
+            entered.set()
+            if not release.wait(5):
+                raise OSError('controlled test persistence timeout')
+        original(path, raw)
+    monkeypatch.setattr(admission_state, 'write', slow_write)
+    async def run():
+        cfg, p = state(tmp_path); path = tmp_path / 'admission.json'
+        p.configure_persistence(path); p.recovery_until.clear(); p.async_checkpoints = True
+        a = p.begin(cfg.routes[0], KIMI, body(KIMI, 128), 's', KIMI, time.monotonic())
+        try:
+            assert await asyncio.to_thread(entered.wait, 3)
+            p.finish(a, no_send=True)
+            for _ in range(20):
+                assert p.checkpoint()
+        finally:
+            release.set()
+        assert await p.flush_checkpoint()
+        assert len(writes) == 2 and writes[0]['pending'] and not writes[-1]['pending']
+        assert not json.loads(path.read_text())['pending']
+        assert p.durable_revision == p.checkpoint_revision
+    asyncio.run(run())
+
+
+def test_async_checkpoint_failure_latches_without_retry_storm(tmp_path, monkeypatch):
+    from ops.native_fabric.unified_router import admission_state
+    attempts = []
+    def unavailable(path, raw):
+        attempts.append(path)
+        raise OSError('controlled unavailable state store')
+    monkeypatch.setattr(admission_state, 'write', unavailable)
+    async def run():
+        cfg, p = state(tmp_path); p.configure_persistence(tmp_path / 'admission.json')
+        p.recovery_until.clear(); p.async_checkpoints = True
+        p.begin(cfg.routes[0], KIMI, body(KIMI, 128), 's', KIMI, time.monotonic())
+        assert not await p.flush_checkpoint()
+        for _ in range(20):
+            assert not p.checkpoint()
+        assert not await p.flush_checkpoint()
+        assert len(attempts) == 1 and p.persistence_error
+        assert math.isinf(p.eta(cfg.routes[1], KIMI, body(KIMI, 128), None, time.monotonic()))
+    asyncio.run(run())
+
+
+def test_stalled_checkpoint_has_bounded_admission_wait(tmp_path, monkeypatch):
+    from ops.native_fabric.unified_router import admission_state
+    entered, release = threading.Event(), threading.Event()
+    original = admission_state.write
+    def blocked(path, raw):
+        entered.set()
+        if not release.wait(5):
+            raise OSError('controlled test persistence timeout')
+        original(path, raw)
+    monkeypatch.setattr(admission_state, 'write', blocked)
+    async def run():
+        cfg, p = state(tmp_path); p.configure_persistence(tmp_path / 'admission.json')
+        p.recovery_until.clear(); p.async_checkpoints = True
+        a = p.begin(cfg.routes[0], KIMI, body(KIMI, 128), 's', KIMI, time.monotonic())
+        try:
+            assert await asyncio.to_thread(entered.wait, 3)
+            assert not await p.flush_checkpoint(timeout_s=.02)
+            assert p.persistence_error == 'FABRIC_ADMISSION_CHECKPOINT_TIMEOUT'
+            p.finish(a, no_send=True)
+            assert not p.active
+        finally:
+            release.set()
+            await p._checkpoint_task
+    asyncio.run(run())

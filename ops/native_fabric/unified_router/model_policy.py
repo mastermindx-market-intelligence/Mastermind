@@ -190,6 +190,14 @@ class ModelPolicyState:
         self.checkpoint_path = None
         self.persistence_error = None
         self.persistence_restored = False
+        self.async_checkpoints = False
+        self.checkpoint_revision = 0
+        self.durable_revision = 0
+        self.checkpoint_write_ms = None
+        self._checkpoint_task = None
+        self._checkpoint_changed = asyncio.Event()
+        self._checkpoint_urgent = asyncio.Event()
+        self._checkpoint_next_at = 0.0
         self.uncertainty_s = 960.0
         self.counters = {k: 0 for k in ("selected", "completed", "failed", "cache_affinity_hits",
             "model_spillovers", "capacity_waits", "queue_refused", "unknown_usage", "quota_refusals")}
@@ -203,9 +211,64 @@ class ModelPolicyState:
 
     def checkpoint(self):
         if self.checkpoint_path is not None:
+            if self.async_checkpoints:
+                self.checkpoint_revision += 1
+                self._start_checkpoint_writer()
+                return self.persistence_error is None
             from .admission_state import save
             return save(self)
         return True
+
+    def _start_checkpoint_writer(self):
+        if self.persistence_error or self.checkpoint_path is None:
+            return
+        if self._checkpoint_task is None or self._checkpoint_task.done():
+            self._checkpoint_task = asyncio.create_task(self._write_checkpoints())
+
+    async def _write_checkpoints(self):
+        from .admission_state import encode, write
+        try:
+            while self.durable_revision < self.checkpoint_revision and not self.persistence_error:
+                delay = max(0.0, self._checkpoint_next_at - time.monotonic())
+                if delay and not self._checkpoint_urgent.is_set():
+                    try:
+                        await asyncio.wait_for(self._checkpoint_urgent.wait(), delay)
+                    except TimeoutError:
+                        pass
+                self._checkpoint_urgent.clear()
+                revision = self.checkpoint_revision
+                raw = encode(self)
+                began = time.monotonic()
+                # One writer, immutable bytes, and monotonic revisions: a slow
+                # older write can never overwrite a newer committed snapshot.
+                await asyncio.to_thread(write, self.checkpoint_path, raw)
+                self.checkpoint_write_ms = round((time.monotonic() - began) * 1000, 1)
+                self.durable_revision = revision
+                self._checkpoint_next_at = time.monotonic() + 1.0
+                self._checkpoint_changed.set()
+        except (OSError, ValueError, TypeError):
+            # Latch errors; no write/retry storm on an unavailable state store.
+            self.persistence_error = "FABRIC_ADMISSION_CHECKPOINT_WRITE_FAILED"
+        finally:
+            self._checkpoint_changed.set()
+
+    async def flush_checkpoint(self, timeout_s=10.0):
+        if self.checkpoint_path is None:
+            return True
+        if not self.async_checkpoints:
+            return self.checkpoint()
+        target = self.checkpoint_revision
+        deadline = time.monotonic() + timeout_s
+        self._checkpoint_urgent.set()
+        self._start_checkpoint_writer()
+        while self.durable_revision < target and not self.persistence_error:
+            self._checkpoint_changed.clear()
+            try:
+                await asyncio.wait_for(self._checkpoint_changed.wait(), max(0.001, deadline - time.monotonic()))
+            except TimeoutError:
+                self.persistence_error = "FABRIC_ADMISSION_CHECKPOINT_TIMEOUT"
+                self._checkpoint_changed.set()
+        return self.persistence_error is None
 
     def _validate(self):
         if not isinstance(self.groups, dict) or not isinstance(self.resources, dict):
@@ -649,7 +712,11 @@ class ModelPolicyState:
             "resources": resources, "recent": list(self.events)[-20:],
             "exact_model_pins_preserved": True, "metered_fallback": self.allow_metered,
             "persistence": {"enabled": self.checkpoint_path is not None,
-                "restored": self.persistence_restored, "error": self.persistence_error},
+                "restored": self.persistence_restored, "error": self.persistence_error,
+                "async_writer": self.async_checkpoints,
+                "pending_revision": self.checkpoint_revision,
+                "durable_revision": self.durable_revision,
+                "last_write_ms": self.checkpoint_write_ms},
             "profiles": {name: {"models": list(self.aliases.get(name, ())),
                 "strategy": group.get("strategy", "balanced"),
                 "capacity_aware": group.get("capacity_aware", False),

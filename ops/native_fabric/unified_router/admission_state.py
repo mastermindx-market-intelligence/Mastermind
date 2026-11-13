@@ -151,32 +151,35 @@ def restore(policy):
         policy.persistence_error = "FABRIC_ADMISSION_CHECKPOINT_INVALID"
 
 
-def save(policy):
-    if policy.persistence_error:
-        return False
+def encode(policy):
+    """Capture one immutable snapshot on the admission owner's event loop."""
     now, wall = time.monotonic(), time.time()
-    path = Path(policy.checkpoint_path)
-    tmp = None
+    samples = [(resource, wall - (now - at), inp, out)
+        for resource in list(policy.window._samples)
+        for at, inp, out in policy.window._q(resource, now)]
+    if len(samples) > MAX_ROWS:
+        raise ValueError("admission checkpoint capacity exceeded")
+    views = {resource: {dimension: {**{k: v for k, v in view.items() if k != "reserved"},
+                        "at": wall - (now - view["at"])}
+                for dimension, view in dimensions.items() if now - view["at"] < 60}
+            for resource, dimensions in policy.provider_capacity.items()}
+    data = {"schema": SCHEMA, "saved_at": wall, "samples": samples,
+        "pending": [(a.resource, wall - (now - a.started), a.input_estimate, a.output_estimate)
+                    for a in policy.active.values()],
+        "recovery": {resource: wall + until - now for resource, until in policy.recovery_until.items() if until > now},
+        "observed_limits": policy.observed_limits, "provider_capacity": views,
+        "cooldown": {rid: wall + until - now for rid, until in policy.route_state.cooldown_until.items() if until > now}}
+    raw = json.dumps(data, separators=(",", ":"), allow_nan=False).encode()
+    if len(raw) > MAX_BYTES:
+        raise ValueError("admission checkpoint too large")
+    return raw
+
+
+def write(path, raw):
+    """Persist immutable bytes; safe to run off-loop without reading policy."""
+    path, tmp = Path(path), None
     try:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        samples = [(resource, wall - (now - at), inp, out)
-            for resource in list(policy.window._samples)
-            for at, inp, out in policy.window._q(resource, now)]
-        if len(samples) > MAX_ROWS:
-            raise ValueError("admission checkpoint capacity exceeded")
-        views = {resource: {dimension: {**{k: v for k, v in view.items() if k != "reserved"},
-                            "at": wall - (now - view["at"])}
-                    for dimension, view in dimensions.items() if now - view["at"] < 60}
-                for resource, dimensions in policy.provider_capacity.items()}
-        data = {"schema": SCHEMA, "saved_at": wall, "samples": samples,
-            "pending": [(a.resource, wall - (now - a.started), a.input_estimate, a.output_estimate)
-                        for a in policy.active.values()],
-            "recovery": {resource: wall + until - now for resource, until in policy.recovery_until.items() if until > now},
-            "observed_limits": policy.observed_limits, "provider_capacity": views,
-            "cooldown": {rid: wall + until - now for rid, until in policy.route_state.cooldown_until.items() if until > now}}
-        raw = json.dumps(data, separators=(",", ":"), allow_nan=False).encode()
-        if len(raw) > MAX_BYTES:
-            raise ValueError("admission checkpoint too large")
         fd, tmp = tempfile.mkstemp(prefix=".admission-", dir=path.parent)
         with os.fdopen(fd, "wb") as stream:
             os.fchmod(stream.fileno(), 0o600)
@@ -184,13 +187,25 @@ def save(policy):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(tmp, path)
-        return True
-    except (OSError, ValueError, TypeError):
-        policy.persistence_error = "FABRIC_ADMISSION_CHECKPOINT_WRITE_FAILED"
-        return False
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
         if tmp:
             try:
                 os.unlink(tmp)
             except FileNotFoundError:
                 pass
+
+
+def save(policy):
+    if policy.persistence_error:
+        return False
+    try:
+        write(policy.checkpoint_path, encode(policy))
+        return True
+    except (OSError, ValueError, TypeError):
+        policy.persistence_error = "FABRIC_ADMISSION_CHECKPOINT_WRITE_FAILED"
+        return False
