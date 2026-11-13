@@ -212,6 +212,7 @@ class TestGatewayResponsesRoute(FabricTestCase):
     def _settings(self):
         return Settings(proxy_token=self.TOKEN,
                         state_dir=self.tmp_path / "state",
+                        capacity_wait_s=0.02,
                         routes=(_oauth_route(),),
                         auth_store=self.tmp_path / "auth.json")
 

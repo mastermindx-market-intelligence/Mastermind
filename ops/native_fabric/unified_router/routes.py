@@ -11,13 +11,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import random
-import re
 import time
 from dataclasses import dataclass, field
-from datetime import timezone
-from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 DEFAULT_AUTH_STORE = Path.home() / ".hermes" / "auth.json"
@@ -37,6 +33,15 @@ class Route:
     models: tuple[str, ...]        # public model slugs this route may serve
     weight: float = 1.0
     priority: int = 100            # lower tier first; within a tier, weights
+    # Chairman 2026-11-09 wide-distribution ruling: one model may join several
+    # providers in a single tier without disturbing the route's other models.
+    # Keys are public slugs (lowercased); missing -> route-wide defaults above.
+    model_priority: dict[str, int] = field(default_factory=dict)
+    model_weight: dict[str, float] = field(default_factory=dict)
+    # Per-model request parameter overrides applied after wire translation
+    # (slug -> e.g. {"reasoning_effort": "medium"} for upstreams whose default
+    # is unusable). Keys are public slugs (lowercased).
+    model_params: dict[str, dict] = field(default_factory=dict)
     pool: str = ""                 # credential_pool key for kind="credential_pool"
     api_key_label: str = ""        # label inside the pool entry
     env_key: str = ""              # NAME in the incumbent env file (~/.hermes/.env)
@@ -50,217 +55,212 @@ class Route:
     upstream_model: tuple[tuple[str, str], ...] = ()  # public slug -> wire id
     auth_header: str = ""          # upstream header for the raw credential (default Bearer authorization)
     session_header: str = ""       # upstream header carrying a stable per-affinity session id
+    # Admission pacing budget per subscription/window, tokens per 60s:
+    # {"input": N, "output": M}. Requests queue so aggregate observed usage
+    # stays under budget -- converts would-be 429s into bounded waits.
+    rate_limit: tuple = ()
     notes: str = ""
-    max_in_flight: int = 0          # local bulkhead; zero leaves only the global cap
-    concurrency_group: str = ""    # explicit shared local scope, never inferred quota
-    group_max_in_flight: int = 0
-    model_priority: dict[str, int] = field(default_factory=dict)
-    model_weight: dict[str, float] = field(default_factory=dict)
-    model_params: dict[str, dict] = field(default_factory=dict)
 
-    def __post_init__(self) -> None:
-        if (not self.route_id or not self.models
-                or not all(isinstance(m, str) and m.strip() for m in self.models)):
-            raise ValueError("route identity and models are required")
-        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", self.route_id):
-            raise ValueError("route identity must be a bounded safe label")
-        if any(len(m) > 256 or any(ord(c) < 33 or ord(c) > 126 for c in m) for m in self.models):
-            raise ValueError("model identifiers must be bounded visible ASCII")
-        if type(self.weight) not in (int, float) or not math.isfinite(self.weight) or self.weight < 0:
-            raise ValueError("route weight must be finite and non-negative")
-        if type(self.priority) is not int:
-            raise ValueError("route priority must be an integer")
-        models = {m.lower() for m in self.models}
-        for field_name in ("model_priority", "model_weight", "model_params"):
-            supplied = getattr(self, field_name)
-            if not isinstance(supplied, dict):
-                raise ValueError("per-model routing overrides must be objects")
-            normalized = {}
-            for key, value in supplied.items():
-                if (not isinstance(key, str) or key.strip().lower() not in models
-                        or key.strip().lower() in normalized):
-                    raise ValueError("per-model overrides must name unique served models")
-                key = key.strip().lower()
-                if field_name == "model_priority":
-                    if type(value) is not int:
-                        raise ValueError("per-model priority must be an integer")
-                elif field_name == "model_weight":
-                    if (type(value) not in (int, float) or not math.isfinite(value)
-                            or value < 0):
-                        raise ValueError("per-model weight must be finite and non-negative")
-                    value = float(value)
-                else:
-                    # Provider tuning cannot replace caller messages, tools, the
-                    # routed model, stream mode or any ownership/authentication field.
-                    if (not isinstance(value, dict) or set(value) - {"reasoning_effort"}
-                            or (value and (not isinstance(value.get("reasoning_effort"), str)
-                                or value["reasoning_effort"] not in {
-                                    "none", "minimal", "low", "medium", "high", "xhigh", "max"}))):
-                        raise ValueError("unsupported per-model request parameters")
-                    if value and self.wire != WIRE_OPENAI:
-                        raise ValueError("reasoning effort override requires OpenAI wire")
-                    value = dict(value)
-                normalized[key] = value
-            object.__setattr__(self, field_name, normalized)
-        if self.wire not in {WIRE_ANTHROPIC, WIRE_OPENAI, WIRE_RESPONSES}:
-            raise ValueError("unsupported route wire")
-        if self.kind not in {"gateway", "credential_pool", "config_file", "oauth_pool"}:
-            raise ValueError("unsupported route kind")
-        if (self.kind == "oauth_pool") != (self.wire == WIRE_RESPONSES):
-            raise ValueError("Responses wire requires the OAuth pool owner")
-        for limit in (self.max_in_flight, self.group_max_in_flight):
-            if type(limit) is not int or limit < 0:
-                raise ValueError("concurrency limits must be non-negative integers")
-        if bool(self.concurrency_group) != bool(self.group_max_in_flight):
-            raise ValueError("a concurrency group requires its explicit positive ceiling")
-        if self.concurrency_group and not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", self.concurrency_group):
-            raise ValueError("concurrency group must be a bounded safe label")
+    def __post_init__(self):
+        object.__setattr__(self, "model_priority", {
+            k.strip().lower(): int(v) for k, v in self.model_priority.items()})
+        object.__setattr__(self, "model_weight", {
+            k.strip().lower(): float(v) for k, v in self.model_weight.items()})
+        object.__setattr__(self, "model_params", {
+            k.strip().lower(): dict(v) for k, v in self.model_params.items()})
+        object.__setattr__(self, "rate_limit", tuple(
+            (str(k), float(v)) for k, v in dict(self.rate_limit).items()))
+
+    def rate_budget(self, kind: str) -> float:
+        for key, value in self.rate_limit:
+            if key == kind:
+                return value
+        return 0.0
+
+    @staticmethod
+    def canon(slug: str) -> str:
+        """Canonical public-slug form: vendors publish both '.' and '-' spellings
+        of the same model id (claude-fable-5.1 / claude-fable-5-1). Route
+        matching is spelling-tolerant so a session pinned to either spelling
+        resolves to the declared slug (and its upstream_model mapping) instead
+        of failing FABRIC_MODEL_UNKNOWN."""
+        return slug.strip().lower().replace(".", "-")
+
+    def canonical_slug(self, model: str) -> str | None:
+        """The DECLARED public slug for ``model`` (either spelling), else None."""
+        wanted = self.canon(model)
+        for slug in self.models:
+            if self.canon(slug) == wanted:
+                return slug
+        return None
 
     def serves(self, model: str) -> bool:
-        wanted = model.strip().lower()
-        return wanted in {slug.lower() for slug in self.models}
+        return self.canonical_slug(model) is not None
 
     def effective_priority(self, model: str) -> int:
-        return self.model_priority.get(model.strip().lower(), self.priority)
+        wanted = self.canon(model)
+        return self.model_priority.get(wanted,
+            self.model_priority.get(self.canonical_slug(model) or "", self.priority))
 
-    def effective_weight(self, model: str = "") -> float:
-        # A route-wide zero is an operator drain across every model. A model
-        # override may additionally drain one model, but cannot undo that hold.
-        if self.weight == 0:
-            return 0.0
-        return self.model_weight.get(model.strip().lower(), self.weight)
+    def effective_weight(self, model: str) -> float:
+        wanted = self.canon(model)
+        return self.model_weight.get(wanted,
+            self.model_weight.get(self.canonical_slug(model) or "", self.weight))
 
     def effective_params(self, model: str) -> dict:
-        return dict(self.model_params.get(model.strip().lower(), {}))
+        """Request parameter overrides for ``model``; empty when none."""
+        wanted = self.canon(model)
+        return dict(self.model_params.get(wanted,
+            self.model_params.get(self.canonical_slug(model) or "", {})))
 
     def wire_model(self, model: str) -> str:
-        wanted = model.strip().lower()
+        # Resolve either spelling to the declared slug first, then apply the
+        # public->wire mapping, so variant-spelled requests send the correct
+        # upstream id (or the declared slug) -- never the raw variant.
+        declared = self.canonical_slug(model)
+        if declared is not None:
+            for slug, wire_id in self.upstream_model:
+                if slug.lower() == declared.strip().lower():
+                    return wire_id
+            return declared
         for slug, wire_id in self.upstream_model:
-            if slug.lower() == wanted:
+            if slug.lower() == model.strip().lower():
                 return wire_id
         return model
 
 
 @dataclass
-class RoutePermit:
-    route_id: str
-    group: str
-    generation: int
-    probe: bool
-    released: bool = False
-
-
-@dataclass
 class RouteState:
-    """Single-event-loop circuit/bulkhead state, not provider quota authority.
-
-    Selection and acquire contain no await. The installed service uses one
-    worker; this state makes no cross-process or direct-provider guarantee.
-    """
+    """Local, in-process circuit knowledge; never a second quota ledger."""
     cooldown_until: dict[str, float] = field(default_factory=dict)
     last_failure: dict[str, tuple[float, str]] = field(default_factory=dict)
     consecutive_failures: dict[str, int] = field(default_factory=dict)
-    generation: dict[str, int] = field(default_factory=dict)
-    in_flight: dict[str, int] = field(default_factory=dict)
-    group_in_flight: dict[str, int] = field(default_factory=dict)
-    probes: set[str] = field(default_factory=set)
 
     def available(self, route_id: str, now: float) -> bool:
-        return (self.cooldown_until.get(route_id, 0.0) <= now
-                and route_id not in self.probes)
-
-    def has_room(self, route: Route) -> bool:
-        return ((not route.max_in_flight
-                 or self.in_flight.get(route.route_id, 0) < route.max_in_flight)
-                and (not route.concurrency_group or self.group_in_flight.get(
-                    route.concurrency_group, 0) < route.group_max_in_flight))
-
-    def exclusion_reason(self, route: Route, now: float, model: str = "") -> str:
-        """First local hard exclusion, shared by selection and acquisition."""
-        if route.effective_weight(model) <= 0:
-            return "drained"
-        if self.cooldown_until.get(route.route_id, 0.0) > now:
-            return "circuit_open"
-        if route.route_id in self.probes:
-            return "probe_occupied"
-        if route.max_in_flight and self.in_flight.get(route.route_id, 0) >= route.max_in_flight:
-            return "route_limit"
-        if route.concurrency_group and self.group_in_flight.get(
-                route.concurrency_group, 0) >= route.group_max_in_flight:
-            return "group_limit"
-        return ""
-
-    def acquire(self, route: Route, *, now: float, model: str = "") -> RoutePermit | None:
-        if self.exclusion_reason(route, now, model):
-            return None
-        probe = self.consecutive_failures.get(route.route_id, 0) > 0
-        if probe:
-            self.probes.add(route.route_id)
-        self.in_flight[route.route_id] = self.in_flight.get(route.route_id, 0) + 1
-        if route.concurrency_group:
-            self.group_in_flight[route.concurrency_group] = self.group_in_flight.get(
-                route.concurrency_group, 0) + 1
-        return RoutePermit(route.route_id, route.concurrency_group,
-                           self.generation.get(route.route_id, 0), probe)
-
-    def release(self, permit: RoutePermit) -> None:
-        if permit.released:
-            return
-        permit.released = True
-        self.in_flight[permit.route_id] -= 1
-        if permit.group:
-            self.group_in_flight[permit.group] -= 1
-        if permit.probe:
-            self.probes.discard(permit.route_id)
+        return self.cooldown_until.get(route_id, 0.0) <= now
 
     def record_failure(self, route_id: str, reason: str, *, now: float,
-                       cooldown_s: float = 30.0,
-                       retry_after_s: float | None = None,
-                       generation: int | None = None) -> None:
-        if generation is not None and generation != self.generation.get(route_id, 0):
-            return
+                       cooldown_s: float = 30.0, escalate: bool = True) -> None:
+        import math
+        try:
+            cooldown_s = float(cooldown_s)
+        except (TypeError, ValueError, OverflowError):
+            cooldown_s = 30.0
+        if not math.isfinite(cooldown_s) or not 0 <= cooldown_s <= 1e9:
+            cooldown_s = 30.0
         count = self.consecutive_failures.get(route_id, 0) + 1
         self.consecutive_failures[route_id] = count
         self.last_failure[route_id] = (now, reason)
-        self.generation[route_id] = self.generation.get(route_id, 0) + 1
-        backoff = min(cooldown_s * (2 ** min(count - 1, 10)), 300.0)
-        # Positive jitter never shortens the provider's minimum Retry-After.
-        delay = max(backoff, retry_after_s or 0.0) + random.uniform(0, min(backoff * .1, 5))
-        self.cooldown_until[route_id] = max(self.cooldown_until.get(route_id, 0), now + delay)
+        # Rate-limit (quota window) refusals must NOT escalate: the window is a
+        # fixed per-minute meter, so benching for count*window would strand a
+        # healthy route for minutes after a short burst. Hard failures still
+        # back off exponentially up to the cap.
+        self.cooldown_until[route_id] = now + (
+            min(cooldown_s * count, 300.0) if escalate
+            else cooldown_s)
 
-    def record_success(self, route_id: str, *, generation: int | None = None) -> None:
-        # An older request finishing after a fresh failure cannot heal it.
-        if generation is not None and generation != self.generation.get(route_id, 0):
-            return
-        if self.consecutive_failures.get(route_id, 0):
-            self.generation[route_id] = self.generation.get(route_id, 0) + 1
+    def record_success(self, route_id: str) -> None:
         self.consecutive_failures[route_id] = 0
-        self.cooldown_until.pop(route_id, None)
-
-    def circuit(self, route_id: str, now: float) -> str:
-        if route_id in self.probes:
-            return "half_open"
-        if self.cooldown_until.get(route_id, 0) > now:
-            return "open"
-        return "probe_ready" if self.consecutive_failures.get(route_id, 0) else "closed"
+        if self.cooldown_until.get(route_id, 0) <= time.monotonic():
+            self.cooldown_until.pop(route_id, None)
 
 
-def retry_after_seconds(value: str, *, wall_now: float) -> float | None:
-    """Parse delta seconds or HTTP-date once; callers use monotonic deadlines."""
-    if not value or len(value) > 128:
-        return None
-    try:
-        seconds = float(value)
-    except ValueError:
-        try:
-            date = parsedate_to_datetime(value)
-            if date.tzinfo is None:
-                date = date.replace(tzinfo=timezone.utc)
-            seconds = date.timestamp() - wall_now
-        except (ValueError, TypeError, OverflowError):
-            return None
-    return max(0.0, seconds) if math.isfinite(seconds) else None
+RATE_WINDOW_S = 60.0
 
+
+class RateWindow:
+    """Local request-keyed pacing, never authoritative provider headroom.
+
+    Active reservations live until their request/stream closes, not for an arbitrary
+    60-second TTL. Input and output are settled by exact reservation identity, so
+    out-of-order completions cannot release a sibling's reservation.
+    """
+    def __init__(self):
+        import collections
+        self._collections = collections
+        self._samples = {}
+        self._pending = {}
+
+    @staticmethod
+    def _amount(value):
+        import math
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("invalid pacing estimate")
+        if not math.isfinite(value) or not 0 <= value <= 1e9:
+            raise ValueError("invalid pacing estimate")
+        return float(value)
+
+    def _q(self, resource, now):
+        q = self._samples.setdefault(resource, self._collections.deque())
+        while q and now - q[0][0] >= RATE_WINDOW_S:
+            q.popleft()
+        return q
+
+    def reserve(self, route_id, inp, out, *, request_id=None, resource_id=None, now=None):
+        import uuid
+        key = request_id or uuid.uuid4().hex
+        if key in self._pending:
+            raise ValueError("duplicate request reservation")
+        self._pending[key] = (time.monotonic() if now is None else now,
+            resource_id or route_id, route_id, self._amount(inp), self._amount(out))
+        return key
+
+    def release(self, request_id):
+        return self._pending.pop(request_id, None) is not None
+
+    def settle(self, route_id, now, inp, out, *, request_id=None):
+        inp, out = self._amount(inp), self._amount(out)
+        if request_id is None:
+            matching = [k for k, p in self._pending.items() if p[2] == route_id]
+            if len(matching) > 1:
+                raise ValueError("settlement requires the original request identity")
+            request_id = matching[0] if matching else None
+        pending = self._pending.pop(request_id, None) if request_id else None
+        resource = pending[1] if pending else route_id
+        if inp > 0 or out > 0:
+            self._q(resource, now).append((now, inp, out))
+
+    def totals(self, resource, now):
+        q = self._q(resource, now)
+        inp = sum(s[1] for s in q)
+        out = sum(s[2] for s in q)
+        for p in self._pending.values():
+            if p[1] == resource:
+                inp += p[3]; out += p[4]
+        return inp, out
+
+    def wait_for(self, route, now, est_in, est_out, *, resource_id=None,
+                 limits=None, allow_oversize=False):
+        resource = resource_id or route.route_id
+        budgets = limits or (route.rate_budget("input"), route.rate_budget("output"))
+        q = self._q(resource, now)
+        totals = self.totals(resource, now)
+        pending = any(p[1] == resource for p in self._pending.values())
+        waits = [0.0]
+        for idx, (budget, used, extra) in enumerate(zip(budgets, totals, (est_in, est_out)), 1):
+            budget = self._amount(budget or 0)
+            extra = self._amount(extra)
+            if budget <= 0 or used + extra <= budget:
+                continue
+            if extra > budget:
+                # Morph explicitly permits one oversized request before throttling.
+                # Never turn that rule into unlimited parallel oversized admission.
+                if allow_oversize and used == 0 and not pending:
+                    continue
+                if not allow_oversize:
+                    return float("inf")
+                waits.append(max((s[0] + RATE_WINDOW_S - now for s in q), default=1.0))
+                continue
+            need = used + extra - budget
+            freed = 0.0
+            for sample in q:
+                freed += sample[idx]
+                if freed >= need:
+                    waits.append(max(0.001, sample[0] + RATE_WINDOW_S - now))
+                    break
+            else:
+                waits.append(1.0 if pending else RATE_WINDOW_S)
+        return max(waits)
 
 def credential_pool_accounts(auth_store: Path = DEFAULT_AUTH_STORE) -> dict[str, list[dict]]:
     """Read the Hermes credential pool; values stay inside this process."""
@@ -334,122 +334,98 @@ def credential_pool_key(auth_store: Path, pool: str, label: str) -> str:
     raise ValueError(f"credential_pool.{pool} label {label!r} has no usable key")
 
 
-def affinity_route(route_ids: list[str], affinity_key: str, *, ttl_buckets: int = 64,
-                   weights: dict[str, float] | None = None) -> str:
-    """Weighted rendezvous: removing one route only remaps its own callers."""
-    def rank(route_id: str) -> tuple[float, str]:
-        digest = hashlib.sha256(json.dumps([affinity_key, route_id]).encode()).digest()
-        # 52 bits keep both endpoints strictly excluded after float rounding.
-        uniform = ((int.from_bytes(digest[:8], "big") >> 12) + 1) / (2**52 + 1)
-        weight = (weights or {}).get(route_id, 1.0)
-        return (-math.log(uniform) / weight, route_id)
-    return min(route_ids, key=rank)
-
-
-@dataclass(frozen=True)
-class RouteDecision:
-    route: Route | None
-    reason: str
-    evidence: dict
-
-
-def decide_route(routes: list[Route], model: str, *, state: RouteState, now: float,
-                 affinity_key: str | None = None) -> RouteDecision:
-    """One selection with bounded evidence, never an admission permit.
-
-    The caller has already applied transport and owner preflight exclusions.
-    Evidence contains only configured route labels, counts and fixed reasons;
-    raw model, alias, affinity and credential inputs are never retained.
-    """
-    candidates = [r for r in routes if r.serves(model)]
-    excluded = {key: 0 for key in ("drained", "circuit_open", "probe_occupied",
-                                   "route_limit", "group_limit")}
-    healthy = []
-    for route in candidates:
-        # First failing gate wins, so these counts form a disjoint partition.
-        reason = state.exclusion_reason(route, now, model)
-        if reason:
-            excluded[reason] += 1
-        else:
-            healthy.append(route)
-    evidence = {
-        "scope": "local_after_owner_preflight", "matched_routes": len(candidates),
-        "excluded": excluded, "eligible_routes": len(healthy),
-        "selected_priority": None, "priority_routes": 0,
-        "least_pressure_routes": 0, "tie_break": "none", "selected_route": None,
-    }
-
-    def result(route: Route | None, reason: str = "") -> RouteDecision:
-        evidence["selected_route"] = route.route_id if route else None
-        return RouteDecision(route, reason, evidence)
-
-    if not candidates:
-        return result(None, "FABRIC_MODEL_UNKNOWN")
-    if excluded["drained"] == len(candidates):
-        return result(None, "FABRIC_ROUTES_DRAINED")
-    if sum(excluded[key] for key in ("drained", "circuit_open", "probe_occupied")) == len(candidates):
-        return result(None, "FABRIC_ALL_ROUTES_COOLING")
-    if not healthy:
-        return result(None, "FABRIC_ROUTES_BUSY")
-    lowest_tier = min(r.effective_priority(model) for r in healthy)
-    tier = sorted((r for r in healthy if r.effective_priority(model) == lowest_tier),
-                  key=lambda r: r.route_id)
-    evidence.update(selected_priority=lowest_tier, priority_routes=len(tier))
-    # Affinity is soft: an idle equally eligible route wins over a busy one.
-    load = {r.route_id: state.in_flight.get(r.route_id, 0) / r.effective_weight(model)
-            for r in tier}
-    best = min(load.values())
-    tier = [r for r in tier if math.isclose(load[r.route_id], best, abs_tol=1e-12)]
-    evidence["least_pressure_routes"] = len(tier)
-    if len(tier) == 1:
-        evidence["tie_break"] = ("single_route_in_tier" if evidence["priority_routes"] == 1
-                                 else "lowest_local_pressure")
-        return result(_weighted_pick(tier, model))
-    if (affinity_key and len(tier) > 1
-            and len({(r.base_url.rstrip('/'), r.wire) for r in tier}) == 1):
-        evidence["tie_break"] = "weighted_rendezvous"
-        chosen = affinity_route([r.route_id for r in tier], affinity_key,
-                                weights={r.route_id: r.effective_weight(model) for r in tier})
-        for route in tier:
-            if route.route_id == chosen:
-                return result(route)
-    evidence["tie_break"] = "weighted_random"
-    return result(_weighted_pick(tier, model))
+def affinity_route(route_ids: list[str], affinity_key: str, *, ttl_buckets: int = 64) -> str:
+    """Stable route for a caller so prompt-cache locality survives requests."""
+    digest = hashlib.sha256(affinity_key.encode("utf-8")).digest()
+    return route_ids[digest[0] % len(route_ids)]
 
 
 def select_route(routes: list[Route], model: str, *, state: RouteState, now: float,
                  affinity_key: str | None = None) -> tuple[Route | None, str]:
-    """Compatibility projection of the single explained selection path."""
-    decision = decide_route(routes, model, state=state, now=now, affinity_key=affinity_key)
-    return decision.route, decision.reason
+    """Admission-time selection: healthy routes for the model, tier then weight.
 
+    Tier and weight are per-model (``model_priority``/``model_weight`` override
+    the route-wide values), so one slug can spread across several providers in
+    a single tier while the route's other models keep their own tiers.
 
-def ordered_routes(routes: list[Route], model: str, *, state: RouteState, now: float,
-                   affinity_key: str | None = None) -> list[Route]:
-    """Compatibility snapshot of the explained selector, without reserving capacity.
+    Caller affinity pins one route only while the tier is a single upstream
+    provider (same base URL), where prompt-cache locality is real. Across
+    different providers the configured weights distribute the traffic instead:
+    a lone caller must not monopolise one plan while the rest sit idle.
 
-    Admission must select again after every proven pre-send failure: availability
-    can change while an upstream connection is being attempted.
+    Returns (route, reason). reason is set when no route can serve the model.
     """
-    remaining = list(routes)
-    ordered = []
-    while remaining:
-        decision = decide_route(remaining, model, state=state, now=now,
-                                affinity_key=affinity_key)
-        if decision.route is None:
-            break
-        ordered.append(decision.route)
-        remaining = [r for r in remaining if r.route_id != decision.route.route_id]
-    return ordered
+    candidates = [r for r in routes if r.serves(model)]
+    if not candidates:
+        return None, "FABRIC_MODEL_UNKNOWN"
+    healthy = [r for r in candidates if state.available(r.route_id, now)]
+    if not healthy:
+        return None, "FABRIC_ALL_ROUTES_COOLING"
+    wanted = model.strip().lower()
+    lowest_tier = min(r.effective_priority(wanted) for r in healthy)
+    tier = sorted((r for r in healthy if r.effective_priority(wanted) == lowest_tier),
+                  key=lambda r: r.route_id)
+    if (affinity_key and len(tier) > 1
+            and len({r.base_url for r in tier}) == 1):
+        chosen = affinity_route([r.route_id for r in tier], affinity_key)
+        for route in tier:
+            if route.route_id == chosen:
+                return route, ""
+    return _weighted_pick(tier, wanted), ""
 
 
-def _weighted_pick(tier: list[Route], model: str = "") -> Route:
-    # The explained selector has already excluded every zero effective weight.
-    total = sum(r.effective_weight(model) for r in tier)
+def _weighted_pick(tier: list[Route], model: str) -> Route:
+    total = sum(max(r.effective_weight(model), 0.0) for r in tier)
+    if total <= 0:
+        return tier[0]
     point = random.random() * total
     accumulated = 0.0
     for route in tier:
-        accumulated += route.effective_weight(model)
-        if point < accumulated:
+        accumulated += max(route.effective_weight(model), 0.0)
+        if point <= accumulated:
             return route
     return tier[-1]
+
+
+def _weighted_order(tier: list[Route], model: str) -> list[Route]:
+    """Weighted draw without replacement: distribution first, ladder after."""
+    remaining = list(tier)
+    ordered: list[Route] = []
+    while remaining:
+        route = _weighted_pick(remaining, model)
+        ordered.append(route)
+        remaining.remove(route)
+    return ordered
+
+
+def ordered_routes(routes: list[Route], model: str, *, state: "RouteState",
+                   now: float, affinity_key: str | None = None) -> list[Route]:
+    """Every healthy route serving ``model``, best-first, for one request.
+
+    This is the failover ladder behind a single client request: the router may
+    try successive entries while no byte has reached the client. Tiers ascend;
+    inside a tier the configured weights order the attempts (drawn without
+    replacement), and caller affinity pins the first attempt only while the
+    tier is a single upstream provider where prompt-cache locality is real.
+    """
+    candidates = [r for r in routes if r.serves(model)]
+    healthy = [r for r in candidates if state.available(r.route_id, now)]
+    if not healthy:
+        return []
+    wanted = model.strip().lower()
+    by_tier: dict[int, list[Route]] = {}
+    for route in healthy:
+        by_tier.setdefault(route.effective_priority(wanted), []).append(route)
+    ordered: list[Route] = []
+    for tier_priority in sorted(by_tier):
+        tier = by_tier[tier_priority]
+        if (affinity_key and len(tier) > 1
+                and len({r.base_url for r in tier}) == 1):
+            chosen_id = affinity_route([r.route_id for r in tier], affinity_key)
+            first = [r for r in tier if r.route_id == chosen_id]
+            rest = _weighted_order(
+                [r for r in tier if r.route_id != chosen_id], wanted)
+            ordered.extend(first + rest)
+        else:
+            ordered.extend(_weighted_order(tier, wanted))
+    return ordered
