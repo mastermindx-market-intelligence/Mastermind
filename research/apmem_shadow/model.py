@@ -88,6 +88,8 @@ def adjusted_range(high: Any, low: Any, returns: Any, retention: float = 0.05
         value = raw[i] * e_return / e_range
         floored += int(value < VARIANCE_FLOOR)
         out[i] = max(float(value), VARIANCE_FLOOR)
+    if not np.isfinite(out).all():
+        raise ValueError("nonfinite adjusted range proxy")
     return out, {"retention": retention, "variance_floor": VARIANCE_FLOOR,
                  "floored_rows": floored, "target": "adjusted_parkinson_daily_variance"}
 
