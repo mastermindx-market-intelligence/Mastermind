@@ -174,7 +174,7 @@ def test_project_installed_fence_separates_native_review_from_formal_approval():
     for guard in (
         "Native review != GitHub APPROVED",
         "Real non-author APPROVED only where required",
-        "Tool-specific technical errors require diagnosis; reconcile unknown modifying effects",
+        "No denied-effect/EFFECT_UNKNOWN carrier swap",
         "No extra review/handoff ceremony",
         "No impersonation/duplicate/uncertain review",
         "GitHub/CODEOWNERS/security/release holds bind",

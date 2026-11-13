@@ -336,7 +336,7 @@ CONSOLIDATED_FAMILIES = (
             "EFFECT_NONE is not retry permission",
             "`EFFECT_UNKNOWN` must be reconciled at the original target",
             "do not enter an identical third loop",
-            "verified access restriction",
+            "first explicit safety or permission denial ends retry",
             'other-account work requires ordinary routing and genuine independence',
             "TOOL_DEGRADED / EFFECT_NONE",
         ),
