@@ -20,6 +20,7 @@ GATE=(/usr/bin/python3 -I /usr/local/lib/fleet-ci/fleet_gate.py)
 STATUS_DIR=/run/fleet-ci
 HOLD="/var/lib/fleet-ci/hold-$N"
 HOLD_FALLBACK="$STATUS_DIR/hold-$N"
+HOLD_PERSIST_FALLBACK="/var/lib/fleet-ci/hold-fallback-$N"
 HOLD_EXIT=78
 cls="$("${GATE[@]}" get FLEET_CLASS)" || { echo "fleet-slot: invalid /etc/fleet-ci/fleet.conf" >&2; exit 1; }
 gid="$("${GATE[@]}" get RUNNER_GROUP_ID)" || exit 1
@@ -37,25 +38,29 @@ scratch=(/tmp /var/tmp /dev/shm /dev/mqueue /run/lock)
 state() { "${GATE[@]}" status --slot "$N" --state "$1" --detail "${2:-}" >/dev/null || true; }
 die() { echo "fleet-slot $name: $*" >&2; state stopped "$*"; exit 1; }
 # hold: persist the marker explicitly (write, sync, read back), then exit 78 so the
-# unit never restarts over an uncertain registration. If the marker cannot be
-# persisted, still exit 78 (no restart), leave a runtime fallback marker and disable
-# the unit so a reboot cannot re-mint either.
+# unit never restarts over an uncertain registration. If the primary marker cannot be
+# persisted, still exit 78 (no restart): leave a runtime fallback marker AND a best-effort
+# persistent fallback under /var/lib/fleet-ci, and disable the unit. A failed disable does
+# not change the exit: the markers alone block startup (and a reboot) until reconciled.
 hold() {
   local msg="$*" ok=1
   mkdir -p /var/lib/fleet-ci && printf '%s\n' "$msg" > "$HOLD" && sync \
     && [ "$(cat "$HOLD" 2>/dev/null)" = "$msg" ] || ok=0
   if [ "$ok" != 1 ]; then
-    echo "fleet-slot $name: HOLD PERSISTENCE FAILED for $HOLD; leaving a runtime marker and disabling the unit" >&2
+    echo "fleet-slot $name: HOLD PERSISTENCE FAILED for $HOLD; leaving fallback markers and disabling the unit" >&2
     { mkdir -p "$STATUS_DIR" && printf '%s\n' "$msg" > "$HOLD_FALLBACK"; } || true
-    systemctl disable "fleet-slot@$N.service" >/dev/null 2>&1 || true
+    { mkdir -p /var/lib/fleet-ci && printf '%s\n' "$msg" > "$HOLD_PERSIST_FALLBACK" && sync; } || true
+    if ! systemctl disable "fleet-slot@$N.service" >/dev/null 2>&1; then
+      echo "fleet-slot $name: systemctl disable failed; hold markers still block startup (exit $HOLD_EXIT)" >&2
+    fi
   fi
   echo "fleet-slot $name: HOLD: $msg" >&2
   state stopped "HOLD: $msg"
   exit "$HOLD_EXIT"
 }
 
-if [ -e "$HOLD" ] || [ -e "$HOLD_FALLBACK" ]; then
-  echo "fleet-slot $name: hold present ($HOLD or $HOLD_FALLBACK); reconcile the $name registration (docs/FLEET_CI_POOL.md), then remove it" >&2
+if [ -e "$HOLD" ] || [ -e "$HOLD_FALLBACK" ] || [ -e "$HOLD_PERSIST_FALLBACK" ]; then
+  echo "fleet-slot $name: hold present ($HOLD, $HOLD_FALLBACK or $HOLD_PERSIST_FALLBACK); reconcile the $name registration (docs/FLEET_CI_POOL.md), then remove it" >&2
   exit "$HOLD_EXIT"
 fi
 state starting
@@ -85,13 +90,14 @@ IFS=: read -r gname _ ggid gmembers <<<"$grp"
 [ "$(getent passwd | awk -F: -v x="$ugid" '$4 == x' | wc -l)" = 1 ] || die "gid $ugid is another account's primary group"
 [ "$(id -G "$u")" = "$ugid" ] || die "$u has supplementary groups (docker group is not allowed)"
 # NoNewPrivileges=yes makes sudo itself refuse to run, so inspect the policy files
-# directly: any mention of the slot user or its private group in sudoers refuses.
-# Unreadable policy fails closed. (The user also has no supplementary groups, so no
-# sudo/wheel/admin group can grant rights.)
+# directly: any mention of the slot user, its private group, or its numeric ids
+# (#<uid> user grant, %#<gid> group grant) in sudoers refuses. Word-bounded so a
+# different slot (ghrunner-10, #10010) is not a match. Unreadable policy fails closed.
+# (The user also has no supplementary groups, so no sudo/wheel/admin group grants rights.)
 for f in /etc/sudoers /etc/sudoers.d/*; do
   [ -e "$f" ] || continue
   [ -f "$f" ] && [ -r "$f" ] || die "cannot read sudoers policy $f"
-  src=0; grep -Eq "(^|[^[:alnum:]_])%?$u([^[:alnum:]_-]|$)" "$f" || src=$?
+  src=0; grep -Eq "(^|[^[:alnum:]_])(%?$u|#$uid|%#$ugid)([^[:alnum:]_-]|$)" "$f" || src=$?
   case "$src" in
     0) die "sudoers mentions $u in $f" ;;
     1) ;;

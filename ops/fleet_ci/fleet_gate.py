@@ -71,6 +71,10 @@ DEFAULTS: Dict[str, str] = {
     # SHA-256 of the pinned runner tarball. Empty/invalid = no pin = the slot refuses
     # to start; the example conf ships an all-zero placeholder that matches nothing.
     "RUNNER_TARBALL_SHA256": "",
+    # A `claimed` status file older than this many seconds no longer holds capacity:
+    # the slot died between admitting and minting. Default 6h matches the GitHub job
+    # timeout. Stale claims are ignored by count_busy and reported in status output.
+    "STALE_CLAIM_S": "21600",
 }
 
 
@@ -191,6 +195,9 @@ def validate_conf(conf: Dict[str, str]) -> List[str]:
         errors.append("RUNNER_GROUP_ID must be a positive integer (0 is refused)")
     if not re.fullmatch(r"[0-9a-f]{64}", conf.get("RUNNER_TARBALL_SHA256", "")):
         errors.append("RUNNER_TARBALL_SHA256 must be the pinned tarball's 64-hex-digit SHA-256; no pin = refuse")
+    stale = _finite_nonnegative(conf.get("STALE_CLAIM_S"))
+    if stale is None or stale <= 0:
+        errors.append("STALE_CLAIM_S must be a positive number of seconds")
     slots = conf.get("SLOTS", "")
     if slots != "auto" and not (slots.isdigit() and 0 <= int(slots) <= MAX_SLOTS):
         errors.append(f"SLOTS must be auto or 0..{MAX_SLOTS}")
@@ -312,27 +319,62 @@ def write_status(status_dir: str, slot: int, state: str, cls: str, detail: Any =
     return record
 
 
-def count_busy(status_dir: str, exclude_slot: int) -> int:
-    """Other slots holding capacity. An unreadable or malformed file counts as busy."""
+def _claim_age(ts: Any, path: str, now: float) -> Optional[float]:
+    """Age of a status record in seconds: its `ts` field, else the file mtime. None when
+    neither is usable (the caller then keeps counting the slot as busy, fail closed)."""
+    t = _finite_nonnegative(ts)
+    if t is None:
+        try:
+            t = os.path.getmtime(path)
+        except OSError:
+            return None
+    return now - t
+
+
+def _scan_status(status_dir: str, exclude_slot: int, max_age_s: float,
+                 now: Optional[float] = None) -> Tuple[int, List[int]]:
+    """(busy count, stale claimed slots). A `claimed` file older than max_age_s no longer
+    holds capacity (the slot died between admitting and minting) and is reported stale;
+    every other busy state still counts regardless of age. Unreadable/malformed = busy."""
+    now = time.time() if now is None else now
     busy = 0
+    stale: List[int] = []
     try:
         names = os.listdir(status_dir)
     except FileNotFoundError:
-        return 0
+        return 0, []
     for name in names:
         if not (name.startswith("slot-") and name.endswith(".json")):
             continue
         num = name[5:-5]
-        if not num.isdigit() or int(num) == exclude_slot:
+        if not num.isdigit():
             continue
+        slot = int(num)
+        path = os.path.join(status_dir, name)
         try:
-            with open(os.path.join(status_dir, name), encoding="utf-8") as fh:
+            with open(path, encoding="utf-8") as fh:
                 rec = json.load(fh)
             state = rec.get("state") if isinstance(rec, dict) else None
+            ts = rec.get("ts") if isinstance(rec, dict) else None
         except (OSError, ValueError):
-            state = None
+            state, ts = None, None
+        if state == "claimed":
+            age = _claim_age(ts, path, now)
+            if age is not None and age > max_age_s:
+                stale.append(slot)
+                continue
+        if slot == exclude_slot:
+            continue
         if state is None or state not in STATES or state in BUSY_STATES:
             busy += 1
+    return busy, sorted(stale)
+
+
+def count_busy(status_dir: str, exclude_slot: int, max_age_s: float = 21600.0,
+               now: Optional[float] = None) -> int:
+    """Other slots holding capacity, ignoring stale `claimed` files (default max age 6h,
+    the GitHub job timeout). An unreadable or malformed file counts as busy."""
+    busy, _ = _scan_status(status_dir, exclude_slot, max_age_s, now)
     return busy
 
 
@@ -341,12 +383,14 @@ def admit(conf: Dict[str, str], slot: int, status_dir: str, proc_root: str,
     """Evaluate and record under one host-wide lock, so two slots cannot both claim the
     same headroom between reading the busy count and writing `claimed`."""
     os.makedirs(status_dir, mode=0o755, exist_ok=True)
+    max_age = _finite_nonnegative(conf.get("STALE_CLAIM_S")) or 21600.0
     with open(os.path.join(status_dir, ".admit.lock"), "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        busy = count_busy(status_dir, slot)
+        busy, stale = _scan_status(status_dir, slot, max_age)
         obs = observe(proc_root, cores)
         ok, gates = evaluate_admission(obs, policy_from_conf(conf), busy)
-        detail = {"busy_slots": busy, "cpu_psi_some10": obs.get("cpu_psi_some10"),
+        detail = {"busy_slots": busy, "stale_claims": stale,
+                  "cpu_psi_some10": obs.get("cpu_psi_some10"),
                   "gates": [{k: g[k] for k in ("gate", "result", "detail")} for g in gates]}
         rec = write_status(status_dir, slot, "claimed" if ok else "refused", conf["FLEET_CLASS"], detail)
     return ok, rec
@@ -361,19 +405,24 @@ def render_limits(conf: Dict[str, str]) -> str:
 
 
 # --- per-slot egress (nftables) -----------------------------------------------------------
-# Denied destinations for every slot uid: RFC1918/LAN, link-local, CGNAT, IPv6 ULA and
-# link-local, plus the host's loopback services. The only loopback exception is the
-# slot's own port range (PORT_BASE + N*PORT_SPAN .. +PORT_SPAN-1), so a job can reach
-# the servers it starts itself and nothing else on the host. Everything else (the
-# internet) is accepted by the chain policy. These are public address ranges, not host
-# identity. `meta skuid` matches the socket owner, so the rules bind to the slot account
-# regardless of which process or port it uses; nft resolves the user names at load time,
-# so provisioning must create the accounts before applying the ruleset.
+# Denied destinations for every slot uid: RFC1918/LAN, link-local, CGNAT, this-network
+# (0/8), multicast (224/4) and reserved (240/4); IPv6 ULA, link-local, IPv4-mapped
+# (::ffff:0:0/96) and multicast (ff00::/8); plus the host's loopback services. Two
+# loopback exceptions, both placed BEFORE the loopback drop: the slot's own port range
+# (PORT_BASE + N*PORT_SPAN .. +PORT_SPAN-1) so a job can reach the servers it starts
+# itself, and DNS to the systemd-resolved stub (127.0.0.53:53, udp+tcp) only. Everything
+# else (the internet) is accepted by the chain policy. These are public address ranges,
+# not host identity. `meta skuid` matches the socket owner, so the rules bind to the slot
+# account regardless of which process or port it uses; nft resolves the user names at
+# load time, so provisioning must create the accounts before applying the ruleset.
 
-DENY_V4 = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16")
-DENY_V6 = ("fc00::/7", "fe80::/10")
+DENY_V4 = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
+           "169.254.0.0/16", "0.0.0.0/8", "224.0.0.0/4", "240.0.0.0/4")
+DENY_V6 = ("fc00::/7", "fe80::/10", "::ffff:0:0/96", "ff00::/8")
 LOOPBACK_V4 = "127.0.0.0/8"
 LOOPBACK_V6 = "::1/128"
+# systemd-resolved stub listener; the only non-own-range loopback destination allowed.
+DNS_RESOLVER_V4 = "127.0.0.53"
 
 
 def render_nft(conf: Dict[str, str], slots: int) -> str:
@@ -384,7 +433,8 @@ def render_nft(conf: Dict[str, str], slots: int) -> str:
         "# Generated by fleet_gate.py render-nft from /etc/fleet-ci/fleet.conf.",
         "# Apply with: nft -f <file>   (idempotent: rebuilds table inet fleet_ci).",
         "# Per-slot egress: internet allowed; RFC1918/LAN, link-local, CGNAT 100.64/10,",
-        "# IPv6 ULA/link-local and host loopback denied, except the slot's own port range.",
+        "# this-net 0/8, multicast 224/4, reserved 240/4, IPv6 ULA/link-local/mapped/mcast",
+        "# and host loopback denied, except the slot's own port range and DNS to 127.0.0.53.",
         "table inet fleet_ci {}",
         "delete table inet fleet_ci",
         "table inet fleet_ci {",
@@ -398,9 +448,11 @@ def render_nft(conf: Dict[str, str], slots: int) -> str:
         v4 = ", ".join(DENY_V4 + (LOOPBACK_V4,))
         v6 = ", ".join(DENY_V6 + (LOOPBACK_V6,))
         lines += [
-            f"        # slot {n}: loopback only inside its own port range {lo}-{hi}",
+            f"        # slot {n}: loopback only inside its own port range {lo}-{hi}, plus DNS",
             f'        meta skuid "{u}" ip daddr {LOOPBACK_V4} meta l4proto {{ tcp, udp }} th dport {lo}-{hi} accept',
             f'        meta skuid "{u}" ip6 daddr {LOOPBACK_V6} meta l4proto {{ tcp, udp }} th dport {lo}-{hi} accept',
+            # DNS to the resolved stub only; MUST precede the loopback drop below.
+            f'        meta skuid "{u}" ip daddr {DNS_RESOLVER_V4} meta l4proto {{ tcp, udp }} th dport 53 accept',
             f'        meta skuid "{u}" ip daddr {{ {v4} }} drop',
             f'        meta skuid "{u}" ip6 daddr {{ {v6} }} drop',
         ]
@@ -455,7 +507,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         except ValueError as err:
             print(f"fleet_gate: {err}", file=sys.stderr)
             return EX_USAGE
-        print(json.dumps(rec, sort_keys=True))
+        max_age = _finite_nonnegative(conf.get("STALE_CLAIM_S")) or 21600.0
+        _, stale = _scan_status(args.status_dir, 0, max_age)
+        print(json.dumps({**rec, "stale_claims": stale}, sort_keys=True))
         return 0
     if args.cmd == "get":
         if args.key not in DEFAULTS:

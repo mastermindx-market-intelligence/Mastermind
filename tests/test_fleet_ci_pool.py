@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -188,6 +189,63 @@ def test_unreadable_status_file_counts_as_busy(tmp_path):
     assert fleet_gate.count_busy(str(tmp_path), exclude_slot=1) == 1
 
 
+def _age_claim(status_dir, slot, state, age_s, now):
+    rec = fleet_gate.write_status(str(status_dir), slot, state, "std")
+    rec["ts"] = now - age_s
+    Path(fleet_gate.status_path(str(status_dir), slot)).write_text(json.dumps(rec))
+
+
+def test_stale_claim_ignored_and_reported(tmp_path):
+    status = tmp_path / "run"
+    now = 1_000_000.0
+    _age_claim(status, 2, "claimed", 0, now)        # fresh claim still holds capacity
+    _age_claim(status, 3, "claimed", 7 * 3600, now)  # 7h old claim -> stale, ignored
+    _age_claim(status, 4, "registered", 7 * 3600, now)  # other busy states count regardless of age
+    busy, stale = fleet_gate._scan_status(str(status), 1, 21600.0, now)
+    assert busy == 2 and stale == [3]
+    assert fleet_gate.count_busy(str(status), 1, 21600.0, now) == 2
+
+
+def test_stale_claim_max_age_configurable(tmp_path):
+    status = tmp_path / "run"
+    now = 1_000_000.0
+    _age_claim(status, 2, "claimed", 100, now)
+    busy, stale = fleet_gate._scan_status(str(status), 1, 200.0, now)
+    assert busy == 1 and stale == []
+    busy, stale = fleet_gate._scan_status(str(status), 1, 50.0, now)
+    assert busy == 0 and stale == [2]
+
+
+def test_status_cli_reports_stale_claims(tmp_path):
+    cf = tmp_path / "fleet.conf"
+    cf.write_text(CONF.read_text().replace("RUNNER_GROUP_ID=0", "RUNNER_GROUP_ID=7"))
+    status = tmp_path / "run"
+    _age_claim(status, 5, "claimed", 7 * 3600, time.time())
+    r = subprocess.run([sys.executable, str(FLEET / "fleet_gate.py"), "--conf", str(cf),
+                        "--status-dir", str(status), "status", "--slot", "1", "--state", "starting"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0
+    assert json.loads(r.stdout)["stale_claims"] == [5]
+
+
+def test_admit_detail_reports_stale_claims(tmp_path):
+    status = tmp_path / "run"
+    _age_claim(status, 9, "claimed", 7 * 3600, time.time())
+    proc = make_proc(tmp_path, avail_gb=40.0)
+    ok, rec = fleet_gate.admit(conf(), 1, str(status), str(proc), cores=32)
+    assert ok and rec["detail"]["stale_claims"] == [9]
+    # the stale slot 9 does not consume headroom
+    assert rec["detail"]["busy_slots"] == 0
+
+
+def test_conf_stale_claim_validation():
+    assert fleet_gate.DEFAULTS["STALE_CLAIM_S"] == "21600"
+    assert any("STALE_CLAIM_S" in e for e in fleet_gate.validate_conf(raw_conf(STALE_CLAIM_S="0")))
+    assert any("STALE_CLAIM_S" in e for e in fleet_gate.validate_conf(raw_conf(STALE_CLAIM_S="abc")))
+    assert fleet_gate.validate_conf(raw_conf(STALE_CLAIM_S="3600")) == []
+    assert "STALE_CLAIM_S=21600" in CONF.read_text()
+
+
 def test_gate_cli_exit_codes(tmp_path):
     cf = tmp_path / "fleet.conf"
     cf.write_text(CONF.read_text().replace("RUNNER_GROUP_ID=0", "RUNNER_GROUP_ID=7"))
@@ -269,9 +327,18 @@ def test_render_nft_rules():
         # loopback exception for the slot's own range, tcp AND udp, before the drops
         assert f'{u} ip daddr 127.0.0.0/8 meta l4proto {{ tcp, udp }} th dport {lo}-{hi} accept' in out
         assert f'{u} ip6 daddr ::1/128 meta l4proto {{ tcp, udp }} th dport {lo}-{hi} accept' in out
-        assert f"{u} ip daddr {{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 127.0.0.0/8 }} drop" in out
-        assert f"{u} ip6 daddr {{ fc00::/7, fe80::/10, ::1/128 }} drop" in out
-        assert out.index(f"th dport {lo}-{hi} accept") < out.index(f"{u} ip daddr {{")
+        # DNS to the resolved stub only, also before the loopback drop
+        dns = f'{u} ip daddr 127.0.0.53 meta l4proto {{ tcp, udp }} th dport 53 accept'
+        assert dns in out
+        v4drop = (f"{u} ip daddr {{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, "
+                  f"169.254.0.0/16, 0.0.0.0/8, 224.0.0.0/4, 240.0.0.0/4, 127.0.0.0/8 }} drop")
+        v6drop = f"{u} ip6 daddr {{ fc00::/7, fe80::/10, ::ffff:0:0/96, ff00::/8, ::1/128 }} drop"
+        assert v4drop in out
+        assert v6drop in out
+        # ordering: own-range accept AND DNS accept both precede the loopback drops
+        assert out.index(f"th dport {lo}-{hi} accept") < out.index(v4drop)
+        assert out.index(dns) < out.index(v4drop)
+        assert out.index(dns) < out.index(v6drop)
     assert "ghrunner-3" not in out
     with pytest.raises(ValueError):
         fleet_gate.render_nft(conf(), 33)
@@ -392,6 +459,52 @@ def test_fetch_queued_jobs_one_page_and_validated(monkeypatch):
         capacity_mod.fetch_queued_fleet_jobs("org", "t")
 
 
+def _runs_page(n):
+    return {"workflow_runs": [{"id": i + 1, "repository": {"full_name": "org/repo"}}
+                              for i in range(n)]}
+
+
+def test_queued_saturation_and_job_detail_cap(monkeypatch):
+    # a full runs page (100) is saturated -> fail closed
+    monkeypatch.setattr(capacity_mod, "_get",
+                        lambda p, t: _runs_page(100) if "/actions/runs?" in p else {"jobs": []})
+    with pytest.raises(ValueError, match="saturated"):
+        capacity_mod.fetch_queued_fleet_jobs("org", "t")
+    # more than 20 queued runs hits the job-detail cap -> fail closed
+    monkeypatch.setattr(capacity_mod, "_get",
+                        lambda p, t: _runs_page(21) if "/actions/runs?" in p else {"jobs": []})
+    with pytest.raises(ValueError, match="cap"):
+        capacity_mod.fetch_queued_fleet_jobs("org", "t")
+    # exactly 20 runs is allowed: 20 job-detail calls, no more
+    calls = []
+
+    def get20(path, token):
+        calls.append(path)
+        return _runs_page(20) if "/actions/runs?" in path else {"jobs": [job()]}
+
+    monkeypatch.setattr(capacity_mod, "_get", get20)
+    jobs = capacity_mod.fetch_queued_fleet_jobs("org", "t")
+    assert len(jobs) == 20
+    assert sum("/jobs?" in c for c in calls) == 20
+
+
+def test_capacity_saturation_is_soft_failure(monkeypatch):
+    monkeypatch.setenv("FLEET_ROUTE_TOKEN", "t")
+
+    def fake_get(path, token):
+        if "runner-groups" in path:
+            return {"runners": [runner("a", "std")], "total_count": 1}
+        return _runs_page(100)
+
+    monkeypatch.setattr(capacity_mod, "_get", fake_get)
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = capacity_mod.main(["--soft", "--group-id", "7"])
+    assert rc == 0 and json.loads(buf.getvalue())["ok"] is False
+
+
 def test_capacity_without_token_is_soft_failure():
     env = {k: v for k, v in os.environ.items() if k != "FLEET_ROUTE_TOKEN"}
     r = subprocess.run([sys.executable, str(CAPACITY), "--soft"], capture_output=True, text=True, env=env)
@@ -436,7 +549,8 @@ def test_router_default_is_untrusted_and_repo_private_is_informational():
 
 
 def run_action_step(tmp_path, mode, token="", cap_runners=None, jobs="1", cls="std",
-                    trusted="true", queued=()):
+                    trusted="true", queued=(), event_name="push", head_repo="",
+                    base_repo="org/repo"):
     """Execute the composite action's bash step as Actions would, with the pinned
     fleet_route.py copy and a stub fleet-capacity when a token is given (no network)."""
     doc = ACTION.read_text()
@@ -460,7 +574,8 @@ def run_action_step(tmp_path, mode, token="", cap_runners=None, jobs="1", cls="s
     env = dict(os.environ, FLEET_MODE=mode, FLEET_CLASS_IN=cls, FLEET_JOBS=jobs,
                FLEET_ROUTE_TOKEN=token, FLEET_RUNNER_GROUP_ID="7", FLEET_SPILL_RATIO="1.0",
                FLEET_TRUSTED_SOURCE=trusted, FLEET_REPO_PRIVATE="false",
-               FLEET_ACTION_DIR=str(action_dir), GITHUB_OUTPUT=str(out))
+               FLEET_ACTION_DIR=str(action_dir), GITHUB_OUTPUT=str(out),
+               FLEET_EVENT_NAME=event_name, FLEET_HEAD_REPO=head_repo, FLEET_BASE_REPO=base_repo)
     subprocess.run(["bash", "-c", script], check=True, env=env, capture_output=True)
     return dict(l.split("=", 1) for l in out.read_text().splitlines())
 
@@ -487,6 +602,26 @@ def test_action_fork_pr_never_gets_fleet(tmp_path, mode, token):
     assert out["target"] == "hosted" and json.loads(out["runner"]) == "ubuntu-24.04"
 
 
+@pytest.mark.parametrize("mode,token,event,head,base,caller,expected", [
+    # fork PR: caller lies true, the action recomputes false -> hosted (defense in depth)
+    ("fleet-only", "", "pull_request", "fork/repo", "org/repo", "true", "hosted"),
+    ("hybrid", "t", "pull_request", "fork/repo", "org/repo", "true", "hosted"),
+    # same-repo PR: computed true AND caller true -> fleet
+    ("fleet-only", "", "pull_request", "org/repo", "org/repo", "true", "fleet"),
+    # push: computed true AND caller true -> fleet
+    ("fleet-only", "", "push", "", "org/repo", "true", "fleet"),
+    # caller false even when computed true -> hosted (AND, not override)
+    ("fleet-only", "", "push", "", "org/repo", "false", "hosted"),
+    # pull_request with an empty head repo -> fail closed hosted
+    ("fleet-only", "", "pull_request", "", "org/repo", "true", "hosted"),
+])
+def test_action_recomputes_trust_and_ands_caller(tmp_path, mode, token, event, head, base,
+                                                 caller, expected):
+    out = run_action_step(tmp_path, mode, token, [runner("a", "std")], trusted=caller,
+                          event_name=event, head_repo=head, base_repo=base)
+    assert out["target"] == expected
+
+
 def test_action_queued_jobs_reduce_idle(tmp_path):
     out = run_action_step(tmp_path, "hybrid", "t", [runner("a", "std")], queued=[job()])
     assert out["target"] == "hosted"  # 1 idle - 1 queued = 0
@@ -503,6 +638,10 @@ def test_action_contract():
     # the caller expression is documented on the input
     assert "github.event.pull_request.head.repo.full_name == github.repository" in doc
     assert "github.event.repository.private" in doc
+    # the action ALSO recomputes trust from the event context (defense in depth)
+    assert "github.event_name" in doc
+    assert "github.event.pull_request.head.repo.full_name" in doc
+    assert "github.repository" in doc
     # inputs reach the script only via env, never interpolated into the script body
     run_body = doc.split("run: |", 1)[1]
     assert "${{" not in run_body
@@ -624,14 +763,17 @@ def test_hold_persists_syncs_reads_back_and_exits_78(tmp_path):
     lib = tmp_path / "lib"
     run = tmp_path / "run"
     defs = (f'N=1; name="t-fleet-std-1"; STATUS_DIR="{run}"; HOLD="{lib}/hold-1"; '
-            f'HOLD_FALLBACK="$STATUS_DIR/hold-1"; HOLD_EXIT=78\nstate() {{ :; }}')
+            f'HOLD_FALLBACK="$STATUS_DIR/hold-1"; HOLD_PERSIST_FALLBACK="{lib}/hold-fallback-1"; '
+            f'HOLD_EXIT=78\nstate() {{ :; }}')
     body = fn.replace("/var/lib/fleet-ci", str(lib)) + '\nhold "uncertain registration"'
     r = run_bash_harness(tmp_path, body, defs)
     assert r.returncode == 78, r.stderr
     assert (lib / "hold-1").read_text() == "uncertain registration\n"
     assert not (run / "hold-1").exists()  # primary persisted: no fallback needed
+    assert not (lib / "hold-fallback-1").exists()
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file permissions")
 def test_hold_persistence_failure_still_stops_and_marks(tmp_path):
     fn = extract(SLOT.read_text(), r"hold\(\) \{.*?\n\}")
     ro = tmp_path / "ro"
@@ -639,23 +781,54 @@ def test_hold_persistence_failure_still_stops_and_marks(tmp_path):
     ro.chmod(0o555)
     run = tmp_path / "run"
     defs = (f'N=1; name="t-fleet-std-1"; STATUS_DIR="{run}"; HOLD="{ro}/hold-1"; '
-            f'HOLD_FALLBACK="$STATUS_DIR/hold-1"; HOLD_EXIT=78\nstate() {{ :; }}')
+            f'HOLD_FALLBACK="$STATUS_DIR/hold-1"; HOLD_PERSIST_FALLBACK="{ro}/hold-fallback-1"; '
+            f'HOLD_EXIT=78\nstate() {{ :; }}')
     body = fn.replace("/var/lib/fleet-ci", str(ro)) + '\nhold "uncertain registration"'
     r = run_bash_harness(tmp_path, body, defs)
     assert r.returncode == 78, r.stderr  # never restart, even without the primary hold
     assert (run / "hold-1").read_text() == "uncertain registration\n"
     assert "HOLD PERSISTENCE FAILED" in r.stderr
+    assert "systemctl disable failed" in r.stderr  # disable failure still exits 78
 
 
-def test_startup_hold_check_exits_78(tmp_path):
-    block = extract(SLOT.read_text(), r'if \[ -e "\$HOLD" \] \|\| \[ -e "\$HOLD_FALLBACK" \]; then\n.*?\nfi')
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file permissions")
+def test_hold_persistent_fallback_and_disable_failure(tmp_path):
+    # primary hold unwritable, but the persistent /var/lib fallback succeeds; a failed
+    # systemctl disable must still exit 78 with both fallback markers written.
+    fn = extract(SLOT.read_text(), r"hold\(\) \{.*?\n\}")
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    ro = lib / "ro"
+    ro.mkdir()
+    ro.chmod(0o555)
+    run = tmp_path / "run"
+    defs = (f'N=1; name="t-fleet-std-1"; STATUS_DIR="{run}"; HOLD="{ro}/hold-1"; '
+            f'HOLD_FALLBACK="$STATUS_DIR/hold-1"; HOLD_PERSIST_FALLBACK="{lib}/hold-fallback-1"; '
+            f'HOLD_EXIT=78\nstate() {{ :; }}\nsystemctl() {{ return 1; }}')
+    body = fn.replace("/var/lib/fleet-ci", str(lib)) + '\nhold "uncertain registration"'
+    r = run_bash_harness(tmp_path, body, defs)
+    assert r.returncode == 78, r.stderr
+    assert (run / "hold-1").read_text() == "uncertain registration\n"          # /run fallback
+    assert (lib / "hold-fallback-1").read_text() == "uncertain registration\n"  # persistent fallback
+    assert "systemctl disable failed" in r.stderr
+
+
+@pytest.mark.parametrize("which", ["primary", "run", "persist"])
+def test_startup_hold_check_exits_78(tmp_path, which):
+    block = extract(SLOT.read_text(),
+                    r'if \[ -e "\$HOLD" \] \|\| \[ -e "\$HOLD_FALLBACK" \] \|\| '
+                    r'\[ -e "\$HOLD_PERSIST_FALLBACK" \]; then\n.*?\nfi')
     hold = tmp_path / "hold-1"
-    hold.write_text("reconcile me\n")
-    defs = (f'N=1; name="t-fleet-std-1"; HOLD="{hold}"; HOLD_FALLBACK="{tmp_path}/none"; HOLD_EXIT=78')
+    fb = tmp_path / "run-hold-1"
+    pf = tmp_path / "persist-hold-1"
+    {"primary": hold, "run": fb, "persist": pf}[which].write_text("reconcile me\n")
+    defs = (f'N=1; name="t-fleet-std-1"; HOLD="{hold}"; HOLD_FALLBACK="{fb}"; '
+            f'HOLD_PERSIST_FALLBACK="{pf}"; HOLD_EXIT=78')
     r = run_bash_harness(tmp_path, block, defs)
     assert r.returncode == 78 and "reconcile" in r.stderr
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file permissions")
 def test_cron_at_allow_files_fail_closed(tmp_path):
     loop = extract(SLOT.read_text(), r"for tool in cron at; do\n.*?\ndone")
     etc = tmp_path / "etc"
@@ -684,11 +857,13 @@ def test_cron_at_allow_files_fail_closed(tmp_path):
     assert run_bash_harness(tmp_path, body, defs).returncode == 1  # missing deny fails closed
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file permissions")
 def test_sudoers_check_is_nnp_safe_and_word_bounded(tmp_path):
     loop = extract(SLOT.read_text(), r"for f in /etc/sudoers /etc/sudoers\.d/\*; do\n.*?\ndone")
     etc = tmp_path / "etc"
     etc.mkdir()
-    defs = f'u="ghrunner-1"; TEST_ETC="{etc}"\ndie() {{ echo "DIE: $*" >&2; exit 1; }}'
+    defs = (f'u="ghrunner-1"; uid=1001; ugid=1002; TEST_ETC="{etc}"\n'
+            f'die() {{ echo "DIE: $*" >&2; exit 1; }}')
     body = loop.replace("/etc/", "$TEST_ETC/")
     # no sudoers at all (sudo not installed) -> ok
     assert run_bash_harness(tmp_path, body, defs).returncode == 0
@@ -700,6 +875,20 @@ def test_sudoers_check_is_nnp_safe_and_word_bounded(tmp_path):
     assert run_bash_harness(tmp_path, body, defs).returncode == 1
     # a different slot (ghrunner-10) is NOT a mention of ghrunner-1
     (etc / "sudoers").write_text("ghrunner-10 ALL=(ALL) ALL\n")
+    assert run_bash_harness(tmp_path, body, defs).returncode == 0
+    # numeric uid grant refuses
+    (etc / "sudoers").write_text("#1001 ALL=(ALL) ALL\n")
+    assert run_bash_harness(tmp_path, body, defs).returncode == 1
+    # numeric gid grant (%#gid) refuses
+    (etc / "sudoers").write_text("%#1002 ALL=(ALL) ALL\n")
+    assert run_bash_harness(tmp_path, body, defs).returncode == 1
+    # a different numeric uid is word-bounded, not a mention of 1001
+    (etc / "sudoers").write_text("#10010 ALL=(ALL) ALL\n")
+    assert run_bash_harness(tmp_path, body, defs).returncode == 0
+    (etc / "sudoers").write_text("%#10020 ALL=(ALL) ALL\n")
+    assert run_bash_harness(tmp_path, body, defs).returncode == 0
+    # a bare numeric gid that is not our uid is not a mention
+    (etc / "sudoers").write_text("#1002 ALL=(ALL) ALL\n")
     assert run_bash_harness(tmp_path, body, defs).returncode == 0
     # unrelated content -> ok
     (etc / "sudoers").write_text("root ALL=(ALL) ALL\n%sudo ALL=(ALL) ALL\n")
@@ -783,12 +972,32 @@ def test_canary_harness_static_contract():
         assert frag in code, frag
     # slot range and distinct slots enforced
     assert "1-32" in code and "A and B must be different slots" in code
+    # /proc cross-read never remounts the host: private namespace or WARN
+    assert "unshare --mount --pid --fork" in code
+    assert "mount -t proc -o hidepid=invisible proc /proc" in code
+    assert "WARN: proc-cross-read" in code
+    assert "mount -o remount" not in code   # no host /proc remount command remains
+    assert "RESTORE_PROC" not in code       # no host-state restore machinery
+
+
+# Protocol constants required by the nft egress rules: RFC1918 / loopback / CGNAT /
+# multicast / reserved ranges and the systemd-resolved stub. These are public address
+# ranges, not host identities; every other dotted-quad literal is refused.
+ALLOWED_IP_LITERALS = {
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10",
+    "169.254.0.0/16", "0.0.0.0/8", "224.0.0.0/4", "240.0.0.0/4",
+    "127.0.0.0/8", "127.0.0.53",
+}
 
 
 def test_public_repo_carries_no_real_host_identity():
-    for path in (DOC, CONF, UNIT, SLOT, ACTION, CANARY,
-                 ACTION_DIR / "fleet_route.py", ACTION_DIR / "fleet-capacity"):
+    for path in (DOC, CONF, UNIT, SLOT, ACTION, CANARY, MINT, CAPACITY,
+                 FLEET / "fleet_gate.py", FLEET / "fleet_route.py",
+                 ACTION_DIR / "fleet_route.py", ACTION_DIR / "fleet-capacity",
+                 Path(__file__)):
         text = path.read_text(encoding="utf-8")
-        assert not re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", text), path
+        for m in re.finditer(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b", text):
+            assert m.group(0) in ALLOWED_IP_LITERALS, (path, m.group(0))
         assert not re.search(r"\bubuntu[0-9]\b", text), path
-        assert "/Users/" not in text, path
+        # a real home path leaks a user name; the bare guard pattern below does not
+        assert not re.search(r"/Users/[A-Za-z0-9_.-]+", text), path

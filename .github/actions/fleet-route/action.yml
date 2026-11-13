@@ -26,7 +26,9 @@ inputs:
       "true" only for a trusted source. The caller MUST compute it in the workflow
       expression:
       github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-      Untrusted sources (fork PRs) never receive fleet labels, in any mode.
+      Untrusted sources (fork PRs) never receive fleet labels, in any mode. Defense in
+      depth: the action recomputes this from github.event_name and the head/base repo
+      itself and ANDs it with this input, so a caller passing "true" cannot override a fork.
     required: false
     default: "false"
   repo_private:
@@ -74,13 +76,32 @@ runs:
         FLEET_TRUSTED_SOURCE: ${{ inputs.is_trusted_source }}
         FLEET_REPO_PRIVATE: ${{ inputs.repo_private }}
         FLEET_ACTION_DIR: ${{ github.action_path }}
+        FLEET_EVENT_NAME: ${{ github.event_name }}
+        FLEET_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        FLEET_BASE_REPO: ${{ github.repository }}
       run: |
         set -euo pipefail
+        # Defense in depth: recompute trust from the event context INSIDE this pinned
+        # action, then AND it with the caller's is_trusted_source. A caller passing true
+        # cannot override a fork: for pull_request events the head repo must equal this
+        # repository. Non-pull_request events (push/schedule/dispatch) are trusted.
+        computed_trusted=false
+        if [ "$FLEET_EVENT_NAME" != "pull_request" ]; then
+          computed_trusted=true
+        elif [ -n "$FLEET_HEAD_REPO" ] && [ "$FLEET_HEAD_REPO" = "$FLEET_BASE_REPO" ]; then
+          computed_trusted=true
+        fi
+        caller_trusted=false
+        case "$(printf '%s' "$FLEET_TRUSTED_SOURCE" | tr '[:upper:]' '[:lower:]')" in
+          true|1|yes) caller_trusted=true ;;
+        esac
+        trusted=false
+        if [ "$computed_trusted" = true ] && [ "$caller_trusted" = true ]; then trusted=true; fi
         # Single decision script from the PINNED action checkout (github.action_path),
         # never from the caller's checkout. It runs the sibling fleet-capacity from the
         # same directory; only that pinned code reads FLEET_ROUTE_TOKEN.
         python3 "$FLEET_ACTION_DIR/fleet_route.py" \
           --mode "${FLEET_MODE:-off}" --class "$FLEET_CLASS_IN" \
           --jobs-needed "$FLEET_JOBS" --spill-ratio "$FLEET_SPILL_RATIO" \
-          --trusted-source "$FLEET_TRUSTED_SOURCE" --repo-private "$FLEET_REPO_PRIVATE" \
+          --trusted-source "$trusted" --repo-private "$FLEET_REPO_PRIVATE" \
           --fetch-capacity --github-output "$GITHUB_OUTPUT"

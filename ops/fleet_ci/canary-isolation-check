@@ -17,8 +17,11 @@
 # port, but egress to loopback outside its own range is dropped, so the service is
 # unreachable. That blocked reachability is what this harness verifies.
 #
-# Reversible: removes only the probe files/processes it created, wipes and recreates
-# A's home, and restores /proc mount options if it had to add hidepid for the test.
+# Reversible: removes only the probe files/processes it created and wipes and recreates
+# A's home. It NEVER remounts the host /proc: if the host /proc is not already
+# hidepid=invisible, the cross-read check runs inside `unshare --mount --pid --fork`
+# with its own /proc mounted hidepid=invisible (namespace-local, host unchanged), or is
+# reported as WARN with the host's current hidepid setting when unshare is unavailable.
 # Never handles a credential or a JIT config. No real host identity in this file.
 #
 #   canary-isolation-check [A B]     run the checks (root)
@@ -94,18 +97,13 @@ nft list table inet fleet_ci >/dev/null 2>&1 || NFT_PRESENT=0
 [ "$NFT_PRESENT" = 1 ] || echo "note: table inet fleet_ci not loaded; apply fleet_gate.py render-nft first" >&2
 
 proc_opts="$(findmnt -no OPTIONS /proc)"
-RESTORE_PROC=0
-case ",$proc_opts," in
-  *,hidepid=invisible,*) ;;
-  *) echo "note: remounting /proc with hidepid=invisible for the test (restored on exit)" >&2
-     mount -o remount,hidepid=invisible /proc && RESTORE_PROC=1 ;;
-esac
+# Never remount the host /proc. The cross-read check below uses the host's existing
+# hidepid=invisible, a private mount+pid namespace, or reports WARN (host unchanged).
 
 BPID=""
 cleanup() {
   if [ -n "$BPID" ]; then kill -KILL "$BPID" 2>/dev/null || true; fi
   rm -f "/dev/shm/fleet-canary-$B" 2>/dev/null || true
-  if [ "$RESTORE_PROC" = 1 ]; then mount -o "remount,$proc_opts" /proc 2>/dev/null || true; fi
 }
 trap cleanup EXIT
 
@@ -115,13 +113,44 @@ BPID=$!
 sleep 0.3
 
 # --- checks ------------------------------------------------------------------------------
-if ! kill -0 "$BPID" 2>/dev/null; then
-  report proc-cross-read 1 "B probe process did not start"
-elif run_as "$ua" cat "/proc/$BPID/status" >/dev/null 2>&1; then
-  report proc-cross-read 1 "A read B's /proc"
-else
-  report proc-cross-read 0
-fi
+# /proc cross-read: never touch the host /proc. If it is already hidepid=invisible, test
+# directly against the host B probe. Otherwise run the check in a private mount+pid
+# namespace with its own /proc (namespace-local, host unchanged), or WARN if unshare is
+# unavailable.
+case ",$proc_opts," in
+  *,hidepid=invisible,*)
+    if ! kill -0 "$BPID" 2>/dev/null; then
+      report proc-cross-read 1 "B probe process did not start"
+    elif run_as "$ua" cat "/proc/$BPID/status" >/dev/null 2>&1; then
+      report proc-cross-read 1 "A read B's /proc"
+    else
+      report proc-cross-read 0
+    fi
+    ;;
+  *)
+    if command -v unshare >/dev/null; then
+      ns_out="$(UA="$ua" UB="$ub" unshare --mount --pid --fork bash -c '
+        mount -t proc -o hidepid=invisible proc /proc || exit 3
+        setpriv --reuid="$UB" --regid="$UB" --init-groups sleep 600 &
+        bpid=$!
+        sleep 0.3
+        if setpriv --reuid="$UA" --regid="$UA" --init-groups cat "/proc/$bpid/status" >/dev/null 2>&1; then
+          echo readable
+        else
+          echo blocked
+        fi
+        kill -KILL "$bpid" 2>/dev/null || true
+      ' 2>/dev/null)" || ns_out="ns-error"
+      case "$ns_out" in
+        blocked) report proc-cross-read 0 "private mount+pid namespace, hidepid=invisible" ;;
+        readable) report proc-cross-read 1 "A read B's /proc in the test namespace" ;;
+        *) report proc-cross-read 1 "namespace probe failed ($ns_out)" ;;
+      esac
+    else
+      echo "WARN: proc-cross-read: host /proc options '$proc_opts' (no hidepid=invisible); unshare unavailable, cross-read not tested; host /proc left unchanged"
+    fi
+    ;;
+esac
 
 run_as "$ub" bash -c "umask 077; printf 'canary' > /dev/shm/fleet-canary-$B"
 if run_as "$ua" cat "/dev/shm/fleet-canary-$B" >/dev/null 2>&1; then

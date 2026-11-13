@@ -19,13 +19,18 @@ before a new caller can: `idle` is therefore the raw idle count MINUS the queued
 jobs of that class (clamped at 0). This prevents capacity over-commit when several
 workflows route at once.
 
-Queued jobs are read from ONE page of queued org workflow runs
-(GET /orgs/{org}/actions/runs?status=queued&per_page=100), then one page of jobs per
-run; jobs with status queued/waiting whose labels include `fleet` and `fleet-<class>`
-count. The token needs org "Self-hosted runners: read" AND "Actions: read" (queued
-runs/jobs), passed as FLEET_ROUTE_TOKEN; never the minting credential. If ANY read
-fails, the whole result is ok=false: the router then falls back to hosted (fail
-closed, never over-commit on a partial view).
+Queued jobs are read from ONE page of 100 queued org workflow runs
+(GET /orgs/{org}/actions/runs?status=queued&per_page=100&page=1), then one page of jobs
+per run; jobs with status queued/waiting whose labels include `fleet` and `fleet-<class>`
+count. Two bounds keep the read cheap and fail closed:
+  * if that runs page is FULL (100 runs), the queued count is SATURATED — there may be
+    more queued fleet jobs than one page can show — so the result is ok=false;
+  * at most 20 job-detail API calls are made per decision; if more than 20 queued runs
+    would need a detail read, the cap is hit and the result is ok=false.
+In both cases the router falls back to hosted. The token needs org "Self-hosted
+runners: read" AND "Actions: read" (queued runs/jobs), passed as FLEET_ROUTE_TOKEN;
+never the minting credential. If ANY read fails, the whole result is ok=false: the
+router then falls back to hosted (fail closed, never over-commit on a partial view).
 
 --input summarizes a saved JSON ({"runners": [...], "queued_jobs": [...]}) instead of
 the API. Any failure prints {"ok": false, "error": ...} and exits 0 when --soft is
@@ -47,6 +52,8 @@ API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
 CLASSES = ("std", "heavy")
 PER_PAGE = 100
 MAX_PAGES = 20
+# At most this many job-detail API calls per decision; more queued runs -> hosted.
+MAX_JOB_DETAIL_CALLS = 20
 FULL_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
@@ -134,13 +141,18 @@ def fetch_runners(org: str, group_id: str, token: str) -> List[Dict[str, Any]]:
 
 
 def fetch_queued_fleet_jobs(org: str, token: str) -> List[Dict[str, Any]]:
-    """One page of queued org workflow runs, then one page of jobs per run. Bounded
-    work: at most PER_PAGE runs and one jobs page each. Any failure raises so the
-    caller reports ok=false and the router falls back to hosted."""
+    """One page of 100 queued org workflow runs, then one page of jobs per run. Bounded
+    work: a full runs page means the queued count is saturated, and at most
+    MAX_JOB_DETAIL_CALLS (20) job-detail reads are made per decision. Either bound, or
+    any read failure, raises so the caller reports ok=false and the router goes hosted."""
     data = _get(f"/orgs/{org}/actions/runs?status=queued&per_page={PER_PAGE}&page=1", token)
     runs = data.get("workflow_runs")
     if not isinstance(runs, list):
         raise ValueError("unexpected queued-runs response shape")
+    if len(runs) >= PER_PAGE:
+        raise ValueError(f"queued-runs page saturated ({PER_PAGE}); cannot bound queued fleet jobs")
+    if len(runs) > MAX_JOB_DETAIL_CALLS:
+        raise ValueError(f"queued job-detail cap ({MAX_JOB_DETAIL_CALLS}) reached; routing hosted")
     jobs: List[Dict[str, Any]] = []
     for run in runs:
         if not isinstance(run, dict):

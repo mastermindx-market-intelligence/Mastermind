@@ -37,6 +37,10 @@ MEM_PSI_MAX=10
 IO_PSI_MAX=20
 SLOT_MEM_FLOOR_GB=6
 LOAD_MAX=0.85
+# A `claimed` status file older than this many seconds no longer holds capacity (the
+# slot died between admitting and minting); it is ignored by the busy count and reported
+# as stale_claims. Default 21600 = 6h, matching the GitHub job timeout. Must be positive.
+STALE_CLAIM_S=21600
 
 # --- per-slot systemd limits (rendered into fleet-slot@.service.d/limits.conf) --------
 SLOT_MEMORY_HIGH=7G

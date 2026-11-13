@@ -26,10 +26,13 @@ GitHub queue ──dispatch──▶ registered one-job JIT runners (only on hos
   * `MemAvailable` ≥ `SLOT_MEM_FLOOR_GB × (busy slots + 1)`;
   * `load1 / cores` < `LOAD_MAX`.
   Busy slots are slots in `claimed`, `minting` or `registered` (an idle registration
-  is reserved capacity) plus any unreadable status file. The check and the `claimed`
-  write happen under one host lock, so two slots cannot claim the same headroom.
-  Refused: back off 15 s → 30 s → 60 s, no registration. CPU PSI is recorded in the
-  status detail but is not a gate.
+  is reserved capacity) plus any unreadable status file. A `claimed` file older than
+  `STALE_CLAIM_S` (default 21600 s = 6 h, the GitHub job timeout) no longer holds
+  capacity — the slot died between admitting and minting — and is reported as
+  `stale_claims` in the status/admit output; other busy states count regardless of age.
+  The check and the `claimed` write happen under one host lock, so two slots cannot
+  claim the same headroom. Refused: back off 15 s → 30 s → 60 s, no registration.
+  CPU PSI is recorded in the status detail but is not a gate.
 * **Honest comparison with `host_pick.evaluate_hosts`** (the Fabric host placer,
   `ops/native_fabric/quota_continuity/source/host_pick.py`):
   * **Same semantics:** the number coercion (`_as_float`/`_finite_nonnegative`), the
@@ -145,10 +148,14 @@ create the accounts first). Per slot:
 
 * **Allow the internet** (chain policy accept for everything not denied below).
 * **Deny** RFC1918/LAN (10/8, 172.16/12, 192.168/16), link-local (169.254/16),
-  CGNAT (100.64/10), IPv6 ULA (fc00::/7) and link-local (fe80::/10).
-* **Deny the host's loopback services** (127/8, ::1) **except the slot's own port
-  range** (`20000+N*100 .. +99`, tcp and udp), so a job can reach the servers it
-  starts itself and nothing else on the host.
+  CGNAT (100.64/10), this-network (0/8), multicast (224/4) and reserved (240/4);
+  IPv6 ULA (fc00::/7), link-local (fe80::/10), IPv4-mapped (::ffff:0:0/96) and
+  multicast (ff00::/8).
+* **Deny the host's loopback services** (127/8, ::1) **except** two destinations,
+  both accepted *before* the loopback drop: the slot's **own port range**
+  (`20000+N*100 .. +99`, tcp and udp), so a job can reach the servers it starts
+  itself; and **DNS to the systemd-resolved stub `127.0.0.53:53` only** (udp and
+  tcp), so name resolution keeps working. No other loopback service is reachable.
 
 These rules filter egress packets; they do not prevent `bind()` — the observable
 effect is that out-of-range loopback services and LAN destinations are unreachable.
@@ -162,21 +169,25 @@ database or daemon reachable from a job would defeat the isolation); Docker for 
 An uncertain registration (mint refusal other than API/network, a runner exiting
 nonzero within 30 s) calls `hold()`: it writes `/var/lib/fleet-ci/hold-N` explicitly,
 `sync`s, reads the file back and compares, then exits **78**. The unit uses
-`Restart=on-failure` with `RestartPreventExitStatus=78`, so a hold never restarts —
-even when the hold file could not be persisted (in that case `hold()` also leaves a
-runtime marker `/run/fleet-ci/hold-N` and disables the unit best-effort, so a reboot
-cannot re-mint either). The slot refuses to start while either marker exists.
-Ordinary failures exit 1 and come back after `RestartSec`.
+`Restart=on-failure` with `RestartPreventExitStatus=78`, so a hold never restarts.
+When the primary marker could not be persisted, `hold()` still exits 78 and leaves
+**two** fallback markers — a runtime one `/run/fleet-ci/hold-N` and a best-effort
+persistent one `/var/lib/fleet-ci/hold-fallback-N` — and disables the unit. A failed
+`systemctl disable` does not change the exit: the markers alone block startup (and a
+reboot) until reconciled. The slot refuses to start while **any** of the three markers
+exists. Ordinary failures exit 1 and come back after `RestartSec`.
 
 **Hold-reconciliation runbook (operator):**
 
-1. Read the hold: `cat /var/lib/fleet-ci/hold-N` (or `/run/fleet-ci/hold-N`).
+1. Read the hold: `cat /var/lib/fleet-ci/hold-N` (or the fallbacks
+   `/run/fleet-ci/hold-N`, `/var/lib/fleet-ci/hold-fallback-N`).
 2. List the registration: `GET /orgs/{org}/actions/runners?name=<name>` where
    `<name>` is `<host>-fleet-<class>-N` (from the hold message / slot status).
 3. If the runner is **offline**, delete it: `DELETE /orgs/{org}/actions/runners/{id}`.
    If it is online/busy, or there are several same-name runners, stop and reconcile
    manually — do not delete a runner that may be executing a job.
-4. Remove the hold file(s): `rm /var/lib/fleet-ci/hold-N /run/fleet-ci/hold-N`.
+4. Remove the hold file(s):
+   `rm /var/lib/fleet-ci/hold-N /run/fleet-ci/hold-N /var/lib/fleet-ci/hold-fallback-N`.
 5. If the unit was disabled by a persistence failure, `systemctl enable` it again.
 6. `systemctl start fleet-slot@N` and watch `slot-N.json` cycle
    `wiping → claimed → minting → registered`.
@@ -199,11 +210,14 @@ include `fleet` and `fleet-<class>`), clamped at 0. Several workflows routing at
 would otherwise all see the same idle registrations and over-commit the pool.
 In-progress jobs are not counted again: their runner already reports `busy`.
 
-The queued read is bounded: **one API page** of queued org workflow runs
-(`GET /orgs/{org}/actions/runs?status=queued&per_page=100`), then one page of jobs per
-run. If **any** read fails, the whole result is `ok=false` and the router falls back
-to hosted — never over-commit on a partial view. Output schema
-`mastermind.fleet_capacity.v1` adds `queued_fleet_jobs` and a per-class `queued`
+The queued read is bounded: **one API page of 100** queued org workflow runs
+(`GET /orgs/{org}/actions/runs?status=queued&per_page=100&page=1`), then one page of
+jobs per run. Two bounds fail closed to hosted: if the runs page is **full (100)** the
+queued count is **saturated** (more fleet jobs may be queued than one page shows); and
+at most **20 job-detail API calls** are made per decision — more than 20 queued runs
+hits the cap. In either case, or if **any** read fails, the whole result is `ok=false`
+and the router falls back to hosted — never over-commit on a partial view. Output
+schema `mastermind.fleet_capacity.v1` adds `queued_fleet_jobs` and a per-class `queued`
 field; `idle`/`idle_slots` are the effective (post-subtraction) values.
 
 ## Sizing
@@ -255,7 +269,10 @@ Host names, IPs and user names of the real fleet stay out of this public reposit
    * Run `ops/fleet_ci/canary-isolation-check 1 2` as root (needs two provisioned
      slot users and the loaded nft ruleset): every check must PASS — cross-slot
      /proc, /dev/shm and home reads denied, out-of-range loopback and LAN egress
-     dropped, internet egress allowed, sudo denied, wipe leaves no residue.
+     dropped, internet egress allowed, sudo denied, wipe leaves no residue. The
+     harness never remounts the host `/proc`: the cross-read check uses the host's
+     existing `hidepid=invisible`, else a private `unshare --mount --pid --fork`
+     namespace with its own `/proc`, else reports WARN (host state unchanged).
    * **JIT env handoff:** while a job runs, as root check the runner process
      environment: `tr '\0' '\n' < /proc/<runner-pid>/environ` must **not** contain
      `ACTIONS_RUNNER_INPUT_JITCONFIG` after startup, and no child process may
