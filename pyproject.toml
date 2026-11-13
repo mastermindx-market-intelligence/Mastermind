@@ -29,6 +29,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8,<10",
+    # Original offline APMEM research mechanics are exercised, never silently skipped.
+    "scipy==1.17.0",
     # The historical mcp>= floor is intentionally retired; the maintained v1
     # release below is exact so unrelated SDK movement cannot red hosted CI.
     # The MCP SDK is isolated to integrations/*/server.py and auth edge modules.
@@ -47,6 +49,9 @@ dev = [
     # worker scheduling or report forwarding on hosted CI.
     "pytest-xdist==3.8.0",
 ]
+
+# Offline scientific evaluation only; this extra confers no live-signal authority.
+apmem-research = ["scipy==1.17.0"]
 
 # Isolated installation profile for remote Business MCP app/resource-server
 # processes. This does not arm, publish, authenticate, or install an app.
