@@ -194,8 +194,8 @@ def _retry_after_s(response) -> float | None:
 class _Retryable(RuntimeError):
     """A pre-commit route refusal; the caller may try the next candidate.
 
-    The client sees only a constant FABRIC_* reason; upstream detail stays in
-    the server-side log (py/stack-trace-exposure). ``cooldown`` marks whether
+    Logs and clients see constant FABRIC_* reasons, never upstream bodies.
+    ``cooldown`` marks whether
     the rung failure should also bench the route for later requests.
     """
 
@@ -205,8 +205,7 @@ class _Retryable(RuntimeError):
         self.reason = reason
         self.cooldown = cooldown
         self.cooldown_s = cooldown_s
-        if detail:
-            _log.warning("fabric attempt refused: %s (%s)", reason, detail[:300])
+        _log.warning("fabric attempt refused: %s", reason)
 
 
 async def _read_bounded(response: httpx.Response, limit: int) -> bytes:
@@ -435,6 +434,8 @@ class RouterState:
     rate_window: object = field(default=None)
     oauth_cursor: dict[str, int] = field(default_factory=dict)
     oauth_bench: dict[tuple[str, str], float] = field(default_factory=dict)
+    oauth_bench_revision: dict[tuple[str, str], int] = field(default_factory=dict)
+    oauth_bench_tasks: set = field(default_factory=set)
 
     def count_usage(self, route_id: str, inp: int, out: int) -> None:
         if inp <= 0 and out <= 0:
@@ -619,6 +620,8 @@ def create_app(cfg: Settings | None = None, *,
         try:
             yield
         finally:
+            if app.state.router_state.oauth_bench_tasks:
+                await asyncio.shield(asyncio.gather(*app.state.router_state.oauth_bench_tasks))
             await app.state.model_policy.flush_checkpoint()
             writer = app.state.model_policy._checkpoint_task
             if writer is not None:
@@ -789,6 +792,9 @@ def create_app(cfg: Settings | None = None, *,
             if "max_tokens" in payload and (type(payload["max_tokens"]) is not int
                     or not 1 <= payload["max_tokens"] <= 1000000):
                 raise ValueError("invalid maximum output tokens")
+            if "tools" in payload and (not isinstance(payload["tools"], list)
+                    or any(not isinstance(tool, dict) for tool in payload["tools"])):
+                raise ValueError("invalid tools")
             _sanitize_payload(payload)
             candidates = _model_candidates(payload, cfg.aliases)
         except (ValueError, WireTranslationError):
@@ -812,6 +818,7 @@ def create_app(cfg: Settings | None = None, *,
         send_count = 0
         waiting = False
         reason = "FABRIC_ALL_ROUTES_UNAVAILABLE"
+        preflight_excluded: set[str] = set()
 
         def note_failure(route, code, retry_after=None):
             state.count(route.route_id, "attempt_failed")
@@ -890,6 +897,8 @@ def create_app(cfg: Settings | None = None, *,
                 if len(routing.active) >= 128:
                     ladder, eta, reason = [], 1.0, "FABRIC_GLOBAL_CAPACITY"
                 for route, resolved in ladder:
+                    if route.route_id in preflight_excluded:
+                        continue
                     if send_count >= cfg.max_attempts:
                         break
                     # Availability and reservation are synchronous and adjacent.
@@ -955,12 +964,14 @@ def create_app(cfg: Settings | None = None, *,
                                 "message": "upstream refusal; request was not replayed"}}, status_code=502)
                         continue
                     except _ResponsesRouteRefused as exc:
-                        safe = exc.reason in ("FABRIC_OAUTH_NO_ACCOUNT", "FABRIC_OAUTH_ACCOUNTS_EXHAUSTED",
-                                              "FABRIC_OAUTH_ACCOUNT_LIMIT", "FABRIC_OAUTH_HTTP_429")
-                        note_failure(route, exc.reason)
+                        safe = bool(admission and not admission.sent)
                         routing.finish(admission, no_send=safe)
                         reason = exc.reason
                         if safe:
+                            # An owner hold or expired credential is not a sick
+                            # provider. Try qualified alternatives before send,
+                            # and reconsider this pool on the next request.
+                            preflight_excluded.add(route.route_id)
                             continue
                         return JSONResponse({"error": {"code": exc.reason,
                             "message": "upstream outcome not replayed"}}, status_code=502)
@@ -1027,6 +1038,8 @@ def create_app(cfg: Settings | None = None, *,
                     return response
                 if counting or send_count >= cfg.max_attempts or time.monotonic() >= admission_deadline:
                     break
+                if ladder and all(r.route_id in preflight_excluded for r, _ in ladder):
+                    break
                 if reason in ("FABRIC_MODEL_UNKNOWN", "FABRIC_TIER_CAPABILITY_UNAVAILABLE", "FABRIC_COUNT_TOKENS_WIRE"):
                     break
                 if not waiting:
@@ -1043,11 +1056,13 @@ def create_app(cfg: Settings | None = None, *,
                     pass
             state.refused += 1
             state.exhausted += 1
+            refusal_headers = {"x-fabric-request-id": nonce}
+            if reason not in {"FABRIC_OAUTH_OWNER_HELD", "FABRIC_OAUTH_REFRESH_REQUIRED", "FABRIC_OAUTH_NO_ACCOUNT"}:
+                refusal_headers["retry-after"] = str(max(1, math.ceil(eta))) if math.isfinite(eta) and eta > 0 else "5"
             return JSONResponse({"error": {"code": reason, "type": "fabric_capacity_error",
                 "message": "no eligible model capacity within the admission budget; no paid spill or model-pin override"}},
                 status_code=501 if reason == "FABRIC_COUNT_TOKENS_WIRE" else 503,
-                headers={"retry-after": str(max(1, math.ceil(eta))) if math.isfinite(eta) and eta > 0 else "5",
-                         "x-fabric-request-id": nonce})
+                headers=refusal_headers)
         finally:
             routing.waiters.pop(nonce, None)
 
@@ -1112,9 +1127,8 @@ def create_app(cfg: Settings | None = None, *,
                 # but never replay this request on another route.
                 raise _Retryable("FABRIC_ROUTE_HTTP_500",
                                  detail=(detail or b"")[:300].decode("utf-8", "replace"))
-            _log.warning("fabric upstream refused model=%s route=%s status=%s body=%s",
-                         payload.get("model"), route.route_id, response.status_code,
-                         (detail or b"")[:400].decode("utf-8", "replace"))
+            _log.warning("fabric upstream refused route=%s status=%s",
+                         route.route_id, response.status_code)
             return JSONResponse({"error": {"type": "upstream_error",
                 "code": f"FABRIC_ROUTE_HTTP_{response.status_code}",
                 "message": "upstream refused; no cross-route replay"}}, status_code=response.status_code)
@@ -1228,9 +1242,8 @@ def create_app(cfg: Settings | None = None, *,
             if response.status_code == 500:
                 raise _Retryable("FABRIC_ROUTE_HTTP_500",
                                  detail=(detail or b"")[:300].decode("utf-8", "replace"))
-            _log.warning("fabric upstream refused model=%s route=%s status=%s body=%s",
-                         payload.get("model"), route.route_id, response.status_code,
-                         (detail or b"")[:400].decode("utf-8", "replace"))
+            _log.warning("fabric upstream refused route=%s status=%s",
+                         route.route_id, response.status_code)
             return JSONResponse({"error": {"type": "upstream_error",
                 "code": f"FABRIC_ROUTE_HTTP_{response.status_code}",
                 "message": "upstream refused; no cross-route replay"}}, status_code=response.status_code)
@@ -1239,7 +1252,8 @@ def create_app(cfg: Settings | None = None, *,
                 data = await _read_response_bounded(response, cfg.max_body_bytes)
                 parsed = json.loads(data)
                 app.state.model_policy.observe_usage(admission, parsed.get("usage"), "openai", parsed.get("model"))
-                translated = openai_to_anthropic(parsed, model=slug or payload["model"])
+                translated = openai_to_anthropic(parsed, model=slug or payload["model"],
+                    message_id=f"msg_{admission.token}" if admission else None)
                 if admission:
                     admission.completed = bool(parsed.get("choices") and parsed["choices"][0].get("finish_reason"))
                     admission.finish_reason = parsed["choices"][0].get("finish_reason") if parsed.get("choices") else None
@@ -1248,7 +1262,8 @@ def create_app(cfg: Settings | None = None, *,
                 return JSONResponse({"error": {"code": "FABRIC_RESPONSE_INVALID"}}, status_code=502)
             finally:
                 await response.aclose()
-        translator = OpenAIStreamTranslator(model=slug or payload["model"])
+        translator = OpenAIStreamTranslator(model=slug or payload["model"],
+            message_id=f"msg_{admission.token}" if admission else f"msg_{uuid.uuid4().hex}")
 
         async def stream():
             first, buffer, terminal = True, b"", False
@@ -1298,17 +1313,11 @@ def create_app(cfg: Settings | None = None, *,
 
 
     class _ResponsesRouteRefused(RuntimeError):
-        """Admission-time refusal; no upstream effect has occurred.
+        """Local account preflight refusal; inference has not been sent."""
 
-        The client sees only the constant FABRIC_* reason code; free-form
-        upstream detail stays in the server-side log (py/stack-trace-exposure).
-        """
-
-        def __init__(self, reason: str, detail: str = ""):
+        def __init__(self, reason: str):
             super().__init__(reason)
             self.reason = reason
-            if detail:
-                _log.warning("responses route %s: %s", reason, detail)
 
     def _oauth_headers(account) -> dict[str, str]:
         headers = {"authorization": f"Bearer {account.access_token}",
@@ -1319,22 +1328,27 @@ def create_app(cfg: Settings | None = None, *,
         headers.update(codex_oauth.account_id_header(account.access_token))
         return headers
 
-    def _oauth_accounts(route: Route):
-        accounts = codex_oauth.read_accounts(
-            app.state.settings.auth_store, route.pool)
+    async def _oauth_accounts(route: Route):
+        try:
+            accounts = await asyncio.to_thread(codex_oauth.read_accounts,
+                app.state.settings.auth_store, route.pool)
+        except (OSError, ValueError, codex_oauth.OAuthPoolError):
+            raise _ResponsesRouteRefused("FABRIC_OAUTH_NO_ACCOUNT") from None
         now = time.time()
         state: RouterState = app.state.router_state
-        eligible = [a for a in accounts
-                    if not a.exhausted
+        unheld = [a for a in accounts if not a.owner_held]
+        if not unheld:
+            raise _ResponsesRouteRefused("FABRIC_OAUTH_OWNER_HELD")
+        unexpired = [a for a in unheld if (
+            codex_oauth.access_token_expiry(a.access_token) is None
+            or codex_oauth.access_token_expiry(a.access_token) > now + 30)]
+        if not unexpired:
+            raise _ResponsesRouteRefused("FABRIC_OAUTH_REFRESH_REQUIRED")
+        eligible = [a for a in unexpired if not a.exhausted
                     and state.oauth_bench.get((route.route_id, a.id), 0.0) <= now]
-        return accounts, eligible
-
-    async def _refresh_once(route: Route, account):
-        return await _run_in_executor(
-            codex_oauth.refresh_account, app.state.settings.auth_store,
-            route.pool, account,
-            token_url=route.token_url, client_id=route.client_id,
-            client=_SyncHttpClient(upstream))
+        if not eligible:
+            raise _ResponsesRouteRefused("FABRIC_OAUTH_ACCOUNTS_EXHAUSTED")
+        return eligible
 
     async def _forward_responses(app_, route: Route, payload: dict,
                                  wants_stream: bool, *, admission=None) -> Response:
@@ -1345,163 +1359,138 @@ def create_app(cfg: Settings | None = None, *,
             responses_request = anthropic_to_responses(payload)
         except WireTranslationError as exc:
             return JSONResponse({"error": {"message": _public_reason(exc, "FABRIC_TRANSLATE_INVALID"),
-                                           "type": "invalid_request_error"}},
-                                status_code=400)
-        # The ChatGPT Responses backend refuses non-streaming requests
-        # ("Stream must be set to true"); always stream upstream and
-        # aggregate server-side when the client did not ask for SSE.
+                                           "type": "invalid_request_error"}}, status_code=400)
         responses_request["stream"] = True
-        accounts, eligible = _oauth_accounts(route)
-        if not eligible:
-            raise _ResponsesRouteRefused(
-                "FABRIC_OAUTH_ACCOUNTS_EXHAUSTED",
-                f"pool {route.pool!r}: {len(accounts)} rows all "
-                "exhausted or benched")
+        eligible = await _oauth_accounts(route)
         cursor = state.oauth_cursor.get(route.route_id, 0)
-        tried: set[str] = set()
-        order = []
-        for offset in range(len(eligible)):
-            account = eligible[(cursor + offset) % len(eligible)]
-            if account.id not in tried:
-                tried.add(account.id)
-                order.append(account)
-        body_bytes = json.dumps(responses_request).encode()
-        base = _route_base_url(route).rstrip("/")
-        last_refusal: _ResponsesRouteRefused | None = None
-        for index, account in enumerate(order):
-            state.oauth_cursor[route.route_id] = (
-                cursor + index + 1) % max(len(eligible), 1)
-            selected = account
-            response = None
-            for attempt in range(2):
-                request = upstream.build_request(
-                    "POST", f"{base}/responses",
-                    headers=_oauth_headers(selected),
-                    content=body_bytes)
-                if admission:
-                    admission.sent = True
-                response = await upstream.send(request, stream=True)
-                if response.status_code == 401 and attempt == 0:
-                    # One refresh for this row, then one retry; a failed
-                    # refresh benches the row for this request only.
-                    await response.aclose()
-                    try:
-                        selected = await _refresh_once(route, selected)
-                    except (codex_oauth.OAuthPoolError, OSError, ValueError):
-                        break
-                    continue
-                break
-            if response is None:
-                continue
+        selected = eligible[cursor % len(eligible)]
+        state.oauth_cursor[route.route_id] = (cursor + 1) % len(eligible)
+        # Exactly one identity per inference. Rotation belongs to the incumbent
+        # auth owner; a 401/429/5xx never causes refresh or account replay here.
+        request = upstream.build_request("POST",
+            f"{_route_base_url(route).rstrip('/')}/responses",
+            headers=_oauth_headers(selected), content=json.dumps(responses_request).encode())
+        if admission:
+            admission.sent = True
+        response = await upstream.send(request, stream=True)
+        if response.status_code >= 400:
             status = response.status_code
+            retry_after = _retry_after_s(response)
+            await response.aclose()
             if status == 429:
-                retry_after = response.headers.get("retry-after", "")
-                reset_at = float(retry_after) + time.time() \
-                    if retry_after.replace(".", "", 1).isdigit() else 0.0
-                try:
-                    data = json.loads(await response.aread())
-                except ValueError:
-                    data = {}
-                await response.aclose()
-                detail = ""
-                error = (data.get("error") or {}) if isinstance(data, dict) else {}
-                detail = str(error.get("message") or "usage limit")[:200]
-                if reset_at <= 0.0:
-                    reset_at = time.time() + 3600.0
-                state.oauth_bench[(route.route_id, account.id)] = reset_at
-                if time.time() < reset_at:
-                    await _run_in_executor(
-                        codex_oauth.bench_row, cfg_.auth_store, route.pool,
-                        account.id, reset_at=reset_at,
-                        reason=f"http_429 {detail}")
-                last_refusal = _ResponsesRouteRefused(
-                    "FABRIC_OAUTH_ACCOUNT_LIMIT",
-                    f"account {account.label!r} 429: {detail}")
-                continue
+                reset_at = time.time() + retry_after if retry_after is not None else None
+                key = (route.route_id, selected.id)
+                state.oauth_bench[key] = max(state.oauth_bench.get(key, 0.0), reset_at or float("inf"))
+                revision = state.oauth_bench_revision.get(key, 0) + 1
+                state.oauth_bench_revision[key] = revision
+                combined = state.oauth_bench[key]
+
+                async def persist_bench():
+                    try:
+                        await asyncio.to_thread(codex_oauth.bench_row, cfg_.auth_store,
+                            route.pool, selected.id,
+                            reset_at=combined if math.isfinite(combined) else None,
+                            reason="http_429")
+                        # Request cancellation cannot strand a completed write,
+                        # nor can an older write clear a newer pending hold.
+                        if state.oauth_bench_revision.get(key) == revision:
+                            state.oauth_bench.pop(key, None)
+                    except (OSError, ValueError, codex_oauth.OAuthPoolError):
+                        _log.error("fabric OAuth account hold could not be persisted")
+
+                writer = asyncio.create_task(persist_bench())
+                state.oauth_bench_tasks.add(writer)
+                writer.add_done_callback(state.oauth_bench_tasks.discard)
+                await asyncio.shield(writer)
+                state.count(route.route_id, "account_limited")
+                headers = {"retry-after": str(max(1, math.ceil(retry_after)))} if retry_after is not None else {}
+                return JSONResponse({"error": {"code": "FABRIC_OAUTH_ACCOUNT_LIMIT",
+                    "message": "upstream limit; request was not replayed"}}, status_code=503, headers=headers)
+            code = "FABRIC_OAUTH_AUTH_REFUSED" if status in (401, 403) else (
+                "FABRIC_OAUTH_UPSTREAM_5XX" if status >= 500 else "FABRIC_OAUTH_UPSTREAM_REFUSED")
             if status >= 500:
-                await response.aclose()
-                return JSONResponse({"error": {"code": "FABRIC_OAUTH_UPSTREAM_5XX",
-                    "message": "upstream outcome not replayed"}}, status_code=502)
-            if status >= 400:
-                data = await response.aread()
-                await response.aclose()
-                return Response(content=data, status_code=status,
-                                media_type="application/json")
-            if not wants_stream:
-                translator = ResponsesStreamTranslator(model=payload["model"])
-                buffer = b""
-                try:
-                    async for part in response.aiter_bytes():
-                        buffer += part
-                        while b"\n" in buffer:
-                            line, buffer = buffer.split(b"\n", 1)
-                            text_line = line.decode("utf-8", "replace").strip()
-                            if not text_line.startswith("data:"):
-                                continue
-                            data = text_line[5:].strip()
-                            if data == "[DONE]":
-                                break
-                            try:
-                                event_data = json.loads(data)
-                                translator.feed(event_data)
-                                if event_data.get("type") == "response.completed":
-                                    completed = event_data.get("response") or {}
-                                    app.state.model_policy.observe_usage(admission, completed.get("usage"), "responses", completed.get("model"))
-                                    if admission:
-                                        admission.completed = True
-                            except ValueError:
-                                continue
-                finally:
-                    await response.aclose()
-                try:
-                    return JSONResponse(translator.to_message())
-                except WireTranslationError as exc:
-                    return JSONResponse({"error": {
-                        "message": "translation failed: "
-                                   + _public_reason(exc, "FABRIC_TRANSLATE_INVALID"),
-                        "type": "fabric_route_error"}},
-                        status_code=502)
-            translator = ResponsesStreamTranslator(model=payload["model"])
+                state.routes.record_failure(route.route_id, code, now=time.monotonic(),
+                    cooldown_s=cfg_.route_cooldown_s)
+                app.state.model_policy.checkpoint()
+            return JSONResponse({"error": {"code": code,
+                "message": "upstream refusal; request was not replayed"}},
+                status_code=502 if status >= 500 else status)
 
-            async def stream():
-                first = True
-                buffer = b""
-                try:
-                    async for part in response.aiter_bytes():
-                        buffer += part
-                        while b"\n" in buffer:
-                            line, buffer = buffer.split(b"\n", 1)
-                            text = line.decode("utf-8", "replace").strip()
-                            if not text.startswith("data:"):
-                                continue
-                            data = text[5:].strip()
-                            if data == "[DONE]":
-                                for event in translator.finish():
-                                    yield _sse(*event)
-                                return
-                            try:
-                                chunk = json.loads(data)
-                            except ValueError:
-                                continue
-                            if first:
-                                yield _sse(*translator.message_start())
-                                first = False
-                            if chunk.get("type") == "response.completed":
-                                completed = chunk.get("response") or {}
-                                app.state.model_policy.observe_usage(admission, completed.get("usage"), "responses", completed.get("model"))
-                                if admission:
-                                    admission.completed = True
-                            for event in translator.feed(chunk):
-                                yield _sse(*event)
-                    for event in translator.finish():
-                        yield _sse(*event)
-                finally:
-                    await response.aclose()
+        translator = ResponsesStreamTranslator(model=payload["model"],
+            retain_text=not wants_stream,
+            message_id=f"msg_{admission.token}" if admission else f"msg_{uuid.uuid4().hex}")
 
-            return StreamingResponse(stream(), media_type="text/event-stream",
-                                     headers={"cache-control": "no-store"})
-        raise last_refusal or _ResponsesRouteRefused(
-            "FABRIC_OAUTH_NO_ACCOUNT")
+        async def events():
+            buffer, received = b"", 0
+            async for part in response.aiter_bytes():
+                received += len(part)
+                if received > cfg_.max_body_bytes:
+                    raise WireTranslationError("FABRIC_RESPONSE_TOO_LARGE")
+                buffer += part
+                if len(buffer) > 2 * 1024 * 1024:
+                    raise WireTranslationError("FABRIC_STREAM_EVENT_TOO_LARGE")
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    text = line.decode("utf-8", "strict").strip()
+                    if not text.startswith("data:"):
+                        continue
+                    data = text[5:].strip()
+                    if data == "[DONE]":
+                        if not translator.completed:
+                            raise WireTranslationError("FABRIC_STREAM_INCOMPLETE")
+                        return
+                    event = json.loads(data)
+                    translated = translator.feed(event)
+                    if translator.completed:
+                        completed = event.get("response") or {}
+                        app.state.model_policy.observe_usage(admission, completed.get("usage"),
+                            "responses", completed.get("model"))
+                    for translated_event in translated:
+                        yield translated_event
+                    # Responses completion is itself the terminal event; [DONE]
+                    # is optional. Tool JSON is validated by finish/to_message.
+                    if translator.completed:
+                        return
+            if not translator.completed:
+                raise WireTranslationError("FABRIC_STREAM_INCOMPLETE")
+
+        def completed():
+            if admission:
+                admission.completed = True
+                admission.finish_reason = translator._finish
+
+        if not wants_stream:
+            try:
+                async for _ in events():
+                    pass
+                result = translator.to_message()
+                completed()
+                return JSONResponse(result)
+            except (ValueError, UnicodeError, httpx.RequestError):
+                return JSONResponse({"error": {"code": "FABRIC_RESPONSE_INVALID",
+                    "message": "incomplete or invalid response; request was not replayed"}}, status_code=502)
+            finally:
+                await response.aclose()
+
+        async def stream():
+            try:
+                yield _sse(*translator.message_start())
+                async for event in events():
+                    yield _sse(*event)
+                final_events = translator.finish()
+                for event in final_events:
+                    yield _sse(*event)
+                completed()
+            except (ValueError, UnicodeError, httpx.RequestError):
+                if admission:
+                    admission.completed = False
+                    admission.finish_reason = "stream_incomplete"
+                yield _sse("error", json.dumps({"type": "error", "error": {
+                    "type": "api_error", "message": "FABRIC_STREAM_INCOMPLETE; request was not replayed"}}))
+            finally:
+                await response.aclose()
+        return StreamingResponse(stream(), media_type="text/event-stream",
+                                 headers={"cache-control": "no-store"})
 
     def _sse(event: str, data: str) -> bytes:
         return f"event: {event}\ndata: {data}\n\n".encode()

@@ -391,7 +391,22 @@ class ModelPolicyState:
         out = float(bound) if bound is not None else min(cap, predicted, 4096.0)
         return inp, out, signatures, full
 
+    @staticmethod
+    def wire_compatible(route, payload):
+        if route.wire == "anthropic":
+            return True
+        # Completed MCP history can be translated, but provider-side tool
+        # configuration and state cannot be dropped to fit another wire.
+        if payload.get("mcp_servers") or payload.get("container"):
+            return False
+        if not isinstance(payload.get("tools", []), list):
+            return False
+        return not any(isinstance(tool, dict) and tool.get("type") not in (None, "custom")
+                       for tool in (payload.get("tools") or []))
+
     def eta(self, route, model, payload, session, now, fingerprint=None):
+        if not self.wire_compatible(route, payload):
+            return float("inf")
         if route.effective_weight(model) <= 0:
             return float("inf")
         until = self.route_state.cooldown_until.get(route.route_id, 0.0)
@@ -445,6 +460,7 @@ class ModelPolicyState:
             self.sticky.pop((profile, session), None); sticky = None
         options = []
         any_model = False
+        incompatible_wire = False
         model_headroom = {}
         if group and group.get("capacity_aware"):
             for model, _ in candidates:
@@ -466,6 +482,9 @@ class ModelPolicyState:
                     continue
                 if group and route.route_id not in group["routes"].get(model, ()):
                     continue
+                if not self.wire_compatible(route, payload):
+                    incompatible_wire = True
+                    continue
                 if counting and route.wire != "anthropic":
                     continue
                 eta = max(0.0, self.route_state.cooldown_until.get(route.route_id, 0) - now) if counting else self.eta(route, model, payload, session, now, fingerprint)
@@ -484,6 +503,7 @@ class ModelPolicyState:
                                 max(inflight / cap, 1 - self.headroom(route, now)), route_rank, route, model))
         if not options:
             code = "FABRIC_COUNT_TOKENS_WIRE" if counting and any_model else (
+                "FABRIC_TIER_CAPABILITY_UNAVAILABLE" if incompatible_wire else
                 "FABRIC_TIER_CAPACITY_UNAVAILABLE" if any_model else "FABRIC_MODEL_UNKNOWN")
             return [], float("inf"), code, profile
         ready = [x for x in options if x[0] <= 0]
