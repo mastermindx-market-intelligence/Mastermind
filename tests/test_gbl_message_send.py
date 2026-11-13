@@ -30,6 +30,9 @@ PRINCIPAL = "grok-account-main"
 ENV_ID = "team-dev-1"
 THREAD_REF = "th_team_dev_1"
 HOME = "/tmp/fixture-t3-home-team-dev-1"      # fixture path; nothing touches it
+# GBL-RETURN item 6: the row names the program absolutely and pins the port.
+T3_PROGRAM = "/fixture/bin/t3"                # fixture path; never executed
+T3_PORT = 3798                                # fixture data; never bound
 KEY = "gb-msg-0001"
 BODY = "Status note for the named thread."
 
@@ -63,7 +66,8 @@ def sender(runner, *, allowlist=DEFAULT_ALLOWLIST,
 
 
 def configured_sender(runner, allowlist=DEFAULT_ALLOWLIST) -> MessageSender:
-    environments = (EnvironmentRow(environment_id=ENV_ID, t3code_home=HOME),)
+    environments = (EnvironmentRow(environment_id=ENV_ID, t3code_home=HOME,
+                                   t3_program=T3_PROGRAM, t3_port=T3_PORT),)
     return sender(runner, allowlist=allowlist, environments=environments)
 
 
@@ -145,9 +149,10 @@ class TestOneSend:
             **send_kwargs())
         message_id = result["message_id"]
         send_call = runner.calls[1]          # [0] = thread show scan
-        assert send_call["argv"] == ["t3", "thread", "send", THREAD_REF, "-",
-                                     "--wait", "--json"]
+        assert send_call["argv"] == [T3_PROGRAM, "thread", "send", THREAD_REF,
+                                     "-", "--wait", "--json"]
         assert send_call["env"]["T3CODE_HOME"] == HOME
+        assert send_call["env"]["T3CODE_PORT"] == str(T3_PORT)
         stdin_text = send_call["stdin"]
         assert stdin_text.splitlines()[0] == message_marker(message_id)
 
@@ -155,9 +160,10 @@ class TestOneSend:
         runner = FakeRunner()
         configured_sender(runner, allowlist=listed_allowlist()).send(**send_kwargs())
         scan = runner.calls[0]
-        assert scan["argv"][:3] == ["t3", "thread", "show"]
+        assert scan["argv"][:3] == [T3_PROGRAM, "thread", "show"]
         assert scan["argv"][3] == THREAD_REF
         assert scan["env"]["T3CODE_HOME"] == HOME
+        assert scan["env"]["T3CODE_PORT"] == str(T3_PORT)
 
     def test_redelivery_finds_marker_and_never_sends_twice(self):
         runner = FakeRunner()
@@ -366,7 +372,9 @@ class TestScanWindow:
         transport = MessageSender(
             runner=runner, allowlist=listed_allowlist(),
             environments=(EnvironmentRow(environment_id=ENV_ID,
-                                         t3code_home=HOME),),
+                                         t3code_home=HOME,
+                                         t3_program=T3_PROGRAM,
+                                         t3_port=T3_PORT),),
             scan_max_pages=2)
         with pytest.raises(GblMessageError) as err:
             transport.send(**send_kwargs())

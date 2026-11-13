@@ -72,7 +72,7 @@ import urllib.request
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 from common.gbl_contract import (
     ASK_ID_RE,
@@ -261,8 +261,10 @@ def validate_paperclip_base_url(url: str, *,
     Returns the normalized URL.
 
     ``production_board=True`` (P0-2 option (a), principal ruling 2026-11-12)
-    admits EXACTLY port 3100 — the real production board — and changes
-    nothing else; 3179 stays reserved under every flag.  Only
+    admits EXACTLY port 3100 — the real production board — at EXACTLY the
+    literal host ``127.0.0.1`` (item 8(a): ``localhost``/``[::1]`` under the
+    flag are the typed refusal PRODUCTION_BOARD_NOT_ALLOWED_HERE), and
+    changes nothing else; 3179 stays reserved under every flag.  Only
     :meth:`PaperclipAskClient.from_spec` may pass True, and only after
     :func:`_require_canonical_production_spec` has proven the spec file is
     the canonical 0600 uid-owned regular file at
@@ -273,6 +275,15 @@ def validate_paperclip_base_url(url: str, *,
             f"production_board must be a bool, got {type(production_board)}")
     if not isinstance(url, str) or not url:
         raise ValueError("paperclip base url is required")
+    if not url.isascii():
+        # item 8(b) / LOW-4: fullwidth digits pass isdigit()/int()
+        # consistently but the returned base kept the non-ASCII netloc and
+        # died untyped (UnicodeEncodeError) at request time — refuse here,
+        # typed, under every flag.
+        raise GblPaperclipError(
+            "BASE_URL_NOT_ASCII",
+            "paperclip base url must be pure ASCII (fullwidth digits and "
+            "internationalized hosts are refused, never normalized)")
     if "://" not in url:
         raise ValueError(f"not an absolute http url: {url!r}")
     scheme, rest = url.split("://", 1)
@@ -288,6 +299,14 @@ def validate_paperclip_base_url(url: str, *,
     if host.lower() not in _LOOPBACK_HOSTS:
         raise ValueError(
             f"paperclip base url must be loopback, got host {host!r}")
+    if production_board and host.lower() != "127.0.0.1":
+        # item 8(a) / LOW-3: the opt-in is for the literal production host.
+        # ``localhost`` or ``[::1]`` may resolve anywhere the host's
+        # resolver says; the flag never inherits their ambiguity.
+        raise GblPaperclipError(
+            "PRODUCTION_BOARD_NOT_ALLOWED_HERE",
+            "the production-board opt-in admits only the literal host "
+            f"127.0.0.1, got {host!r}")
     if port is None:
         raise ValueError(
             "paperclip base url must carry an explicit port "
@@ -367,6 +386,39 @@ def _require_canonical_production_spec(spec_path: Path) -> None:
         raise GblPaperclipError(
             code, f"paperclip.{PRODUCTION_BOARD_FIELD} is honored only at "
             f"{expected}; {spec_path} is another path")
+
+
+def _refuse_stray_production_board_field(spec: Any, spec_path: Path) -> None:
+    """Item 8(c) / LOW-2: the FIELD NAME ``production_board`` is honored at
+    exactly one place — ``paperclip.production_board``.  The same name
+    ANYWHERE else in the spec (top level, a nested block, inside a list
+    item), with ANY value, is the typed refusal
+    ``PRODUCTION_BOARD_NOT_ALLOWED_HERE``: a stray copy must never sit
+    inert beside the honored gate.  This is the runtime mirror of the repo
+    hygiene scan.  Fails closed on pathological nesting (RecursionError)."""
+    def walk(node: Any, path: tuple[str, ...]) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == PRODUCTION_BOARD_FIELD and path != ("paperclip",):
+                    where = ".".join(path + (str(key),)) or str(key)
+                    raise GblPaperclipError(
+                        "PRODUCTION_BOARD_NOT_ALLOWED_HERE",
+                        f"spec {spec_path} carries the field name "
+                        f"{PRODUCTION_BOARD_FIELD!r} at {where} — honored "
+                        "only at paperclip.production_board, whatever the "
+                        "stray copy's value")
+                walk(value, path + (str(key),))
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                walk(value, path + (f"[{index}]",))
+    try:
+        walk(spec, ())
+    except RecursionError:
+        raise GblPaperclipError(
+            "PRODUCTION_BOARD_NOT_ALLOWED_HERE",
+            f"spec {spec_path} nests too deeply to scan for stray "
+            f"{PRODUCTION_BOARD_FIELD!r} fields — refused, never skipped"
+        ) from None
 
 
 def _canonical(value: Mapping[str, Any]) -> str:
@@ -548,6 +600,8 @@ class PaperclipAskClient:
                  hmac_key_path: str | Path | None = None,
                  headers: Mapping[str, str] | None = None,
                  timeout_seconds: float = 15.0,
+                 target_agents: Mapping[str, str] | None = None,
+                 service_agent_name: str | None = None,
                  _production_board: bool = False):
         # _production_board is PRIVATE to from_spec (P0-2 option (a)): it may
         # be True only after _require_canonical_production_spec has proven
@@ -560,6 +614,30 @@ class PaperclipAskClient:
                                            typed=False)
         self._agent_id = _quote_segment(service_agent_id,
                                         what="service_agent_id", typed=False)
+        # GBL-RETURN: the RAW id (server rows serve it unquoted; the charset
+        # gate above makes quote(raw) == raw for every admitted id, and the
+        # dispatch payloads/identity checks compare against served rows).
+        self._agent_id_value = str(service_agent_id)
+        # GBL-RETURN outcome 1: the delegate target table — handle -> board
+        # agent id — held ON THIS SERVER (the spec), never caller-supplied.
+        targets: dict[str, str] = {}
+        for handle, agent in dict(target_agents or {}).items():
+            if not isinstance(handle, str) or not handle:
+                raise ValueError("target handles must be non-empty strings")
+            if not isinstance(agent, str) or not _SEGMENT_RE.fullmatch(agent):
+                raise ValueError(
+                    f"targets[{handle!r}] must be an agent-id token "
+                    "([A-Za-z0-9_-]{1,128})")
+            targets[handle] = agent
+        self._target_agents = targets
+        # GBL-RETURN: the bridge agent's DISPLAY name comes from the spec
+        # held on this server (paperclip.agent_name), never from a board
+        # read of /api/agents/me — that route requires an AGENT actor and
+        # refuses this client's local-trusted header with 401 (no-seam
+        # proof 1 finding, dev board 2026-11-12).  Attribution text only;
+        # no decision ever keys off it.
+        name = str(service_agent_name or "").strip()
+        self._agent_name = name[:120] if name else "the Grok bridge"
         if hmac_key_path is not None:
             path = Path(hmac_key_path).expanduser()
             if not path.is_absolute():
@@ -623,6 +701,10 @@ class PaperclipAskClient:
             spec = json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise ValueError(f"cannot read spec {path}: {exc}") from None
+        # item 8(c): scan the WHOLE tree before anything else is honored —
+        # a stray production_board field is the typed refusal even in a
+        # spec that would never reach the paperclip-block gate.
+        _refuse_stray_production_board_field(spec, Path(path))
         block = spec.get("paperclip") if isinstance(spec, dict) else None
         if not isinstance(block, dict):
             raise ValueError(f"spec {path} has no paperclip block")
@@ -640,8 +722,20 @@ class PaperclipAskClient:
                     "nothing falls back silently")
             _require_canonical_production_spec(Path(path))
             production = True
+        # GBL-RETURN outcome 1: the delegate target table lives in the spec
+        # ON THE SERVER (paperclip.targets: handle -> teammate agent id) —
+        # a caller can never name an agent id, only a configured handle.
+        targets = block.get("targets", {})
+        if not isinstance(targets, dict):
+            raise ValueError(f"spec {path} paperclip.targets must be an object")
+        name = block.get("agent_name")
+        if name is not None and not isinstance(name, str):
+            raise ValueError(f"spec {path} paperclip.agent_name must be "
+                             "a string")
         return cls(block["base_url"], block["company_id"], block["agent_id"],
                    hmac_key_path=block["hmac_key_path"],
+                   target_agents=targets,
+                   service_agent_name=name,
                    _production_board=production)
 
     # -- the GblAskStore interface --------------------------------------------
@@ -1006,6 +1100,371 @@ class PaperclipAskClient:
             if created is None or created >= since:
                 total += 1
         return total
+
+    # -- GBL-RETURN: the delegate dispatch/return capability ------------------
+    #
+    # The optional GblDelegateDispatchStore arm of this store: a delegate ask
+    # is handed to the target teammate THROUGH THE BOARD in the RF carrier's
+    # installed ask-child shape (one child of the ask-record issue, assigned
+    # to the teammate's agent, parent blocked on it with a self-owned unblock
+    # descriptor), and the answer comes back from the bridge's OWN board read
+    # of that child — never from waker-supplied text.
+
+    def resolve_target_agent(self, target: str) -> str:
+        """The target teammate's board agent id from the spec's target table
+        held ON THIS SERVER — never from the caller.  An unknown handle is
+        the typed ``TARGET_AGENT_NOT_CONFIGURED`` refusal."""
+        agent = self._target_agents.get(str(target))
+        if agent is None:
+            raise GblPaperclipError(
+                "TARGET_AGENT_NOT_CONFIGURED",
+                f"target {str(target)[:64]!r} names no row of the spec's "
+                "paperclip.targets table")
+        return agent
+
+    def _full_issue(self, issue_id: Any) -> dict[str, Any]:
+        """GET one issue in FULL — the list projection truncates a long
+        description (``descriptionTruncated``) and the ask-marker hash is
+        over the SERVED text, so every marker decision reads the whole row."""
+        seg = self._issue_seg(issue_id)
+        row = self._request("GET", f"/api/issues/{seg}")
+        if not isinstance(row, dict):
+            raise GblPaperclipTransportError("UNPARSEABLE_ISSUE_ROW", seg)
+        return row
+
+    def _children_rows(self, issue_id: Any) -> list[dict[str, Any]]:
+        """The parentId-filtered children walk, field-for-field the RF law:
+        a SHORT page is not the end (a server may clamp ``limit``), only an
+        EMPTY page ends the walk, bounded at ten pages; rows dedupe by id
+        (offset paging over a moving list can serve a row twice) and the
+        parentId is stamped (the query already filtered on it, so a list
+        projection omitting the field cannot strand the return edge)."""
+        rows: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        offset = 0
+        for _page in range(MAX_CHILDREN_PAGES):
+            query = urllib.parse.urlencode(
+                {"parentId": str(issue_id), "limit": CHILDREN_PAGE_LIMIT,
+                 "offset": offset})
+            batch = self._request(
+                "GET", f"/api/companies/{self._company_seg}/issues?{query}")
+            if isinstance(batch, dict):
+                # An unrecognised shape is NOT an empty result (RF attack
+                # finding 6): {"data": …} or {"error": …} must never read as
+                # "no children".
+                batch = next((batch[key] for key in ("issues", "children",
+                                                     "rows")
+                              if isinstance(batch.get(key), list)), None)
+            if not isinstance(batch, list):
+                raise GblPaperclipTransportError("UNPARSEABLE_CHILDREN_LIST")
+            for row in batch:
+                if not isinstance(row, dict):
+                    raise GblPaperclipTransportError(
+                        "UNPARSEABLE_CHILDREN_LIST")
+                row = dict(row)
+                row.setdefault("parentId", str(issue_id))
+                key = str(row.get("id"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                rows.append(row)
+            if not batch:
+                break
+            offset += len(batch)
+        return rows
+
+    def _untruncated_children(self, issue_id: Any) -> list[dict[str, Any]]:
+        """The children walk, truncation-aware (RF proof 2 / Delta-3 N5):
+        every truncated row that could be THIS bridge's is re-read in full
+        before any marker test, and a FAILED re-read fails the walk typed —
+        a markerless list row would make the family look empty and silently
+        strand the return edge.  A truncated row the board attributes to
+        another creator is skipped without the re-read (Delta-4 D4-3)."""
+        rows: list[dict[str, Any]] = []
+        for row in self._children_rows(issue_id):
+            if row.get("descriptionTruncated") and row.get("id"):
+                owner = row.get("createdByAgentId")
+                if owner and owner != self._agent_id_value:
+                    continue        # foreign: no marker test of ours uses it
+                rows.append(self._full_issue(row["id"]))
+            else:
+                rows.append(row)
+        return rows
+
+    def _is_ask_child_of(self, row: Mapping[str, Any],
+                         parent: Mapping[str, Any]) -> bool:
+        """The RF identity test: parented on ``parent`` AND ending with
+        exactly the marker computed from the parent's SERVED content."""
+        if not parent or row.get("parentId") != parent.get("id"):
+            return False
+        return (_rf_ask_child_marker(row.get("description") or "")
+                == _rf_expected_ask_op(parent))
+
+    def _ask_parent_row(self, ask_id: str) -> dict[str, Any]:
+        """The ask-record issue for this ask id, FULLY read, still carrying
+        exactly this envelope (a foreign edit that swapped the record is the
+        typed ASK_RECORD_MISMATCH refusal, never a dispatch on wrong text)."""
+        if not ASK_ID_RE.fullmatch(ask_id or ""):
+            raise GblPaperclipError("ASK_ID_INVALID", str(ask_id)[:64])
+        row = self._issue_for(ask_id)
+        if row is None:
+            raise GblPaperclipError("ASK_RECORD_MISSING", ask_id)
+        full = self._full_issue(row["id"])
+        if not self._envelope_is(full, ask_id):
+            raise GblPaperclipError("ASK_RECORD_MISMATCH", ask_id)
+        return full
+
+    def dispatch_delegate(self, ask: Mapping[str, Any]) -> dict[str, Any]:
+        """GBL-RETURN outcome 1 — DELEGATE OUT.  Create-or-reuse the child
+        issue of the ask record in the RF carrier's exact shape and leave
+        the parent blocked on it, so the target teammate's installed carrier
+        wakes on the child and its ``deliver(ask_child=True)`` (status done)
+        fires the parent's issue_blockers_resolved wake back at the bridge.
+
+        Idempotent across runs by the RF reuse scan (marker at the
+        description END + created by THIS bridge + open + same assignee +
+        same sanitised title).  An ambiguous create — transport failure,
+        5xx, or the ambiguous 4xx set — is NEVER retried as a second create:
+        ONE re-scan reconciles, and a re-scan that finds nothing raises
+        ``GblCreateEffectUnknown`` for the bridge to surface.  Not
+        team.message, not a running t3; RF files are untouched."""
+        envelope = dict(ask)
+        ask_id = str(envelope.get("ask_id") or "")
+        target_agent = self.resolve_target_agent(
+            str(envelope.get("target") or ""))
+        parent = self._ask_parent_row(ask_id)
+        parent_seg = self._issue_seg(parent["id"])
+        ask_op = _rf_expected_ask_op(parent)
+        want_title = _rf_strip_markers(envelope.get("title")) or "Asked work"
+        description = _rf_strip_markers(envelope.get("body"))
+        me_name = self._agent_name
+
+        def find_child(*, open_only: bool) -> dict[str, Any] | None:
+            for row in self._untruncated_children(parent["id"]):
+                creator = row.get("createdByAgentId")
+                # Delta-3 N9: only OUR child is reusable.  A NULL creator
+                # still counts as ours: a real board serving this client's
+                # local-trusted role stamps createdByAgentId=null on its
+                # creates (no-seam dev-board proof, 2026-11-12).  A
+                # NON-NULL foreign id is still skipped.
+                if creator is not None and creator != self._agent_id_value:
+                    continue
+                if not self._is_ask_child_of(row, parent):
+                    continue
+                if open_only and row.get("status") in ("done", "cancelled"):
+                    continue        # a finished child is not work in flight
+                if row.get("assigneeAgentId") != target_agent:
+                    continue
+                if (row.get("title") or "") != want_title:
+                    continue
+                return row
+            return None
+
+        child = find_child(open_only=True)
+        reused = child is not None
+        if child is None:
+            payload = {
+                "title": want_title,
+                "description": (f"{description}\n\n"
+                                f"Asked by {me_name} on "
+                                f"{parent.get('identifier')}\n[{ask_op}]"),
+                "assigneeAgentId": target_agent,
+                "parentId": parent["id"],
+                "status": "todo",
+            }
+            try:
+                created = self._request(
+                    "POST", f"/api/companies/{self._company_seg}/issues",
+                    payload)
+                if not isinstance(created, dict) or not created.get("id"):
+                    raise GblPaperclipTransportError(
+                        "UNPARSEABLE_CHILD_ROW", ask_id)
+                child = created
+            except GblPaperclipClientError as exc:
+                if exc.status not in AMBIGUOUS_CREATE_4XX:
+                    raise       # a definite 4xx refusal is typed, not unknown
+                child = self._reconcile_child_create(
+                    ask_id, exc, find_child)
+                reused = True
+            except (GblPaperclipTransportError,
+                    GblPaperclipServerError) as exc:
+                child = self._reconcile_child_create(
+                    ask_id, exc, find_child)
+                reused = True
+        child_id = str(child["id"])
+        # The blocked-parent relation (RF handle_ask law): a FRESH read
+        # decides, the PATCH carries the WHOLE recorded blocker set plus
+        # this child, and the unblock owner is SELF — the board refuses an
+        # agent naming another owner (403, live 2026-11-10).  Skipped only
+        # when the relation is already exactly recorded.
+        fresh = self._full_issue(parent["id"])
+        descriptor = fresh.get("unblockDescriptor") or {}
+        identifier = child.get("identifier")
+        if (fresh.get("status") != "blocked"
+                or not identifier
+                or not _identifier_recorded(
+                    identifier, str(descriptor.get("action") or ""))):
+            blocker_ids = list(dict.fromkeys(
+                _rf_recorded_blocker_ids(fresh) + [child_id]))
+            try:
+                self._request("PATCH", f"/api/issues/{parent_seg}", {
+                    "status": "blocked",
+                    "blockedByIssueIds": blocker_ids,
+                    "unblockDescriptor": {
+                        "owner": {"agentId": self._agent_id_value},
+                        "action": (f"{envelope.get('target')} completes "
+                                   f"{identifier}: {want_title}")}})
+            except (GblPaperclipTransportError,
+                    GblPaperclipServerError) as exc:
+                # The child exists; only the relation is uncertain.  A
+                # re-dispatch reconciles by the reuse scan and retries the
+                # PATCH — never a second child.
+                raise GblCreateEffectUnknown(
+                    f"block PATCH for {ask_id} is ambiguous "
+                    f"({type(exc).__name__}); the child {child_id} exists — "
+                    "re-dispatch reconciles by reuse scan") from None
+        return {"child_issue_id": child_id, "child_identifier": identifier,
+                "target_agent": target_agent, "reused": reused}
+
+    @staticmethod
+    def _reconcile_child_create(ask_id: str, exc: Exception,
+                                find_child: Callable[[bool], Any]):
+        """The RF R2a finding-6 law: a create whose answer was lost is
+        reconciled by ONE re-scan for this ask's own child — and only a
+        child of THIS ask (same marker, assignee and title; the create-
+        losing scan keeps RF's shape and does not require open status, a
+        child may have been finished in the meantime).  Nothing found ⇒ the
+        effect stays unknown; never a second create."""
+        row = find_child(open_only=False)
+        if row is None:
+            raise GblCreateEffectUnknown(
+                f"child create for {ask_id} is ambiguous "
+                f"({type(exc).__name__}) and the re-scan found no child"
+            ) from None
+        return row
+
+    def read_dispatch_child(self, ask_id: str,
+                            child_issue_id: str) -> dict[str, Any]:
+        """GBL-RETURN outcomes 2/5 — the child THIS bridge dispatched,
+        proven by the whole RF identity law, never by a wake-supplied id
+        alone: parented on the ask record, ending with the marker computed
+        from the parent's SERVED content, assigned to the spec-resolved
+        target agent, created by this bridge (when the board serves the
+        creator), and — while the parent still records blockers — inside
+        that recorded set (RF handle_return: an EMPTY recorded set falls
+        back to the other checks; the board clears the relation when it
+        resolves the wake).  Any mismatch is the typed
+        ``RETURN_CHILD_NOT_OURS`` refusal: a return for a child the bridge
+        did not create never enters the record."""
+        parent = self._ask_parent_row(ask_id)
+        envelope = _parse_ask_envelope(parent.get("description")) or {}
+        try:
+            child = self._full_issue(child_issue_id)
+        except GblPaperclipClientError as exc:
+            if exc.code == "HTTP_404":
+                raise GblPaperclipError(
+                    "RETURN_CHILD_NOT_OURS",
+                    f"child {str(child_issue_id)[:64]} does not exist"
+                ) from None
+            raise
+        blocker_ids = _rf_recorded_blocker_ids(parent)
+        checks = (
+            ("parent", child.get("parentId") == parent.get("id")),
+            ("marker", self._is_ask_child_of(child, parent)),
+            ("blocker", (not blocker_ids)
+             or str(child_issue_id) in blocker_ids),
+            ("assignee", child.get("assigneeAgentId")
+             == self.resolve_target_agent(str(envelope.get("target") or ""))),
+        )
+        creator = child.get("createdByAgentId")
+        if creator is not None:
+            checks += (("creator", creator == self._agent_id_value),)
+        failed = [name for name, ok in checks if not ok]
+        if failed:
+            raise GblPaperclipError(
+                "RETURN_CHILD_NOT_OURS",
+                f"child {str(child_issue_id)[:64]} fails: {','.join(failed)}")
+        return child
+
+    def read_child_result(self, ask_id: str,
+                          child_issue_id: str) -> dict[str, Any]:
+        """The child's outcome from the bridge's OWN board read: done +
+        the RF result-comment law ⇒ the answer; cancelled ⇒ terminal, no
+        answer (RF q1-10: a cancelled child carries nothing back); anything
+        else ⇒ not yet.  A failed comments read FAILS typed — it is never
+        read as "no answer" (RF R2a finding 17).  ``child_identifier`` is
+        the board-served identifier of the proven child, for the bridge's
+        cut-answer notice (R1 HIGH-1) to name where the full text lives."""
+        child = self.read_dispatch_child(ask_id, child_issue_id)
+        identifier = child.get("identifier")
+        status = child.get("status")
+        if status == "cancelled":
+            return {"done": False, "cancelled": True, "answer": None,
+                    "child_identifier": identifier}
+        if status != "done":
+            return {"done": False, "cancelled": False, "answer": None,
+                    "child_identifier": identifier}
+        return {"done": True, "cancelled": False,
+                "answer": self._last_result_comment(child),
+                "child_identifier": identifier}
+
+    def _last_result_comment(self, child: Mapping[str, Any]) -> str | None:
+        """The RF result-comment law, field-for-field: the LAST comment
+        authored by the child's own assignee (authorType agent, author id =
+        the child's assigneeAgentId) that is not a machine comment; else the
+        newest non-machine comment under a prefix saying it is NOT the asked
+        teammate's own words; else None.  (The installed board may serve
+        plain-route comments unattributed — gbl4-devproof 2026-11-11 — in
+        which case the disclaimed fallback is the served path, exactly as in
+        the RF carrier.)  R1 item 3: no comment ⇒ None, NEVER a placeholder
+        string — the old "(no answer comment on the child issue)" pointer
+        was posted by return_delegate as the ask's ONE answer, permanent
+        under ruling 19; with None the bridge reports NO_ANSWER_COMMENT,
+        posts nothing, and the next wake/scan re-reads."""
+        rows = self._comment_rows(self._issue_seg(child["id"]))
+        assignee = child.get("assigneeAgentId")
+        if assignee:
+            for row in reversed(rows):          # newest first
+                body = str(row.get("body") or "").strip()
+                if (body and row.get("authorType") == "agent"
+                        and row.get("authorAgentId") == assignee
+                        and not _rf_is_machine_comment(body)):
+                    return body
+        for row in reversed(rows):
+            body = str(row.get("body") or "").strip()
+            if body and not _rf_is_machine_comment(body):
+                return ("(the asked teammate's own comment was not found; "
+                        "this is the newest comment on the child issue, not "
+                        "their answer)\n\n" + body)
+        return None
+
+    def scan_delegate_asks(self) -> list[str]:
+        """GBL-RETURN outcome 2 — the bridge's OWN bounded read of open
+        delegate asks (the lost-wake recovery source; acceptable because the
+        board wake is the primary and this read is capped and read-only).
+        Truncation-aware: a list row whose description the projection cut is
+        re-read in full before the envelope parse, so a long-bodied delegate
+        ask is never misread as corrupt or foreign."""
+        found: list[str] = []
+        seen: set[str] = set()
+        for row in self._iter_issues():
+            if len(found) >= SCAN_DELEGATE_ASKS_MAX:
+                break
+            if row.get("status") in ("done", "cancelled"):
+                continue
+            if row.get("descriptionTruncated") and row.get("id"):
+                row = self._full_issue(row["id"])
+            envelope = _parse_ask_envelope(row.get("description"))
+            if envelope is None or envelope.get("kind") != "delegate":
+                continue
+            ask_id = envelope.get("ask_id")
+            if (not isinstance(ask_id, str)
+                    or not ASK_ID_RE.fullmatch(ask_id)
+                    or ask_id in seen):
+                continue
+            seen.add(ask_id)
+            found.append(ask_id)
+        return found
 
     # -- issue resolution (exact key only; panel B M3) -------------------------
 
@@ -1422,6 +1881,89 @@ def _parse_event_body(body: str) -> dict[str, Any] | None:
     except (ValueError, RecursionError):
         return None
     return value if isinstance(value, dict) else None
+
+
+# ── The RF carrier's ask-child shape (GBL-RETURN outcomes 1/2/5) ────────────
+#
+# A delegate dispatch must land in the EXACT shape the installed RF carrier
+# (tools/mmos_teammate/wake_carrier.py — READ-ONLY; never edited by this
+# lane) already wakes on, so the target teammate's own carrier handles the
+# child with no RF-side change.  Replicated field-for-field from that module:
+# the marker formula (op_id / expected_ask_op), the end-of-description anchor
+# (ASK_CHILD_MARKER_RE), the create payload, the blocked-parent PATCH with
+# the SELF-owned unblock descriptor (the board refuses any other owner with
+# 403), the parentId-filtered children walk (short pages are not the end;
+# only an empty page is, bounded at ten), the truncation re-read (the marker
+# sits at the very END of a description the list projection cuts at 1200
+# chars), and the result-comment law (the assignee's own last non-machine
+# comment, else a disclaimed fallback, else a pointer — a failed comments
+# read FAILS, it is never "no answer").
+
+RF_ASK_CHILD_MARKER_RE = re.compile(r"\[(pc-[A-Za-z0-9_.-]+-ask)\]\s*$")
+RF_PC_MARKER_RE = re.compile(r"\[pc-[^\]\n]*\]")
+RF_MACHINE_COMMENT_PREFIXES = ("[coding-job]", "[t2-carrier]")
+CHILDREN_PAGE_LIMIT = 1000
+MAX_CHILDREN_PAGES = 10
+SCAN_DELEGATE_ASKS_MAX = 25      # the bounded lost-wake recovery read
+
+
+def _rf_op_id(issue_id: Any, content: str) -> str:
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:10]
+    return f"pc-{issue_id}-{digest}"
+
+
+def _rf_expected_ask_op(parent: Mapping[str, Any]) -> str:
+    """The ask marker the RF carrier computes for a child of ``parent`` —
+    the parent's SERVED title+description hashed, with the -ask suffix."""
+    content = ((parent.get("title") or "") + "\n"
+               + (parent.get("description") or ""))
+    return f"{_rf_op_id(parent['id'], content)}-ask"
+
+
+def _rf_ask_child_marker(text: Any) -> str | None:
+    """The ask-child marker at the very END of a description, if any.  A
+    ``[pc-…-ask]`` token anywhere else is foreign text (RF R2a finding 3)."""
+    match = RF_ASK_CHILD_MARKER_RE.search(str(text or "").rstrip())
+    return match.group(1) if match else None
+
+
+def _rf_strip_markers(text: Any) -> str:
+    """Caller text with any complete ``[pc-…]`` token removed, so nothing a
+    caller wrote can pose as a carrier marker downstream (RF R2a finding 3)."""
+    return RF_PC_MARKER_RE.sub("", str(text or "")).strip()
+
+
+def _rf_recorded_blocker_ids(issue: Mapping[str, Any]) -> list[str]:
+    """The blocker relation the board records for a parent, as a GET serves
+    it: ``blockedBy`` summary rows first (the installed board never serves
+    ``blockedByIssueIds`` on GET), the id list only as an echo fallback."""
+    ids: list[str] = []
+    for row in (issue.get("blockedBy") or []):
+        if isinstance(row, dict) and row.get("id"):
+            ids.append(str(row["id"]))
+    ids.extend(str(iid) for iid in (issue.get("blockedByIssueIds") or [])
+               if isinstance(iid, str))
+    return list(dict.fromkeys(ids))
+
+
+def _rf_is_machine_comment(body: str) -> bool:
+    return body.startswith(RF_MACHINE_COMMENT_PREFIXES)
+
+
+def _identifier_recorded(identifier: Any, action: str) -> bool:
+    """R1 item 5: does the recorded unblock-descriptor action name THIS
+    child identifier as a WHOLE token?  The skip test used to be a
+    substring match, so a new child ``MMO-9`` "matched" a previously
+    recorded ``MMO-91`` — the PATCH that records the new child as a
+    blocker was skipped and its ``done`` never fired
+    ``issue_blockers_resolved`` on the parent (a lost wake).  Token
+    boundary = anything outside ``[A-Za-z0-9-]`` (or string start/end),
+    the identifier alphabet the board serves."""
+    token = str(identifier or "")
+    if not token:
+        return False
+    pattern = rf"(?<![A-Za-z0-9-]){re.escape(token)}(?![A-Za-z0-9-])"
+    return re.search(pattern, action) is not None
 
 
 # ── Comment provenance (panel B M1/M2 client side; GBL lane consumes) ───────

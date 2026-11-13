@@ -67,6 +67,10 @@ KID = "fixture-gbl-key"
 ENV_ID = "team-dev-1"
 THREAD_REF = "th_team_dev_1"
 T3_HOME = "/tmp/fixture-gbl-t3-home"
+# GBL-RETURN item 6: the environment row names the program absolutely and
+# pins the port; both are fixture data here (nothing is executed or bound).
+T3_PROGRAM = "/fixture/bin/t3"
+T3_PORT = 3798
 
 _KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 _PEM = _KEY.private_bytes(
@@ -186,7 +190,8 @@ def message_sender(runner) -> MessageSender:
     return MessageSender(
         runner=runner,
         allowlist=({"environment_id": ENV_ID, "thread_ref": THREAD_REF},),
-        environments=(EnvironmentRow(environment_id=ENV_ID, t3code_home=T3_HOME),),
+        environments=(EnvironmentRow(environment_id=ENV_ID, t3code_home=T3_HOME,
+                                     t3_program=T3_PROGRAM, t3_port=T3_PORT),),
     )
 
 
