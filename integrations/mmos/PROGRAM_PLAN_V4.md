@@ -2213,3 +2213,33 @@ All seven of Secretary's timers stay in Hermes. Item 3 of section 57's order is 
 **Class rule.** A timer is judged by what its instruction needs the body to do, read against the receiving teammate's actual limits. A clean job record does not make it movable. A timer does not move if its rate would flood the board with run issues nobody closes. No teammate's limits are widened to fit a timer.
 
 **Consequence for the ten bots.** Moving a bot moves its conversation, history and memory. Its Hermes timers keep running in Hermes unless a timer is listed as fitting under this rule. The install list carries a per-bot timer table.
+
+## 59. Amendment, 2026-11-13 07:01 UTC: Grok Bot link installed; ten more teammates created; janitor lane opened
+
+**Grok Bot link.** Installed on the real host, steps 1 to 8 of its list, every check passed. The bridge and its public address are running. Every table is empty: no account is admitted, no teammate is a target, no environment is allowed. The public address refuses every call until the Chairman's sitting. The sitting request was corrected against the shipped token check: the token's audience is the bridge address, the only scope is the bridge scope, and a token lives at most 900 seconds.
+
+**Hermes move, part C.** One roster apply created ten teammates on the real team server: home, limits, gate, own provider instance, primary conversation, memory link. The three existing teammates were not renamed or rebound. Eleven history archives were exported and verified. Gate fences were checked 12 ways per teammate. Each new teammate answered one proof turn through its memory link and its history. The server was not restarted.
+
+Not done: the board moves. They go one agent at a time. Product waits on its open issue. Meta-CEO is last.
+
+**Host finding.** The roster apply was refused three times before it passed. The team server reloads its settings only when the operating system reports a file change. The file-event service on this Mac is overloaded and reports changes seconds late or not at all. The tool waits about ten seconds. The fix used: touch the settings file with the same bytes, wait, run the same apply again. The retry window goes on the roster owner's later list.
+
+**Janitor lane (Chairman order, 2026-11-13).** Phase A, read-only, measured the disk, the worktrees and the cleanup jobs on this Mac and the fleet. Phase B stages the changes and installs nothing: a watch for the lost worktree records, a correct repack rule, the floor guard, sparse trees for the T3 Macro checkouts, a rulebook, and a scheduled task that starts an engineer at a critical level. The principal reads each staged item and installs it.
+
+Done by the principal on evidence: five dangling refs in the Macro store were deleted after the exact change was named to Sector; a fence was put on the fleet repack job; other programmes' finished check folders were removed only on their owners' exact lists.
+
+**Class rules.**
+
+- A step that waits for a running program to notice a file change confirms the program saw it. It does not assume a time.
+- Nothing holding uncommitted or unpushed work is deleted by rule.
+- No record or tree is removed by age or volume without a positive check that no live session holds it. An unanswerable probe means keep.
+- A repack, gc or prune by rule treats every ref namespace as a root, does not expire objects by time in a store with live sessions, and is safe on a partial clone.
+- A receipt is written before bytes move.
+- Another programme's folder is removed only on that programme's exact list, after the principal's own check.
+
+**Next, in order.**
+
+1. The board moves for the eight clear agents, one at a time, load under 50.
+2. The Chairman's sitting for the Grok Bot link, then enrolment and the two canary asks.
+3. The janitor's staged items: the record watch first, then the repack rule.
+4. The bridge still waits on the Chairman's five reloads.
