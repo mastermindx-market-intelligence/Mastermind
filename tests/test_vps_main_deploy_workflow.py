@@ -28,7 +28,8 @@ def test_release_wake_is_protected_main_only_and_read_only() -> None:
     assert set(events) == {"push", "workflow_dispatch"}
     assert events["workflow_dispatch"] == {}
     assert events["push"]["branches"] == ["master"]
-    assert {"app/**", "portfolio/**", "control_plane/**", "engine/**", "web/**"} <= set(
+    assert {"app/**", "brain/**", "portfolio/**", "control_plane/**", "engine/**", "web/**",
+            ".github/workflows/vps-main-deploy.yml"} <= set(
         events["push"]["paths"]
     )
     assert "pull_request_target" not in events and "pull_request" not in events
