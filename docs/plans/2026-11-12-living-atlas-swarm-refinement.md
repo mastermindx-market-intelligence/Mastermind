@@ -1,10 +1,10 @@
 # Mastermind Living Atlas — Futuristic swarm refinement
 
-**Prepared:** 12 November 2026, America/Vancouver.  
-**Scope:** investigate the supplied reference, refine the experience, build an original working motion study, and bind the implementation plan to the actual Mastermind source interfaces.  
-**Status:** the synthetic visual study is implemented and checked; the production React mount and live-source integration are not implemented by this revision.  
-**Protected procedure and application baseline:** Mastermind **0e1ca7a2d8aa95ac415191d64bd3a39212be39d0**; skillpack schema mastermind.sol_skillpack.v1, version 1.0.1, minimum bootstrap major 1.  
-**Prior proposal:** [Living Atlas architecture at 75a30039889e9315555bfa27795453e0d335a4cb](https://github.com/mastermindx-market-intelligence/Mastermind/blob/75a30039889e9315555bfa27795453e0d335a4cb/docs/plans/2026-11-09-mmos-living-atlas-visualization.md).  
+**Prepared:** 12 November 2026, America/Vancouver.\
+**Scope:** investigate the supplied reference, refine the experience, build an original working motion study, and bind the implementation plan to the actual Mastermind source interfaces.\
+**Status:** the synthetic visual study is implemented and checked; the production React mount and live-source integration are not implemented by this revision.\
+**Protected procedure and application baseline:** Mastermind **0e1ca7a2d8aa95ac415191d64bd3a39212be39d0**; skillpack schema mastermind.sol_skillpack.v1, version 1.0.1, minimum bootstrap major 1.\
+**Prior proposal:** [Living Atlas architecture at 75a30039889e9315555bfa27795453e0d335a4cb](https://github.com/mastermindx-market-intelligence/Mastermind/blob/75a30039889e9315555bfa27795453e0d335a4cb/docs/plans/2026-11-09-mmos-living-atlas-visualization.md).\
 **Organizational alignment:** the existing Mastermind OS / Team / Code / estate programme. This source proposal creates no new workstream or Runtime assignment. No Agent OS organizational-state update is claimed.
 
 ## 1. Decision

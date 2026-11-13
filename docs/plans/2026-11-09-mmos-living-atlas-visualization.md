@@ -2,9 +2,9 @@
 
 ## Experience architecture and engineering plan
 
-**Prepared:** 9 November 2026, America/Vancouver  
-**Status:** proposed architecture; concept and motion study authored; production integration not started by this commission.  
-**Source baseline:** Mastermind protected master at **85179e35ce1fd3ddc00e85df5745fee4d5288068**.  
+**Prepared:** 9 November 2026, America/Vancouver\
+**Status:** proposed architecture; concept and motion study authored; production integration not started by this commission.\
+**Source baseline:** Mastermind protected master at **85179e35ce1fd3ddc00e85df5745fee4d5288068**.\
 **Programme alignment:** extend the existing Team / Projects / Code / Fleet experience and WS:EXECUTIVE-ECOSYSTEM-COMPLETION. This is a proposed experience specification, not a new runtime, admission grant, registry or accepted organizational ruling.
 
 **12 November refinement:** [Futuristic swarm direction and executable study](2026-11-12-living-atlas-swarm-refinement.md) updates the visual treatment, rich-actor budget and attachment to the existing Living HQ contract after inspection of the supplied video. The source/evidence and lifecycle requirements below remain applicable.
@@ -179,10 +179,10 @@ The default camera is stable. Explicit navigation moves it smoothly. Follow-team
 
 The inspector leads with purpose:
 
-> **Make Portfolio reliable**  
-> Terminal · Engineering lead · two active helpers  
-> Now: running navigation checks  
-> Last verified milestone: route guard updated  
+> **Make Portfolio reliable**\
+> Terminal · Engineering lead · two active helpers\
+> Now: running navigation checks\
+> Last verified milestone: route guard updated\
 > Waiting on: browser verification
 
 Repository, workspace, branch, head, process and source IDs remain available beneath the readable summary. Reuse permission-aware Open session, Open changes and Open PR paths.
@@ -502,43 +502,43 @@ Avoid relay-only management layers. Route bounded work through qualified existin
 
 ### A1 — Read contract and fixtures
 
-**Inputs:** pinned paths, actual schemas, active integration branch/owner.  
-**Output:** normalized projection with lineage, availability, coverage and history capabilities; sanitized fixtures.  
-**Held:** runtime ownership changes and new telemetry infrastructure.  
+**Inputs:** pinned paths, actual schemas, active integration branch/owner.\
+**Output:** normalized projection with lineage, availability, coverage and history capabilities; sanitized fixtures.\
+**Held:** runtime ownership changes and new telemetry infrastructure.\
 **Pass:** duplicate names, missing parents, partial pages, stale snapshots and auth changes cannot fabricate joins.
 
 ### B1 — One-project animation kit
 
-**Inputs:** event-to-motion table, original art direction and A1.  
-**Output:** reusable rig, three resource props, movement/work/wait/failure/return behavior and quality levels.  
-**Held:** credentials, whole-estate layout and a second renderer.  
+**Inputs:** event-to-motion table, original art direction and A1.\
+**Output:** reusable rig, three resource props, movement/work/wait/failure/return behavior and quality levels.\
+**Held:** credentials, whole-estate layout and a second renderer.\
 **Pass:** motion-off remains comprehensible; outcomes never precede evidence.
 
 ### C1 — Existing-owner live adapter
 
-**Inputs:** qualified host/T3/Hermes/Fabric reads, exact selection and A1.  
-**Output:** one connected project scene and native deep links.  
-**Held:** dispatch, retry, account/provider changes, merge or deployment authority.  
+**Inputs:** qualified host/T3/Hermes/Fabric reads, exact selection and A1.\
+**Output:** one connected project scene and native deep links.\
+**Held:** dispatch, retry, account/provider changes, merge or deployment authority.\
 **Pass:** a real execution is traceable from original source to scene and back to evidence.
 
 ### D1 — Estate composition
 
-**Inputs:** C1 and qualified paging.  
-**Output:** stable project anchors, aggregation, semantic zoom, search and typed relationship lenses.  
-**Held:** guessed roster/totals and filesystem-wide scans.  
+**Inputs:** C1 and qualified paging.\
+**Output:** stable project anchors, aggregation, semantic zoom, search and typed relationship lenses.\
+**Held:** guessed roster/totals and filesystem-wide scans.\
 **Pass:** grouped records and missing source records are visibly distinct.
 
 ### E1 — Recorded activity and replay
 
-**Inputs:** retention/reconstruction contracts and epoch/cursor fixtures.  
-**Output:** historical activity; state replay only within qualified intervals.  
-**Held:** a new history store or guessed causal order.  
+**Inputs:** retention/reconstruction contracts and epoch/cursor fixtures.\
+**Output:** historical activity; state replay only within qualified intervals.\
+**Held:** a new history store or guessed causal order.\
 **Pass:** restart, retention loss and reconnect preserve visible gaps.
 
 ### F1 — Release proof
 
-**Inputs:** exact candidate, actual devices, source coverage and original journey.  
-**Output:** measured rendering/shell/memory results, accessibility proof, original result return, rollout and rollback.  
+**Inputs:** exact candidate, actual devices, source coverage and original journey.\
+**Output:** measured rendering/shell/memory results, accessibility proof, original result return, rollout and rollback.\
 **Pass:** users understand and inspect real work without disrupting the OS.
 
 ### Planning estimate
