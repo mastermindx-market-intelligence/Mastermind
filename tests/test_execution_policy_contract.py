@@ -81,7 +81,7 @@ class ExecutionPolicyContractTests(unittest.TestCase):
         active = ' '.join(self.read('docs/sol_skills/ACTIVE_EXECUTION.md').split())
         self.assertIn('Action-scoped refusal is not mission-wide refusal.', active)
         self.assertIn('Independent work must not reproduce the denied/uncertain effect.', active)
-        self.assertIn('input-size, schema, transport and technical failures must be evaluated separately', active)
+        self.assertIn('first explicit safety or permission denial ends retry', active)
         self.assertIn('`EFFECT_UNKNOWN` must be reconciled at the original target', active)
 
 

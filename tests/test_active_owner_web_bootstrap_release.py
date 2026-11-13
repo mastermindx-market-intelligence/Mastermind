@@ -34,7 +34,7 @@ def test_accepted_macro_merge_rule_can_fit_when_composed_with_this_kernel():
         "docs/DELIVERY_WORKFLOW.md",
         "Never bulk-arm/clear other holds",
         "Native review != GitHub APPROVED",
-        "Tool-specific technical errors require diagnosis; reconcile unknown modifying effects",
+        "No denied-effect/EFFECT_UNKNOWN carrier swap",
     ):
         assert guard in block, f"accepted release guard missing: {guard}"
     assert len(block.encode("utf-8")) <= 8000
@@ -49,7 +49,7 @@ def test_live_account_owner_and_exact_safety_fences_are_in_installed_fence():
         "HANDOFF_SOURCE_LINK_V1",
         "Native CRITICAL keeps actual distinct review",
         "no blanket independent technical/source review",
-        "Restrict only proven denied effects",
+        "Explicit safety/permission denial ends that action",
         "EFFECT_UNKNOWN",
         "never self-approve/self-merge/falsify/bypass",
     ):

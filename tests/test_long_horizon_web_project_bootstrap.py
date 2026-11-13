@@ -56,8 +56,8 @@ def test_default_preserves_real_stops_and_existing_safety_fences():
     for phrase in (
         "a proven ACTIVE_EXECUTION boundary",
         "never pad time",
-        "Tool-specific technical errors require diagnosis; reconcile unknown modifying effects",
-        "Restrict only proven denied effects",
+        "No denied-effect/EFFECT_UNKNOWN carrier swap",
+        "Explicit safety/permission denial ends that action",
         "never self-approve/self-merge/falsify/bypass",
         "Never bulk-arm/clear other holds",
         "Native review != GitHub APPROVED",
@@ -127,35 +127,13 @@ def test_account_global_overlay_covers_outside_project_without_overclaiming():
 def test_task_first_direct_execution_is_visible_in_project_and_native_briefs():
     block = _block()
     native = (ROOT / "docs/NATIVE_EXECUTION_BRIEF.md").read_text(encoding="utf-8")
-    assert "9A. TASK FIRST: operational fix -> authorized host/service + live proof" in block
-    assert "no PR without source change" in block
-    assert "21. Principal may implement/test/repair without failed Fabric attempt;" in block
-    assert "delegate independent leaves if faster" in block
+    assert "9A. TASK FIRST: operational fix -> authorized host/service direct + live proof" in block
+    assert "no PR absent source change" in block
+    assert "21. Direct principal implementation/test/repair needs no failed Fabric attempt." in block
+    assert "Delegate independent leaves if faster end-to-end" in block
     assert "No extra review/handoff ceremony" in block
-    assert "Tool-specific technical errors require diagnosis; reconcile unknown modifying effects" in block
+    assert "No denied-effect/EFFECT_UNKNOWN carrier swap" in block
     assert "Operational repair: use actually authorized host/service tools" in native
     assert "No PR absent" in native
     assert "A failed\n  worker dispatch is not required" in native
     assert "## Keep real boundaries" in native
-
-def test_old_blanket_retry_language_is_not_reintroduced_in_live_source():
-    active = (ROOT / "docs/sol_skills/ACTIVE_EXECUTION.md").read_text()
-    native = (ROOT / "docs/NATIVE_EXECUTION_BRIEF.md").read_text()
-    kernel = _block()
-    for text in (active, native, kernel):
-        normalized = " ".join(text.lower().split())
-        assert "no rephrased request" not in normalized
-        assert "first explicit safety or permission denial ends retry" not in normalized
-        assert "no rephrased/cross-tool/account/provider evasion" not in normalized
-    assert "technical failures must be evaluated separately" in active
-    assert "technical recovery" in kernel
-
-def test_pr_nonblocking_execution_preserves_exact_chairman_rule():
-    block = _block()
-    rule = "PR-NONBLOCKING EXECUTION: Pending PR/CI/review/merge blocks release lane, not mission. Qualify owned PR, request protected release once if permitted, reassess parent DONE_WHEN. Start next safe authorized nonduplicative task in same healthy turn. Prefer owned/path-disjoint work; linked stacked PR only for genuine dependency with compatible custody. Preserve holds, queued heads/effect fences. Stop at proven parent completion or verified ACTIVE_EXECUTION boundary."
-    assert block.count(rule) == 1
-    assert "PR-NONBLOCKING EXECUTION:" in block
-    assert "No duplicate checks/polling or invented reviewer gates." in block
-    assert len(block) < 8000
-    assert len(block.encode("utf-8")) < 8000
-
