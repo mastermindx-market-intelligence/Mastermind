@@ -150,6 +150,8 @@ RESERVED_ACCOUNT_LABELS = frozenset(
 STAGE_FILES = (
     "gateway.mjs",
     "original-delivery.mjs",
+    "t3-control.mjs",
+    "t3-dot-tools.json",
     "modern-fabric-http.mjs",
     "output-budget.mjs",
     "git-publish.mjs",
@@ -168,7 +170,8 @@ STAGE_FILES = (
 # immediately preceding v0.1.6 install has every current file except the new
 # read-only fleet-status consumer; earlier generations also predate Paper,
 # output paging, and typed Git.
-LEGACY_STAGE_FILES_V8 = tuple(name for name in STAGE_FILES if name != "original-delivery.mjs")
+LEGACY_STAGE_FILES_V9 = tuple(name for name in STAGE_FILES if name not in {"t3-control.mjs", "t3-dot-tools.json"})
+LEGACY_STAGE_FILES_V8 = tuple(name for name in LEGACY_STAGE_FILES_V9 if name != "original-delivery.mjs")
 LEGACY_STAGE_FILES_V7 = tuple(name for name in LEGACY_STAGE_FILES_V8 if name != "modern-fabric-http.mjs")
 LEGACY_STAGE_FILES_V6 = tuple(name for name in LEGACY_STAGE_FILES_V7 if name not in {"commission-prepare.mjs", "commission-service.mjs"})
 LEGACY_STAGE_FILES_V5 = tuple(name for name in LEGACY_STAGE_FILES_V6 if name != "workspace-access.mjs")
@@ -463,6 +466,7 @@ C2_PAPER_V12_FILES_SHA256 = {
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
         frozenset(STAGE_FILES),
+        frozenset(LEGACY_STAGE_FILES_V9),
         frozenset(LEGACY_STAGE_FILES_V8),
         frozenset(LEGACY_STAGE_FILES_V7),
         frozenset(LEGACY_STAGE_FILES_V6),

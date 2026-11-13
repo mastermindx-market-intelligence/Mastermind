@@ -69,6 +69,7 @@
  */
 
 import { TextOutputPager, OUTPUT_PAGE_TOOL, projectOutputSafely } from './output-budget.mjs';
+import { createT3Controller, resolveT3ControlConfig, T3_CONTROL_NAMES, t3ToolResult } from './t3-control.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
@@ -399,7 +400,8 @@ export function resolveConfig(partial = {}) {
     !Object.hasOwn(cfg, 'paperDesign') || cfg.paperDesign !== false ||
     Object.hasOwn(cfg, 'fleetStatus') ||
     Object.hasOwn(cfg, 'repositoryWorkspaces') ||
-    Object.hasOwn(cfg, 'commissionPublication')
+    Object.hasOwn(cfg, 'commissionPublication') ||
+    (Object.hasOwn(cfg, 't3Control') && cfg.t3Control !== false)
   )) {
     throw new TypeError('Fabric-only gateway refuses unrelated host capabilities');
   }
@@ -420,8 +422,9 @@ export function resolveConfig(partial = {}) {
   }
   cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
   cfg.fleetStatus = resolveFleetStatusConfig(cfg.fleetStatus);
+  cfg.t3Control = resolveT3ControlConfig(cfg.t3Control);
   if (cfg.fabricOnly === true && (cfg.gitPublish || cfg.repositoryWorkspaces ||
-      cfg.commissionPublication || cfg.paperDesign || cfg.fleetStatus)) {
+      cfg.commissionPublication || cfg.paperDesign || cfg.fleetStatus || cfg.t3Control)) {
     throw new TypeError("Fabric-only gateway refuses unrelated host capabilities");
   }
 
@@ -985,6 +988,7 @@ class GatewaySession {
     this.workspaceAccess = cfg.repositoryWorkspaces ? createRepositoryWorkspaceAccess(cfg.repositoryWorkspaces, cfg.gitPublish) : null;
     this.gitPublisher = this.workspaceAccess ?? (cfg.gitPublish ? createGitPublisher(cfg.gitPublish) : null);
     this.paperDesigner = cfg.paperDesign ? createPaperDesigner(cfg.paperDesign) : null;
+    this.t3Controller = cfg.t3Control ? createT3Controller(cfg.t3Control, principalKey) : null;
     this.fleetStatus = cfg.fleetStatus
       ? createFleetStatus({ enabled: true, ...cfg.fleetStatus })
       : null;
@@ -1139,7 +1143,7 @@ class GatewaySession {
         signal: extra?.signal,
       });
       const tools = sanitizeToolList(result.tools);
-      if (tools.some(tool => ORIGINAL_TOOL_NAMES.has(tool.name))) {
+      if (tools.some(tool => ORIGINAL_TOOL_NAMES.has(tool.name) || T3_CONTROL_NAMES.has(tool.name))) {
         throw new McpError(ErrorCode.InternalError, 'Backend exposed a reserved original collection tool');
       }
       const localTools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
@@ -1158,6 +1162,10 @@ class GatewaySession {
       }
       if (this.paperDesigner) {
         localTools.push(...PAPER_DESIGN_TOOLS.map((tool) => ({ ...tool })));
+      }
+      if (this.t3Controller) {
+        // A stale/disabled account profile hides only this capability lane.
+        try { localTools.push(...await this.t3Controller.tools()); } catch {}
       }
       const backendNames = new Set(tools.map((tool) => tool.name));
       for (const localTool of localTools) {
@@ -1240,6 +1248,23 @@ class GatewaySession {
         });
         return fleetStatusErrorResult(error);
       }
+    }
+
+    if (T3_CONTROL_NAMES.has(name)) {
+      if (!this.t3Controller) {
+        throw new McpError(ErrorCode.InvalidParams, 'T3 control is not enabled for this account');
+      }
+      return this.withBackendSlot(async () => {
+        this.bumpTool(name);
+        const value = await this.t3Controller.call(name, request?.params?.arguments ?? {}, { signal: extra?.signal });
+        if (value.status === 'EFFECT_UNKNOWN') this.taint('Native T3 effect unknown');
+        log(value.status === 'OBSERVED' ? 'info' : 'warn', 'tool_call', {
+          sid: this.tag, tool: name, durationMs: Date.now() - started,
+          classification: value.status === 'OBSERVED' ? CLASSIFICATION.OK : CLASSIFICATION.TOOL_ERROR,
+          effect: value.status === 'EFFECT_UNKNOWN' ? 'EFFECT_UNKNOWN' : undefined,
+        });
+        return projectOutputSafely(this.outputPager, t3ToolResult(value), { toolName: name, hasOutputSchema: false });
+      }, { kind: 'tools/call', tool: name, started });
     }
 
     if (this.paperDesigner && PAPER_DESIGN_TOOL_NAMES.has(name)) {
