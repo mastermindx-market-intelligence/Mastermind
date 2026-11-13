@@ -144,7 +144,18 @@ Source of these rules: mastermind-terminal `docs/CI_TERMINAL_E2E_SELFHOSTED_LANE
 `fleet_gate.py render-nft [--slots K]` prints an idempotent nftables ruleset
 (table `inet fleet_ci`, chain `egress`, hook `output`, policy `accept`) matched on
 the slot uid (`meta skuid "ghrunner-N"`; nft resolves the names at load time, so
-create the accounts first). Per slot:
+create the accounts first).
+
+The **first rule of chain `egress`** is `ct state established,related accept`: it
+admits the reply and established traffic of connections the per-slot rules below
+already allowed. A slot's own in-range server replies (e.g. the TCP SYN-ACK) to the
+client's ephemeral port, which is *outside* the slot range, so without this rule the
+loopback drop kills the reply and even a job's own server is unreachable. New
+connections are still filtered per slot — their first packet is `ct state new`, so it
+falls through to the rules below and a new connection to a denied range is dropped.
+This never admits a new outbound connection to a denied range.
+
+Per slot:
 
 * **Allow the internet** (chain policy accept for everything not denied below).
 * **Deny** RFC1918/LAN (10/8, 172.16/12, 192.168/16), link-local (169.254/16),
@@ -273,6 +284,9 @@ Host names, IPs and user names of the real fleet stay out of this public reposit
      harness never remounts the host `/proc`: the cross-read check uses the host's
      existing `hidepid=invisible`, else a private `unshare --mount --pid --fork`
      namespace with its own `/proc`, else reports WARN (host state unchanged).
+     The first host canary passed all 8 checks with the `ct state
+     established,related accept` rule in place; an earlier ruleset without it failed
+     `port-range-egress` because the slot's own server reply was dropped.
    * **JIT env handoff:** while a job runs, as root check the runner process
      environment: `tr '\0' '\n' < /proc/<runner-pid>/environ` must **not** contain
      `ACTIONS_RUNNER_INPUT_JITCONFIG` after startup, and no child process may

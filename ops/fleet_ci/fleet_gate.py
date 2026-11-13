@@ -440,6 +440,14 @@ def render_nft(conf: Dict[str, str], slots: int) -> str:
         "table inet fleet_ci {",
         "    chain egress {",
         "        type filter hook output priority 0; policy accept;",
+        # First rule: admit reply/established traffic of connections the per-slot rules
+        # below already allowed. A slot's own in-range server replies (e.g. SYN-ACK) to
+        # the client's ephemeral port, which is outside the slot range; without this the
+        # loopback drop kills that reply. New connections are STILL filtered per slot:
+        # their first packet is ct state new, so it falls through to the rules below and
+        # a new connection to a denied range is dropped. This never admits a new outbound
+        # connection to a denied range, only reply/established/related traffic.
+        "        ct state established,related accept",
     ]
     for n in range(1, slots + 1):
         u = f"ghrunner-{n}"

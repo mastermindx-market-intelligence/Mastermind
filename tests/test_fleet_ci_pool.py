@@ -321,6 +321,13 @@ def test_render_nft_rules():
     assert "type filter hook output priority 0; policy accept;" in out
     # idempotent apply: create-if-missing, delete, recreate
     assert out.index("table inet fleet_ci {}") < out.index("delete table inet fleet_ci")
+    # stateful reply accept is the first rule of chain egress, before EVERY skuid rule:
+    # it admits only reply/established traffic, new connections are still filtered below.
+    ct = "ct state established,related accept"
+    assert ct in out
+    assert out.index("type filter hook output priority 0; policy accept;") < out.index(ct)
+    for m in re.finditer(r"meta skuid", out):
+        assert out.index(ct) < m.start()
     for n, lo, hi in ((1, 20100, 20199), (2, 20200, 20299)):
         u = f'meta skuid "ghrunner-{n}"'
         assert u in out
