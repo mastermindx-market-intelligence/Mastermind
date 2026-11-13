@@ -11,6 +11,17 @@ source, test, and maintenance actions follow the current assignment and applicab
 under the Executive contract below. This distinction does not grant runtime, credential,
 trading, or source-write authority and never promotes research into trade execution.
 
+## Task-scoped implementation and research discovery
+
+For a known workstream or implementation question, reuse the existing
+Context Fabric / Project Atlas workflow in docs/CONTEXT_DISCOVERY.md. The
+opt-in atlas_search kind=text finds exact, source-lined Markdown research prose
+in an immutable Git revision; code symbols, headings and references retain
+their own kinds. An Atlas hit does not establish current PR, installation,
+runtime or acceptance status. Read those facts from the original GitHub,
+Agent OS, Executive and native-session owners. Avoid a blanket repository
+census when a task has specific source identities.
+
 ## Reuse-first engineering
 
 For substantive systems, agent/autonomy infrastructure, charts, UI or tool implementation, apply [Reuse First](docs/REUSE_FIRST_ENGINEERING.md): inspect the incumbent and maintained open-source options before custom-building commodity machinery. Prefer small adapters/composition over duplicate systems; spend bespoke engineering on differentiated quant logic and scientifically validated behavior. Check actual fit, maintenance, existing security boundaries and consumer proof without adding a new approval gate. Keep the scan proportionate; this adds no mandatory research or approval ceremony.

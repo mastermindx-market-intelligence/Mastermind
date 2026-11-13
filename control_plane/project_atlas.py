@@ -20,7 +20,7 @@ from typing import Any
 from control_plane.session_truth_contract import canonical_json
 
 BLOB_SCHEMA = "mastermind.project_atlas_blob.v1"
-PARSER_VERSION = "atlas-parser-2"
+PARSER_VERSION = "atlas-parser-3"
 MAX_BLOB_BYTES = 1024 * 1024
 MAX_SYMBOLS = 8192
 MAX_IMPORTS = 8192
@@ -228,6 +228,7 @@ def _python_record(text: str) -> dict[str, Any]:
         "imports": sorted(visitor.imports),
         "headings": [],
         "references": [],
+        "prose": "",
     }
 
 
@@ -254,10 +255,12 @@ def _markdown_record(text: str) -> dict[str, Any]:
     headings: list[dict[str, Any]] = []
     fence_char: str | None = None
     fence_length = 0
+    prose_lines: list[str] = []
     for index, line in enumerate(lines, start=1):
         # Fenced code is literal content, not document structure. Match only
         # CommonMark fence delimiters: up to three spaces, >=3 matching marks.
         if fence_char is not None:
+            prose_lines.append("")
             closing = re.fullmatch(r" {0,3}(" + re.escape(fence_char) +
                                    r"{" + str(fence_length) + r",})[ \t]*", line)
             if closing:
@@ -265,12 +268,15 @@ def _markdown_record(text: str) -> dict[str, Any]:
             continue
         opening = re.match(r" {0,3}(`{3,}|~{3,})(.*)$", line)
         if opening and (opening[1][0] != "`" or "`" not in opening[2]):
+            prose_lines.append("")
             fence_char = opening[1][0]
             fence_length = len(opening[1])
             continue
         match = _HEADING_RE.match(line)
         if not match:
+            prose_lines.append(line)
             continue
+        prose_lines.append("")
         headings.append(
             {
                 "level": len(match.group(1)),
@@ -288,6 +294,8 @@ def _markdown_record(text: str) -> dict[str, Any]:
         "imports": [],
         "headings": headings,
         "references": _references(text),
+        # Line-preserving disposable Markdown search projection. Git is authority.
+        "prose": "\n".join(prose_lines),
     }
 
 
@@ -345,6 +353,10 @@ def validate_cached_record(
         raise ProjectAtlasError("cached atlas blob identity is stale")
     if record.get("language") != language:
         raise ProjectAtlasError("cached atlas language is stale")
+    prose = record.get("prose")
+    if (type(prose) is not str or len(prose.encode("utf-8")) > MAX_BLOB_BYTES
+            or (language == "python" and prose != "")):
+        raise ProjectAtlasError("cached atlas prose is invalid")
     normalized = dict(record)
     if record_digest(normalized) != digest:
         raise ProjectAtlasError("cached atlas digest is invalid")
