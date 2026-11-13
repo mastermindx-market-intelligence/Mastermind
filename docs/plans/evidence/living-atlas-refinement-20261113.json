@@ -1,0 +1,48 @@
+{
+  "status": "succeeded",
+  "packageVersion": "0.3.0",
+  "siteVersion": 3,
+  "sourceCommit": "5bff75215c58a71607d3b6fa764423c8f38d2b97",
+  "projectId": "appgprj_6af58b6094788191828263c1b0d5402f",
+  "versionId": "appgprj_6af58b6094788191828263c1b0d5402f~appgver_d79b44e3f3308191be57d203fbc5ef71",
+  "deploymentId": "appgdep_6af66f7792a8819199ba5128551f1dbd",
+  "url": "https://mastermind-living-atlas.mastermindx-6859.chatgpt.site",
+  "publishedAt": "2026-11-13T02:01:36.141753+00:00",
+  "archiveHash": "sha256:5e638ea001ab64dfe47b20d5a0f6c78e1278ce90d1be46f4fd2676a605e934fd",
+  "audience": "owner-private",
+  "browserProduction": "ChatGPT sign-in gate; authenticated rendering not observed",
+  "liveData": "Synthetic demonstration; existing-owner contract adapters and package implemented; production mount unproved",
+  "checks": {
+    "node": 83,
+    "browserSDK": 20,
+    "browserKinetic": 16,
+    "browserHost": 16,
+    "browserReact": 10,
+    "typescript": "passed"
+  },
+  "archives": {
+    "living-atlas-sdk.zip": {
+      "bytes": 234967,
+      "sha256": "af784a8c93cd234d13530bbb06a4de1cc36180976ca4f034e8100d2371f99492"
+    },
+    "living-atlas-source.zip": {
+      "bytes": 183987,
+      "sha256": "6dffcb9a3ab4650189c761a66805299faa0ff30aee1bf4ed57a012ddea8cff92"
+    }
+  },
+  "governingPin": "c0b30b422d2310e614f91faed49a4adbce4291f0",
+  "intermediateCheckpoint": "7e56895da541feb1f2230fcdd7d7cf847ee229e3",
+  "priorCanonicalPR": {
+    "number": 2456,
+    "head": "b312302d532e3d4b761c3775ece24fcab940aa76",
+    "stateAtRead": "open; existing auto-merge effect untouched"
+  },
+  "qualification": {
+    "source": "Original app remains in existing Sites Git repository",
+    "fixtureInputs": "Synthetic owner-shaped documents; no detailed VPS export",
+    "gpu": "Unproven; managed browser disables WebGL",
+    "handoff": "No owner message sent",
+    "preview": "Stopped after QA",
+    "parentOutcome": "Independent refinement release delivered; authenticated host consumer and representative GPU proof remain"
+  }
+}
