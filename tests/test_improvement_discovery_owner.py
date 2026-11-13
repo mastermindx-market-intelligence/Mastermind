@@ -114,6 +114,76 @@ def test_owner_snapshot_reaches_evidenced_demand_gap_and_competing_options(snaps
     assert r["jobs_created"] == 0
 
 
+def test_owner_facts_reach_existing_private_cognition_cli(snapshot, monkeypatch, tmp_path, capsys):
+    from brain import cli_bridge, improvement_cognition as IC
+    from brain.improvement_discovery import agenda_projection
+    from scripts.improvement_cognition import main
+
+    item = report(snapshot)
+    path = tmp_path / "private-discovery.json"
+    path.write_text(json.dumps(item))
+    before = path.read_bytes()
+    calls = []
+
+    def reasoner(prompt, **kwargs):
+        calls.append((prompt, kwargs))
+        return {"ok": True, "tools_used": [], "backend": "test", "provider": "test",
+                "model": "test", "text": json.dumps({"schema": IC.DRAFT_SCHEMA,
+                    "evidence_digest": item["digest"], "proposals": []})}
+
+    monkeypatch.setattr(cli_bridge, "reason_private_ephemeral_sync", reasoner)
+    assert main([str(path), "--evaluation-packet"]) == 0
+    assert len(calls) == 1
+    prompt, kwargs = calls[0]
+    packet = json.loads(prompt.split("FROZEN_EVIDENCE_PACKET\n", 1)[1])
+    opportunity = packet["opportunities"][0]
+    assert opportunity["observations"] == item["opportunities"][0]["observations"]
+    assert "context rows for 2 of 3 distinct subjects" in opportunity["observations"][0]["finding"]
+    assert "not semantic adequacy, predictive value or production eligibility" in prompt
+    assert packet["sources"] == item["sources"]
+    assert packet["receipt_assurance"] == item["receipt_assurance"]
+    assert packet["known_work_coverage"] == "NOT_ATTESTED"
+    assert kwargs["max_turns"] == 1
+    assert not Path(kwargs["cwd"]).exists()
+    for scaffold in item["hypotheses"]:
+        assert scaffold["question"] not in prompt
+    assert item["opportunities"][0]["next_evidence"] not in prompt
+    public = capsys.readouterr().out + json.dumps(agenda_projection(item))
+    assert opportunity["observations"][0]["finding"] not in public
+    assert item["sources"][0]["ref"] not in public
+    assert item["digest"] not in public
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("kind", ["complete", "incomplete", "legacy", "stale", "empty"])
+def test_private_cognition_preserves_owner_qualifications_without_refresh(snapshot, kind):
+    from brain import improvement_cognition as IC
+
+    if kind == "incomplete":
+        snapshot["coverage"]["inputs_complete"] = False
+        snapshot["coverage"]["input_status"]["theses"] = "MISSING"
+    elif kind == "legacy":
+        for key in ("subjects_n", "sample_scope", "inputs_complete", "input_status"):
+            snapshot["coverage"].pop(key)
+    elif kind == "stale":
+        snapshot.update(asof="2026-07-21", generated_at="2026-07-21T07:00:00Z")
+    elif kind == "empty":
+        snapshot["coverage"].update(open_theses_n=0, resolved_recent_n=0, subjects_n=0,
+            with_context_row_n=0, coverage_rate=None)
+    item = report(snapshot)
+
+    packet = IC._evidence_packet(item)
+
+    assert packet["report_as_of"] == NOW
+    assert packet["freshness_revalidated"] is False
+    assert packet["sources"] == item["sources"]
+    opportunity = packet["opportunities"][0]
+    original = item["opportunities"][0]
+    for field in ("diagnosis", "disposition", "observations", "source_problems", "existing_work"):
+        assert opportunity[field] == original[field]
+    assert packet["receipt_assurance"] == "CONTENT_IDENTIFIED_LOCAL_OWNER_SNAPSHOT_PRODUCER_REVISION_UNATTESTED"
+
+
 def test_partial_population_does_not_become_build_recommendation(snapshot):
     snapshot["coverage"]["inputs_complete"] = False
     snapshot["coverage"]["input_status"]["theses"] = "MISSING"
