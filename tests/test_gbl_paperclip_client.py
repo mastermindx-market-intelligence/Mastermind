@@ -2884,14 +2884,22 @@ class TestDelegateDispatch:
         # ask's one permanent answer
         assert store.read_child_result(env["ask_id"], child_id)["answer"] \
             is None
-        # an unattributed comment (the installed board's plain-route shape,
-        # gbl4-devproof): the disclaimed fallback, verbatim RF wording
+        # Principal ruling INFO-1: a comment by anyone other than the
+        # child's assignee is never the answer, with or without a
+        # disclaimer — it would be permanent (ruling 19) and chosen by
+        # whoever can comment on the child issue
         fake.state.comment_author = AGENT_ID       # not the child's assignee
         self._post_comment(store, child_id, "Some bystander comment.")
-        answer = store.read_child_result(env["ask_id"], child_id)["answer"]
-        assert answer.startswith(
-            "(the asked teammate's own comment was not found;")
-        assert answer.endswith("Some bystander comment.")
+        assert store.read_child_result(env["ask_id"], child_id)["answer"] \
+            is None
+        # the assignee's own comment, older than a newer bystander comment,
+        # is still the answer
+        fake.state.comment_author = TARGET_AGENT_ID
+        self._post_comment(store, child_id, "The teammate's own answer.")
+        fake.state.comment_author = AGENT_ID
+        self._post_comment(store, child_id, "A later bystander comment.")
+        assert store.read_child_result(env["ask_id"], child_id)["answer"] \
+            == "The teammate's own answer."
 
     def test_done_child_with_no_comment_yields_none_not_a_placeholder(
             self, fake):

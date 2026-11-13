@@ -1409,18 +1409,22 @@ class PaperclipAskClient:
                 "child_identifier": identifier}
 
     def _last_result_comment(self, child: Mapping[str, Any]) -> str | None:
-        """The RF result-comment law, field-for-field: the LAST comment
-        authored by the child's own assignee (authorType agent, author id =
-        the child's assigneeAgentId) that is not a machine comment; else the
-        newest non-machine comment under a prefix saying it is NOT the asked
-        teammate's own words; else None.  (The installed board may serve
-        plain-route comments unattributed — gbl4-devproof 2026-11-11 — in
-        which case the disclaimed fallback is the served path, exactly as in
-        the RF carrier.)  R1 item 3: no comment ⇒ None, NEVER a placeholder
-        string — the old "(no answer comment on the child issue)" pointer
-        was posted by return_delegate as the ask's ONE answer, permanent
-        under ruling 19; with None the bridge reports NO_ANSWER_COMMENT,
-        posts nothing, and the next wake/scan re-reads."""
+        """The LAST comment authored by the child's own assignee (authorType
+        agent, author id = the child's assigneeAgentId) that is not a machine
+        comment; else None.
+
+        Principal ruling INFO-1 (2026-11-13): the bridge has NO bystander
+        fallback.  The RF carrier quotes the newest non-machine comment by
+        anyone under a disclaimer, which is tolerable inside the team; here
+        the text becomes the ask's ONE answer, permanent under ruling 19,
+        and leaves the building — so whoever can comment on the child issue
+        would be choosing the answer.  An answer nobody can attribute to the
+        asked teammate is withheld: the bridge reports NO_ANSWER_COMMENT,
+        posts nothing, the next wake/scan re-reads, and the ask ends EXPIRED
+        if the teammate never comments.  The real board attributes carrier
+        comments (authorAgentId = the assignee; read 2026-11-13).
+
+        R1 item 3: no comment ⇒ None, NEVER a placeholder string."""
         rows = self._comment_rows(self._issue_seg(child["id"]))
         assignee = child.get("assigneeAgentId")
         if assignee:
@@ -1430,12 +1434,6 @@ class PaperclipAskClient:
                         and row.get("authorAgentId") == assignee
                         and not _rf_is_machine_comment(body)):
                     return body
-        for row in reversed(rows):
-            body = str(row.get("body") or "").strip()
-            if body and not _rf_is_machine_comment(body):
-                return ("(the asked teammate's own comment was not found; "
-                        "this is the newest comment on the child issue, not "
-                        "their answer)\n\n" + body)
         return None
 
     def scan_delegate_asks(self) -> list[str]:
