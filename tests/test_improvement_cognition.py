@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from brain import improvement_cognition as C
+from brain import improvement_discovery as D
 
 
 def _digest(value):
@@ -16,31 +17,42 @@ def _digest(value):
     return "sha256:" + hashlib.sha256(raw.encode()).hexdigest()
 
 
-def report():
-    item = {
-        "execution_authority_granted": False,
-        "jobs_created": 0,
-        "independent_discovery_proven": False,
-        "opportunities": [{
-            "id": "opportunity:" + "b" * 24,
-            "diagnosis": "EVIDENCED_GAP",
-            "disposition": "REVIEW_AND_DUPLICATE_CHECK",
-            "source_refs": ["nw-coverage-contract", "nw-reflection-snapshot"],
-            "next_evidence": "Compare reuse with a bounded coverage investigation.",
-            "expectation": {
-                "user_job": "Understand the context for monitored subjects.",
-                "consumer": "Neural Web context reader",
-                "requirement": "Disclose coverage and missingness without claiming semantic quality.",
-            },
+def discovery_bundle():
+    receipt = {"revision": "a" * 40, "content_sha256": "sha256:" + "b" * 64,
+               "available_at": "2026-09-24T07:00:00Z", "observed_at": "2026-09-24T08:00:00Z",
+               "valid_until": "2026-09-25T08:00:00Z", "state": "CURRENT"}
+    return {
+        "schema": D.INPUT_SCHEMA, "case_id": "cognition-test", "origin": "PROSPECTIVE",
+        "cutoff_at": None,
+        "sources": [
+            {**receipt, "id": "nw-coverage-contract", "owner": "GITHUB", "ref": "contract:coverage"},
+            {**receipt, "id": "nw-reflection-snapshot", "owner": "DOMAIN_OWNER", "ref": "owner:coverage"},
+        ],
+        "expectations": [{
+            "id": "nw-context", "scope": "decided-subjects",
+            "user_job": "Understand the context for monitored subjects.",
+            "consumer": "Neural Web context reader",
+            "requirement": "Disclose coverage and missingness without claiming semantic quality.",
+            "expectation_source": "nw-coverage-contract",
         }],
-        "hypotheses": [{
+        "observations": [{
+            "expectation_id": "nw-context", "scope": "decided-subjects",
+            "source_refs": ["nw-reflection-snapshot"], "scope_complete": True,
+            "state": "GAP", "finding": "The owner observes context for two of three decided subjects.",
+        }],
+        "existing_work": [],
+    }
+
+
+def report(bundle=None):
+    item = D.evaluate(bundle if bundle is not None else discovery_bundle(), now="2026-09-24T08:00:00Z")
+    item["hypotheses"] = [{
             "kind": "REUSE_OR_CONNECT",
             "question": "Does useful context already exist behind another accepted owner?",
             "discriminating_check": "Check the accepted context owner before commissioning research.",
             "falsifier": "No accepted owner exposes the needed context for the same subject.",
-        }],
-    }
-    item["digest"] = _digest(item)
+        }]
+    item["digest"] = _digest({key: value for key, value in item.items() if key != "digest"})
     return item
 
 
@@ -226,6 +238,86 @@ def test_stale_or_modified_report_digest_is_refused():
     item["opportunities"][0]["next_evidence"] = "tampered after digest"
     with pytest.raises(ValueError, match="discovery_digest_mismatch"):
         C.draft_proposals(item)
+
+
+@pytest.mark.parametrize("damage", ["missing_source", "scope", "clock", "work_owner",
+                                     "duplicate_source", "diagnosis"])
+def test_resigned_invalid_grounding_is_refused_before_provider(monkeypatch, damage):
+    item = report()
+    opportunity = item["opportunities"][0]
+    if damage == "missing_source":
+        item["sources"] = [row for row in item["sources"] if row["owner"] == "GITHUB"]
+    elif damage == "scope":
+        opportunity["observations"][0]["scope"] = "a-different-population"
+    elif damage == "clock":
+        item["sources"][0]["valid_until"] = "2026-09-20T08:00:00Z"
+    elif damage == "work_owner":
+        opportunity["existing_work"] = [{"expectation_id": "nw-context",
+            "source_ref": "nw-reflection-snapshot", "disposition": "ACCEPTED"}]
+    elif damage == "duplicate_source":
+        item["sources"].append(dict(item["sources"][0]))
+    else:
+        opportunity["diagnosis"] = "SATISFIED"
+    item["digest"] = _digest({key: value for key, value in item.items() if key != "digest"})
+    calls = []
+    patch_reasoner(monkeypatch, lambda *args, **kwargs: calls.append(args))
+
+    with pytest.raises(ValueError):
+        C.draft_proposals(item)
+    assert calls == []
+
+
+def test_private_packet_preserves_accepted_work_and_input_text_contract():
+    bundle = discovery_bundle()
+    finding = "PRIVATE_OBSERVATION\n\t" + "e" * 1400
+    bundle["observations"][0]["finding"] = finding
+    work_source = {**bundle["sources"][0], "id": "known-work", "owner": "AGENT_OS",
+                   "ref": "agentos:PRIVATE_WORK_REFERENCE"}
+    bundle["sources"].append(work_source)
+    bundle["existing_work"] = [{"expectation_id": "nw-context", "source_ref": "known-work",
+                                "disposition": "ACCEPTED"}]
+    item = report(bundle)
+
+    packet = C._evidence_packet(item)
+
+    opportunity = packet["opportunities"][0]
+    assert opportunity["disposition"] == "RECONCILE_ACCEPTED"
+    assert opportunity["observations"][0]["finding"] == finding
+    assert opportunity["existing_work"] == bundle["existing_work"]
+    assert packet["known_work_coverage"] == "NOT_ATTESTED"
+    assert next(row for row in packet["sources"] if row["id"] == "known-work")["ref"] == work_source["ref"]
+    assert "PRIVATE_OBSERVATION" not in json.dumps(D.agenda_projection(item))
+    assert "PRIVATE_WORK_REFERENCE" not in json.dumps(D.agenda_projection(item))
+    opportunity["observations"][0]["source_refs"].clear()
+    assert item["opportunities"][0]["observations"][0]["source_refs"] == ["nw-reflection-snapshot"]
+
+
+def test_complete_escaped_packet_budget_has_an_exact_boundary(monkeypatch):
+    bundle = discovery_bundle()
+    bundle["observations"][0]["finding"] = "PRIVATE_觀察" * 50
+    item = report(bundle)
+    packet = C._evidence_packet(item)
+    wire = json.dumps(packet, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    monkeypatch.setattr(C, "MAX_PACKET_BYTES", len(wire))
+    assert C._evidence_packet(item) == packet
+    monkeypatch.setattr(C, "MAX_PACKET_BYTES", len(wire) - 1)
+    with pytest.raises(ValueError, match="evidence_packet_too_large"):
+        C._evidence_packet(item)
+
+
+def test_oversized_owner_facts_refuse_before_model_without_truncation(monkeypatch):
+    bundle = discovery_bundle()
+    original = bundle["observations"][0]
+    bundle["observations"] = [{**original, "finding": f"{n}:" + "觀" * 1000} for n in range(8)]
+    item = report(bundle)
+    before = json.dumps(item, sort_keys=True)
+    calls = []
+    patch_reasoner(monkeypatch, lambda *args, **kwargs: calls.append(args))
+
+    with pytest.raises(ValueError, match="evidence_packet_too_large"):
+        C.draft_proposals(item)
+    assert calls == []
+    assert json.dumps(item, sort_keys=True) == before
 
 
 def test_private_ephemeral_sdk_has_zero_settings_tools_and_native_nonpersistence(monkeypatch, tmp_path):
