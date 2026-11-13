@@ -2243,3 +2243,34 @@ Done by the principal on evidence: five dangling refs in the Macro store were de
 2. The Chairman's sitting for the Grok Bot link, then enrolment and the two canary asks.
 3. The janitor's staged items: the record watch first, then the repack rule.
 4. The bridge still waits on the Chairman's five reloads.
+
+## 60. Amendment, 2026-11-13 08:20 UTC: all ten teammates moved on the board; record watch and repack rule installed
+
+**Hermes move, part C, finished.** All ten new teammates are moved on the board, one at a time. Each one answered a board task on its own provider instance. The board now has thirteen teammates on the wake path and idle, and no live run. The team server was not restarted. No Hermes timer was moved.
+
+Three things were not on the list, and the principal decided them:
+
+- Product was held by one open task, a three-day-old test of the old path that had only ever failed. It was parked in the backlog, not closed.
+- Meta-CEO had been in an error state for three days with nothing assigned. The error was cleared through the board's own route, and the agent was moved last. Its Hermes side is unchanged.
+- The principal's own mistake. A runner script lost its refusal behind a pipe, so a check task was created for a teammate that had not been moved yet. The old body answered it, the board continued the task until its own time limit, and the agent ended in an error state. Nothing was cancelled or killed. The task was closed, the error cleared through the board's route, and the teammate moved normally.
+
+**Janitor.** Two staged items are installed, both changed by the principal after review.
+
+- The record watch logs every worktree record that disappears, with the processes running at that moment. Changed: an unreadable folder is not logged as a loss; the watch also runs on a timer because file events are late on this Mac.
+- The repack rule replaces the fence. The staged version was not installed as it stood. Its stop on low disk space ended the repack command but left the pack writer running, and the job hung. The installed version stops the whole process group, has an overall time limit, and cleans up when it is stopped from outside.
+
+An independent review of the next two items (scratch removal, floor guard) is running. Three more are still with the lane.
+
+**Class rules.**
+
+- A step that writes carries its own check of the state it needs. It does not rely on the step before it having refused.
+- A script whose output is piped returns its real exit code, and a loop reads that code before the next write.
+- A program that stops a child stops the child's whole process group. Its test shows the grandchild is gone, on a fixture large enough that the grandchild is still running at the stop.
+- A staged item is installed only from the copy the principal reviewed. The lane is told which copy that is.
+
+**Next, in order.**
+
+1. The Chairman's sitting for the Grok Bot link, then enrolment and the two canary asks.
+2. The janitor's remaining items, each after review.
+3. The bridge still waits on the Chairman's five reloads.
+4. Later list for the teammates: who each new teammate may ask; the roster's wait for a settings reload.
