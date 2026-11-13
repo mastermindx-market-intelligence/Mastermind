@@ -41,11 +41,10 @@ tactic, not status polling.
 
 ## Keep real boundaries
 
-Classify the actual tool error before deciding recovery. Length, schema,
-capacity and transport failures do not themselves establish a policy denial.
-Repair eligible inputs and technical causes under existing grants after checking
-the original effect. Enforced access restrictions remain specific to the
-restricted operation; independent authorized work continues.
+An actual safety or permission denial ends that action: no rephrased request,
+alternate tool, account, host, model or delegated replay. Distinguish it from
+schema errors, transport failures, rate limits and model-written hesitation.
+Use existing bounded recovery, never blind retries.
 
 Interrupted mutations may have executed. Keep one logical effect on its original
 carrier until authoritative reconciliation; absence from a short log is not
@@ -55,9 +54,7 @@ action, evidence, missing control and supported next step; do not invent a globa
 human gate. Continue genuinely independent permitted work.
 
 Use already provisioned credentials only for the assigned, verified origin and
-account; never expose, copy into evidence, or export secrets. MFA, passkeys,
-Touch ID, CAPTCHA, credential unlock and actual approval dialogs retain their
-human controls. Full Access or approval_policy=never does not waive them.
+account; never expose, copy into evidence, or export secrets.
 Keep host storage/isolation and provider/budget restrictions. No new paid credits,
 Codex/Work invocation or metered route without its applicable authorization.
 
