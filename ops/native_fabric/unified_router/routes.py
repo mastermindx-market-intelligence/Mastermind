@@ -146,9 +146,27 @@ class RouteState:
     last_failure: dict[str, tuple[float, str]] = field(default_factory=dict)
     consecutive_failures: dict[str, int] = field(default_factory=dict)
     generations: dict[str, int] = field(default_factory=dict)
+    owner_holds: dict[str, dict] = field(default_factory=dict)
+    model_holds: dict[str, dict[str, dict]] = field(default_factory=dict)
+
+    def held(self, route_id: str, model: str):
+        return self.owner_holds.get(route_id) or self.model_holds.get(route_id, {}).get(model)
 
     def available(self, route_id: str, now: float) -> bool:
-        return self.cooldown_until.get(route_id, 0.0) <= now
+        return route_id not in self.owner_holds and self.cooldown_until.get(route_id, 0.0) <= now
+
+    def hold(self, route_id: str, category: str, code: str, *, now: float, model: str | None = None) -> None:
+        if model is not None:
+            self.model_holds.setdefault(route_id, {})[model] = {"category": category, "code": code}
+            self.generations[route_id] = self.generations.get(route_id, 0) + 1
+            return
+        previous = self.owner_holds.get(route_id)
+        if previous and previous.get("category") == "permission":
+            return
+        self.owner_holds[route_id] = {"category": category, "code": code}
+        self.generations[route_id] = self.generations.get(route_id, 0) + 1
+        self.consecutive_failures[route_id] = max(1, self.consecutive_failures.get(route_id, 0))
+        self.last_failure[route_id] = (now, code)
 
     def record_failure(self, route_id: str, reason: str, *, now: float,
                        cooldown_s: float = 30.0, escalate: bool = True,
@@ -180,6 +198,8 @@ class RouteState:
 
     def record_success(self, route_id: str, *, generation: int | None = None,
                        now: float | None = None) -> bool:
+        if route_id in self.owner_holds:
+            return False
         current = self.generations.get(route_id, 0)
         if generation is not None and generation != current:
             return False

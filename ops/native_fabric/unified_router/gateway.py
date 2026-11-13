@@ -46,7 +46,9 @@ from ops.native_fabric.unified_router.routes import (
     ordered_routes,
 )
 from ops.native_fabric.unified_router import codex_oauth
-from ops.native_fabric.unified_router.model_policy import ModelPolicyState, VERSION, session_key, prefix_signature
+from ops.native_fabric.unified_router.provider_errors import classify as classify_provider_error
+from ops.native_fabric.unified_router.model_policy import (ModelPolicyState, VERSION,
+    AdmissionCapacityChanged, session_key, prefix_signature)
 from ops.native_fabric.unified_router.config_refresh import ConfigRefresh, read_document
 from ops.native_fabric.unified_router.wire import (
     OpenAIStreamTranslator,
@@ -126,7 +128,7 @@ _QUOTA_WALL_RE = re.compile(
     r"reset(?:s)?\s+at\s+(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})")
 
 
-def _quota_wall_s(detail) -> float | None:
+def _quota_wall_s(detail, route=None, request_url=None) -> float | None:
     """Bench duration from a provider quota-exhaustion body.
 
     z.ai/zhipu quota bodies state a wall-clock reset ("Your limit will reset
@@ -137,6 +139,12 @@ def _quota_wall_s(detail) -> float | None:
     """
     if not detail:
         return None
+    if route is not None or request_url is not None:
+        from urllib.parse import urlsplit
+        host = (urlsplit(request_url or route.base_url).hostname or "").lower()
+        if not (host == "open.bigmodel.cn" or host.endswith(".bigmodel.cn")
+                or host == "api.z.ai" or host.endswith(".z.ai")):
+            return None
     text = detail.decode("utf-8", "replace") if isinstance(detail, bytes) else str(detail)
     m = _QUOTA_WALL_RE.search(text)
     if not m:
@@ -150,7 +158,7 @@ def _quota_wall_s(detail) -> float | None:
         return None
     if wait <= 0:
         return None
-    return max(60.0, min(21600.0, wait))
+    return max(1.0, wait) if wait <= 1e9 else None
 
 
 # Provider-executed tools make an upstream turn non-idempotent: a replayed
@@ -165,7 +173,7 @@ def _replay_safe(payload: dict) -> bool:
     if payload.get("container") or payload.get("mcp_servers"):
         return False
     for tool in payload.get("tools") or []:
-        if isinstance(tool, dict) and tool.get("type") in _SIDE_EFFECT_TOOL_TYPES:
+        if not isinstance(tool, dict) or tool.get("type") not in (None, "custom"):
             return False
     return True
 
@@ -200,11 +208,19 @@ class _Retryable(RuntimeError):
     """
 
     def __init__(self, reason: str, detail: str = "", *, cooldown: bool = True,
-                 cooldown_s: float | None = None):
+                 cooldown_s: float | None = None, rejected: bool = False,
+                 retryable: bool = False, category: str = "execution_unknown",
+                 provider_code: str = "", owner_hold: bool = False, http_status: int = 502):
         super().__init__(reason)
         self.reason = reason
         self.cooldown = cooldown
         self.cooldown_s = cooldown_s
+        self.rejected = rejected
+        self.retryable = retryable
+        self.category = category
+        self.provider_code = provider_code
+        self.owner_hold = owner_hold
+        self.http_status = http_status
         _log.warning("fabric attempt refused: %s", reason)
 
 
@@ -702,6 +718,10 @@ def create_app(cfg: Settings | None = None, *,
                  "group_max_in_flight": r.group_max_in_flight,
                  "circuit_generation": state.routes.generations.get(r.route_id, 0),
                  "probe_required": bool(state.routes.consecutive_failures.get(r.route_id, 0)),
+                 "owner_hold": state.routes.owner_holds.get(r.route_id),
+                 "model_holds": state.routes.model_holds.get(r.route_id, {}),
+                 "cooldown_remaining_s": round(max(0, state.routes.cooldown_until.get(r.route_id, 0) - now), 1),
+                 "last_failure": state.routes.last_failure.get(r.route_id, (None, None))[1],
                  "model_priority": dict(r.model_priority),
                  "model_weight": dict(r.model_weight),
                  "model_params": {slug: sorted(params) for slug, params
@@ -828,14 +848,14 @@ def create_app(cfg: Settings | None = None, *,
         reason = "FABRIC_ALL_ROUTES_UNAVAILABLE"
         preflight_excluded: set[str] = set()
 
-        def note_failure(route, code, retry_after=None, admission=None):
+        def note_failure(route, code, retry_after=None, admission=None, failure=None):
             state.count(route.route_id, "attempt_failed")
             if counting:
                 # count_tokens is metering, not inference: a metering failure
                 # must never open (and a metering success must never close) the
                 # inference circuit breaker for real traffic.
                 return
-            quota = code.endswith("_429")
+            quota = code.endswith("_429") or bool(failure and failure.category in ("quota_exhausted", "temporary_capacity"))
             if quota:
                 routing.counters["quota_refusals"] += 1
             # Keep actual provider Retry-After, including long quota windows.
@@ -857,6 +877,11 @@ def create_app(cfg: Settings | None = None, *,
                     cooldown_s=delay, escalate=not quota and getattr(route, "kind", "") != "gateway",
                     generation=admission.circuit_generation if admission and member is route else None,
                     quota=quota)
+                # A local pool gateway retains its own per-account hold owner.
+                # Direct-route unknown exhaustion cannot be cleared by a timer.
+                if failure and failure.owner_hold and retry_after is None and member.kind != "gateway":
+                    state.routes.hold(member.route_id, failure.category,
+                                      failure.provider_code or code, now=time.monotonic())
             routing.changed.set()
             routing.checkpoint()
 
@@ -880,7 +905,8 @@ def create_app(cfg: Settings | None = None, *,
             except PermissionError:
                 return JSONResponse({"error": {"code": "FABRIC_CREDENTIAL_PERMISSION_REFUSED"}}, status_code=403)
             except (OSError, ValueError):
-                raise _Retryable("FABRIC_ROUTE_CREDENTIAL", cooldown=True)
+                raise _Retryable("FABRIC_ROUTE_CREDENTIAL", cooldown=True,
+                                 rejected=True, retryable=True, category="local_preflight")
             if counting:
                 return await _forward_anthropic_count(app, route, authorization, forwarded, admission=admission)
             if route.wire == WIRE_ANTHROPIC:
@@ -931,8 +957,16 @@ def create_app(cfg: Settings | None = None, *,
                     if len(routing.active) >= 128 or capacity_eta > 0:
                         continue
                     selected_at = time.monotonic()
-                    admission = routing.begin(route, resolved, payload, session, profile,
-                        time.monotonic(), fingerprint, operation="count_tokens" if counting else "inference")
+                    try:
+                        admission = routing.begin(route, resolved, payload, session, profile,
+                            time.monotonic(), fingerprint, operation="count_tokens" if counting else "inference")
+                    except AdmissionCapacityChanged:
+                        reason = "FABRIC_ADMISSION_CAPACITY_CHANGED"
+                        continue
+                    if admission:
+                        admission.routing_reason = ("overflow_safe_rejection"
+                            if admission.overflow_target and profile.startswith("model:")
+                            and not decision.startswith("overflow_") else decision)
                     if admission and admission.effective_max_tokens is not None:
                         try:
                             durable = await routing.flush_checkpoint()
@@ -942,10 +976,17 @@ def create_app(cfg: Settings | None = None, *,
                             raise
                         if not durable:
                             routing.finish(admission, no_send=True)
-                            return JSONResponse({"error": {"code": "FABRIC_ADMISSION_STATE_UNAVAILABLE"}}, status_code=503)
+                            # No send occurred. The latched state error removes
+                            # strict seats; permitted non-strict fallback remains.
+                            reason = "FABRIC_ADMISSION_STATE_UNAVAILABLE"
+                            continue
                         if disconnected:
                             routing.finish(admission, no_send=True)
                             return JSONResponse({"error": {"code": "FABRIC_CLIENT_DISCONNECTED"}}, status_code=499)
+                        if not refresh_config() or not routing.send_ready(admission, time.monotonic()):
+                            routing.finish(admission, no_send=True)
+                            reason = "FABRIC_ADMISSION_INVALIDATED"
+                            continue
                     remaining = cfg.upstream_timeout_s if admission is None else (
                         cfg.upstream_timeout_s - (time.monotonic() - admission.started))
                     if remaining <= 0:
@@ -962,19 +1003,17 @@ def create_app(cfg: Settings | None = None, *,
                             response = await invoke(route, resolved, admission)
                     except _Retryable as exc:
                         code = exc.reason
-                        note_failure(route, code, getattr(exc, "cooldown_s", None), admission)
-                        # Only local refusal, a typed rate-limit rejection, or a
-                        # provider-stated "not completed" (502/503/504/529, gated
-                        # on _replay_safe at the raise site) may ladder onward.
-                        permitted = code in ("FABRIC_ROUTE_CREDENTIAL", "FABRIC_ROUTE_HTTP_429",
-                                             "FABRIC_ROUTE_HTTP_502", "FABRIC_ROUTE_HTTP_503",
-                                             "FABRIC_ROUTE_HTTP_504", "FABRIC_ROUTE_HTTP_529")
-                        routing.finish(admission, no_send=permitted)
+                        note_failure(route, code, getattr(exc, "cooldown_s", None), admission, exc)
+                        # Only proven local no-send or a classified admission
+                        # rejection may continue through the bounded ladder.
+                        permitted = exc.retryable and exc.rejected
+                        routing.finish(admission, no_send=exc.rejected)
                         reason = code
                         if not permitted:
                             state.refused += 1
                             return JSONResponse({"error": {"type": "fabric_route_error", "code": code,
-                                "message": "upstream refusal; request was not replayed"}}, status_code=502)
+                                "category": exc.category,
+                                "message": "upstream outcome was not replayed"}}, status_code=exc.http_status)
                         continue
                     except _ResponsesRouteRefused as exc:
                         safe = bool(admission and not admission.sent)
@@ -1008,6 +1047,9 @@ def create_app(cfg: Settings | None = None, *,
                         raise
                     response.headers["x-fabric-resolved-model"] = resolved
                     response.headers["x-fabric-route"] = route.route_id
+                    response.headers["x-fabric-requested-model"] = str(payload.get("model", ""))
+                    response.headers["x-fabric-routing-reason"] = admission.routing_reason if admission else decision
+                    response.headers["x-fabric-model-substituted"] = str(resolved != payload.get("model")).lower()
                     response.headers["x-fabric-routing-policy"] = VERSION
                     response.headers["x-fabric-request-id"] = nonce
                     if getattr(app.state, "runtime_generation", None):
@@ -1041,24 +1083,25 @@ def create_app(cfg: Settings | None = None, *,
                     else:
                         success = 200 <= response.status_code < 300 and (counting or bool(admission and admission.completed))
                         routing.finish(admission, success=success,
-                                       no_send=bool(admission and not admission.sent))
+                                       no_send=bool(admission and (not admission.sent or admission.rejected_before_acceptance)))
                         if success:
                             state.served += 1; state.count(route.route_id, "served")
                             if not counting:
                                 state.routes.record_success(route.route_id, generation=admission.circuit_generation)
                                 routing.checkpoint()
                         elif not counting and response.status_code in (401, 403):
-                            # Do not probe another identity to get around this refusal.
-                            state.routes.record_failure(route.route_id, "FABRIC_ROUTE_PERMISSION",
-                                now=time.monotonic(), cooldown_s=86400, escalate=False,
-                                generation=admission.circuit_generation, permission=True)
+                            # Provider refusal is already scoped by upstream_refusal.
+                            # This remaining path is a local credential read denial.
+                            if not admission.sent:
+                                state.routes.hold(route.route_id, "permission", "FABRIC_CREDENTIAL_PERMISSION_REFUSED",
+                                                  now=time.monotonic())
                             routing.checkpoint()
                     return response
                 if counting or send_count >= cfg.max_attempts or time.monotonic() >= admission_deadline:
                     break
                 if ladder and all(r.route_id in preflight_excluded for r, _ in ladder):
                     break
-                if reason in ("FABRIC_MODEL_UNKNOWN", "FABRIC_TIER_CAPABILITY_UNAVAILABLE", "FABRIC_COUNT_TOKENS_WIRE"):
+                if reason in ("FABRIC_MODEL_UNKNOWN", "FABRIC_TIER_CAPABILITY_UNAVAILABLE", "FABRIC_COUNT_TOKENS_WIRE", "FABRIC_REQUEST_EXCEEDS_CAPACITY"):
                     break
                 if not waiting:
                     if not routing.join_wait(nonce, session):
@@ -1078,11 +1121,36 @@ def create_app(cfg: Settings | None = None, *,
             if reason not in {"FABRIC_OAUTH_OWNER_HELD", "FABRIC_OAUTH_REFRESH_REQUIRED", "FABRIC_OAUTH_NO_ACCOUNT"}:
                 refusal_headers["retry-after"] = str(max(1, math.ceil(eta))) if math.isfinite(eta) and eta > 0 else "5"
             return JSONResponse({"error": {"code": reason, "type": "fabric_capacity_error",
-                "message": "no eligible model capacity within the admission budget; no paid spill or model-pin override"}},
+                "message": "no eligible capacity within the configured model/fallback policy"}},
                 status_code=501 if reason == "FABRIC_COUNT_TOKENS_WIRE" else 503,
                 headers=refusal_headers)
         finally:
             routing.waiters.pop(nonce, None)
+
+    def upstream_refusal(route, payload, admission, status, detail, retry_after, request_url=None):
+        failure = classify_provider_error(status, detail)
+        if admission:
+            admission.rejected_before_acceptance = failure.rejected
+        code = f"FABRIC_ROUTE_HTTP_{status}"
+        if failure.category in ("temporary_capacity", "quota_exhausted"):
+            app.state.model_policy.learn_limit(route, detail)
+            delay = _quota_wall_s(detail, route, request_url) or retry_after
+            delay = delay if delay is not None and delay > 0 else None
+            raise _Retryable(code, cooldown_s=delay, rejected=failure.rejected,
+                retryable=failure.retryable and _replay_safe(payload), category=failure.category,
+                provider_code=failure.code, owner_hold=failure.owner_hold, http_status=status)
+        if failure.category == "execution_unknown":
+            raise _Retryable(code, cooldown_s=retry_after, provider_code=failure.code,
+                             http_status=502 if status == 500 else status)
+        if failure.category == "permission" and failure.owner_hold:
+            # Refusal ends this request. No alternate account/model/provider replay.
+            state = app.state.router_state.routes
+            state.hold(route.route_id, failure.category, failure.code, now=time.monotonic(),
+                       model=admission.model if admission and failure.scope == "model" else None)
+            app.state.model_policy.checkpoint()
+        return JSONResponse({"error": {"type": "upstream_error", "code": code,
+            "category": failure.category, "provider_code": failure.code,
+            "message": "upstream refused; request was not replayed"}}, status_code=status)
 
     async def _forward_anthropic_count(app, route, authorization, payload, *, admission=None) -> Response:
         upstream: httpx.AsyncClient = app.state.upstream
@@ -1096,11 +1164,10 @@ def create_app(cfg: Settings | None = None, *,
         if admission:
             admission.sent = True
         response = await upstream.send(upstream_request)
-        if response.status_code in RETRYABLE_STATUS:
-            raise _Retryable(f"FABRIC_ROUTE_HTTP_{response.status_code}",
-                             response.text[:2048],
-                             cooldown=response.status_code in COOLDOWN_STATUS,
-                             cooldown_s=_retry_after_s(response))
+        if response.status_code >= 400:
+            # Metering shares transport capacity, not inference health/holds.
+            return Response(content=response.content, status_code=response.status_code,
+                            media_type="application/json")
         data = response.content
         return Response(content=data, status_code=response.status_code,
                         media_type="application/json")
@@ -1122,31 +1189,7 @@ def create_app(cfg: Settings | None = None, *,
             detail = await _read_bounded(response, 4096)
             retry_after = _retry_after_s(response)
             await response.aclose()
-            if response.status_code == 429:
-                app.state.model_policy.learn_limit(route, detail)
-                wall = _quota_wall_s(detail)
-                raise _Retryable("FABRIC_ROUTE_HTTP_429",
-                                 detail=(detail or b"")[:300].decode("utf-8", "replace")
-                                 + (f" [quota wall {int(wall)}s]" if wall else ""),
-                                 cooldown_s=wall or retry_after)
-            if response.status_code in (502, 503, 504, 529) and _replay_safe(payload):
-                # Provider-stated "not completed" (overload/gateway). No byte has
-                # reached the client and the payload has no provider-executed
-                # side effects, so a ladder failover is safe.
-                raise _Retryable(f"FABRIC_ROUTE_HTTP_{response.status_code}",
-                                 detail=(detail or b"")[:300].decode("utf-8", "replace"),
-                                 cooldown=response.status_code in COOLDOWN_STATUS,
-                                 cooldown_s=retry_after)
-            if response.status_code == 500:
-                # Ambiguous execution state: bench the route for later requests
-                # but never replay this request on another route.
-                raise _Retryable("FABRIC_ROUTE_HTTP_500",
-                                 detail=(detail or b"")[:300].decode("utf-8", "replace"))
-            _log.warning("fabric upstream refused route=%s status=%s",
-                         route.route_id, response.status_code)
-            return JSONResponse({"error": {"type": "upstream_error",
-                "code": f"FABRIC_ROUTE_HTTP_{response.status_code}",
-                "message": "upstream refused; no cross-route replay"}}, status_code=response.status_code)
+            return upstream_refusal(route, payload, admission, response.status_code, detail, retry_after, str(upstream_request.url))
         headers = {k: v for k, v in response.headers.items()
                    if k.lower() in {"content-type", "x-request-id", "retry-after"}}
         if not wants_stream:
@@ -1242,26 +1285,7 @@ def create_app(cfg: Settings | None = None, *,
             detail = await _read_bounded(response, 4096)
             retry_after = _retry_after_s(response)
             await response.aclose()
-            if response.status_code == 429:
-                app.state.model_policy.learn_limit(route, detail)
-                wall = _quota_wall_s(detail)
-                raise _Retryable("FABRIC_ROUTE_HTTP_429",
-                                 detail=(detail or b"")[:300].decode("utf-8", "replace")
-                                 + (f" [quota wall {int(wall)}s]" if wall else ""),
-                                 cooldown_s=wall or retry_after)
-            if response.status_code in (502, 503, 504, 529) and _replay_safe(payload):
-                raise _Retryable(f"FABRIC_ROUTE_HTTP_{response.status_code}",
-                                 detail=(detail or b"")[:300].decode("utf-8", "replace"),
-                                 cooldown=response.status_code in COOLDOWN_STATUS,
-                                 cooldown_s=retry_after)
-            if response.status_code == 500:
-                raise _Retryable("FABRIC_ROUTE_HTTP_500",
-                                 detail=(detail or b"")[:300].decode("utf-8", "replace"))
-            _log.warning("fabric upstream refused route=%s status=%s",
-                         route.route_id, response.status_code)
-            return JSONResponse({"error": {"type": "upstream_error",
-                "code": f"FABRIC_ROUTE_HTTP_{response.status_code}",
-                "message": "upstream refused; no cross-route replay"}}, status_code=response.status_code)
+            return upstream_refusal(route, payload, admission, response.status_code, detail, retry_after, str(upstream_request.url))
         if not wants_stream:
             try:
                 data = await _read_response_bounded(response, cfg.max_body_bytes)

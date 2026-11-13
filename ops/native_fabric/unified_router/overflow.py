@@ -35,6 +35,7 @@ import re
 import time
 from collections import OrderedDict, deque
 from datetime import datetime
+from .model_policy import AdmissionCapacityChanged
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover
@@ -170,13 +171,14 @@ class Overflow:
         self.health = {}                 # family -> {"unhealthy_at", "since", "signal"}
         self.intents = OrderedDict()     # id(payload) -> (kind, family, requested, target, time)
         self.tokens = {}                 # admission token -> (kind, family, requested, target)
-        self.cap_sessions = {}           # target -> deque of new-diversion times
+        self.cap_sessions = {model: deque(stamps) for model, stamps in
+                             getattr(policy, "restored_overflow_caps", {}).items()}
         self.peak = {}                   # resource -> peak fraction of limit seen
         self.warm_waiting = OrderedDict()
         self.pending_429 = None
         self.events = deque(maxlen=64)
         self.counters = {k: 0 for k in (
-            "diverted_new_session", "diverted_sticky", "diverted_short_fallback",
+            "diverted_new_session", "diverted_sticky", "diverted_short_fallback", "diverted_request_boundary",
             "diverted_completed", "diverted_failed", "primary_admitted",
             "cap_refused", "target_unavailable", "warm_waits", "provider_429",
             "limit_bodies_translated", "billing_headers_stripped")}
@@ -281,9 +283,7 @@ class Overflow:
             mapping.popitem(last=False)
 
     def _primary_routes(self, model):
-        p = self.policy
-        return [r for r in p.routes.values() if r.serves(model) and r.effective_weight(model) > 0
-                and (r.route_id not in p.metered or p.allow_metered)]
+        return self.policy.eligible_routes(model)
 
     def _managed_routes(self, model):
         """Primary routes whose capacity this policy actually budgets (per-key
@@ -351,7 +351,8 @@ class Overflow:
         cap = cfg["caps"].get(target)
         if not isinstance(cap, dict):
             return True
-        inflight = sum(1 for v in self.tokens.values() if v[3] == target)
+        inflight = sum(a.operation == "inference" and a.overflow_target == target
+                       for a in self.policy.active.values())
         if inflight >= int(cap.get("max_inflight", 1 << 30)):
             return False
         if new_session:
@@ -380,23 +381,33 @@ class Overflow:
         if isinstance(fallback, str) and fallback not in ("wait", "") and fallback not in choices:
             choices.append(fallback)
         if kind == "sticky":
-            # A diverted session is pinned to the model it was diverted TO:
-            # hopping to another rung mid-conversation would silently switch
-            # models on an in-flight session. If its target cannot serve, the
-            # session reverts to base (sticky_revert) or waits — it never
-            # tries a different substitute.
-            choices = [t for t in choices if t == fam.get("target")]
+            # Opted-in families may switch between completed requests; legacy
+            # families keep their existing target-only conversation policy.
+            choices = ([fam["target"]] + [t for t in choices if t != fam["target"]]
+                       if fam.get("request_boundary_fallback") else
+                       [t for t in choices if t == fam.get("target")])
+        combined = []
         for target in choices:
-            if kind != "sticky" and not self._cap_ok(target, now, cfg, kind == "new_session"):
+            new_target = kind in ("new_session", "request_boundary") or (kind == "sticky" and target != fam.get("target"))
+            if not self._cap_ok(target, now, cfg, new_target):
                 self.counters["cap_refused"] += 1
                 continue
             ladder, eta, _, _ = self._plan([(target, "")], payload, session, nonce, now,
                                            elapsed, False, fingerprint)
             if ladder:
-                self.intents[id(payload)] = (kind, family, requested, target, now)
-                self._trim(self.intents, 512)
+                if not combined:
+                    target_kind = "request_boundary" if kind == "sticky" and new_target else kind
+                    self.intents[id(payload)] = (target_kind, family, requested, target, now)
+                    self._trim(self.intents, 512)
+                if fam.get("request_boundary_fallback"):
+                    # Explore at most two accounts of a substitute before the
+                    # next model; a large key pool cannot spend every attempt.
+                    combined.extend(ladder[:2])
+                    continue
                 return ladder, eta, "overflow_" + kind, profile
             if kind == "sticky" and math.isfinite(eta):
+                if fam.get("request_boundary_fallback"):
+                    continue
                 if fam.get("sticky_revert"):
                     # Substitute chains prefer returning to the requested model
                     # over parking on a saturated substitute.
@@ -404,7 +415,74 @@ class Overflow:
                 # An in-flight diverted session waits for its target; it is not bounced back.
                 return [], eta, "FABRIC_OVERFLOW_TARGET_WAIT", profile
             self.counters["target_unavailable"] += 1
-        return None
+        return (combined, 0.0, "overflow_" + kind, profile) if combined else None
+
+    @staticmethod
+    def _targets(fam):
+        result = [x for x in fam.get("targets", []) if isinstance(x, str) and x]
+        for value in (fam.get("target"), fam.get("cap_fallback")):
+            if isinstance(value, str) and value not in ("", "wait") and value not in result:
+                result.append(value)
+        return result
+
+    def _request_boundary_plan(self, candidates, payload, session, nonce, now, elapsed,
+                               fingerprint, cfg, profile, family, fam, record, base):
+        """A new request may change model after prior requests have settled.
+
+        Conversation length is not evidence of an active upstream effect. This
+        path is opt-in per family; existing windowed GLM policy stays separate.
+        """
+        p = self.policy
+        active = [a for a in p.active.values() if session and a.session == session
+                  and a.profile == profile and a.operation == "inference"]
+        base_result = base()
+        return_after = float(fam.get("return_to_primary_after_s", 300))
+        record_age = now - (record[4] if record and len(record) > 4 else record[1]) if record else 0
+        prefer_primary = record and record_age >= return_after and bool(base_result[0])
+        if (record and record[0] in self._targets(fam) and not prefer_primary
+                and not any(a.model != record[0] for a in active)):
+            sticky_fam = dict(fam, target=record[0], cap_fallback="wait")
+            result = self._divert("sticky", family, sticky_fam, candidates[0][0], payload,
+                                  session, nonce, now, elapsed, fingerprint, cfg, profile)
+            if result is not None:
+                if active:
+                    result = ([(r, m) for r, m in result[0] if all(a.model == m for a in active)],
+                              result[1], result[2], result[3])
+                    if not result[0]:
+                        return [], 1.0, "FABRIC_SESSION_ACTIVE", profile
+                return result
+        ladder, eta, reason, _ = base_result
+        if ladder:
+            # Do not split simultaneous turns across primary and substitute.
+            if active and any(a.model != candidates[0][0] for a in active):
+                return [], 1.0, "FABRIC_SESSION_ACTIVE", profile
+            self.intents.pop(id(payload), None)
+            if not active:
+                fallback = self._divert("request_boundary", family, fam, candidates[0][0],
+                    payload, session, nonce, now, elapsed, fingerprint, cfg, profile)
+                if fallback:
+                    # Two primary probes precede substitute exploration. More
+                    # untried primary accounts cannot starve the final model
+                    # within the gateway's bounded attempt budget.
+                    ladder = ladder[:2] + fallback[0] + ladder[2:]
+            return ladder, eta, reason, profile
+        if active:
+            return [], 1.0, "FABRIC_SESSION_ACTIVE", profile
+        grace = float(fam.get("preference_wait_s", 1.5))
+        if 0 < eta <= grace and elapsed < grace:
+            return [], min(eta, grace - elapsed), "FABRIC_AFFINITY_WAIT", profile
+        requested = candidates[0][0]
+        result = self._divert("request_boundary", family, fam, requested, payload,
+                              session, nonce, now, elapsed, fingerprint, cfg, profile)
+        if result is not None:
+            reasons = {p.unavailable_reason(r, requested, payload, session, now, fingerprint)
+                       for r in self._primary_routes(requested)}
+            explanation = "input_budget" if "input_budget" in reasons else (
+                "output_budget" if "output_budget" in reasons else
+                "provider_cooldown" if "provider_cooldown" in reasons else
+                "admission_state_unavailable" if "admission_state_unavailable" in reasons else "capacity")
+            return result[0], result[1], "overflow_" + explanation, profile
+        return ladder, eta, reason, profile
 
     # ---- wrapped policy methods ---------------------------------------
     def plan(self, candidates, payload, session, nonce, now, elapsed=0.0, counting=False,
@@ -412,7 +490,33 @@ class Overflow:
         base = lambda: self._plan(candidates, payload, session, nonce, now, elapsed,
                                   counting, fingerprint)
         cfg = self.config()
-        if counting or not self.enabled(cfg) or len(candidates) != 1 or candidates[0][1]:
+        if counting or not self.enabled(cfg):
+            return base()
+        if candidates[0][1]:
+            group = self.policy.groups.get(candidates[0][1], {})
+            fallback_models = group.get("fallback_models", ())
+            if not fallback_models:
+                return base()
+            ladder, eta, reason, profile = base()
+            record = self.diverted.get(session) if session else None
+            active_models = {a.model for a in self.policy.active.values() if session
+                and a.session == session and a.profile == profile and a.operation == "inference"}
+            if active_models:
+                ladder = [(route, model) for route, model in ladder if model in active_models]
+            elif record and record[3] == profile:
+                since = record[4] if len(record) > 4 else record[1]
+                primary = [(route, model) for route, model in ladder if model not in fallback_models]
+                if primary and now - since >= float(group.get("return_to_primary_after_s", 300)):
+                    ladder = primary + [(route, model) for route, model in ladder if model in fallback_models]
+                    reason = "preferred_model_recovered"
+            kept = []
+            for route, model in ladder:
+                old = self.diverted.get(session) if session else None
+                new = not (old and old[0] == model and old[3] == profile)
+                if model not in fallback_models or self._cap_ok(model, now, cfg, new):
+                    kept.append((route, model))
+            return kept, eta if kept else max(1, eta), reason if kept else "FABRIC_FALLBACK_CAPACITY", profile
+        if len(candidates) != 1:
             return base()
         requested = candidates[0][0]
         family, fam = self.family_of(cfg, requested)
@@ -427,9 +531,14 @@ class Overflow:
 
         # 1. A session already diverted stays where it is.
         record = self.diverted.get(session) if session else None
+        if record and (record[2] != family or record[3] != requested):
+            record = None  # A different requested profile never inherits this diversion.
         if record and now - record[1] >= float(cfg["diverted_sticky_s"]):
             self.diverted.pop(session, None)
             record = None
+        if fam.get("request_boundary_fallback") is True:
+            return self._request_boundary_plan(candidates, payload, session, nonce, now, elapsed,
+                fingerprint, cfg, profile, family, fam, record, base)
         if record:
             plan = self._divert("sticky", family, dict(fam, target=record[0], cap_fallback="wait"),
                                 requested, payload, session, nonce, now, elapsed,
@@ -508,16 +617,34 @@ class Overflow:
             self.intents.pop(id(payload), None)
             self.warm_waiting.pop(id(payload), None)
             return self._begin(route, model, payload, session, profile, now, fingerprint, operation=operation)
-        admission = self._begin(route, model, payload, session, profile, now, fingerprint)
-        intent = self.intents.pop(id(payload), None)
-        self.warm_waiting.pop(id(payload), None)
+        intent = self.intents.get(id(payload))
         requested = profile[6:] if isinstance(profile, str) and profile.startswith("model:") else None
-        family = self.family_of(self.config(), requested)[0] if requested and requested != model else None
+        configured_family, configured_rule = self.family_of(self.config(), requested) if requested else (None, None)
+        family = configured_family if requested != model else None
+        group = self.policy.groups.get(profile, {})
+        if (session and (group.get("fallback_models") or (configured_rule or {}).get("request_boundary_fallback"))
+                and any(a.operation == "inference" and a.session == session and a.profile == profile
+                        and a.model != model for a in self.policy.active.values())):
+            raise AdmissionCapacityChanged("active session model changed")
+        if model in group.get("fallback_models", ()):
+            requested, family = profile, "profile"
+        prior = self.diverted.get(session) if session else None
+        existing = bool(prior and prior[0] == model and prior[2:4] == [family, requested])
+        kind = (intent[0] if intent and intent[3] == model else
+                "sticky" if existing else "new_session")
+        if kind == "sticky" and not existing:
+            kind = "request_boundary"
+        if family and not self._cap_ok(model, now, self.config(), kind in ("new_session", "request_boundary")):
+            self.counters["cap_refused"] += 1
+            raise AdmissionCapacityChanged("fallback target capacity changed")
+        admission = self._begin(route, model, payload, session, profile, now, fingerprint)
+        self.intents.pop(id(payload), None)
+        self.warm_waiting.pop(id(payload), None)
         if family:
             # The policy only admits another model under an exact pin when plan() diverted it.
-            kind = intent[0] if intent and intent[3] == model else (
-                "sticky" if session and session in self.diverted else "new_session")
             target = model
+            admission.overflow_target = target
+            admission.overflow_previous = prior
             self.tokens[admission.token] = (kind, family, requested, target)
             self.counters["diverted_" + kind] += 1
             if session:
@@ -526,13 +653,18 @@ class Overflow:
                     self.c429.pop(session, None)
                     self._trim(self.fell_back)
                 else:
-                    if kind == "new_session":
+                    if kind in ("new_session", "request_boundary"):
                         self.cap_sessions.setdefault(target, deque()).append(now)
-                    self.diverted[session] = [target, now, family, requested]
+                        admission.overflow_cap_stamp = now
+                    previous = self.diverted.get(session)
+                    since = (previous[4] if previous and len(previous) > 4 and previous[0] == target
+                             and previous[2:4] == [family, requested] else now)
+                    self.diverted[session] = [target, now, family, requested, since]
                     self.diverted.move_to_end(session)
                     self._trim(self.diverted)
-            elif kind == "new_session":
+            elif kind in ("new_session", "request_boundary"):
                 self.cap_sessions.setdefault(target, deque()).append(now)
+                admission.overflow_cap_stamp = now
             self._event({"event": "diverted", "kind": kind, "family": family,
                          "requested_model": requested, "served_model": model,
                          "route": route.route_id, "request": admission.token,
@@ -558,10 +690,28 @@ class Overflow:
         session = admission.session
         if marked:
             self.counters["diverted_completed" if success else "diverted_failed"] += 1
+            if no_send:
+                stamp = getattr(admission, "overflow_cap_stamp", None)
+                window = self.cap_sessions.get(admission.model, ())
+                if stamp is not None and stamp in window:
+                    window.remove(stamp)
+                current = self.diverted.get(session) if session else None
+                if current and current[1] == admission.started:
+                    previous = getattr(admission, "overflow_previous", None)
+                    if previous is None:
+                        self.diverted.pop(session, None)
+                    else:
+                        self.diverted[session] = previous
             if success and session in self.diverted:
                 self.diverted[session][1] = self.clock()
         elif session:
             if success:
+                prior = self.diverted.get(session)
+                group = self.policy.groups.get(admission.profile, {})
+                primary_return = (prior and prior[3] == admission.profile
+                                  and admission.model not in group.get("fallback_models", ()))
+                if prior and (primary_return or (prior[3] == admission.model and admission.profile == "model:" + admission.model)):
+                    self.diverted.pop(session, None)
                 self.c429.pop(session, None)
                 if session in self.seen:
                     self.seen[session] += 1
@@ -569,6 +719,7 @@ class Overflow:
                 self.c429[session] = self.c429.get(session, 0) + 1
                 self.c429.move_to_end(session)
                 self._trim(self.c429)
+        self.policy.checkpoint()
 
     def learn_limit(self, route, body):
         cfg = self.config()
@@ -614,7 +765,7 @@ class Overflow:
         enabled = self.enabled(cfg)
         now = self.clock()
         c = self.counters
-        diverted = c["diverted_new_session"] + c["diverted_sticky"] + c["diverted_short_fallback"]
+        diverted = c["diverted_new_session"] + c["diverted_sticky"] + c["diverted_short_fallback"] + c["diverted_request_boundary"]
         considered = diverted + c["primary_admitted"]
         families = {}
         for name in cfg["families"]:

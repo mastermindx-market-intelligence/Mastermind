@@ -17,6 +17,10 @@ from dataclasses import dataclass, field
 VERSION = "model-tier-v1-20261111"
 
 
+class AdmissionCapacityChanged(ValueError):
+    """A final synchronous capacity fence refused before any upstream send."""
+
+
 def positive(value, default=0.0, maximum=1e9):
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return default
@@ -165,6 +169,10 @@ class Admission:
     operation: str = "inference"
     concurrency_group: str = ""
     circuit_generation: int = 0
+    requested_model: str = ""
+    routing_reason: str = ""
+    overflow_target: str = ""
+    rejected_before_acceptance: bool = False
 
 
 class ModelPolicyState:
@@ -298,6 +306,11 @@ class ModelPolicyState:
             weights = group.get("weights", {})
             if not isinstance(allowed, dict) or not isinstance(weights, dict):
                 raise ValueError("invalid model group routes/weights")
+            fallback = group.get("fallback_models", [])
+            if (not isinstance(fallback, list)
+                    or any(not isinstance(m, str) or m not in self.aliases[name] for m in fallback)
+                    or len(set(fallback)) != len(fallback)):
+                raise ValueError("invalid bounded fallback models")
             for model in self.aliases[name]:
                 if model not in allowed or not allowed[model]:
                     raise ValueError("every group model needs explicit allowed routes")
@@ -316,6 +329,38 @@ class ModelPolicyState:
                 raise ValueError("invalid exact-model route binding")
         if self.metered - set(self.routes):
             raise ValueError("metered route identity is unknown")
+        holds = self.policy.get("route_model_holds", {})
+        if not isinstance(holds, dict):
+            raise ValueError("invalid route model holds")
+        for rid, models in holds.items():
+            if rid not in self.routes or not isinstance(models, dict):
+                raise ValueError("invalid held route")
+            for model, reason in models.items():
+                if (not self.routes[rid].serves(model) or not isinstance(reason, str)
+                        or not 1 <= len(reason) <= 128 or any(not (c.isalnum() or c == "_") for c in reason)):
+                    raise ValueError("invalid held model")
+        overflow = self.policy.get("overflow", {})
+        if not isinstance(overflow, dict):
+            raise ValueError("invalid overflow policy")
+        if not isinstance(overflow.get("families", {}), dict) or not isinstance(overflow.get("caps", {}), dict):
+            raise ValueError("invalid overflow families or caps")
+        for fam in overflow.get("families", {}).values():
+            if not isinstance(fam, dict):
+                raise ValueError("invalid fallback family")
+            if "request_boundary_fallback" in fam and type(fam["request_boundary_fallback"]) is not bool:
+                raise ValueError("invalid request-boundary policy")
+            for field, limit in (("preference_wait_s", 10), ("return_to_primary_after_s", 3600)):
+                if field in fam and positive(fam[field], -1, limit) < 0:
+                    raise ValueError("invalid fallback preference interval")
+            if "targets" in fam and (not isinstance(fam["targets"], list) or len(fam["targets"]) > 8
+                    or any(not isinstance(m, str) or not any(r.serves(m) for r in self.routes.values()) for m in fam["targets"])):
+                raise ValueError("invalid fallback chain")
+        for cap in overflow.get("caps", {}).values():
+            if not isinstance(cap, dict):
+                raise ValueError("invalid fallback cap")
+            for field in ("max_inflight", "max_new_sessions_per_hour"):
+                if field in cap and (type(cap[field]) is not int or not 1 <= cap[field] <= 8192):
+                    raise ValueError("invalid fallback cap")
         for rid, rule in self.resources.items():
             if rid not in self.routes or not isinstance(rule, dict):
                 raise ValueError("resource route binding is invalid")
@@ -354,6 +399,19 @@ class ModelPolicyState:
     def resource(self, route):
         rule = self.resources.get(route.route_id, {})
         return rule.get("key", route.route_id), rule
+
+    def eligible_routes(self, model, group=None):
+        """One eligibility decision shared by selection and overflow diagnostics."""
+        included = any(r.serves(model) and r.route_id not in self.metered
+                       for r in self.routes.values())
+        allowed = (group["routes"].get(model, ()) if group else
+                   self.policy.get("exact_route_allowlists", {}).get(model))
+        return [r for r in self.routes.values() if r.serves(model)
+                and r.effective_weight(model) > 0
+                and model not in self.policy.get("route_model_holds", {}).get(r.route_id, {})
+                and (allowed is None or r.route_id in allowed)
+                and not (r.route_id in self.metered and not self.allow_metered
+                         and (group or included))]
 
     def limits(self, route):
         _, rule = self.resource(route)
@@ -431,10 +489,43 @@ class ModelPolicyState:
                 return 1.0
         return 0.0
 
+    def fit_reason(self, route, model, payload, session, now, fingerprint=None):
+        """Permanent request-size/wire mismatch, distinct from temporary pressure."""
+        if not self.wire_compatible(route, payload):
+            return "incompatible_wire"
+        _, rule = self.resource(route)
+        inp, out, _, _ = self.estimate(route, model, payload, session, now, fingerprint)
+        if not rule.get("allow_one_oversize", False):
+            for name, amount, limit in zip(("input_budget", "output_budget"),
+                                           (inp, out), self.limits(route)):
+                if limit and amount > limit:
+                    return name
+        return None
+
+    def unavailable_reason(self, route, model, payload, session, now, fingerprint=None):
+        fit = self.fit_reason(route, model, payload, session, now, fingerprint)
+        if fit:
+            return fit
+        resource, rule = self.resource(route)
+        hold = self.route_state.held(route.route_id, model)
+        if hold:
+            return hold["category"]
+        if self.persistence_error and rule.get("strict_output_reservation"):
+            return "admission_state_unavailable"
+        if self.route_state.cooldown_until.get(route.route_id, 0) > now:
+            return "provider_cooldown"
+        if self.recovery_until.get(resource, 0) > now:
+            return "uncertain_send_hold"
+        if self.concurrency_eta(route):
+            return "concurrency"
+        return "token_budget" if self.eta(route, model, payload, session, now, fingerprint) > 0 else "ready"
+
     def eta(self, route, model, payload, session, now, fingerprint=None):
         if not self.wire_compatible(route, payload):
             return float("inf")
         if route.effective_weight(model) <= 0:
+            return float("inf")
+        if self.route_state.held(route.route_id, model):
             return float("inf")
         until = self.route_state.cooldown_until.get(route.route_id, 0.0)
         if until > now:
@@ -456,6 +547,37 @@ class ModelPolicyState:
             if view and now - view["at"] < 60 and extra > view["remaining"]:
                 wait = max(wait, 60 - (now - view["at"]))
         return wait
+
+    def send_ready(self, admission, now):
+        """Revalidate after persistence awaits, including this reservation once."""
+        route = self.routes.get(admission.route_id)
+        if (route is None or admission.settled or admission.token not in self.active or self.draining
+                or self.route_state.held(admission.route_id, admission.model)
+                or self.route_state.cooldown_until.get(admission.route_id, 0) > now
+                or self.route_state.generations.get(admission.route_id, 0) != admission.circuit_generation
+                or self.recovery_until.get(admission.resource, 0) > now):
+            return False
+        if not admission.profile.startswith("model:") and admission.profile not in self.groups:
+            return False
+        if route.route_id not in {r.route_id for r in self.eligible_routes(
+                admission.model, self.groups.get(admission.profile))}:
+            return False
+        _, rule = self.resource(route)
+        if self.persistence_error and rule.get("strict_output_reservation"):
+            return False
+        active = tuple(self.active.values())
+        if (sum(a.resource == admission.resource for a in active) > rule.get("max_inflight", 8)
+                or (route.max_in_flight and sum(a.route_id == route.route_id for a in active) > route.max_in_flight)
+                or (route.concurrency_group and sum(a.concurrency_group == route.concurrency_group for a in active) > route.group_max_in_flight)):
+            return False
+        if not rule.get("allow_one_oversize", False):
+            if any(limit and used > limit for used, limit in zip(
+                    self.window.totals(admission.resource, now), self.limits(route))):
+                return False
+        for view in self.provider_capacity.get(admission.resource, {}).values():
+            if now - view["at"] < 60 and view["remaining"] < 0:
+                return False
+        return True
 
     @staticmethod
     def _rendezvous(key, name, weight):
@@ -488,30 +610,17 @@ class ModelPolicyState:
         model_headroom = {}
         if group and group.get("capacity_aware"):
             for model, _ in candidates:
-                model_headroom[model] = max((self.headroom(r, now) for r in self.routes.values()
-                    if r.route_id in group["routes"].get(model, ())
-                    and self.eta(r, model, payload, session, now, fingerprint) <= 0), default=0.0)
+                model_headroom[model] = max((self.headroom(r, now) for r in self.eligible_routes(model, group)
+                    if self.eta(r, model, payload, session, now, fingerprint) <= 0), default=0.0)
         for order, (model, _) in enumerate(candidates):
-            for route in self.routes.values():
-                if not route.serves(model):
-                    continue
-                any_model = True
-                if route.effective_weight(model) <= 0:
-                    continue
-                has_included = any(r.serves(model) and r.route_id not in self.metered for r in self.routes.values())
-                if route.route_id in self.metered and not self.allow_metered and (group or has_included):
-                    continue
-                exact_allowlist = self.policy.get("exact_route_allowlists", {}).get(model)
-                if not group and exact_allowlist is not None and route.route_id not in exact_allowlist:
-                    continue
-                if group and route.route_id not in group["routes"].get(model, ()):
-                    continue
+            any_model = any_model or any(r.serves(model) for r in self.routes.values())
+            for route in self.eligible_routes(model, group):
                 if not self.wire_compatible(route, payload):
                     incompatible_wire = True
                     continue
                 if counting and route.wire != "anthropic":
                     continue
-                eta = max(0.0, self.route_state.cooldown_until.get(route.route_id, 0) - now,
+                eta = max(float("inf") if self.route_state.held(route.route_id, model) else 0.0, self.route_state.cooldown_until.get(route.route_id, 0) - now,
                     self.concurrency_eta(route, inference=False)) if counting else self.eta(route, model, payload, session, now, fingerprint)
                 resource = self.resource(route)[0]
                 inflight = sum(a.resource == resource for a in self.active.values())
@@ -532,6 +641,9 @@ class ModelPolicyState:
                 "FABRIC_TIER_CAPACITY_UNAVAILABLE" if any_model else "FABRIC_MODEL_UNKNOWN")
             return [], float("inf"), code, profile
         ready = [x for x in options if x[0] <= 0]
+        if not ready and not counting and all(self.fit_reason(x[6], x[7], payload, session, now, fingerprint)
+                                              for x in options):
+            return [], float("inf"), "FABRIC_REQUEST_EXCEEDS_CAPACITY", profile
         preference_s = min(2.0, positive(self.policy.get("affinity_wait_s", 1.5)))
         sticky_wait = next((x[0] for x in options if x[1]), float("inf"))
         if sticky and 0 < sticky_wait <= preference_s and elapsed < preference_s and not counting:
@@ -556,7 +668,7 @@ class ModelPolicyState:
         if operation not in {"inference", "count_tokens"}:
             raise ValueError("unknown admission operation")
         if self.concurrency_eta(route, inference=operation == "inference"):
-            raise ValueError("admission concurrency changed before reservation")
+            raise AdmissionCapacityChanged("admission concurrency changed before reservation")
         inp, out, signatures, full = (self.estimate(route, model, payload, session, now, fingerprint)
             if operation == "inference" else (0.0, 0.0, (), 0.0))
         token = uuid.uuid4().hex
@@ -565,6 +677,7 @@ class ModelPolicyState:
         admission.operation = operation
         admission.concurrency_group = route.concurrency_group
         admission.circuit_generation = self.route_state.generations.get(route.route_id, 0)
+        admission.requested_model = str(payload.get("model", model))
         if operation == "count_tokens":
             self.active[token] = admission
             self.counters["metering_selected"] += 1
@@ -726,6 +839,8 @@ class ModelPolicyState:
                 self.route_state.record_failure(admission.route_id, "FABRIC_STREAM_INCOMPLETE",
                     now=now, cooldown_s=30, generation=admission.circuit_generation)
         self.events.append({"request": admission.token, "profile": admission.profile,
+            "requested_model": admission.requested_model,
+            "routing_reason": admission.routing_reason,
             "selected_model": admission.model, "reported_model": admission.reported_model,
             "route": admission.route_id, "success": bool(success),
             "requested_max_tokens": admission.requested_max_tokens,
@@ -778,6 +893,9 @@ class ModelPolicyState:
                 "inflight": sum(a.concurrency_group == name for a in self.active.values())}
                 for name, limit in self.concurrency_limits.items()},
             "waiting": len(self.waiters), "counters": dict(self.counters),
+            "owner_holds": dict(self.route_state.owner_holds),
+            "model_holds": self.route_state.model_holds,
+            "route_model_holds": self.policy.get("route_model_holds", {}),
             "resources": resources, "recent": list(self.events)[-20:],
             "exact_model_pins_preserved": True, "metered_fallback": self.allow_metered,
             "persistence": {"enabled": self.checkpoint_path is not None,

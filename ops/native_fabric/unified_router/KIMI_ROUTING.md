@@ -1,4 +1,4 @@
-# Kimi Ultra routing and capacity protection
+# Morph capacity, model selection and fallback protection
 
 ## Purpose
 
@@ -20,7 +20,8 @@ References: https://docs.morphllm.com/ultra-plan and https://docs.morphllm.com/s
 
 - `auto` includes DeepSeek, Kimi, GLM and Qwen with initial weights 6:3:1:1 and capacity-aware weighted selection.
 - `fabric/balanced` uses GLM, Kimi and Qwen with weights 4:4:2 and capacity awareness.
-- `fabric/kimi-preferred` keeps Kimi first, then its existing qualified GLM/Qwen alternatives.
+- `fabric/kimi-preferred` keeps Kimi first, then Qwen4 and Opus5.5.
+- `fabric/deepseek-preferred` keeps eligible DeepSeek providers first, then Qwen4 and Opus5.5.
 - `fabric/fast`, the explicit frontier tier, exact-model route allowlists, metered fallback restrictions and existing explicit overflow policies retain their roles.
 
 Model weights are preferences when a resource is eligible, not traffic quotas. Measured headroom and current in-flight work reduce selection pressure. Existing session affinity is preserved when it remains eligible. A cooling sibling subscription cannot suppress a ready subscription. Only known pre-effect failures can use bounded fallback; partially delivered or uncertain requests are never replayed.
@@ -35,9 +36,9 @@ Checkpoint I/O runs outside the request event loop. One writer serializes immuta
 
 ## Direct M2 rollout
 
-The deployment authority is the Chairman's direct request of 2026-11-13. Protected source-law pin: `c0b30b422d2310e614f91faed49a4adbce4291f0`. Baseline is the actual M2 release, including its existing local overlays; it must not be replaced wholesale by an older repository version.
+The deployment authority is the Chairman's continuing direct M2 request. The follow-up protected source-law pin is `fc91f33ccce3e8f18c78546f03c955c2ced0c704`. Baseline is the actual M2 release, including its existing local overlays; it must not be replaced wholesale by an older repository version.
 
-Use the incumbent reload lock, exact source/config preimages and backups. Temporarily disable both Kimi routes for new admissions and verify adoption before changing source. Keep them disabled through the graceful SIGTERM and launchd replacement. Do not run overlapping serving processes with independent admission windows, and do not force-kill active streams. Verify the replacement PID, source generation, manifest, configuration and persistence before enabling the promoted profile. New admissions can pause while the old process drains; this is not a zero-downtime rollout.
+Use the incumbent reload lock, exact source/config preimages and backups. Qualify the complete candidate before activation. Use graceful SIGTERM and the same launchd slot, preserving the admission ledger and every existing provider hold. Do not run overlapping serving processes with independent admission windows, and do not force-kill active streams. Adopt changed group bindings only after the incumbent drains. Verify the replacement PID, measured source generation, manifest, configuration and persistence before consumer proof. New admissions can pause while the old process drains.
 
 The source archive branch preserves code and evidence without making direct M2 activation wait for a PR. Production installation, source archival, test success and real request proof are separate receipts, recorded on Mastermind issue 983.
 
@@ -55,7 +56,23 @@ The second activation retains the proven subscription policy and ledger. It uses
 
 ## Concurrent dispatch and circuit recovery
 
-The same active-admission ledger now composes the global ceiling of 128, per-resource limits, optional route `max_in_flight`, and optional `concurrency_group`/`group_max_in_flight`. Group occupancy does not merge token windows or provider balance observations. The 37 current route declarations omit the optional fields, so their default zero/empty values preserve existing resource policy. Invalid or contradictory group limits refuse configuration. Limit changes affect future admissions; active group or resource reassignment still requires drain.
+The same active-admission ledger composes the global ceiling of 128, per-resource limits, optional route `max_in_flight`, and optional `concurrency_group`/`group_max_in_flight`. Group occupancy does not merge token windows or provider balance observations. OpenCode Go chat/Beam routes share a local cap of two per configured credential. BytePlus routes share a conservative family cap of two; Experiential routes share a gateway cap of two. These are local safety limits, not assertions of additional provider entitlement. Qwen routes use four concurrent requests per local resource. Invalid or contradictory group limits refuse configuration. Limit changes affect future admissions; active group or resource reassignment still requires drain.
+
+## Kimi and DeepSeek follow-up
+
+Kimi's low sustained token allowance is a fit constraint even when a route has no active request. Exact requests preserve their full prompt and output ceiling. A cold prompt larger than the effective input budget or output ceiling larger than the effective output budget now moves through the explicitly configured fallback family promptly. Flexible Kimi aliases retain the visible 4096-token output bound. Conversation history no longer falsely marks a settled conversation as an active upstream request.
+
+Each Morph DeepSeek resource keeps the documented 400000 uncached-input and 70000 output TPM ceilings, now at 95% operating headroom (380000/66500), six local concurrent requests at most, and complete output reservation. The flexible alias ceiling is16384. Flash aliases share their existing resource. No burst allowance is assumed, and provider observations may reduce these estimates. A healthy independent Morph sibling remains eligible.
+
+Exact DeepSeek Flash and preferred/auto profiles include the existing Morph, Experiential, OpenCode Go and BytePlus candidates. Exact1017 only includes providers configured to serve that snapshot; it is not silently mapped to an unpinned model. The Experiential gateway currently reports `PLAN_INCLUDED_FUNDING_UNVERIFIED`, so its DeepSeek routes remain configured but excluded by an explicit model hold. Its Anthropic compatibility endpoint cannot bypass that hold. Existing OpenCode/BytePlus quota deadlines remain authoritative; this change neither clears them nor enables extra usage.
+
+Opted-in Kimi/DeepSeek families can change models between requests. An actual active inference for the same session/profile prevents a model split at planning and at final admission. Temporary short waits receive at most1.5seconds of preference grace; impossible fits do not wait for a minute window they can never fit. Fallback targets are Qwen4, then Opus5.5. Within a five-attempt budget, at most two available primary accounts and two Qwen accounts precede an Opus attempt. Only classified preacceptance rejections permit advancement. If substitutes are unavailable, the complete primary candidate list remains available. This bounded exploration cannot test every provider account in one request.
+
+Sticky fallback requests obey the same concurrent target caps as new diversions. Switching targets charges the new target's hourly cap, and final admission rechecks those caps. Proven no-send attempts restore the previous diversion and refund its hourly admission charge. Accepted or uncertain effects remain charged. Hourly diversion windows persist through restart. A ready primary may be used after a minimum300seconds on a substitute; this is a minimum residence interval, not proof of300seconds of continuously healthy upstream service.
+
+Provider errors are classified by bounded stable codes: temporary admission pressure, exhausted quota, permission, invalid request, and uncertain execution. Direct-account exhaustion without a valid future reset becomes a durable owner hold instead of a repeating timer. Model grant refusals hold only the affected route/model; prompt refusals end that request without poisoning unrelated work. Authentication/account restrictions remain terminal for that effect. Generic502/503/504/529 responses are not proof of nonacceptance, so they retain reservations and are not replayed. Typed overload responses can use bounded fallback. Actual positive Retry-After deadlines are not shortened, and reset timestamps are interpreted only for the appropriate provider endpoint.
+
+Strict admissions revalidate runtime holds, current configured eligibility, circuit generation and capacity after persistence awaits. Configuration withdrawal or a new funding hold cannot slip between reservation and send. `/routingz` exposes runtime owner/model holds and configured model holds. Response metadata includes requested/resolved model, selected route, routing reason and exact request identity; admission events retain the same decision context.
 
 Every inference captures its route's circuit generation. Old successes and generic failures cannot change a newer circuit decision, while authoritative quota and permission refusals remain effective. Cooldown deadlines cannot shorten. After the cooldown, one current inference probe may run; its validated success closes the circuit. The existing admission checkpoint preserves the need for a probe across restart.
 
@@ -76,7 +93,8 @@ python -m pytest --import-mode=importlib \
   ops/native_fabric/unified_router/test_codex_route.py \
   ops/native_fabric/unified_router/test_mcpfix_wire.py \
   ops/native_fabric/unified_router/test_router_resilience_upgrade.py \
-  ops/native_fabric/unified_router/test_router_concurrency_upgrade.py -q
+  ops/native_fabric/unified_router/test_router_concurrency_upgrade.py \
+  ops/native_fabric/unified_router/test_morph_fallback_upgrade.py -q
 ```
 
 Provider congestion, external use of the same subscription and token-estimation error can still cause throttling. The router reacts to those signals; it cannot promise that an upstream provider never returns 429.

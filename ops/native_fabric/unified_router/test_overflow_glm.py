@@ -41,6 +41,8 @@ class _StubPolicy:
         self.snapshot = lambda *a, **k: {}
         self.route_state = type("RS", (), {"cooldown_until": {}})()
         self.routes = {}
+        self.active = {}
+        self.eligible_routes = lambda model: list(self.routes.values())
         self.window = type("W", (), {"totals": lambda *a: (0.0,)})()
 
 

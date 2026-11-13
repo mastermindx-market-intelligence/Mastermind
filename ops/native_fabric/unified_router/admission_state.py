@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from pathlib import Path
 import stat
 import tempfile
@@ -120,6 +121,44 @@ def restore(policy):
         if not isinstance(probes, list) or len(probes) > 1024:
             raise ValueError("invalid recovery probes")
         probes = {_identity(rid) for rid in probes}
+        owner_holds = data.get("owner_holds", {})
+        if not isinstance(owner_holds, dict) or len(owner_holds) > 1024:
+            raise ValueError("invalid owner holds")
+        for rid, hold in owner_holds.items():
+            _identity(rid)
+            if (not isinstance(hold, dict) or hold.get("category") not in ("permission", "quota_exhausted")
+                    or not isinstance(hold.get("code"), str)
+                    or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", hold["code"])):
+                raise ValueError("invalid owner hold")
+        model_holds = data.get("model_holds", {})
+        if not isinstance(model_holds, dict) or len(model_holds) > 1024:
+            raise ValueError("invalid model holds")
+        for rid, models in model_holds.items():
+            _identity(rid)
+            if not isinstance(models, dict) or len(models) > 128:
+                raise ValueError("invalid model hold scope")
+            for model, hold in models.items():
+                _identity(model)
+                if (not isinstance(hold, dict) or hold.get("category") != "permission"
+                        or not isinstance(hold.get("code"), str)
+                        or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", hold["code"])):
+                    raise ValueError("invalid model hold")
+        overflow_caps = {}
+        cap_rows = data.get("overflow_cap_sessions", {})
+        if not isinstance(cap_rows, dict) or len(cap_rows) > 128:
+            raise ValueError("invalid overflow caps")
+        for model, stamps in cap_rows.items():
+            _identity(model)
+            if not isinstance(stamps, list) or len(stamps) > MAX_ROWS:
+                raise ValueError("invalid overflow cap window")
+            result = []
+            for stamp in stamps:
+                age = wall - _number(stamp)
+                if age < -5:
+                    raise ValueError("future overflow admission")
+                if age < 3600:
+                    result.append(now - max(0, age))
+            overflow_caps[model] = sorted(result)
         views = data.get("provider_capacity", {})
         if not isinstance(views, dict) or len(views) > 1024:
             raise ValueError("invalid provider capacity")
@@ -145,6 +184,11 @@ def restore(policy):
         policy.observed_limits.update(observed)
         policy.provider_capacity.update(capacity)
         policy.route_state.cooldown_until.update(cooldown)
+        policy.route_state.owner_holds.update({rid: value for rid, value in owner_holds.items()
+                                              if rid in policy.routes})
+        policy.route_state.model_holds.update({rid: value for rid, value in model_holds.items()
+                                              if rid in policy.routes})
+        policy.restored_overflow_caps = overflow_caps
         for rid in probes:
             if rid in policy.routes:
                 policy.route_state.consecutive_failures[rid] = max(1,
@@ -178,6 +222,10 @@ def encode(policy):
                                  if count > 0 and rid in policy.routes),
         "recovery": {resource: wall + until - now for resource, until in policy.recovery_until.items() if until > now},
         "observed_limits": policy.observed_limits, "provider_capacity": views,
+        "owner_holds": policy.route_state.owner_holds,
+        "model_holds": policy.route_state.model_holds,
+        "overflow_cap_sessions": {model: [wall - (now - at) for at in stamps if now - at < 3600]
+            for model, stamps in getattr(getattr(policy, "overflow", None), "cap_sessions", {}).items()},
         "cooldown": {rid: wall + until - now for rid, until in policy.route_state.cooldown_until.items() if until > now}}
     raw = json.dumps(data, separators=(",", ":"), allow_nan=False).encode()
     if len(raw) > MAX_BYTES:

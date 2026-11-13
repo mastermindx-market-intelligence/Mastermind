@@ -182,14 +182,14 @@ def test_upstream_denial_or_ambiguous_failure_is_not_replayed(tmp_path,monkeypat
 
 
 @pytest.mark.parametrize('status',[502,503,504,529])
-def test_provider_capacity_failure_before_output_uses_bounded_safe_fallback(tmp_path,monkeypatch,status):
+def test_generic_server_failure_has_unknown_acceptance_and_is_not_replayed(tmp_path,monkeypatch,status):
     monkeypatch.setenv('FABRIC_TEST_UPSTREAM','test-only');calls=[]
     def handler(req):
         calls.append(req)
         return httpx.Response(status,json={'error':{'message':'fixture'}}) if len(calls)==1 else response_for(req)
     response,app=asyncio.run(run_request(settings(tmp_path),handler,setup=prefer_kimi))
-    assert response.status_code==200 and len(calls)==2
-    assert response.headers['x-fabric-resolved-model']=='glm'
+    assert response.status_code==status and len(calls)==1
+    assert response.json()['error']['category']=='execution_unknown'
 
 
 @pytest.mark.parametrize('status',[502,503,504,529])
