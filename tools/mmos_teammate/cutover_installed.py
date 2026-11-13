@@ -727,7 +727,11 @@ def cmd_rebind_thread(spec, dry_run=False):
                      "unneeded — continuing")
     model = ((spec.get("t3") or {}).get("model") or spec.get("model")
              or old_thread.get("model"))
-    title = f"{spec['agent_name']} primary " + time.strftime("%Y-%m-%d")
+    # RF-TITLE (principal ruling, 2026-11-12): the title carries the UTC
+    # minute so two rebinds on one day cannot share a title (HM install
+    # part B, finding 3).
+    title = f"{spec['agent_name']} primary " + time.strftime(
+        "%Y-%m-%d %H:%MZ", time.gmtime())
     sha_before = sha256_file(result_path)
 
     new_id = new_instance = new_model = revision = None

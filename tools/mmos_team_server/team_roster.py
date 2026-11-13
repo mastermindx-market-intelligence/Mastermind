@@ -1396,6 +1396,11 @@ def resolve_threads(spec, project_id):
                 "created": False, "currentTitle": found["title"],
                 "projectId": project_id, "pinnedAt": found["pinnedAt"],
                 "recoveredBy": recovered_by,
+                # RF-TITLE-MICRO (RULING ESC 16): the binding's presence at
+                # resolution time — a fact that stays true on every later
+                # run, unlike recoveredBy, which flips to "state" once this
+                # apply saves the bound id. Not written to the state file.
+                "bound": bound is not None,
                 "instance": found["instance"] or mate["instance"],
             }
             if found["title"] != title:
@@ -1427,7 +1432,7 @@ def commit_threads(spec, project_id, threads, to_create, state, state_path):
                                  "projectId": project_id, "pinnedAt": None,
                                  "currentTitle": title,
                                  "title": title, "created": True,
-                                 "recoveredBy": None,
+                                 "recoveredBy": None, "bound": False,
                                  "instance": mate["instance"]}
         log(f"primary thread for {mate['name']}: {launched['threadId']}")
     seen = {}
@@ -1547,9 +1552,33 @@ def rename_threads(spec, threads):
     profile is supplied by the operator, never inferred from a live server's
     credential files, and no token appears in argv.
     """
-    stale = [(mate, threads[mate["name"]]["currentTitle"])
-             for mate in spec["teammates"]
-             if threads[mate["name"]]["currentTitle"] != teammate_title(mate)]
+    stale = []
+    for mate in spec["teammates"]:
+        info = threads[mate["name"]]
+        wanted = teammate_title(mate)
+        if info["currentTitle"] == wanted:
+            continue
+        if info.get("bound"):
+            # RF-TITLE (principal ruling) + RF-TITLE-MICRO (RULING ESC 16,
+            # 2026-11-12): the board binding owns which conversation is this
+            # teammate's primary, so the roster never renames a conversation
+            # the binding names. The skip is decided by the binding's
+            # PRESENCE at resolution time (`bound`, set by resolve_threads),
+            # a fact that stays true on every later run — never by the
+            # recoveredBy label, which flips to "state" as soon as the first
+            # apply saves the bound id and would hand the live conversation
+            # back to the renamer. The title difference is a note, not a
+            # failure: apply ends rc 0. Threads found with no binding
+            # (state, instance, title prefix) and minted threads keep the
+            # rename path below.
+            log(f"{mate['name']}: the board binding names thread "
+                f"{info['threadId']}; not renaming it (live title "
+                f"{info['currentTitle']!r}, roster title {wanted!r})")
+            # LOW-2: the report must never state a title that is not on the
+            # conversation — a skipped thread keeps its live title.
+            info["title"] = info["currentTitle"]
+            continue
+        stale.append((mate, info["currentTitle"]))
     if not stale:
         return {mate["name"]: False for mate in spec["teammates"]}, []
     profile = spec.get("browser_profile")
