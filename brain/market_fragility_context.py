@@ -124,11 +124,13 @@ def project_market_fragility(payload: Any, *, now: datetime | None = None) -> di
     h.update(window_end=history.get("window_end") if _day(history.get("window_end")) else None,
              terminal_regime=history.get("terminal_regime") if history.get("terminal_regime") in ("long", "short") else None,
              counts_are_independent_trials=False,
-             terminal_run_left_censored=history.get("terminal_run_left_censored") is True)
+             terminal_run_left_censored=history.get("terminal_run_left_censored") if isinstance(history.get("terminal_run_left_censored"), bool) else None)
     out: dict[str, Any] = {
         "schema": _SCHEMA, "status": "current" if usable else "stale" if age is not None and age > 0 else "unavailable",
         "state": state if usable else "unknown", "source": _SOURCE, "position_basis": "assumption",
         "source_session": day.isoformat() if day else None,
+        "source_session_complete": clocks.get("source_session_complete") if isinstance(clocks.get("source_session_complete"), bool) else None,
+        "coverage_status": payload.get("data_status") if payload.get("data_status") in ("ready", "partial", "stale", "unavailable") else "unavailable",
         "source_age_sessions_at_read": age, "computed_at": clocks["computed_at"],
         "source_available_at": clocks.get("source_available_at"),
         "reported_gamma_regime": sign if isinstance(sign, str) and sign in {"short", "long"} else None,

@@ -161,3 +161,14 @@ def test_source_session_cannot_postdate_computation():
     data = payload()
     data["clocks"]["computed_at"] = "2026-11-11T21:00:00Z"
     assert project_market_fragility(data, now=NOW)["reason"] == "source_postdates_computation"
+
+
+def test_partial_session_qualification_survives_compaction_adapter():
+    data = payload()
+    data["clocks"]["source_session"] = "2026-11-13"
+    data["clocks"]["source_session_complete"] = False
+    data["data_status"] = "partial"
+    result = project_market_fragility(data, now=NOW)
+    assert result["state"] == "amplifying"
+    assert result["source_session_complete"] is False
+    assert result["coverage_status"] == "partial"
