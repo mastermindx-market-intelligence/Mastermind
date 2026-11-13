@@ -1,0 +1,1387 @@
+{
+  "schema": "mastermind.morph_fallback_acceptance.v1",
+  "status": "PROVEN_SCOPED_OUTCOME",
+  "captured_at": 1794554143.8629692,
+  "source_commit": "6f3b8716b53cebb0dd3351d3010b5b89f94fdcc9",
+  "authority_pin": "fc91f33ccce3e8f18c78546f03c955c2ced0c704",
+  "runtime": {
+    "pid": 71314,
+    "runtime_generation": "model-tier-20261111-1ce495a38d8d15eb",
+    "source_matches_manifest": true,
+    "configuration": {
+      "sha256": "ab8b965145805412ba3b9c574642e03c8b01f9b55ac396bd0db8e413bf4b4cc6",
+      "updates": 0,
+      "changed_at": null,
+      "error": null,
+      "hot_reload": true,
+      "scope": "future_admissions_only"
+    },
+    "persistence": {
+      "enabled": true,
+      "restored": true,
+      "error": null,
+      "async_writer": true,
+      "pending_revision": 425,
+      "durable_revision": 425,
+      "last_write_ms": 5.4
+    },
+    "active": 6,
+    "waiting": 0,
+    "counters": {
+      "selected": 104,
+      "completed": 97,
+      "failed": 1,
+      "cache_affinity_hits": 59,
+      "model_spillovers": 2,
+      "capacity_waits": 0,
+      "queue_refused": 0,
+      "unknown_usage": 1,
+      "quota_refusals": 0,
+      "metering_selected": 0,
+      "metering_completed": 0,
+      "metering_failed": 0
+    },
+    "concurrency_groups": {
+      "experiential-local-gateway": {
+        "max_in_flight": 2,
+        "inflight": 0
+      },
+      "byteplus-coding-safety": {
+        "max_in_flight": 2,
+        "inflight": 0
+      },
+      "opencode-go-credential-1": {
+        "max_in_flight": 2,
+        "inflight": 0
+      },
+      "opencode-go-credential-2": {
+        "max_in_flight": 2,
+        "inflight": 0
+      }
+    },
+    "route_model_holds": {
+      "labs_pool": {
+        "deepseek-v4.1-flash": "PLAN_INCLUDED_FUNDING_UNVERIFIED",
+        "deepseek-v4.1-flash-1017": "PLAN_INCLUDED_FUNDING_UNVERIFIED"
+      }
+    }
+  },
+  "verification": {
+    "local_regression_tests": 270,
+    "m2_regression_tests": 270,
+    "m2_exit_code": 0,
+    "m2_python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+    "source_hashes_match": true,
+    "reload_lock_released": true,
+    "ledger_mode": "0600",
+    "runtime_files": {
+      "ops/native_fabric/unified_router/service.py": "d4bfdadf5eb2229ca0f7404f4b50040d2035a88576b1c2716d2ea96f325c9006",
+      "ops/native_fabric/unified_router/gateway.py": "1fbd2bbc25e13eb7f267dde896af5f4e7c02d0a11cdc45e07f22c55dd3dbe0db",
+      "ops/native_fabric/unified_router/routes.py": "aed6a026b400658298a13ce75b756124ef152f13ff625a00dfb424960eaf6f07",
+      "ops/native_fabric/unified_router/model_policy.py": "8d1a008143bf55e07cb1b00fde153954e194085b814b630f82f839457cefefac",
+      "ops/native_fabric/unified_router/config_refresh.py": "5f22502ceea10d64edf4f620cd027c16cabe5ff55b1fb1cc0ebd0ebd9059b011",
+      "ops/native_fabric/unified_router/wire.py": "34e767b7f8a97c31dbfe2d3a84499970189ed2be45c5e01e1151c63b61ba7831",
+      "ops/native_fabric/unified_router/codex_oauth.py": "24142f9028c57c66bc2f6afd26e55e79ca98ae43e3ecbdc68af690be0a412b40",
+      "ops/native_fabric/unified_router/capacity_fabric_observer.py": "5a4e5e0676b75d2f7b242a019abbc62ec1ab6cf3131a9b526b54950428cebcf6",
+      "ops/native_fabric/unified_router/capacity_fabric_schema.py": "8e0a8e1f08797eeaeb4bf3766bf8fbd1d6a2894ae887665be34e1127c338b22d",
+      "ops/native_fabric/unified_router/overflow.py": "ddded3a28c87b5c746ae90fad6e842460396ecd0d02a0d1c6b35e01d9d615ef3",
+      "ops/native_fabric/unified_router/admission_state.py": "c97db32252c4d53177e1152e426a444db36cc52de8b15918da57419c3ce7f76f",
+      "ops/native_fabric/unified_router/provider_errors.py": "8c2ca613451edaa9f1e49fc732d286da08b48bf23316484241d91a054981f35a"
+    },
+    "config_sha256": "ab8b965145805412ba3b9c574642e03c8b01f9b55ac396bd0db8e413bf4b4cc6"
+  },
+  "deployment": {
+    "started_at": 1794553801.939469,
+    "source_commit": "6f3b8716b53cebb0dd3351d3010b5b89f94fdcc9",
+    "expected_generation": "model-tier-20261111-1ce495a38d8d15eb",
+    "steps": [
+      {
+        "step": "preimages_backed_up",
+        "at": 1794553802.075456,
+        "pid": 11192,
+        "active": 11,
+        "config_sha256": "9a7c72a365dbb49caac9e4835a481e0f176c9ad4744a2052b5eee2ce72c6cbf5",
+        "backup": "/Users/chriswong/.local/share/mastermind/fabric-router/work/morph-fallback-20261113/backup"
+      },
+      {
+        "step": "new_admissions_paused",
+        "at": 1794553802.168347,
+        "config_sha256": "b584e631d9950a89ccd4e66b0a63c958c9bb24beea6fd60e0fb7a08b153ba139",
+        "active": 11
+      },
+      {
+        "step": "source_installed",
+        "at": 1794553802.220798,
+        "changed_files": [
+          "KIMI_ROUTING.md",
+          "ROUTER_RELIABILITY_PLAN.md",
+          "admission_state.py",
+          "gateway.py",
+          "model_policy.py",
+          "morph_fallback_config.py",
+          "overflow.py",
+          "provider_errors.py",
+          "routes.py",
+          "test_model_tiers.py",
+          "test_morph_fallback_upgrade.py",
+          "test_overflow_glm.py"
+        ],
+        "manifest_sha256": "a038fc349921da3e3e04049bbf1d03015cd07506aebe0c07788d182246cd8310"
+      },
+      {
+        "step": "graceful_signal",
+        "at": 1794553802.2474399,
+        "pid": 11192,
+        "returncode": 0
+      },
+      {
+        "step": "draining",
+        "at": 1794553832.332741,
+        "original_pid": 11192,
+        "current_job_pid": 11192
+      },
+      {
+        "step": "draining",
+        "at": 1794553862.442764,
+        "original_pid": 11192,
+        "current_job_pid": 11192
+      },
+      {
+        "step": "draining",
+        "at": 1794553892.520339,
+        "original_pid": 11192,
+        "current_job_pid": 11192
+      },
+      {
+        "step": "incumbent_drained",
+        "at": 1794553900.544037,
+        "pid": 11192,
+        "long_provider_hold_count": 10,
+        "ledger_sha256": "31dd9e12ab41b16c6c9784de8350005519f41a6c9534c3f1f1e4ad656eac0fd7"
+      },
+      {
+        "step": "candidate_configuration_installed",
+        "at": 1794553900.549999,
+        "config_sha256": "ab8b965145805412ba3b9c574642e03c8b01f9b55ac396bd0db8e413bf4b4cc6"
+      },
+      {
+        "step": "activation_verified",
+        "at": 1794553914.963504,
+        "pid": 71314,
+        "runtime_generation": "model-tier-20261111-1ce495a38d8d15eb",
+        "config_sha256": "ab8b965145805412ba3b9c574642e03c8b01f9b55ac396bd0db8e413bf4b4cc6",
+        "persistence": {
+          "enabled": true,
+          "restored": true,
+          "error": null,
+          "async_writer": true,
+          "pending_revision": 0,
+          "durable_revision": 0,
+          "last_write_ms": null
+        },
+        "preserved_provider_holds": [
+          "byteplus_coding",
+          "opencode_go_1",
+          "opencode_go_2",
+          "glm_chairman_6",
+          "glm_chairman_5",
+          "glm_chairman_3",
+          "glm_chairman_4",
+          "bailian_1",
+          "bailian_3",
+          "byteplus_coding_2"
+        ],
+        "elapsed_s": 113.02
+      }
+    ],
+    "plist_sha256": "9e4fcf11612dace207df0dd8b52844e14b290a6f9fdd43006aef2faf1f5764a3",
+    "original_pid": 11192,
+    "status": "INSTALLED_AND_VERIFIED"
+  },
+  "consumer_cases": [
+    {
+      "case": "kimi-seat-a",
+      "status": "PASSED",
+      "http_status": 200,
+      "requested_model": "kimi-k3.1-pro",
+      "requested_max_tokens": 1024,
+      "message_count": 1,
+      "headers": {
+        "x-fabric-resolved-model": "kimi-k3.1-pro",
+        "x-fabric-route": "morph_kimi",
+        "x-fabric-requested-model": "kimi-k3.1-pro",
+        "x-fabric-routing-reason": "exact_model",
+        "x-fabric-model-substituted": "false",
+        "x-fabric-routing-policy": "model-tier-v1-20261111",
+        "x-fabric-request-id": "bdeb908d6cb247559429762266e90100",
+        "x-fabric-generation": "model-tier-20261111-1ce495a38d8d15eb",
+        "x-fabric-admission-wait-ms": "1",
+        "x-fabric-requested-max-tokens": "1024",
+        "x-fabric-effective-max-tokens": "1024"
+      },
+      "response_model": "kimi-k3.1-pro",
+      "stop_reason": "end_turn",
+      "usage": {
+        "input_tokens": 112,
+        "output_tokens": 60
+      },
+      "output_marker_present": true,
+      "elapsed_s": 1.21,
+      "matching_admission_events": [
+        {
+          "request": "6ff7e7dfea1e474e8372c81a3f6d6619",
+          "profile": "model:kimi-k3.1-pro",
+          "requested_model": "kimi-k3.1-pro",
+          "routing_reason": "exact_model",
+          "selected_model": "kimi-k3.1-pro",
+          "reported_model": "morph-kimik31",
+          "route": "morph_kimi",
+          "success": true,
+          "requested_max_tokens": 1024,
+          "effective_max_tokens": 1024,
+          "finish_reason": "stop",
+          "usage": {
+            "input": 112,
+            "uncached_input": 112,
+            "cached_input": 0,
+            "output": 60
+          },
+          "usage_known": true,
+          "elapsed_s": 1.204
+        }
+      ]
+    },
+    {
+      "case": "kimi-seat-b",
+      "status": "PASSED",
+      "http_status": 200,
+      "requested_model": "kimi-k3.1-pro",
+      "requested_max_tokens": 1024,
+      "message_count": 1,
+      "headers": {
+        "x-fabric-resolved-model": "kimi-k3.1-pro",
+        "x-fabric-route": "morph_kimi_2",
+        "x-fabric-requested-model": "kimi-k3.1-pro",
+        "x-fabric-routing-reason": "exact_model",
+        "x-fabric-model-substituted": "false",
+        "x-fabric-routing-policy": "model-tier-v1-20261111",
+        "x-fabric-request-id": "4e3938de79464b22b4aeea2a150411ba",
+        "x-fabric-generation": "model-tier-20261111-1ce495a38d8d15eb",
+        "x-fabric-admission-wait-ms": "1",
+        "x-fabric-requested-max-tokens": "1024",
+        "x-fabric-effective-max-tokens": "1024"
+      },
+      "response_model": "kimi-k3.1-pro",
+      "stop_reason": "end_turn",
+      "usage": {
+        "input_tokens": 112,
+        "output_tokens": 61
+      },
+      "output_marker_present": true,
+      "elapsed_s": 1.691,
+      "matching_admission_events": [
+        {
+          "request": "e680b4f10abb41fa8d25b1ec47687181",
+          "profile": "model:kimi-k3.1-pro",
+          "requested_model": "kimi-k3.1-pro",
+          "routing_reason": "exact_model",
+          "selected_model": "kimi-k3.1-pro",
+          "reported_model": "morph-kimik31",
+          "route": "morph_kimi_2",
+          "success": true,
+          "requested_max_tokens": 1024,
+          "effective_max_tokens": 1024,
+          "finish_reason": "stop",
+          "usage": {
+            "input": 112,
+            "uncached_input": 112,
+            "cached_input": 0,
+            "output": 61
+          },
+          "usage_known": true,
+          "elapsed_s": 1.686
+        }
+      ]
+    },
+    {
+      "case": "kimi-established-fallback",
+      "status": "PASSED",
+      "http_status": 200,
+      "requested_model": "kimi-k3.1-pro",
+      "requested_max_tokens": 32768,
+      "message_count": 7,
+      "headers": {
+        "x-fabric-resolved-model": "qwen4-max-preview",
+        "x-fabric-route": "bailian_7",
+        "x-fabric-requested-model": "kimi-k3.1-pro",
+        "x-fabric-routing-reason": "overflow_output_budget",
+        "x-fabric-model-substituted": "true",
+        "x-fabric-routing-policy": "model-tier-v1-20261111",
+        "x-fabric-request-id": "380ed0975a894595be35c60e86d7713d",
+        "x-fabric-generation": "model-tier-20261111-1ce495a38d8d15eb",
+        "x-fabric-admission-wait-ms": "3"
+      },
+      "response_model": "qwen4.0-max-preview",
+      "stop_reason": "end_turn",
+      "usage": {
+        "input_tokens": 131,
+        "output_tokens": 114,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "output_marker_present": true,
+      "elapsed_s": 6.639,
+      "matching_admission_events": [
+        {
+          "request": "ef9c6f0a1c134da7989667fc7f472064",
+          "profile": "model:kimi-k3.1-pro",
+          "requested_model": "kimi-k3.1-pro",
+          "routing_reason": "overflow_output_budget",
+          "selected_model": "qwen4-max-preview",
+          "reported_model": "qwen4.0-max-preview",
+          "route": "bailian_7",
+          "success": true,
+          "requested_max_tokens": 32768,
+          "effective_max_tokens": null,
+          "finish_reason": null,
+          "usage": {
+            "input": 131,
+            "uncached_input": 131,
+            "cached_input": 0,
+            "output": 114
+          },
+          "usage_known": true,
+          "elapsed_s": 6.63
+        }
+      ]
+    },
+    {
+      "case": "deepseek-direct",
+      "status": "PASSED",
+      "http_status": 200,
+      "requested_model": "deepseek-v4.1-flash",
+      "requested_max_tokens": 1024,
+      "message_count": 1,
+      "headers": {
+        "x-fabric-resolved-model": "deepseek-v4.1-flash",
+        "x-fabric-route": "morph_ds",
+        "x-fabric-requested-model": "deepseek-v4.1-flash",
+        "x-fabric-routing-reason": "exact_model",
+        "x-fabric-model-substituted": "false",
+        "x-fabric-routing-policy": "model-tier-v1-20261111",
+        "x-fabric-request-id": "1216ee9df5fb4a4db9de7e3298e22fc2",
+        "x-fabric-generation": "model-tier-20261111-1ce495a38d8d15eb",
+        "x-fabric-admission-wait-ms": "1",
+        "x-fabric-requested-max-tokens": "1024",
+        "x-fabric-effective-max-tokens": "1024"
+      },
+      "response_model": "deepseek-v4.1-flash",
+      "stop_reason": "end_turn",
+      "usage": {
+        "input_tokens": 54,
+        "output_tokens": 22
+      },
+      "output_marker_present": true,
+      "elapsed_s": 1.989,
+      "matching_admission_events": [
+        {
+          "request": "ab999938024945a9b6e359050dbaed45",
+          "profile": "model:deepseek-v4.1-flash",
+          "requested_model": "deepseek-v4.1-flash",
+          "routing_reason": "exact_model",
+          "selected_model": "deepseek-v4.1-flash",
+          "reported_model": "morph-dsv41flash-1017",
+          "route": "morph_ds",
+          "success": true,
+          "requested_max_tokens": 1024,
+          "effective_max_tokens": 1024,
+          "finish_reason": "stop",
+          "usage": {
+            "input": 54,
+            "uncached_input": 54,
+            "cached_input": 0,
+            "output": 22
+          },
+          "usage_known": true,
+          "elapsed_s": 1.982
+        }
+      ]
+    },
+    {
+      "case": "deepseek-preferred",
+      "status": "PASSED",
+      "http_status": 200,
+      "requested_model": "fabric/deepseek-preferred",
+      "requested_max_tokens": 2048,
+      "message_count": 1,
+      "headers": {
+        "x-fabric-resolved-model": "qwen4-max-preview",
+        "x-fabric-route": "bailian_4",
+        "x-fabric-requested-model": "fabric/deepseek-preferred",
+        "x-fabric-routing-reason": "ready_tier",
+        "x-fabric-model-substituted": "true",
+        "x-fabric-routing-policy": "model-tier-v1-20261111",
+        "x-fabric-request-id": "a47ae54bc7594878928f94a7edb8867e",
+        "x-fabric-generation": "model-tier-20261111-1ce495a38d8d15eb",
+        "x-fabric-admission-wait-ms": "2"
+      },
+      "response_model": "qwen4.0-max-preview",
+      "stop_reason": "end_turn",
+      "usage": {
+        "input_tokens": 46,
+        "output_tokens": 143,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "output_marker_present": true,
+      "elapsed_s": 5.005,
+      "matching_admission_events": [
+        {
+          "request": "53e587a6549e44e1bfa6a04cc366f22b",
+          "profile": "fabric/deepseek-preferred",
+          "requested_model": "fabric/deepseek-preferred",
+          "routing_reason": "ready_tier",
+          "selected_model": "qwen4-max-preview",
+          "reported_model": "qwen4.0-max-preview",
+          "route": "bailian_4",
+          "success": true,
+          "requested_max_tokens": 2048,
+          "effective_max_tokens": null,
+          "finish_reason": null,
+          "usage": {
+            "input": 46,
+            "uncached_input": 46,
+            "cached_input": 0,
+            "output": 143
+          },
+          "usage_known": true,
+          "elapsed_s": 4.993
+        }
+      ]
+    },
+    {
+      "case": "opus-destination",
+      "status": "PASSED",
+      "http_status": 200,
+      "requested_model": "claude-opus-5-5",
+      "requested_max_tokens": 1024,
+      "message_count": 1,
+      "headers": {
+        "x-fabric-resolved-model": "claude-opus-5-5",
+        "x-fabric-route": "claude_pool",
+        "x-fabric-requested-model": "claude-opus-5-5",
+        "x-fabric-routing-reason": "exact_model",
+        "x-fabric-model-substituted": "false",
+        "x-fabric-routing-policy": "model-tier-v1-20261111",
+        "x-fabric-request-id": "f00f4f325cfb49468e8331f5c344672a",
+        "x-fabric-generation": "model-tier-20261111-1ce495a38d8d15eb",
+        "x-fabric-admission-wait-ms": "5"
+      },
+      "response_model": "claude-opus-5-5",
+      "stop_reason": "end_turn",
+      "usage": {
+        "input_tokens": 79,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 24,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "service_tier": "standard",
+        "inference_geo": "global",
+        "speed": "standard"
+      },
+      "output_marker_present": true,
+      "elapsed_s": 1.682,
+      "matching_admission_events": [
+        {
+          "request": "3067a7e1c62c4e1f87868cfe33e5e873",
+          "profile": "model:claude-opus-5-5",
+          "requested_model": "claude-opus-5-5",
+          "routing_reason": "exact_model",
+          "selected_model": "claude-opus-5-5",
+          "reported_model": "claude-opus-5-5",
+          "route": "claude_pool",
+          "success": true,
+          "requested_max_tokens": 1024,
+          "effective_max_tokens": null,
+          "finish_reason": null,
+          "usage": {
+            "input": 79,
+            "uncached_input": 79,
+            "cached_input": 0,
+            "output": 24
+          },
+          "usage_known": true,
+          "elapsed_s": 1.67
+        }
+      ]
+    },
+    {
+      "case": "auto-profile",
+      "status": "PASSED",
+      "http_status": 200,
+      "requested_model": "auto",
+      "requested_max_tokens": 1024,
+      "message_count": 1,
+      "headers": {
+        "x-fabric-resolved-model": "glm-5.3",
+        "x-fabric-route": "glm_chairman_2",
+        "x-fabric-requested-model": "auto",
+        "x-fabric-routing-reason": "ready_tier",
+        "x-fabric-model-substituted": "true",
+        "x-fabric-routing-policy": "model-tier-v1-20261111",
+        "x-fabric-request-id": "06515e5acfb24e8aab3b5c65fe8d54d7",
+        "x-fabric-generation": "model-tier-20261111-1ce495a38d8d15eb",
+        "x-fabric-admission-wait-ms": "2"
+      },
+      "response_model": "glm-5.3",
+      "stop_reason": "end_turn",
+      "usage": {
+        "input_tokens": 31,
+        "output_tokens": 52,
+        "cache_read_input_tokens": 0,
+        "server_tool_use": {
+          "web_search_requests": 0
+        },
+        "service_tier": "standard"
+      },
+      "output_marker_present": true,
+      "elapsed_s": 3.994,
+      "matching_admission_events": [
+        {
+          "request": "39207b4bdf8b4c7680d98d39ac634d4b",
+          "profile": "auto",
+          "requested_model": "auto",
+          "routing_reason": "ready_tier",
+          "selected_model": "glm-5.3",
+          "reported_model": "glm-5.3",
+          "route": "glm_chairman_2",
+          "success": true,
+          "requested_max_tokens": 1024,
+          "effective_max_tokens": null,
+          "finish_reason": null,
+          "usage": {
+            "input": 31,
+            "uncached_input": 31,
+            "cached_input": 0,
+            "output": 52
+          },
+          "usage_known": true,
+          "elapsed_s": 3.986
+        }
+      ]
+    }
+  ],
+  "streaming_case": {
+    "status": "PASSED",
+    "source_commit": "6f3b8716b53cebb0dd3351d3010b5b89f94fdcc9",
+    "generation": "model-tier-20261111-1ce495a38d8d15eb",
+    "started_at": 1794554052.669745,
+    "requested_model": "kimi-k3.1-pro",
+    "requested_max_tokens": 32768,
+    "message_count": 7,
+    "payload_sha256": "17286940de33302519aee4af590c9b4b1b4263ecb152245ab231b74bc830e5ab",
+    "http_status": 200,
+    "headers": {
+      "x-fabric-resolved-model": "qwen4-max-preview",
+      "x-fabric-route": "bailian_2",
+      "x-fabric-requested-model": "kimi-k3.1-pro",
+      "x-fabric-routing-reason": "overflow_output_budget",
+      "x-fabric-model-substituted": "true",
+      "x-fabric-routing-policy": "model-tier-v1-20261111",
+      "x-fabric-request-id": "696e81102caa4887acfd19a01d0e2927",
+      "x-fabric-generation": "model-tier-20261111-1ce495a38d8d15eb",
+      "x-fabric-admission-wait-ms": "7"
+    },
+    "output_marker_present": true,
+    "message_stop": true,
+    "usage_events": [
+      {
+        "type": "message_start",
+        "message": {
+          "id": "msg_713ed895-607f-40b9-9a23-2ca34b47eba9",
+          "type": "message",
+          "role": "assistant",
+          "model": "qwen4.0-max-preview",
+          "content": [],
+          "stop_reason": null,
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 39,
+            "output_tokens": 0
+          }
+        }
+      },
+      {
+        "type": "message_delta",
+        "delta": {
+          "stop_reason": "end_turn",
+          "stop_sequence": null
+        },
+        "usage": {
+          "input_tokens": 98,
+          "output_tokens": 61,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          }
+        }
+      }
+    ],
+    "elapsed_s": 3.491,
+    "matching_admission_events": [
+      {
+        "request": "b1e98a329715446f930e71199c26bdfe",
+        "profile": "model:kimi-k3.1-pro",
+        "requested_model": "kimi-k3.1-pro",
+        "routing_reason": "overflow_output_budget",
+        "selected_model": "qwen4-max-preview",
+        "reported_model": "qwen4.0-max-preview",
+        "route": "bailian_2",
+        "success": true,
+        "requested_max_tokens": 32768,
+        "effective_max_tokens": null,
+        "finish_reason": null,
+        "usage": {
+          "input": 98,
+          "uncached_input": 98,
+          "cached_input": 0,
+          "output": 61
+        },
+        "usage_known": true,
+        "elapsed_s": 3.431
+      }
+    ],
+    "persistence": {
+      "enabled": true,
+      "restored": true,
+      "error": null,
+      "async_writer": true,
+      "pending_revision": 296,
+      "durable_revision": 293,
+      "last_write_ms": 5.2
+    }
+  },
+  "resources": {
+    "morph_kimi": {
+      "input_tpm": 24290,
+      "output_tpm": 6162,
+      "input_basis": "uncached",
+      "local_input_charged_or_reserved": 0,
+      "local_output_charged_or_reserved": 0,
+      "inflight": 0,
+      "max_inflight": 1,
+      "effective_input_tpm": 21861,
+      "effective_output_tpm": 5545.8,
+      "headroom_fraction": 1,
+      "strict_output_reservation": true,
+      "alias_max_output_tokens": 4096,
+      "provider_capacity": {
+        "input": {
+          "limit": 21861,
+          "remaining_after_reservations": 21861,
+          "reported_remaining": 24178,
+          "age_s": 207.5,
+          "fresh": false,
+          "basis": "provider_after_input_minus_other_reservations"
+        },
+        "output": {
+          "limit": 5545.8,
+          "remaining_after_reservations": 5485.8,
+          "reported_remaining": 6162,
+          "age_s": 207.5,
+          "fresh": false,
+          "basis": "provider_pre_completion_minus_local_reservations"
+        }
+      },
+      "recovery_wait_s": 0,
+      "quota_truth": "local_estimate_not_provider_balance"
+    },
+    "morph_kimi_2": {
+      "input_tpm": 24290,
+      "output_tpm": 6162,
+      "input_basis": "uncached",
+      "local_input_charged_or_reserved": 0,
+      "local_output_charged_or_reserved": 0,
+      "inflight": 0,
+      "max_inflight": 1,
+      "effective_input_tpm": 21861,
+      "effective_output_tpm": 5545.8,
+      "headroom_fraction": 1,
+      "strict_output_reservation": true,
+      "alias_max_output_tokens": 4096,
+      "provider_capacity": {
+        "input": {
+          "limit": 21861,
+          "remaining_after_reservations": 21861,
+          "reported_remaining": 24178,
+          "age_s": 205.8,
+          "fresh": false,
+          "basis": "provider_after_input_minus_other_reservations"
+        },
+        "output": {
+          "limit": 5545.8,
+          "remaining_after_reservations": 5484.8,
+          "reported_remaining": 6162,
+          "age_s": 205.8,
+          "fresh": false,
+          "basis": "provider_pre_completion_minus_local_reservations"
+        }
+      },
+      "recovery_wait_s": 0,
+      "quota_truth": "local_estimate_not_provider_balance"
+    },
+    "morph_ds": {
+      "input_tpm": 400000,
+      "output_tpm": 70000,
+      "input_basis": "uncached",
+      "local_input_charged_or_reserved": 0,
+      "local_output_charged_or_reserved": 0,
+      "inflight": 0,
+      "max_inflight": 6,
+      "effective_input_tpm": 380000,
+      "effective_output_tpm": 66500,
+      "headroom_fraction": 1,
+      "strict_output_reservation": true,
+      "alias_max_output_tokens": 16384,
+      "provider_capacity": {
+        "input": {
+          "limit": 380000,
+          "remaining_after_reservations": 380000,
+          "reported_remaining": 399350,
+          "age_s": 91.2,
+          "fresh": false,
+          "basis": "provider_after_input_minus_other_reservations"
+        },
+        "output": {
+          "limit": 66500,
+          "remaining_after_reservations": 65373,
+          "reported_remaining": 70000,
+          "age_s": 91.2,
+          "fresh": false,
+          "basis": "provider_pre_completion_minus_local_reservations"
+        }
+      },
+      "recovery_wait_s": 0,
+      "quota_truth": "local_estimate_not_provider_balance"
+    },
+    "morph_ds_2": {
+      "input_tpm": 400000,
+      "output_tpm": 70000,
+      "input_basis": "uncached",
+      "local_input_charged_or_reserved": 16248.3,
+      "local_output_charged_or_reserved": 51900,
+      "inflight": 1,
+      "max_inflight": 6,
+      "effective_input_tpm": 380000,
+      "effective_output_tpm": 66500,
+      "headroom_fraction": 0.2195,
+      "strict_output_reservation": true,
+      "alias_max_output_tokens": 16384,
+      "provider_capacity": {
+        "input": {
+          "limit": 380000,
+          "remaining_after_reservations": 380000,
+          "reported_remaining": 399544,
+          "age_s": 29.4,
+          "fresh": true,
+          "basis": "provider_after_input_minus_other_reservations"
+        },
+        "output": {
+          "limit": 66500,
+          "remaining_after_reservations": 18584,
+          "reported_remaining": 50584,
+          "age_s": 29.4,
+          "fresh": true,
+          "basis": "provider_pre_completion_minus_local_reservations"
+        }
+      },
+      "recovery_wait_s": 0,
+      "quota_truth": "local_estimate_not_provider_balance"
+    }
+  },
+  "provider_routes": [
+    {
+      "route_id": "labs_pool",
+      "served": 0,
+      "attempt_failed": 0,
+      "refused": 0,
+      "cooldown_remaining_s": 0,
+      "last_failure": null,
+      "owner_hold": null,
+      "model_holds": {},
+      "concurrency_group": "experiential-local-gateway",
+      "group_max_in_flight": 2,
+      "max_in_flight": 0
+    },
+    {
+      "route_id": "byteplus_coding",
+      "served": 0,
+      "attempt_failed": 0,
+      "refused": 0,
+      "cooldown_remaining_s": 3269.8,
+      "last_failure": null,
+      "owner_hold": null,
+      "model_holds": {},
+      "concurrency_group": "byteplus-coding-safety",
+      "group_max_in_flight": 2,
+      "max_in_flight": 2
+    },
+    {
+      "route_id": "opencode_go_1",
+      "served": 0,
+      "attempt_failed": 0,
+      "refused": 0,
+      "cooldown_remaining_s": 233056.4,
+      "last_failure": null,
+      "owner_hold": null,
+      "model_holds": {},
+      "concurrency_group": "opencode-go-credential-1",
+      "group_max_in_flight": 2,
+      "max_in_flight": 2
+    },
+    {
+      "route_id": "opencode_go_2",
+      "served": 0,
+      "attempt_failed": 0,
+      "refused": 0,
+      "cooldown_remaining_s": 233058.5,
+      "last_failure": null,
+      "owner_hold": null,
+      "model_holds": {},
+      "concurrency_group": "opencode-go-credential-2",
+      "group_max_in_flight": 2,
+      "max_in_flight": 2
+    },
+    {
+      "route_id": "morph_ds",
+      "served": 16,
+      "attempt_failed": 0,
+      "refused": 0,
+      "cooldown_remaining_s": 0,
+      "last_failure": null,
+      "owner_hold": null,
+      "model_holds": {},
+      "concurrency_group": "",
+      "group_max_in_flight": 0,
+      "max_in_flight": 0
+    },
+    {
+      "route_id": "morph_kimi",
+      "served": 1,
+      "attempt_failed": 0,
+      "refused": 0,
+      "cooldown_remaining_s": 0,
+      "last_failure": null,
+      "owner_hold": null,
+      "model_holds": {},
+      "concurrency_group": "",
+      "group_max_in_flight": 0,
+      "max_in_flight": 0
+    },
+    {
+      "route_id": "morph_ds_2",
+      "served": 8,
+      "attempt_failed": 0,
+      "refused": 0,
+      "cooldown_remaining_s": 0,
+      "last_failure": null,
+      "owner_hold": null,
+      "model_holds": {},
+      "concurrency_group": "",
+      "group_max_in_flight": 0,
+      "max_in_flight": 0
+    },
+    {
+      "route_id": "morph_kimi_2",
+      "served": 1,
+      "attempt_failed": 0,
+      "refused": 0,
+      "cooldown_remaining_s": 0,
+      "last_failure": null,
+      "owner_hold": null,
+      "model_holds": {},
+      "concurrency_group": "",
+      "group_max_in_flight": 0,
+      "max_in_flight": 0
+    },
+    {
+      "route_id": "byteplus_coding_2",
+      "served": 0,
+      "attempt_failed": 0,
+      "refused": 0,
+      "cooldown_remaining_s": 16139,
+      "last_failure": null,
+      "owner_hold": null,
+      "model_holds": {},
+      "concurrency_group": "byteplus-coding-safety",
+      "group_max_in_flight": 2,
+      "max_in_flight": 2
+    }
+  ],
+  "overflow": {
+    "version": "fabric-overflow-v1-20261110",
+    "enabled": true,
+    "counters": {
+      "diverted_new_session": 1,
+      "diverted_sticky": 10,
+      "diverted_short_fallback": 0,
+      "diverted_request_boundary": 6,
+      "diverted_completed": 16,
+      "diverted_failed": 0,
+      "primary_admitted": 27,
+      "cap_refused": 0,
+      "target_unavailable": 0,
+      "warm_waits": 0,
+      "provider_429": 0,
+      "limit_bodies_translated": 0,
+      "billing_headers_stripped": 24
+    },
+    "diverted_requests": 17,
+    "diversion_share": 0.3864,
+    "families": {
+      "kimi": {
+        "overflowing": false,
+        "signal": null,
+        "overflowing_for_s": 0,
+        "healthy_in_s": 0,
+        "proactive_window_open": false
+      },
+      "deepseek": {
+        "overflowing": false,
+        "signal": null,
+        "overflowing_for_s": 0,
+        "healthy_in_s": 0,
+        "proactive_window_open": false
+      },
+      "sol": {
+        "overflowing": false,
+        "signal": null,
+        "overflowing_for_s": 0,
+        "healthy_in_s": 0,
+        "proactive_window_open": false
+      },
+      "glm": {
+        "overflowing": false,
+        "signal": null,
+        "overflowing_for_s": 0,
+        "healthy_in_s": 0,
+        "proactive_window_open": true
+      }
+    },
+    "keys": {
+      "morph-ultra-seat-1-deepseek": {
+        "input_tpm_limit": 400000,
+        "target": 320000,
+        "used_or_reserved": 0,
+        "used_pct_of_limit": 0,
+        "over_target": false,
+        "peak_pct_of_limit": 85.2,
+        "cooling_s": 0
+      },
+      "morph-ultra-seat-1-kimi": {
+        "input_tpm_limit": 24290,
+        "target": 19432,
+        "used_or_reserved": 0,
+        "used_pct_of_limit": 0,
+        "over_target": false,
+        "peak_pct_of_limit": 0.5,
+        "cooling_s": 0
+      },
+      "morph-ultra-seat-2-deepseek": {
+        "input_tpm_limit": 400000,
+        "target": 320000,
+        "used_or_reserved": 16248.3,
+        "used_pct_of_limit": 4.1,
+        "over_target": false,
+        "peak_pct_of_limit": 93,
+        "cooling_s": 0
+      },
+      "morph-ultra-seat-2-kimi": {
+        "input_tpm_limit": 24290,
+        "target": 19432,
+        "used_or_reserved": 0,
+        "used_pct_of_limit": 0,
+        "over_target": false,
+        "peak_pct_of_limit": 0.5,
+        "cooling_s": 0
+      }
+    },
+    "diverted_sessions": 7,
+    "diverted_inflight": 1,
+    "recent": [
+      {
+        "event": "diverted",
+        "kind": "request_boundary",
+        "family": "kimi",
+        "requested_model": "kimi-k3.1-pro",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_7",
+        "request": "ef9c6f0a1c134da7989667fc7f472064",
+        "session": "c71ccee55e84",
+        "input_estimate": 277,
+        "t": 1794553938.102
+      },
+      {
+        "event": "diverted",
+        "kind": "request_boundary",
+        "family": "deepseek",
+        "requested_model": "deepseek-v4.1-flash",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_6",
+        "request": "e7e043a9e7ce4a8f965e8ba1782fff17",
+        "session": "d834fc55a09b",
+        "input_estimate": 232056,
+        "t": 1794553943.088
+      },
+      {
+        "event": "diverted",
+        "kind": "new_session",
+        "family": "profile",
+        "requested_model": "fabric/deepseek-preferred",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_4",
+        "request": "53e587a6549e44e1bfa6a04cc366f22b",
+        "session": "6ef48e80fe4a",
+        "input_estimate": 68,
+        "t": 1794553946.746
+      },
+      {
+        "event": "diverted",
+        "kind": "request_boundary",
+        "family": "deepseek",
+        "requested_model": "deepseek-v4.1-flash",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_4",
+        "request": "f69a751656294e9fab89d94476879190",
+        "session": "1eff36e7d61c",
+        "input_estimate": 230082,
+        "t": 1794553952.463
+      },
+      {
+        "event": "diverted",
+        "kind": "sticky",
+        "family": "deepseek",
+        "requested_model": "deepseek-v4.1-flash",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_6",
+        "request": "3610671e26fc47f0b11e6748eef8ac70",
+        "session": "d834fc55a09b",
+        "input_estimate": 234211,
+        "t": 1794553969.258
+      },
+      {
+        "event": "diverted",
+        "kind": "sticky",
+        "family": "deepseek",
+        "requested_model": "deepseek-v4.1-flash",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_4",
+        "request": "70cbdd054d8b4166aeb7b2d29cb58ef1",
+        "session": "1eff36e7d61c",
+        "input_estimate": 232237,
+        "t": 1794553979.63
+      },
+      {
+        "event": "diverted",
+        "kind": "request_boundary",
+        "family": "deepseek",
+        "requested_model": "deepseek-v4.1-flash",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_6",
+        "request": "dc601450839f44d3a963d30e48551646",
+        "session": "7e997a6b5619",
+        "input_estimate": 229091,
+        "t": 1794554011.373
+      },
+      {
+        "event": "diverted",
+        "kind": "request_boundary",
+        "family": "deepseek",
+        "requested_model": "deepseek-v4.1-flash",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_5",
+        "request": "3b5cf0e6d3214919ac92d4442bf0fd35",
+        "session": "835ec4f795c2",
+        "input_estimate": 138315,
+        "t": 1794554029.564
+      },
+      {
+        "event": "diverted",
+        "kind": "sticky",
+        "family": "deepseek",
+        "requested_model": "deepseek-v4.1-flash",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_6",
+        "request": "661f72b3fe094d99800a5409ce7fd247",
+        "session": "7e997a6b5619",
+        "input_estimate": 231246,
+        "t": 1794554031.356
+      },
+      {
+        "event": "diverted",
+        "kind": "sticky",
+        "family": "deepseek",
+        "requested_model": "deepseek-v4.1-flash",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_5",
+        "request": "9213aa5227b44015a7f434bff5bee7b6",
+        "session": "835ec4f795c2",
+        "input_estimate": 138571,
+        "t": 1794554041.59
+      },
+      {
+        "event": "diverted",
+        "kind": "sticky",
+        "family": "deepseek",
+        "requested_model": "deepseek-v4.1-flash",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_5",
+        "request": "ffba422fa412433bb547db917649eaf1",
+        "session": "835ec4f795c2",
+        "input_estimate": 138887,
+        "t": 1794554048.294
+      },
+      {
+        "event": "diverted",
+        "kind": "request_boundary",
+        "family": "kimi",
+        "requested_model": "kimi-k3.1-pro",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_2",
+        "request": "b1e98a329715446f930e71199c26bdfe",
+        "session": "b60211255b93",
+        "input_estimate": 230,
+        "t": 1794554052.729
+      },
+      {
+        "event": "diverted",
+        "kind": "sticky",
+        "family": "deepseek",
+        "requested_model": "deepseek-v4.1-flash",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_5",
+        "request": "153a4c42eadb4c43a4740c3da3f12eb1",
+        "session": "835ec4f795c2",
+        "input_estimate": 141659,
+        "t": 1794554055.379
+      },
+      {
+        "event": "diverted",
+        "kind": "sticky",
+        "family": "deepseek",
+        "requested_model": "deepseek-v4.1-flash",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_5",
+        "request": "744d9d1dd3044e7eba221b78a525c909",
+        "session": "835ec4f795c2",
+        "input_estimate": 142282,
+        "t": 1794554065.105
+      },
+      {
+        "event": "diverted",
+        "kind": "sticky",
+        "family": "deepseek",
+        "requested_model": "deepseek-v4.1-flash",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_2",
+        "request": "a69b0ac2415c4e5c92753e8fadfde173",
+        "session": "835ec4f795c2",
+        "input_estimate": 142766,
+        "t": 1794554084.339
+      },
+      {
+        "event": "diverted",
+        "kind": "sticky",
+        "family": "deepseek",
+        "requested_model": "deepseek-v4.1-flash",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_4",
+        "request": "5aaa92518ce94929a77b13541aa67a15",
+        "session": "835ec4f795c2",
+        "input_estimate": 144120,
+        "t": 1794554115.308
+      },
+      {
+        "event": "diverted",
+        "kind": "sticky",
+        "family": "deepseek",
+        "requested_model": "deepseek-v4.1-flash",
+        "served_model": "qwen4-max-preview",
+        "route": "bailian_4",
+        "request": "a751b33889d8473388e0008b4de1b3a7",
+        "session": "835ec4f795c2",
+        "input_estimate": 146346,
+        "t": 1794554140.472
+      }
+    ]
+  },
+  "profiles": {
+    "auto": {
+      "models": [
+        "deepseek-v4.1-flash",
+        "kimi-k3.1-pro",
+        "glm-5.3",
+        "qwen4-max-preview"
+      ],
+      "strategy": "balanced",
+      "capacity_aware": true,
+      "weights": {
+        "deepseek-v4.1-flash": 6,
+        "kimi-k3.1-pro": 3,
+        "glm-5.3": 1,
+        "qwen4-max-preview": 1
+      }
+    },
+    "fabric/fast": {
+      "models": [
+        "deepseek-v4.1-flash",
+        "glm-5.3",
+        "qwen4-max-preview"
+      ],
+      "strategy": "ordered",
+      "capacity_aware": true,
+      "weights": {
+        "deepseek-v4.1-flash": 1000,
+        "glm-5.3": 1,
+        "qwen4-max-preview": 1
+      }
+    },
+    "fabric/balanced": {
+      "models": [
+        "glm-5.3",
+        "kimi-k3.1-pro",
+        "qwen4-max-preview"
+      ],
+      "strategy": "balanced",
+      "capacity_aware": true,
+      "weights": {
+        "glm-5.3": 4,
+        "kimi-k3.1-pro": 4,
+        "qwen4-max-preview": 2
+      }
+    },
+    "fabric/kimi-preferred": {
+      "models": [
+        "kimi-k3.1-pro",
+        "qwen4-max-preview",
+        "claude-opus-5-5"
+      ],
+      "strategy": "ordered",
+      "capacity_aware": true,
+      "weights": {
+        "kimi-k3.1-pro": 1000,
+        "qwen4-max-preview": 1,
+        "claude-opus-5-5": 1
+      }
+    },
+    "fabric/frontier": {
+      "models": [
+        "claude-opus-5-5",
+        "gpt-6.1-sol"
+      ],
+      "strategy": "balanced",
+      "capacity_aware": false,
+      "weights": {
+        "claude-opus-5-5": 1,
+        "gpt-6.1-sol": 1
+      }
+    },
+    "fabric/deepseek-preferred": {
+      "models": [
+        "deepseek-v4.1-flash",
+        "qwen4-max-preview",
+        "claude-opus-5-5"
+      ],
+      "strategy": "ordered",
+      "capacity_aware": true,
+      "weights": {
+        "deepseek-v4.1-flash": 1000,
+        "qwen4-max-preview": 1,
+        "claude-opus-5-5": 1
+      }
+    }
+  },
+  "route_allowlists": {
+    "kimi-k3.1-pro": [
+      "morph_kimi",
+      "morph_kimi_2"
+    ],
+    "deepseek-v4.1-flash": [
+      "morph_ds",
+      "morph_ds_2",
+      "labs_pool",
+      "opencode_go_1",
+      "opencode_go_2",
+      "byteplus_coding",
+      "byteplus_coding_2"
+    ],
+    "deepseek-v4.1-flash-1017": [
+      "morph_ds",
+      "morph_ds_2",
+      "labs_pool"
+    ],
+    "glm-5.3": [
+      "glm_chairman_1",
+      "glm_chairman_2",
+      "glm_chairman_3",
+      "glm_chairman_4",
+      "glm_chairman_5",
+      "glm_chairman_6"
+    ],
+    "qwen3.8-max": [
+      "bailian_1",
+      "bailian_2",
+      "bailian_3",
+      "bailian_4",
+      "bailian_5",
+      "bailian_6",
+      "bailian_7",
+      "bailian_8"
+    ],
+    "qwen4-max-preview": [
+      "bailian_1",
+      "bailian_2",
+      "bailian_3",
+      "bailian_4",
+      "bailian_5",
+      "bailian_6",
+      "bailian_7",
+      "bailian_8"
+    ]
+  },
+  "boundaries": [
+    "Experiential DeepSeek funding verification is explicitly held; no compatibility-surface bypass.",
+    "Existing OpenCode/BytePlus deadlines remain; no held-lane inference canary or extra usage purchase.",
+    "Qwen-to-Opus failure ladder is fault-fixture proven; actual Opus destination is production proven.",
+    "Source archive PR2464 remains Draft; direct M2 activation does not authorize protected-master overlay merge."
+  ],
+  "post_rollout_followup": {
+    "completed": 116,
+    "selected": 125,
+    "failed": 1,
+    "quota_refusals": 0,
+    "capacity_waits": 0,
+    "queue_refused": 0,
+    "provider_failure": {
+      "route": "bailian_2",
+      "code": "FABRIC_UPSTREAM_EFFECT_UNKNOWN",
+      "attempt_failed": 1,
+      "cooldown_remaining_s": 0,
+      "root_cause": "Not established; this was outside the eight successful verification calls. The implemented path treats uncertain acceptance as terminal and retains the admission charge."
+    },
+    "persistence_error": null
+  }
+}

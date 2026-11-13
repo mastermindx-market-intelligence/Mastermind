@@ -41,6 +41,16 @@ Read-only live counters after about4hours: selected10964, completed10662, failed
 
 P1/P2 implementation is complete in the candidate: request-boundary and preferred-profile fallback; shared eligibility; bounded target exploration; final cap/session/hold fences; full DeepSeek output reservations; durable owner/model holds and hourly diversion accounting; conservative existing-provider concurrency groups; configured Experiential funding hold. A local 270-case regression suite covers these changes plus the accepted prior admission, wire, OAuth and circuit behavior. All provider calls in the tests are mocked.
 
-The M2 baseline was rechecked at staging: PID11192, generation c6bf1abb586ec8fd, matching source16427 and configuration9a7c72a3, healthy persistence. The owned stage is `/Users/chriswong/.local/share/mastermind/fabric-router/work/morph-fallback-20261113`; its baseline copy is isolated from8313. No production source/config has been modified in this follow-up yet.
+The M2 baseline was rechecked before staging at PID11192/generationc6bf1abb586ec8fd, matching source16427 and config9a7c72a3. The coherent candidate was archived at `6f3b8716b53cebb0dd3351d3010b5b89f94fdcc9`, passed270 local and270 M2 tests, and was activated through the incumbent LaunchAgent after a graceful drain.
 
-Next: archive the candidate with compare-and-swap, qualify exact bytes in M2 Python3.14, then drain/install through the incumbent LaunchAgent and obtain fitting/fallback consumer receipts. Existing BytePlus and OpenCode quota deadlines and Experiential funding hold remain external constraints; no held-lane canary or hold clearing is authorized by a software fix.
+## Acceptance and continuity
+
+P3 is proven. Running PID71314/generation `model-tier-20261111-1ce495a38d8d15eb` matches the source manifest; config is `ab8b965145805412ba3b9c574642e03c8b01f9b55ac396bd0db8e413bf4b4cc6`. Ledger restoration and healthy durable checkpoints are verified. Eleven active requests drained; ten long provider holds were preserved; the reload lock is released.
+
+Eight genuine production verification calls passed: both Kimi seats, seven-turn Kimi-to-Qwen fallback, direct DeepSeek, DeepSeek-preferred fallback to Qwen, Opus destination, auto profile and streaming Kimi-to-Qwen fallback with final usage/message_stop. Both DeepSeek Morph seats also completed real traffic after activation. See [MORPH_ROUTING_ACCEPTANCE.md](MORPH_ROUTING_ACCEPTANCE.md) and [MORPH_ROUTING_ACCEPTANCE.json](MORPH_ROUTING_ACCEPTANCE.json) for exact receipts, limits and test distinctions.
+
+DO_NOT_REDO: this source installation, drained activation, successful consumer cases or the held-provider canaries that were deliberately not attempted. The owned stage is `/Users/chriswong/.local/share/mastermind/fabric-router/work/morph-fallback-20261113`. Any future change starts from the measured running generation and actual config/ledger, with original effect reconciliation.
+
+External boundaries: Experiential included funding remains unverified; OpenCode/BytePlus retain real provider cooldowns. No account/plan restriction, permission refusal or uncertain effect is bypassed. One non-canary Bailian2 unknown-effect failure was observed after deployment; its upstream cause was not established and the router's no-replay path applies. No remaining in-flight worker or modifying child exists. The source archive remains Draft pending broader protected-master overlay qualification.
+
+Finalization: PROVEN_OUTCOME for this scoped router repair, with external provider eligibility limitations explicitly retained. This does not claim universal upstream availability or a defect-free router.
