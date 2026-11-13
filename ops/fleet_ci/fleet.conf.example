@@ -1,0 +1,34 @@
+# /etc/fleet-ci/fleet.conf — one per fleet host (root:root 0644; not secret).
+# Parsed by fleet_gate.py as KEY=VALUE, never sourced by a shell. Unknown keys are refused.
+
+# Runner class: std (ordinary test jobs) or heavy (e2e/browser/docker-heavy jobs).
+# Labels become: self-hosted,Linux,X64,fleet,fleet-<class>
+FLEET_CLASS=std
+# Org runner group id of the fleet group (placeholder; read it with the GitHub UI/API).
+RUNNER_GROUP_ID=0
+
+# --- sizing: slots_for_host() ---------------------------------------------------------
+# slots = min(cores // 4, (MemTotal_GB - RESERVE_GB) // SLOT_MEM_GB)
+# e.g. 24 cores / 30 GB, reserve 8, slot 8  -> min(6, 2) = 2 slots
+#      32 cores / 62 GB, reserve 8, slot 8  -> min(8, 6) = 6 slots
+# SLOTS=auto uses the rule; a number is capped at the rule (never above it).
+SLOTS=auto
+SLOT_MEM_GB=8
+# Memory kept for the host's other services (they share these hosts).
+RESERVE_GB=8
+
+# --- admission gates (same semantics as host_pick.evaluate_hosts) ---------------------
+# Refuse to register one more runner while any of these holds:
+#   memory PSI some avg10 >= MEM_PSI_MAX   (percent, 1..100)
+#   io PSI some avg10     >= IO_PSI_MAX    (percent, 1..100)
+#   MemAvailable          <  SLOT_MEM_FLOOR_GB * (busy slots + 1)
+#   load1 / cores         >= LOAD_MAX
+MEM_PSI_MAX=10
+IO_PSI_MAX=20
+SLOT_MEM_FLOOR_GB=6
+LOAD_MAX=0.85
+
+# --- per-slot systemd limits (rendered into fleet-slot@.service.d/limits.conf) --------
+SLOT_MEMORY_HIGH=7G
+SLOT_MEMORY_MAX=8G
+SLOT_CPU_QUOTA=400%

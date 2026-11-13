@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Fleet CI pool capacity, as the hybrid router reads it (docs/FLEET_CI_POOL.md).
+
+  fleet-capacity [--org ORG] [--group-id ID] [--input FILE]
+
+Reads the org runners of the fleet runner group (GET /orgs/{org}/actions/runner-groups/
+{id}/runners; needs a token that can read org self-hosted runners: a fine-grained token
+with "Self-hosted runners: read" on the org, passed as FLEET_ROUTE_TOKEN; never the
+minting credential) and prints one JSON object:
+
+  {"schema": "mastermind.fleet_capacity.v1", "ok": true,
+   "idle_slots": I, "busy_slots": B, "online_slots": I+B,
+   "per_class": {"std": {"idle": .., "busy": .., "online": ..}, "heavy": {...}}}
+
+Only runners carrying the `fleet` label count; the class comes from `fleet-<class>`.
+A one-job JIT runner is online and idle exactly while it waits for its job, so
+idle_slots is the number of jobs the pool can start now. Any failure prints
+{"ok": false, "error": ...} and exits 0 when --soft is given (the router then falls
+back to hosted), else exits 1. Never prints the token.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+from typing import Any, Dict, List, Optional
+
+SCHEMA = "mastermind.fleet_capacity.v1"
+API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+CLASSES = ("std", "heavy")
+PER_PAGE = 100
+MAX_PAGES = 20
+
+
+def _label_names(runner: Dict[str, Any]) -> List[str]:
+    labels = runner.get("labels")
+    if not isinstance(labels, list):
+        return []
+    return [l["name"].lower() for l in labels if isinstance(l, dict) and isinstance(l.get("name"), str)]
+
+
+def summarize(runners: List[Dict[str, Any]]) -> Dict[str, Any]:
+    per_class = {c: {"idle": 0, "busy": 0, "online": 0} for c in CLASSES}
+    for r in runners:
+        if not isinstance(r, dict):
+            continue
+        names = _label_names(r)
+        if "fleet" not in names:
+            continue
+        cls = next((c for c in CLASSES if f"fleet-{c}" in names), None)
+        if cls is None or r.get("status") != "online":
+            continue
+        bucket = per_class[cls]
+        bucket["online"] += 1
+        if r.get("busy") is True:
+            bucket["busy"] += 1
+        elif r.get("busy") is False:
+            bucket["idle"] += 1
+        # busy missing/odd: online but not counted idle (fail toward hosted)
+    idle = sum(b["idle"] for b in per_class.values())
+    busy = sum(b["busy"] for b in per_class.values())
+    online = sum(b["online"] for b in per_class.values())
+    return {"schema": SCHEMA, "ok": True, "idle_slots": idle, "busy_slots": busy,
+            "online_slots": online, "per_class": per_class}
+
+
+def _get(path: str, token: str) -> Dict[str, Any]:
+    req = urllib.request.Request(API + path, headers={
+        "Authorization": "Bearer " + token,
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "fleet-ci-capacity",
+    })
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read() or b"{}")
+
+
+def fetch_runners(org: str, group_id: str, token: str) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    for page in range(1, MAX_PAGES + 1):
+        data = _get(f"/orgs/{org}/actions/runner-groups/{group_id}/runners"
+                    f"?per_page={PER_PAGE}&page={page}", token)
+        batch, total = data.get("runners"), data.get("total_count")
+        if not isinstance(batch, list) or not isinstance(total, int):
+            raise ValueError("unexpected response shape")
+        items.extend(batch)
+        if len(items) >= total or not batch:
+            return items
+    raise ValueError("too many pages")
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    p = argparse.ArgumentParser(prog="fleet-capacity")
+    p.add_argument("--org", default=os.environ.get("FLEET_ORG", "mastermindx-market-intelligence"))
+    p.add_argument("--group-id", default=os.environ.get("FLEET_RUNNER_GROUP_ID", ""))
+    p.add_argument("--input", help="summarize a saved runners JSON ({runners:[...]}) instead of the API")
+    p.add_argument("--soft", action="store_true", help="on failure print ok=false and exit 0")
+    args = p.parse_args(argv)
+    try:
+        if args.input:
+            with open(args.input, encoding="utf-8") as fh:
+                data = json.load(fh)
+            runners = data.get("runners") if isinstance(data, dict) else None
+            if not isinstance(runners, list):
+                raise ValueError("input has no runners list")
+        else:
+            token = os.environ.get("FLEET_ROUTE_TOKEN", "")
+            if not token:
+                raise ValueError("FLEET_ROUTE_TOKEN not set")
+            if not args.group_id.isdigit():
+                raise ValueError("fleet runner group id not set")
+            runners = fetch_runners(args.org, args.group_id, token)
+        print(json.dumps(summarize(runners), sort_keys=True))
+        return 0
+    except urllib.error.HTTPError as err:
+        why = f"HTTP {err.code}"
+    except (OSError, ValueError) as err:
+        why = f"{type(err).__name__}: {err}" if isinstance(err, ValueError) else type(err).__name__
+    print(json.dumps({"schema": SCHEMA, "ok": False, "error": why}, sort_keys=True))
+    return 0 if args.soft else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

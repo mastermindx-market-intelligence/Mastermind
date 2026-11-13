@@ -1,0 +1,430 @@
+#!/usr/bin/python3 -I
+"""Fleet CI slot pool: load-aware admission, slot status and host sizing (stdlib only).
+
+Installed on each fleet host as /usr/local/lib/fleet-ci/fleet_gate.py and called by
+`fleet-slot` (docs/FLEET_CI_POOL.md). Never handles a credential or a JIT config.
+
+  admit  --slot N                  evaluate the gates under the host admission lock; on
+                                   PASS record this slot as `claimed` (exit 0), on FAIL
+                                   record `refused` (exit 10). Prints one JSON line.
+  status --slot N --state S [--detail D]
+                                   atomically replace the slot status file; print it.
+  get KEY                          print one validated config value (for the bash loop).
+  slots                            print the slots_for_host() sizing for this host.
+  render-limits                    print the systemd drop-in carrying MemoryMax/CPUQuota.
+
+Gate semantics are copied from the Fabric host placer
+(ops/native_fabric/quota_continuity/source/host_pick.py, evaluate_hosts): the same
+number coercion (_as_float/_finite_nonnegative/_valid_timestamp), the same pressure
+policy validity (each PSI ceiling within 1..100 percent), a reading at or above a PSI
+ceiling refuses, available memory at or above the floor passes, and a missing or
+unparsable observation fails closed. The host placer is not importable on fleet hosts,
+so the small pure functions are copied; tests/test_fleet_ci_pool.py checks parity.
+
+Exit codes: 0 admitted / ok; 10 refused by a gate; 2 bad config or usage.
+"""
+from __future__ import annotations
+
+import argparse
+import fcntl
+import json
+import math
+import os
+import sys
+import tempfile
+import time
+from typing import Any, Dict, List, Optional, Tuple
+
+SCHEMA = "mastermind.fleet_slot_status.v1"
+EX_REFUSED = 10
+EX_USAGE = 2
+CLASSES = ("std", "heavy")
+# Slot states. `claimed`/`minting`/`registered` hold host capacity: they count as busy
+# for the next slot's memory floor. A slot registered with GitHub waits for exactly one
+# job, so an idle registration is reserved capacity, not free capacity.
+BUSY_STATES = frozenset({"claimed", "minting", "registered"})
+STATES = BUSY_STATES | frozenset({"starting", "refused", "exited", "wiping", "stopped"})
+MAX_SLOTS = 32
+PORT_BASE = 20000
+PORT_SPAN = 100
+
+DEFAULTS: Dict[str, str] = {
+    "FLEET_CLASS": "std",
+    "RUNNER_GROUP_ID": "",
+    "SLOTS": "auto",
+    "SLOT_MEM_GB": "8",
+    "RESERVE_GB": "8",
+    "SLOT_MEM_FLOOR_GB": "6",
+    "MEM_PSI_MAX": "10",
+    "IO_PSI_MAX": "20",
+    "LOAD_MAX": "0.85",
+    "SLOT_MEMORY_HIGH": "7G",
+    "SLOT_MEMORY_MAX": "8G",
+    "SLOT_CPU_QUOTA": "400%",
+}
+
+
+# --- copied from host_pick.py (keep identical semantics) ---------------------------------
+
+def _as_float(value: Any) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _finite_nonnegative(value: Any) -> Optional[float]:
+    number = _as_float(value)
+    return number if number is not None and number >= 0 and math.isfinite(number) else None
+
+
+def _valid_timestamp(value: Any, now: float) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    try:
+        timestamp = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(timestamp) or timestamp <= 0:
+        return None
+    return timestamp if timestamp <= now + 1 else None
+
+
+def _gate(name: str, ok: bool, label: str, detail: str = "") -> Dict[str, str]:
+    return {"host": name, "gate": label, "result": "PASS" if ok else "FAIL", "detail": detail}
+
+
+# --- procfs parsing ----------------------------------------------------------------------
+
+def parse_psi(text: str) -> Dict[str, Dict[str, float]]:
+    """`some avg10=1.00 avg60=...` lines -> {"some": {"avg10": 1.0, ...}, "full": {...}}."""
+    out: Dict[str, Dict[str, float]] = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if not parts or parts[0] not in ("some", "full"):
+            continue
+        fields: Dict[str, float] = {}
+        for kv in parts[1:]:
+            key, sep, raw = kv.partition("=")
+            num = _finite_nonnegative(raw) if sep else None
+            if num is not None:
+                fields[key] = num
+        out[parts[0]] = fields
+    return out
+
+
+def parse_meminfo(text: str) -> Dict[str, int]:
+    """/proc/meminfo -> {field: kB}."""
+    out: Dict[str, int] = {}
+    for line in text.splitlines():
+        key, sep, rest = line.partition(":")
+        if not sep:
+            continue
+        tok = rest.split()
+        if tok and tok[0].isdigit():
+            out[key.strip()] = int(tok[0])
+    return out
+
+
+def parse_loadavg(text: str) -> Optional[float]:
+    tok = text.split()
+    return _finite_nonnegative(tok[0]) if tok else None
+
+
+def _read(path: str) -> Optional[str]:
+    try:
+        with open(path, encoding="ascii", errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def observe(proc_root: str = "/proc", cores: Optional[int] = None) -> Dict[str, Any]:
+    """One live observation of the host. Missing pieces stay None and fail closed."""
+    obs: Dict[str, Any] = {"observed_at": time.time()}
+    for res in ("memory", "io", "cpu"):
+        text = _read(os.path.join(proc_root, "pressure", res))
+        psi = parse_psi(text) if text is not None else {}
+        obs[f"{res}_psi_some10"] = psi.get("some", {}).get("avg10")
+    mem_text = _read(os.path.join(proc_root, "meminfo"))
+    mem = parse_meminfo(mem_text) if mem_text is not None else {}
+    obs["mem_available_gb"] = mem["MemAvailable"] / 1048576 if "MemAvailable" in mem else None
+    obs["mem_total_gb"] = mem["MemTotal"] / 1048576 if "MemTotal" in mem else None
+    load_text = _read(os.path.join(proc_root, "loadavg"))
+    obs["load1"] = parse_loadavg(load_text) if load_text is not None else None
+    obs["cores"] = cores if cores is not None else os.cpu_count()
+    return obs
+
+
+# --- config ------------------------------------------------------------------------------
+
+def parse_conf(text: str) -> Dict[str, str]:
+    """KEY=VALUE lines; `#` comments; no shell expansion (the file is never sourced)."""
+    conf = dict(DEFAULTS)
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.partition("=")
+        key = key.strip()
+        if not sep or key not in DEFAULTS:
+            raise ValueError(f"unknown or malformed config line: {key or line[:20]}")
+        conf[key] = value.strip().strip('"')
+    return conf
+
+
+def policy_from_conf(conf: Dict[str, str]) -> Dict[str, Any]:
+    return {
+        "mem_psi_max": _finite_nonnegative(conf.get("MEM_PSI_MAX")),
+        "io_psi_max": _finite_nonnegative(conf.get("IO_PSI_MAX")),
+        "slot_mem_floor_gb": _finite_nonnegative(conf.get("SLOT_MEM_FLOOR_GB")),
+        "load_max": _finite_nonnegative(conf.get("LOAD_MAX")),
+    }
+
+
+def validate_conf(conf: Dict[str, str]) -> List[str]:
+    errors = []
+    if conf.get("FLEET_CLASS") not in CLASSES:
+        errors.append("FLEET_CLASS must be std or heavy")
+    gid = conf.get("RUNNER_GROUP_ID", "")
+    if not gid.isdigit():
+        errors.append("RUNNER_GROUP_ID must be digits")
+    slots = conf.get("SLOTS", "")
+    if slots != "auto" and not (slots.isdigit() and 0 <= int(slots) <= MAX_SLOTS):
+        errors.append(f"SLOTS must be auto or 0..{MAX_SLOTS}")
+    for key in ("SLOT_MEM_GB", "RESERVE_GB"):
+        if _finite_nonnegative(conf.get(key)) is None:
+            errors.append(f"{key} must be a nonnegative number")
+    if not (_finite_nonnegative(conf.get("SLOT_MEM_GB")) or 0) > 0:
+        errors.append("SLOT_MEM_GB must be positive")
+    pol = policy_from_conf(conf)
+    for key in ("mem_psi_max", "io_psi_max"):
+        if pol[key] is None or not 1 <= pol[key] <= 100:
+            errors.append(f"{key.upper()} must be within 1..100 (host_pick pressure policy)")
+    if pol["slot_mem_floor_gb"] is None:
+        errors.append("SLOT_MEM_FLOOR_GB must be a nonnegative number")
+    if pol["load_max"] is None or pol["load_max"] <= 0:
+        errors.append("LOAD_MAX must be a positive number")
+    for key in ("SLOT_MEMORY_HIGH", "SLOT_MEMORY_MAX"):
+        v = conf.get(key, "")
+        if not (v[:-1].isdigit() and v[-1:] in ("M", "G")):
+            errors.append(f"{key} must look like 7G or 7168M")
+    q = conf.get("SLOT_CPU_QUOTA", "")
+    if not (q.endswith("%") and q[:-1].isdigit() and int(q[:-1]) > 0):
+        errors.append("SLOT_CPU_QUOTA must look like 400%")
+    return errors
+
+
+# --- sizing ------------------------------------------------------------------------------
+
+def slots_for_host(cores: int, mem_total_gb: float, reserve_gb: float, slot_mem_gb: float) -> int:
+    """min(cores // 4, (MemTotal_GB - reserve_GB) // SLOT_MEM_GB), never below 0.
+
+    Four cores per slot keeps a typical test job (pytest -n auto inside a 400% CPU quota)
+    from oversubscribing the host; the reserve keeps headroom for the host's other
+    services. A host too small for one slot gets 0 (it does not join the pool).
+    """
+    if cores <= 0 or slot_mem_gb <= 0:
+        return 0
+    by_cpu = cores // 4
+    by_mem = int(max(0.0, mem_total_gb - reserve_gb) // slot_mem_gb)
+    return max(0, min(by_cpu, by_mem, MAX_SLOTS))
+
+
+# --- admission ---------------------------------------------------------------------------
+
+def evaluate_admission(obs: Dict[str, Any], policy: Dict[str, Any], busy_slots: int,
+                       host: str = "localhost") -> Tuple[bool, List[Dict[str, str]]]:
+    """All gates for registering ONE more runner on this host. Every gate must PASS."""
+    gates: List[Dict[str, str]] = []
+    now = time.time()
+    ts = _valid_timestamp(obs.get("observed_at"), now)
+    # Freshness, as host_pick: the observation is live, so allow a few seconds only.
+    gates.append(_gate(host, ts is not None and now - ts <= 10, "fresh",
+                       "no-observation" if ts is None else f"age={now - ts:.1f}s"))
+
+    max_io, max_mem = policy.get("io_psi_max"), policy.get("mem_psi_max")
+    policy_valid = (max_io is not None and 1 <= max_io <= 100
+                    and max_mem is not None and 1 <= max_mem <= 100)
+    io = _finite_nonnegative(obs.get("io_psi_some10"))
+    mem_psi = _finite_nonnegative(obs.get("memory_psi_some10"))
+    if not policy_valid:
+        ok, why = False, "invalid-pressure-policy"
+    elif io is None or mem_psi is None:
+        ok, why = False, "pressure-unavailable-or-stale"
+    elif io >= max_io:
+        ok, why = False, f"io_psi_some10={io:g}>={max_io:g}%"
+    elif mem_psi >= max_mem:
+        ok, why = False, f"memory_psi_some10={mem_psi:g}>={max_mem:g}%"
+    else:
+        ok, why = True, f"io_psi={io:g}<{max_io:g}%,mem_psi={mem_psi:g}<{max_mem:g}%"
+    gates.append(_gate(host, ok, "pressure", why))
+
+    floor = policy.get("slot_mem_floor_gb")
+    avail = _finite_nonnegative(obs.get("mem_available_gb"))
+    busy = busy_slots if isinstance(busy_slots, int) and busy_slots >= 0 else None
+    if floor is None or avail is None or busy is None:
+        gates.append(_gate(host, False, "memory", "missing_or_invalid"))
+    else:
+        need = floor * (busy + 1)
+        gates.append(_gate(host, avail >= need, "memory",
+                           f"{avail:.1f}>={need:g} (floor={floor:g}x{busy + 1})"
+                           if avail >= need else f"{avail:.1f}<{need:g} (floor={floor:g}x{busy + 1})"))
+
+    load_max = policy.get("load_max")
+    load1 = _finite_nonnegative(obs.get("load1"))
+    cores = obs.get("cores")
+    cores = cores if isinstance(cores, int) and not isinstance(cores, bool) and cores > 0 else None
+    if load_max is None or load_max <= 0 or load1 is None or cores is None:
+        gates.append(_gate(host, False, "load", "missing_or_invalid"))
+    else:
+        per_core = load1 / cores
+        gates.append(_gate(host, per_core < load_max, "load",
+                           f"load1/cores={per_core:.2f}{'<' if per_core < load_max else '>='}{load_max:g}"))
+    return all(g["result"] == "PASS" for g in gates), gates
+
+
+# --- slot status files -------------------------------------------------------------------
+
+def status_path(status_dir: str, slot: int) -> str:
+    return os.path.join(status_dir, f"slot-{slot}.json")
+
+
+def write_status(status_dir: str, slot: int, state: str, cls: str, detail: Any = "") -> Dict[str, Any]:
+    if state not in STATES:
+        raise ValueError(f"unknown state {state}")
+    record = {"schema": SCHEMA, "slot": slot, "class": cls, "state": state,
+              "ts": round(time.time(), 3), "port_base": PORT_BASE + slot * PORT_SPAN,
+              "pid": os.getpid(), "detail": detail}
+    os.makedirs(status_dir, mode=0o755, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=status_dir, prefix=f".slot-{slot}.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, sort_keys=True) + "\n")
+        os.chmod(tmp, 0o644)  # not secret: the router and T3 read slot state
+        os.replace(tmp, status_path(status_dir, slot))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return record
+
+
+def count_busy(status_dir: str, exclude_slot: int) -> int:
+    """Other slots holding capacity. An unreadable or malformed file counts as busy."""
+    busy = 0
+    try:
+        names = os.listdir(status_dir)
+    except FileNotFoundError:
+        return 0
+    for name in names:
+        if not (name.startswith("slot-") and name.endswith(".json")):
+            continue
+        num = name[5:-5]
+        if not num.isdigit() or int(num) == exclude_slot:
+            continue
+        try:
+            with open(os.path.join(status_dir, name), encoding="utf-8") as fh:
+                rec = json.load(fh)
+            state = rec.get("state") if isinstance(rec, dict) else None
+        except (OSError, ValueError):
+            state = None
+        if state is None or state not in STATES or state in BUSY_STATES:
+            busy += 1
+    return busy
+
+
+def admit(conf: Dict[str, str], slot: int, status_dir: str, proc_root: str,
+          cores: Optional[int] = None) -> Tuple[bool, Dict[str, Any]]:
+    """Evaluate and record under one host-wide lock, so two slots cannot both claim the
+    same headroom between reading the busy count and writing `claimed`."""
+    os.makedirs(status_dir, mode=0o755, exist_ok=True)
+    with open(os.path.join(status_dir, ".admit.lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        busy = count_busy(status_dir, slot)
+        obs = observe(proc_root, cores)
+        ok, gates = evaluate_admission(obs, policy_from_conf(conf), busy)
+        detail = {"busy_slots": busy, "cpu_psi_some10": obs.get("cpu_psi_some10"),
+                  "gates": [{k: g[k] for k in ("gate", "result", "detail")} for g in gates]}
+        rec = write_status(status_dir, slot, "claimed" if ok else "refused", conf["FLEET_CLASS"], detail)
+    return ok, rec
+
+
+def render_limits(conf: Dict[str, str]) -> str:
+    return ("# Generated by fleet_gate.py render-limits from /etc/fleet-ci/fleet.conf\n"
+            "[Service]\n"
+            f"MemoryHigh={conf['SLOT_MEMORY_HIGH']}\n"
+            f"MemoryMax={conf['SLOT_MEMORY_MAX']}\n"
+            f"CPUQuota={conf['SLOT_CPU_QUOTA']}\n")
+
+
+# --- CLI ---------------------------------------------------------------------------------
+
+def _load(path: str) -> Dict[str, str]:
+    text = _read(path)
+    if text is None:
+        raise ValueError(f"config {path} unreadable")
+    conf = parse_conf(text)
+    errors = validate_conf(conf)
+    if errors:
+        raise ValueError("; ".join(errors))
+    return conf
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    p = argparse.ArgumentParser(prog="fleet_gate")
+    p.add_argument("--conf", default=os.environ.get("FLEET_CONF", "/etc/fleet-ci/fleet.conf"))
+    p.add_argument("--status-dir", default=os.environ.get("FLEET_STATUS_DIR", "/run/fleet-ci"))
+    p.add_argument("--proc-root", default=os.environ.get("FLEET_PROC_ROOT", "/proc"))
+    sub = p.add_subparsers(dest="cmd", required=True)
+    a = sub.add_parser("admit"); a.add_argument("--slot", type=int, required=True)
+    s = sub.add_parser("status"); s.add_argument("--slot", type=int, required=True)
+    s.add_argument("--state", required=True); s.add_argument("--detail", default="")
+    g = sub.add_parser("get"); g.add_argument("key")
+    sub.add_parser("slots")
+    sub.add_parser("render-limits")
+    args = p.parse_args(argv)
+    try:
+        conf = _load(args.conf)
+    except ValueError as err:
+        print(f"fleet_gate: {err}", file=sys.stderr)
+        return EX_USAGE
+    if args.cmd in ("admit", "status") and not 1 <= args.slot <= MAX_SLOTS:
+        print(f"fleet_gate: slot must be 1..{MAX_SLOTS}", file=sys.stderr)
+        return EX_USAGE
+    if args.cmd == "admit":
+        ok, rec = admit(conf, args.slot, args.status_dir, args.proc_root)
+        print(json.dumps(rec, sort_keys=True))
+        return 0 if ok else EX_REFUSED
+    if args.cmd == "status":
+        try:
+            rec = write_status(args.status_dir, args.slot, args.state, conf["FLEET_CLASS"], args.detail)
+        except ValueError as err:
+            print(f"fleet_gate: {err}", file=sys.stderr)
+            return EX_USAGE
+        print(json.dumps(rec, sort_keys=True))
+        return 0
+    if args.cmd == "get":
+        if args.key not in DEFAULTS:
+            print("fleet_gate: unknown key", file=sys.stderr)
+            return EX_USAGE
+        print(conf[args.key])
+        return 0
+    if args.cmd == "slots":
+        obs = observe(args.proc_root)
+        auto = slots_for_host(obs["cores"] or 0, obs["mem_total_gb"] or 0.0,
+                              float(conf["RESERVE_GB"]), float(conf["SLOT_MEM_GB"]))
+        n = auto if conf["SLOTS"] == "auto" else min(int(conf["SLOTS"]), auto)
+        print(json.dumps({"slots": n, "sizing_rule": auto, "configured": conf["SLOTS"],
+                          "cores": obs["cores"], "mem_total_gb": obs["mem_total_gb"]}, sort_keys=True))
+        return 0
+    print(render_limits(conf), end="")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,41 @@
+[Unit]
+Description=Fleet CI ephemeral JIT runner slot %i (host from hostname, class from fleet.conf)
+Documentation=https://github.com/mastermindx-market-intelligence/Mastermind/blob/master/docs/FLEET_CI_POOL.md
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/fleet-ci/fleet.conf
+# A slot that keeps dying (broken prerequisite) stops after 5 starts in 10 minutes.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/fleet-slot %i
+# The slot script asserts this slice, the hidden procfs and the private IPC namespace.
+Slice=fleet_ci.slice
+PrivateTmp=yes
+PrivateIPC=yes
+ProtectProc=invisible
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=no
+NoNewPrivileges=no
+ReadOnlyPaths=-/var/crash -/var/metrics -/var/lib/BrlAPI
+Delegate=yes
+KillMode=control-group
+# Defaults; provisioning writes fleet-slot@.service.d/limits.conf from fleet.conf
+# (fleet_gate.py render-limits) and that drop-in wins.
+MemoryHigh=7G
+MemoryMax=8G
+CPUQuota=400%
+TasksMax=4096
+# The JIT config sits in run.sh's environment until Runner.Listener reads it: no core dumps.
+LimitCORE=0
+# Unlike the Terminal lane, the pool restarts slots: an uncertain registration writes
+# /var/lib/fleet-ci/hold-%i first, and the slot refuses to start while it exists.
+Restart=always
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

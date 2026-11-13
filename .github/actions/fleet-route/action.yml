@@ -1,0 +1,70 @@
+name: fleet-route
+description: >-
+  Choose runs-on for the next job(s): GitHub-hosted, or the load-aware fleet slot pool
+  (docs/FLEET_CI_POOL.md). Default mode is off, which always returns ubuntu-24.04.
+inputs:
+  mode:
+    description: "off | hybrid | fleet-only. Pass vars.CI_FLEET_MODE; empty or unknown means off."
+    required: false
+    default: "off"
+  class:
+    description: "Fleet runner class: std or heavy."
+    required: false
+    default: "std"
+  jobs_needed:
+    description: "How many fleet slots the routed job(s) need at once (matrix width)."
+    required: false
+    default: "1"
+  token:
+    description: >-
+      Read-only org self-hosted-runners token (secrets.FLEET_ROUTE_TOKEN). Only used in
+      hybrid mode. Missing or failing -> hosted. Never the minting credential.
+    required: false
+    default: ""
+  group_id:
+    description: "Fleet runner group id (vars.CI_FLEET_RUNNER_GROUP_ID). Hybrid only."
+    required: false
+    default: ""
+  spill_ratio:
+    description: "Hybrid: route to fleet when idle/jobs_needed >= ratio (1.0 = whole batch only)."
+    required: false
+    default: "1.0"
+outputs:
+  runner:
+    description: 'JSON for runs-on, use as runs-on: ${{ fromJSON(steps.<id>.outputs.runner) }}'
+    value: ${{ steps.route.outputs.runner }}
+  target:
+    description: "hosted or fleet"
+    value: ${{ steps.route.outputs.target }}
+runs:
+  using: composite
+  steps:
+    - id: route
+      shell: bash
+      env:
+        FLEET_MODE: ${{ inputs.mode }}
+        FLEET_CLASS_IN: ${{ inputs.class }}
+        FLEET_JOBS: ${{ inputs.jobs_needed }}
+        FLEET_ROUTE_TOKEN: ${{ inputs.token }}
+        FLEET_RUNNER_GROUP_ID: ${{ inputs.group_id }}
+        FLEET_SPILL_RATIO: ${{ inputs.spill_ratio }}
+        FLEET_DIR: ${{ github.action_path }}/../../../ops/fleet_ci
+      run: |
+        set -euo pipefail
+        mode="$(printf '%s' "${FLEET_MODE:-off}" | tr '[:upper:]' '[:lower:]')"
+        case "$mode" in off|hybrid|fleet-only) ;; *) mode=off ;; esac
+        cap=""
+        if [ "$mode" = hybrid ]; then
+          cap="$(mktemp)"
+          if [ -n "$FLEET_ROUTE_TOKEN" ]; then
+            python3 "$FLEET_DIR/fleet-capacity" --soft > "$cap" || echo '{"ok":false}' > "$cap"
+          else
+            echo '{"ok":false,"error":"FLEET_ROUTE_TOKEN missing"}' > "$cap"
+          fi
+        fi
+        runner="$(python3 "$FLEET_DIR/fleet_route.py" --mode "$mode" --class "$FLEET_CLASS_IN" \
+          --jobs-needed "$FLEET_JOBS" --spill-ratio "$FLEET_SPILL_RATIO" ${cap:+--capacity "$cap"})"
+        case "$runner" in '"ubuntu-24.04"') target=hosted ;; *) target=fleet ;; esac
+        echo "runner=$runner" >> "$GITHUB_OUTPUT"
+        echo "target=$target" >> "$GITHUB_OUTPUT"
+        echo "fleet-route: mode=$mode class=$FLEET_CLASS_IN jobs=$FLEET_JOBS -> $target $runner"
