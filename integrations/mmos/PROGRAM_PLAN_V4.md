@@ -2203,3 +2203,13 @@ DeepSeek worker with the same eight points.
 4. The bridge still waits on the Chairman's five reloads.
 
 No install on the real root while machine load is above 50.
+
+## 58. Amendment, 2026-11-13 03:38 UTC: no timer of Secretary's moves (corrects section 57)
+
+Section 57 said the ten-minute timer moves. It does not. Its job record is clean, but its instruction runs a procedure that needs a terminal, writes a state file under the Hermes profile and posts to Slack on alert. Secretary's teammate has none of these. Moved, it would fail every ten minutes, add about 144 run issues a day to the board, and the watch it performs would go dark.
+
+All seven of Secretary's timers stay in Hermes. Item 3 of section 57's order is dropped.
+
+**Class rule.** A timer is judged by what its instruction needs the body to do, read against the receiving teammate's actual limits. A clean job record does not make it movable. A timer does not move if its rate would flood the board with run issues nobody closes. No teammate's limits are widened to fit a timer.
+
+**Consequence for the ten bots.** Moving a bot moves its conversation, history and memory. Its Hermes timers keep running in Hermes unless a timer is listed as fitting under this rule. The install list carries a per-bot timer table.
