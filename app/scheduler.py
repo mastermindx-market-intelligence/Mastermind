@@ -997,7 +997,9 @@ def _improvement_agenda_job():
     handle = _ledger_start("improvement_agenda_weekly", trigger="cron")
     try:
         from brain import improvement_agenda
-        improvement_agenda.write()
+        result = improvement_agenda.write()
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            raise RuntimeError("improvement agenda publication unaccepted")
         _ledger_end(handle, "ok")
     except Exception as exc:  # noqa: BLE001 — an agenda miss must never kill the scheduler
         _ledger_end(handle, "error")

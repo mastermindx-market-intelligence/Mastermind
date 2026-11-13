@@ -523,6 +523,103 @@ class TestLedgerHelpers:
 
 
 # ---------------------------------------------------------------------------
+# Improvement Agenda publication acknowledgment
+# ---------------------------------------------------------------------------
+
+class TestImprovementAgendaJob:
+    """Agenda health must reflect the existing writer's publication acknowledgment."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate_ledger(self, tmp_path, monkeypatch):
+        import app.scheduler as sched_mod
+        import control_plane.run_events as re_mod
+
+        original_ledger_path = re_mod._ledger_path
+        monkeypatch.setattr(re_mod, "_ledger_path", lambda root=None: original_ledger_path(tmp_path))
+        monkeypatch.setattr(sched_mod, "_scheduler", None)
+
+    def _assert_outcome(self, tmp_path, status):
+        import app.scheduler as sched_mod
+
+        started = _events_of_kind(tmp_path, "run_started")
+        finished = _events_of_kind(tmp_path, "run_finished")
+        assert len(started) == len(finished) == 1
+        assert started[0]["job"] == finished[0]["job"] == "improvement_agenda_weekly"
+        assert started[0]["extra"]["run_id"] == finished[0]["extra"]["run_id"]
+        assert started[0]["extra"]["trigger"] == "cron"
+        assert finished[0]["status"] == status
+        health = next(row for row in sched_mod.scheduler_health()
+                      if row["id"] == "improvement_agenda_weekly")
+        assert health["last_status"] == status
+        assert health["last_started"] is not None
+        assert health["last_finished"] is not None
+
+    @pytest.mark.parametrize("markdown_blocked", [False, True])
+    def test_real_writer_acknowledgment_controls_health(self, tmp_path, monkeypatch,
+                                                       markdown_blocked):
+        """A partial JSON-only write is an error; a saved empty agenda is valid."""
+        from unittest.mock import Mock
+
+        import app.scheduler as sched_mod
+        from brain import improvement_agenda
+
+        output = tmp_path / "agenda"
+        output.mkdir()
+        markdown = output / "AGENDA.md"
+        if markdown_blocked:
+            markdown.mkdir()
+        agenda = {"as_of": "2026-11-13", "schema_version": "improvement_agenda.v1",
+                  "n_items": 0, "items": [], "class_counts": {}, "owners": {}}
+        monkeypatch.setattr(improvement_agenda, "_OUT", output)
+        build = Mock(return_value=agenda)
+        monkeypatch.setattr(improvement_agenda, "build", build)
+        write = Mock(wraps=improvement_agenda.write)
+        monkeypatch.setattr(improvement_agenda, "write", write)
+
+        assert sched_mod._improvement_agenda_job() is None
+
+        write.assert_called_once_with()
+        build.assert_called_once()
+        json_files = list(output.glob("*.json"))
+        assert len(json_files) == 1
+        assert json.loads(json_files[0].read_text()) == agenda
+        if markdown_blocked:
+            assert markdown.is_dir()
+        else:
+            assert "0 open items" in markdown.read_text()
+        self._assert_outcome(tmp_path, "error" if markdown_blocked else "ok")
+
+    @pytest.mark.parametrize("result", [None, [], {}, {"ok": False}, {"ok": 1}, {"ok": "true"}])
+    def test_unacknowledged_result_records_error(self, tmp_path, monkeypatch, result):
+        from unittest.mock import Mock
+
+        import app.scheduler as sched_mod
+        from brain import improvement_agenda
+
+        write = Mock(return_value=result)
+        monkeypatch.setattr(improvement_agenda, "write", write)
+
+        assert sched_mod._improvement_agenda_job() is None
+
+        write.assert_called_once_with()
+        self._assert_outcome(tmp_path, "error")
+
+    def test_writer_exception_still_records_error(self, tmp_path, monkeypatch):
+        from unittest.mock import Mock
+
+        import app.scheduler as sched_mod
+        from brain import improvement_agenda
+
+        write = Mock(side_effect=OSError("agenda write failed"))
+        monkeypatch.setattr(improvement_agenda, "write", write)
+
+        assert sched_mod._improvement_agenda_job() is None
+
+        write.assert_called_once_with()
+        self._assert_outcome(tmp_path, "error")
+
+
+# ---------------------------------------------------------------------------
 # 7. Settle lock tests (MW1 fix — BLOCKER)
 # ---------------------------------------------------------------------------
 
