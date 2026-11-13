@@ -109,8 +109,8 @@ def test_project_bootstrap_carries_compact_capacity_and_model_identity_guard():
     source = text("docs/sol_skills/BOOTSTRAP_KERNEL.md")
     for phrase in (
         "Preserve provider capacity",
-        "Classify length/schema/configuration/rate-limit/transport",
-        "Verified",
+        "Repeated refusals are potential capacity/throttling risk",
+        "never repeatedly rephrase or switch accounts/models/providers",
         "Keep selected model/mode, actually served model, and observed response quality separate",
         "Never infer a model downgrade from quality, latency or tool availability",
         "unverified served identity remains UNKNOWN",
@@ -229,8 +229,8 @@ def test_fable_is_not_a_universal_routing_or_merge_prerequisite(path):
 def test_effect_absence_never_grants_permission_to_evade_a_denial(path):
     source = text(path)
     assert "EFFECT_NONE is not retry permission" in source
-    assert ("verified access restriction" in source.lower() if path.endswith("ACTIVE_EXECUTION.md") else "Verified" in source)
-    assert ("Diagnose and repair technical failures within grants" if path.endswith("ACTIVE_EXECUTION.md") else "Authorized technical recovery") in source
+    assert "first explicit safety or permission denial ends retry" in source
+    assert ("Diagnose and repair technical failures within grants" if path.endswith("ACTIVE_EXECUTION.md") else "permitted technical recovery") in source
 
 def test_legacy_original_writer_note_does_not_override_current_assignment():
     for rel in ("AGENTS.md", "CLAUDE.md", "docs/SOL_CEO_ACCOUNT_INSTRUCTIONS.md"):
