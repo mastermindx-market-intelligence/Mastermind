@@ -488,7 +488,17 @@ def query_atlas(
     ):
         raise ProjectAtlasError("query limit is outside the closed bound")
     results: list[dict[str, Any]] = []
+    # Index-build omissions are source-coverage gaps, even when every
+    # remaining cache record loads correctly. Propagate both categories.
+    initial_degraded = manifest.get("degraded", [])
+    if not isinstance(initial_degraded, list) or len(initial_degraded) > _MAX_MANIFEST_FILES:
+        raise ProjectAtlasError("manifest degradation rows are invalid")
     degraded: list[dict[str, str]] = []
+    for item in initial_degraded:
+        if (not isinstance(item, dict) or not isinstance(item.get("path"), str)
+                or not isinstance(item.get("reason"), str)):
+            raise ProjectAtlasError("manifest degradation row is invalid")
+        degraded.append({"path": item["path"], "reason": item["reason"]})
     for file_row in manifest["files"]:
         if not isinstance(file_row, dict):
             raise ProjectAtlasError("manifest file row is invalid")
@@ -535,7 +545,7 @@ def query_atlas(
         "kind": kind,
         "results": results[:limit],
         "truncated": truncated,
-        "degraded": degraded,
+        "degraded": sorted(degraded, key=lambda item: (item["path"], item["reason"])),
     }
 
 

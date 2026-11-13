@@ -23,3 +23,21 @@ Fresh ChatGPT Web, Fable/T3, Codex and Hermes sessions should find what Mastermi
 4. **C4 — original parent DONE_WHEN:** user-path benchmark with high recall vs exhaustive retrieval and materially fewer calls/tokens; production installation + real consumer freshness, GitHub state joins and all scoped owner/custody/denial boundaries. All non-proven items remain open.
 
 Status at initial save: source-specific C1 planned; native/production acceptance unproven. This file is an editorial task tree, not a new Agent OS workstream, authority, lifecycle, search service or company memory database.
+
+
+## C1 real-source outcome (2026-11-13)
+
+The exact-source canary at 23c18c889621efc6a6df13c477734d98f75784a1
+indexed 6,848 files. A cold disposable cache took 383.04 seconds; rebuilding
+the manifest from warm same-blob cache took 12.42 seconds and parsed no blobs.
+An actual search for sector rotation returned four bounded, source-lined
+results (truncated), and one oversized Python source was excluded from index
+coverage. The query originally omitted this build degradation; a source
+repair and regression test now propagate it to the result. The original
+benchmark receipts are in docs/plans/evidence/context-discovery-atlas-20261113.json.
+
+This is source and local CLI evidence, not a T3/Fable consumer, installed
+authenticated Context MCP, release, or organizational acceptance. Indexing
+a whole repo per session is not acceptable; use exact commits and a retained
+disposable cache/manifest. Degraded source coverage requires original Git
+fallback. C3/C4 remain open.

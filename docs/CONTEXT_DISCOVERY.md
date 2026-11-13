@@ -56,8 +56,10 @@ matched path, source line and bounded excerpt. kind=text uses case-insensitive
 literal single-line substring matching of Markdown outside fenced code. It is
 **not semantic retrieval**: paraphrases, wrapped phrases and PDFs may be
 missed. Empty results are never proof that a topic has no research. Snippets
-can be withheld for credential-like content. The query reports stale/missing
-cache records in degraded; always inspect that before relying on an absence.
+can be withheld for credential-like content. The query reports index-build omissions (oversize or unparseable source)
+and stale/missing cache records in degraded; always inspect those before
+relying on an absence. Where a source is omitted, use a targeted original Git
+source read instead of treating the Atlas as complete.
 For code symbol lookup, use kind=symbol; for workstream/PR refs, kind=reference.
 The legacy kind=any selection retains its preexisting structural semantics.
 

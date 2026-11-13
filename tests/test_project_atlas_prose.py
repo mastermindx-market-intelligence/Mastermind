@@ -177,3 +177,19 @@ def test_sensitive_text_not_exposed_when_secret_is_far_from_match(tmp_path: Path
     assert hit["line"] == 1
     assert hit["identity"] == "[SENSITIVE_EXCERPT_WITHHELD]"
     assert "yyy" not in hit["identity"]
+
+
+def test_missing_built_source_is_disclosed_even_if_all_remaining_cache_loads(tmp_path: Path):
+    root = repository(tmp_path)
+    cache = tmp_path / "cache"
+    (root / "docs" / "evidence.md").write_text(
+        "Sector rotation evidence must be out-of-sample.\n", encoding="utf-8",
+    )
+    (root / "bad.py").write_text("def syntax?(:\n", encoding="utf-8")
+    git(root, "add", ".")
+    git(root, "commit", "-qm", "partial index")
+    manifest = build(root, cache)
+    assert any(r["path"] == "bad.py" for r in manifest["degraded"])
+    response = search(manifest, cache, "Sector rotation evidence")
+    assert len(response["results"]) == 1
+    assert [r["path"] for r in response["degraded"]] == ["bad.py"]
