@@ -612,7 +612,7 @@ def test_v4_profile_resolves_exact_skill_grants_and_compatibility_names():
     assert profile.sandbox_policy == "read-only"
 
 
-def test_v4_default_config_profiles_have_no_skill_grants_when_capabilities_empty():
+def test_v4_default_config_profiles_have_no_skill_grants_when_capabilities_empty(tmp_path):
     """A V4 profile with ``skill_capabilities: []`` behaves exactly like the
 
     V3 runtime-name path: ``skill_grants`` stays empty and ``skills`` is
@@ -620,7 +620,11 @@ def test_v4_default_config_profiles_have_no_skill_grants_when_capabilities_empty
     copied unchanged into the fixture).
     """
 
-    registry = ExecutionCapabilityRegistry.load(V4_FIXTURE, source_root=REPO_ROOT)
+    # This profile-compatibility check does not require a live checkout root.
+    # Keep the real verifier and frozen package bytes, isolated from unrelated
+    # checkout writes that correctly trip its retained-directory identity fence.
+    source_root = _copy_package_source(tmp_path)
+    registry = ExecutionCapabilityRegistry.load(V4_FIXTURE, source_root=source_root)
     for profile_id, profile in registry.profiles.items():
         if profile_id == FIXTURE_PROFILE_ID:
             continue
