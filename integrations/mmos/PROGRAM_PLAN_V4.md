@@ -2174,3 +2174,32 @@ DeepSeek worker with the same eight points.
 **Limits that stay.** It restrains cooperating sessions; a session with a shell can write its files. Other provider homes and the worker home do not have it. No teammate has it. An upgrade of Peekaboo stops the server until the principal re-pins it. The vision relay was proven by the lane on its fixture and not re-run on the installed copy. The lane is closed for code; its eight low findings stay on the later list.
 
 **Next, in order.** Unchanged from section 55. The bridge still waits on the Chairman's five reloads.
+
+## 57. Amendment, 2026-11-13 03:28 UTC: title repair and Grok Bot link return merged; timers ruled
+
+**Merged.** Trunk is `3071bb5d4`.
+
+- The roster title repair. The roster never renames a conversation the board binding names, on any run. The first return keyed the skip on a label that was only true on the first run after a rebind; the repair keys it on the binding's presence, read fresh each run. A rebind title now carries the UTC minute.
+- The Grok Bot link return. A delegated job goes to the teammate as a child issue on the board, to the agent the server's own table names. The answer is the bridge's own read of that child. A wake carries the ask id and nothing else. An over-long answer is cut with a notice naming the child issue.
+
+**Changed at the merge, by the principal.** The link's result read no longer falls back to the newest comment by anyone. If the board cannot attribute a comment to the asked teammate, nothing is returned, the next wake reads again, and the ask expires. The real board attributes the teammates' comments, so the attributed path is the served one.
+
+**Timers.** One of Secretary's seven moves now: the ten-minute one. The two that post to Slack stay in Hermes, because Slack work is the Hermes body's. Two need a script run before the wake, which the carrier does not have; they stay and no code is written for them. Two are host scripts with no agent; they stay.
+
+**Class rules.**
+
+- A skip that protects a live conversation is decided by a fact that stays true on every later run, never by a label that describes how the thing was found the first time. Its test runs the command twice.
+- A report never states a title that is not on the conversation.
+- Text that leaves the team as someone's answer is that someone's own attributed words, or it is withheld. A disclaimer does not make another author's text an answer.
+- A timer moves only when the product already has the shape it needs. New carrier code is not written to move a timer.
+
+**Host defect under diagnosis.** At about 03:04 UTC the git records of at least three Sector Intelligence session worktrees on the SSDs were removed while in use. Records holding a lock file survived. A read-only lane is finding the remover. Lanes commit and push at natural points and report a lost record without repairing it.
+
+**Next, in order.**
+
+1. Part C of the Hermes move is rehearsed again from this trunk, with the apply run twice, then installed one agent at a time.
+2. The link's install list is retaken at this trunk with proof 1 re-run; then the one install, the tunnel job and the Chairman sitting.
+3. The ten-minute timer moves.
+4. The bridge still waits on the Chairman's five reloads.
+
+No install on the real root while machine load is above 50.
