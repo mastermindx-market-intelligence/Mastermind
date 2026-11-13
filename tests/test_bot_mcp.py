@@ -758,3 +758,64 @@ def test_json_transport_does_not_replace_only_unfit_entry_with_metadata():
 
     assert result["is_error"] is True
     assert _strict_json(_text(result)) == {"error": "MCP_RESPONSE_TOO_LARGE"}
+
+
+# Canonical producer -> real SDK transport: the fixture is the observation from
+# Macro's 2026-11-13 source audit, not an invented market data scenario.
+def _fragility_fixture():
+    return json.loads((_ROOT / "tests/fixtures/market_fragility_observation.json").read_text())
+
+
+def _freeze_fragility_read(monkeypatch):
+    from datetime import datetime, timezone
+    from brain import market_fragility_context
+    original = market_fragility_context.project_market_fragility
+    frozen = datetime(2026, 11, 13, 17, tzinfo=timezone.utc)
+    monkeypatch.setattr(market_fragility_context, "project_market_fragility",
+                        lambda value: original(value, now=frozen))
+
+
+def test_fragility_producer_observation_reaches_real_sdk_wire(tmp_path, monkeypatch):
+    reads = _count_vendored_read(tmp_path, monkeypatch, "data/regime/latest.json", {
+        "date": "2026-11-12", "quad": "Q2", "sector_rs": [],
+        "market_fragility": _fragility_fixture(),
+    })
+    _isolate_regime_enrichment(monkeypatch)
+    _freeze_fragility_read(monkeypatch)
+    wire = asyncio.run(_sdk_wire_tool_call(bot_mcp.build_server(), "get_regime", {}))
+    result = _strict_json(wire["content"][0]["text"])
+    assert wire.get("isError", False) is False
+    assert reads["count"] == 1
+    assert result["quad"] == "Q2"
+    fragility = result["market_fragility"]
+    assert fragility["state"] == "amplifying"
+    assert fragility["history"]["observed_sessions"] == 15
+    assert fragility["history"]["unknown_sessions"] == 5
+    assert fragility["authority"]["position_sizing"] is False
+    assert fragility["predictive_validation"] == "not_established"
+    assert _utf8_bytes(wire["content"][0]["text"]) <= 8_000
+
+
+def test_bad_fragility_does_not_hide_healthy_core_regime(tmp_path, monkeypatch):
+    bad = _fragility_fixture()
+    bad["authority"]["trade_execution"] = True
+    _count_vendored_read(tmp_path, monkeypatch, "data/regime/latest.json", {
+        "quad": "Q2", "sector_rs": [], "market_fragility": bad,
+    })
+    _isolate_regime_enrichment(monkeypatch)
+    _freeze_fragility_read(monkeypatch)
+    wire = asyncio.run(_sdk_wire_tool_call(bot_mcp.build_server(), "get_regime", {}))
+    result = _strict_json(wire["content"][0]["text"])
+    assert result["quad"] == "Q2"
+    assert result["market_fragility"]["state"] == "unknown"
+    assert result["market_fragility"]["reason"] == "unexpected_authority"
+
+
+def test_transport_compaction_keeps_fragility_qualifiers_whole():
+    from datetime import datetime, timezone
+    from brain.market_fragility_context import project_market_fragility
+    fragility = project_market_fragility(_fragility_fixture(), now=datetime(2026, 11, 13, 17, tzinfo=timezone.utc))
+    result = bot_mcp._json({"market_fragility": fragility, "other_rows": ["x" * 200] * 100})
+    parsed = _strict_json(_text(result))
+    assert not result.get("is_error")
+    assert parsed["market_fragility"] == fragility
