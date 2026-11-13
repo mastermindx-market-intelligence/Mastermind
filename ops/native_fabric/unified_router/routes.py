@@ -60,8 +60,18 @@ class Route:
     # stays under budget -- converts would-be 429s into bounded waits.
     rate_limit: tuple = ()
     notes: str = ""
+    max_in_flight: int = 0
+    concurrency_group: str = ""
+    group_max_in_flight: int = 0
 
     def __post_init__(self):
+        for value in (self.max_in_flight, self.group_max_in_flight):
+            if type(value) is not int or not 0 <= value <= 1000000:
+                raise ValueError("invalid route concurrency limit")
+        if (not isinstance(self.concurrency_group, str) or len(self.concurrency_group) > 128
+                or bool(self.concurrency_group) != bool(self.group_max_in_flight)
+                or any(ord(c) < 33 or ord(c) > 126 for c in self.concurrency_group)):
+            raise ValueError("invalid shared concurrency group")
         object.__setattr__(self, "model_priority", {
             k.strip().lower(): int(v) for k, v in self.model_priority.items()})
         object.__setattr__(self, "model_weight", {
@@ -135,13 +145,19 @@ class RouteState:
     cooldown_until: dict[str, float] = field(default_factory=dict)
     last_failure: dict[str, tuple[float, str]] = field(default_factory=dict)
     consecutive_failures: dict[str, int] = field(default_factory=dict)
+    generations: dict[str, int] = field(default_factory=dict)
 
     def available(self, route_id: str, now: float) -> bool:
         return self.cooldown_until.get(route_id, 0.0) <= now
 
     def record_failure(self, route_id: str, reason: str, *, now: float,
-                       cooldown_s: float = 30.0, escalate: bool = True) -> None:
+                       cooldown_s: float = 30.0, escalate: bool = True,
+                       generation: int | None = None, quota: bool = False,
+                       permission: bool = False) -> bool:
         import math
+        current = self.generations.get(route_id, 0)
+        if generation is not None and generation != current and not (quota or permission):
+            return False
         try:
             cooldown_s = float(cooldown_s)
         except (TypeError, ValueError, OverflowError):
@@ -150,19 +166,30 @@ class RouteState:
             cooldown_s = 30.0
         count = self.consecutive_failures.get(route_id, 0) + 1
         self.consecutive_failures[route_id] = count
+        self.generations[route_id] = current + 1
         self.last_failure[route_id] = (now, reason)
         # Rate-limit (quota window) refusals must NOT escalate: the window is a
         # fixed per-minute meter, so benching for count*window would strand a
         # healthy route for minutes after a short burst. Hard failures still
-        # back off exponentially up to the cap.
-        self.cooldown_until[route_id] = now + (
+        # back off up to the cap. Authoritative quota/permission holds remain
+        # effective even when their response arrives from an older generation.
+        self.cooldown_until[route_id] = max(self.cooldown_until.get(route_id, 0), now + (
             min(cooldown_s * count, 300.0) if escalate
-            else cooldown_s)
+            else cooldown_s))
+        return True
 
-    def record_success(self, route_id: str) -> None:
+    def record_success(self, route_id: str, *, generation: int | None = None,
+                       now: float | None = None) -> bool:
+        current = self.generations.get(route_id, 0)
+        if generation is not None and generation != current:
+            return False
+        if self.cooldown_until.get(route_id, 0) > (time.monotonic() if now is None else now):
+            return False
+        if self.consecutive_failures.get(route_id, 0):
+            self.generations[route_id] = current + 1
         self.consecutive_failures[route_id] = 0
-        if self.cooldown_until.get(route_id, 0) <= time.monotonic():
-            self.cooldown_until.pop(route_id, None)
+        self.cooldown_until.pop(route_id, None)
+        return True
 
 
 RATE_WINDOW_S = 60.0

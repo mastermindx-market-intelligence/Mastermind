@@ -330,6 +330,9 @@ def _routes_from_document(document: dict) -> tuple[Route, ...]:
                                  in entry.get("upstream_model", {}).items()),
             auth_header=entry.get("auth_header", ""),
             session_header=entry.get("session_header", ""),
+            max_in_flight=entry.get("max_in_flight", 0),
+            concurrency_group=entry.get("concurrency_group", ""),
+            group_max_in_flight=entry.get("group_max_in_flight", 0),
             rate_limit=dict(entry.get("rate_limit") or {}),
             notes=entry.get("notes", "")))
     return tuple(routes)
@@ -694,6 +697,11 @@ def create_app(cfg: Settings | None = None, *,
                 {"route_id": r.route_id, "wire": r.wire, "models": list(r.models),
                  "usage": state.usage.get(r.route_id, {"input": 0, "output": 0}),
                  "weight": r.weight, "priority": r.priority,
+                 "max_in_flight": r.max_in_flight,
+                 "concurrency_group": r.concurrency_group,
+                 "group_max_in_flight": r.group_max_in_flight,
+                 "circuit_generation": state.routes.generations.get(r.route_id, 0),
+                 "probe_required": bool(state.routes.consecutive_failures.get(r.route_id, 0)),
                  "model_priority": dict(r.model_priority),
                  "model_weight": dict(r.model_weight),
                  "model_params": {slug: sorted(params) for slug, params
@@ -820,7 +828,7 @@ def create_app(cfg: Settings | None = None, *,
         reason = "FABRIC_ALL_ROUTES_UNAVAILABLE"
         preflight_excluded: set[str] = set()
 
-        def note_failure(route, code, retry_after=None):
+        def note_failure(route, code, retry_after=None, admission=None):
             state.count(route.route_id, "attempt_failed")
             if counting:
                 # count_tokens is metering, not inference: a metering failure
@@ -846,7 +854,9 @@ def create_app(cfg: Settings | None = None, *,
             affected = [r for r in routing.routes.values() if routing.resource(r)[0] == resource] if quota else [route]
             for member in affected:
                 state.routes.record_failure(member.route_id, code, now=time.monotonic(),
-                                            cooldown_s=delay, escalate=not quota and getattr(route, "kind", "") != "gateway")
+                    cooldown_s=delay, escalate=not quota and getattr(route, "kind", "") != "gateway",
+                    generation=admission.circuit_generation if admission and member is route else None,
+                    quota=quota)
             routing.changed.set()
             routing.checkpoint()
 
@@ -872,7 +882,7 @@ def create_app(cfg: Settings | None = None, *,
             except (OSError, ValueError):
                 raise _Retryable("FABRIC_ROUTE_CREDENTIAL", cooldown=True)
             if counting:
-                return await _forward_anthropic_count(app, route, authorization, forwarded)
+                return await _forward_anthropic_count(app, route, authorization, forwarded, admission=admission)
             if route.wire == WIRE_ANTHROPIC:
                 return await _forward_anthropic(app, route, authorization, forwarded,
                                                 wants_stream, admission=admission)
@@ -902,7 +912,9 @@ def create_app(cfg: Settings | None = None, *,
                     if send_count >= cfg.max_attempts:
                         break
                     # Availability and reservation are synchronous and adjacent.
-                    if not counting and routing.eta(route, resolved, payload, session, time.monotonic(), fingerprint) > 0:
+                    capacity_eta = (routing.concurrency_eta(route, inference=False) if counting else
+                        routing.eta(route, resolved, payload, session, time.monotonic(), fingerprint))
+                    if capacity_eta > 0:
                         continue
                     if not counting and peak_on and _route_peak_gated(route, cfg):
                         # Peak conservation: pace this send for its fleet-wide slot
@@ -914,12 +926,13 @@ def create_app(cfg: Settings | None = None, *,
                         await _peak_gate(route, cfg)
                     # The peak gate awaited; another request may have reserved
                     # this resource while it slept. Recheck after the final await.
-                    if not counting and (len(routing.active) >= 128 or routing.eta(
-                            route, resolved, payload, session, time.monotonic(), fingerprint) > 0):
+                    capacity_eta = (routing.concurrency_eta(route, inference=False) if counting else
+                        routing.eta(route, resolved, payload, session, time.monotonic(), fingerprint))
+                    if len(routing.active) >= 128 or capacity_eta > 0:
                         continue
                     selected_at = time.monotonic()
-                    admission = None if counting else routing.begin(
-                        route, resolved, payload, session, profile, time.monotonic(), fingerprint)
+                    admission = routing.begin(route, resolved, payload, session, profile,
+                        time.monotonic(), fingerprint, operation="count_tokens" if counting else "inference")
                     if admission and admission.effective_max_tokens is not None:
                         try:
                             durable = await routing.flush_checkpoint()
@@ -949,7 +962,7 @@ def create_app(cfg: Settings | None = None, *,
                             response = await invoke(route, resolved, admission)
                     except _Retryable as exc:
                         code = exc.reason
-                        note_failure(route, code, getattr(exc, "cooldown_s", None))
+                        note_failure(route, code, getattr(exc, "cooldown_s", None), admission)
                         # Only local refusal, a typed rate-limit rejection, or a
                         # provider-stated "not completed" (502/503/504/529, gated
                         # on _replay_safe at the raise site) may ladder onward.
@@ -979,14 +992,14 @@ def create_app(cfg: Settings | None = None, *,
                         # Only our own direct retry-free transport can prove connect/pool pre-send failure.
                         safe = transport is None
                         routing.finish(admission, no_send=safe)
-                        note_failure(route, "FABRIC_ROUTE_CONNECT")
+                        note_failure(route, "FABRIC_ROUTE_CONNECT", admission=admission)
                         reason = "FABRIC_ROUTE_CONNECT"
                         if safe:
                             continue
                         return JSONResponse({"error": {"code": "FABRIC_UPSTREAM_EFFECT_UNKNOWN"}}, status_code=502)
                     except (httpx.RequestError, TimeoutError):
                         routing.finish(admission)
-                        note_failure(route, "FABRIC_UPSTREAM_EFFECT_UNKNOWN")
+                        note_failure(route, "FABRIC_UPSTREAM_EFFECT_UNKNOWN", admission=admission)
                         state.refused += 1
                         return JSONResponse({"error": {"code": "FABRIC_UPSTREAM_EFFECT_UNKNOWN",
                             "message": "request may have reached upstream; not replayed"}}, status_code=502)
@@ -1021,7 +1034,9 @@ def create_app(cfg: Settings | None = None, *,
                                     if admitted.completed:
                                         state.served += 1
                                         state.count(admitted.route_id, "served")
-                                        state.routes.record_success(admitted.route_id)
+                                        state.routes.record_success(admitted.route_id,
+                                            generation=admitted.circuit_generation)
+                                        routing.checkpoint()
                         response.body_iterator = finish_stream()
                     else:
                         success = 200 <= response.status_code < 300 and (counting or bool(admission and admission.completed))
@@ -1029,11 +1044,14 @@ def create_app(cfg: Settings | None = None, *,
                                        no_send=bool(admission and not admission.sent))
                         if success:
                             state.served += 1; state.count(route.route_id, "served")
-                            state.routes.record_success(route.route_id)
-                        elif response.status_code in (401, 403):
+                            if not counting:
+                                state.routes.record_success(route.route_id, generation=admission.circuit_generation)
+                                routing.checkpoint()
+                        elif not counting and response.status_code in (401, 403):
                             # Do not probe another identity to get around this refusal.
                             state.routes.record_failure(route.route_id, "FABRIC_ROUTE_PERMISSION",
-                                now=time.monotonic(), cooldown_s=86400, escalate=False)
+                                now=time.monotonic(), cooldown_s=86400, escalate=False,
+                                generation=admission.circuit_generation, permission=True)
                             routing.checkpoint()
                     return response
                 if counting or send_count >= cfg.max_attempts or time.monotonic() >= admission_deadline:
@@ -1066,7 +1084,7 @@ def create_app(cfg: Settings | None = None, *,
         finally:
             routing.waiters.pop(nonce, None)
 
-    async def _forward_anthropic_count(app, route, authorization, payload) -> Response:
+    async def _forward_anthropic_count(app, route, authorization, payload, *, admission=None) -> Response:
         upstream: httpx.AsyncClient = app.state.upstream
         upstream_request = upstream.build_request(
             "POST", f"{_route_base_url(route).rstrip('/')}/v1/messages/count_tokens",
@@ -1075,17 +1093,14 @@ def create_app(cfg: Settings | None = None, *,
                      "content-type": "application/json",
                      "accept-encoding": "identity"},
             content=json.dumps(payload).encode())
+        if admission:
+            admission.sent = True
         response = await upstream.send(upstream_request)
         if response.status_code in RETRYABLE_STATUS:
             raise _Retryable(f"FABRIC_ROUTE_HTTP_{response.status_code}",
                              response.text[:2048],
                              cooldown=response.status_code in COOLDOWN_STATUS,
                              cooldown_s=_retry_after_s(response))
-        state: RouterState = app.state.router_state
-        # No record_success here: a count success must not reset the inference
-        # breaker for a route that may be failing real traffic.
-        state.served += 1
-        state.count(route.route_id, "served")
         data = response.content
         return Response(content=data, status_code=response.status_code,
                         media_type="application/json")
@@ -1410,7 +1425,8 @@ def create_app(cfg: Settings | None = None, *,
                 "FABRIC_OAUTH_UPSTREAM_5XX" if status >= 500 else "FABRIC_OAUTH_UPSTREAM_REFUSED")
             if status >= 500:
                 state.routes.record_failure(route.route_id, code, now=time.monotonic(),
-                    cooldown_s=cfg_.route_cooldown_s)
+                    cooldown_s=cfg_.route_cooldown_s,
+                    generation=admission.circuit_generation if admission else None)
                 app.state.model_policy.checkpoint()
             return JSONResponse({"error": {"code": code,
                 "message": "upstream refusal; request was not replayed"}},

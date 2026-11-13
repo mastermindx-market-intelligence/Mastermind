@@ -54,7 +54,8 @@ def read_document(path):
 
 def binding(route):
     row = dataclasses.asdict(route)
-    for key in ("weight", "priority", "model_priority", "model_weight", "model_params", "notes", "models"):
+    for key in ("weight", "priority", "model_priority", "model_weight", "model_params", "notes", "models",
+                "max_in_flight", "group_max_in_flight"):
         row.pop(key, None)
     return row
 
@@ -121,6 +122,7 @@ class ConfigRefresh:
                     if key in rule:
                         rule[key] = min(rule[key], value)
             previous.routes, previous.aliases = candidate.routes, candidate.aliases
+            previous.concurrency_limits = candidate.concurrency_limits
             previous.policy, previous.groups = candidate.policy, candidate.groups
             previous.resources, previous.metered = candidate.resources, candidate.metered
             previous.allow_metered = candidate.allow_metered

@@ -116,6 +116,10 @@ def restore(policy):
             delay = _number(until) - wall
             if 0 < delay <= 1e9:
                 cooldown[_identity(rid)] = now + delay
+        probes = data.get("probe_required", list(data.get("cooldown", {})))
+        if not isinstance(probes, list) or len(probes) > 1024:
+            raise ValueError("invalid recovery probes")
+        probes = {_identity(rid) for rid in probes}
         views = data.get("provider_capacity", {})
         if not isinstance(views, dict) or len(views) > 1024:
             raise ValueError("invalid provider capacity")
@@ -141,6 +145,10 @@ def restore(policy):
         policy.observed_limits.update(observed)
         policy.provider_capacity.update(capacity)
         policy.route_state.cooldown_until.update(cooldown)
+        for rid in probes:
+            if rid in policy.routes:
+                policy.route_state.consecutive_failures[rid] = max(1,
+                    policy.route_state.consecutive_failures.get(rid, 0))
         for rid, rule in policy.resources.items():
             for field, value in observed.get(rule.get("key", rid), {}).items():
                 if field in rule:
@@ -165,7 +173,9 @@ def encode(policy):
             for resource, dimensions in policy.provider_capacity.items()}
     data = {"schema": SCHEMA, "saved_at": wall, "samples": samples,
         "pending": [(a.resource, wall - (now - a.started), a.input_estimate, a.output_estimate)
-                    for a in policy.active.values()],
+                    for a in policy.active.values() if a.operation == "inference"],
+        "probe_required": sorted(rid for rid, count in policy.route_state.consecutive_failures.items()
+                                 if count > 0 and rid in policy.routes),
         "recovery": {resource: wall + until - now for resource, until in policy.recovery_until.items() if until > now},
         "observed_limits": policy.observed_limits, "provider_capacity": views,
         "cooldown": {rid: wall + until - now for rid, until in policy.route_state.cooldown_until.items() if until > now}}

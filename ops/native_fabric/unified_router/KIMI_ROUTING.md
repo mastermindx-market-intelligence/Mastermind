@@ -53,6 +53,14 @@ Malformed or non-object tool arguments return a typed translation failure; they 
 
 The second activation retains the proven subscription policy and ledger. It uses exact phase-one source/config preimages, the same launchd slot and reload lock, waits for the incumbent process to drain and exit, and verifies ledger restoration and measured source generation before consumer proof. The source archive remains a draft reconciliation PR until broader protected-master route/group contracts are qualified; direct M2 activation does not waive repository protections.
 
+## Concurrent dispatch and circuit recovery
+
+The same active-admission ledger now composes the global ceiling of 128, per-resource limits, optional route `max_in_flight`, and optional `concurrency_group`/`group_max_in_flight`. Group occupancy does not merge token windows or provider balance observations. The 37 current route declarations omit the optional fields, so their default zero/empty values preserve existing resource policy. Invalid or contradictory group limits refuse configuration. Limit changes affect future admissions; active group or resource reassignment still requires drain.
+
+Every inference captures its route's circuit generation. Old successes and generic failures cannot change a newer circuit decision, while authoritative quota and permission refusals remain effective. Cooldown deadlines cannot shorten. After the cooldown, one current inference probe may run; its validated success closes the circuit. The existing admission checkpoint preserves the need for a probe across restart.
+
+Token counting uses operation-tagged entries in the same active ledger. It consumes dispatch concurrency without reserving inference tokens, changes no inference health/cache/overflow state, and releases exactly once on completion or cancellation. Count-only entries are excluded from uncertain-inference recovery holds. `/routingz` exposes separate inference/metering activity, metering counters and group occupancy; `/statusz` includes route caps and circuit generation/probe state.
+
 ## Validation
 
 The focused regression suite covers whole-output reservation, exact ceilings, shared resources, sibling isolation, header semantics, cache estimates, partial-stream failures, no-replay behavior, malformed cooldowns, active configuration changes and clean/crash/corrupt/cold-start recovery. Existing wire, model-tier, overflow and Codex-route tests remain included.
@@ -67,7 +75,8 @@ python -m pytest --import-mode=importlib \
   ops/native_fabric/unified_router/test_overflow_glm.py \
   ops/native_fabric/unified_router/test_codex_route.py \
   ops/native_fabric/unified_router/test_mcpfix_wire.py \
-  ops/native_fabric/unified_router/test_router_resilience_upgrade.py -q
+  ops/native_fabric/unified_router/test_router_resilience_upgrade.py \
+  ops/native_fabric/unified_router/test_router_concurrency_upgrade.py -q
 ```
 
 Provider congestion, external use of the same subscription and token-estimation error can still cause throttling. The router reacts to those signals; it cannot promise that an upstream provider never returns 429.

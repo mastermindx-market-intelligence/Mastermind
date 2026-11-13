@@ -162,12 +162,21 @@ class Admission:
     requested_max_tokens: int = 4096
     effective_max_tokens: int | None = None
     finish_reason: str | None = None
+    operation: str = "inference"
+    concurrency_group: str = ""
+    circuit_generation: int = 0
 
 
 class ModelPolicyState:
     """Ephemeral state attached to RouterState; the existing RateWindow owns reservations."""
     def __init__(self, routes, aliases, policy, rate_window, route_state):
         self.routes = {r.route_id: r for r in routes}
+        self.concurrency_limits = {}
+        for route in routes:
+            if route.concurrency_group:
+                previous = self.concurrency_limits.setdefault(route.concurrency_group, route.group_max_in_flight)
+                if previous != route.group_max_in_flight:
+                    raise ValueError("conflicting shared concurrency limits")
         self.aliases = dict(aliases)
         self.policy = policy or {}
         self.window = rate_window
@@ -200,7 +209,8 @@ class ModelPolicyState:
         self._checkpoint_next_at = 0.0
         self.uncertainty_s = 960.0
         self.counters = {k: 0 for k in ("selected", "completed", "failed", "cache_affinity_hits",
-            "model_spillovers", "capacity_waits", "queue_refused", "unknown_usage", "quota_refusals")}
+            "model_spillovers", "capacity_waits", "queue_refused", "unknown_usage", "quota_refusals",
+            "metering_selected", "metering_completed", "metering_failed")}
         self._validate()
 
     def configure_persistence(self, path, uncertainty_s=960):
@@ -404,6 +414,23 @@ class ModelPolicyState:
         return not any(isinstance(tool, dict) and tool.get("type") not in (None, "custom")
                        for tool in (payload.get("tools") or []))
 
+    def concurrency_eta(self, route, *, inference=True):
+        """All concurrency constraints derive from the single active ledger."""
+        if len(self.active) >= 128:
+            return 1.0
+        resource, rule = self.resource(route)
+        active = tuple(self.active.values())
+        if sum(a.resource == resource for a in active) >= int(rule.get("max_inflight", 8)):
+            return 1.0
+        if route.max_in_flight and sum(a.route_id == route.route_id for a in active) >= route.max_in_flight:
+            return 1.0
+        if route.concurrency_group and sum(a.concurrency_group == route.concurrency_group for a in active) >= route.group_max_in_flight:
+            return 1.0
+        if inference and self.route_state.consecutive_failures.get(route.route_id, 0):
+            if any(a.route_id == route.route_id and a.operation == "inference" for a in active):
+                return 1.0
+        return 0.0
+
     def eta(self, route, model, payload, session, now, fingerprint=None):
         if not self.wire_compatible(route, payload):
             return float("inf")
@@ -418,12 +445,9 @@ class ModelPolicyState:
         recovery = self.recovery_until.get(resource, 0.0)
         if recovery > now:
             return recovery - now
-        active = sum(1 for x in self.active.values() if x.resource == resource)
-        cap = int(rule.get("max_inflight", 8))
-        if self.route_state.consecutive_failures.get(route.route_id, 0):
-            cap = min(cap, 1)  # One half-open request after a failed/cooling resource.
-        if active >= cap:
-            return 1.0
+        concurrency_wait = self.concurrency_eta(route)
+        if concurrency_wait:
+            return concurrency_wait
         inp, out, _, _ = self.estimate(route, model, payload, session, now, fingerprint)
         wait = self.window.wait_for(route, now, inp, out, resource_id=resource,
             limits=self.limits(route), allow_oversize=rule.get("allow_one_oversize", False) is True)
@@ -487,7 +511,8 @@ class ModelPolicyState:
                     continue
                 if counting and route.wire != "anthropic":
                     continue
-                eta = max(0.0, self.route_state.cooldown_until.get(route.route_id, 0) - now) if counting else self.eta(route, model, payload, session, now, fingerprint)
+                eta = max(0.0, self.route_state.cooldown_until.get(route.route_id, 0) - now,
+                    self.concurrency_eta(route, inference=False)) if counting else self.eta(route, model, payload, session, now, fingerprint)
                 resource = self.resource(route)[0]
                 inflight = sum(a.resource == resource for a in self.active.values())
                 cap = self.resource(route)[1].get("max_inflight", 8)
@@ -526,12 +551,24 @@ class ModelPolicyState:
         return [(x[6], x[7]) for x in ready], min(x[0] for x in options), (
             "session_affinity" if ready and ready[0][1] else "ready_tier" if group else "exact_model"), profile
 
-    def begin(self, route, model, payload, session, profile, now, fingerprint=None):
+    def begin(self, route, model, payload, session, profile, now, fingerprint=None, *, operation="inference"):
         resource, rule = self.resource(route)
-        inp, out, signatures, full = self.estimate(route, model, payload, session, now, fingerprint)
+        if operation not in {"inference", "count_tokens"}:
+            raise ValueError("unknown admission operation")
+        if self.concurrency_eta(route, inference=operation == "inference"):
+            raise ValueError("admission concurrency changed before reservation")
+        inp, out, signatures, full = (self.estimate(route, model, payload, session, now, fingerprint)
+            if operation == "inference" else (0.0, 0.0, (), 0.0))
         token = uuid.uuid4().hex
         admission = Admission(token, route.route_id, resource, model, session, profile,
                               now, inp, out, signatures, full)
+        admission.operation = operation
+        admission.concurrency_group = route.concurrency_group
+        admission.circuit_generation = self.route_state.generations.get(route.route_id, 0)
+        if operation == "count_tokens":
+            self.active[token] = admission
+            self.counters["metering_selected"] += 1
+            return admission
         admission.input_basis = rule.get("input_basis", "total")
         admission.requested_max_tokens, admission.effective_max_tokens = self.output_bound(route, model, payload)
         # No await between availability recheck and reservation: one event-loop owner.
@@ -616,6 +653,13 @@ class ModelPolicyState:
             return
         admission.settled = True
         now = time.monotonic()
+        if admission.operation == "count_tokens":
+            self.active.pop(admission.token, None)
+            self.counters["metering_completed" if success else "metering_failed"] += 1
+            self.events.append({"request": admission.token, "operation": "count_tokens",
+                "route": admission.route_id, "success": bool(success), "elapsed_s": round(now-admission.started, 3)})
+            self.changed.set()
+            return
         rule = self.resources.get(admission.route_id, {})
         usage = admission.usage
         if (admission.effective_max_tokens is not None and admission.sent
@@ -680,7 +724,7 @@ class ModelPolicyState:
             self.counters["failed"] += 1
             if admission.finish_reason == "stream_incomplete":
                 self.route_state.record_failure(admission.route_id, "FABRIC_STREAM_INCOMPLETE",
-                    now=now, cooldown_s=30)
+                    now=now, cooldown_s=30, generation=admission.circuit_generation)
         self.events.append({"request": admission.token, "profile": admission.profile,
             "selected_model": admission.model, "reported_model": admission.reported_model,
             "route": admission.route_id, "success": bool(success),
@@ -728,6 +772,11 @@ class ModelPolicyState:
                 "recovery_wait_s": round(max(0, self.recovery_until.get(resource, 0) - now), 1),
                 "quota_truth": "local_estimate_not_provider_balance"}
         return {"version": VERSION, "draining": self.draining, "active": len(self.active),
+            "inference_active": sum(a.operation == "inference" for a in self.active.values()),
+            "metering_active": sum(a.operation == "count_tokens" for a in self.active.values()),
+            "concurrency_groups": {name: {"max_in_flight": limit,
+                "inflight": sum(a.concurrency_group == name for a in self.active.values())}
+                for name, limit in self.concurrency_limits.items()},
             "waiting": len(self.waiters), "counters": dict(self.counters),
             "resources": resources, "recent": list(self.events)[-20:],
             "exact_model_pins_preserved": True, "metered_fallback": self.allow_metered,

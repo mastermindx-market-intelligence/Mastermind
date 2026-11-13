@@ -503,7 +503,11 @@ class Overflow:
                     ladder = kept
         return ladder, eta, reason, prof
 
-    def begin(self, route, model, payload, session, profile, now, fingerprint=None):
+    def begin(self, route, model, payload, session, profile, now, fingerprint=None, *, operation="inference"):
+        if operation != "inference":
+            self.intents.pop(id(payload), None)
+            self.warm_waiting.pop(id(payload), None)
+            return self._begin(route, model, payload, session, profile, now, fingerprint, operation=operation)
         admission = self._begin(route, model, payload, session, profile, now, fingerprint)
         intent = self.intents.pop(id(payload), None)
         self.warm_waiting.pop(id(payload), None)
@@ -544,6 +548,8 @@ class Overflow:
 
     def finish(self, admission, *, success=False, no_send=False):
         if admission is None or admission.settled:
+            return self._finish(admission, success=success, no_send=no_send)
+        if getattr(admission, "operation", "inference") != "inference":
             return self._finish(admission, success=success, no_send=no_send)
         hit_429 = self.pending_429 == admission.route_id
         self.pending_429 = None
