@@ -2,6 +2,12 @@ name: fleet-route
 description: >-
   Choose runs-on for the next job(s): GitHub-hosted, or the load-aware fleet slot pool
   (docs/FLEET_CI_POOL.md). Default mode is off, which always returns ubuntu-24.04.
+  Callers MUST use the cross-repo form pinned to master or a SHA:
+  uses: mastermindx-market-intelligence/Mastermind/.github/actions/fleet-route@<sha>
+  — never ./.github/actions/fleet-route: a local reference would run the decision from
+  the caller's checkout (PR-head code) while holding the token. All decision logic and
+  the only token-using code live in this action directory and are read through
+  github.action_path, i.e. from the pinned ref.
 inputs:
   mode:
     description: "off | hybrid | fleet-only. Pass vars.CI_FLEET_MODE; empty or unknown means off."
@@ -15,10 +21,27 @@ inputs:
     description: "How many fleet slots the routed job(s) need at once (matrix width)."
     required: false
     default: "1"
+  is_trusted_source:
+    description: >-
+      "true" only for a trusted source. The caller MUST compute it in the workflow
+      expression:
+      github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+      Untrusted sources (fork PRs) never receive fleet labels, in any mode.
+    required: false
+    default: "false"
+  repo_private:
+    description: >-
+      Pass github.event.repository.private. Informational (recorded in the decision);
+      private repositories have no outside forks, so the trusted-source guard is the
+      binding control while the repos are public.
+    required: false
+    default: "false"
   token:
     description: >-
-      Read-only org self-hosted-runners token (secrets.FLEET_ROUTE_TOKEN). Only used in
-      hybrid mode. Missing or failing -> hosted. Never the minting credential.
+      Read-only org token (secrets.FLEET_ROUTE_TOKEN): "Self-hosted runners: read" plus
+      "Actions: read" for the queued-job count. Only used in hybrid mode, and only by
+      the pinned fleet-capacity script in this directory. Missing or failing -> hosted.
+      Never the minting credential.
     required: false
     default: ""
   group_id:
@@ -48,23 +71,16 @@ runs:
         FLEET_ROUTE_TOKEN: ${{ inputs.token }}
         FLEET_RUNNER_GROUP_ID: ${{ inputs.group_id }}
         FLEET_SPILL_RATIO: ${{ inputs.spill_ratio }}
-        FLEET_DIR: ${{ github.action_path }}/../../../ops/fleet_ci
+        FLEET_TRUSTED_SOURCE: ${{ inputs.is_trusted_source }}
+        FLEET_REPO_PRIVATE: ${{ inputs.repo_private }}
+        FLEET_ACTION_DIR: ${{ github.action_path }}
       run: |
         set -euo pipefail
-        mode="$(printf '%s' "${FLEET_MODE:-off}" | tr '[:upper:]' '[:lower:]')"
-        case "$mode" in off|hybrid|fleet-only) ;; *) mode=off ;; esac
-        cap=""
-        if [ "$mode" = hybrid ]; then
-          cap="$(mktemp)"
-          if [ -n "$FLEET_ROUTE_TOKEN" ]; then
-            python3 "$FLEET_DIR/fleet-capacity" --soft > "$cap" || echo '{"ok":false}' > "$cap"
-          else
-            echo '{"ok":false,"error":"FLEET_ROUTE_TOKEN missing"}' > "$cap"
-          fi
-        fi
-        runner="$(python3 "$FLEET_DIR/fleet_route.py" --mode "$mode" --class "$FLEET_CLASS_IN" \
-          --jobs-needed "$FLEET_JOBS" --spill-ratio "$FLEET_SPILL_RATIO" ${cap:+--capacity "$cap"})"
-        case "$runner" in '"ubuntu-24.04"') target=hosted ;; *) target=fleet ;; esac
-        echo "runner=$runner" >> "$GITHUB_OUTPUT"
-        echo "target=$target" >> "$GITHUB_OUTPUT"
-        echo "fleet-route: mode=$mode class=$FLEET_CLASS_IN jobs=$FLEET_JOBS -> $target $runner"
+        # Single decision script from the PINNED action checkout (github.action_path),
+        # never from the caller's checkout. It runs the sibling fleet-capacity from the
+        # same directory; only that pinned code reads FLEET_ROUTE_TOKEN.
+        python3 "$FLEET_ACTION_DIR/fleet_route.py" \
+          --mode "${FLEET_MODE:-off}" --class "$FLEET_CLASS_IN" \
+          --jobs-needed "$FLEET_JOBS" --spill-ratio "$FLEET_SPILL_RATIO" \
+          --trusted-source "$FLEET_TRUSTED_SOURCE" --repo-private "$FLEET_REPO_PRIVATE" \
+          --fetch-capacity --github-output "$GITHUB_OUTPUT"

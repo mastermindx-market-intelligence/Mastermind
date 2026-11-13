@@ -12,14 +12,20 @@ Installed on each fleet host as /usr/local/lib/fleet-ci/fleet_gate.py and called
   get KEY                          print one validated config value (for the bash loop).
   slots                            print the slots_for_host() sizing for this host.
   render-limits                    print the systemd drop-in carrying MemoryMax/CPUQuota.
+  render-nft [--slots N]           print the per-slot nftables egress ruleset.
 
-Gate semantics are copied from the Fabric host placer
-(ops/native_fabric/quota_continuity/source/host_pick.py, evaluate_hosts): the same
-number coercion (_as_float/_finite_nonnegative/_valid_timestamp), the same pressure
-policy validity (each PSI ceiling within 1..100 percent), a reading at or above a PSI
-ceiling refuses, available memory at or above the floor passes, and a missing or
-unparsable observation fails closed. The host placer is not importable on fleet hosts,
-so the small pure functions are copied; tests/test_fleet_ci_pool.py checks parity.
+Gate semantics vs the Fabric host placer
+(ops/native_fabric/quota_continuity/source/host_pick.py, evaluate_hosts): the number
+coercion (_as_float/_finite_nonnegative), the pressure policy validity (each PSI
+ceiling within 1..100 percent), "at or above a PSI ceiling refuses", "available memory
+at or above the floor passes" and "missing/unparsable fails closed" are copied; the
+host placer is not importable on fleet hosts, so the small pure functions are copied
+and tests/test_fleet_ci_pool.py checks parity. Deliberate differences: the fleet
+memory floor scales with busy slots (floor x (busy+1)); the fleet load gate is
+per-core (load1/cores < LOAD_MAX) where host_pick uses absolute load1 < load_gate;
+and there is NO freshness gate — host_pick's fresh gate guards stored probe state
+(max_age), while the fleet observes live in the same call, so a freshness check here
+would be tautological. See docs/FLEET_CI_POOL.md.
 
 Exit codes: 0 admitted / ok; 10 refused by a gate; 2 bad config or usage.
 """
@@ -30,6 +36,7 @@ import fcntl
 import json
 import math
 import os
+import re
 import sys
 import tempfile
 import time
@@ -61,6 +68,9 @@ DEFAULTS: Dict[str, str] = {
     "SLOT_MEMORY_HIGH": "7G",
     "SLOT_MEMORY_MAX": "8G",
     "SLOT_CPU_QUOTA": "400%",
+    # SHA-256 of the pinned runner tarball. Empty/invalid = no pin = the slot refuses
+    # to start; the example conf ships an all-zero placeholder that matches nothing.
+    "RUNNER_TARBALL_SHA256": "",
 }
 
 
@@ -78,18 +88,6 @@ def _as_float(value: Any) -> Optional[float]:
 def _finite_nonnegative(value: Any) -> Optional[float]:
     number = _as_float(value)
     return number if number is not None and number >= 0 and math.isfinite(number) else None
-
-
-def _valid_timestamp(value: Any, now: float) -> Optional[float]:
-    if isinstance(value, bool):
-        return None
-    try:
-        timestamp = float(value)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    if not math.isfinite(timestamp) or timestamp <= 0:
-        return None
-    return timestamp if timestamp <= now + 1 else None
 
 
 def _gate(name: str, ok: bool, label: str, detail: str = "") -> Dict[str, str]:
@@ -189,8 +187,10 @@ def validate_conf(conf: Dict[str, str]) -> List[str]:
     if conf.get("FLEET_CLASS") not in CLASSES:
         errors.append("FLEET_CLASS must be std or heavy")
     gid = conf.get("RUNNER_GROUP_ID", "")
-    if not gid.isdigit():
-        errors.append("RUNNER_GROUP_ID must be digits")
+    if not gid.isdigit() or int(gid) <= 0:
+        errors.append("RUNNER_GROUP_ID must be a positive integer (0 is refused)")
+    if not re.fullmatch(r"[0-9a-f]{64}", conf.get("RUNNER_TARBALL_SHA256", "")):
+        errors.append("RUNNER_TARBALL_SHA256 must be the pinned tarball's 64-hex-digit SHA-256; no pin = refuse")
     slots = conf.get("SLOTS", "")
     if slots != "auto" and not (slots.isdigit() and 0 <= int(slots) <= MAX_SLOTS):
         errors.append(f"SLOTS must be auto or 0..{MAX_SLOTS}")
@@ -237,14 +237,12 @@ def slots_for_host(cores: int, mem_total_gb: float, reserve_gb: float, slot_mem_
 
 def evaluate_admission(obs: Dict[str, Any], policy: Dict[str, Any], busy_slots: int,
                        host: str = "localhost") -> Tuple[bool, List[Dict[str, str]]]:
-    """All gates for registering ONE more runner on this host. Every gate must PASS."""
-    gates: List[Dict[str, str]] = []
-    now = time.time()
-    ts = _valid_timestamp(obs.get("observed_at"), now)
-    # Freshness, as host_pick: the observation is live, so allow a few seconds only.
-    gates.append(_gate(host, ts is not None and now - ts <= 10, "fresh",
-                       "no-observation" if ts is None else f"age={now - ts:.1f}s"))
+    """All gates for registering ONE more runner on this host. Every gate must PASS.
 
+    No freshness gate: observe() runs in this same call, so an age check would be
+    tautological (host_pick's fresh gate guards stored probe state, not live reads).
+    """
+    gates: List[Dict[str, str]] = []
     max_io, max_mem = policy.get("io_psi_max"), policy.get("mem_psi_max")
     policy_valid = (max_io is not None and 1 <= max_io <= 100
                     and max_mem is not None and 1 <= max_mem <= 100)
@@ -362,6 +360,54 @@ def render_limits(conf: Dict[str, str]) -> str:
             f"CPUQuota={conf['SLOT_CPU_QUOTA']}\n")
 
 
+# --- per-slot egress (nftables) -----------------------------------------------------------
+# Denied destinations for every slot uid: RFC1918/LAN, link-local, CGNAT, IPv6 ULA and
+# link-local, plus the host's loopback services. The only loopback exception is the
+# slot's own port range (PORT_BASE + N*PORT_SPAN .. +PORT_SPAN-1), so a job can reach
+# the servers it starts itself and nothing else on the host. Everything else (the
+# internet) is accepted by the chain policy. These are public address ranges, not host
+# identity. `meta skuid` matches the socket owner, so the rules bind to the slot account
+# regardless of which process or port it uses; nft resolves the user names at load time,
+# so provisioning must create the accounts before applying the ruleset.
+
+DENY_V4 = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10", "169.254.0.0/16")
+DENY_V6 = ("fc00::/7", "fe80::/10")
+LOOPBACK_V4 = "127.0.0.0/8"
+LOOPBACK_V6 = "::1/128"
+
+
+def render_nft(conf: Dict[str, str], slots: int) -> str:
+    """Idempotent nftables ruleset for slots 1..`slots` (create/delete/recreate table)."""
+    if not 0 <= slots <= MAX_SLOTS:
+        raise ValueError(f"slots must be 0..{MAX_SLOTS}")
+    lines = [
+        "# Generated by fleet_gate.py render-nft from /etc/fleet-ci/fleet.conf.",
+        "# Apply with: nft -f <file>   (idempotent: rebuilds table inet fleet_ci).",
+        "# Per-slot egress: internet allowed; RFC1918/LAN, link-local, CGNAT 100.64/10,",
+        "# IPv6 ULA/link-local and host loopback denied, except the slot's own port range.",
+        "table inet fleet_ci {}",
+        "delete table inet fleet_ci",
+        "table inet fleet_ci {",
+        "    chain egress {",
+        "        type filter hook output priority 0; policy accept;",
+    ]
+    for n in range(1, slots + 1):
+        u = f"ghrunner-{n}"
+        lo = PORT_BASE + n * PORT_SPAN
+        hi = lo + PORT_SPAN - 1
+        v4 = ", ".join(DENY_V4 + (LOOPBACK_V4,))
+        v6 = ", ".join(DENY_V6 + (LOOPBACK_V6,))
+        lines += [
+            f"        # slot {n}: loopback only inside its own port range {lo}-{hi}",
+            f'        meta skuid "{u}" ip daddr {LOOPBACK_V4} meta l4proto {{ tcp, udp }} th dport {lo}-{hi} accept',
+            f'        meta skuid "{u}" ip6 daddr {LOOPBACK_V6} meta l4proto {{ tcp, udp }} th dport {lo}-{hi} accept',
+            f'        meta skuid "{u}" ip daddr {{ {v4} }} drop',
+            f'        meta skuid "{u}" ip6 daddr {{ {v6} }} drop',
+        ]
+    lines += ["    }", "}", ""]
+    return "\n".join(lines)
+
+
 # --- CLI ---------------------------------------------------------------------------------
 
 def _load(path: str) -> Dict[str, str]:
@@ -387,6 +433,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     g = sub.add_parser("get"); g.add_argument("key")
     sub.add_parser("slots")
     sub.add_parser("render-limits")
+    rn = sub.add_parser("render-nft")
+    rn.add_argument("--slots", type=int, default=None,
+                    help="render for exactly this many slots (default: the `slots` sizing)")
     args = p.parse_args(argv)
     try:
         conf = _load(args.conf)
@@ -414,13 +463,21 @@ def main(argv: Optional[List[str]] = None) -> int:
             return EX_USAGE
         print(conf[args.key])
         return 0
-    if args.cmd == "slots":
+    if args.cmd in ("slots", "render-nft"):
         obs = observe(args.proc_root)
         auto = slots_for_host(obs["cores"] or 0, obs["mem_total_gb"] or 0.0,
                               float(conf["RESERVE_GB"]), float(conf["SLOT_MEM_GB"]))
         n = auto if conf["SLOTS"] == "auto" else min(int(conf["SLOTS"]), auto)
-        print(json.dumps({"slots": n, "sizing_rule": auto, "configured": conf["SLOTS"],
-                          "cores": obs["cores"], "mem_total_gb": obs["mem_total_gb"]}, sort_keys=True))
+        if args.cmd == "slots":
+            print(json.dumps({"slots": n, "sizing_rule": auto, "configured": conf["SLOTS"],
+                              "cores": obs["cores"], "mem_total_gb": obs["mem_total_gb"]}, sort_keys=True))
+            return 0
+        if args.slots is not None:
+            if not 0 <= args.slots <= MAX_SLOTS:
+                print(f"fleet_gate: --slots must be 0..{MAX_SLOTS}", file=sys.stderr)
+                return EX_USAGE
+            n = args.slots
+        print(render_nft(conf, n), end="")
         return 0
     print(render_limits(conf), end="")
     return 0

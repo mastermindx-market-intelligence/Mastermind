@@ -20,7 +20,11 @@ ProtectSystem=full
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=no
-NoNewPrivileges=no
+# No setuid elevation anywhere in the unit: the minter handoff uses setpriv, not sudo
+# (sudo is setuid and refuses to run under NoNewPrivileges). RestrictSUIDSGID also
+# strips setuid/setgid bits from anything the slot creates (e.g. tarball extraction).
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
 ReadOnlyPaths=-/var/crash -/var/metrics -/var/lib/BrlAPI
 Delegate=yes
 KillMode=control-group
@@ -32,9 +36,13 @@ CPUQuota=400%
 TasksMax=4096
 # The JIT config sits in run.sh's environment until Runner.Listener reads it: no core dumps.
 LimitCORE=0
-# Unlike the Terminal lane, the pool restarts slots: an uncertain registration writes
-# /var/lib/fleet-ci/hold-%i first, and the slot refuses to start while it exists.
-Restart=always
+# Ordinary failures (exit 1) come back after RestartSec. An uncertain registration
+# writes /var/lib/fleet-ci/hold-%i (write, sync, read back) and exits 78;
+# RestartPreventExitStatus=78 keeps the unit stopped even if the hold could not be
+# persisted, and the slot refuses to start while a hold marker exists. Reconcile per
+# docs/FLEET_CI_POOL.md before removing the hold.
+Restart=on-failure
+RestartPreventExitStatus=78
 RestartSec=60
 
 [Install]
