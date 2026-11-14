@@ -1,0 +1,4533 @@
+{
+  "schema": "mastermind.entry_risk_forward_part.v1",
+  "source_code_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7",
+  "origin_session": "2026-11-13",
+  "status": "COMPUTED_AWAITING_PUBLICATION_NOT_VALIDATED",
+  "records": [
+    {
+      "instrument": "ACAD",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:49.586277+00:00",
+      "computed_at": "2026-11-14T06:21:36.317136+00:00",
+      "lineage": {
+        "raw_capture_sha256": "92be6c09e857096327cbd2d949d4e344f69ab871708b720e4889d4d1e7a75939",
+        "prefix_sha256": "7c8a2305d6868acb6edb79b8a05f325a061c85a034dba6b23a4a841bf6862071",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.001791696116283144,
+            "5": 0.0017674755743789625,
+            "20": 0.0017234816275270512
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.6719430193873229,
+            "5": 0.6673858289951162,
+            "20": 0.6590275943667434
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.0024396497265535807,
+            "5": 0.0024396497265535807,
+            "20": 0.0024396497265535807
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.7840865584178206,
+            "5": 0.7840865584178206,
+            "20": 0.7840865584178206
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "ACAD",
+        "verdict": "knife",
+        "buyable": false,
+        "entry_score": 10.0,
+        "metrics": {
+          "range_pctile_60d": 16.0,
+          "pct_vs_20dma": -5.56,
+          "ret_10d": -0.0894,
+          "ret_5d": -0.1168,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.1364,
+          "ret_from_63d_low": 0.1364,
+          "days_since_63d_low": 4,
+          "peak_range_pctile_10d": 35.3,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [
+          "acute multi-day collapse \u2014 do not catch the knife"
+        ],
+        "park_triggers": {
+          "range_pctile_lte": 80.0,
+          "tier_in": [
+            "T1",
+            "T2"
+          ],
+          "not_verdicts": [
+            "chase",
+            "late_leg",
+            "rollover",
+            "extended",
+            "knife",
+            "missed_move",
+            "extended_vs_plan"
+          ]
+        },
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "ACAD",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "92be6c09e857096327cbd2d949d4e344f69ab871708b720e4889d4d1e7a75939",
+            "prefix_sha256": "7c8a2305d6868acb6edb79b8a05f325a061c85a034dba6b23a4a841bf6862071",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:49.586277+00:00",
+          "computed_at": "2026-11-14T06:21:36.317136+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.6719430193873229,
+            "h5": 0.6673858289951162,
+            "h20": 0.6590275943667434,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "ACAD",
+        "raw_sha256": "92be6c09e857096327cbd2d949d4e344f69ab871708b720e4889d4d1e7a75939",
+        "captured_at": "2026-11-14T06:15:49.586277+00:00",
+        "source_request_path": "/tiingo/daily/ACAD/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 0,
+        "dividend_events": 0,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.0,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "AME",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:51.537798+00:00",
+      "computed_at": "2026-11-14T06:21:49.399086+00:00",
+      "lineage": {
+        "raw_capture_sha256": "345973b7a952446dab8907678fe0a323a3ce3cf7c02644e59a2d413d25446c78",
+        "prefix_sha256": "49cda88d0733af63ced53f82f45a53e7f29dacdf5d9afe89c0340fb62c526a1a",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.0004094945337312905,
+            "5": 0.00040431116551845335,
+            "20": 0.0003867523621746939
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.3212360853022045,
+            "5": 0.3191965126856029,
+            "20": 0.31218839707462365
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.0004813946546311124,
+            "5": 0.0004813946546311124,
+            "20": 0.0004813946546311124
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.3482979370697454,
+            "5": 0.3482979370697454,
+            "20": 0.3482979370697454
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "AME",
+        "verdict": "clean",
+        "buyable": true,
+        "entry_score": 60.0,
+        "metrics": {
+          "range_pctile_60d": 62.2,
+          "pct_vs_20dma": 0.2,
+          "ret_10d": 0.0041,
+          "ret_5d": 0.0588,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.0857,
+          "ret_from_63d_low": 0.0857,
+          "days_since_63d_low": 6,
+          "peak_range_pctile_10d": 83.3,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [],
+        "park_triggers": null,
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "AME",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "345973b7a952446dab8907678fe0a323a3ce3cf7c02644e59a2d413d25446c78",
+            "prefix_sha256": "49cda88d0733af63ced53f82f45a53e7f29dacdf5d9afe89c0340fb62c526a1a",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:51.537798+00:00",
+          "computed_at": "2026-11-14T06:21:49.399086+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.3212360853022045,
+            "h5": 0.3191965126856029,
+            "h20": 0.31218839707462365,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "AME",
+        "raw_sha256": "345973b7a952446dab8907678fe0a323a3ce3cf7c02644e59a2d413d25446c78",
+        "captured_at": "2026-11-14T06:15:51.537798+00:00",
+        "source_request_path": "/tiingo/daily/AME/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 2,
+        "dividend_events": 67,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.0003295136438483286,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "ANGI",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:16:02.904468+00:00",
+      "computed_at": "2026-11-14T06:22:48.381152+00:00",
+      "lineage": {
+        "raw_capture_sha256": "3ad20ce330247e46246f6931e0dbe8bde9e3cdf211c85f1593ffbf58f51627a1",
+        "prefix_sha256": "39f3593088475b4b02d7a5d1e77bd8e231e9995dd59dcfa84a252566f1e25b6d",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.002123788778863283,
+            "5": 0.0024275471805406896,
+            "20": 0.002578340275663813
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.7315700733856924,
+            "5": 0.7821393031271692,
+            "20": 0.8060655987370264
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.003193078630916732,
+            "5": 0.003193078630916732,
+            "20": 0.003193078630916732
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.8970260949331499,
+            "5": 0.8970260949331499,
+            "20": 0.8970260949331499
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "ANGI",
+        "verdict": "rollover",
+        "buyable": false,
+        "entry_score": 10.0,
+        "metrics": {
+          "range_pctile_60d": 68.5,
+          "pct_vs_20dma": 1.15,
+          "ret_10d": 0.0818,
+          "ret_5d": -0.0636,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.1489,
+          "ret_from_63d_low": 0.4211,
+          "days_since_63d_low": 60,
+          "peak_range_pctile_10d": 100.0,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [
+          "rollover confirmed by MACD/tier/RSI state",
+          "came off the boil \u2014 peak 100th pctile within 10d, now 68th"
+        ],
+        "park_triggers": {
+          "range_pctile_lte": 80.0,
+          "tier_in": [
+            "T1",
+            "T2"
+          ],
+          "not_verdicts": [
+            "chase",
+            "late_leg",
+            "rollover",
+            "extended",
+            "knife",
+            "missed_move",
+            "extended_vs_plan"
+          ]
+        },
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "ANGI",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "3ad20ce330247e46246f6931e0dbe8bde9e3cdf211c85f1593ffbf58f51627a1",
+            "prefix_sha256": "39f3593088475b4b02d7a5d1e77bd8e231e9995dd59dcfa84a252566f1e25b6d",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:16:02.904468+00:00",
+          "computed_at": "2026-11-14T06:22:48.381152+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.7315700733856924,
+            "h5": 0.7821393031271692,
+            "h20": 0.8060655987370264,
+            "fit_cutoff": "2026-09-02",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "ANGI",
+        "raw_sha256": "3ad20ce330247e46246f6931e0dbe8bde9e3cdf211c85f1593ffbf58f51627a1",
+        "captured_at": "2026-11-14T06:16:02.904468+00:00",
+        "source_request_path": "/tiingo/daily/ANGI/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 3769,
+        "retained_rows": 3769,
+        "data_end": "2026-11-13",
+        "split_events": 1,
+        "dividend_events": 0,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 4.440892098500625e-16,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 52,
+      "successful_fits": 52,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "ANIP",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:49.230686+00:00",
+      "computed_at": "2026-11-14T06:21:33.700809+00:00",
+      "lineage": {
+        "raw_capture_sha256": "3717cacb016a033eedf114d90c13dd94908a7640efea74c3fe6f7e18ee84a899",
+        "prefix_sha256": "e2f0f222c192ae11dea44218610e5ecb9d0fbad47bb2fb221b7d7047a3fd9517",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.0005574996301708921,
+            "5": 0.0008314830298309352,
+            "20": 0.0011570646017531594
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.37481983245696165,
+            "5": 0.4577485374279154,
+            "20": 0.5399817401003446
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.0005449203057852057,
+            "5": 0.0005449203057852057,
+            "20": 0.0005449203057852057
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.37056702100682387,
+            "5": 0.37056702100682387,
+            "20": 0.37056702100682387
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "ANIP",
+        "verdict": "clean",
+        "buyable": true,
+        "entry_score": 60.0,
+        "metrics": {
+          "range_pctile_60d": 35.2,
+          "pct_vs_20dma": 0.0,
+          "ret_10d": -0.0078,
+          "ret_5d": 0.0598,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.0598,
+          "ret_from_63d_low": 0.0598,
+          "days_since_63d_low": 5,
+          "peak_range_pctile_10d": 42.6,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [],
+        "park_triggers": null,
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "ANIP",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "3717cacb016a033eedf114d90c13dd94908a7640efea74c3fe6f7e18ee84a899",
+            "prefix_sha256": "e2f0f222c192ae11dea44218610e5ecb9d0fbad47bb2fb221b7d7047a3fd9517",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:49.230686+00:00",
+          "computed_at": "2026-11-14T06:21:33.700809+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.37481983245696165,
+            "h5": 0.4577485374279154,
+            "h20": 0.5399817401003446,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "ANIP",
+        "raw_sha256": "3717cacb016a033eedf114d90c13dd94908a7640efea74c3fe6f7e18ee84a899",
+        "captured_at": "2026-11-14T06:15:49.230686+00:00",
+        "source_request_path": "/tiingo/daily/ANIP/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 2,
+        "dividend_events": 0,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 2.000000165680742e-10,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "APP",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:16:04.690724+00:00",
+      "computed_at": "2026-11-14T06:22:53.662721+00:00",
+      "lineage": {
+        "raw_capture_sha256": "f1ee7f38e687574d63d1c3675500a6027fac2cf20213666d28ba1874a053c0f0",
+        "prefix_sha256": "fbda209d395aaeaed3d86476f59a8d407b73794733953f8c364f9aac1205fa72",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.0018332267749833547,
+            "5": 0.002443700633527722,
+            "20": 0.0027740281977696553
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.6796860652505724,
+            "5": 0.7847372551682417,
+            "20": 0.8360951535787976
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.004184762167639313,
+            "5": 0.004184762167639313,
+            "20": 0.004184762167639313
+          },
+          "annualized_volatility_fraction": {
+            "1": 1.0269177504771776,
+            "5": 1.0269177504771776,
+            "20": 1.0269177504771776
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "APP",
+        "verdict": "chase",
+        "buyable": false,
+        "entry_score": 5.0,
+        "metrics": {
+          "range_pctile_60d": 99.5,
+          "pct_vs_20dma": 33.97,
+          "ret_10d": 0.7904,
+          "ret_5d": 0.0457,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.7904,
+          "ret_from_63d_low": 0.7904,
+          "days_since_63d_low": 10,
+          "peak_range_pctile_10d": 100.0,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [
+          "buying the top of the range on a fresh rip (100th pctile of 60d range, +79% in 10d, +34% vs 20dma)"
+        ],
+        "park_triggers": {
+          "range_pctile_lte": 40.0,
+          "tier_in": [
+            "T1",
+            "T2"
+          ],
+          "not_verdicts": [
+            "chase",
+            "late_leg",
+            "rollover",
+            "extended",
+            "knife",
+            "missed_move",
+            "extended_vs_plan"
+          ]
+        },
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "APP",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "f1ee7f38e687574d63d1c3675500a6027fac2cf20213666d28ba1874a053c0f0",
+            "prefix_sha256": "fbda209d395aaeaed3d86476f59a8d407b73794733953f8c364f9aac1205fa72",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:16:04.690724+00:00",
+          "computed_at": "2026-11-14T06:22:53.662721+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.6796860652505724,
+            "h5": 0.7847372551682417,
+            "h20": 0.8360951535787976,
+            "fit_cutoff": "2026-10-21",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "APP",
+        "raw_sha256": "f1ee7f38e687574d63d1c3675500a6027fac2cf20213666d28ba1874a053c0f0",
+        "captured_at": "2026-11-14T06:16:04.690724+00:00",
+        "source_request_path": "/tiingo/daily/APP/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 1404,
+        "retained_rows": 1404,
+        "data_end": "2026-11-13",
+        "split_events": 0,
+        "dividend_events": 0,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.0,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 15,
+      "successful_fits": 15,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "BCO",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:56.581252+00:00",
+      "computed_at": "2026-11-14T06:22:10.493887+00:00",
+      "lineage": {
+        "raw_capture_sha256": "d57bd4bab3797aa7bd209bf0de9d19036bbb767802a04562ff125f0006877282",
+        "prefix_sha256": "73386e6a5ae23d60ed2a8765976ef9b39c07c478d8ebc11875b005dc8d0b18db",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.000360794783317395,
+            "5": 0.0004014756907015707,
+            "20": 0.0004282052461110006
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.3015299079626821,
+            "5": 0.3180752647673123,
+            "20": 0.3284931080250728
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.000756343580598687,
+            "5": 0.000756343580598687,
+            "20": 0.000756343580598687
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.43657597541650084,
+            "5": 0.43657597541650084,
+            "20": 0.43657597541650084
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "BCO",
+        "verdict": "clean",
+        "buyable": true,
+        "entry_score": 60.0,
+        "metrics": {
+          "range_pctile_60d": 99.3,
+          "pct_vs_20dma": 6.59,
+          "ret_10d": 0.1404,
+          "ret_5d": 0.0599,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.1691,
+          "ret_from_63d_low": 0.1716,
+          "days_since_63d_low": 31,
+          "peak_range_pctile_10d": 100.0,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [],
+        "park_triggers": null,
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "BCO",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "d57bd4bab3797aa7bd209bf0de9d19036bbb767802a04562ff125f0006877282",
+            "prefix_sha256": "73386e6a5ae23d60ed2a8765976ef9b39c07c478d8ebc11875b005dc8d0b18db",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:56.581252+00:00",
+          "computed_at": "2026-11-14T06:22:10.493887+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.3015299079626821,
+            "h5": 0.3180752647673123,
+            "h20": 0.3284931080250728,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "BCO",
+        "raw_sha256": "d57bd4bab3797aa7bd209bf0de9d19036bbb767802a04562ff125f0006877282",
+        "captured_at": "2026-11-14T06:15:56.581252+00:00",
+        "source_request_path": "/tiingo/daily/BCO/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 0,
+        "dividend_events": 68,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.00032356503670608814,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "BRBR",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:51.938400+00:00",
+      "computed_at": "2026-11-14T06:21:43.387830+00:00",
+      "lineage": {
+        "raw_capture_sha256": "d70dfb7aa6bf6a5a3f5e2b2679026f20db5359f9a5263d4191e6cab75c3e65d9",
+        "prefix_sha256": "17ea8db4cd04e02709ddf9fa8e9a776fdb2178a7065b6a46af1001ff973bf633",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.0011267024971068503,
+            "5": 0.0014559841883215465,
+            "20": 0.0027579778193051966
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.532849912518456,
+            "5": 0.6057293252410929,
+            "20": 0.8336728437852042
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.001513307050510456,
+            "5": 0.001513307050510456,
+            "20": 0.001513307050510456
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.61753815811546,
+            "5": 0.61753815811546,
+            "20": 0.61753815811546
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "BRBR",
+        "verdict": "late_leg",
+        "buyable": false,
+        "entry_score": 15.0,
+        "metrics": {
+          "range_pctile_60d": 91.6,
+          "pct_vs_20dma": 9.73,
+          "ret_10d": 0.1516,
+          "ret_5d": 0.1528,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.1656,
+          "ret_from_63d_low": 0.427,
+          "days_since_63d_low": 31,
+          "peak_range_pctile_10d": 91.6,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [
+          "+43% off the 63d low in 31 sessions \u2014 too deep into the leg to START"
+        ],
+        "park_triggers": {
+          "range_pctile_lte": 40.0,
+          "tier_in": [
+            "T1",
+            "T2"
+          ],
+          "not_verdicts": [
+            "chase",
+            "late_leg",
+            "rollover",
+            "extended",
+            "knife",
+            "missed_move",
+            "extended_vs_plan"
+          ]
+        },
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "BRBR",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "d70dfb7aa6bf6a5a3f5e2b2679026f20db5359f9a5263d4191e6cab75c3e65d9",
+            "prefix_sha256": "17ea8db4cd04e02709ddf9fa8e9a776fdb2178a7065b6a46af1001ff973bf633",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:51.938400+00:00",
+          "computed_at": "2026-11-14T06:21:43.387830+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.532849912518456,
+            "h5": 0.6057293252410929,
+            "h20": 0.8336728437852042,
+            "fit_cutoff": "2026-10-26",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "BRBR",
+        "raw_sha256": "d70dfb7aa6bf6a5a3f5e2b2679026f20db5359f9a5263d4191e6cab75c3e65d9",
+        "captured_at": "2026-11-14T06:15:51.938400+00:00",
+        "source_request_path": "/tiingo/daily/BRBR/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 1779,
+        "retained_rows": 1779,
+        "data_end": "2026-11-13",
+        "split_events": 0,
+        "dividend_events": 0,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.0,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 21,
+      "successful_fits": 21,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "CBT",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:53.827265+00:00",
+      "computed_at": "2026-11-14T06:21:57.830559+00:00",
+      "lineage": {
+        "raw_capture_sha256": "cfabc3a215997fe2a189daa7e918d809fbc67cffdf8ca62c8b98b3a9be65b64d",
+        "prefix_sha256": "d7e02b12fa4a128e8dd349444d8f89d38bc94f034e85233e062b0742f0405b84",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.00037495775272414835,
+            "5": 0.0004165541066357408,
+            "20": 0.0004711160273693277
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.3073912062608255,
+            "5": 0.323993263621648,
+            "20": 0.3445594852809462
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.0005943925785739801,
+            "5": 0.0005943925785739801,
+            "20": 0.0005943925785739801
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.3870231644238404,
+            "5": 0.3870231644238404,
+            "20": 0.3870231644238404
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "CBT",
+        "verdict": "clean",
+        "buyable": true,
+        "entry_score": 60.0,
+        "metrics": {
+          "range_pctile_60d": 6.4,
+          "pct_vs_20dma": -1.82,
+          "ret_10d": -0.0337,
+          "ret_5d": 0.0122,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.0122,
+          "ret_from_63d_low": 0.0122,
+          "days_since_63d_low": 5,
+          "peak_range_pctile_10d": 34.2,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [],
+        "park_triggers": null,
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "CBT",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "cfabc3a215997fe2a189daa7e918d809fbc67cffdf8ca62c8b98b3a9be65b64d",
+            "prefix_sha256": "d7e02b12fa4a128e8dd349444d8f89d38bc94f034e85233e062b0742f0405b84",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:53.827265+00:00",
+          "computed_at": "2026-11-14T06:21:57.830559+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.3073912062608255,
+            "h5": 0.323993263621648,
+            "h20": 0.3445594852809462,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "CBT",
+        "raw_sha256": "cfabc3a215997fe2a189daa7e918d809fbc67cffdf8ca62c8b98b3a9be65b64d",
+        "captured_at": "2026-11-14T06:15:53.827265+00:00",
+        "source_request_path": "/tiingo/daily/CBT/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 0,
+        "dividend_events": 67,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.0004013950235086727,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "CHD",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:16:07.195347+00:00",
+      "computed_at": "2026-11-14T06:23:13.433835+00:00",
+      "lineage": {
+        "raw_capture_sha256": "66845a20c5af65060414906ccf8b33791c6577a7aeb49bb47c312e9ec9eab93c",
+        "prefix_sha256": "dd49461dc5862ff0a317f4a91c3978946d4f97a41afd0dca13480d9b7d792123",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.00018040846831038278,
+            "5": 0.00020361624687842777,
+            "20": 0.00022231494749300171
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.21322038836428484,
+            "5": 0.2265199642710633,
+            "20": 0.23669255748383056
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.0003467986099807279,
+            "5": 0.0003467986099807279,
+            "20": 0.0003467986099807279
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.2956234931718781,
+            "5": 0.2956234931718781,
+            "20": 0.2956234931718781
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "CHD",
+        "verdict": "clean",
+        "buyable": true,
+        "entry_score": 60.0,
+        "metrics": {
+          "range_pctile_60d": 100.0,
+          "pct_vs_20dma": 4.44,
+          "ret_10d": 0.0567,
+          "ret_5d": 0.0364,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.0886,
+          "ret_from_63d_low": 0.2062,
+          "days_since_63d_low": 46,
+          "peak_range_pctile_10d": 100.0,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [],
+        "park_triggers": null,
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "CHD",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "66845a20c5af65060414906ccf8b33791c6577a7aeb49bb47c312e9ec9eab93c",
+            "prefix_sha256": "dd49461dc5862ff0a317f4a91c3978946d4f97a41afd0dca13480d9b7d792123",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:16:07.195347+00:00",
+          "computed_at": "2026-11-14T06:23:13.433835+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.21322038836428484,
+            "h5": 0.2265199642710633,
+            "h20": 0.23669255748383056,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "CHD",
+        "raw_sha256": "66845a20c5af65060414906ccf8b33791c6577a7aeb49bb47c312e9ec9eab93c",
+        "captured_at": "2026-11-14T06:16:07.195347+00:00",
+        "source_request_path": "/tiingo/daily/CHD/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 2,
+        "dividend_events": 69,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.00016537556184438126,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "CI",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:16:01.592258+00:00",
+      "computed_at": "2026-11-14T06:22:41.598124+00:00",
+      "lineage": {
+        "raw_capture_sha256": "8cd0f38fbdb6ee06d7bb7ab325bb5af52b2997e28d4d9d8ec79b947e11ed5f00",
+        "prefix_sha256": "61bc6d3ab21cca298545bd8486c8c6934df94fcf3a5b1bd272a43c8ecccad953",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.0004146478962206394,
+            "5": 0.0003930487671546615,
+            "20": 0.00035907641255440324
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.3232510941166342,
+            "5": 0.3147193818673624,
+            "20": 0.3008109970790789
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.00046002013908022905,
+            "5": 0.00046002013908022905,
+            "20": 0.00046002013908022905
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.3404777159348578,
+            "5": 0.3404777159348578,
+            "20": 0.3404777159348578
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "CI",
+        "verdict": "clean",
+        "buyable": true,
+        "entry_score": 60.0,
+        "metrics": {
+          "range_pctile_60d": 62.5,
+          "pct_vs_20dma": -1.21,
+          "ret_10d": -0.0041,
+          "ret_5d": 0.0116,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.0116,
+          "ret_from_63d_low": 0.1186,
+          "days_since_63d_low": 36,
+          "peak_range_pctile_10d": 79.2,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [],
+        "park_triggers": null,
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "CI",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "8cd0f38fbdb6ee06d7bb7ab325bb5af52b2997e28d4d9d8ec79b947e11ed5f00",
+            "prefix_sha256": "61bc6d3ab21cca298545bd8486c8c6934df94fcf3a5b1bd272a43c8ecccad953",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:16:01.592258+00:00",
+          "computed_at": "2026-11-14T06:22:41.598124+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.3232510941166342,
+            "h5": 0.3147193818673624,
+            "h20": 0.3008109970790789,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "CI",
+        "raw_sha256": "8cd0f38fbdb6ee06d7bb7ab325bb5af52b2997e28d4d9d8ec79b947e11ed5f00",
+        "captured_at": "2026-11-14T06:16:01.592258+00:00",
+        "source_request_path": "/tiingo/daily/CI/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 0,
+        "dividend_events": 34,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.00023632158251568267,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "COHR",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:53.456134+00:00",
+      "computed_at": "2026-11-14T06:21:57.610797+00:00",
+      "lineage": {
+        "raw_capture_sha256": "b9c8742b74e9e5f508fd67fd4acea9bc391406c98d7ec6700274ae7e042b990c",
+        "prefix_sha256": "19d4d20622b8ea769ed8d1de99dc625aabc583b40ecc4e29e9a9969e41a4a703",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.008165588250147003,
+            "5": 0.007511148727642177,
+            "20": 0.005982786905007456
+          },
+          "annualized_volatility_fraction": {
+            "1": 1.4344783856988033,
+            "5": 1.3757941268103409,
+            "20": 1.2278690076966186
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.005789684964377474,
+            "5": 0.005789684964377474,
+            "20": 0.005789684964377474
+          },
+          "annualized_volatility_fraction": {
+            "1": 1.2078909764639867,
+            "5": 1.2078909764639867,
+            "20": 1.2078909764639867
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": true,
+          "tier": "T2",
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": true,
+          "tier": "T2",
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "COHR",
+        "verdict": "clean",
+        "buyable": true,
+        "entry_score": 60.0,
+        "metrics": {
+          "range_pctile_60d": 28.7,
+          "pct_vs_20dma": 0.24,
+          "ret_10d": 0.0372,
+          "ret_5d": 0.1314,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.285,
+          "ret_from_63d_low": 0.285,
+          "days_since_63d_low": 6,
+          "peak_range_pctile_10d": 38.4,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [],
+        "park_triggers": null,
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "COHR",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "b9c8742b74e9e5f508fd67fd4acea9bc391406c98d7ec6700274ae7e042b990c",
+            "prefix_sha256": "19d4d20622b8ea769ed8d1de99dc625aabc583b40ecc4e29e9a9969e41a4a703",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:53.456134+00:00",
+          "computed_at": "2026-11-14T06:21:57.610797+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 1.4344783856988033,
+            "h5": 1.3757941268103409,
+            "h20": 1.2278690076966186,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "COHR",
+        "raw_sha256": "b9c8742b74e9e5f508fd67fd4acea9bc391406c98d7ec6700274ae7e042b990c",
+        "captured_at": "2026-11-14T06:15:53.456134+00:00",
+        "source_request_path": "/tiingo/daily/COHR/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 1,
+        "dividend_events": 0,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.0,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "CVX",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:55.282076+00:00",
+      "computed_at": "2026-11-14T06:22:06.282654+00:00",
+      "lineage": {
+        "raw_capture_sha256": "9e2e0764da53f7c18cb6b1dda9a812f0956f7d23ff15e615d73c1cb860cca641",
+        "prefix_sha256": "fca4269f2d6749e332721c02965852a4639ddc6e89e73e4e2b624f81ba103430",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.0002319124233882404,
+            "5": 0.00024232783661856555,
+            "20": 0.00025966181342265633
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.24174765912793567,
+            "5": 0.24711660168406033,
+            "20": 0.2558022223955636
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.0002676044519304527,
+            "5": 0.0002676044519304527,
+            "20": 0.0002676044519304527
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.2596850436326168,
+            "5": 0.2596850436326168,
+            "20": 0.2596850436326168
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "CVX",
+        "verdict": "clean",
+        "buyable": true,
+        "entry_score": 60.0,
+        "metrics": {
+          "range_pctile_60d": 56.3,
+          "pct_vs_20dma": -1.4,
+          "ret_10d": -0.0664,
+          "ret_5d": 0.0342,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.0432,
+          "ret_from_63d_low": 0.1007,
+          "days_since_63d_low": 55,
+          "peak_range_pctile_10d": 78.3,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [],
+        "park_triggers": null,
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "CVX",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "9e2e0764da53f7c18cb6b1dda9a812f0956f7d23ff15e615d73c1cb860cca641",
+            "prefix_sha256": "fca4269f2d6749e332721c02965852a4639ddc6e89e73e4e2b624f81ba103430",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:55.282076+00:00",
+          "computed_at": "2026-11-14T06:22:06.282654+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.24174765912793567,
+            "h5": 0.24711660168406033,
+            "h20": 0.2558022223955636,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "CVX",
+        "raw_sha256": "9e2e0764da53f7c18cb6b1dda9a812f0956f7d23ff15e615d73c1cb860cca641",
+        "captured_at": "2026-11-14T06:15:55.282076+00:00",
+        "source_request_path": "/tiingo/daily/CVX/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 0,
+        "dividend_events": 67,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.0007318936831573841,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "DDD",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:46.650530+00:00",
+      "computed_at": "2026-11-14T06:21:20.631814+00:00",
+      "lineage": {
+        "raw_capture_sha256": "cb44905aeefdc98c9ee700854b1e902a64e53d5426ba4657904362d32603d153",
+        "prefix_sha256": "43ea8bcf3bb91f5dca1e2a0b902f15251bd639cef72d6aaaabaf737242c43e38",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.0024780567443558484,
+            "5": 0.0024822326183748483,
+            "20": 0.0024880122798932106
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.7902343320671874,
+            "5": 0.7908998797764871,
+            "20": 0.7918201150091408
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.0054472910782092385,
+            "5": 0.0054472910782092385,
+            "20": 0.0054472910782092385
+          },
+          "annualized_volatility_fraction": {
+            "1": 1.1716302111625188,
+            "5": 1.1716302111625188,
+            "20": 1.1716302111625188
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "DDD",
+        "verdict": "knife",
+        "buyable": false,
+        "entry_score": 10.0,
+        "metrics": {
+          "range_pctile_60d": 0.0,
+          "pct_vs_20dma": -38.62,
+          "ret_10d": -0.4496,
+          "ret_5d": -0.1257,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.0,
+          "ret_from_63d_low": 0.0,
+          "days_since_63d_low": 0,
+          "peak_range_pctile_10d": 53.3,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [
+          "acute multi-day collapse \u2014 do not catch the knife"
+        ],
+        "park_triggers": {
+          "range_pctile_lte": 80.0,
+          "tier_in": [
+            "T1",
+            "T2"
+          ],
+          "not_verdicts": [
+            "chase",
+            "late_leg",
+            "rollover",
+            "extended",
+            "knife",
+            "missed_move",
+            "extended_vs_plan"
+          ]
+        },
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "DDD",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "cb44905aeefdc98c9ee700854b1e902a64e53d5426ba4657904362d32603d153",
+            "prefix_sha256": "43ea8bcf3bb91f5dca1e2a0b902f15251bd639cef72d6aaaabaf737242c43e38",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:46.650530+00:00",
+          "computed_at": "2026-11-14T06:21:20.631814+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.7902343320671874,
+            "h5": 0.7908998797764871,
+            "h20": 0.7918201150091408,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "DDD",
+        "raw_sha256": "cb44905aeefdc98c9ee700854b1e902a64e53d5426ba4657904362d32603d153",
+        "captured_at": "2026-11-14T06:15:46.650530+00:00",
+        "source_request_path": "/tiingo/daily/DDD/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 2,
+        "dividend_events": 0,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 2.50022225145554e-13,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "DECK",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:48.857482+00:00",
+      "computed_at": "2026-11-14T06:21:30.001345+00:00",
+      "lineage": {
+        "raw_capture_sha256": "af1bd6280a96bdec68de49791a448c7a63486b2f42056000e5a81ba1bacc4112",
+        "prefix_sha256": "92e93cbc0f5116780248728bb6e1aa1d07ed7aef45aa136d0dcd18ff0bd65c99",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.0008218695106200166,
+            "5": 0.0008231830021320755,
+            "20": 0.0008278418267593103
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.455094623870953,
+            "5": 0.45545813917118994,
+            "20": 0.4567451590803631
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.0007098216844038435,
+            "5": 0.0007098216844038435,
+            "20": 0.0007098216844038435
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.42293624161304566,
+            "5": 0.42293624161304566,
+            "20": 0.42293624161304566
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "DECK",
+        "verdict": "clean",
+        "buyable": true,
+        "entry_score": 60.0,
+        "metrics": {
+          "range_pctile_60d": 63.9,
+          "pct_vs_20dma": 1.81,
+          "ret_10d": 0.0589,
+          "ret_5d": 0.0013,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.0803,
+          "ret_from_63d_low": 0.1201,
+          "days_since_63d_low": 43,
+          "peak_range_pctile_10d": 88.7,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [],
+        "park_triggers": null,
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "DECK",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "af1bd6280a96bdec68de49791a448c7a63486b2f42056000e5a81ba1bacc4112",
+            "prefix_sha256": "92e93cbc0f5116780248728bb6e1aa1d07ed7aef45aa136d0dcd18ff0bd65c99",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:48.857482+00:00",
+          "computed_at": "2026-11-14T06:21:30.001345+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.455094623870953,
+            "h5": 0.45545813917118994,
+            "h20": 0.4567451590803631,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "DECK",
+        "raw_sha256": "af1bd6280a96bdec68de49791a448c7a63486b2f42056000e5a81ba1bacc4112",
+        "captured_at": "2026-11-14T06:15:48.857482+00:00",
+        "source_request_path": "/tiingo/daily/DECK/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 2,
+        "dividend_events": 0,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 1.3770096174331009e-11,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "DIN",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:50.497525+00:00",
+      "computed_at": "2026-11-14T06:21:40.344607+00:00",
+      "lineage": {
+        "raw_capture_sha256": "0794bc540478f0899f7a9d4f0242df85cd56e0eb9da6f96fb4c162e161edbe04",
+        "prefix_sha256": "aa1835377e0b1b23ad3373df02b7b074ad0b4c708fea61b00b3a5c498cc08551",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.0007005987192995752,
+            "5": 0.0007486791321939745,
+            "20": 0.0008036019030098494
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.4201795773993459,
+            "5": 0.43435830982367724,
+            "20": 0.45000853276186004
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.0012645423852941724,
+            "5": 0.0012645423852941724,
+            "20": 0.0012645423852941724
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.5645039247818667,
+            "5": 0.5645039247818667,
+            "20": 0.5645039247818667
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "DIN",
+        "verdict": "late_leg",
+        "buyable": false,
+        "entry_score": 15.0,
+        "metrics": {
+          "range_pctile_60d": 96.7,
+          "pct_vs_20dma": 6.56,
+          "ret_10d": 0.0386,
+          "ret_5d": 0.0287,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.1859,
+          "ret_from_63d_low": 0.3713,
+          "days_since_63d_low": 43,
+          "peak_range_pctile_10d": 100.0,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [
+          "+37% off the 63d low in 43 sessions \u2014 too deep into the leg to START"
+        ],
+        "park_triggers": {
+          "range_pctile_lte": 40.0,
+          "tier_in": [
+            "T1",
+            "T2"
+          ],
+          "not_verdicts": [
+            "chase",
+            "late_leg",
+            "rollover",
+            "extended",
+            "knife",
+            "missed_move",
+            "extended_vs_plan"
+          ]
+        },
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "DIN",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "0794bc540478f0899f7a9d4f0242df85cd56e0eb9da6f96fb4c162e161edbe04",
+            "prefix_sha256": "aa1835377e0b1b23ad3373df02b7b074ad0b4c708fea61b00b3a5c498cc08551",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:50.497525+00:00",
+          "computed_at": "2026-11-14T06:21:40.344607+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.4201795773993459,
+            "h5": 0.43435830982367724,
+            "h20": 0.45000853276186004,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "DIN",
+        "raw_sha256": "0794bc540478f0899f7a9d4f0242df85cd56e0eb9da6f96fb4c162e161edbe04",
+        "captured_at": "2026-11-14T06:15:50.497525+00:00",
+        "source_request_path": "/tiingo/daily/DIN/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 0,
+        "dividend_events": 49,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.003833517670841032,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "DOCU",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:57.879233+00:00",
+      "computed_at": "2026-11-14T06:22:12.598620+00:00",
+      "lineage": {
+        "raw_capture_sha256": "3faed21f51e3a920510e693ccd44623e3c81aedc588c188eb674645bcebb61a5",
+        "prefix_sha256": "8d7b831115bdb6963812c8cef4eefe0cac8220ac035a0ff6ce8650d47d9729e6",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.0008433820152913743,
+            "5": 0.0010193575339471927,
+            "20": 0.0014941245407104715
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.46101222093717464,
+            "5": 0.5068314301172457,
+            "20": 0.6136117536839062
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.0006221794971103112,
+            "5": 0.0006221794971103112,
+            "20": 0.0006221794971103112
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.39596620218371975,
+            "5": 0.39596620218371975,
+            "20": 0.39596620218371975
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "DOCU",
+        "verdict": "clean",
+        "buyable": true,
+        "entry_score": 60.0,
+        "metrics": {
+          "range_pctile_60d": 82.6,
+          "pct_vs_20dma": -0.16,
+          "ret_10d": -0.0172,
+          "ret_5d": 0.0406,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.0818,
+          "ret_from_63d_low": 0.3612,
+          "days_since_63d_low": 56,
+          "peak_range_pctile_10d": 86.0,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [],
+        "park_triggers": null,
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "DOCU",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "3faed21f51e3a920510e693ccd44623e3c81aedc588c188eb674645bcebb61a5",
+            "prefix_sha256": "8d7b831115bdb6963812c8cef4eefe0cac8220ac035a0ff6ce8650d47d9729e6",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:57.879233+00:00",
+          "computed_at": "2026-11-14T06:22:12.598620+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.46101222093717464,
+            "h5": 0.5068314301172457,
+            "h20": 0.6136117536839062,
+            "fit_cutoff": "2026-11-04",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "DOCU",
+        "raw_sha256": "3faed21f51e3a920510e693ccd44623e3c81aedc588c188eb674645bcebb61a5",
+        "captured_at": "2026-11-14T06:15:57.879233+00:00",
+        "source_request_path": "/tiingo/daily/DOCU/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 2150,
+        "retained_rows": 2150,
+        "data_end": "2026-11-13",
+        "split_events": 0,
+        "dividend_events": 0,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.0,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 27,
+      "successful_fits": 27,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "DVA",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:50.821229+00:00",
+      "computed_at": "2026-11-14T06:21:43.405698+00:00",
+      "lineage": {
+        "raw_capture_sha256": "2350f135415dfc3f1251256c26f8c0591142d5ac695e465264fe8267080bafda",
+        "prefix_sha256": "3833c5b81016f16ffd00be7e230c9b2a7c0a2b6cbfe9062144b7e31f7db1d280",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.0005000902356053462,
+            "5": 0.0006304329514617033,
+            "20": 0.0008158404574882961
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.3549968160033935,
+            "5": 0.3985838729406262,
+            "20": 0.45342231450056647
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.0010473519662738255,
+            "5": 0.0010473519662738255,
+            "20": 0.0010473519662738255
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.5137438033699326,
+            "5": 0.5137438033699326,
+            "20": 0.5137438033699326
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "DVA",
+        "verdict": "clean",
+        "buyable": true,
+        "entry_score": 60.0,
+        "metrics": {
+          "range_pctile_60d": 3.5,
+          "pct_vs_20dma": -5.21,
+          "ret_10d": -0.069,
+          "ret_5d": -0.0877,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.0028,
+          "ret_from_63d_low": 0.0043,
+          "days_since_63d_low": 59,
+          "peak_range_pctile_10d": 100.0,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [],
+        "park_triggers": null,
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "DVA",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "2350f135415dfc3f1251256c26f8c0591142d5ac695e465264fe8267080bafda",
+            "prefix_sha256": "3833c5b81016f16ffd00be7e230c9b2a7c0a2b6cbfe9062144b7e31f7db1d280",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:50.821229+00:00",
+          "computed_at": "2026-11-14T06:21:43.405698+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.3549968160033935,
+            "h5": 0.3985838729406262,
+            "h20": 0.45342231450056647,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "DVA",
+        "raw_sha256": "2350f135415dfc3f1251256c26f8c0591142d5ac695e465264fe8267080bafda",
+        "captured_at": "2026-11-14T06:15:50.821229+00:00",
+        "source_request_path": "/tiingo/daily/DVA/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 1,
+        "dividend_events": 0,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.0,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "ECL",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:45.869626+00:00",
+      "computed_at": "2026-11-14T06:21:11.840922+00:00",
+      "lineage": {
+        "raw_capture_sha256": "707ce37c759d2263fac16a9a2244f6db6bde09126dd5c6f5dc111018f5a9eec6",
+        "prefix_sha256": "b23118b487896a1775323073317c2928e5588d7a9d6a70b92c8b8bf08ea39903",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.0002649352448442923,
+            "5": 0.00026328359345947704,
+            "20": 0.0002599282641378069
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.2583866902546678,
+            "5": 0.25758001776494277,
+            "20": 0.255933433850928
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.0002837227313587367,
+            "5": 0.0002837227313587367,
+            "20": 0.0002837227313587367
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.26739133924344227,
+            "5": 0.26739133924344227,
+            "20": 0.26739133924344227
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "ECL",
+        "verdict": "clean",
+        "buyable": true,
+        "entry_score": 60.0,
+        "metrics": {
+          "range_pctile_60d": 87.4,
+          "pct_vs_20dma": 3.29,
+          "ret_10d": 0.0208,
+          "ret_5d": 0.0286,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.0816,
+          "ret_from_63d_low": 0.1477,
+          "days_since_63d_low": 40,
+          "peak_range_pctile_10d": 100.0,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [],
+        "park_triggers": null,
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "ECL",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "707ce37c759d2263fac16a9a2244f6db6bde09126dd5c6f5dc111018f5a9eec6",
+            "prefix_sha256": "b23118b487896a1775323073317c2928e5588d7a9d6a70b92c8b8bf08ea39903",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:45.869626+00:00",
+          "computed_at": "2026-11-14T06:21:11.840922+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.2583866902546678,
+            "h5": 0.25758001776494277,
+            "h20": 0.255933433850928,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "ECL",
+        "raw_sha256": "707ce37c759d2263fac16a9a2244f6db6bde09126dd5c6f5dc111018f5a9eec6",
+        "captured_at": "2026-11-14T06:15:45.869626+00:00",
+        "source_request_path": "/tiingo/daily/ECL/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 0,
+        "dividend_events": 67,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.0002117768456928265,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "ENTG",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:16:04.323184+00:00",
+      "computed_at": "2026-11-14T06:23:02.699787+00:00",
+      "lineage": {
+        "raw_capture_sha256": "512e648cce831474cf762072feb21ad65ec41d34320598ab65325b7ed8aae74b",
+        "prefix_sha256": "df8777811142e35a0539e7f50c38cfe9c307764705b0776af35572f62ebaa79b",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.0029148331183409073,
+            "5": 0.002756134805309541,
+            "20": 0.002308974442339112
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.8570518921406736,
+            "5": 0.8333942470031842,
+            "20": 0.762798505156805
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.0028854328372363218,
+            "5": 0.0028854328372363218,
+            "20": 0.0028854328372363218
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.8527186376428939,
+            "5": 0.8527186376428939,
+            "20": 0.8527186376428939
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "ENTG",
+        "verdict": "clean",
+        "buyable": true,
+        "entry_score": 60.0,
+        "metrics": {
+          "range_pctile_60d": 53.9,
+          "pct_vs_20dma": 1.85,
+          "ret_10d": -0.0452,
+          "ret_5d": 0.1518,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.1816,
+          "ret_from_63d_low": 0.1816,
+          "days_since_63d_low": 6,
+          "peak_range_pctile_10d": 70.1,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [],
+        "park_triggers": null,
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "ENTG",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "512e648cce831474cf762072feb21ad65ec41d34320598ab65325b7ed8aae74b",
+            "prefix_sha256": "df8777811142e35a0539e7f50c38cfe9c307764705b0776af35572f62ebaa79b",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:16:04.323184+00:00",
+          "computed_at": "2026-11-14T06:23:02.699787+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.8570518921406736,
+            "h5": 0.8333942470031842,
+            "h20": 0.762798505156805,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "ENTG",
+        "raw_sha256": "512e648cce831474cf762072feb21ad65ec41d34320598ab65325b7ed8aae74b",
+        "captured_at": "2026-11-14T06:16:04.323184+00:00",
+        "source_request_path": "/tiingo/daily/ENTG/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 0,
+        "dividend_events": 37,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.0001820183390927856,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    },
+    {
+      "instrument": "FCF",
+      "status": "RECORDED_RESEARCH",
+      "origin_session": "2026-11-13",
+      "captured_at": "2026-11-14T06:15:58.651496+00:00",
+      "computed_at": "2026-11-14T06:22:21.510272+00:00",
+      "lineage": {
+        "raw_capture_sha256": "da0c62feba1f3b24295f57ed356803d29d8d2a320c52efe9f603b2f25cfb1921",
+        "prefix_sha256": "28e996a45f3dfbe8193881d27fe506cdc89070ad4448e9b7fd181fcc45d58626",
+        "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+        "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+      },
+      "expected_future_sessions": [
+        "2026-11-16",
+        "2026-11-17",
+        "2026-11-18",
+        "2026-11-19",
+        "2026-11-20",
+        "2026-11-23",
+        "2026-11-24",
+        "2026-11-25",
+        "2026-11-27",
+        "2026-11-30",
+        "2026-12-01",
+        "2026-12-02",
+        "2026-12-03",
+        "2026-12-04",
+        "2026-12-07",
+        "2026-12-08",
+        "2026-12-09",
+        "2026-12-10",
+        "2026-12-11",
+        "2026-12-14"
+      ],
+      "forecasts": {
+        "mem": {
+          "mean_daily_variance": {
+            "1": 0.0002756801740884712,
+            "5": 0.00028622762659947615,
+            "20": 0.0003079001865445357
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.26357428529789234,
+            "5": 0.26856910079729573,
+            "20": 0.2785513363981997
+          }
+        },
+        "ewma": {
+          "mean_daily_variance": {
+            "1": 0.00023492659012727598,
+            "5": 0.00023492659012727598,
+            "20": 0.00023492659012727598
+          },
+          "annualized_volatility_fraction": {
+            "1": 0.24331358513669873,
+            "5": 0.24331358513669873,
+            "20": 0.24331358513669873
+          }
+        }
+      },
+      "native_observations": [
+        {
+          "observed_session": "2026-11-10",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-11",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-12",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        },
+        {
+          "observed_session": "2026-11-13",
+          "t1": false,
+          "t2": false,
+          "tier": null,
+          "provisional": false
+        }
+      ],
+      "new_union_onset": false,
+      "price_native_only_entry_report": {
+        "ticker": "FCF",
+        "verdict": "rollover",
+        "buyable": false,
+        "entry_score": 10.0,
+        "metrics": {
+          "range_pctile_60d": 73.3,
+          "pct_vs_20dma": 0.17,
+          "ret_10d": 0.0033,
+          "ret_5d": 0.001,
+          "pct_vs_200dma": null,
+          "off_52w_high_pct": null,
+          "above200": null,
+          "rsi14": null,
+          "macd_pos": null,
+          "ret_from_21d_low": 0.0395,
+          "ret_from_63d_low": 0.0609,
+          "days_since_63d_low": 27,
+          "peak_range_pctile_10d": 100.0,
+          "tier": null,
+          "tier_eligible": false,
+          "tier_fresh": false,
+          "stage": null,
+          "bottom_state": null,
+          "plan": null
+        },
+        "notes": [
+          "rollover confirmed by MACD/tier/RSI state",
+          "came off the boil \u2014 peak 100th pctile within 10d, now 73th"
+        ],
+        "park_triggers": {
+          "range_pctile_lte": 80.0,
+          "tier_in": [
+            "T1",
+            "T2"
+          ],
+          "not_verdicts": [
+            "chase",
+            "late_leg",
+            "rollover",
+            "extended",
+            "knife",
+            "missed_move",
+            "extended_vs_plan"
+          ]
+        },
+        "sources": [
+          "price_series",
+          "signal_gate"
+        ],
+        "as_of": "2026-11-13",
+        "entry_risk_research": {
+          "schema": "mastermind.entry_risk_research.v1",
+          "status": "RESEARCH_ONLY",
+          "reason_codes": [
+            "CONDITIONAL_MODEL_UNAVAILABLE"
+          ],
+          "instrument": "FCF",
+          "origin_session": "2026-11-13",
+          "authority": {
+            "may_rank": false,
+            "may_size": false,
+            "may_trade": false,
+            "may_change_entry": false
+          },
+          "forecast_status": "AVAILABLE_RESEARCH",
+          "conditional_status": "UNAVAILABLE",
+          "evidence_maturity": "RESEARCH_NOT_PRODUCTION_QUALIFIED",
+          "component_roles": {
+            "technical": "observed entry-state representation",
+            "volatility": "dispersion estimate, not expected return",
+            "conditional_model": "barrier activity and conditional outcome estimates"
+          },
+          "directional_edge_established": false,
+          "recurring_execution": false,
+          "lineage": {
+            "raw_capture_sha256": "da0c62feba1f3b24295f57ed356803d29d8d2a320c52efe9f603b2f25cfb1921",
+            "prefix_sha256": "28e996a45f3dfbe8193881d27fe506cdc89070ad4448e9b7fd181fcc45d58626",
+            "native_source_commit": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+            "research_source_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+          },
+          "captured_at": "2026-11-14T06:15:58.651496+00:00",
+          "computed_at": "2026-11-14T06:22:21.510272+00:00",
+          "historical_first_availability": null,
+          "capture_utc_date_after_origin": true,
+          "historical_first_availability_proven": false,
+          "prospective_outcomes_validated": false,
+          "forecast": {
+            "model": "delta1_MEM",
+            "unit": "annualized_volatility_fraction",
+            "h1": 0.26357428529789234,
+            "h5": 0.26856910079729573,
+            "h20": 0.2785513363981997,
+            "fit_cutoff": "2026-10-15",
+            "is_loss_limit": false,
+            "is_direction_forecast": false
+          }
+        }
+      },
+      "missing_consumer_inputs": [
+        "stage",
+        "sector context",
+        "fundamental opportunity",
+        "holdings",
+        "production data health"
+      ],
+      "conditional_model_status": "ABSTAIN_OLD_TRAINING_POPULATION_NOT_FRESH_QUALIFIED",
+      "current_SP1500_membership_asserted": false,
+      "ordinary_action_ratios_research_assumption": true,
+      "source_capture_quality": {
+        "instrument": "FCF",
+        "raw_sha256": "da0c62feba1f3b24295f57ed356803d29d8d2a320c52efe9f603b2f25cfb1921",
+        "captured_at": "2026-11-14T06:15:58.651496+00:00",
+        "source_request_path": "/tiingo/daily/FCF/prices?endDate=2026-11-13&startDate=2010-01-01",
+        "input_rows": 4243,
+        "retained_rows": 4243,
+        "data_end": "2026-11-13",
+        "split_events": 0,
+        "dividend_events": 68,
+        "historical_first_availability": null,
+        "price_imputation": false,
+        "adjusted_fields_used_as_predictors": false,
+        "unsupported_action_dates": [],
+        "adjustment_factor_log_error_max": 0.0005798782471111073,
+        "action_basis_qualified": true
+      },
+      "selected_fits": 60,
+      "successful_fits": 60,
+      "may_rank": false,
+      "may_size": false,
+      "may_trade": false,
+      "prospective_matured_outcomes": 0,
+      "maturity_at_issue": [
+        {
+          "horizon": 1,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 5,
+          "status": "NOT_MATURED"
+        },
+        {
+          "horizon": 20,
+          "status": "NOT_MATURED"
+        }
+      ]
+    }
+  ],
+  "matured_outcomes": 0,
+  "may_rank": false,
+  "may_size": false,
+  "may_trade": false
+}

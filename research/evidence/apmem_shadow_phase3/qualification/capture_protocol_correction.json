@@ -1,0 +1,11 @@
+{
+  "schema": "phase3.capture_protocol_binding_correction.v1",
+  "original_receipt_sha256": "ebd6ee351d681d46ab22fd293787f1220b4d8af54badc7cd1af0291fba9aa4c8",
+  "original_pointer": "4a85434cd32ca7d40171f85dc9401a09d5e8c3e7",
+  "correct_protocol_commit": "9ad69220add59fbd797fa3ff26b9da80d2d50bcc",
+  "protocol_blob_sha": "548fc2b405531fef7373edc69ff3fe83891fe0d4",
+  "protocol_path": "research/apmem_shadow/phase3/FORWARD_CONTRACT.md",
+  "protocol_commit_time": "2026-11-14T06:10:35Z",
+  "corrected_at": "2026-11-14T06:20:54.043165+00:00",
+  "scope": "protocol-reference metadata only; original raw captures, roster, forecast choices and actual clocks unchanged"
+}

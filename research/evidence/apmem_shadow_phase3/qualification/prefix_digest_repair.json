@@ -1,0 +1,11 @@
+{
+  "schema": "phase3.prefix_digest_repair.v1",
+  "failure_observed": "Two bound-outcome-source tests treated differing pandas index-name metadata as a historical price revision.",
+  "repair": "Hash canonical economic date and exact float-hex close pairs; ignore index/column names but preserve true value changes.",
+  "added_regression": "Equal economic values with different pandas names have equal digest; price change has different digest.",
+  "final_tests": 120,
+  "actual_numerical_runtime": "M2 miniconda Python",
+  "original_failed_stdout_separately_archived": false,
+  "forward_predictions_published_before_repair": false,
+  "source_code_commit": "df0106cf5c5717fa40c6de207643696b3e0656d7"
+}

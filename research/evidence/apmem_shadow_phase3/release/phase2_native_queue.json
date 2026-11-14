@@ -1,0 +1,29 @@
+{
+  "started_at": "2026-11-14T06:12:12.095150+00:00",
+  "head": "f7f7dcb381c7cf1b19ceb1af6b367818268d9155",
+  "before": {
+    "headRefOid": "f7f7dcb381c7cf1b19ceb1af6b367818268d9155",
+    "state": "OPEN",
+    "isDraft": false,
+    "mergeable": "MERGEABLE",
+    "reviewDecision": null,
+    "mergeQueueEntry": null
+  },
+  "purpose": "canonical ready-to-queue edge after previously pending checks completed; existing auto-merge request retained",
+  "admin_bypass": false,
+  "force_merge": false,
+  "new_auto_merge_request": false,
+  "status": "RECONCILED",
+  "returncode": 0,
+  "stdout": "",
+  "stderr": "",
+  "finished_at": "2026-11-14T06:12:13.321820+00:00",
+  "after": {
+    "headRefOid": "f7f7dcb381c7cf1b19ceb1af6b367818268d9155",
+    "state": "OPEN",
+    "isDraft": false,
+    "mergeable": "MERGEABLE",
+    "reviewDecision": null,
+    "mergeQueueEntry": null
+  }
+}

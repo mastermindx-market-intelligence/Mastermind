@@ -1,0 +1,62 @@
+{
+  "schema": "phase3.aggregate_records.v1",
+  "original_artifact_sha256": "a350aa40cd803a14d877e1a2093eab5f497c6f01597e47989e4f724c912e63b4",
+  "records": [
+    {
+      "sessions": 1612,
+      "total_return": 0.25340054363045805,
+      "cagr": 0.03582096368602872,
+      "sharpe": 0.4938846747092494,
+      "sortino": 0.6966751496142576,
+      "calmar": 0.353882143016864,
+      "annualized_excess_vol": 0.0775901237202548,
+      "maximum_close_drawdown": -0.10122286301493799,
+      "worst_5pct_daily_mean": -0.01099283313927972,
+      "worst_day": -0.019953915980812642,
+      "ulcer_index": 0.0487960274379674,
+      "longest_underwater_sessions": 422,
+      "mean_close_equity_exposure": 0.4488012690712611,
+      "turnover_per_year": null,
+      "first_session": "2020-01-02",
+      "last_session": "2026-06-02",
+      "policy": "half_core_half_tactical",
+      "turnover_reason": "not reconstructed from per-sleeve dollar ledgers",
+      "fixed_initial_capital_weights": [
+        0.5,
+        0.5
+      ],
+      "rebalancing_between_sleeves": false,
+      "all_within_sleeve_costs_included": true,
+      "possible_twenty_name_union": true,
+      "authority": "research_only"
+    },
+    {
+      "sessions": 1612,
+      "total_return": 0.127451907190276,
+      "cagr": 0.01886839410234331,
+      "sharpe": 0.34524457652074353,
+      "sortino": 0.4777984184843796,
+      "calmar": 0.20081523978288848,
+      "annualized_excess_vol": 0.059437222715042176,
+      "maximum_close_drawdown": -0.09395897503965778,
+      "worst_5pct_daily_mean": -0.008689989253041555,
+      "worst_day": -0.017638308851223194,
+      "ulcer_index": 0.04554001896651489,
+      "longest_underwater_sessions": 1172,
+      "mean_close_equity_exposure": 0.2946016876824731,
+      "turnover_per_year": null,
+      "first_session": "2020-01-02",
+      "last_session": "2026-06-02",
+      "policy": "half_core_half_cash",
+      "turnover_reason": "not reconstructed from per-sleeve dollar ledgers",
+      "fixed_initial_capital_weights": [
+        0.5,
+        0.5
+      ],
+      "rebalancing_between_sleeves": false,
+      "all_within_sleeve_costs_included": true,
+      "possible_twenty_name_union": true,
+      "authority": "research_only"
+    }
+  ]
+}
