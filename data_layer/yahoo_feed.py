@@ -126,7 +126,15 @@ def warm(tickers, background: bool = False) -> None:
             _INFLIGHT.update(todo)
         finally:
             _LOCK.release()
-        threading.Thread(target=_bg_fetch, args=(todo,), daemon=True).start()
+        try:
+            threading.Thread(target=_bg_fetch, args=(todo,), daemon=True).start()
+        except RuntimeError:
+            # No worker owns these reservations if the runtime cannot start a
+            # thread. Keep the best-effort hot path usable and allow a later
+            # request to retry without clearing another worker's symbols.
+            with _LOCK:
+                _INFLIGHT.difference_update(todo)
+            log.debug("yahoo_feed: background thread could not start")
         return
     with _LOCK:
         # re-check freshness under the lock — a caller we queued behind may have just populated these
@@ -592,3 +600,4 @@ def clear_cache() -> None:
     _CLOSE_EVIDENCE = {}
     _OPEN_EVIDENCE = {}
     _FETCHED_DAY = None
+
