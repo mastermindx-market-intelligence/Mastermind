@@ -33,9 +33,11 @@ a case-variant spelling of the root keeps its case through realpath, so the
 candidate and every existing ancestor are also compared to the real root by
 (st_dev, st_ino); when identity cannot be established the fence refuses. A
 symlinked settings path is always refused. File contents are never printed
-except the presentation member (in plan's diff). For tests only, the fenced
-root is overridable via the MMOS_PRESENTATION_REAL_ROOT env var or the
-REAL_ROOT module attribute; nothing else defaults to a real path.
+except the presentation member (in plan's diff). ~/.mastermind/t3-team is
+ALWAYS fenced; the MMOS_PRESENTATION_REAL_ROOT env var, if set, names an
+ADDITIONAL fenced root and can never move or loosen the fence (PF-3b class
+rule: nothing settable by environment loosens a rule). Nothing defaults to
+a real path.
 
 Atomic replacement reuses team_roster.atomic_write (0600 temp, fsync,
 os.replace, staging under <root>/run when derivable) — one writer pattern,
@@ -135,8 +137,22 @@ def guard_settings(path, real_root_ok):
     """
     expanded = os.path.abspath(os.path.expanduser(path))
     real = os.path.realpath(expanded)
-    real_root = os.path.realpath(os.path.expanduser(
-        os.environ.get(REAL_ROOT_ENV) or REAL_ROOT))
+    # PF-3b (a): the default root is always fenced; the env value only adds.
+    roots = [REAL_ROOT]
+    extra = os.environ.get(REAL_ROOT_ENV)
+    if extra:
+        roots.append(extra)
+    for root in roots:
+        _fence_one_root(expanded, real, root, real_root_ok)
+    if os.path.islink(expanded):
+        die(f"symlinked settings path refused: {expanded}")
+    if not os.path.isfile(expanded):
+        die(f"settings path is not a regular file: {expanded}")
+    return expanded
+
+
+def _fence_one_root(expanded, real, root, real_root_ok):
+    real_root = os.path.realpath(os.path.expanduser(root))
     for candidate in (expanded, real):
         if (_under_root(candidate, real_root)
                 or _under_root(candidate.casefold(), real_root.casefold())):
@@ -156,11 +172,6 @@ def guard_settings(path, real_root_ok):
         root_id = (root_st.st_dev, root_st.st_ino)
         for candidate in (expanded, real):
             _identity_fence(candidate, root_id, real_root, real_root_ok)
-    if os.path.islink(expanded):
-        die(f"symlinked settings path refused: {expanded}")
-    if not os.path.isfile(expanded):
-        die(f"settings path is not a regular file: {expanded}")
-    return expanded
 
 
 def _no_surrogates(field, s):
@@ -314,12 +325,16 @@ def write_receipt(receipt_dir, settings_path, value_file, before, after):
     so a second apply can never O_TRUNC the first preimage/receipt and
     destroy the first undo path. F7: a symlinked receipt dir is refused like
     a symlinked settings path — no write through the link, no chmod side
-    effect on its target. Only the final component is fenced (REV-PRESFIX
-    F11): a symlinked PARENT is followed, as for any user-chosen path (on
-    macOS /tmp itself is a symlink); the 0700 chmod lands on the created
-    dir, never on the link's target."""
+    effect on its target. PF-3b (b): a symlinked ANCESTOR is refused too
+    (on macOS /tmp itself is a symlink: use /private/tmp or a home path)."""
     if os.path.islink(receipt_dir):
         die(f"symlinked receipt dir refused: {receipt_dir}")
+    # PF-3b (b) / REV-PRESFIX F11: no symlinked ancestor either — the
+    # resolved path must equal the absolute path.
+    absolute = os.path.abspath(os.path.expanduser(receipt_dir))
+    if os.path.realpath(absolute) != absolute:
+        die(f"receipt dir reached through a symlinked ancestor refused: "
+            f"{receipt_dir}")
     preimage = os.path.join(receipt_dir, "preimage.bin")
     rp = os.path.join(receipt_dir, "receipt.json")
     if os.path.lexists(rp) or os.path.lexists(preimage):

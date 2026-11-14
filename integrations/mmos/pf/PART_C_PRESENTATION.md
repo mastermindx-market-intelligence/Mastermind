@@ -206,7 +206,7 @@ python3.12 tools/mmos_team_server/presentation_set.py undo \
   --real-root-ok
 ```
 
-`--receipt-dir` is the dir of the apply being undone. Undo also refuses a
+`--receipt-dir` is the dir of the apply being undone. Every receipt dir must be reached without any symlinked ancestor (the tool refuses otherwise, PF-3b); the real-root fence on `~/.mastermind/t3-team` cannot be moved by `MMOS_PRESENTATION_REAL_ROOT`, which only adds a fenced root. Undo also refuses a
 receipt whose `settings_path` is not this settings file (resolved path and
 file identity must both match). Refuses unless the current sha256 equals
 the receipt's after-sha — i.e. if

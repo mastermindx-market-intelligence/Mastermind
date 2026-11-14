@@ -723,3 +723,85 @@ def test_env_root_absent_allows_unrelated_tmp_file(tmp_path, value_file,
     r = do_apply(p, value_file, tmp_path / "receipts")
     assert r.returncode == 0, r.stderr
     assert json.loads(p.read_bytes())["presentation"] == VALUE
+
+# ---------------------------------------------------------------------------
+# PF-3b (a): the env override never MOVES the fence. ~/.mastermind/t3-team is
+# always fenced; MMOS_PRESENTATION_REAL_ROOT only ADDS a fenced root. HOME is
+# a fake home in these tests (expanduser follows HOME), never the real one.
+# ---------------------------------------------------------------------------
+
+def run_tool_env(env_extra, *args):
+    env = dict(os.environ)
+    env.update(env_extra)
+    return subprocess.run([sys.executable, TOOL, *args], env=env,
+                          capture_output=True, text=True, timeout=60)
+
+
+def _fake_home_root(tmp_path):
+    home = tmp_path / "fakehome"
+    s = home / ".mastermind" / "t3-team" / "home" / "userdata" / "settings.json"
+    s.parent.mkdir(parents=True)
+    s.write_bytes(ODD_NO_PRES)
+    s.chmod(0o600)
+    return home, s
+
+
+def test_env_override_does_not_unfence_default_root(tmp_path, value_file):
+    home, s = _fake_home_root(tmp_path)
+    other = tmp_path / "other-root"
+    other.mkdir()
+    before = s.read_bytes()
+    r = run_tool_env({"HOME": str(home),
+                      "MMOS_PRESENTATION_REAL_ROOT": str(other)},
+                     "apply", "--settings", str(s),
+                     "--value-file", str(value_file),
+                     "--expect-sha256", sha(before),
+                     "--receipt-dir", str(tmp_path / "r1"))
+    assert r.returncode != 0, "env override moved the fence off t3-team"
+    assert s.read_bytes() == before
+
+
+def test_env_override_adds_a_fenced_root(tmp_path, value_file):
+    home, _ = _fake_home_root(tmp_path)
+    extra = tmp_path / "extra-root"
+    p = extra / "settings.json"
+    extra.mkdir()
+    p.write_bytes(ODD_NO_PRES)
+    p.chmod(0o600)
+    before = p.read_bytes()
+    r = run_tool_env({"HOME": str(home),
+                      "MMOS_PRESENTATION_REAL_ROOT": str(extra)},
+                     "apply", "--settings", str(p),
+                     "--value-file", str(value_file),
+                     "--expect-sha256", sha(before),
+                     "--receipt-dir", str(tmp_path / "r2"))
+    assert r.returncode != 0
+    assert p.read_bytes() == before
+
+
+def test_real_root_ok_still_unlocks_default_root(tmp_path, value_file):
+    home, s = _fake_home_root(tmp_path)
+    r = run_tool_env({"HOME": str(home)},
+                     "apply", "--settings", str(s),
+                     "--value-file", str(value_file),
+                     "--expect-sha256", sha(s.read_bytes()),
+                     "--receipt-dir", str(tmp_path / "r3"), "--real-root-ok")
+    assert r.returncode == 0, r.stderr
+    assert json.loads(s.read_bytes())["presentation"] == VALUE
+
+
+# PF-3b (b) / REV-PRESFIX F11: a receipt dir reached through ANY symlinked
+# ancestor is refused (resolved path must equal the absolute path).
+
+def test_receipt_dir_under_symlinked_parent_refused(settings, value_file,
+                                                    tmp_path):
+    target = tmp_path / "parent_target"
+    target.mkdir()
+    alias = tmp_path / "parent_alias"
+    alias.symlink_to(target, target_is_directory=True)
+    before = settings.read_bytes()
+    r = do_apply(settings, value_file, alias / "receipts")
+    assert r.returncode != 0
+    assert "symlink" in r.stderr
+    assert settings.read_bytes() == before
+    assert not (target / "receipts").exists()
