@@ -1,0 +1,94 @@
+--- a/ext/host_pick.py
++++ b/ext/host_pick.py
+@@ -380,6 +380,47 @@
+             else:
+                 gate_ok, detail = True, f"cpu_tctl={cpu:g}<{limit:g}C,nvme_margin={nvme:g}>={nvme_floor:g}C"
+             gates.append(_gate(name, gate_ok, "thermal", detail))
++
++        # Optional procfs pressure guard for specifically enrolled hosts only.
++        # Existing workers continue; this is admission of new auto placements.
++        if "require_pressure" in entry:
++            required = entry.get("require_pressure")
++            max_io = _finite_nonnegative(entry.get("max_io_psi_some10_pct"))
++            max_mem = _finite_nonnegative(entry.get("max_memory_psi_some10_pct"))
++            granular = (state or {}).get("granular")
++            granular = granular if isinstance(granular, dict) else {}
++            psi = granular.get("psi_some_avg10")
++            psi = psi if isinstance(psi, dict) else {}
++            io = _finite_nonnegative(psi.get("io"))
++            memory_psi = _finite_nonnegative(psi.get("memory"))
++            psi_ts = _valid_timestamp(granular.get("observed_at"), now)
++            policy_valid = (
++                type(required) is bool
++                and max_io is not None and 1 <= max_io <= 100
++                and max_mem is not None and 1 <= max_mem <= 100
++            )
++            observed = (
++                granular.get("schema") == "mastermind.fabric_host_granular.v1"
++                and granular.get("source") == "linux_procfs"
++                and granular.get("admission_authoritative") is False
++                and psi_ts is not None and state_ts is not None
++                and abs(psi_ts - state_ts) <= 5
++                and now.timestamp() - psi_ts <= max_age
++                and io is not None and memory_psi is not None
++            )
++            if required is False and policy_valid:
++                pressure_ok, why = True, "policy-disabled"
++            elif not policy_valid:
++                pressure_ok, why = False, "invalid-pressure-policy"
++            elif not observed:
++                pressure_ok, why = False, "pressure-unavailable-or-stale"
++            elif io >= max_io:
++                pressure_ok, why = False, f"io_psi_some10={io:g}>={max_io:g}%"
++            elif memory_psi >= max_mem:
++                pressure_ok, why = False, f"memory_psi_some10={memory_psi:g}>={max_mem:g}%"
++            else:
++                pressure_ok, why = True, f"io_psi={io:g}<{max_io:g}%,mem_psi={memory_psi:g}<{max_mem:g}%"
++            gates.append(_gate(name, pressure_ok, "pressure", why))
+ 
+         ncpu = _positive_int((state or {}).get("ncpu"))
+         gates.append(
+--- a/ext/hosts.json
++++ b/ext/hosts.json
+@@ -704,8 +704,10 @@
+     "lane_ceiling": 32,
+     "load_gate": 16,
+     "max_active": 32,
+-    "min_free_gb": 150,
+-    "min_free_mem_gb": 4,
++    "max_io_psi_some10_pct": 20.0,
++    "max_memory_psi_some10_pct": 10.0,
++    "min_free_gb": 300,
++    "min_free_mem_gb": 8,
+     "notes": "Fleet enrollment began telemetry-only on 2026-09-30; the recorded Go remote acceptance later admitted only the bounded go-codex route reflected by allowed_modes.",
+     "nvme_min_crit_headroom_c": 8.0,
+     "platform": "linux",
+@@ -716,6 +718,7 @@
+     "ram_gb": 32,
+     "repos": [],
+     "require_ac": false,
++    "require_pressure": true,
+     "require_thermal": true,
+     "roles": [
+       "lanes"
+@@ -1037,8 +1040,10 @@
+     "lane_ceiling": 32,
+     "load_gate": 16,
+     "max_active": 32,
+-    "min_free_gb": 150,
+-    "min_free_mem_gb": 4,
++    "max_io_psi_some10_pct": 20.0,
++    "max_memory_psi_some10_pct": 10.0,
++    "min_free_gb": 300,
++    "min_free_mem_gb": 8,
+     "notes": "2026-10-05: enrolled as telemetry-only candidate after strict SSH identity and Studio MCP reachability proofs; no automatic placement until an admitted route canary and settled lease prove a mode.",
+     "nvme_min_crit_headroom_c": 8.0,
+     "platform": "linux",
+@@ -1048,6 +1053,7 @@
+     "ram_gb": 32,
+     "repos": [],
+     "require_ac": false,
++    "require_pressure": true,
+     "require_thermal": true,
+     "roles": [
+       "lanes"
