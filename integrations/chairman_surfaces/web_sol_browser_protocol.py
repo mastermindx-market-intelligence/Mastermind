@@ -25,7 +25,7 @@ ADVANCED_ACTIONS = ADVANCED_READ | {"cdp_attach", "cdp_detach", "cdp", "evaluate
     "upload", "download", "dialog", "emulate", "route"}
 NO_SNAPSHOT = ADVANCED_READ | {"snapshot", "diagnostics", "cdp_detach", "dialog"}
 READ_ACTIONS = frozenset({"status", "tabs", "snapshot", "screenshot", "diagnostics", "read"}) | ADVANCED_READ
-PAGE_ACTIONS = frozenset({"click", "fill", "select", "press", "scroll", "read"})
+PAGE_ACTIONS = frozenset({"click", "fill", "select", "press", "scroll", "read", "menu"})
 TAB_ACTIONS = PAGE_ACTIONS | {"snapshot", "screenshot", "diagnostics", "navigate",
                             "reload", "back", "forward", "close", "focus"} | ADVANCED_ACTIONS
 ACTIONS = READ_ACTIONS | TAB_ACTIONS | {"open"}
@@ -237,8 +237,21 @@ def validate_request(value):
         # character offset of the page to return.
         _require(set(params) == {"offset"} and type(params["offset"]) is int
                  and 0 <= params["offset"] <= 2000000)
+    elif action == "menu":
+        # Stepped menu choice: one opener ref plus 1-3 item labels, one per
+        # menu step. The page world walks the labels, clicks the final item
+        # and reads the value back; an unreadable value is EFFECT_UNKNOWN.
+        _require(set(params) == {"path"} and type(params["path"]) is list
+                 and 1 <= len(params["path"]) <= 3
+                 and all(_text(label, 1, 160) for label in params["path"]))
     elif action == "select":
         _require(set(params) == {"value"} and _text(params["value"], 0, 512))
+    elif action == "snapshot":
+        # ensure_role/ensure_name reserve a ref past the element cap (the
+        # composer on a long page); a plain snapshot stays param-free.
+        _require(set(params) <= {"ensure_role", "ensure_name"}
+                 and (not params or (_text(params.get("ensure_role"), 1, 40)
+                     and ("ensure_name" not in params or _text(params["ensure_name"], 1, 160)))))
     elif action == "press":
         _require(set(params) == {"key"} and type(params["key"]) is str and params["key"] in KEYS)
     elif action == "scroll":

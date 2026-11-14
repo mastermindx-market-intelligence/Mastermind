@@ -30,9 +30,18 @@
   const READ_PAGE_BYTES = 30720;
   const READ_MAX_NODES = 20000;
   const READ_MAX_CHARACTERS = 1000000;
+  // Stepped menu control (BR2 item 1): one bounded multi-click operation —
+  // open by opener ref, walk up to three labelled steps, choose, read the
+  // value back. Same settle interval as fill; a hard time bound keeps a
+  // hostile menu from freezing the tab, and any uncertainty after the first
+  // click is EFFECT_UNKNOWN, never success.
+  const MENU_MAX_STEPS = 3;
+  const MENU_MAX_ITEMS = 60;
+  const MENU_TIME_BOUND_MS = 4000;
+  const MENU_ITEM_SELECTOR = '[role="menuitem"],[role="menuitemradio"],[role="menuitemcheckbox"],[role="option"]';
   const ACTIONS = new Set(["snapshot", "validate", "consume", "validate_focus", "focus_ref", "click", "fill",
-    "select", "scroll", "read", "diagnostics"]);
-  const MUTATIONS = new Set(["focus_ref", "click", "fill", "select", "scroll"]);
+    "select", "scroll", "read", "menu", "diagnostics"]);
+  const MUTATIONS = new Set(["focus_ref", "click", "fill", "select", "scroll", "menu"]);
   // Every contenteditable variant is an editor: the enumerated values are
   // case-insensitive "true"/"plaintext-only" plus the empty string (which
   // means true). Discovery must match all of them, not the literal "true".
@@ -101,10 +110,54 @@
       }
       return {text: parts.join("\n").slice(0, MAX_TEXT), truncated: Boolean(node)};
     }
-    function snapshot(session) {
+    // Native role semantics for ensure_role: an explicit role attribute
+    // always matches; these native shapes match too, so a contenteditable
+    // composer or a plain textarea is a textbox without an ARIA label.
+    const NATIVE_ROLE = {
+      textbox: n => n.tagName === "TEXTAREA" ||
+        (n.tagName === "INPUT" && /^(text|search|email|url|tel|number)$/i.test(n.type)) || n.isContentEditable,
+      searchbox: n => n.tagName === "INPUT" && /^search$/i.test(n.type),
+      button: n => n.tagName === "BUTTON" || (n.tagName === "INPUT" && /^(button|submit|reset)$/i.test(n.type)),
+      link: n => n.tagName === "A" && n.hasAttribute("href"),
+      combobox: n => n.tagName === "SELECT",
+      checkbox: n => n.tagName === "INPUT" && /^checkbox$/i.test(n.type),
+      radio: n => n.tagName === "INPUT" && /^radio$/i.test(n.type)
+    };
+    const matchesRole = (node, role) => node.getAttribute("role") === role ||
+      Boolean(NATIVE_ROLE[role] && NATIVE_ROLE[role](node));
+    function elementItem(node, ref) {
+      const item = {ref, tag: node.tagName.toLowerCase(), role: text(node.getAttribute("role"), 40),
+        name: name(node), disabled: Boolean(node.disabled || node.getAttribute("aria-disabled") === "true"),
+        bounds: bounds(node)};
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test(node.tagName) || node.isContentEditable) {
+        // For contenteditables, innerText is the editor truth: block
+        // paragraphs read back as line breaks; a raw textContent join would
+        // silently flatten them.
+        const value = String(node.isContentEditable
+          ? (typeof node.innerText === "string" ? node.innerText : node.textContent)
+          : node.value || "");
+        item.value = value.slice(0,1000);
+        item.value_truncated = value.length > 1000;
+        item.read_only = Boolean(node.readOnly);
+        item.editable = !item.disabled && !item.read_only && (node.isContentEditable ||
+          node.tagName === "TEXTAREA" || (node.tagName === "INPUT" && /^(text|search|email|url|tel|number)$/i.test(node.type)));
+        if (node.tagName === "INPUT" && /^(checkbox|radio)$/i.test(node.type)) item.checked = Boolean(node.checked);
+      }
+      if (node.tagName === "A") item.href = publicUrl(node.href);
+      if (node.tagName === "SELECT") item.options = Array.from(node.options).slice(0, 40)
+        .map(o => ({label: text(o.label), value: String(o.value).slice(0,512), value_truncated:String(o.value).length>512,
+          disabled: Boolean(o.disabled), selected:Boolean(o.selected)}));
+      return item;
+    }
+    function snapshot(session, params = {}) {
       prepared = null;
       const refs = new Map();
       const elements = [];
+      const ensureRole = typeof params.ensure_role === "string" ? params.ensure_role : null;
+      const ensureName = typeof params.ensure_name === "string" ? text(params.ensure_name, 160) : null;
+      const matchesEnsure = node => Boolean(ensureRole) && matchesRole(node, ensureRole) &&
+        (!ensureName || name(node) === ensureName);
+      let ensuredRef = null;
       const scroller = doc.scrollingElement;
       if (scroller) refs.set("page", {node: scroller, page: true});
       const walker = doc.createTreeWalker(doc.body || doc.documentElement, 1);
@@ -113,32 +166,38 @@
         if (++examined > MAX_NODES || elements.length >= MAX_ELEMENTS) break;
         if (!node.matches(SELECTOR) || !visible(node) || sensitive(node)) continue;
         const ref = "e" + (elements.length + 1);
-        const item = {ref, tag: node.tagName.toLowerCase(), role: text(node.getAttribute("role"), 40),
-          name: name(node), disabled: Boolean(node.disabled || node.getAttribute("aria-disabled") === "true"),
-          bounds: bounds(node)};
-        if (/^(INPUT|TEXTAREA|SELECT)$/.test(node.tagName) || node.isContentEditable) {
-          // For contenteditables, innerText is the editor truth: block
-          // paragraphs read back as line breaks; a raw textContent join would
-          // silently flatten them.
-          const value = String(node.isContentEditable
-            ? (typeof node.innerText === "string" ? node.innerText : node.textContent)
-            : node.value || "");
-          item.value = value.slice(0,1000);
-          item.value_truncated = value.length > 1000;
-          item.read_only = Boolean(node.readOnly);
-          item.editable = !item.disabled && !item.read_only && (node.isContentEditable ||
-            node.tagName === "TEXTAREA" || (node.tagName === "INPUT" && /^(text|search|email|url|tel|number)$/i.test(node.type)));
-          if (node.tagName === "INPUT" && /^(checkbox|radio)$/i.test(node.type)) item.checked = Boolean(node.checked);
-        }
-        if (node.tagName === "A") item.href = publicUrl(node.href);
-        if (node.tagName === "SELECT") item.options = Array.from(node.options).slice(0, 40)
-          .map(o => ({label: text(o.label), value: String(o.value).slice(0,512), value_truncated:String(o.value).length>512,
-            disabled: Boolean(o.disabled), selected:Boolean(o.selected)}));
+        const item = elementItem(node, ref);
         const size = new TextEncoder().encode(JSON.stringify(item)).length;
         if (bytes + size > 28000) break;
         bytes += size;
         refs.set(ref, {node, signature: signature(node)});
         elements.push(item);
+        if (!ensuredRef && matchesEnsure(node)) ensuredRef = ref;
+      }
+      // ensure: when the walk gave the named role no ref (the composer sits
+      // past MAX_ELEMENTS on a long conversation), one bounded post-walk
+      // scan appends the first visible match as an extra ref under the same
+      // byte budget. No scroll, no focus, no DOM change — the element is
+      // observable exactly where it is, and fill reaches it offscreen.
+      let ensure = null;
+      if (ensureRole) {
+        if (!ensuredRef) {
+          const collected = new Set(Array.from(refs.values(), entry => entry.node));
+          let examinedEnsure = 0;
+          for (const candidate of doc.querySelectorAll(SELECTOR)) {
+            if (++examinedEnsure > 4000) break;
+            if (collected.has(candidate) || !visible(candidate) || sensitive(candidate) || !matchesEnsure(candidate)) continue;
+            const ref = "e" + (elements.length + 1);
+            const item = elementItem(candidate, ref);
+            const size = new TextEncoder().encode(JSON.stringify(item)).length;
+            if (bytes + size > 28000) break;
+            refs.set(ref, {node: candidate, signature: signature(candidate)});
+            elements.push(item);
+            ensuredRef = ref;
+            break;
+          }
+        }
+        ensure = {role: ensureRole, name: ensureName, ref: ensuredRef, found: Boolean(ensuredRef)};
       }
       const reading = pageText();
       current = {id: random(), session, url: win.location.href, refs};
@@ -146,7 +205,8 @@
         title: text(doc.title, 200), text: reading.text, text_truncated: reading.truncated,
         elements, elements_truncated: Boolean(node), scroll_ref: scroller ? "page" : null,
         viewport: {width: win.innerWidth, height: win.innerHeight},
-        ready_state: doc.readyState, scope: "top_frame", content_is_untrusted: true});
+        ready_state: doc.readyState, scope: "top_frame", content_is_untrusted: true,
+        ...(ensure ? {ensure} : {})});
     }
     // What one comparison channel provably does to text. Each step is applied
     // to BOTH sides of the comparison and named in the receipt when it
@@ -333,7 +393,22 @@
       if (typeof request.expires_at !== "string" || !Number.isFinite(Date.parse(request.expires_at)) ||
           Date.parse(request.expires_at)<=Date.now()) return "REQUEST_EXPIRED";
       if (!request.params || typeof request.params !== "object" || Array.isArray(request.params)) return "INVALID_REQUEST";
-      if (request.action === "snapshot") return Object.keys(request.params).length ? "INVALID_REQUEST" : null;
+      if (request.action === "snapshot") {
+        // ensure_role/ensure_name reserve a ref for an element past the
+        // MAX_ELEMENTS cap (the composer on a long conversation); they are
+        // the only snapshot params, and a plain snapshot stays param-free.
+        const keys = Object.keys(request.params);
+        if (!keys.length) return null;
+        if (keys.some(k => !["ensure_role", "ensure_name"].includes(k)) ||
+            typeof request.params.ensure_role !== "string" ||
+            request.params.ensure_role.length < 1 || request.params.ensure_role.length > 40 ||
+            /[\x00-\x1f\x7f]/.test(request.params.ensure_role) ||
+            (request.params.ensure_name !== undefined &&
+              (typeof request.params.ensure_name !== "string" ||
+               request.params.ensure_name.length < 1 || request.params.ensure_name.length > 160 ||
+               /[\x00-\x1f\x7f]/.test(request.params.ensure_name)))) return "INVALID_REQUEST";
+        return null;
+      }
       // diagnostics is a read-only health probe; it never mutates and must
       // stay callable when no snapshot exists — that is its whole purpose.
       if (request.action === "diagnostics") return Object.keys(request.params).length ? "INVALID_REQUEST" : null;
@@ -434,13 +509,113 @@
         return result(false, "ACTION_EFFECT_UNKNOWN", null, "EFFECT_UNKNOWN");
       }
     }
+    // Visible menu/listbox items, bounded. An item's state is its
+    // aria-checked (menuitemradio/menuitemcheckbox) or aria-selected
+    // (option); a submenu step is an item that declares a popup.
+    function menuItems() {
+      const items = [];
+      for (const node of doc.querySelectorAll(MENU_ITEM_SELECTOR)) {
+        if (items.length >= MENU_MAX_ITEMS) break;
+        if (!visible(node) || sensitive(node)) continue;
+        items.push({node, name: name(node),
+          disabled: Boolean(node.disabled || node.getAttribute("aria-disabled") === "true"),
+          haspopup: ["true", "menu", "listbox"].includes(node.getAttribute("aria-haspopup")) ||
+            node.hasAttribute("aria-expanded")});
+      }
+      return items;
+    }
+    const itemChecked = node => node.getAttribute("aria-checked") === "true" ||
+      node.getAttribute("aria-selected") === "true";
+    // The opener-text channel is weak by nature, so it only confirms a label
+    // the opener displays as its whole value or as a separated suffix
+    // ("Thinking: Extra High") — never a bare substring ("GPT-5" inside
+    // "GPT-5 Thinking" is a different choice and must not confirm).
+    const openerShows = (openerName, label) => Boolean(label) && (openerName === label ||
+      (openerName.endsWith(label) && !/[A-Za-z0-9]/.test(openerName[openerName.length - label.length - 1] || "")));
+    // One snapshot authorizes one menu operation. Every click is bounded by
+    // the time bound; the read-back ladder is item-state, opener-text,
+    // reopen-item-state — and when no channel can read the chosen value
+    // back, the receipt is EFFECT_UNKNOWN with read_back null, never APPLIED.
+    async function performMenu(opener, params) {
+      const deadline = Date.now() + MENU_TIME_BOUND_MS;
+      const labels = params.path.map(label => text(label, 160));
+      const data = {menu_path: params.path.slice(), steps_taken: 0, read_back: null,
+        menu_left_open: false, items_seen: [], snapshot_consumed: true, refresh_required: true,
+        settle_interval_ms: FILL_SETTLE_MS, time_bound_ms: MENU_TIME_BOUND_MS, content_is_untrusted: true};
+      let clicked = false;
+      const timedOut = () => Date.now() > deadline;
+      const leftOpen = () => { try { return menuItems().length > 0; } catch (_) { return false; } };
+      // A refusal after the menu opened restores it best-effort: one opener
+      // re-click, settled, disclosed through menu_left_open. No choice was
+      // made, so the effect stays NOT_APPLIED.
+      const refusal = async code => {
+        if (clicked) { try { opener.click(); await settle(); } catch (_) {} }
+        data.menu_left_open = leftOpen();
+        return result(false, code, data, "NOT_APPLIED");
+      };
+      const unknown = code => {
+        data.menu_left_open = leftOpen();
+        return result(false, code, data, "EFFECT_UNKNOWN");
+      };
+      try {
+        const before = new Set(menuItems().map(item => item.node));
+        opener.click(); clicked = true;
+        await settle();
+        let items = menuItems().filter(item => !before.has(item.node));
+        if (!items.length && opener.getAttribute("aria-expanded") === "true") items = menuItems();
+        if (!items.length) return await refusal("MENU_NOT_OPENED");
+        let chosen = null;
+        for (let step = 0; step < labels.length; step++) {
+          if (timedOut()) return unknown("MENU_TIME_BOUND");
+          const matches = items.filter(item => item.name === labels[step]);
+          if (!matches.length) return await refusal("MENU_ITEM_NOT_FOUND");
+          if (matches.length > 1) return await refusal("MENU_AMBIGUOUS");
+          const item = matches[0];
+          if (item.disabled) return await refusal("MENU_ITEM_DISABLED");
+          if (step < labels.length - 1) {
+            if (!item.haspopup) return await refusal("MENU_NO_SUBMENU");
+            const seen = new Set(menuItems().map(entry => entry.node));
+            item.node.click(); data.steps_taken = step + 1;
+            await settle();
+            items = menuItems().filter(entry => !seen.has(entry.node));
+            if (!items.length) return await refusal("MENU_NOT_OPENED");
+          } else {
+            chosen = item;
+            item.node.click(); data.steps_taken = step + 1;
+            await settle();
+          }
+        }
+        data.items_seen = menuItems().map(item => item.name);
+        let readBack = chosen.node.isConnected && visible(chosen.node) && itemChecked(chosen.node)
+          ? {value: chosen.name, source: "item-state"} : null;
+        if (!readBack && !visible(chosen.node) && openerShows(name(opener), chosen.name))
+          readBack = {value: name(opener), source: "opener-text"};
+        if (!readBack) {
+          // The value is visible only on reopen: open once more, read the
+          // chosen item's state, then close again (best-effort, disclosed).
+          if (timedOut()) return unknown("MENU_TIME_BOUND");
+          opener.click();
+          await settle();
+          const reopened = menuItems().find(item => item.name === chosen.name);
+          if (reopened && itemChecked(reopened.node))
+            readBack = {value: chosen.name, source: "reopen-item-state"};
+          try { opener.click(); await settle(); } catch (_) {}
+        }
+        data.read_back = readBack;
+        data.menu_left_open = leftOpen();
+        if (!readBack) return result(false, "ACTION_EFFECT_UNKNOWN", data, "EFFECT_UNKNOWN");
+        return result(true, "OK", data, "APPLIED");
+      } catch (_) {
+        return unknown("ACTION_EFFECT_UNKNOWN");
+      }
+    }
     function dispatch(request) {
       let attempted = false;
       try {
         const invalid = validate(request);
         if (invalid) return result(false, invalid);
         const {action, session_id: session, params} = request;
-        if (action === "snapshot") return snapshot(session);
+        if (action === "snapshot") return snapshot(session, params);
         if (action === "validate") return result(true, "OK", {snapshot_id: current.id});
         if (action === "consume") {current=null;prepared=null;return result(true,"OK");}
         if (action === "validate_focus") return result(true, "OK");
@@ -460,7 +635,11 @@
         if (action === "scroll" && (fields !== "x,y" || ![params.x, params.y].every(n => Number.isInteger(n) && Math.abs(n) <= 3000))) return result(false, "INPUT_REFUSED");
         if (["click", "focus_ref"].includes(action) && fields) return result(false, "INPUT_REFUSED");
         if (action === "read" && (fields !== "offset" || typeof params.offset !== "number")) return result(false, "INPUT_REFUSED");
-        if (action === "click") {
+        if (action === "menu" && (fields !== "path" || !Array.isArray(params.path) ||
+            params.path.length < 1 || params.path.length > MENU_MAX_STEPS ||
+            params.path.some(label => typeof label !== "string" || label.length < 1 || label.length > 160 ||
+              /[\x00-\x1f\x7f]/.test(label)))) return result(false, "INPUT_REFUSED");
+        if (action === "click" || action === "menu") {
           const b = node.getBoundingClientRect();
           const x = b.x + b.width / 2, y = b.y + b.height / 2;
           if (x < 0 || y < 0 || x >= win.innerWidth || y >= win.innerHeight) return result(false, "TARGET_OFFSCREEN");
@@ -507,6 +686,7 @@
           return result(true, "OK", {focus_token:prepared.token, snapshot_consumed:true}, "APPLIED");
         }
         if (action === "fill") return performFill(node, params);
+        if (action === "menu") return performMenu(node, params);
         if (action === "select") {
           node.value = params.value;
           node.dispatchEvent(new win.Event("input", {bubbles: true}));

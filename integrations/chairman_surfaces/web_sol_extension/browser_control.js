@@ -8,7 +8,7 @@
   const FIELDS = ["schema", ...IDENTITY, "tab_id", "url_fingerprint", "snapshot_id", "ref", "params", "issued_at", "expires_at"];
   const CDP = root.MMXBrowserCDP;
   const READ = new Set(["status", "tabs", "snapshot", "screenshot", "diagnostics", "read", ...(CDP ? CDP.READ : [])]);
-  const PAGE = new Set(["click", "fill", "select", "press", "scroll", "read"]);
+  const PAGE = new Set(["click", "fill", "select", "press", "scroll", "read", "menu"]);
   const ACTIONS = new Set([...READ, ...PAGE, "open", "navigate", "reload", "back", "forward", "close", "focus", ...(CDP ? CDP.ACTIONS : [])]);
   const NO_SNAPSHOT = new Set(["snapshot", "diagnostics", ...(CDP ? CDP.NO_SNAPSHOT : [])]);
   const TAB = new Set([...ACTIONS].filter(a => !["status", "tabs", "open"].includes(a)));
@@ -56,8 +56,14 @@
     else if (r.action === "read") {if (!exact(p,["offset"]) || !Number.isInteger(p.offset) || p.offset < 0 || p.offset > 2000000) return false;}
     else if (r.action === "fill") {if (!exact(p,["text"]) || typeof p.text !== "string" || p.text.length > 30000 || p.text.includes("\u0000")) return false;}
     else if (r.action === "select") {if (!exact(p,["value"]) || !bounded(p.value,0,512)) return false;}
+    else if (r.action === "menu") {if (!exact(p,["path"]) || !Array.isArray(p.path) || p.path.length < 1 || p.path.length > 3 || p.path.some(l=>!bounded(l,1,160))) return false;}
     else if (r.action === "press") {if (!exact(p,["key"]) || !Object.hasOwn(KEY_CODES,p.key)) return false;}
     else if (r.action === "scroll") {if (!exact(p,["x","y"]) || ![p.x,p.y].every(x=>Number.isInteger(x)&&Math.abs(x)<=3000)) return false;}
+    else if (r.action === "snapshot") {
+      const k = Object.keys(p);
+      if (k.length && (k.some(x=>!["ensure_role","ensure_name"].includes(x)) || !bounded(p.ensure_role,1,40) ||
+          (p.ensure_name !== undefined && !bounded(p.ensure_name,1,160)))) return false;
+    }
     else if (!exact(p,[])) return false;
     const ts = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
     if (typeof r.issued_at !== "string" || typeof r.expires_at !== "string" || !ts.test(r.issued_at) || !ts.test(r.expires_at)) return false;
