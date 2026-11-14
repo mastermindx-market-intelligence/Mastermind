@@ -6,6 +6,7 @@ installer separately fences the actual source/config preimage and drains8313.
 from __future__ import annotations
 
 import copy
+from urllib.parse import urlsplit
 
 
 def upgrade(document):
@@ -23,6 +24,15 @@ def upgrade(document):
     if needed - routes.keys():
         raise ValueError("expected existing route identities are missing")
     for rid in morph_ds:
+        # Morph documents a native Anthropic Messages wire. Preserve T3 thinking
+        # blocks and tool-call history instead of translating them through the
+        # lossy OpenAI chat/completions adapter (DeepSeek tool turns need them).
+        # Never silently retarget an unrelated upstream sharing a route ID.
+        url = urlsplit(str(routes[rid].get("base_url", "")))
+        if (url.scheme != "https" or url.hostname != "api.morphllm.com"
+                or url.path.rstrip("/") not in ("", "/v1")):
+            raise ValueError("Morph DeepSeek route has an unexpected upstream origin")
+        routes[rid].update(base_url="https://api.morphllm.com", wire="anthropic")
         resources[rid].update(input_tpm=400000, output_tpm=70000, headroom=0.95,
             max_inflight=6, input_basis="uncached", allow_one_oversize=False,
             strict_output_reservation=True, alias_max_output_tokens=16384,
@@ -31,7 +41,8 @@ def upgrade(document):
         routes[rid]["notes"] = ("Morph Ultra DeepSeek: existing subscription resource, shared Flash aliases. "
             "400000 uncached input/70000 output TPM;95% sustained budget;full output reservation; "
             "six local concurrent requests at most;16K output ceiling for flexible aliases. "
-            "Observed cache/header constraints and durable uncertain-send holds apply. No assumed burst.")
+            "Native Anthropic Messages preserves reasoning/tool history; "
+            "observed cache/header constraints and durable uncertain-send holds apply. No assumed burst.")
     for rid in kimi:
         resources[rid].update(headroom=0.9, max_inflight=1, strict_output_reservation=True,
             alias_max_output_tokens=4096, require_observed_cache=True, allow_one_oversize=False,
@@ -84,8 +95,17 @@ def upgrade(document):
         fam.update(match=matches, targets=["qwen4-max-preview", "claude-opus-5-5"],
             cap_fallback="wait", request_boundary_fallback=True,
             preference_wait_s=1.5, return_to_primary_after_s=300)
+    # The legacy "Pro" compatibility alias actually served Flash and made
+    # capacity failures and evaluation results misleading. Remove only the
+    # proven Flash masquerade; preserve a genuine separately wired Pro alias.
+    stale_pro = result.setdefault("aliases", {}).get("deepseek-v4-pro")
+    if stale_pro in (["deepseek-v4.1-flash"], ["deepseek-v4.1-flash-1017"]):
+        del result["aliases"]["deepseek-v4-pro"]
+        result.setdefault("model_labels", {}).pop("deepseek-v4-pro", None)
     labels = result.setdefault("model_labels", {})
     labels.update({
+        "deepseek-v4.1-flash": "DeepSeek V4.1 Flash 1017 (not V4 Pro)",
+        "deepseek-v4.1-flash-1017": "DeepSeek V4.1 Flash 1017 (not V4 Pro)",
         "fabric/kimi-preferred": "Kimi preferred (4K alias output); Qwen4 / Opus5.5 fallback",
         "fabric/deepseek-preferred": "DeepSeek preferred (16K alias output); eligible providers, Qwen4 / Opus5.5",
         "fabric/balanced": "Balanced - Kimi / GLM / Qwen4 with eligible capacity",
