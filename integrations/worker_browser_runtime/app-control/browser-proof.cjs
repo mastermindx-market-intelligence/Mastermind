@@ -93,17 +93,26 @@ async function main() {
     await page.getByText('glm:fixture-allowance', { exact: true }).waitFor();
     const setDisplay = async (theme, locale) => {
       const before = await inspect();
-      const fromZh = before.locale === 'zh-CN';
-      // On narrow viewports the disclosure lives in the closed navigation
-      // drawer: open it first, and close it with the new locale's toggle.
-      const disclosure = fromZh ? '显示设置' : 'Display settings';
-      const drawer = !before.controls.some(row => row.name === disclosure);
-      if (drawer) await act(fromZh ? '打开导航' : 'Open navigation', 'activate');
+      const disclosure = before.locale === 'zh-CN' ? '显示设置' : 'Display settings';
+      // Below the drawer breakpoint the display controls render inside the
+      // navigation drawer, which defaults closed at mobile widths. Open it
+      // through the always-rendered navigation toggle (its accessible name is
+      // static in both states) so the disclosure is enumerable at every
+      // variant width, then restore the closed drawer before the variant's
+      // layout checks so mobile and desktop variants assert the same state.
+      const navigationToggle = before.locale === 'zh-CN' ? '打开导航' : 'Open navigation';
+      const drawerOpened = !before.controls.some(row => row.name === disclosure);
+      if (drawerOpened) await act(navigationToggle, 'activate');
       await act(disclosure, 'activate');
-      await act(fromZh ? '主题' : 'Theme', 'select', { value: theme });
-      await act(fromZh ? '语言' : 'Language', 'select', { value: locale });
+      await act(before.locale === 'zh-CN' ? '主题' : 'Theme', 'select', { value: theme });
+      await act(before.locale === 'zh-CN' ? '语言' : 'Language', 'select', { value: locale });
       await act(locale === 'zh-CN' ? '显示设置' : 'Display settings', 'activate');
-      if (drawer) await act(locale === 'zh-CN' ? '打开导航' : 'Open navigation', 'activate');
+      if (drawerOpened) {
+        // The language select above may have just changed the toggle's live
+        // accessible name; re-read the current locale's spelling to close.
+        const mid = await inspect();
+        await act(mid.locale === 'zh-CN' ? '打开导航' : 'Open navigation', 'activate');
+      }
       const after = await inspect();
       assert.equal(after.theme, theme); assert.equal(after.locale, locale);
     };

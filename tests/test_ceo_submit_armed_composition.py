@@ -1667,12 +1667,27 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # same AST; retain every path, membership and mutation refusal below.
     # The reviewed pure Memory-validator extraction also preserves that
     # anchor and the imports; only the full-source fingerprint changes.
+    # 2026-11-09 MMOS composition pin move: commit d7558be03 (PR #2351
+    # trusted capacity source through the installed Workspace factory) adds
+    # the capacity-source constructor guard outside the wrapper; the
+    # installed event-loop anchor AST is unchanged and only this full-file
+    # fingerprint moves.
+    # 2026-11-09 audit #14 closeout: compose_t3_native_owners_for_service
+    # (control_plane/t3_native_composition.py) is composed additively into
+    # supervisor_factory outside the wrapper; it adds no event loop or
+    # dispatch call and stays a no-op ({}) on unenrolled hosts. The
+    # installed event-loop anchor AST is unchanged and only this full-file
+    # fingerprint moves.
     # Capacity Fabric adds a read-only factory input outside the installed wrapper.
+    # 2026-11-11 WO-20 fourth-drift merge (master 8ee0196d, landed #2351): the
+    # merged phase1c equals this branch's bytes, so the fingerprint and the
+    # reviewed installed event-loop anchor keep this branch's values. No new
+    # literal site is qualified.
     from tests.executive_identity_review import _reviewed_ast_dump
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'eb33b3f4982f8248515dd03e0842a58ade6e624628272945ca0c8d088f876bdf'):
+            'd9d4492fa73a71bc479bf084d2d741fe847d811847e331b18e333b6b55f3f2bc'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

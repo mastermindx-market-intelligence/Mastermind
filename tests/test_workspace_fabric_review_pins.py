@@ -23,8 +23,25 @@ METHOD = next(node for node in OWNER.body
 BLOCK = "".join(SOURCE.splitlines(keepends=True)[METHOD.lineno - 1:METHOD.end_lineno])
 FRAGMENT = "class ExecutiveControlService:\n" + BLOCK + "\n"
 # Model READ and selected-child composition move the same three status operands.
-STATUS_SITES = ((6048, 66, 69, 'int'), (6061, 74, 77, 'int'), (6063, 75, 78, 'int'))
+# 2026-11-11 WO-20 master merge: master did not change the ingress method
+# (its AST equals the base); the merged method is byte-identical to this branch,
+# so these three operands keep this branch's coordinates.
+# 2026-11-09 MMOS composition pin move: the capacity fabric frame branch and
+# WO-13 selected_child_admit action (feat/mmos-v1-integration) shift the same
+# three reviewed operands to 6048/6061/6063; columns and values are unchanged.
+# 2026-11-09 T3 attempt-fleet read pin move (t3/fleet-attempt-read-route): the
+# per-attempt frame admission adds one import and one elif branch in the same
+# method; the same three reviewed operands shift to 6056/6069/6071, columns
+# and values unchanged.
+STATUS_SITES = ((6056, 66, 69, 'int'), (6069, 74, 77, 'int'), (6071, 75, 78, 'int'))
 
+# 2026-11-09 MMOS composition pin move: commit a751d78cc (PR #2316 WO-05)
+# shifts the same three reviewed backend operands to 226/416/511.
+# 2026-11-11 WO-20 fourth-drift merge (master 8ee0196d, landed #2351):
+# both parents map every reviewed token to the same merged line,
+# byte-identically (repin4.py); the merged source equals this branch's
+# bytes, so the pins keep this branch's digests and coordinates. No new
+# literal site is qualified.
 BACKEND_SITES = (
     (226, 73, 76, "int"),
     (416, 78, 81, "int"),

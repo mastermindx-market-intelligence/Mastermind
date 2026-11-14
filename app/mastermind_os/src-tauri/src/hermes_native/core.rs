@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 pub fn valid_fields(operation: &str, keys: &[&str]) -> bool {
     let expected: &[&str] = match operation {
         "status" | "list" => &["operation"],
+        "team_roster" => &["operation"],
         "create" => &["operation", "role", "requestId"],
         "read" => &["operation", "sessionId"],
         "send" => &["operation", "sessionId", "requestId", "text"],
@@ -60,6 +61,8 @@ mod tests {
         assert!(!valid_fields("status", &["operation", "url"]));
         assert!(!valid_fields("send", &["operation", "text"]));
         assert!(!valid_fields("shell", &["operation"]));
+        assert!(valid_fields("team_roster", &["operation"]));
+        assert!(!valid_fields("team_roster", &["operation", "sessionId"]));
         assert!(valid_fields("recover_create", &["operation", "requestId"]));
         assert!(valid_fields("recover_send", &["operation", "requestId", "sessionId"]));
         assert!(!valid_fields("recover_send", &["operation", "requestId", "sessionId", "text"]));

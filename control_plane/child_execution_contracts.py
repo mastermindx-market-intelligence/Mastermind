@@ -98,9 +98,20 @@ __all__ = [
     "CapabilityRequest",
     "ChildExecutionRequest",
     "CHILD_EXECUTION_REQUEST_SCHEMA",
+    "CHILD_EXECUTION_REQUEST_SCHEMA_V1_1",
+    "CHILD_EXECUTION_REQUEST_SCHEMA_V1_2",
     "FALLBACK_MODES",
+    "OriginalRequesterBinding",
     "ExecutionBinding",
     "EXECUTION_BINDING_SCHEMA",
+    "EXECUTION_BINDING_SCHEMA_V1_1",
+    "KNOWN_RUNTIME_KINDS",
+    "DESCENDANT_POLICIES",
+    "WORKSPACE_MODES",
+    "RESERVATION_MODELS",
+    "FanoutEnvelope",
+    "LocalitySpec",
+    "WorkspaceRequirements",
     "RoutePreview",
     "ROUTE_PREVIEW_SCHEMA",
     "PREVIEW_AUTHORITY",
@@ -417,6 +428,11 @@ class ChildRoutingPolicy:
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 
+#: Bound on one idempotency-triple field.  The triple is joined into a
+#: single durable command id, so an unbounded field would inflate every
+#: event row that records it.
+BOUNDED_IDENTIFIER_MAX_LENGTH = 256
+
 
 def _record_to_dict(record: Any) -> dict[str, Any]:
     """Every dataclass field, JSON-native (tuples -> lists, nested records -> dicts)."""
@@ -443,6 +459,36 @@ def _require_hex64(value: Any, field_name: str) -> None:
         raise ValueError(f"{field_name} must be a 64-char lowercase hex sha256 digest")
 
 
+def _require_identifier_length(value: Any, field_name: str) -> None:
+    """Bound one identifier so an unbounded field cannot inflate event rows."""
+
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string identifier")
+    if len(value) > BOUNDED_IDENTIFIER_MAX_LENGTH:
+        raise ValueError(
+            f"{field_name} must be at most {BOUNDED_IDENTIFIER_MAX_LENGTH} "
+            f"characters, got {len(value)}")
+
+
+def _require_bounded_identifier(value: Any, field_name: str) -> None:
+    """Fence one reference identifier: non-empty, bounded, printable.
+
+    Applied to the v1.2 ``original_requester`` reference fields.  The
+    idempotency triple keeps only the length bound: its ``\\x1f`` join
+    collision is closed by the admission's JSON-encoded command identity
+    (``child_request_admission.admission_command_id``), which admits such
+    triples as distinct operations.
+    """
+
+    _require_non_empty(value, field_name)
+    _require_identifier_length(value, field_name)
+    for offset, char in enumerate(value):
+        if not char.isprintable():
+            raise ValueError(
+                f"{field_name} must be a printable identifier: control or "
+                f"separator character {char!r} at offset {offset}")
+
+
 def _string_tuple(value: Any) -> tuple[str, ...]:
     if value is None:
         return ()
@@ -460,6 +506,27 @@ def _pop_const(data: dict, key: str, const: str, owner: str) -> None:
     supplied = data.pop(key, None)
     if supplied is not None and supplied != const:
         raise ValueError(f"{owner}.{key} must be {const!r}, got {supplied!r}")
+
+
+def _pop_schema(data: dict, accepted: tuple[str, ...], owner: str) -> None:
+    """Accept any of ``accepted`` schema labels (v1 + v1.1 compat read);
+    the reconstructed record's own extension content decides which label
+    it serializes with."""
+    supplied = data.pop("schema", None)
+    if supplied is not None and supplied not in accepted:
+        raise ValueError(f"{owner}.schema must be one of {accepted}, got {supplied!r}")
+
+
+def _sparse_v1_1(payload: dict, extension_fields: tuple[str, ...],
+                 has_extensions: bool) -> dict:
+    """SPARSE v1.1 serialization: a record with no extension fields set
+    serializes EXACTLY like v1 (unset extension keys are omitted), so
+    old records round-trip byte-identically through the extended code
+    and strict ``additionalProperties: false`` consumers keep working."""
+    if not has_extensions:
+        for name in extension_fields:
+            payload.pop(name, None)
+    return payload
 
 
 # --- 2. the classification record (Rev 4 §S3.A l.181–186) ----------------------
@@ -565,6 +632,219 @@ class CapabilityRequest:
         return cls(**dict(payload or {}))
 
 
+# --- 2b. Rev 5 v1.1 extension vocabulary and nested records (D1) ---------------
+#
+# Rev 5 §5 ("Reservation and identity") + change order §3A extend the v1
+# envelopes compatibly: every new field is OPTIONAL with a default, old
+# v1 records parse and serialize byte-identically, and a record only
+# declares schema ``*.v1.1`` when at least one extension field is set
+# (auto-upgrade in ``__post_init__``; a v1.1-labelled record with no
+# extension fields IS a v1 record and normalizes to one).
+
+CHILD_EXECUTION_REQUEST_SCHEMA_V1_1 = "ChildExecutionRequest.v1.1"
+CHILD_EXECUTION_REQUEST_SCHEMA_V1_2 = "ChildExecutionRequest.v1.2"
+EXECUTION_BINDING_SCHEMA_V1_1 = "ExecutionBinding.v1.1"
+
+#: Runtime/harness dimension of a route (Rev 5 §5 "runtime/harness × ...").
+#: Open vocabulary — the shared boundary validates non-blank, not
+#: membership, so newer runtimes pass through (same forward-compat rule
+#: as ``canonical_task_complexity``).  Core Rev 5 kinds:
+KNOWN_RUNTIME_KINDS = (
+    "hermes-native",      # persistent Hermes team/executive harness
+    "t3-native",          # T3 Code environment/thread/run lifecycle
+    "dsh-acp",            # DeepSeek Harness under ACP (--profile acp)
+    "opencode-free-cli",  # scoped free OpenCode CLI lane (WO-18)
+    "fabric-native",      # Mastermind Fabric-managed worker process
+    "codex-cli",          # attested Codex CLI adapter
+    "claude-code",        # Claude Code adapter family
+    "acp",                # generic ACP (runtime != any specific harness)
+    "api-direct",         # metered API principal, no native harness
+)
+
+#: Descendant admission policy every runtime descriptor must declare one
+#: of (Rev 5 §6 "Descendant policy: the most important integration
+#: detail").  ``bounded_native_fanout`` requires a declared
+#: :class:`FanoutEnvelope` naming its native enforcement.
+DESCENDANT_POLICIES = (
+    "fabric_per_child",
+    "bounded_native_fanout",
+    "native_fanout_disabled",
+)
+
+#: Workspace intent (Rev 5 §3 "Placement unit and locality").
+WORKSPACE_MODES = (
+    "read_only_snapshot",
+    "single_writer",
+    "isolated_patch",
+)
+
+#: One reservation model per profile (Rev 5 §6 l.385): either the whole
+#: envelope is reserved up front, or each admitted child is reserved on
+#: its own — never both for the same profile.
+RESERVATION_MODELS = (
+    "envelope_reserved",
+    "per_child_reserved",
+)
+
+
+@dataclass(frozen=True)
+class FanoutEnvelope:
+    """The declared descendant envelope for ``bounded_native_fanout``.
+
+    A configuration promise without a real native enforcement mechanism
+    is insufficient (Rev 5 §6): when the policy is
+    ``bounded_native_fanout`` the envelope must be declared AND carry a
+    non-empty ``enforcement_ref`` naming the native control that
+    actually bounds the fan-out.
+    """
+
+    max_descendants: int
+    max_concurrent: int | None = None
+    reservation_model: str = ""
+    enforcement_ref: str = ""
+
+    def __post_init__(self) -> None:
+        if self.max_descendants < 0:
+            raise ValueError("max_descendants must be >= 0")
+        if self.max_concurrent is not None and self.max_concurrent < 1:
+            raise ValueError("max_concurrent must be >= 1 when supplied")
+        if self.reservation_model and self.reservation_model not in RESERVATION_MODELS:
+            raise ValueError(
+                f"reservation_model must be one of {RESERVATION_MODELS}, got "
+                f"{self.reservation_model!r}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return _record_to_dict(self)
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any] | FanoutEnvelope | None) -> "FanoutEnvelope | None":
+        if payload is None or isinstance(payload, FanoutEnvelope):
+            return payload
+        return cls(**dict(payload or {}))
+
+
+@dataclass(frozen=True)
+class LocalitySpec:
+    """Placement locality of one child (Rev 5 §3; change order §3D).
+
+    ``parent_host_preference`` is SOFT (warm caches, lower transfer
+    cost).  ``hard_affinity`` pins the child to its parent's host and is
+    lawful only with a concrete ``hard_affinity_reason`` — a real local
+    service, a nonportable dependency, or an exact mutable workspace
+    lease.  If hard-affinity work cannot fit, it queues or the parent
+    decomposes it; the cap is never evaded.
+    """
+
+    parent_host_preference: bool = False
+    hard_affinity: bool = False
+    hard_affinity_reason: str = ""
+
+    def __post_init__(self) -> None:
+        if self.hard_affinity and not self.hard_affinity_reason.strip():
+            raise ValueError(
+                "hard_affinity requires hard_affinity_reason (real local "
+                "service, nonportable dependency, or exact mutable workspace)")
+
+    def to_dict(self) -> dict[str, Any]:
+        return _record_to_dict(self)
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any] | LocalitySpec | None) -> "LocalitySpec | None":
+        if payload is None or isinstance(payload, LocalitySpec):
+            return payload
+        return cls(**dict(payload or {}))
+
+
+@dataclass(frozen=True)
+class WorkspaceRequirements:
+    """What the child needs of a workspace (Rev 5 §3/§4).
+
+    ``mode`` uses the supported workspace intent vocabulary; empty means
+    unspecified (the owner's default applies).  Refs are opaque and
+    credential-free.
+    """
+
+    mode: str = ""
+    workspace_ref: str = ""
+    base_ref: str = ""
+    scratch_gib: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.mode and self.mode not in WORKSPACE_MODES:
+            raise ValueError(
+                f"mode must be one of {WORKSPACE_MODES}, got {self.mode!r}")
+        if self.scratch_gib is not None and self.scratch_gib < 0:
+            raise ValueError("scratch_gib must be >= 0 when supplied")
+
+    def to_dict(self) -> dict[str, Any]:
+        return _record_to_dict(self)
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any] | WorkspaceRequirements | None) -> "WorkspaceRequirements | None":
+        if payload is None or isinstance(payload, WorkspaceRequirements):
+            return payload
+        return cls(**dict(payload or {}))
+
+
+# --- 2c. v1.2 sparse extension: original requester binding (return path) -------
+#
+# The return-path integrator gap (Director F gap 1): the admission envelope
+# carried no origin binding, so a sealed attempt could not be routed back to
+# the Hermes/T3 seat that requested it.  v1.2 adds ONE optional sparse block.
+# Compat law mirrors v1.1 exactly: absent block → byte-identical v1/v1.1
+# serialization and digest; present block → participates in the digest (the
+# requester selects the return destination, so a requester swap under the
+# same idempotency triple is a conflict, not a retry).  The block carries
+# references only — never an authenticated namespace: authentication is
+# runtime-owned and joined at settlement from ``binding.caller_namespace``.
+
+#: Carrier kinds the return path distinguishes at settlement (open set —
+#: validated non-blank, not membership, like runtime kinds).
+CARRIER_KINDS = (
+    "hermes_teammate",   # persistent Hermes teammate/bot seat
+    "hermes_session",    # Hermes conversation/session seat
+    "t3_thread",         # T3 Code native thread seat
+    "api_principal",     # authenticated API principal (no native seat)
+)
+
+
+@dataclass(frozen=True)
+class OriginalRequesterBinding:
+    """Where a sealed result must return to (v1.2 sparse block).
+
+    ``teammate_id``/``conversation_id``/``project_id`` are REQUIRED bounded
+    identifiers (the settlement composition needs all three to address the
+    return); ``carrier_kind`` is optional free-form context.  All are
+    references, not credentials: nothing here authenticates the requester.
+    """
+
+    teammate_id: str
+    conversation_id: str
+    project_id: str
+    carrier_kind: str = ""
+
+    def __post_init__(self) -> None:
+        _require_bounded_identifier(self.teammate_id, "original_requester.teammate_id")
+        _require_bounded_identifier(
+            self.conversation_id, "original_requester.conversation_id")
+        _require_bounded_identifier(self.project_id, "original_requester.project_id")
+        if self.carrier_kind:
+            if not self.carrier_kind.strip():
+                raise ValueError(
+                    "original_requester.carrier_kind must be non-blank when supplied")
+            _require_bounded_identifier(
+                self.carrier_kind, "original_requester.carrier_kind")
+
+    def to_dict(self) -> dict[str, Any]:
+        return _record_to_dict(self)
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any] | "OriginalRequesterBinding" | None) -> "OriginalRequesterBinding | None":
+        if payload is None or isinstance(payload, OriginalRequesterBinding):
+            return payload
+        return cls(**dict(payload or {}))
+
+
 # --- 3. ChildExecutionRequest.v1 (Rev 4 §S1 l.56–65; promoted from the draft) --
 
 CHILD_EXECUTION_REQUEST_SCHEMA = "ChildExecutionRequest.v1"
@@ -610,11 +890,32 @@ class ChildExecutionRequest:
     policy_revision: str = POLICY_REVISION
     fallback_mode: str = "advisory_only"
     notes: str = ""
+    # --- Rev 5 v1.1 extension (all OPTIONAL; absent = a plain v1 record) ---
+    #: Soft/hard placement locality (Rev 5 §3; change order §3D).
+    locality: LocalitySpec | None = None
+    #: Preferred runtime/harness (soft hint; KNOWN_RUNTIME_KINDS vocabulary,
+    #: open set).  Decision stays separate from placement — the owner may
+    #: place elsewhere and records why.
+    runtime_preference: str = ""
+    #: Workspace intent + refs the child needs (Rev 5 §3/§4).
+    workspace_requirements: WorkspaceRequirements | None = None
+    #: Declared descendant envelope when the child itself will fan out
+    #: natively (pairs with the binding's ``descendant_policy``).
+    declared_fanout: FanoutEnvelope | None = None
+    # --- v1.2 sparse extension (return path; absent = v1/v1.1 record) ---
+    #: Origin binding for the return path: which Hermes/T3 seat requested
+    #: this child, so a sealed attempt can be routed back.  Absent block
+    #: digests byte-identically to v1/v1.1; present block participates in
+    #: the digest.  References only — authentication is joined at
+    #: settlement from ``binding.caller_namespace``, never carried here.
+    original_requester: OriginalRequesterBinding | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty(self.root_ref, "root_ref")
         _require_non_empty(self.immediate_parent_run_ref, "immediate_parent_run_ref")
         _require_non_empty(self.logical_child_key, "logical_child_key")
+        for field_name in ("root_ref", "immediate_parent_run_ref", "logical_child_key"):
+            _require_identifier_length(getattr(self, field_name), field_name)
         complexity = canonical_task_complexity(self.requested_complexity)
         if complexity not in CANONICAL_TASK_COMPLEXITIES and complexity != REVIEW_LANE:
             raise ValueError(
@@ -633,6 +934,30 @@ class ChildExecutionRequest:
                 "policy revision drift: embedded routing_decision was produced by "
                 f"revision {self.routing_decision.policy_revision!r} but the request "
                 f"declares {self.policy_revision!r}")
+        if self.runtime_preference and not self.runtime_preference.strip():
+            raise ValueError("runtime_preference must be non-blank when supplied")
+        if self._has_v1_2_extensions:
+            object.__setattr__(
+                self, "schema", CHILD_EXECUTION_REQUEST_SCHEMA_V1_2)
+        elif self._has_v1_1_extensions:
+            object.__setattr__(
+                self, "schema", CHILD_EXECUTION_REQUEST_SCHEMA_V1_1)
+
+    @property
+    def _has_v1_1_extensions(self) -> bool:
+        """True when any Rev 5 extension field is declared (drives the
+        v1 → v1.1 schema auto-upgrade and the digest input)."""
+        return bool(
+            self.locality is not None
+            or self.runtime_preference
+            or self.workspace_requirements is not None
+            or self.declared_fanout is not None)
+
+    @property
+    def _has_v1_2_extensions(self) -> bool:
+        """True when the v1.2 return-path block is declared (schema label
+        v1.2 wins over v1.1 when both are present)."""
+        return self.original_requester is not None
 
     def idempotency_key(self) -> tuple[str, str, str]:
         """The idempotency triple (root, immediate_parent, logical_child_key)."""
@@ -640,9 +965,25 @@ class ChildExecutionRequest:
 
     def canonical_payload(self) -> dict[str, Any]:
         """The digest input: every semantic field.  ``notes`` is excluded —
-        free-text never participates in request identity."""
+        free-text never participates in request identity.  Absent v1.1
+        extension fields are excluded too, so a v1 request digests
+        IDENTICALLY before and after the Rev 5 extension (redelivering a
+        v1-era request after an upgrade is a retry, never a conflict);
+        declared v1.1 content participates (a request that adds locality
+        or a fan-out envelope is semantically different work).  The v1.2
+        ``original_requester`` block follows the same sparse law: absent
+        block → v1/v1.1 digests unchanged; present block → participates
+        (the requester selects the return destination, so a requester swap
+        under the same idempotency triple is a conflict, never a retry)."""
         payload = _record_to_dict(self)
         payload.pop("notes", None)
+        payload = _sparse_v1_1(
+            payload,
+            ("locality", "runtime_preference", "workspace_requirements",
+             "declared_fanout"),
+            self._has_v1_1_extensions)
+        if self.original_requester is None:
+            payload.pop("original_requester", None)
         return payload
 
     @property
@@ -662,14 +1003,22 @@ class ChildExecutionRequest:
                 and self.request_digest != other.request_digest)
 
     def to_dict(self) -> dict[str, Any]:
-        payload = _record_to_dict(self)
+        payload = _sparse_v1_1(
+            _record_to_dict(self),
+            ("locality", "runtime_preference", "workspace_requirements",
+             "declared_fanout"),
+            self._has_v1_1_extensions)
+        if self.original_requester is None:
+            payload.pop("original_requester", None)
         payload["request_digest"] = self.request_digest
         return payload
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "ChildExecutionRequest":
         data = dict(payload or {})
-        _pop_const(data, "schema", CHILD_EXECUTION_REQUEST_SCHEMA, cls.__name__)
+        _pop_schema(data, (CHILD_EXECUTION_REQUEST_SCHEMA,
+                           CHILD_EXECUTION_REQUEST_SCHEMA_V1_1,
+                           CHILD_EXECUTION_REQUEST_SCHEMA_V1_2), cls.__name__)
         supplied_digest = data.pop("request_digest", None)
         decision = data.get("routing_decision")
         if isinstance(decision, Mapping):
@@ -677,6 +1026,12 @@ class ChildExecutionRequest:
         if data.get("required_capabilities") is not None:
             data["required_capabilities"] = tuple(
                 CapabilityRequest.from_dict(c) for c in data["required_capabilities"])
+        data["locality"] = LocalitySpec.from_dict(data.get("locality"))
+        data["workspace_requirements"] = WorkspaceRequirements.from_dict(
+            data.get("workspace_requirements"))
+        data["declared_fanout"] = FanoutEnvelope.from_dict(data.get("declared_fanout"))
+        data["original_requester"] = OriginalRequesterBinding.from_dict(
+            data.get("original_requester"))
         request = cls(**data)
         if supplied_digest is not None and supplied_digest != request.request_digest:
             raise ValueError(
@@ -727,6 +1082,40 @@ class ExecutionBinding:
     assignment_generation: int = 0
     fence_counter: int = 0
     lease_expiry: str = ""
+    # --- Rev 5 v1.1 extension: native runtime identity / workspace /
+    # operation / descendant policy (change order §3A binding list; all
+    # OPTIONAL — absent = a plain v1 binding).  Refs are opaque and
+    # credential-free; native IDs stay distinct identities joined to
+    # company IDs by this durable mapping (Rev 5 §5 l.267).
+    #: Runtime/harness kind of the bound execution (KNOWN_RUNTIME_KINDS
+    #: vocabulary, open set).
+    runtime_kind: str = ""
+    #: T3 native identity chain (environment → server → project → thread → run).
+    t3_environment_ref: str = ""
+    t3_server_ref: str = ""
+    project_ref: str = ""
+    thread_ref: str = ""
+    run_ref: str = ""
+    #: Provider instance + native session the run is actually bound to.
+    provider_instance_ref: str = ""
+    native_session_ref: str = ""
+    #: Workspace containment block (Rev 5 §4; change order §3E).
+    workspace_ref: str = ""
+    base_ref: str = ""
+    writer_epoch: int | None = None
+    lease_ref: str = ""
+    #: Operation block: ``operation_key`` carries the native launch
+    #: ``clientRequestId`` (T3 source-supported idempotency key) and
+    #: ``caller_namespace`` the authenticated principal/namespace it was
+    #: minted under — both must be persisted and replayed unchanged
+    #: after a lost reply (Rev 5 §7 l.412; change order §3A).
+    operation_key: str = ""
+    caller_namespace: str = ""
+    #: Descendant admission policy in force for this execution (Rev 5 §6).
+    descendant_policy: str = ""
+    #: The declared/enforced envelope when ``descendant_policy`` is
+    #: ``bounded_native_fanout``.
+    declared_fanout_envelope: FanoutEnvelope | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty(self.root_run_ref, "root_run_ref")
@@ -745,10 +1134,61 @@ class ExecutionBinding:
             raise ValueError("fence_counter must be >= 0")
         if self.scope_digest:
             _require_hex64(self.scope_digest, "scope_digest")
+        # --- v1.1 extension normalization/validation ---
+        runtime_kind = self.runtime_kind.strip().lower()
+        object.__setattr__(self, "runtime_kind", runtime_kind)
+        if self.writer_epoch is not None and self.writer_epoch < 0:
+            raise ValueError("writer_epoch must be >= 0 when supplied")
+        if self.descendant_policy and self.descendant_policy not in DESCENDANT_POLICIES:
+            raise ValueError(
+                f"descendant_policy must be one of {DESCENDANT_POLICIES}, got "
+                f"{self.descendant_policy!r}")
+        if self.descendant_policy == "bounded_native_fanout":
+            envelope = self.declared_fanout_envelope
+            if envelope is None:
+                raise ValueError(
+                    "descendant_policy 'bounded_native_fanout' requires a "
+                    "declared_fanout_envelope")
+            if envelope.max_descendants < 1:
+                raise ValueError(
+                    "bounded_native_fanout envelope must bound at least one "
+                    "descendant (use 'native_fanout_disabled' for zero)")
+            if not envelope.enforcement_ref.strip():
+                raise ValueError(
+                    "bounded_native_fanout requires enforcement_ref naming the "
+                    "native control that enforces the envelope")
+        if self._has_v1_1_extensions:
+            object.__setattr__(self, "schema", EXECUTION_BINDING_SCHEMA_V1_1)
+
+    @property
+    def _has_v1_1_extensions(self) -> bool:
+        """True when any Rev 5 extension field is set (drives the v1 →
+        v1.1 schema auto-upgrade)."""
+        return bool(
+            self.runtime_kind
+            or self.t3_environment_ref or self.t3_server_ref
+            or self.project_ref or self.thread_ref or self.run_ref
+            or self.provider_instance_ref or self.native_session_ref
+            or self.workspace_ref or self.base_ref
+            or self.writer_epoch is not None or self.lease_ref
+            or self.operation_key or self.caller_namespace
+            or self.descendant_policy
+            or self.declared_fanout_envelope is not None)
 
     def child_identity(self) -> tuple[str, str, str]:
         """The (root, immediate_parent, logical_child_key) placement identity."""
         return (self.root_run_ref, self.immediate_parent_run_ref, self.logical_child_key)
+
+    def to_dict(self) -> dict[str, Any]:
+        return _sparse_v1_1(
+            _record_to_dict(self),
+            ("runtime_kind", "t3_environment_ref", "t3_server_ref",
+             "project_ref", "thread_ref", "run_ref",
+             "provider_instance_ref", "native_session_ref",
+             "workspace_ref", "base_ref", "writer_epoch", "lease_ref",
+             "operation_key", "caller_namespace", "descendant_policy",
+             "declared_fanout_envelope"),
+            self._has_v1_1_extensions)
 
     def binds_request(self, request: ChildExecutionRequest) -> bool:
         """True when this binding is the fenced assignment OF that request:
@@ -756,21 +1196,20 @@ class ExecutionBinding:
         return (self.child_identity() == request.idempotency_key()
                 and self.request_digest == request.request_digest)
 
-    def to_dict(self) -> dict[str, Any]:
-        return _record_to_dict(self)
-
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "ExecutionBinding":
         data = dict(payload or {})
-        _pop_const(data, "schema", EXECUTION_BINDING_SCHEMA, cls.__name__)
+        _pop_schema(data, (EXECUTION_BINDING_SCHEMA,
+                           EXECUTION_BINDING_SCHEMA_V1_1), cls.__name__)
         if data.get("shared_quota_resource_refs") is not None:
             data["shared_quota_resource_refs"] = _string_tuple(
                 data["shared_quota_resource_refs"])
+        data["declared_fanout_envelope"] = FanoutEnvelope.from_dict(
+            data.get("declared_fanout_envelope"))
         return cls(**data)
 
 
 # --- 5. RoutePreview.v1 (Rev 4 §S3.B l.199–212) --------------------------------
-
 ROUTE_PREVIEW_SCHEMA = "RoutePreview.v1"
 #: Fixed by law: a preview never reserves or launches; it cannot become a
 #: live route by flipping a source-preview field.

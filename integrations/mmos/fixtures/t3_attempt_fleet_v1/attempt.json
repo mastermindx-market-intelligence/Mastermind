@@ -1,0 +1,55 @@
+{
+  "schema": "mastermind.t3_attempt_fleet/v1",
+  "evaluated_at_utc": "2026-11-09T12:00:00+00:00",
+  "attempts": [
+    {
+      "attempt_id": "runs/att-1",
+      "idempotency": {
+        "key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "namespace": "mastermind.control_plane.t3_execution_adapter/v1"
+      },
+      "t3_thread": {
+        "thread_id": "mcp:launch:1111111111111111111111111111111111111111111111111111111111111111",
+        "run_id": "run:thread:x:ordinal:1",
+        "state": null,
+        "unknown_reason": null
+      },
+      "harness_process": {
+        "pid": 100,
+        "provider": "claude",
+        "model": "glm-5.3",
+        "start_time": "2027-01-15T08:00:00+00:00",
+        "unknown_reason": null
+      },
+      "thread_count_for_key": 1,
+      "thread_count_reason": null,
+      "harness_count_for_thread": 1,
+      "harness_count_reason": null,
+      "duplicate_launcher": {
+        "observed": false,
+        "kinds": [],
+        "evidence_refs": [
+          "adapter_state:read",
+          "adapter_state:key:aaaaaaaaaaaa",
+          "census:pid:100"
+        ],
+        "unknown_reason": null
+      },
+      "invariant": {
+        "exactly_one_thread": "PROVEN",
+        "exactly_one_harness": "PROVEN"
+      },
+      "freshness": {
+        "adapter_state": "fresh",
+        "census": "fresh",
+        "thread_read": "absent"
+      },
+      "evidence_refs": [
+        "adapter_state:read",
+        "adapter_state:key:aaaaaaaaaaaa",
+        "census:pid:100"
+      ]
+    }
+  ],
+  "notes": []
+}

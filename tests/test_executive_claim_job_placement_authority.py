@@ -715,6 +715,447 @@ def test_decision_projection_refuses_a_claim_without_a_binding(tmp_path):
         decision_event_from_claim(job_id="legacy-job", claim_payload={"status": "RUNNING"})
 
 
+# --- Rev 5 v1.1 (Director C): t3-native ExecutionBinding join at claim ----------
+
+def _t3_spec(key: str) -> dict:
+    spec = _spec(key)
+    spec["route"] = {
+        "provider_ref": "codex", "pool_ref": "glm", "adapter_id": "t3-native",
+    }
+    return spec
+
+
+def test_t3_native_claim_issues_v1_1_binding_with_t3_idempotency_join(tmp_path):
+    """Rev 5 §3A/§7: a t3-native route descriptor makes the claim-time
+    binding itself carry the native idempotency join — runtime_kind from
+    the registered descriptor, operation_key = the binding-derived T3
+    clientRequestId — derived inside the SAME claim transaction, so a
+    coordinator restart or lost reply replays the same upstream command
+    key. caller_namespace stays EMPTY (REVIEW_C_E_OPUS_20261109 A2): the
+    claim knows no OAuth principal; the adapter's port attests it at
+    launch (see the claim->adapter equality test below)."""
+    from control_plane.child_execution_contracts import EXECUTION_BINDING_SCHEMA_V1_1
+    from control_plane.t3_execution_adapter import derive_t3_client_request_id
+
+    runtime, _ = _runtime(tmp_path)
+    runtime.workers.register_worker(
+        "worker-t3", provider="codex", account_label="acct-t3",
+        worker_type="mock", capabilities=["code"],
+        quota_classes={"default": {"capabilities": ["code"],
+                                     "metadata": {"adapter_id": "t3-native"}}},
+        metadata={"host_id": "ubuntu0"},
+    )
+    job = runtime.jobs.create_job(
+        "t3 placement child", constraints={"child_placement": _t3_spec("t3-child-1")}
+    )
+
+    lease = runtime.attempts.claim_job(
+        job.job_id, placement_observations=_observations()
+    )
+
+    assert lease is not None
+    raw = runtime.attempts.execution_binding(lease.attempt.attempt_id)
+    assert raw is not None
+    binding = ExecutionBinding.from_dict(raw)
+    # The v1 identity is unchanged; only the v1.1 extension joins.
+    assert binding.binds_request(_request("t3-child-1"))
+    assert binding.schema == EXECUTION_BINDING_SCHEMA_V1_1
+    assert binding.runtime_kind == "t3-native"
+    assert binding.adapter_id == "t3-native"
+    # A2: never the adapter's fixed namespace (which the adapter would wrap
+    # a second time) and never an invented principal.
+    assert binding.caller_namespace == ""
+    assert raw["caller_namespace"] == ""
+    # The persisted operation key IS the adapter's deterministic derivation
+    # over this same binding — the join the adapter must reproduce at
+    # launch, byte for byte, never a fresh key.
+    assert binding.operation_key == derive_t3_client_request_id(binding)
+    assert len(binding.operation_key) == 64 and binding.operation_key.islower()
+    # The claim payload carries the joined v1.1 binding verbatim.
+    claimed = [e for e in runtime.store.list_events(job_id=job.job_id)
+               if e.event_type == "JOB_CLAIMED"]
+    assert claimed[0].payload["execution_binding"] == raw
+    assert claimed[0].payload["execution_binding"]["runtime_kind"] == "t3-native"
+
+
+
+class _AttestingT3Port:
+    """Fake T3NativeClientPort that records every envelope it is sent and,
+    when given a principal, attests it through ``authenticated_namespace``
+    (the OAuth client the real port authenticates with)."""
+
+    def __init__(self, principal: str | None) -> None:
+        self.envelopes: list = []
+        if principal is not None:
+            self.authenticated_namespace = lambda: principal
+
+    async def launch_thread(self, envelope):
+        from control_plane.t3_execution_adapter import T3ThreadLaunchReceipt
+
+        self.envelopes.append(envelope)
+        return T3ThreadLaunchReceipt(
+            thread_id="thr-claim-1", run_id="t3run-claim-1", project_id="proj-1",
+            status="running", link="https://t3.example/thread/thr-claim-1",
+            created_at="2026-11-09T12:00:00+00:00",
+            request_namespace=envelope.request_namespace,
+            client_request_id=envelope.client_request_id,
+        )
+
+    async def read_thread(self, thread_id, run_id, cursor):  # pragma: no cover
+        raise AssertionError("not exercised")
+
+    async def interrupt_run(self, ref, reason):  # pragma: no cover
+        raise AssertionError("not exercised")
+
+    async def replay_launch(self, envelope):  # pragma: no cover
+        raise AssertionError("not exercised")
+
+
+class _NullInspector:
+    def boot_session_id(self) -> str:
+        return "boot-1"
+
+    def identity(self, pid: int) -> tuple[str, int]:
+        return (f"identity-{pid}", pid)
+
+    def inspect(self, pid: int) -> object:
+        return {"pid": pid}
+
+
+@pytest.mark.parametrize("principal", ["oauth-client-X", None],
+                         ids=["port-attests-principal", "port-without-principal"])
+def test_t3_claim_binding_and_real_adapter_agree_on_namespace_and_key(
+    tmp_path, principal
+):
+    """A2 claim->adapter equality: the binding claim_job issues is fed to
+    the REAL T3ExecutionAdapter. One story, byte for byte: the binding's
+    caller_namespace is empty, the namespace on the wire is exactly what
+    the PORT attests (principal-qualified — never the fixed namespace
+    wrapped in itself), and the clientRequestId on the wire is the claim's
+    operation_key. The adapter's DURABLE launch record (a second store
+    instance reading the same SQLite file) holds that same namespace/key
+    and the same claim binding. A port that attests NO principal cannot
+    prove which OAuth client's idempotency identity it runs under, so the
+    reviewed adapter refuses the launch before any native call (audit #3,
+    re-audit FIXED_CONFIRMED): nothing is sent and nothing is launched."""
+    import asyncio
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from control_plane.t3_execution_adapter import (
+        SQLiteT3AdapterStateStore,
+        T3_REQUEST_NAMESPACE,
+        T3ExecutionAdapter,
+        t3_request_namespace,
+    )
+    from control_plane.worker_execution_contract import WorkerLaunchSpec
+
+    runtime, _ = _runtime(tmp_path)
+    runtime.workers.register_worker(
+        "worker-t3", provider="codex", account_label="acct-t3",
+        worker_type="mock", capabilities=["code"],
+        quota_classes={"default": {"capabilities": ["code"],
+                                     "metadata": {"adapter_id": "t3-native"}}},
+        metadata={"host_id": "ubuntu0"},
+    )
+    job = runtime.jobs.create_job(
+        "t3 namespace child", constraints={"child_placement": _t3_spec("t3-ns-1")}
+    )
+    lease = runtime.attempts.claim_job(job.job_id, placement_observations=_observations())
+    raw = runtime.attempts.execution_binding(lease.attempt.attempt_id)
+    claimed = [e for e in runtime.store.list_events(job_id=job.job_id)
+               if e.event_type == "JOB_CLAIMED"][0].payload["execution_binding"]
+    assert claimed == raw
+    binding = ExecutionBinding.from_dict(raw)
+    assert binding.caller_namespace == "" and raw["caller_namespace"] == ""
+
+    port = _AttestingT3Port(principal)
+    state_path = tmp_path / "t3_adapter_state.sqlite3"
+    adapter = T3ExecutionAdapter(
+        port, lambda spec: binding, _NullInspector(),
+        clock=lambda: datetime.fromtimestamp(NOW / 1000, tz=timezone.utc),
+        state_store=SQLiteT3AdapterStateStore(state_path),
+    )
+    spec = WorkerLaunchSpec(
+        run_id=lease.attempt.attempt_id, job_id=job.job_id,
+        worker_id=binding.worker_id, workspace_path=Path("/tmp/mmos-t3-ws"),
+        run_dir=tmp_path / "run", prompt="bounded child",
+        result_schema_path=tmp_path / "run" / "schema.json",
+    )
+    if principal is None:
+        from control_plane.t3_execution_adapter import T3NamespaceAttestationError
+        with pytest.raises(T3NamespaceAttestationError):
+            asyncio.run(adapter.start(spec))
+        assert port.envelopes == []
+        durable = SQLiteT3AdapterStateStore(state_path).load_run(spec.run_id)
+        assert durable is None or durable.receipt is None
+        return
+    asyncio.run(adapter.start(spec))
+
+    expected_namespace = f"{T3_REQUEST_NAMESPACE}:oauth-client-X"
+    assert expected_namespace == t3_request_namespace(principal)
+    [envelope] = port.envelopes
+    assert envelope.request_namespace == expected_namespace
+    assert envelope.request_namespace.count(T3_REQUEST_NAMESPACE) == 1
+    assert envelope.client_request_id == binding.operation_key == raw["operation_key"]
+
+    durable = SQLiteT3AdapterStateStore(state_path).load_run(spec.run_id)
+    assert durable.intent.request_namespace == envelope.request_namespace
+    assert durable.intent.client_request_id == envelope.client_request_id
+    assert durable.receipt.request_namespace == envelope.request_namespace
+    assert durable.binding == binding
+    assert durable.binding.to_dict() == raw
+
+
+def test_plain_adapter_route_stays_a_v1_binding(tmp_path):
+    """The join is scoped to the t3-native seam: a registered non-t3
+    adapter (codex-cli) and an adapter-less route both claim unchanged v1
+    bindings with no native extension fields."""
+    runtime, _ = _runtime(tmp_path)
+    runtime.workers.register_worker(
+        "worker-codex", provider="codex", account_label="acct-codex",
+        worker_type="mock", capabilities=["code"],
+        quota_classes={"default": {"capabilities": ["code"],
+                                     "metadata": {"adapter_id": "codex-cli"}}},
+        metadata={"host_id": "ubuntu0"},
+    )
+    codex_spec = _spec("codex-child-1")
+    codex_spec["route"] = {
+        "provider_ref": "codex", "pool_ref": "glm", "adapter_id": "codex-cli",
+    }
+    job = runtime.jobs.create_job(
+        "codex placement child", constraints={"child_placement": codex_spec}
+    )
+    lease = runtime.attempts.claim_job(
+        job.job_id, placement_observations=_observations()
+    )
+    binding = ExecutionBinding.from_dict(
+        runtime.attempts.execution_binding(lease.attempt.attempt_id)
+    )
+    assert binding.runtime_kind == "" and binding.operation_key == ""
+    assert binding.caller_namespace == "" and binding.schema == "ExecutionBinding.v1"
+
+    _worker(runtime, "worker-plain", "ubuntu1")
+    plain = _job(runtime, "plain-child-1")
+    plain_lease = runtime.attempts.claim_job(
+        plain.job_id,
+        placement_observations=_observations(
+            hosts={"ubuntu0": 1, "ubuntu1": 1}),
+    )
+    plain_binding = ExecutionBinding.from_dict(
+        runtime.attempts.execution_binding(plain_lease.attempt.attempt_id)
+    )
+    assert plain_binding.schema == "ExecutionBinding.v1"
+    assert not plain_binding._has_v1_1_extensions
+
+
+def test_unknown_route_adapter_fails_closed_inside_the_claim_transaction(tmp_path):
+    """An adapter id that is not a reviewed descriptor refuses the claim
+    with a typed StateConflict INSIDE the transaction: the placement
+    commitment rolls back with it and the Job stays QUEUED — never a
+    half-claimed attempt or an unattributable native launch."""
+    runtime, _ = _runtime(tmp_path)
+    runtime.workers.register_worker(
+        "worker-bogus", provider="codex", account_label="acct-bogus",
+        worker_type="mock", capabilities=["code"],
+        quota_classes={"default": {"capabilities": ["code"],
+                                     "metadata": {"adapter_id": "definitely-not-an-adapter"}}},
+        metadata={"host_id": "ubuntu0"},
+    )
+    bogus_spec = _spec("bogus-child-1")
+    bogus_spec["route"] = {
+        "provider_ref": "codex", "pool_ref": "glm",
+        "adapter_id": "definitely-not-an-adapter",
+    }
+    job = runtime.jobs.create_job(
+        "bogus placement child", constraints={"child_placement": bogus_spec}
+    )
+    with pytest.raises(StateConflict, match="not a reviewed adapter"):
+        runtime.attempts.claim_job(
+            job.job_id, placement_observations=_observations()
+        )
+    assert _commitments(runtime) == []
+    with runtime.store.read() as connection:
+        status = connection.execute(
+            "SELECT status FROM jobs WHERE job_id=?", (job.job_id,)
+        ).fetchone()["status"]
+        attempts = connection.execute(
+            "SELECT COUNT(*) AS n FROM attempts WHERE job_id=?", (job.job_id,)
+        ).fetchone()["n"]
+    assert status == JobStatus.QUEUED.value and attempts == 0
+
+
+def test_workspace_lease_join_stamps_containment_by_contract(tmp_path):
+    """Rev 5 §4 join (Director C): attach_workspace_lease stamps the
+    binding's v1.1 workspace-containment block from ONE real lease record
+    (real SQLite store in a temp dir; no launch of any kind) — the
+    binding's workspace_ref/base_ref/writer_epoch/lease_ref ARE the lease's
+    values, t3_workspace_id stays the lease-side native join field, and a
+    non-active lease refuses."""
+    from control_plane.t3_execution_adapter import derive_t3_client_request_id
+    from control_plane.workspace_lease import (
+        WorkspaceLeaseStore,
+        attach_workspace_lease,
+    )
+
+    runtime, _ = _runtime(tmp_path)
+    runtime.workers.register_worker(
+        "worker-t3", provider="codex", account_label="acct-t3",
+        worker_type="mock", capabilities=["code"],
+        quota_classes={"default": {"capabilities": ["code"],
+                                     "metadata": {"adapter_id": "t3-native"}}},
+        metadata={"host_id": "ubuntu0"},
+    )
+    job = runtime.jobs.create_job(
+        "t3 workspace child", constraints={"child_placement": _t3_spec("t3-ws-1")}
+    )
+    lease = runtime.attempts.claim_job(
+        job.job_id, placement_observations=_observations()
+    )
+    binding = ExecutionBinding.from_dict(
+        runtime.attempts.execution_binding(lease.attempt.attempt_id)
+    )
+    assert binding.operation_key == derive_t3_client_request_id(binding)
+
+    store = WorkspaceLeaseStore(str(tmp_path / "workspace-leases.sqlite"))
+    record = store.acquire_single_writer(
+        repo_ref="github.com:mastermindx/Mastermind", host_ref="ubuntu0",
+        native_workspace_owner="t3-native",
+        workspace_ref="workspace:///mastermind/t3-ws-1",
+        base_revision="a" * 40, writer_ref="writer-t3-1",
+        active_assignment_refs=(lease.attempt.attempt_id,),
+        t3_workspace_id="t3ws-7f3a", now_ms=NOW,
+    )
+    joined = attach_workspace_lease(binding, record, now_ms=NOW)
+    assert (joined.workspace_ref, joined.base_ref) == (
+        record.workspace_ref, record.base_revision)
+    assert (joined.writer_epoch, joined.lease_ref) == (
+        record.writer_epoch, record.lease_id)
+    # The lease-side native join field survives the round trip: the binding
+    # reaches t3_workspace_id through lease_ref, and this module never
+    # fabricates it into the binding.
+    assert record.t3_workspace_id == "t3ws-7f3a"
+    assert joined.lease_ref == record.lease_id
+    # Joining again is idempotent; the input binding is unchanged.
+    assert attach_workspace_lease(joined, record, now_ms=NOW) == joined
+    assert binding.workspace_ref == "" and binding.lease_ref == ""
+
+    store.release(record.lease_id, writer_epoch=record.writer_epoch, now_ms=NOW + 1)
+    with pytest.raises(Exception, match="LEASE_NOT_ACTIVE"):
+        attach_workspace_lease(joined, dataclasses_replace_status(record), now_ms=NOW)
+    store.close()
+
+
+
+def _claimed_t3_binding_and_lease(tmp_path, *, key: str, expires_ms=None,
+                                  assignment_refs=None):
+    from control_plane.workspace_lease import WorkspaceLeaseStore
+
+    runtime, _ = _runtime(tmp_path)
+    runtime.workers.register_worker(
+        "worker-t3", provider="codex", account_label="acct-t3",
+        worker_type="mock", capabilities=["code"],
+        quota_classes={"default": {"capabilities": ["code"],
+                                     "metadata": {"adapter_id": "t3-native"}}},
+        metadata={"host_id": "ubuntu0"},
+    )
+    job = runtime.jobs.create_job(
+        "t3 lease child", constraints={"child_placement": _t3_spec(key)}
+    )
+    lease = runtime.attempts.claim_job(job.job_id, placement_observations=_observations())
+    binding = ExecutionBinding.from_dict(
+        runtime.attempts.execution_binding(lease.attempt.attempt_id)
+    )
+    store = WorkspaceLeaseStore(str(tmp_path / "workspace-leases.sqlite"))
+    refs = (lease.attempt.attempt_id,) if assignment_refs is None else assignment_refs
+    record = store.acquire_single_writer(
+        repo_ref="github.com:mastermindx/Mastermind", host_ref="ubuntu0",
+        native_workspace_owner="t3-native",
+        workspace_ref=f"workspace:///mastermind/{key}",
+        base_revision="a" * 40, writer_ref=f"writer-{key}",
+        active_assignment_refs=refs, now_ms=NOW, expires_ms=expires_ms,
+    )
+    return binding, record, store
+
+
+def test_workspace_lease_join_refuses_an_active_but_expired_lease(tmp_path):
+    """A3: lease_status alone used to admit an active lease whose expiry had
+    passed (expires_ms=1). Expiry is judged against the injected now_ms."""
+    from control_plane.workspace_lease import WorkspaceLeaseConflict, attach_workspace_lease
+
+    binding, record, store = _claimed_t3_binding_and_lease(
+        tmp_path, key="t3-exp-1", expires_ms=NOW + 60_000)
+    assert attach_workspace_lease(binding, record, now_ms=NOW).lease_ref == record.lease_id
+    for now in (NOW + 60_000, NOW + 60_001):  # at and after expiry
+        with pytest.raises(WorkspaceLeaseConflict, match="LEASE_EXPIRED") as caught:
+            attach_workspace_lease(binding, record, now_ms=now)
+        assert caught.value.details["expires_ms"] == NOW + 60_000
+    import dataclasses as _dc
+    with pytest.raises(WorkspaceLeaseConflict, match="LEASE_EXPIRED"):
+        attach_workspace_lease(binding, _dc.replace(record, expires_ms=1), now_ms=NOW)
+    # The clock is required and typed (module convention: injected epoch-ms).
+    with pytest.raises(TypeError):
+        attach_workspace_lease(binding, record)
+    for bad in (None, "1", -1, 1.5, True):
+        with pytest.raises(WorkspaceLeaseConflict, match="INVALID_VALUE"):
+            attach_workspace_lease(binding, record, now_ms=bad)
+    store.close()
+
+
+def test_workspace_lease_join_refuses_a_lease_assigned_to_another_attempt(tmp_path):
+    """A3: active_assignment_refs naming a DIFFERENT attempt (or none) does
+    not contain this binding's attempt — refused, never silently joined."""
+    from control_plane.workspace_lease import WorkspaceLeaseConflict, attach_workspace_lease
+
+    binding, record, store = _claimed_t3_binding_and_lease(
+        tmp_path, key="t3-asg-1", assignment_refs=("ATT-someone-else",))
+    with pytest.raises(WorkspaceLeaseConflict, match="LEASE_ASSIGNMENT_MISMATCH") as caught:
+        attach_workspace_lease(binding, record, now_ms=NOW)
+    assert caught.value.details["attempt_ref"] == binding.attempt_ref
+    assert caught.value.details["active_assignment_refs"] == ["ATT-someone-else"]
+    import dataclasses as _dc
+    with pytest.raises(WorkspaceLeaseConflict, match="LEASE_ASSIGNMENT_MISMATCH"):
+        attach_workspace_lease(binding, _dc.replace(record, active_assignment_refs=()),
+                               now_ms=NOW)
+    # Naming this attempt among others contains it.
+    shared = _dc.replace(record, active_assignment_refs=("ATT-other", binding.attempt_ref))
+    assert attach_workspace_lease(binding, shared, now_ms=NOW).lease_ref == record.lease_id
+    store.close()
+
+
+def test_workspace_lease_join_refuses_rebinding_to_a_different_lease(tmp_path):
+    """A3: re-attaching a DIFFERENT lease used to replace lease_ref /
+    workspace_ref silently. Now LEASE_REBIND_REFUSED; the same lease stays
+    idempotent; a drifted same-id lease and pre-stamped containment refuse."""
+    import dataclasses as _dc
+
+    from control_plane.workspace_lease import WorkspaceLeaseConflict, attach_workspace_lease
+
+    binding, record, store = _claimed_t3_binding_and_lease(tmp_path, key="t3-rb-1")
+    joined = attach_workspace_lease(binding, record, now_ms=NOW)
+    assert attach_workspace_lease(joined, record, now_ms=NOW) == joined
+    other = _dc.replace(record, lease_id="lease-other",
+                        workspace_ref="workspace:///mastermind/elsewhere")
+    with pytest.raises(WorkspaceLeaseConflict, match="LEASE_REBIND_REFUSED") as caught:
+        attach_workspace_lease(joined, other, now_ms=NOW)
+    assert caught.value.details["bound_lease_ref"] == record.lease_id
+    drifted = _dc.replace(record, writer_epoch=(record.writer_epoch or 0) + 1)
+    with pytest.raises(WorkspaceLeaseConflict, match="LEASE_REBIND_REFUSED"):
+        attach_workspace_lease(joined, drifted, now_ms=NOW)
+    pre_stamped = _dc.replace(binding, workspace_ref="workspace:///mastermind/forged")
+    with pytest.raises(WorkspaceLeaseConflict, match="LEASE_REBIND_REFUSED"):
+        attach_workspace_lease(pre_stamped, record, now_ms=NOW)
+    # The refused attempts left the joined binding untouched.
+    assert joined.lease_ref == record.lease_id
+    store.close()
+
+
+def dataclasses_replace_status(record):
+    import dataclasses as _dc
+    from control_plane.workspace_lease import STATUS_RELEASED
+    return _dc.replace(record, lease_status=STATUS_RELEASED)
+
+
 def _claimed_ohf_placement(tmp_path):
     from tests.test_ohf_p1b_runtime_orchestrator import _profile
 

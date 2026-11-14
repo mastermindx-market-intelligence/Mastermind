@@ -603,6 +603,10 @@ jobs:
 
       # Use a separate pinned owner fixture; keep the ordinary Macro vendor pin.
       # This executes before any full-suite reuse decision, including merge_group.
+      # 2026-11-10 post-#2387 requalification: master fd9f414bf (#2401) moved
+      # this paired fixture to macro 0c052116 after #2387's permissive-umask
+      # ledger fixtures shifted the two registered-pool test blobs; our fork
+      # point ebc48690f carried the new blobs with the stale a82b310 pin.
       - name: Checkout paired Brain production owner fixture
         if: matrix.index == 0
         uses: actions/checkout@v4

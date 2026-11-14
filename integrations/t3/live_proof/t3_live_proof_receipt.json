@@ -1,0 +1,182 @@
+{
+  "schema": "mastermind.t3_live_proof_receipt/v1",
+  "recorded_at": "2026-11-09T04:23:23.753912+00:00",
+  "environment": {
+    "environmentId": "5f4cd5f0-e3df-407d-af02-1aa833637937",
+    "label": "m2studio",
+    "serverVersion": "0.1.7",
+    "platform": {
+      "os": "darwin",
+      "arch": "arm64",
+      "machine": "mac-studio"
+    },
+    "endpoint": "http://127.0.0.1:3773/mcp"
+  },
+  "company": {
+    "run_id": "runs/t3-live-proof-1",
+    "job_id": "jobs/rev5-t3-lane-proof",
+    "worker_id": "workers/t3-proof-1",
+    "binding_adapter": "t3-native",
+    "binding_host": "m2-studio",
+    "client_request_id": "7348fa34d653782d54e319fb602bcced1178ac0a3a7a9ed54065390405774d9b",
+    "request_namespace": "mastermind.control_plane.t3_execution_adapter/v1"
+  },
+  "native": {
+    "thread_id": "mcp:launch:716e98e8e078d44b16d16160280a135815e2bdd3ef02cb056ee7db124af347b8",
+    "run_id": "run:thread:mcp%3Alaunch%3A716e98e8e078d44b16d16160280a135815e2bdd3ef02cb056ee7db124af347b8:ordinal:1",
+    "project_id": "9de77193-e68a-49fe-adee-f85406f04772",
+    "link": "https://app.t3.codes/threads/5f4cd5f0-e3df-407d-af02-1aa833637937/mcp%3Alaunch%3A716e98e8e078d44b16d16160280a135815e2bdd3ef02cb056ee7db124af347b8",
+    "launch_status": "preparing"
+  },
+  "observed": {
+    "status_sequence": [
+      "STARTING",
+      "SUCCEEDED"
+    ],
+    "reached_terminal": true,
+    "result_ledgered_before_receipt": true,
+    "intent_persisted_before_native_call": true,
+    "port_call_sequence": [
+      {
+        "op": "launch",
+        "clientRequestId": "7348fa34d653782d54e319fb602bcced1178ac0a3a7a9ed54065390405774d9b"
+      },
+      {
+        "op": "read",
+        "threadId": "mcp:launch:716e98e8e078d44b16d16160280a135815e2bdd3ef02cb056ee7db124af347b8",
+        "cursor": ""
+      },
+      {
+        "op": "read",
+        "threadId": "mcp:launch:716e98e8e078d44b16d16160280a135815e2bdd3ef02cb056ee7db124af347b8",
+        "cursor": "0"
+      },
+      {
+        "op": "read",
+        "threadId": "mcp:launch:716e98e8e078d44b16d16160280a135815e2bdd3ef02cb056ee7db124af347b8",
+        "cursor": "3"
+      },
+      {
+        "op": "read",
+        "threadId": "mcp:launch:716e98e8e078d44b16d16160280a135815e2bdd3ef02cb056ee7db124af347b8",
+        "cursor": ""
+      }
+    ],
+    "collection_result_digest": null
+  },
+  "result_excerpt": "https://app.t3.codes/threads/5f4cd5f0-e3df-407d-af02-1aa833637937/mcp%3Alaunch%3A716e98e8e078d44b16d16160280a135815e2bdd3ef02cb056ee7db124af347b8",
+  "result_payload_excerpt": "T3-PROOF-OK",
+  "events": [
+    {
+      "t": "2026-11-09T04:23:13.568256+00:00",
+      "event": "pairing.create.ok",
+      "sessionId": null,
+      "ttl": "15m"
+    },
+    {
+      "t": "2026-11-09T04:23:13.627035+00:00",
+      "event": "oauth.token.ok",
+      "scope": "orchestration:read orchestration:operate"
+    },
+    {
+      "t": "2026-11-09T04:23:13.648590+00:00",
+      "event": "mcp.initialize.ok",
+      "server": {
+        "name": "T3 Code",
+        "version": "0.1.7"
+      },
+      "protocolVersion": "2025-06-18",
+      "session": true
+    },
+    {
+      "t": "2026-11-09T04:23:13.659419+00:00",
+      "event": "t3_environment_read",
+      "environmentId": "5f4cd5f0-e3df-407d-af02-1aa833637937",
+      "label": "m2studio",
+      "serverVersion": "0.1.7",
+      "platform": {
+        "os": "darwin",
+        "arch": "arm64",
+        "machine": "mac-studio"
+      }
+    },
+    {
+      "t": "2026-11-09T04:23:13.660135+00:00",
+      "event": "port.launch_thread",
+      "clientRequestId": "7348fa34d653782d54e319fb602bcced1178ac0a3a7a9ed54065390405774d9b"
+    },
+    {
+      "t": "2026-11-09T04:23:13.693794+00:00",
+      "event": "port.launch_thread.ok",
+      "threadId": "mcp:launch:716e98e8e078d44b16d16160280a135815e2bdd3ef02cb056ee7db124af347b8",
+      "runId": "run:thread:mcp%3Alaunch%3A716e98e8e078d44b16d16160280a135815e2bdd3ef02cb056ee7db124af347b8:ordinal:1",
+      "status": "preparing",
+      "link": "https://app.t3.codes/threads/5f4cd5f0-e3df-407d-af02-1aa833637937/mcp%3Alaunch%3A716e98e8e078d44b16d16160280a135815e2bdd3ef02cb056ee7db124af347b8"
+    },
+    {
+      "t": "2026-11-09T04:23:13.693932+00:00",
+      "event": "adapter.start.ok",
+      "run_id": "runs/t3-live-proof-1",
+      "pid": 0,
+      "receipt_before_ack": true,
+      "elapsed_s": 0.03
+    },
+    {
+      "t": "2026-11-09T04:23:13.694026+00:00",
+      "event": "launch.receipt",
+      "threadId": "mcp:launch:716e98e8e078d44b16d16160280a135815e2bdd3ef02cb056ee7db124af347b8",
+      "nativeRunId": "run:thread:mcp%3Alaunch%3A716e98e8e078d44b16d16160280a135815e2bdd3ef02cb056ee7db124af347b8:ordinal:1",
+      "clientRequestId": "7348fa34d653782d54e319fb602bcced1178ac0a3a7a9ed54065390405774d9b",
+      "derived_key_matches": true,
+      "link": "https://app.t3.codes/threads/5f4cd5f0-e3df-407d-af02-1aa833637937/mcp%3Alaunch%3A716e98e8e078d44b16d16160280a135815e2bdd3ef02cb056ee7db124af347b8"
+    },
+    {
+      "t": "2026-11-09T04:23:13.713223+00:00",
+      "event": "port.read_thread.ok",
+      "nativeStatus": "starting",
+      "nextPosition": 0,
+      "items": 1
+    },
+    {
+      "t": "2026-11-09T04:23:13.713321+00:00",
+      "event": "adapter.status",
+      "state": "STARTING"
+    },
+    {
+      "t": "2026-11-09T04:23:23.730517+00:00",
+      "event": "port.read_thread.ok",
+      "nativeStatus": "completed",
+      "nextPosition": 3,
+      "items": 1
+    },
+    {
+      "t": "2026-11-09T04:23:23.742766+00:00",
+      "event": "adapter.status",
+      "state": "SUCCEEDED"
+    },
+    {
+      "t": "2026-11-09T04:23:23.753511+00:00",
+      "event": "port.read_thread.ok",
+      "nativeStatus": "completed",
+      "nextPosition": null,
+      "items": 0
+    },
+    {
+      "t": "2026-11-09T04:23:23.753884+00:00",
+      "event": "adapter.collect_result",
+      "ok": true,
+      "error": null,
+      "ledgered_before_receipt": true,
+      "collection_status": "SUCCEEDED",
+      "exit_code": null,
+      "result_sha256": "3731a7b469233ee0"
+    },
+    {
+      "t": "2026-11-09T04:23:23.761202+00:00",
+      "event": "port.read_thread.ok",
+      "nativeStatus": "completed",
+      "nextPosition": 3,
+      "items": 2
+    }
+  ]
+}

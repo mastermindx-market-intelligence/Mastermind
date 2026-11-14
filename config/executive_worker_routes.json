@@ -53,6 +53,20 @@
       "adapter_id": "codex-cli",
       "enabled": false,
       "autonomous_allowed": false
+    },
+    "hermes": {
+      "adapter_id": "hermes-native",
+      "enabled": true,
+      "autonomous_allowed": true,
+      "production_armed": true,
+      "arming_grant": "OQ-7 (Chairman ruling, 2026-11-08): V1 routes armed NOW for Wave 2 live testing — a scoped arming grant for this programme's routes, NOT blanket production arming. Hermes provider row for the WO-10 hermes-native descriptor; built but unselected until the incumbent runtime selects it (Rev 4 l.253). No model alias is bound to this row: the Hermes native principal surface is deliberately absent from the worker-placement surface map (named principal surface, not a worker placement surface), so this row arms the route without claiming worker-alias eligibility. Global production_armed stays false (loader law)."
+    },
+    "deepseek": {
+      "adapter_id": "opencode-free-cli",
+      "enabled": false,
+      "autonomous_allowed": false,
+      "production_armed": false,
+      "arming_grant": "OQ-7 (Chairman ruling, 2026-11-08): scoped V1 arming for Wave 2 live testing — NOT blanket production arming. The incumbent DeepSeek adapter is OpenCodeWorkerAdapter (OQ-11); WO-16 armed ExecutionBinding.v1 compatibility only, and the lane stays explicitly unavailable (no reviewed confinement profile or broker composition), so this row names the scoped route with enabled=false and production_armed=false stated explicitly: naming the route selects nothing, binds no live worker, and launches nothing until that composition is reviewed."
     }
   },
   "model_aliases": {

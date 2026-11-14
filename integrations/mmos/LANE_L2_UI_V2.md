@@ -1,0 +1,155 @@
+# LANE L2 — Product UI (DONE_WHEN row 6)
+
+Lead lane branch `t3/mmos-v2-l2`; lands on trunk `feat/mmos-v1-integration-t3`
+(plain merge, non-force). Mission: a real usable UI from the 34 canonical Paper
+boards (TD01–TD13 + HC01–HC21, file 01M3NRCX55B452A12819WNE1RH) for the journey
+**Team → conversation → project → T3 deep link → result → Fleet**, with honest
+unknown/queued/declined/backend-unavailable states, responsive layouts and
+keyboard navigation. Evidence companions (same directory): `BOARD_INVENTORY.md`
+(54-board census of the file), `BOARD_EXTRACTIONS.md` (authored structure+copy),
+`BOARD_CENSUS.md` (board → component → state table at lane start).
+
+## Board coverage (canonical 34)
+
+| Boards | Surface | State |
+|---|---|---|
+| TD01/TS01, TD02, HC01, HC04, HC10→* | `src/team/TeamWorkspace.tsx` + `TeamRoute.tsx` (live `team_roster` native read) | LIVE (pre-lane) |
+| TD03, TD06, TD07 | `src/projects/ProjectDeliveryPanel.tsx` + NEW `ProjectRouteReview.tsx`, `ProjectRunOutcome.tsx`, `delivery-route-run.ts` | MERGED (l2/a4): route-review + run/result sections, honest null projections |
+| TD04, TD09, HC07 | `src/code/CodeWorkspace.tsx` + NEW `CodeWorkbench.tsx`, `attempt-fleet-read.ts` | MERGED (l2/a2): per-attempt facts via `readT3AttemptFleet`, execution-return panels, activity trail, return footer |
+| TD05, TD11, HC17 | `src/resources/CapacityFabricRead.tsx` + `ModelConfigurationRead.tsx` | LIVE (pre-lane) |
+| TD08, TD10 | Team responsive + zh strings | LIVE (pre-lane); mobile hardening in wave B css |
+| TD12, TD13 | `ResourceCapacityRead` + retained panels | LIVE via real `readResourceCapacity` when a capacity attempt is selected |
+| TD13 | teammate detail | LIVE (pre-lane) |
+| HC02, HC03, HC09 (+HS02) | NEW `NewBotPanel`/`NewGroupPanel`/`BotSettingsPanel` (l2/b1) | MERGED + hosted in `TeamWorkspace` (toolbar + bot detail) |
+| HC05 | `src/team/DelegatedTaskCard.tsx` | LIVE (pre-lane), null-fed at mounts (producer upstream, see OWNER ASKS) |
+| HC06 | Start coding → project/workspace | LIVE (pre-lane) |
+| HC08 | `src/team/ResultReturnCard.tsx` | LIVE honest-null (producer upstream) |
+| HC10 | NEW `RoutinesPanel.tsx` (l2/b5) | MERGED + MOUNTED as a TeamWorkspace board mode (real roster; routine read honestly not-projected) |
+| HC11 | NEW `CodeSettingsPanel.tsx` (B5) | MERGED (l2/b5) + MOUNTED in `CodeWorkspace` (honest null provider/env sources) |
+| HC12, HC18, HC19 (+HC22/23) | NEW `InboxNeedsYouPanel.tsx`, `ReplyThreadPanel.tsx`, `SplitConversationsWorkspace.tsx`, `conversation-surfaces.css` (l2/b4) | HC18/HC19 MERGED + MOUNTED as TeamWorkspace board modes; HC12 component-complete, **unmounted by law** — a real origin message source does not exist and sample data is forbidden |
+| HC13–HC16 | mobile variants of Team surfaces | covered by responsive css (wave B) |
+| HC20, HC21 (+HC24) | NEW `SearchContextView.tsx`, `WorkHierarchyView.tsx` (l2/b6) | MERGED + MOUNTED as TeamWorkspace board modes (honest not-projected reads) |
+
+Extended companions: TB01–03/HB01–03 are meta/architecture boards (no UI);
+TS02 is contract-only by census (see OWNER ASKS); TD05H host telemetry has no
+qualified producer (honest state by design); HS01/HS04–08 map onto the same
+components as their primary boards.
+
+## Lane changes (trunk delta `85f0f91af..` lane HEAD)
+
+1. **Native T3 attempt-fleet read (l2/a1)** — `read_t3_attempt_fleet` Tauri
+   command (`src-tauri/src/auth.rs`) + `host.ts` native client method. Rust
+   `t3_attempt_id_valid` mirrors `validT3AttemptId` byte-for-byte (grammar
+   `[A-Za-z0-9][A-Za-z0-9_./:%=-]{0,159}`, closed secret refusal, case-
+   insensitive); one signed GET, `bounded_json` cap 16 384, schema check
+   `mastermind.t3_attempt_fleet/v1`, release-generation check. Closes the
+   census gap "Fleet attempt block web-only": `T3AttemptFleetBlock` now reads
+   on both transports.
+2. **HC07 code workbench (l2/a2)** — per-attempt workbench consuming the fleet
+   read + typed `execution_return/v1` props + retained-activity trail; honest
+   states for every missing source (no invented deltas, no fake streaming).
+3. **TD06/TD07 project journey (l2/a4)** — route-review and run/outcome
+   sections on `ProjectDeliveryPanel`.
+4. **Conversation surfaces (l2/b4)** — HC18/HC12/HC19 components (create-only).
+5. **HC10/HC11 (l2/b5)** — Routines + Code settings panels (create-only);
+   HC11 mounted in `CodeWorkspace` with honest null sources.
+6. **Fleet→Code attempt context (lead)** — `AttendedFabricWorkspace` gains
+   `onOpenAttemptInCode` (exact-run inspect only); App holds `codeAttemptId`,
+   cleared by nav-rail Code entry; `CodeWorkspace attemptId` switches to the
+   per-attempt workbench. Activity-selection ids (WS:/JOB-/ATT-) are a
+   different id space and are deliberately NOT joined to T3 run ids.
+7. **HC02/HC03/HC09 (l2/b1)** and **HC20/HC21 (l2/b6)** — merged and hosted.
+8. **TeamWorkspace board-mode integration (lead)** — the five HC10/HC18/HC19/
+   HC20/HC21 surfaces mount as `aria-pressed` toolbar toggles that replace the
+   roster table while active (Paper mode semantics); search selection is owned
+   by TeamWorkspace so Escape/mode switches never leave a stale result.
+   `ReplyThreadPanel` (HC12) stays unmounted by the honest-state law.
+
+## Proven (commands + counts, lane worktree)
+
+- `npm run typecheck` — clean at every merge (A1, A2, A4, B4, B5, HC11 mount,
+  trunk merge, board-mode integration).
+- `npx vitest run src/team src/code src/projects src/fabric src/resources/T3AttemptFleetBlock.test.tsx src/resources/t3-attempt-fleet-contract.test.ts src/host.t3-attempt-fleet-read.test.ts` on the
+  trunk-merged result — 45 files / 551 tests passed.
+- After HC11 mount: `npx vitest run src/code/` — 4 files / 49 tests.
+- After board-mode integration: `npx vitest run src/team --maxWorkers=2` —
+  16 files / 169 tests.
+- `MM_SOURCE_REVISION=$(git rev-parse HEAD) MM_BUILD_IDENTITY=mastermind-os-review cargo check` (src-tauri, post-A1) — PASS (48s, 14 pre-existing warnings).
+- `cargo test t3_attempt_fleet_read_tests` (A1 worktree) — 2/2.
+- Paper parity: structure+copy extracted via `get_tree_summary` (committed in
+  `BOARD_EXTRACTIONS.md`); visual parity pass pending at wave close.
+
+## Visual parity pass (wave close)
+
+Local untracked harness (dev server + `parity-preview.html?board=` filter,
+real components, preview-only fixtures — never committed) compared against
+Paper refs (`get_screenshot`) and `BOARD_EXTRACTIONS.md`:
+
+- **HC10 Routines**: structure/typography match. Found + fixed a real defect
+  — the shell's global `dl` 110px template collapsed every fact row into the
+  label column (rail note rendered 13px wide); fixed in `cb155c6a3` and pinned
+  by the css contract audit (grid reset + dd wrap, 22/22).
+- **HC18 Needs you**: strong parity (fixture count delta only).
+- **HC19 Split**: strong parity — "Two conversations", side-by-side panes,
+  independent composers + per-pane draft notes.
+- **HC20 Search**: good — layout/results/context pane match; filter chips not
+  rendered (no search source; fabricated facets forbidden by law).
+- **HC21 Work**: strong parity.
+- **HC12 Thread**: matches the extraction end-to-end (Thread/origin/task
+  link/attachment/composer/@ mention/note) via the harness; unmounted in the
+  shipped UI by honest-state law (no origin-message source).
+- **HC01/HC02/HC09/HC11**: accepted on component tests + 22-test css audit +
+  B7 hardening (light touch by decision).
+
+Accepted deltas (honest, recorded): HC10 back label "← Team" vs Paper's
+"← <teammate name>" (no name source in routines mode) and honest
+not-projected schedule fields vs Paper's sampled "Next at 20:30 · America /
+Vancouver"; HC19 omits Paper's workspace-tabs strip ("Workspace saved on this
+device" — no workspace persistence exists in this build); composers without a
+backend render disabled-with-reason vs Paper's live ones.
+
+## Honest-state law (binding on every surface)
+
+Real projection or honest unavailable/unknown-with-reason — never Paper sample
+data (names "Meta-CEO"/"Engineering"/"Secretary"/"Ryan", "12 teammates",
+"Ubuntu 2", "DeepSeek Harness", sample times/counts), never fake success,
+never zero-for-unknown. Fixtures live only in `*.test.*`. No send/launch/
+dispatch path is faked: composers and submits without a backend render
+disabled with a visible reason.
+
+## OWNER ASKS (upstream producers, not this lane)
+
+1. `delegatedTask`/`executionReturn` producers (App mounts render honest
+   null states): `ChildExecutionRequest` v1.2 requester block (Director C2)
+   and the execution-return read route (Director F gap list) are the missing
+   sources.
+2. `t3ThreadProjection` host source — `MastermindMissionHost.t3ThreadProjection`
+   is implemented by no host; Code deep links render the honest wall naming it.
+3. Qualified host-capacity producer for `HostTelemetryPanel` (`capacity` prop):
+   `qualifyHostCapacityRead` requires an expected binding from existing
+   Runtime/collector ownership; wiring it from browser selection is forbidden
+   by the contract (`src/resources/README.md`). Owner: the server-side reader.
+4. TS02 Teamlink surface: contract exists (`teamlink-contract.ts`), no view
+   consumes it; a surface owner should be named if the board is promoted.
+5. Conversation-search + routines-schedule + provider-configuration reads do
+   not exist; the new surfaces render honest "not projected" states until
+   they do.
+
+## OPEN
+
+- None for this lane. Adversarial pass (grok-4.7, READ_ONLY) on
+  `e844a5e7b..deced831c`: honest-state clean, CSS clean, tests clean; one
+  claimed MAJOR (toolbar `setSearchSelection(null)` blocking mode entry) was
+  independently verified false and rejected — separate state vars, committed
+  board-mode tests cover entry, and clearing a stale selection on mode
+  switch is the intended behavior.
+- LANDED: trunk `feat/mmos-v1-integration-t3` fast-forwarded
+  `b2cb6385b..deced831c` (non-force; trunk contained in lane, no merge, no
+  identity-pin moves). Lane branch `t3/mmos-v2-l2` @ `deced831c` throughout.
+
+Done this wave: B7 merge `ccf3fe154` (responsive+keyboard, 43 files/514 tests
+on the merged result); release-candidate gates green — typecheck ✓, full
+`npx vitest run` 7400 passed/12 skipped (1 load flake re-verified in
+isolation), `cargo check` exit 0 (14 pre-existing warnings); parity pass
+above; HC10 rail collapse fix `cb155c6a3`; post-fix affected gate
+typecheck ✓ + `src/team src/code` 21 files/240 tests on the landed HEAD.

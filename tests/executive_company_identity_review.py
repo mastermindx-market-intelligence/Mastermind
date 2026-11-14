@@ -7,6 +7,13 @@ catalog composition adds three exact HTTP response Constants in the existing
 ingress method. Each method's full AST, owning class, literal values and spelling
 remain pinned; all other identity tokens stay visible to the generic D8 guard.
 No runtime authority is added.
+
+2026-11-09 T3 attempt-fleet read pin move (t3/fleet-attempt-read-route): the
+per-attempt frame admission adds one import and one elif branch inside the
+existing ingress method. The same three reviewed ingress denial operands are
+byte-identical; their AST site paths shift at one index (body 59 to
+60) and the method/whole-file digests move with the postimage. The
+Company-consultation method and its permission-mode literals are untouched.
 """
 
 REVIEWED_PATH = "control_plane/executive_service.py"
@@ -50,12 +57,12 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                                   456,
                                                   '0o710'))},
  '_handle_ceo_ingress_connection': {'node_type': 'AsyncFunctionDef',
-                                    'source_sha256': '2a4b7858ab2cdf874ad8fb029374050521f0732e82296d32ffcca679faaf37ce',
-                                    'ast_sha256': '27f53e5690ad71c86f01f2ad657535aa022e0565472fef95ee773fc8c7837eaf',
+                                    'source_sha256': '36fcecb190ff106fe79ee391aae8dd60027b260055a02883ab1391ea019162d5',
+                                    'ast_sha256': '8ba83fc94d6ccbfe11eec5ed1b477a28e0ec92bd199f34c4123eb5be6803d912',
                                     'sites': ((('body',
                                                 3,
                                                 'body',
-                                                59,
+                                                60,
                                                 'body',
                                                 3,
                                                 'orelse',
@@ -73,7 +80,7 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                               (('body',
                                                 3,
                                                 'body',
-                                                59,
+                                                60,
                                                 'body',
                                                 3,
                                                 'orelse',
@@ -95,7 +102,7 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                               (('body',
                                                 3,
                                                 'body',
-                                                59,
+                                                60,
                                                 'body',
                                                 3,
                                                 'orelse',
@@ -154,10 +161,27 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
 # complete AST paths and token spans, remain unchanged. Only the exact whole
 # source and enclosing ingress-method digests change for this composition.
 
+# 2026-11-09 MMOS composition pin move: the integration branch (capacity
+# fabric frame branch + WO-13 selected_child_admit action, composed via
+# commits merged under feat/mmos-v1-integration) extends the ingress method
+# before the catalog branch. The three reviewed Fabric response operands,
+# their reasons and their complete AST shape below the catalog block are
+# unchanged; only the enclosing whole-source and ingress-method digests and
+# the mapped statement index (body 58 -> 59) move. No new literal site is
+# qualified.
+
 # WO13 admission repair: the complete Company listener and ingress ASTs,
 # all six original operands and their AST paths remain exact to accepted e4cd.
 # Only this qualified whole-source hash and mapped catalog positions change.
 # No new identity exemption or installed/runtime acceptance is granted.
 
+# 2026-11-11 WO-20 master merge (feat/mmos-v1-integration-merge): both parents'
+# reviewed tokens map byte-identically onto the merged source; only the whole-source
+# digest and line coordinates are requalified. No new literal site is qualified.
 # Capacity Fabric adds one fixed read before the catalog. The original Company
 # listener, catalog response branch and six qualified literals are preserved.
+# 2026-11-11 WO-20 fourth-drift merge (master 8ee0196d, landed #2351):
+# both parents map every reviewed token to the same merged line,
+# byte-identically (repin4.py); the merged source equals this branch's
+# bytes, so the pins keep this branch's digests and coordinates. No new
+# literal site is qualified.

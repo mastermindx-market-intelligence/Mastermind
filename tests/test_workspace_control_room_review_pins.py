@@ -13,9 +13,21 @@ from tests.executive_identity_review import (
 ROOT = Path(__file__).resolve().parents[1]
 ACTION_PATH = "control_plane/workspace_control_room_actions.py"
 HTTP_PATH = "integrations/mastermind_workspace_app/app.py"
+# 2026-11-09 MMOS composition pin move: commit 3838b8b82 (PR #2351 capacity
+# fabric OS read) added one route-constant line above the handler; the same
+# eight reviewed response operands are byte-identical, shifted by one line.
+# 2026-11-09 T3 attempt-fleet read pin move (t3/fleet-attempt-read-route):
+# the per-attempt route adds one further route-constant line above the
+# handler; the same eight reviewed response operands are byte-identical,
+# shifted by one more line.
 EXPECTED = {
     ACTION_PATH: ((135, 58, 61, "int"),),
-    HTTP_PATH: ((932, 71, 74, 'int'), (943, 71, 74, 'int'), (951, 71, 74, 'int'), (957, 79, 82, 'int'), (966, 71, 74, 'int'), (976, 71, 74, 'int'), (981, 76, 79, 'int'), (987, 71, 74, 'int')),
+    HTTP_PATH: ((933, 71, 74, 'int'), (944, 71, 74, 'int'), (952, 71, 74, 'int'), (958, 79, 82, 'int'), (967, 71, 74, 'int'), (977, 71, 74, 'int'), (982, 76, 79, 'int'), (988, 71, 74, 'int')),
+    # 2026-11-11 WO-20 fourth-drift merge (master 8ee0196d, landed #2351):
+    # both parents map every reviewed token to the same merged line,
+    # byte-identically (repin4.py); the merged source equals this branch's
+    # bytes, so the pins keep this branch's digests and coordinates. No new
+    # literal site is qualified.
 }
 
 

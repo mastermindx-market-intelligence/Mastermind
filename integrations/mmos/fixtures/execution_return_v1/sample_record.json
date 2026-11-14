@@ -1,0 +1,52 @@
+{
+  "acceptance": "not_accepted",
+  "acceptance_claim_refused": true,
+  "attempt": {
+    "attempt_id": "ATT-000042",
+    "authenticated_namespace": "mastermind.control_plane.t3_execution_adapter/v1:hermes-eng-seat-1",
+    "idempotency_key": "t3-launch-abc123",
+    "root_id": "root-wo19-coding-7",
+    "seal_digest": "9999999999999999999999999999999999999999999999999999999999999999",
+    "t3_run_id": "run-77",
+    "t3_thread_id": "th_ready_9"
+  },
+  "digest": "6876dc96ef1f67e0b8525c6115bd95fdbe0b0bbe422f021e173fc3ded2619549",
+  "github": {
+    "branch": "t3/execution-return-path",
+    "checks": [
+      {
+        "conclusion": "success",
+        "name": "ci-union"
+      },
+      {
+        "conclusion": "success",
+        "name": "typecheck"
+      },
+      {
+        "conclusion": "skipped",
+        "name": "lint"
+      }
+    ],
+    "checks_state": "green",
+    "installation": "claimed_unproven",
+    "merge_state": "merged",
+    "pr_number": 2338,
+    "pr_url": "https://github.com/Acme/Mastermind/pull/2338"
+  },
+  "original_requester": {
+    "authenticated_namespace": "mastermind.control_plane.t3_execution_adapter/v1:hermes-eng-seat-1",
+    "conversation_id": "sess-3f9c2",
+    "project_id": "proj-mmos-v1",
+    "teammate_id": "hermes-engineering"
+  },
+  "result": {
+    "artifact_refs": [
+      "control_plane/roster_join.py",
+      "tests/test_roster_join.py"
+    ],
+    "text": "Implemented the roster join with tests. → union-green. Delivery is not acceptance."
+  },
+  "return_id": "execret-6876dc96ef1f67e0b8525c6115bd95fd",
+  "schema": "mastermind.execution_return/v1",
+  "stage": "installed_unknown"
+}

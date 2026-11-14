@@ -385,6 +385,17 @@ def test_fabric_route_preview_refuses_without_the_shared_law(tmp_path,monkeypatc
     assert str(caught.value)=='ROUTE_PREVIEW_SOURCE_UNAVAILABLE'
 
 
+def test_fabric_route_preview_refuses_when_the_owner_file_is_absent(tmp_path,monkeypatch):
+    bridge=_capacity_bridge()
+    # The production guard itself stays: with no owner file on this host the
+    # preview refuses before any subprocess is spawned.
+    monkeypatch.setattr(bridge,'catalog',lambda:dict(pools=[dict(pool='canonical-pool')]))
+    monkeypatch.setattr(bridge,'FABRIC',tmp_path/'absent-fabric_task.py')
+    with pytest.raises(ValueError) as caught:
+        bridge.preview(dict(task_class='execute',complexity='C1_ROUTINE_BOUNDED'))
+    assert str(caught.value)=='FABRIC_OWNER_UNAVAILABLE'
+
+
 def test_capacity_preview_validator_accepts_repointed_and_legacy_shapes(tmp_path):
     m,d,_=load(tmp_path)
     def call(ctx,payload):

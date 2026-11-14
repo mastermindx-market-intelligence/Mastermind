@@ -36,6 +36,10 @@ import {
 import { readLaunchBindingConfig } from "./launch-config";
 import { resolveLaunchBinding } from "./orchestration/executive-launch-command-port";
 import { Today } from "./today/Today";
+import { TeamRoute } from "./team/TeamRoute";
+import { HermesNativePanel } from "./hermes-native/HermesNativePanel";
+import { CodeWorkspace } from "./code/CodeWorkspace";
+import { ProjectDeliveryPanel, type DeliveryTrailStep } from "./projects/ProjectDeliveryPanel";
 import { AuthEntry } from "./auth-entry/AuthEntry";
 import privateEntryArt from "./auth-entry/private-entry.jpg";
 import { AttendedFabricWorkspace } from "./fabric/AttendedFabricWorkspace";
@@ -192,6 +196,7 @@ export const navigation = [
   "Today",
   "Team",
   "Projects",
+  "Code",
   "Inbox",
   "Conversations",
   "Knowledge",
@@ -215,6 +220,7 @@ const primaryNavigation: readonly View[] = [
   "Today",
   "Team",
   "Projects",
+  "Code",
   "Inbox",
   "Conversations",
   "Knowledge",
@@ -255,8 +261,9 @@ const navigationPaths: Record<View, string> = {
 
   "Session Estate": "M4 4h16v12H4zM8 20h8M12 16v4",
   Today: "M3 10 12 3l9 7v11H3zM9 21v-7h6v7",
-  Team: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8M22 21v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0",
-  Projects: "M3 6h6l2 2h10v12H3z", Inbox: "M3 5h18v15H3zM3 14h5l2 3h4l2-3h5",
+  Team: "M8 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6M2 20v-4a5 5 0 0 1 10 0v4M16 4a3 3 0 0 1 0 6M16 13a5 5 0 0 1 6 5v2",
+  Projects: "M3 6h6l2 2h10v12H3z", Code: "m8 5-7 7 7 7m8-14 7 7-7 7",
+  Inbox: "M3 5h18v15H3zM3 14h5l2 3h4l2-3h5",
   Conversations: "M4 4h16v12H9l-5 4z", Knowledge: "M4 3h7v17H4zM14 3h6v17h-6z",
   "Meta-CEO": "M12 3 3 8l9 5 9-5zM3 12l9 5 9-5M3 16l9 5 9-5",
   Work: "M6 4h15v17H6zM2 8h8M2 13h8M2 18h8", Programs: "M3 4h18v16H3zM8 4v16M3 9h18",
@@ -270,7 +277,7 @@ function NavigationIcon({ view }: { view: View }) {
 }
 function navigationLabel(view: View, locale: "en" | "zh-CN"): string {
   if (locale === "en") return view === "Fleet & Capacity" ? "Resources & systems" : view;
-  const labels: Record<View, string> = { Search: "搜索", Sources: "来源", Tools: "工具", "Session Estate": "会话工作区", Today: "今天", Team: "团队", Projects: "项目", Inbox: "收件箱", Conversations: "对话", Knowledge: "知识", "Meta-CEO": "Meta-CEO 办公室", Work: "工作", Programs: "工作流", "Control Room": "控制室", "Fleet & Capacity": "资源与系统", "Mission Workspace": "任务工作区", Conversation: "当前对话", Activity: "活动", Connections: "连接", Evidence: "证据" };
+  const labels: Record<View, string> = { Search: "搜索", Sources: "来源", Tools: "工具", "Session Estate": "会话工作区", Today: "今天", Team: "团队", Projects: "项目", Code: "代码", Inbox: "收件箱", Conversations: "对话", Knowledge: "知识", "Meta-CEO": "Meta-CEO 办公室", Work: "工作", Programs: "工作流", "Control Room": "控制室", "Fleet & Capacity": "资源与系统", "Mission Workspace": "任务工作区", Conversation: "当前对话", Activity: "活动", Connections: "连接", Evidence: "证据" };
   return labels[view];
 }
 
@@ -1419,6 +1426,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       [initialLocation],
     ),
     [selection, setSelection] = useState<MissionSelection | null>(initial),
+    // T3 attempt context for the Code workbench (HC07): set from the Fleet
+    // catalog's exact-run inspect action, cleared by a fresh nav-rail Code
+    // entry. The id is a T3 run id (run ids contain "/"); activity-selection
+    // ids (WS:/JOB-/ATT-) are a different id space and are NOT joined here.
+    [codeAttemptId, setCodeAttemptId] = useState<string | null>(null),
     [active, setActive] = useState<View>(initialFreshConversation.open || !initialFreshConversation.valid ? "Conversations" : initialProjectJourney.open || !initialProjectJourney.valid ? "Projects" : initial && new URL(window.location.href).searchParams.get("direct_native_job")===initial.rootJobId ? "Projects" : "Today"),
     [projectTab, setProjectTab] = useState<ProjectTab | null>(initial && new URL(window.location.href).searchParams.get("direct_native_job")===initial.rootJobId ? "Overview" : null),
     [index, setIndex] = useState<ProgramIndex>({
@@ -3071,7 +3083,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                   : "UNAVAILABLE"
               : active === "Control Room" || active === "Session Estate"
                 ? currentControlRoom.state === "PENDING" ? "SOURCE_READ_PENDING" : currentControlRoom.state
-              : active === "Fleet & Capacity"
+              : active === "Fleet & Capacity" || active === "Team" || active === "Code"
                 ? "NOT_PROJECTED"
                 : (d?.read_state.state ?? "UNAVAILABLE"),
     headerSummary =
@@ -3160,7 +3172,11 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                 : "Work source unavailable; zero work is not inferred."
             : active === "Fleet & Capacity"
               ? "Capacity source not connected. No host readiness was inferred."
-              : notice === "Source and observation clocks are displayed as projected; this render did not refresh them."
+              : active === "Team"
+                ? locale === "zh-CN" ? "团队名册在打开此视图时通过本地原生 team_roster 操作读取一次；未观测的成员状态保持未知。" : "The team roster is read once through the local native team_roster operation; unobserved teammate state stays unknown."
+                : active === "Code"
+                  ? locale === "zh-CN" ? "T3 线程投影来源未连接。不推断任何线程状态。" : "T3 thread projection source not connected. No thread state is inferred."
+                  : notice === "Source and observation clocks are displayed as projected; this render did not refresh them."
               ? copy.sourceClocksNotice : notice,
     open = (w: string, r: string | null, direct = false) => {
       setCatalogueProject(null);
@@ -5031,7 +5047,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
       />
     ) : null;
   const newProjectRoute = active === "Projects" && (projectJourney.shown || projectJourney.invalidLink);
-  const quietHeader = active === "Team" || active === "Meta-CEO" || active === "Fleet & Capacity" || active === "Conversations" || active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" ||
+  const quietHeader = active === "Meta-CEO" || active === "Fleet & Capacity" || active === "Conversations" || active === "Inbox" || active === "Today" || active === "Knowledge" || active === "Search" || active === "Sources" || active === "Tools" || active === "Team" || active === "Code" ||
     active === "Projects" && !directRoute && (!projectTab ||
       Boolean(projectWorkRef && (projectTab === "Conversation" || catalogueWorkRef)));
   const independentProjectRead =
@@ -5340,21 +5356,6 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <p>{locale === "zh-CN" ? "当前来源未提供项目操作接口。" : "The current source has not supplied the project operation interface."}</p></section>}
       {retainedProjectGoal}
     </>;
-  else if (active === "Team")
-    content = <Suspense fallback={<p role="status">{locale === "zh-CN" ? "正在加载团队工作区…" : "Loading the team workspace…"}</p>}><CompanyWorkspace key={authRevision} transport={window.MastermindMissionHost?.company}
-      authGeneration={authRevision} canRead={Boolean(authState?.status === "signed_in" && authState.acquisition)} locale={locale}
-      onNavigate={destination => { setProjectTab(null); setActive(destination); }}
-      onOpenProject={workRef => {
-        if (!currentTodayCatalogue() || index.state !== "AVAILABLE") return false;
-        const matches = index.programs.filter(card => card.workRef === workRef);
-        if (matches.length !== 1) return false;
-        const card = matches[0];
-        if (card.rootState === "RESOLVED" && card.rootJobId && card.rootCandidates.length === 1 && card.rootCandidates[0] === card.rootJobId) {
-          open(card.workRef, card.rootJobId); return true;
-        }
-        setCatalogueProject({ workRef, authRevision, epoch: programIndexEpoch });
-        setProjectTab("More"); setActive("Projects"); return true;
-      }}/></Suspense>;
   else if (active === "Today")
     content = <Today locale={locale} projection={office.projection} work={workState}
       currentCatalogue={{value: index, current: currentTodayCatalogue}}
@@ -5521,6 +5522,23 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         <button type="button" onClick={openProjectJourney} disabled={!projectJourney.isHostCurrent()}>{locale === "zh-CN" ? projectJourney.selection ? "继续项目设置" : "新建项目" : projectJourney.selection ? "Continue project setup" : "New project"}</button>
         {retainedProjectGoal}
         {programsRefreshControl}
+        {!directSelected && projectWorkRef ? (
+          <details className="reason-details mm-project-delivery"><summary>{locale === "zh-CN" ? "团队交付" : "Team delivery"}</summary>
+            <ProjectDeliveryPanel
+              locale={locale}
+              objective={null}
+              owner={null}
+              delegatedTask={null}
+              executionReturn={null}
+              trail={[
+                {key: "plan", step: locale === "zh-CN" ? "01 · 计划" : "01 · Plan", label: locale === "zh-CN" ? "范围已接受" : "Scope accepted", state: "unknown"},
+                {key: "build", step: locale === "zh-CN" ? "02 · 构建" : "02 · Build", label: locale === "zh-CN" ? "工程进行中" : "Engineering working", state: "unknown"},
+                {key: "verify", step: locale === "zh-CN" ? "03 · 验证" : "03 · Verify", label: locale === "zh-CN" ? "等待结果" : "Awaiting result", state: "unknown"},
+              ] satisfies DeliveryTrailStep[]}
+              onOpenCode={() => { setCodeAttemptId(null); setActive("Code"); }}
+            />
+          </details>
+        ) : null}
         {!directSelected && projectWorkRef && (catalogueWorkRef || projectTab === "Conversation") ? (
           <ProjectPlanPanel {...projectPlanProps} renderWorkspace={({objective, panel, inspection, launchInspection}) => <ProjectWorkspace headingLevel={1} headingRef={projectHeading} locale={locale}
             scopeKey={JSON.stringify([authRevision, projectWorkRef,
@@ -5889,10 +5907,50 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
         key={`fleet:${authRevision}`}
         host={window.MastermindMissionHost}
         locale={locale}
+        onOpenAttemptInCode={attemptId => { setCodeAttemptId(attemptId); setActive("Code"); }}
       />
       </details>
       </>
     );
+  else if (active === "Team")
+    // Team roster (TD01/TS01) + bot entry (TD02/HC04). The conversation
+    // surface below is the EXISTING hermes-native panel; never a second
+    // transport. The roster is read once through the existing native port's
+    // read-only team_roster operation (Director B's authoritative contract).
+    // Company (Paperclip company workspace, #2395) is the secondary view of
+    // Team per the Revision 7 plan: conversations first, Company preserved.
+    content = (
+      <>
+      <TeamRoute
+        key={`team:${authRevision}`}
+        locale={locale}
+        conversationPanel={<HermesNativePanel key={`team-hermes:${authRevision}`} locale={locale}/>}
+        delegatedTask={null}
+        onOpenConversations={() => { setProjectTab(null); setActive("Conversations"); }}
+        onOpenCode={() => { setCodeAttemptId(null); setActive("Code"); }}
+      />
+      <details className="mm-team-company"><summary>{locale === "zh-CN" ? "公司工作区" : "Company workspace"}</summary>
+      <Suspense fallback={<p role="status">{locale === "zh-CN" ? "正在加载团队工作区…" : "Loading the team workspace…"}</p>}><CompanyWorkspace key={authRevision} transport={window.MastermindMissionHost?.company}
+      authGeneration={authRevision} canRead={Boolean(authState?.status === "signed_in" && authState.acquisition)} locale={locale}
+      onNavigate={destination => { setProjectTab(null); setActive(destination); }}
+      onOpenProject={workRef => {
+        if (!currentTodayCatalogue() || index.state !== "AVAILABLE") return false;
+        const matches = index.programs.filter(card => card.workRef === workRef);
+        if (matches.length !== 1) return false;
+        const card = matches[0];
+        if (card.rootState === "RESOLVED" && card.rootJobId && card.rootCandidates.length === 1 && card.rootCandidates[0] === card.rootJobId) {
+          open(card.workRef, card.rootJobId); return true;
+        }
+        setCatalogueProject({ workRef, authRevision, epoch: programIndexEpoch });
+        setProjectTab("More"); setActive("Projects"); return true;
+      }}/></Suspense>
+      </details>
+      </>
+    );
+  else if (active === "Code")
+    // TD04 workbench surface: typed T3 thread projections with documented
+    // deep links only. No embedded editor/terminal; no launch authority.
+    content = <CodeWorkspace locale={locale} host={window.MastermindMissionHost} attemptId={codeAttemptId}/>;
   else if (active === "Conversation")
     content = (
       <>
@@ -6053,6 +6111,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
                     setProjectTab(null);
                     if (x === "Projects") setCatalogueProject(null);
                     if (x === "Conversations") {freshDraftRef.current.hide();conversationNavigation.showList();}
+                    if (x === "Code") setCodeAttemptId(null);
                     setActive(x);
                     if (navigationOpen) closeNavigation();
                   }}
@@ -6143,7 +6202,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             {!quietHeader && <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : active === "Activity" ? (locale === "zh-CN" ? "此项目已记录的工作与结果。来源信息可能不完整。" : "Recorded work and results for this project. Source information may be incomplete.") : headerSummary}</p>}
           </div>
           <div className="facts">
-            {active === "Team" ? null : active === "Tools" || active === "Sources" ? <details className="workspace-qualification"><summary>{active === "Tools" ? (locale === "zh-CN" ? "工具上下文" : "Tool context") : (locale === "zh-CN" ? "来源与范围" : "Sources and scope")}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : active === "Activity" ? <details className="workspace-qualification mm-activity-source-status"><summary>{locale === "zh-CN" ? "来源与范围" : "Sources and scope"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : !directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && active !== "Meta-CEO" && active !== "Fleet & Capacity" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} text={active === "Session Estate" && headerState === "UNAVAILABLE" ? copy.unavailable : undefined} /> : null}
+            {active === "Tools" || active === "Sources" ? <details className="workspace-qualification"><summary>{active === "Tools" ? (locale === "zh-CN" ? "工具上下文" : "Tool context") : (locale === "zh-CN" ? "来源与范围" : "Sources and scope")}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : active === "Activity" ? <details className="workspace-qualification mm-activity-source-status"><summary>{locale === "zh-CN" ? "来源与范围" : "Sources and scope"}</summary><State value={headerState}/><p>{headerSummary}</p><p>{visibleNotice}</p><p>{copy.statusNote}</p></details> : !directRoute ? quietHeader ? <details className="workspace-qualification"><summary>{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || active === "Team" || active === "Code" || newProjectRoute ? (locale === "zh-CN" ? "来源与访问" : "Sources and access") : reading.qualificationLabel} {active !== "Conversations" && active !== "Meta-CEO" && active !== "Fleet & Capacity" && active !== "Team" && active !== "Code" && !newProjectRoute ? <State value={headerState} /> : null}</summary>{newProjectRoute ? <p>{locale === "zh-CN" ? "工作区项目列表与现有任务" : "Workspace project list and existing tasks"}</p> : null}{active === "Conversations" || active === "Meta-CEO" || active === "Fleet & Capacity" || active === "Team" || active === "Code" || newProjectRoute ? <State value={headerState} /> : null}<p>{headerSummary}</p>{reading.readinessDiagnostic ? <><p role="status">{reading.statusNotice}</p><p><code>{reading.readinessDiagnostic}</code></p></> : <p role="status">{visibleNotice}</p>}<p><b>{copy.statusSources}</b><br />{copy.statusNote}</p></details> : <State value={headerState} text={active === "Session Estate" && headerState === "UNAVAILABLE" ? copy.unavailable : undefined} /> : null}
           </div>
         </header>
         {nativeGoalNotice}
@@ -6165,7 +6224,7 @@ export function App({ locale = "en", theme = "dark", preferencesControl }: AppPr
             }}>{copy.discardAll}</button>
           </section>
         ) : null}
-        {active !== "Team" && active !== "Control Room" && active !== "Fleet & Capacity" && active !== "Today" && active !== "Conversations" && active !== "Activity" && active !== "Tools" && active !== "Sources" && !directRoute &&
+        {active !== "Control Room" && active !== "Fleet & Capacity" && active !== "Today" && active !== "Team" && active !== "Code" && active !== "Conversations" && active !== "Activity" && active !== "Tools" && active !== "Sources" && !directRoute &&
           !((active === "Meta-CEO" || active === "Inbox" || active === "Projects" && (projectJourney.shown || projectJourney.invalidLink)) && visibleNotice === "Choose a Program with one resolved mission before opening the workspace.") &&
           !reading.suppressBodyNotice &&
           !(active === "Projects" && (projectJourney.shown || projectJourney.invalidLink) && reading.readinessDiagnostic !== null) ? (
