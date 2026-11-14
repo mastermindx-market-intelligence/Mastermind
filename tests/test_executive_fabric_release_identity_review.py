@@ -176,3 +176,64 @@ def test_frozen_glm_duration_real_committed_git_collector(
     guard.test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
         tmp_path, monkeypatch, path, content, with_identity,
     )
+
+
+_OFFICE_TIMING_FIXTURE = (
+    'integrations/studio_direct_mcp/search-runtime/test-issue1027-office.mjs'
+)
+
+
+def test_office_timing_pin_requires_exact_complete_postimage():
+    from tests.test_ceo_submit_armed_composition import (
+        _d8_frozen_source_diff, _scan_added_identity_diff,
+    )
+
+    path = _OFFICE_TIMING_FIXTURE
+    text = (Path(__file__).parents[1] / path).read_text()
+    diff = _d8_frozen_source_diff(path, text)
+    assert reviewed_literal_spans(path, text) == (
+        (97, 67, 70, 'int'), (98, 55, 58, 'int'), (131, 97, 100, 'int'),
+    )
+    assert _scan_added_identity_diff(diff, source_postimages={path: text}) == []
+    assert {'900', '850'} <= set(_scan_added_identity_diff(diff))
+    changed = text + '\n// unrelated byte drift\n'
+    assert reviewed_literal_spans(path, changed) == ()
+    assert {'900', '850'} <= set(_scan_added_identity_diff(
+        _d8_frozen_source_diff(path, changed), source_postimages={path: changed},
+    ))
+    # A mismatched added line is distinct from an unrelated trailing byte:
+    # the latter already invalidates the full-file pin above.
+    lines = text.splitlines(keepends=True)
+    lines[96] = lines[96][:67] + '901' + lines[96][70:]
+    with pytest.raises(AssertionError, match='diff/postimage line mismatch'):
+        _scan_added_identity_diff(diff, source_postimages={path: ''.join(lines)})
+
+
+def test_office_timing_pin_requires_its_exact_registered_record(monkeypatch):
+    from tests.test_ceo_submit_armed_composition import (
+        _d8_frozen_source_diff, _scan_added_identity_diff,
+    )
+
+    path = _OFFICE_TIMING_FIXTURE
+    text = (Path(__file__).parents[1] / path).read_text()
+    monkeypatch.delitem(REVIEWED_FILES, path)
+    assert reviewed_literal_spans(path, text) == ()
+    assert {'900', '850'} <= set(_scan_added_identity_diff(
+        _d8_frozen_source_diff(path, text), source_postimages={path: text},
+    ))
+
+
+@pytest.mark.parametrize('with_identity', [False, True])
+def test_office_timing_pin_real_committed_git_collector(tmp_path, monkeypatch, with_identity):
+    from tests import test_ceo_submit_armed_composition as guard
+
+    path = _OFFICE_TIMING_FIXTURE
+    content = (Path(__file__).parents[1] / path).read_text()
+    if with_identity:
+        content += '\nnew_peer_uid = 471\n'
+        assert '471' in scan(content, path)
+    # The incumbent fixture commits exact source, collects diff/show postimages,
+    # and invokes the actual D8 topology guard; no scanner rule changes here.
+    guard.test_d8_real_git_diff_distinguishes_evidence_from_identity_changes(
+        tmp_path, monkeypatch, path, content, with_identity,
+    )

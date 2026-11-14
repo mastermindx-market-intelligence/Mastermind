@@ -1,0 +1,280 @@
+{
+  "donor": "56b5127ec6539f1d182ed4c3ffdeb114cf6bfd66",
+  "patchSHA256": "a10ac443eb6620af31d086a48a3298fc713f83a12dfd106674b912c95bba7bfb",
+  "packageBuild": "PASS",
+  "upstreamSuites": [
+    "test-allowed-directories-symlink.js",
+    "test-symlink-security.js",
+    "test-search-files-literal.js",
+    "test-search-files-file-pattern.js",
+    "test-search-file-pattern.js",
+    "test-search-office-any-folder.js",
+    "test-search-error-output.js",
+    "test-search-process-exit.js",
+    "test-search-stopped-not-failed.js",
+    "test-issue1027-admission.mjs",
+    "test-issue1027-office.mjs",
+    "test-issue1027-validation-owner.mjs"
+  ],
+  "scope": "source qualification only; not installed acceptance",
+  "schema": "mastermind.issue1027.upstream-qualification.v3",
+  "date": "2026-11-12",
+  "upstreamSearchSuites": {
+    "passed": 12,
+    "failed": 0,
+    "skipped": 0
+  },
+  "admissionChecks": 14,
+  "officeChecks": 16,
+  "actualWorkerExits": 17,
+  "residualWorkers": 0,
+  "residualProcesses": 0,
+  "mutationChecks": [
+    {
+      "mutation": "thread budget",
+      "status": "DETECTED",
+      "discriminator": "AssertionError"
+    },
+    {
+      "mutation": "live-work admission",
+      "status": "DETECTED",
+      "discriminator": "AssertionError"
+    },
+    {
+      "mutation": "preflight permit retention",
+      "status": "DETECTED",
+      "discriminator": "deadline must not release unsettled preflight"
+    },
+    {
+      "mutation": "late preflight fence",
+      "status": "DETECTED",
+      "discriminator": "late preflight spawned a search"
+    },
+    {
+      "mutation": "initial cap flag",
+      "status": "DETECTED",
+      "discriminator": "AssertionError"
+    },
+    {
+      "mutation": "initial cap disclosure",
+      "status": "DETECTED",
+      "discriminator": "result limit reached"
+    },
+    {
+      "mutation": "initial deadline flag",
+      "status": "DETECTED",
+      "discriminator": "AssertionError"
+    },
+    {
+      "mutation": "actual validation settlement",
+      "status": "DETECTED",
+      "discriminator": "non-cancelling internal timeout released live work"
+    },
+    {
+      "mutation": "parallel validation settlement",
+      "status": "DETECTED",
+      "discriminator": "first path answer released parallel lookup work"
+    },
+    {
+      "mutation": "effective early-termination identity",
+      "status": "DETECTED",
+      "discriminator": "same effective true produced different admission"
+    },
+    {
+      "mutation": "explicit exhaustive execution",
+      "status": "DETECTED",
+      "discriminator": "AssertionError"
+    },
+    {
+      "mutation": "completed search terminal immutability",
+      "status": "DETECTED",
+      "discriminator": "completed search terminal state changed after deadline"
+    }
+  ],
+  "ownedCommandTests": 3,
+  "independentReview": "Historical REQUEST_CHANGES is attributed in priorQualification; current Web 5A source self-check and read-only technical assurance found no blocking narrow-delta finding. No GitHub approval or protected release claimed.",
+  "installed": false,
+  "remainingIssueGates": [
+    "host-wide Executive admission",
+    "authenticated operation attribution",
+    "aggregate/native RSS qualification",
+    "required CI and any actual protected-review requirement",
+    "vendor updater/preimage/rollback route",
+    "quiesced native installed canary"
+  ],
+  "logSHA256": {
+    "completed-result-red.log": "c70e7d2ebaf74b53c0f158803cbcb14d0f95ef89e4ab228363409da220538642",
+    "build.log": "094c381a4964c2580889c9fe4d25d972721269ea955d34913ec4ef9f5908ac28",
+    "tests.log": "25cd9a0f6586b1b35648b8eb48561f66d2a9b9d1b0177bc59798078f8b0cc8be",
+    "mutation-results.json": "c3c07b567fba2bbb5ee7cac99925b12b6f511ba66b5b7084d100a8b692343f8f",
+    "office-results.json": "9d1387f298bf2c9e2dded7ceb7733661cbae4b3c13429c2666d81891e4caa141"
+  },
+  "validationOwnerChecks": 5,
+  "redBeforeGreen": {
+    "baseline": "fe03a79db814b9b0a0a1c75d00ef9fba872986e0",
+    "lateDeadline": "FAIL: successful completed result changed timedOut false to true while validation remained live",
+    "disposal": "FAIL: successful completed result changed cancelled false to true while validation remained live",
+    "incumbentOwnerChecks": "all 3 passed on original source with the new regression fixture",
+    "afterRepair": "all 5 owner/identity checks PASS; active-search deadline and disposal checks retained"
+  },
+  "filesystemDonorBlob": "f84a796ddeb7aa4037df5d593910f60082f891d9",
+  "nativeIOSettlement": "Retain admission and await actual work; no forced cancellation or finite native-I/O settlement claim.",
+  "sourcePreimage": "fe03a79db814b9b0a0a1c75d00ef9fba872986e0",
+  "sourceLawPin": "0e1ca7a2d8aa95ac415191d64bd3a39212be39d0",
+  "ownedCommandReceipt": {
+    "tests": 3,
+    "ownedPids": 3,
+    "residualOwned": 0,
+    "sentinelUnaffected": true,
+    "timeoutNonzero": true
+  },
+  "generatedPostimages": {
+    "src/search-manager.ts": {
+      "sha256": "f86694844233127295db38e0e8d822f7737ba7cfb7e93847bec3478a84296154",
+      "changedFromSourcePreimage": true
+    },
+    "src/handlers/search-handlers.ts": {
+      "sha256": "06565844dc51b7ab42211024190d51a2d845f9724b316ea094c3ba41e63a69dc",
+      "changedFromSourcePreimage": false
+    },
+    "src/search-patterns.ts": {
+      "sha256": "04bc93ca2a5c01901a4bda79cd995266cde7d5e1f4dc852d2f4c53bf3b4ebb3b",
+      "changedFromSourcePreimage": false
+    },
+    "src/office-search.ts": {
+      "sha256": "5d525688ba8a7a639a6b7aca68aeb1f90b7a9d40acc5adc258746f3650f1eac6",
+      "changedFromSourcePreimage": false
+    },
+    "src/office-worker-host.ts": {
+      "sha256": "9851d65c2a7a98f4f6b41c1324a56f19eb0077ab2e6a322d15837c5c956b4bc7",
+      "changedFromSourcePreimage": false
+    },
+    "src/office-search-worker.ts": {
+      "sha256": "f3c0e8134c9239220d8068220602b0ca58fc2fa2757dcf76abdbe379fe8d303d",
+      "changedFromSourcePreimage": false
+    },
+    "src/tools/filesystem.ts": {
+      "sha256": "f1006e21080a4ae02d9e0fb16aecd1ac098d2c0a3b8ea88ebe313d2ff42c90aa",
+      "changedFromSourcePreimage": false
+    }
+  },
+  "priorQualification": {
+    "sourceHead": "fe03a79db814b9b0a0a1c75d00ef9fba872986e0",
+    "receipt": {
+      "donor": "56b5127ec6539f1d182ed4c3ffdeb114cf6bfd66",
+      "patchSHA256": "9972d58ba03d3b6f2aa8627a5e6cb2642e407c4d2cdf1b078a019bcd2cd55516",
+      "packageBuild": "PASS",
+      "upstreamSuites": [
+        "test-allowed-directories-symlink.js",
+        "test-symlink-security.js",
+        "test-search-files-literal.js",
+        "test-search-files-file-pattern.js",
+        "test-search-file-pattern.js",
+        "test-search-office-any-folder.js",
+        "test-search-error-output.js",
+        "test-search-process-exit.js",
+        "test-search-stopped-not-failed.js",
+        "test-issue1027-admission.mjs",
+        "test-issue1027-office.mjs",
+        "test-issue1027-validation-owner.mjs"
+      ],
+      "scope": "source qualification only; not installed acceptance",
+      "schema": "mastermind.issue1027.upstream-qualification.v3",
+      "date": "2026-10-01",
+      "upstreamSearchSuites": {
+        "passed": 12,
+        "failed": 0,
+        "skipped": 0
+      },
+      "admissionChecks": 14,
+      "officeChecks": 16,
+      "actualWorkerExits": 17,
+      "residualWorkers": 0,
+      "residualProcesses": 0,
+      "mutationChecks": [
+        {
+          "mutation": "thread budget",
+          "status": "DETECTED",
+          "discriminator": "AssertionError"
+        },
+        {
+          "mutation": "live-work admission",
+          "status": "DETECTED",
+          "discriminator": "AssertionError"
+        },
+        {
+          "mutation": "preflight permit retention",
+          "status": "DETECTED",
+          "discriminator": "deadline must not release unsettled preflight"
+        },
+        {
+          "mutation": "late preflight fence",
+          "status": "DETECTED",
+          "discriminator": "late preflight spawned a search"
+        },
+        {
+          "mutation": "initial cap flag",
+          "status": "DETECTED",
+          "discriminator": "AssertionError"
+        },
+        {
+          "mutation": "initial cap disclosure",
+          "status": "DETECTED",
+          "discriminator": "result limit reached"
+        },
+        {
+          "mutation": "initial deadline flag",
+          "status": "DETECTED",
+          "discriminator": "AssertionError"
+        },
+        {
+          "mutation": "actual validation settlement",
+          "status": "DETECTED",
+          "discriminator": "non-cancelling internal timeout released live work"
+        },
+        {
+          "mutation": "parallel validation settlement",
+          "status": "DETECTED",
+          "discriminator": "first path answer released parallel lookup work"
+        },
+        {
+          "mutation": "effective early-termination identity",
+          "status": "DETECTED",
+          "discriminator": "same effective true produced different admission"
+        },
+        {
+          "mutation": "explicit exhaustive execution",
+          "status": "DETECTED",
+          "discriminator": "AssertionError"
+        }
+      ],
+      "ownedCommandTests": 3,
+      "independentReview": "REQUEST_CHANGES on 8118114; both new findings repaired pending exact-head review",
+      "installed": false,
+      "remainingIssueGates": [
+        "host-wide Executive admission",
+        "authenticated operation attribution",
+        "aggregate/native RSS qualification",
+        "required CI and independent delta review",
+        "vendor updater/preimage/rollback route",
+        "quiesced native installed canary"
+      ],
+      "logSHA256": {
+        "v5-red.log": "a4d2f6440006625dfe9386814efd28837a9b88203fc8597d072063f1f50d5868",
+        "v5-validation/build.log": "a569167c3d8f9bab12f08aea41b200e5e5eda87cee4b6c488cb77890cd1ec9ac",
+        "v5-validation/tests.log": "71396baec99b8c5968c6dbc4a21fba06d9fc7fbfaeae3b44614f603568b6ff34",
+        "v5-validation/v5-mutation-results.json": "5197b379ef5ebfb3144faee4f91de5a5c5ba2752355ff880c40235ec77d55753",
+        "v5-validation/upstream/test/office-results.json": "de6d022d99d346789f79b64dfc08b0bb4136c74e5a029f0c7f50eca1b087cd07"
+      },
+      "validationOwnerChecks": 3,
+      "redBeforeGreen": {
+        "baseline": "8118114e75b9f3cf3f8ffc665a38d640312347f0",
+        "internalTimeout": "FAIL: 0 admitted operations while 2 underlying validation operations remain live",
+        "earlyTermination": "FAIL: omitted and explicit true produced different admissions",
+        "afterRepair": "all 3 owner/identity checks PASS"
+      },
+      "filesystemDonorBlob": "f84a796ddeb7aa4037df5d593910f60082f891d9",
+      "nativeIOSettlement": "Retain admission and await actual work; no forced cancellation or finite native-I/O settlement claim."
+    }
+  }
+}

@@ -1267,3 +1267,14 @@ REVIEWED_FILES["ops/paperclip_fleet/evidence/2026-11-10-credential-qualification
 # Passive Paperclip asset document pagination: exact row-count bounds only.
 # No identity, permission or runtime topology change; any source drift restores D8.
 REVIEWED_FILES["ops/paperclip_fleet/archive_assets.py"] = {'sha256': 'f96b00c2c238139c67f7be03f79d698c3f0d4f3d7f055e1a20661600c07b57af', 'sites': ((459, 53, 56, 'int', '500'), (460, 182, 185, 'int', '500'), (461, 48, 51, 'int', '500'))}
+
+# PR #1125's unchanged Office fixture: one search deadline and two bounded
+# waits for genuine parser entry. These elapsed-time operands do not select
+# any identity, permission or routing principal. Pin the entire exact fixture
+# and only these three whole tokens; any byte drift restores ordinary D8.
+REVIEWED_FILES["integrations/studio_direct_mcp/search-runtime/test-issue1027-office.mjs"] = {
+    "sha256": "835a81bfe033b2ddcbeb24ed5fabf179b0564bf068ae9dd1d4247fa1a83876c4",
+    "sites": ((97, 67, 70, "int", "900"),
+              (98, 55, 58, "int", "850"),
+              (131, 97, 100, "int", "850")),
+}
