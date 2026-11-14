@@ -249,7 +249,7 @@ def _convert_to_legacy_install(roots: dict, *, typed_git: bool = False) -> dict:
     removed = ("fleet-status.mjs", "paper-design.mjs", "output-budget.mjs") if typed_git else (
         "fleet-status.mjs", "paper-design.mjs", "output-budget.mjs", "git-publish.mjs"
     )
-    removed = (*removed, "workspace-access.mjs", "commission-prepare.mjs", "commission-service.mjs", "modern-fabric-http.mjs", "original-delivery.mjs")
+    removed = (*removed, "workspace-access.mjs", "commission-prepare.mjs", "commission-service.mjs", "modern-fabric-http.mjs", "original-delivery.mjs", "t3-control.mjs", "t3-dot-tools.json")
     for name in removed:
         (roots["base"] / name).unlink()
         manifest["files"].pop(name)
@@ -278,6 +278,8 @@ class TestIdentity(unittest.TestCase):
                 "gateway.mjs",
                 "modern-fabric-http.mjs",
                 "original-delivery.mjs",
+                "t3-control.mjs",
+                "t3-dot-tools.json",
                 "output-budget.mjs",
                 "git-publish.mjs",
                 "workspace-access.mjs",
@@ -292,6 +294,20 @@ class TestIdentity(unittest.TestCase):
             },
         )
         self.assertEqual(svc.PRIVATE_GATEWAY_NAME, "private-tunnel-gateway.mjs")
+
+    def test_t3_stage_and_pre_t3_legacy_are_exact_not_partial_hybrids(self):
+        additions = {"t3-control.mjs", "t3-dot-tools.json"}
+        current = frozenset(svc.STAGE_FILES)
+        previous = frozenset(svc.LEGACY_STAGE_FILES_V9)
+        self.assertEqual(current - previous, additions)
+        self.assertIn(current, svc.KNOWN_MANIFEST_FILESETS)
+        self.assertIn(previous, svc.KNOWN_MANIFEST_FILESETS)
+        for missing in additions:
+            self.assertNotIn(current - {missing}, svc.KNOWN_MANIFEST_FILESETS)
+        self.assertNotIn(current | {"unreviewed-module.mjs"}, svc.KNOWN_MANIFEST_FILESETS)
+        for legacy in (svc.LEGACY_STAGE_FILES_V1, svc.LEGACY_STAGE_FILES_V2):
+            self.assertFalse(additions.intersection(legacy))
+            self.assertNotIn(frozenset(legacy) | additions, svc.KNOWN_MANIFEST_FILESETS)
 
     def test_manifest_keys_include_runtime_identity(self):
         self.assertIn("account", svc.MANIFEST_KEYS_V2)
