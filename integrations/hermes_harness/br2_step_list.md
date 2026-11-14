@@ -1,6 +1,7 @@
 # BR2 install step list — bridge release after b640dec1 (STAGED; install is the principal's)
 
-Branch `t3/mmos-v4-br2`. Staged base **`NEW = 920544c6bc98f5bfd403ad7baf73968ec1d89935`**;
+Branch `t3/mmos-v4-br2`. **Final staged head `ac55bdf3529f867493d8b173ed4da2279314a8d5`**
+(on origin). Staged base **`NEW = 920544c6bc98f5bfd403ad7baf73968ec1d89935`**;
 base trunk `473eca8cf` (bridge bytes identical to b640dec1). This step list's own
 commits sit atop `NEW`: the install re-curates step 1's manifest at the branch head
 and the installed `release_commit` is that head, not `920544c6b`. The transport
@@ -260,14 +261,18 @@ protocol level by the pytest suites (§6).
   `test_web_sol_transport_gates.py` 13/13 (LOW1 census/surface intersection,
   LOW2 digest-swap refusal), `test_web_sol_browser_menu_ensure.py` 28/28.
 - **Server-side pin-switch rehearsal:** §5 (PASS, zero-diff, against the new head).
-- **Staged bundle (re-staged at the final head, includes the MED-1 fix):**
+- **Staged bundle (re-staged at `ac55bdf35`, includes the MED-1 fix):**
   `~/.mastermind/mmos_dev/br2/staging/extensions/aaaaaaaaaaaaaaaaaaaaaaaa`
   (13 files), sha256 manifest `~/.mastermind/mmos_dev/br2/staging/extension-sha256.txt`
   (all 13 verify OK), bundle digest
-  `10932a1abd9675bbb7b8488947b372a06491397862d836c1fade7bfdf1b51582`,
+  `b0b8278601e2199bffcd8246736d5baba931b8a44d10d8060d001901911f5058`
+  rendered at commit `ac55bdf3529f867493d8b173ed4da2279314a8d5`,
   `instance_config.js` digest `08c66c33…`, manifest permissions include `storage`.
-  The bundle embeds no head commit, so its digest is stable across the doc-only
-  commits atop the MED-1 source fix; restage log `logs/restage-finalhead.txt`.
+  The bundle digest includes `source_commit` (`web_sol_deployment.py`,
+  `_bundle_digest`), so it changes with every commit; the installer renders its
+  own bundle. What a verifier compares is the 13-file sha256 manifest above, which
+  does NOT change across doc-only commits (the extension bytes are unchanged);
+  restage log `logs/restage-new1.txt`.
 
 ## 7. What is NOT proven (honest)
 
