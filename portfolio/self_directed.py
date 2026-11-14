@@ -506,32 +506,76 @@ def _append_fill(fill: dict) -> None:
         fh.write(json.dumps(fill, default=str) + "\n")
 
 
-def _load_fills() -> list[dict]:
-    if not _FILLS_PATH.exists():
-        return []
-    rows: list[dict] = []
-    for i, line in enumerate(_FILLS_PATH.read_text(encoding="utf-8").splitlines()):
-        line = line.strip()
-        if not line:
+class SelfDirectedStateCorrupt(RuntimeError):
+    """Existing durable Self-Directed state is malformed and must not be reset implicitly."""
+
+    def __init__(self, artifact: str) -> None:
+        self.artifact = str(artifact)
+        super().__init__(f"self-directed durable state corrupt: {self.artifact}")
+
+
+def _state_text(path: Path, artifact: str) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        # An absent file is a first-use default only inside an existing book.
+        status, _, _ = _classify_account_path(path)
+        if status == "absent":
+            return None
+        raise SelfDirectedStateCorrupt(artifact) from exc
+    except (OSError, UnicodeError) as exc:
+        raise SelfDirectedStateCorrupt(artifact) from exc
+
+
+def _load_state_rows(path: Path, artifact: str, *, include_sequence: bool = False) -> list[dict]:
+    text = _state_text(path, artifact)
+    rows = []
+    for index, line in enumerate((text or "").splitlines()):
+        if not line.strip():
             continue
         try:
-            r = json.loads(line)
-            r["_seq"] = i
-            rows.append(r)
-        except Exception:
-            pass
-    rows.sort(key=lambda r: (r.get("date") or "", r.get("_seq", 0)))
+            row = json.loads(line)
+        except ValueError as exc:
+            raise SelfDirectedStateCorrupt(artifact) from exc
+        if not isinstance(row, dict):
+            raise SelfDirectedStateCorrupt(artifact)
+        if include_sequence:
+            row["_seq"] = index
+        rows.append(row)
+    return rows
+
+
+def _load_fills() -> list[dict]:
+    rows = _load_state_rows(_FILLS_PATH, "fills", include_sequence=True)
+    rows.sort(key=lambda row: (row.get("date") or "", row["_seq"]))
     return rows
 
 
 def _load_pending() -> list[dict]:
+    text = _state_text(_PENDING_PATH, "pending")
+    if text is None:
+        return []
     try:
-        if _PENDING_PATH.exists():
-            data = json.loads(_PENDING_PATH.read_text())
-            return data if isinstance(data, list) else []
-    except Exception:
-        pass
-    return []
+        orders = json.loads(text)
+    except ValueError as exc:
+        raise SelfDirectedStateCorrupt("pending") from exc
+    if not isinstance(orders, list):
+        raise SelfDirectedStateCorrupt("pending")
+    # Settle validates the complete batch before the first durable fill.
+    for order in orders:
+        if not isinstance(order, dict) or order.get("side") not in ("buy", "sell"):
+            raise SelfDirectedStateCorrupt("pending")
+        ticker = order.get("ticker")
+        if not isinstance(ticker, str) or not ticker.strip():
+            raise SelfDirectedStateCorrupt("pending")
+        shares, notional = order.get("shares"), order.get("notional")
+        if (shares is None) == (notional is None):
+            raise SelfDirectedStateCorrupt("pending")
+        quantity = shares if shares is not None else notional
+        # Older writers rounded tiny valid quantities to zero before saving.
+        if not _is_account_number(quantity) or quantity < 0:
+            raise SelfDirectedStateCorrupt("pending")
+    return orders
 
 
 def _save_pending(orders: list[dict]) -> None:
@@ -540,13 +584,16 @@ def _save_pending(orders: list[dict]) -> None:
 
 
 def _load_theses() -> dict[str, dict]:
+    text = _state_text(_THESES_PATH, "theses")
+    if text is None:
+        return {}
     try:
-        if _THESES_PATH.exists():
-            data = json.loads(_THESES_PATH.read_text())
-            return data if isinstance(data, dict) else {}
-    except Exception:
-        pass
-    return {}
+        theses = json.loads(text)
+    except ValueError as exc:
+        raise SelfDirectedStateCorrupt("theses") from exc
+    if not isinstance(theses, dict):
+        raise SelfDirectedStateCorrupt("theses")
+    return theses
 
 
 def _save_theses(theses: dict[str, dict]) -> None:
@@ -822,6 +869,7 @@ def settle_pending(*, now: datetime | None = None, market_open: bool | None = No
         return []
 
     state = _load_account()
+    _load_fills()
     asof = _today()
     settled: list[dict] = []
     still_pending: list[dict] = []
@@ -872,8 +920,8 @@ def place_order(ticker: str, side: str, shares: float | None = None, *,
     def _pos(v):
         try:
             v = float(v)
-            return v if v > 0 else None
-        except (TypeError, ValueError):
+            return v if math.isfinite(v) and v > 0 else None
+        except (TypeError, ValueError, OverflowError):
             return None
     sh = _pos(shares)
     nt = _pos(notional)
@@ -892,6 +940,7 @@ def place_order(ticker: str, side: str, shares: float | None = None, *,
     if market_open:
         settle_pending(now=now, market_open=True)
         state = _load_account()
+        _load_fills()
         px = float(price) if (price and float(price) > 0) else _current_price(ticker)
         if not px or px <= 0:
             return {"ok": False, "error": f"no live price available for {ticker}"}
@@ -1078,6 +1127,7 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
     except SelfDirectedAccountInvalid:
         # E13: a mark is best-effort — an invalid book gets no NAV row and is never saved over.
         return None
+    existing_nav_rows = _load_state_rows(_NAV_PATH, "nav_history")
     prices = {(k or "").upper(): v for k, v in (prices or {}).items() if _positive_price(v) is not None}
     positions = state.get("positions", {})
 
@@ -1134,18 +1184,7 @@ def mark(*, prices: dict[str, float] | None = None, asof: str | None = None,
            "invested": round(invested, 2),
            "spy_nav": round(spy_nav, 2) if spy_nav is not None else None}
     _require_book_dir()
-    rows: list[dict] = []
-    if _NAV_PATH.exists():
-        for line in _NAV_PATH.read_text().splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                r = json.loads(line)
-            except Exception:
-                continue
-            if r.get("date") != asof:            # idempotent per date
-                rows.append(r)
+    rows = [r for r in existing_nav_rows if r.get("date") != asof]
     rows.append(row)
     _atomic_write_bytes(
         _NAV_PATH, ("\n".join(json.dumps(r, default=str) for r in rows) + "\n").encode("utf-8")
