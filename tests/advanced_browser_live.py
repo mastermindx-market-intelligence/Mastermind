@@ -99,7 +99,7 @@ async def main():
         ext = stage / "extension"
         shutil.copytree(ROOT / "integrations/chairman_surfaces/web_sol_extension", ext)
         manifest = json.loads((ext / "manifest.json").read_text())
-        manifest["permissions"] = ["nativeMessaging", "alarms", "debugger", "tabs", "scripting", "downloads"]
+        manifest["permissions"] = ["nativeMessaging", "alarms", "debugger", "storage", "tabs", "scripting", "downloads"]
         manifest["host_permissions"] = ["http://127.0.0.1/*", "http://localhost/*"]
         manifest["optional_permissions"] = []
         manifest["optional_host_permissions"] = []

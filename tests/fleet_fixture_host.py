@@ -57,7 +57,7 @@ def main(args):
                 artifact.destination.write_bytes(artifact.content);artifact.destination.chmod(artifact.mode)
             extension=stage/"extension";shutil.copytree(ROOT/"integrations/chairman_surfaces/web_sol_extension",extension)
             manifest=json.loads((extension/"manifest.json").read_text())
-            manifest.update(permissions=["nativeMessaging","alarms","debugger","tabs","scripting","downloads"],
+            manifest.update(permissions=["nativeMessaging","alarms","debugger","storage","tabs","scripting","downloads"],
                 host_permissions=["http://127.0.0.1/*","http://localhost/*"],optional_permissions=[],optional_host_permissions=[])
             (extension/"manifest.json").write_text(json.dumps(manifest))
             shutil.copyfile(next(a.destination for a in bundle.artifacts if a.kind=="instance_config"),extension/"instance_config.js")

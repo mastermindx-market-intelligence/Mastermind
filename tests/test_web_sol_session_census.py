@@ -13,8 +13,8 @@ EXTENSION = ROOT / "integrations/chairman_surfaces/web_sol_extension"
 def test_manifest_preserves_the_reader_with_explicit_browser_permissions():
     manifest = json.loads((EXTENSION / "manifest.json").read_text())
     assert manifest.get("action", {}).get("default_popup") == "census.html"
-    assert set(manifest["permissions"]) == {"nativeMessaging", "alarms", "debugger"}
-    assert manifest["optional_permissions"] == ["tabs", "scripting"]
+    assert set(manifest["permissions"]) == {"nativeMessaging", "alarms", "debugger", "storage"}
+    assert manifest["optional_permissions"] == ["tabs", "scripting", "downloads"]
     assert set(manifest["host_permissions"]) == {
         "https://chat.openai.com/*", "https://chatgpt.com/*"
     }

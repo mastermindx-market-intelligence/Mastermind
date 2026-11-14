@@ -525,7 +525,7 @@ def _validate_census_manifest(payload: bytes, release: WebSolRelease) -> None:
         if (type(manifest["manifest_version"]) is not int
                 or manifest["manifest_version"] != 3
                 or manifest["version"] != wsp.WEB_SOL_EXTENSION_VERSION
-                or manifest["permissions"] != ["nativeMessaging", "alarms", "debugger"]
+                or manifest["permissions"] != ["nativeMessaging", "alarms", "debugger", "storage"]
                 or manifest["optional_permissions"] != ["tabs", "scripting", "downloads"]
                 or manifest["minimum_chrome_version"] != "125"
                 or manifest["optional_host_permissions"] != ["http://*/*", "https://*/*"]

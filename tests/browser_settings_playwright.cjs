@@ -8,7 +8,7 @@ const root=path.resolve(__dirname,"../integrations/chairman_surfaces/web_sol_ext
   try{
     const page=await browser.newPage({viewport:{width:1100,height:1000}});
     await page.addInitScript(()=>{
-      const permissions=new Set(["nativeMessaging","alarms","debugger"]),origins=new Set(["https://chatgpt.com/*","https://chat.openai.com/*"]);
+      const permissions=new Set(["nativeMessaging","alarms","debugger","storage"]),origins=new Set(["https://chatgpt.com/*","https://chat.openai.com/*"]);
       const added=[],removed=[];window.settingsFixtureCalls=[];
       window.chrome={permissions:{
         getAll:async()=>({permissions:[...permissions],origins:[...origins]}),

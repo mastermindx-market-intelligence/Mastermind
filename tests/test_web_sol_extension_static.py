@@ -34,13 +34,16 @@ def test_manifest_is_mv3_exact_host_and_least_privilege():
     manifest = _manifest()
 
     assert manifest["manifest_version"] == 3
-    assert manifest["name"] == "Mastermind Web Sol Surface Adapter"
-    assert manifest["version"] == "0.3.0"
+    assert manifest["name"] == "Mastermind Browser · Hermes"
+    assert manifest["version"] == "0.4.1"
     assert set(manifest["host_permissions"]) == CHATGPT_MATCHES
 
     permissions = set(manifest.get("permissions", []))
-    assert permissions == {"nativeMessaging", "alarms", "debugger"}
-    assert manifest["optional_permissions"] == ["tabs", "scripting"]
+    # storage joined the required set in BR2 item 3: the opener record must
+    # survive service-worker death (chrome.storage.session, browser-session
+    # scoped, cleared at browser restart). It is no longer forbidden below.
+    assert permissions == {"nativeMessaging", "alarms", "debugger", "storage"}
+    assert manifest["optional_permissions"] == ["tabs", "scripting", "downloads"]
     assert manifest["optional_host_permissions"] == ["http://*/*", "https://*/*"]
     assert manifest["options_page"] == "browser.html"
 
@@ -60,7 +63,6 @@ def test_manifest_is_mv3_exact_host_and_least_privilege():
         "privacy",
         "proxy",
         "scripting",
-        "storage",
         "webNavigation",
         "webRequest",
     }

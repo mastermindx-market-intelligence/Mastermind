@@ -496,8 +496,8 @@ def test_content_probe_waits_for_delayed_webcrypto_digest():
 
 def test_manifest_preserves_reconnect_and_requires_debugger_without_automatic_site_grants():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    assert set(manifest["permissions"]) == {"nativeMessaging", "alarms", "debugger"}
-    assert manifest["optional_permissions"] == ["tabs", "scripting"]
+    assert set(manifest["permissions"]) == {"nativeMessaging", "alarms", "debugger", "storage"}
+    assert manifest["optional_permissions"] == ["tabs", "scripting", "downloads"]
     assert set(manifest["host_permissions"]) == {
         "https://chat.openai.com/*",
         "https://chatgpt.com/*",
