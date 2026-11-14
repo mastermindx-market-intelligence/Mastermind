@@ -70,7 +70,7 @@ class _AuthorizedStore:
 
 class RuntimeReplyEventHost:
     def __init__(self, returns, cipher, policies, *, clock, enabled=False, resolver=None,
-                 connector=None, canary_policy_provider=None):
+                 connector=None, canary_policy_provider=None, native_monitor_enabled=False):
         if (type(returns) is not RuntimeSessionReturn or type(cipher) is not ExecutiveReplyCipher
                 or not isinstance(policies,ReplyPolicySelection) or type(enabled) is not bool
                 or not callable(clock)):
@@ -98,6 +98,27 @@ class RuntimeReplyEventHost:
             resolver=resolver,connector=connector,audience_owner=self.audiences)
         self.ingress = ReplyEventIngressOwner(self.runtime,self.validate_frame,self.handle_frame)
         self.consumer = ReplyEventCommitConsumer(self.runtime,self.handle_committed)
+        if type(native_monitor_enabled) is not bool:
+            raise TypeError("Native return observation requires explicit selection")
+        self.t3_monitor = None
+        if native_monitor_enabled:
+            if not enabled or returns.t3_replies is None:
+                raise ValueError("Native return observation requires its existing armed source")
+            from .t3_reply_monitor import RuntimeT3ReplyMonitor
+            self.t3_monitor = RuntimeT3ReplyMonitor(self)
+
+    async def start_native_returns(self):
+        if self.t3_monitor is None:
+            return {"state": "NOT_SELECTED", "native_inference_started": False}
+        try:
+            return await self.t3_monitor.reconcile()
+        except Exception:
+            self.t3_monitor.last_error = "ORIGINAL_NATIVE_OBSERVATION_UNAVAILABLE"
+            return {"state": "UNAVAILABLE", "native_inference_started": False}
+
+    async def close_native_returns(self):
+        if self.t3_monitor is not None:
+            await self.t3_monitor.close()
 
     def validate_frame(self, frame):
         if (type(frame) is not dict or set(frame) != {"schema","operation","principal","arguments","source_policy_sha256"}
@@ -165,6 +186,11 @@ class RuntimeReplyEventHost:
             else:
                 cls = EventSubscribeRequest if operation == "subscribe" else EventUnsubscribeRequest
                 data = dataclasses.asdict(await getattr(adapter,operation)(principal,cls(**frame["arguments"])))
+                if self.t3_monitor is not None:
+                    # The canonical subscribe/unsubscribe receipt is already
+                    # settled. Observer readiness is separate and inspectable;
+                    # an optional observer failure must not replay that write.
+                    await self.start_native_returns()
             return result(operation,data=data)
         except (SubscriptionUnavailable,ReplyPolicyDenied):
             return result(operation,code="subscription_unavailable")

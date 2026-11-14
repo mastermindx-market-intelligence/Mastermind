@@ -281,6 +281,26 @@ class RuntimeReplySubscriptionStore:
             raise ValueError("legacy subscription has no retained authorization")
         return snapshot, json.loads(_json(value))
 
+    def active_subscriptions(self, *, limit=128):
+        """Bounded restart projection from this incumbent store, not a registry.
+
+        Contains no callback URL, key or retained authorization bytes. Consumers
+        must capture and revalidate each original audience before using a row.
+        """
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise ValueError("bounded subscription projection required")
+        events = self._store.list_events(aggregate_type=_AGGREGATE)
+        if len(events) > _MAX_HISTORY:
+            raise ValueError("subscription projection exceeds retained history bound")
+        now, rows = self._now(), []
+        for ident in sorted({event.aggregate_id for event in events}):
+            snapshot, _, _ = self._state(ident)
+            if snapshot.record is not None and now < snapshot.record.expires_at:
+                rows.append(snapshot.record)
+                if len(rows) > limit:
+                    raise ValueError("active subscription projection exceeds bound")
+        return tuple(rows)
+
     def subscriptions_for_reply(self, request_ref, read_ref):
         # Existing event owner only; no new index/database/queue. Refuse an
         # excessive census rather than omitting an unknown matching audience.

@@ -2940,13 +2940,20 @@ def _service_from_config(
                     web_census_handler = InstalledProfileCensus(
                         session_web_observation_owner, current_guard=require_web_observation_read)
 
+                native_return_kwargs = {}
+                if (reply_events_armed and "native_t3" in reply_events_config):
+                    from integrations.session_bridge.t3_return_tools import RuntimeT3ReturnControl
+                    native_host = event_host_factory(runtime)
+                    native_return_kwargs = {"t3_replies": native_host.returns.t3_replies,
+                                            "t3_return_control": RuntimeT3ReturnControl(native_host)}
                 return build_runtime_session_bridge(
                     runtime, dialogue_socket_path=relay_readside_socket_path,
                     summon_handler=summon, codex_owner_configured=codex_owner_configured,
                     attention_requester=attention,
                     authorized_policies=trusted_policies,
                     reference_cursor_key=session_reference_cursor_key,
-                    hermes_session=hermes_session, web_census_handler=web_census_handler)
+                    hermes_session=hermes_session, web_census_handler=web_census_handler,
+                    **native_return_kwargs)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
             if session_read_policy_loader is not None and installed_profile == WEB_CEO_V3_PROFILE:
                 def project_conversation_read_factory(runtime):
@@ -3095,14 +3102,21 @@ def _service_from_config(
                 ),
                 carrier_factory=_build_executive_dialogue_wake_carrier,
             )
+        event_host_cache = []
         def event_host_factory(runtime):
             if not reply_events_armed:
                 return None
             from integrations.session_bridge.reply_event_host_composition import build_installed_reply_event_host
-            return build_installed_reply_event_host(runtime,reply_events_config,
+            if event_host_cache:
+                if event_host_cache[0][0] is not runtime:
+                    raise ServiceError("existing reply-event owner is bound to another Runtime")
+                return event_host_cache[0][1]
+            selected = build_installed_reply_event_host(runtime,reply_events_config,
                 release_sha=config.proof_base_sha,peer_uid=int(raw["ceo_ingress_app_peer_uid"]),control_uid=int(raw["control_uid"]),
                 dialogue_socket_path=relay_readside_socket_path,
                 native_owner_configured=lambda: raw["company_consultation"].get("native_return_armed",False))
+            event_host_cache.append((runtime, selected))
+            return selected
         if reply_events_armed:
             app_binding = ceo_ingress_kwargs.get("ceo_ingress_app_binding")
             if app_binding is None or not app_binding.armed or raw["company_consultation"].get("native_return_armed",False) is not True:

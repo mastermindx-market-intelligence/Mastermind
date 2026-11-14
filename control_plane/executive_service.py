@@ -4129,6 +4129,11 @@ class ExecutiveControlService:
             # Native Wake can call Company MCP. Recover only after every
             # listener is serving, under the same existing service owner.
             await self._reconcile_company_answer_wakes()
+            native_reply_host = getattr(self._company_consultation_host, "reply_event_host", None)
+            if native_reply_host is not None and self._service_state in {"READY", "AWAITING_CANARY"}:
+                # Restart derives only current accepted subscriptions. This
+                # starts no inference and owns no replacement event service.
+                await native_reply_host.start_native_returns()
             if (
                 self.config.coo_autonomy_armed
                 and not self.config.coo_foreground_only
@@ -4213,6 +4218,11 @@ class ExecutiveControlService:
         for writer in tuple(self._operator_writers):
             writer.close()
         await self._drain_service_tasks(self._operator_handlers)
+        native_reply_host = getattr(self._company_consultation_host, "reply_event_host", None)
+        if native_reply_host is not None:
+            # Stop read-only native waits, then drain admitted callbacks before
+            # the original Runtime or its effect reservations are closed.
+            await native_reply_host.close_native_returns()
         if self._privileged_readiness_controller is not None:
             await self._privileged_readiness_controller.aclose()
         await self._drain_service_tasks(self._physical_workers)

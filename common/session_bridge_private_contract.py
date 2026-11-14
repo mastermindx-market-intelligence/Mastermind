@@ -15,8 +15,8 @@ PRIVATE_SCHEMA = "mastermind.executive_ceo_ingress_session_bridge.v1"
 # the same installed validator and live host checks still own those decisions.
 FOREGROUND_PRIVATE_SCHEMA = "mastermind.executive_ceo_ingress_session_bridge_foreground.v1"
 PRIVATE_RESULT_SCHEMA = "mastermind.executive_ceo_ingress_session_bridge_result.v1"
-SESSION_TOOLS = ("session_targets", "session_send", "session_summon", "session_reply_read", "session_reply_references", "session_web_census")
-MODIFYING_TOOLS = ("session_send", "session_summon")
+SESSION_TOOLS = ("session_targets", "session_send", "session_summon", "session_reply_read", "session_reply_references", "session_web_census", "session_t3_return_link", "session_t3_return_status")
+MODIFYING_TOOLS = ("session_send", "session_summon", "session_t3_return_link")
 
 
 class BridgeError(Exception):

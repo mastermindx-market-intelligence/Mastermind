@@ -41,8 +41,14 @@ def test_closed_read_only_tool_contract():
     assert spec.annotations["destructiveHint"] is False
     assert spec.input_schema == {"type": "object", "properties": {
         "read_ref": {"type": "string", "minLength": 1, "maxLength": 256},
-        "operation_key": {"type": "string", "minLength": 1, "maxLength": 256}},
-        "oneOf": [{"required": ["read_ref"]}, {"required": ["operation_key"]}],
+        "operation_key": {"type": "string", "minLength": 1, "maxLength": 256},
+        "message_key": {"type": "string", "minLength": 1, "maxLength": 256,
+            "description": "For a T3 notification, use its exact message_key with read_ref; this never selects the latest unrelated reply."}},
+        "oneOf": [{"required": ["read_ref"], "maxProperties": 1},
+                  {"required": ["operation_key"], "maxProperties": 1},
+                  {"required": ["read_ref", "message_key"], "maxProperties": 2,
+                   "properties": {"read_ref": {"pattern": "^t3-reply-[0-9a-f]{64}$"},
+                                  "message_key": {"pattern": "^t3-native-(reply|question)-[0-9a-f]{64}$"}}}],
         "additionalProperties": False}
 
 

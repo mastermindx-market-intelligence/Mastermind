@@ -25,7 +25,7 @@ def validate_reply_event_host_config(value):
         return None
     default_fields={"armed","mcp_config_path","storage_key_path","storage_key_id"}
     extras=set(value)-default_fields
-    if extras not in (set(), {"dot_canary_enabled"}):
+    if not extras <= {"dot_canary_enabled", "native_t3"}:
         raise ValueError("explicit receiver and storage custody inputs required")
     if not default_fields <= set(value):
         raise ValueError("original receiver custody inputs required")
@@ -36,7 +36,11 @@ def validate_reply_event_host_config(value):
             raise ValueError("explicit absolute host custody path required")
     if type(value["storage_key_id"]) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,95}",value["storage_key_id"]) is None:
         raise ValueError("storage key identity unavailable")
-    return dict(value)
+    result = dict(value)
+    if "native_t3" in value:
+        from .t3_reply_native_access import validate_native_return_config
+        result["native_t3"] = validate_native_return_config(value["native_t3"])
+    return result
 
 
 def _provisioned_cipher(path, key_id, *, control_uid):
@@ -77,7 +81,17 @@ def build_installed_reply_event_host(runtime, value, *, release_sha, peer_uid,
     fabric = RuntimeFabricTargetProjector(runtime)
     codex = RuntimeCodexTargetProjector(fabric,owner_configured=native_owner_configured)
     kwargs = {} if service_call is None else {"service_call":service_call}
-    returns = RuntimeSessionReturn(runtime,fabric=fabric,codex=codex,socket_path=Path(dialogue_socket_path),**kwargs)
+    native_kwargs = {}
+    if "native_t3" in config:
+        if policies.native_returns_selected() is not True:
+            raise ValueError("original native returns are not selected by the authenticated receiver")
+        from .t3_reply_native_access import InstalledT3ReplyNativeAccess
+        from .t3_reply_events import T3OriginalReplySource
+        native_access = InstalledT3ReplyNativeAccess(policies, config["native_t3"])
+        native_kwargs["t3_replies"] = T3OriginalReplySource(runtime, native_access,
+            current=native_access.current, clock=lambda: int(time.time()), enabled=True)
+    returns = RuntimeSessionReturn(runtime,fabric=fabric,codex=codex,
+        socket_path=Path(dialogue_socket_path), **kwargs, **native_kwargs)
     # The original installed host stays byte-for-byte behavior compatible when
     # the additional canary is absent or disabled. An explicit host opt-in alone
     # grants no channel/account authority: the *same sealed MCP document*
@@ -102,4 +116,5 @@ def build_installed_reply_event_host(runtime, value, *, release_sha, peer_uid,
     return RuntimeReplyEventHost(
         returns,cipher,policies,clock=lambda:int(time.time()),enabled=True,
         canary_policy_provider=canary_provider,
+        **({"native_monitor_enabled": True} if native_kwargs else {}),
     )
