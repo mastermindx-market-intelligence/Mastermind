@@ -335,6 +335,30 @@ def transport_capability_action_set(digest_value: Any):
     return None
 
 
+def transport_capability_surface_actions(digest_value: Any):
+    """Return the surface-action set a peer presenting this digest is held to.
+
+    Both admitted releases speak the same surface actions; any other digest
+    is unknown and the presenting peer is refused: ``None``.
+    """
+
+    if digest_value in (
+        transport_capability_digest(),
+        PREVIOUS_TRANSPORT_CAPABILITY_DIGEST,
+    ):
+        return {action.value for action in SurfaceAction}
+    return None
+
+
+def transport_capability_admits_census(digest_value: Any) -> bool:
+    """Census rides the same two admitted releases; unknown digests refuse."""
+
+    return digest_value in (
+        transport_capability_digest(),
+        PREVIOUS_TRANSPORT_CAPABILITY_DIGEST,
+    )
+
+
 def _validate_transport_message(
     value: Any,
     *,

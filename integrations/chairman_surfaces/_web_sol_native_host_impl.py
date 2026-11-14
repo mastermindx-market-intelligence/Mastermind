@@ -422,6 +422,10 @@ def complete_server_handshake(
     )
     if second["challenge_nonce"] == first["challenge_nonce"]:
         raise NativeHostError("transport_challenge_reused")
+    if second["capability_digest"] != first["capability_digest"]:
+        # One connection presents exactly one capability release; admitting
+        # each hello independently would let a peer mix two admitted sets.
+        raise NativeHostError("transport_digest_changed")
     final_ack = wsp.build_transport_hello_ack(second, boot_nonce=boot_nonce)
     write_frame(
         writer,
@@ -903,6 +907,7 @@ def _serve_client(
     expected_instance_id: str,
     boot_nonce: str,
     extension_actions=None,
+    extension_digest=None,
     monotonic: Callable[[], float] = time.monotonic,
 ) -> None:
     timeout = _validate_timeout_seconds(timeout_seconds)
@@ -935,6 +940,13 @@ def _serve_client(
                 request = census.validate_census_window(request)
                 if request["adapter_instance_id"] != expected_instance_id:
                     raise NativeHostError("transport_instance_mismatch")
+                if (not wsp.transport_capability_admits_census(final_ack["capability_digest"])
+                        or not wsp.transport_capability_admits_census(extension_digest)):
+                    # Census joins the browser family's intersection: an
+                    # absent or unknown digest at either end refuses before
+                    # anything reaches Chrome. No census receipt builder
+                    # exists for a refusal, so the connection closes typed.
+                    raise NativeHostError("transport_capability_mismatch")
                 deadline = Deadline(ends_at=started + census.TOTAL_SECONDS)
             elif request.get("schema") == browser.REQUEST_SCHEMA:
                 request = browser.validate_window(request)
@@ -963,6 +975,21 @@ def _serve_client(
                         monotonic=monotonic,
                     )
                     return
+            elif request.get("schema") == wsp.ACTION_SCHEMA:
+                request = wsp.validate_request(request)
+                surface = wsp.transport_capability_surface_actions(
+                    final_ack["capability_digest"]
+                )
+                peer_surface = wsp.transport_capability_surface_actions(
+                    extension_digest
+                )
+                if (surface is None or request["action"] not in surface
+                        or peer_surface is None
+                        or request["action"] not in peer_surface):
+                    # Surface actions join the same intersection; like census
+                    # there is no refusal receipt shape, so the connection
+                    # closes typed instead of dispatching one end cannot do.
+                    raise NativeHostError("transport_capability_mismatch")
             receipt = forward_request(
                 request,
                 write_chrome=lambda document: _write_chrome(
@@ -1001,6 +1028,7 @@ def _serve_guarded_client(
     expected_instance_id: str,
     boot_nonce: str,
     extension_actions=None,
+    extension_digest=None,
     action_gate: threading.Lock,
     gate_pre_acquired: bool = False,
 ) -> str:
@@ -1022,6 +1050,7 @@ def _serve_guarded_client(
             expected_instance_id=expected_instance_id,
             boot_nonce=boot_nonce,
             extension_actions=extension_actions,
+            extension_digest=extension_digest,
         )
     except ChromeChannelError:
         raise
@@ -1078,6 +1107,7 @@ def run_native_host(
     extension_actions = wsp.transport_capability_action_set(
         extension_ack["capability_digest"]
     )
+    extension_digest = extension_ack["capability_digest"]
     server = open_private_server(destination, owner_uid=uid)
     action_gate = threading.Lock()
     fatal_event = threading.Event()
@@ -1100,6 +1130,7 @@ def run_native_host(
                 expected_instance_id=instance_id,
                 boot_nonce=boot_nonce,
                 extension_actions=extension_actions,
+                extension_digest=extension_digest,
                 action_gate=action_gate,
                 gate_pre_acquired=True,
             )
