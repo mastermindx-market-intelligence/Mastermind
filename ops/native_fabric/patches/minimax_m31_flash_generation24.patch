@@ -1,0 +1,277 @@
+--- a/ext/pick.py
++++ b/ext/pick.py
+@@ -1117,6 +1117,45 @@
+     return "-"
+ 
+ 
++
++
++# The existing signed pools.yaml is the ONLY model-selection policy owner.
++# The opt-in task_models map never grants provider, role, quota, host or START
++# authority. Invalid policy fails closed instead of silently choosing a model.
++_MINIMAX_SUPPORTED_MODELS = frozenset({"MiniMax-M3", "MiniMax-M3.1-Flash"})
++_MINIMAX_LABOR_MODEL_CLASSES = frozenset({
++    "executor", "mechanical", "census", "extract", "execute", "fix_build",
++    "verify", "heal", "build", "fix", "tests-only-repair",
++})
++
++
++def _minimax_signed_model_policy(doc: Optional[Dict[str, Any]]) -> Tuple[bool, str]:
++    source = doc if isinstance(doc, dict) else load_pools()
++    # A missing, invalid, or incomplete signed MiniMax policy must HOLD.
++    # Do not silently synthesize a default or treat a malformed pool map as
++    # a valid provider grant. The incumbent M3 fallback stays in the
++    # non-policy _default_model helper, not in this admission check.
++    if type(source) is not dict:
++        return False, "invalid MiniMax signed model policy"
++    pools = source.get("pools")
++    if type(pools) is not dict:
++        return False, "invalid MiniMax signed model policy"
++    spec = pools.get("minimax")
++    if type(spec) is not dict:
++        return False, "invalid MiniMax signed model policy"
++    default = spec.get("default_model")
++    mapping = spec.get("task_models", {})
++    if (type(default) is not str or default not in _MINIMAX_SUPPORTED_MODELS
++            or type(mapping) is not dict
++            or len(mapping) > len(_MINIMAX_LABOR_MODEL_CLASSES)):
++        return False, "invalid MiniMax signed model policy"
++    if any(type(tc) is not str or tc not in _MINIMAX_LABOR_MODEL_CLASSES
++           or type(model) is not str or model not in _MINIMAX_SUPPORTED_MODELS
++           for tc, model in mapping.items()):
++        return False, "invalid MiniMax signed model policy"
++    return True, "ok"
++
++
+ def _default_model(pool: str, task_class: Optional[str] = None) -> str:
+     if pool == "glm":
+         if (task_class or "").strip():
+@@ -1352,6 +1391,10 @@
+             return False, f"{p} domain coordinator policy unavailable or unqualified"
+     if p == "cursor" and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):
+         return False, "cursor never for labor (R30)"
++    if p == "minimax":
++        valid_model_policy, reason = _minimax_signed_model_policy(doc)
++        if not valid_model_policy:
++            return False, reason
+     if p == "minimax" and tc in minimax_forbidden(doc):
+         return False, (
+             f"minimax refused for {tc}: labor tier, never judgment (R20)"
+@@ -1613,8 +1656,19 @@
+     # Preserve the exact caller-authorized Grok Build version. A default
+     # upgrade must never relabel a historical explicitly pinned 4.6 job.
+     pinned = ((pool == "grok" and model in ("grok-4.6", "grok-4.7"))
+-              or (pool == "cursor" and model == "cursor-grok-4.6-high"))
+-    model = (model if pinned else None) or spec.get("default_model") or _default_model(pool, task_class)
++              or (pool == "cursor" and model == "cursor-grok-4.6-high")
++              or (pool == "minimax" and str(model or "").casefold() in
++                  {"minimax-m3", "minimax-m3.1-flash"}))
++    if pool == "minimax" and pinned:
++        model = ("MiniMax-M3.1-Flash" if str(model).casefold() ==
++                 "minimax-m3.1-flash" else "MiniMax-M3")
++    task_model = None
++    if pool == "minimax" and not pinned:
++        # Only an explicitly reviewed, signed task-level assignment opts in.
++        # No implicit model migration for existing default M3 requests.
++        per_task = spec.get("task_models", {}) if isinstance(spec, dict) else {}
++        task_model = per_task.get(task_class.lower()) if isinstance(per_task, dict) else None
++    model = (model if pinned else task_model) or spec.get("default_model") or _default_model(pool, task_class)
+     if pool == "bailian" and task_class.lower() == "review":
+         model = spec.get("review_model") or "qwen3.8-max"
+     return model, suffix
+@@ -1854,6 +1908,7 @@
+             view = placement_view.build_placement_view(
+                 registry, host_pick.HOSTS_STATE_DIR, mode, now=now,
+                 excluded=mode_excluded, plan_path=None, state_reader=reader,
++                **({"max_age": 180} if pool == "minimax" else {}),
+                 **({"selection_key": route_key} if host == "auto" and route_key is not None else {}),
+             )
+             chosen = view.get("host_choice")
+@@ -1970,9 +2025,12 @@
+     qwen_candidate_model = None
+     if host is not None:
+         try:
+-            glm_candidate_model = _selection_model("glm", task_class, load_pools(), needs,
+-                model=(requested_model if requested_model not in
+-                       ("cursor-grok-4.6-high", "grok-4.6", "grok-4.7") else None))[0]
++            # Do not interpret pinned MiniMax/Grok model identities as GLM account selection.
++            glm_models = {str(value).casefold() for value in _glm_models(load_pools()).values()}
++            glm_pin = (requested_model if str(requested_model or "").casefold()
++                       in glm_models else None)
++            glm_candidate_model = _selection_model(
++                "glm", task_class, load_pools(), needs, model=glm_pin)[0]
+             qwen_candidate_model = _selection_model("bailian", task_class, load_pools(), needs)[0]
+             routes = _eligible_host_routes(
+                 host, glm_model=glm_candidate_model,
+@@ -2052,7 +2110,10 @@
+         # This exact high-effort alias was observed in the authenticated Cursor
+         # catalog. Capability/host, economic, quality and independence gates
+         # below are still required; catalog presence is not worker admission.
+-    if explicit_model and not native_alias and not grok_pin:
++    minimax_pin = explicit_model in {"minimax-m3", "minimax-m3.1-flash"}
++    if minimax_pin and forced != "minimax":
++        return "NONE reason=exact MiniMax model requires minimax pool"
++    if explicit_model and not native_alias and not grok_pin and not minimax_pin:
+         # Exact worker pinning is never an arbitrary model promotion. Permit
+         # the current task-qualified default for its explicitly chosen pool;
+         # keep the pre-existing full GLM C2 escalation narrow and witnessed.
+@@ -2096,7 +2157,7 @@
+             return "NONE reason=go_short_capability_only_for_c0_c1"
+         if host_modes is not None and forced not in host_modes:
+             return f"NONE reason=pool {forced} has no eligible mode on requested host"
+-        selected_model = (explicit_model or None) if forced in ("glm", "grok") or native_alias else None
++        selected_model = (explicit_model or None) if forced in ("glm", "grok", "minimax") or native_alias else None
+         ok, reason = policy_allows(forced, tc, doc, model=selected_model)
+         if not ok:
+             return f"NONE reason={reason}"
+--- a/ext/sub.sh
++++ b/ext/sub.sh
+@@ -207,12 +207,12 @@
+   local compact="${POOL_AUTO_COMPACT_WINDOW_TOKENS:-}" default_turns=120 turns=""
+ 
+   case "$pool:$model" in
+-    minimax:MiniMax-M3|minimax:minimax-m3|glm:glm-5.3|glm:glm-5.3-*|go-claude:minimax-m3|go-claude:MiniMax-M3)
++    minimax:MiniMax-M3|minimax:minimax-m3|minimax:MiniMax-M3.1-Flash|minimax:minimax-m3.1-flash|glm:glm-5.3|glm:glm-5.3-*|go-claude:minimax-m3|go-claude:MiniMax-M3)
+       [ -n "$context" ] || context=1000000
+       ;;
+   esac
+   case "$pool:$model" in
+-    minimax:MiniMax-M3|minimax:minimax-m3|glm:*flash*|go-claude:minimax-m3|go-claude:MiniMax-M3)
++    minimax:MiniMax-M3|minimax:minimax-m3|minimax:MiniMax-M3.1-Flash|minimax:minimax-m3.1-flash|glm:*flash*|go-claude:minimax-m3|go-claude:MiniMax-M3)
+       default_turns=240
+       ;;
+   esac
+@@ -237,7 +237,12 @@
+     fi
+     export CLAUDE_CODE_MAX_CONTEXT_TOKENS="$context"
+     if [ -z "$compact" ] && [ "$context" -ge 1000000 ]; then
+-      compact=900000
++      # Official MiniMax M3.1 Claude Code guidance recommends 512K compaction.
++      # Preserve legacy 900K for M3 and other worker models.
++      case "$pool:$model" in
++        minimax:MiniMax-M3.1-Flash|minimax:minimax-m3.1-flash) compact=524288 ;;
++        *) compact=900000 ;;
++      esac
+     fi
+   fi
+   if [ -n "$compact" ]; then
+@@ -748,6 +753,22 @@
+ _mm_cfg="$HOME/.minimax/config.json"
+ ANTHROPIC_BASE_URL="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))[\"anthropic_base_url\"])" "$_mm_cfg")" || exit 1
+ ANTHROPIC_AUTH_TOKEN="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))[\"api_key\"])" "$_mm_cfg")" || exit 1
++# M3.1 Flash uses the existing MiniMax M Plan Subscription Key only.
++# Check inside the slot.py payload, after the incumbent admission and
++# credential read. Legacy M3 routes remain unchanged; never print keys.
++case "$2" in
++  MiniMax-M3.1-Flash|minimax-m3.1-flash)
++    case "$ANTHROPIC_AUTH_TOKEN" in
++      sk-cp-*) ;;
++      *) echo "MINIMAX_M31_SUBSCRIPTION_KEY_REQUIRED" >&2; exit 78 ;;
++    esac ;;
++esac
++# Claude Code needs the documented [1m] qualifier for long client context.
++# Keep the original bare model for provider quota and preflight accounting.
++_mm_cli_model="$2"
++case "$2" in
++  MiniMax-M3.1-Flash|minimax-m3.1-flash) _mm_cli_model="MiniMax-M3.1-Flash[1m]" ;;
++esac
+ export ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN
+ export CLAUDE_CONFIG_DIR="$4"
+ export PATH="$(cd "$(dirname "$0")" && pwd)/lane_bin:$PATH"   # 2026-09-19 seat: executor guard shims (gh/git)
+@@ -764,12 +785,12 @@
+   # capture is performed by the trusted Fabric wrapper before this process starts.
+   exec claude -p "${_mm_prompt_args[@]}" --append-system-prompt "$6" --output-format text \
+     --permission-mode dontAsk --permission-prompts none --max-turns 60 \
+-    --tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep" --model "$2"
++    --tools "Read,Glob,Grep" --allowedTools "Read,Glob,Grep" --model "$_mm_cli_model"
+ fi
+ python3 "${10}/capacity_preflight.py" minimax "$2"
+ _mm_probe_rc=$?
+ if [ "$_mm_probe_rc" -ne 0 ]; then exit "$_mm_probe_rc"; fi
+-exec claude -p "${_mm_prompt_args[@]}" --output-format stream-json --verbose --dangerously-skip-permissions --max-turns "$8" --model "$2" \
++exec claude -p "${_mm_prompt_args[@]}" --output-format stream-json --verbose --dangerously-skip-permissions --max-turns "$8" --model "$_mm_cli_model" \
+   --strict-mcp-config --mcp-config "$7"
+ ' _ "$LAUNCH_CWD" "${MODEL:-MiniMax-M3}" "$PROMPT" "$HERE/../minimax_claude_home" "${MINIMAX_VISUAL_HELPER:-0}" "$_mm_visual_system" "$_mm_mcp_config" "$CLAUDE_WORKER_MAX_TURNS" "$_SUB_PROMPT_FILE_MODE" "$HERE" > "$_json" || _rc=$?
+     if [ "${MINIMAX_VISUAL_HELPER:-0}" = "1" ]; then
+--- a/ext/mm_codex_exec.sh
++++ b/ext/mm_codex_exec.sh
+@@ -25,7 +25,7 @@
+ # the host's mutable config is not evidence that a launched worker uses it.
+ CODEX_CONTEXT_ARGS=()
+ case "$MODEL" in
+-  MiniMax-M3|minimax-m3)
++  MiniMax-M3|minimax-m3|MiniMax-M3.1-Flash|minimax-m3.1-flash)
+     _ctx="${POOL_MAX_CONTEXT_TOKENS:-1000000}"
+     case "$_ctx" in ''|*[!0-9]*|0*) echo "CODEX_CONTEXT_REFUSED reason=window_invalid" >&2; exit 78 ;; esac
+     if [ "${#_ctx}" -gt 7 ] || [ "$_ctx" -lt 100000 ] || [ "$_ctx" -gt 1000000 ]; then
+@@ -123,6 +123,15 @@
+ trap cleanup_codex_home EXIT
+ cp "$SRC_HOME/config.toml" "$CODEX_SCRATCH/config.toml"
+ export MINIMAX_API_KEY="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.minimax/config.json")))["api_key"])')"
++# This is checked only after the original MiniMax slot is acquired.
++# M3.1 Flash must never silently use a pay-as-you-go API key.
++case "$MODEL" in
++  MiniMax-M3.1-Flash|minimax-m3.1-flash)
++    case "$MINIMAX_API_KEY" in
++      sk-cp-*) ;;
++      *) echo "MINIMAX_M31_SUBSCRIPTION_KEY_REQUIRED" >&2; exit 78 ;;
++    esac ;;
++esac
+ 
+ if [ ! -f "$PROMPT_FILE" ]; then
+   echo "mm_codex_exec: prompt file not found: $PROMPT_FILE" >&2
+--- a/ext/host_pick.py
++++ b/ext/host_pick.py
+@@ -506,7 +506,8 @@
+ 
+ def choose_host(rows: List[Dict[str, Any]],
+                 prefer_remote: Optional[bool] = None,
+-                placement_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
++                placement_key: Optional[str] = None,
++                near_equal_score_gap: float = 0.025) -> Optional[Dict[str, Any]]:
+     """Choose a safe host; spread concurrent near-equal candidates when keyed.
+ 
+     HOST_PICK_SELECTION_KEY must be a unique task/attempt identity supplied by
+@@ -514,7 +515,12 @@
+     Without a key the historical deterministic ranking remains unchanged.
+     Physical LaneLease still serializes and validates every final admission.
+     """
+-    eligible = [row for row in rows if row["eligible"] and row["score"] is not None]
++    import math
++    # A malformed advisory score must never hijack or crash the host choice.
++    eligible = [row for row in rows
++                if row.get("eligible") is True
++                and type(row.get("score")) in (int, float)
++                and math.isfinite(row["score"])]
+     if not eligible:
+         return None
+     if prefer_remote is None:
+@@ -533,11 +539,15 @@
+         # hashing to near-equal candidates so a degraded host does not receive
+         # work just because its hash is larger.
+         import hashlib
++        if (type(near_equal_score_gap) is not float
++                or not math.isfinite(near_equal_score_gap)
++                or not 0.0 <= near_equal_score_gap <= 0.08):
++            raise ValueError("host_pick_near_equal_gap_invalid")
+         candidates = [r for r in eligible if not r["seat"]] if (
+             prefer_remote and any(not r["seat"] for r in eligible)) else eligible
+         highest = max(float(r["score"]) for r in candidates)
+         near_equal = [r for r in candidates
+-                      if highest - float(r["score"]) <= 0.025]
++                      if highest - float(r["score"]) <= near_equal_score_gap]
+         key_bytes = placement_key.encode("utf-8")
+         # Weighted rendezvous avoids routing many concurrent tasks to a legacy
+         # two-lane CI host when 25-slot adaptive hosts have equivalent scores.
+--- a/ext/placement_view.py
++++ b/ext/placement_view.py
+@@ -465,7 +465,8 @@
+     host_choice = (
+         chooser(eligible_for_choice, prefer_remote=True)
+         if selection_key is None else
+-        chooser(eligible_for_choice, prefer_remote=True, placement_key=selection_key)
++        chooser(eligible_for_choice, prefer_remote=True, placement_key=selection_key,
++                **({"near_equal_score_gap": 0.08} if mode == "minimax" else {}))
+     )
+     plan = _plan_status(
+         plan_path,

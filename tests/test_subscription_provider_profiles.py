@@ -32,6 +32,7 @@ def test_official_anthropic_compatibility_profiles_pin_supported_models():
     assert get_profile("alibaba-token-plan-personal").model_for("subagent") == "qwen3.8-flash"
     assert get_profile("alibaba-token-plan-personal").model_for("hard") == "qwen3.8-max"
     assert get_profile("minimax-token-plan").model_for() == "MiniMax-M3"
+    assert get_profile("minimax-token-plan").model_for("fast") == "MiniMax-M3.1-Flash"
 
 
 def test_default_model_class_cannot_be_promoted_to_hard():
