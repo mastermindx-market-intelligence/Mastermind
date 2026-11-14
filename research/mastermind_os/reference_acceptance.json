@@ -1,0 +1,168 @@
+{
+  "record_type": "offline_reference_validation",
+  "operation_key": "mastermind-os-rollout-contract-20260916-sol-001",
+  "round": "relationship-focus-source-repair",
+  "source_pin": "e8803ba3d3ee928d150d7dcac1a1e2bad2dc0d48",
+  "previous_candidate": "091592da12f28bb9a568b9ba0f668394b4bca4b1",
+  "disposition": "DRAFT_HOLD_BUILT_NOT_PROVEN",
+  "production_acceptance_granted": false,
+  "runtime_or_provider_effect": false,
+  "external_worker_started": false,
+  "browser_policy_changed": false,
+  "source_checks": {
+    "passed": 16,
+    "failed": 0,
+    "latest_exit_code": 0,
+    "scope": "actual pure inline JavaScript model + source existence + CSP hash consistency; not DOM/browser behavior",
+    "javascript_scripts": [
+      {
+        "script": 0,
+        "sha256": "3a312f24477799918ca000bdb811290d9450bf3ea03f77d5423da27ec309c66b",
+        "exit_code": 0
+      },
+      {
+        "script": 1,
+        "sha256": "771b48d24262a8208e88878dde2782dba10ba7696bdaead361a44b6ce456681f",
+        "exit_code": 0
+      }
+    ],
+    "stdout_sha256": "ecf57d762b443151696ef4727347520d0d5715719bac1e0cd93caddf627ffa61"
+  },
+  "test_collection": {
+    "total": 55,
+    "source_only": 16,
+    "browser_dependent": 39
+  },
+  "red_evidence": {
+    "selection": "presentation_model",
+    "failed": 11,
+    "passed": 0,
+    "reason": "shared executable relationship/focus module absent before implementation",
+    "log_sha256": "62478f274051a33db68aec9b351031cffc7b4ca677709a277a49c2691e609950"
+  },
+  "green_evidence": {
+    "log_sha256": "911f76179c699720e3ce4c622ed7687d69a35bb5c1661cf8dc7a51e2d1076964"
+  },
+  "mutation_evidence": [
+    {
+      "mutant": "remove_duplicate_edge_guard",
+      "test_selection": "presentation_model_rejects_ambiguous_design_relationships",
+      "exit_code": 1,
+      "summary": "1 failed, 3 passed, 48 deselected in 0.29s",
+      "log_sha256": "42558fd38a4e12a01823ade60752391f1fb0ebebcf4450aa1bdb0f8f03f58334"
+    },
+    {
+      "mutant": "accept_disconnected_focus",
+      "test_selection": "presentation_model_selects_connected_focus_return",
+      "exit_code": 1,
+      "summary": "2 failed, 1 passed, 49 deselected in 0.32s",
+      "log_sha256": "6351a15a7cf295ca388f143f340a83ee7a9abd36cf6f53c81b5c078d1bd42f72"
+    },
+    {
+      "mutant": "erase_relationships",
+      "test_selection": "presentation_model_has_real_typed_edges",
+      "exit_code": 1,
+      "summary": "1 failed, 51 deselected in 0.18s",
+      "log_sha256": "9fd233ed39d47f9f605b43a2b09a774906ebcf0efa35707d24317fd0ed072bb9"
+    }
+  ],
+  "browser_campaign": {
+    "status": "NOT_RUN_ON_REPAIRED_CANDIDATE",
+    "reason": "Historical managed Chromium navigation refusal remains unresolved; no retry or workaround",
+    "historical_candidate": "091592da12f28bb9a568b9ba0f668394b4bca4b1",
+    "historical_file_navigation": "ERR_BLOCKED_BY_ADMINISTRATOR",
+    "historical_loopback_navigation": "ERR_BLOCKED_BY_ADMINISTRATOR",
+    "screenshots_produced": 0,
+    "visual_acceptance": false,
+    "accessibility_acceptance": false,
+    "cross_host_browser_retry": false,
+    "dom_emulation_used": false
+  },
+  "environment": {
+    "scope": "current_native_source_check_environment",
+    "python": "3.14.7",
+    "node": "v26.5.0"
+  },
+  "open_gates": [
+    "39 actual browser cases including DOM/event/focus/diagram layout/CSP enforcement are unverified",
+    "Exact real mission + authorized content producer/client contract must be consumed through current owners",
+    "R2 freeze #704 requires same-writer repair and independent exact-head review",
+    "No source-release, installed product or production acceptance"
+  ],
+  "integration_intake": {
+    "carrier": "slack:C0BSBM78V1N/1789324397.992989",
+    "original_message_ts": "1789555914.549109",
+    "review_message_ts": "1789593323.110469",
+    "principal_consumption_ts": "1789593485.305139",
+    "state": "PRINCIPAL_CONSUMED_REPAIR_RELAY_REPORTED",
+    "new_child_assignment": false,
+    "repaired_head_acceptance": false
+  },
+  "review_evidence": {
+    "pr": 704,
+    "head": "8b94141106200f0c48b6d033cca19a8007ef0031",
+    "review": 5228415542,
+    "verdict": "REQUEST_CHANGES",
+    "producer_counterexample_sha256": "777d203f8e7348a882b4e93e80076ce45986b98863f2379e81e873b8852712af",
+    "follow_through": {
+      "head": "c09672fc50a5895e7552936d3e585455424d85ae",
+      "review": 5228672592,
+      "verdict": "REQUEST_CHANGES",
+      "repair_delivery_ts": "1789595166.330749",
+      "repair_completion_not_asserted": true
+    }
+  },
+  "artifact_sha256": {
+    "docs/superpowers/specs/2026-09-16-mastermind-os-integrated-rollout-design.md": "60a24320dea7ef587191705b8f94e5d6a1663e3586e879007f4cd578f711a099",
+    "docs/superpowers/plans/2026-09-16-mastermind-os-reference-workspace.md": "920d2eb3cd3cf6b12a80ba1aa5d1cf39f2493e709e79ecc2abdc2ac24388c9b7",
+    "research/mastermind_os/README.md": "845ad1e938c50cd1ef49356505c816f9cab50b9cdaf362b53e797e9bad69fb4f",
+    "research/mastermind_os/test_reference_workspace.py": "7f33eb60e1184ed4bd5cce044ed40dd52a17b0fc9c8e4354dc6648e9d7659695",
+    "research/mastermind_os/reference_workspace.html": "6e8d2a5643521e217fb3ad40b0bb87b1fc604bd2bf03cd395539617641d49419"
+  },
+  "next_action": "Consume the repaired #704 freeze plus exact incumbent reader/DF1 contracts, preserve source custody, and admit only the qualified real mission-workspace slice. Browser/installed gates remain open.",
+  "native_source_checks": {
+    "observed_at": "2026-09-19T05:45:24Z",
+    "passed": 16,
+    "failed": 0,
+    "exit_code": 0,
+    "stdout_sha256": "ecf57d762b443151696ef4727347520d0d5715719bac1e0cd93caddf627ffa61",
+    "python": "3.14.7",
+    "node": "v26.5.0",
+    "inline_script_syntax_exit_codes": [
+      0,
+      0
+    ],
+    "browser_selected": false,
+    "previous_timeouts_superseded_for_current_source_proof_only": true
+  },
+  "continuation_recovery": {
+    "procedure_pin": "5ee11ab1e993616f3568cfca4069cb21fa61fd8f",
+    "workspace_reused": true,
+    "prepared_files_match_checkpoint": true,
+    "source_test_or_help_process_matches": 0,
+    "source_write_uncertainty": false,
+    "original_published_head": "091592da12f28bb9a568b9ba0f668394b4bca4b1"
+  },
+  "historical_environment": {
+    "scope": "pre_recovery_original_reference_checkpoint",
+    "python": "3.13.5",
+    "node": "v22.16.0"
+  },
+  "independent_source_review": {
+    "review_head": "70765be17a28f3db539a636ffebcc89c5e548e93",
+    "return_ts": "1789600165.491269",
+    "verdict": "REQUEST_CHANGES",
+    "firm_blocker": "acceptance record carried two unqualified contradictory environment epochs",
+    "hardening_note": "three application focus call sites bypassed the shared connected-target selector",
+    "repair_state": "REPAIRED_IN_NEXT_CANDIDATE_AWAITING_EXACT_HEAD_REREVIEW"
+  },
+  "hosted_codeql_previous_alert": {
+    "head": "b2c21525f9b3a9a790bfa577458fe161d983b13d",
+    "conclusion": "failure",
+    "title": "Bad HTML filtering regexp",
+    "path": "research/mastermind_os/test_reference_workspace.py",
+    "root_cause": "case-sensitive regex used as an HTML script extractor in the test harness",
+    "local_repair": "structural HTMLParser extraction plus mixed-case SCRIPT regression",
+    "hosted_rerun_state": "AWAITING_NEXT_PUSH"
+  }
+}
