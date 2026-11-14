@@ -653,6 +653,15 @@ def _morph_deepseek_native(route: Route, model: str) -> bool:
             and model in ("deepseek-v4.1-flash", "deepseek-v4.1-flash-1017"))
 
 
+def _morph_anthropic_version_headers(route: Route) -> dict[str, str]:
+    """Morph's native Messages route uses the standard versioned API contract."""
+    url = urlsplit(route.base_url)
+    if (route.wire == WIRE_ANTHROPIC and url.scheme == "https"
+            and url.netloc == "api.morphllm.com"):
+        return {"anthropic-version": "2023-06-01"}
+    return {}
+
+
 def _session_headers(route: Route, payload: dict, admission=None) -> dict[str, str]:
     """A stable, header-safe session id for upstreams that route by session."""
     if not route.session_header:
@@ -1216,6 +1225,7 @@ def create_app(cfg: Settings | None = None, *,
             "POST", f"{_route_base_url(route).rstrip('/')}/v1/messages/count_tokens",
             headers={**_upstream_auth_headers(route, authorization),
                      **_session_headers(route, payload),
+                     **_morph_anthropic_version_headers(route),
                      **({"anthropic-beta": beta_header} if beta_header else {}),
                      "content-type": "application/json",
                      "accept-encoding": "identity"},
@@ -1237,6 +1247,7 @@ def create_app(cfg: Settings | None = None, *,
         upstream: httpx.AsyncClient = app.state.upstream
         request_headers = {**_upstream_auth_headers(route, authorization),
                            **_session_headers(route, payload, admission),
+                           **_morph_anthropic_version_headers(route),
                            **({"anthropic-beta": beta_header} if beta_header else {}),
                            "content-type": "application/json", "accept-encoding": "identity"}
         upstream_request = upstream.build_request("POST",
