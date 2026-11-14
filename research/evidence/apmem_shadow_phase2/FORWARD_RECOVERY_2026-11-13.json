@@ -1,0 +1,113 @@
+{
+  "schema": "mastermind.volatility_forward_recovery.v1",
+  "origin": "2026-11-13",
+  "old_attempt_preserved": "research/apmem_shadow/phase2/evidence/forward_availability.json",
+  "old_attempt": "ABSTAIN_INPUT_UNAVAILABLE",
+  "recovery": "existing approved Tiingo EOD reader; complete single-provider source, not imputation",
+  "receipt": {
+    "QQQ": {
+      "adapter": "tiingo_eod_raw_cash_distribution.v1",
+      "instrument": "QQQ",
+      "origin": "2026-11-13",
+      "source_raw_sha256": "fd8f7bd5e89a4c6cb6da69bb695ce94ba9a21ef4382a1d363fedc2c1d0999d68",
+      "source_request_path": "/tiingo/daily/QQQ/prices?endDate=2026-11-13&startDate=2010-01-01",
+      "captured_at": "2026-11-14T01:49:39.523745+00:00",
+      "price_basis": "vendor_raw_ohlc_no_adj_fields",
+      "cash_distribution_basis": "vendor_divCash_no_separate_supplemental_distribution",
+      "split_mapping": "all_vendor_splitFactor_1_to_no_unapplied_event",
+      "historical_first_availability": null,
+      "price_or_distribution_imputation": false,
+      "raw_rows_retained_separately": true,
+      "sha256": "df0a5bc5ada1cef01a26f29b9d00b0156b75143d6472191acae3a4f1a43fc169",
+      "rows": 4243,
+      "source": "Tiingo via existing approved EOD reader",
+      "interface_filename_note": "legacy neutral CLI input filename; data vendor is explicitly Tiingo"
+    },
+    "SPY": {
+      "adapter": "tiingo_eod_raw_cash_distribution.v1",
+      "instrument": "SPY",
+      "origin": "2026-11-13",
+      "source_raw_sha256": "e433c3770f29b990fb8cc05e1ecd97f4030b72c86b38926695676bab836fea4a",
+      "source_request_path": "/tiingo/daily/SPY/prices?endDate=2026-11-13&startDate=2010-01-01",
+      "captured_at": "2026-11-14T01:49:39.846389+00:00",
+      "price_basis": "vendor_raw_ohlc_no_adj_fields",
+      "cash_distribution_basis": "vendor_divCash_no_separate_supplemental_distribution",
+      "split_mapping": "all_vendor_splitFactor_1_to_no_unapplied_event",
+      "historical_first_availability": null,
+      "price_or_distribution_imputation": false,
+      "raw_rows_retained_separately": true,
+      "sha256": "8c3d652b8af521aa1baa46d655db7c9a8f81e6598bd8b261223fa1bf940e4f70",
+      "rows": 4243,
+      "source": "Tiingo via existing approved EOD reader",
+      "interface_filename_note": "legacy neutral CLI input filename; data vendor is explicitly Tiingo"
+    },
+    "IWM": {
+      "adapter": "tiingo_eod_raw_cash_distribution.v1",
+      "instrument": "IWM",
+      "origin": "2026-11-13",
+      "source_raw_sha256": "aa1e9af2ec85c0265325beb8258fef735e60fb85be967feeae114d4c7b594126",
+      "source_request_path": "/tiingo/daily/IWM/prices?endDate=2026-11-13&startDate=2010-01-01",
+      "captured_at": "2026-11-14T01:49:40.176446+00:00",
+      "price_basis": "vendor_raw_ohlc_no_adj_fields",
+      "cash_distribution_basis": "vendor_divCash_no_separate_supplemental_distribution",
+      "split_mapping": "all_vendor_splitFactor_1_to_no_unapplied_event",
+      "historical_first_availability": null,
+      "price_or_distribution_imputation": false,
+      "raw_rows_retained_separately": true,
+      "sha256": "4fee9d0c24ff9d592bb47076734a8a8ad38746d55971433f4029730e0c970998",
+      "rows": 4243,
+      "source": "Tiingo via existing approved EOD reader",
+      "interface_filename_note": "legacy neutral CLI input filename; data vendor is explicitly Tiingo"
+    }
+  },
+  "cross_source_diagnostics": [
+    {
+      "instrument": "QQQ",
+      "overlap_sessions": 4242,
+      "maximum_relative_ohlc_difference": {
+        "open": 0.008383668102562747,
+        "high": 0.022818417370659372,
+        "low": 0.025562837834210983,
+        "close": 0.0008441651048122223
+      },
+      "median_absolute_close_difference": 3.051757815342171e-06,
+      "days_with_close_difference_over_1pct": 0,
+      "source_is_complete_single_vendor_panel": true
+    },
+    {
+      "instrument": "SPY",
+      "overlap_sessions": 4242,
+      "maximum_relative_ohlc_difference": {
+        "open": 0.013905523403528575,
+        "high": 0.008721284621629133,
+        "low": 0.01318627143611062,
+        "close": 0.0011313034996267568
+      },
+      "median_absolute_close_difference": 4.8828125045474735e-06,
+      "days_with_close_difference_over_1pct": 0,
+      "source_is_complete_single_vendor_panel": true
+    },
+    {
+      "instrument": "IWM",
+      "overlap_sessions": 4242,
+      "maximum_relative_ohlc_difference": {
+        "open": 0.016169652554155034,
+        "high": 0.002552648509557498,
+        "low": 0.005943158495995027,
+        "close": 0.0038326666883220506
+      },
+      "median_absolute_close_difference": 2.7465820267025265e-06,
+      "days_with_close_difference_over_1pct": 0,
+      "source_is_complete_single_vendor_panel": true
+    }
+  ],
+  "source_code_commit": "1a7091ab97b34a29ba33905a053167a64fffc893",
+  "forward_record_sha256": "76a33f4f05d1cba899da059a91e7bd77637e83727385b6159b6ad1419c590776",
+  "forecast_instruments": 3,
+  "fixed_models_per_instrument": 5,
+  "horizons_per_model": 3,
+  "matured_forward_outcomes": 0,
+  "child_process_exit": 0,
+  "may_trade": false,
+  "background_monitoring": false
+}
