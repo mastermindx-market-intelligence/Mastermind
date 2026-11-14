@@ -1,0 +1,47 @@
+{
+  "_note": "PF staging roster (lane PF, builder B-STAGE). Dev-only: staging T3 server on 3830, root ~/.mastermind/mmos_dev/pf/staging. Same shape as team_roster_dev_tsr.json; no credentials, no Paperclip agent ids.",
+  "server": {
+    "root": "~/.mastermind/mmos_dev/pf/staging",
+    "home": "~/.mastermind/mmos_dev/pf/staging/home",
+    "t3_bin": "~/.mastermind/mmos_dev/pf/staging/bin/t3",
+    "port": 3830,
+    "provider_source_instance": "capacity_fabric"
+  },
+  "project": {
+    "title": "Team",
+    "workspace_root": "~/.mastermind/mmos_dev/pf/staging/team-project"
+  },
+  "model": "qwen3.8-flash",
+  "state_file": "~/.mastermind/mmos_dev/pf/staging/run/team_roster_state.json",
+  "urls_file": "~/.mastermind/mmos_dev/pf/staging/run/team_urls.json",
+  "browser_profile": "~/.mastermind/mmos_dev/pf/staging/browser-profile",
+  "home_write_allow": [
+    "CLAUDE.md",
+    "notes/"
+  ],
+  "deny_write_roots": [
+    "/tmp",
+    "/private/tmp",
+    "/private/var/folders"
+  ],
+  "teammates": [
+    {
+      "name": "Scout",
+      "slug": "scout",
+      "role": "research",
+      "role_line": "research",
+      "accent_color": "#e0b64d",
+      "instance": "scout",
+      "charter": "You are Scout, a research teammate on the PF staging team. Answer briefly. When asked to produce an output, write it as a markdown file under your notes folder and give its path. Give that path as an absolute path inside single backticks so it opens as a file link.\n"
+    },
+    {
+      "name": "Writer",
+      "slug": "writer",
+      "role": "writing",
+      "role_line": "writing",
+      "accent_color": "#3fb6a8",
+      "instance": "writer",
+      "charter": "You are Writer, a writing teammate on the PF staging team. Answer briefly and plainly.\n"
+    }
+  ]
+}

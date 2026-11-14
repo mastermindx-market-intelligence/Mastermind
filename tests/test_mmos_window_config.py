@@ -82,8 +82,11 @@ class TestConfigDirs:
         assert '$HOME/.mastermind/window"' in script
         assert '$HOME/.mastermind/mmos_dev/window-dev"' in script
         assert '$HOME/.mastermind/mmos_dev/window-dev-t8"' in script
+        # Lane PF: the Next bundle maps to its own dev folder, exactly like
+        # shell_mode.rs::fixed_config_dir("com.mastermind.os.next").
+        assert '$HOME/.mastermind/mmos_dev/window-next"' in script
 
-    def test_release_dev_and_t8_are_three_distinct_directories(self):
+    def test_release_dev_t8_and_next_are_four_distinct_directories(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             dirs = []
@@ -91,6 +94,7 @@ class TestConfigDirs:
                 ("release", ".mastermind/window"),
                 ("dev", ".mastermind/mmos_dev/window-dev"),
                 ("t8", ".mastermind/mmos_dev/window-dev-t8"),
+                ("next", ".mastermind/mmos_dev/window-next"),
             ]:
                 run_tool(
                     "write",
@@ -102,7 +106,7 @@ class TestConfigDirs:
                 )
                 dirs.append(home / expected)
                 assert (home / expected / "shell-url").exists(), bundle
-            assert len({str(d) for d in dirs}) == 3
+            assert len({str(d) for d in dirs}) == 4
             # The release file is not under any dev root.
             assert ".mastermind/mmos_dev" not in str(dirs[0])
 
@@ -609,6 +613,172 @@ class TestWriteShowClear:
             assert result.returncode != 0
             assert "symlink" in result.stderr
             assert stat_mod.S_ISLNK(linked.lstat().st_mode)  # untouched by the refusal
+
+
+class TestBoardUrl:
+    """Lane PF: the optional board origin — a second loopback origin stored
+    beside shell-url in the same fixed config folder. Origin-only spelling
+    (http://127.0.0.1:<port>, at most a trailing '/'), the same trust rules,
+    its own refusals, and `show`/`clear` cover it like the address."""
+
+    BOARD = "http://127.0.0.1:3196"
+    ADDR = "http://127.0.0.1:3780/env-1/thread-1"
+
+    def _next_dir(self, tmp):
+        return Path(tmp) / ".mastermind/mmos_dev/window-next"
+
+    def test_board_url_write_show_clear_round_trip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_tool(
+                "write", "--bundle", "next", "--url", self.ADDR,
+                "--board-url", self.BOARD, env_extra={"HOME": tmp},
+            )
+            config_dir = self._next_dir(tmp)
+            board = config_dir / "board-url"
+            assert board.exists()
+            assert stat.S_IMODE(board.stat().st_mode) == 0o600
+            assert board.read_text().strip() == self.BOARD
+            shown = run_tool("show", "--bundle", "next", env_extra={"HOME": tmp})
+            assert self.BOARD in shown.stdout
+            run_tool("clear", "--bundle", "next", env_extra={"HOME": tmp})
+            assert not board.exists()
+            assert not (config_dir / "shell-url").exists()
+            assert not (config_dir / "pair-helper").exists()
+
+    def test_board_url_refuses_anything_but_the_origin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for bad in [
+                "http://127.0.0.1:3196/board",
+                "http://127.0.0.1:3196/pair",
+                "http://127.0.0.1:3196//",
+                "http://127.0.0.1:3196/.",
+                "http://127.0.0.1:3196/?x=1",
+                "http://127.0.0.1:3196/#f",
+                "http://user:pass@127.0.0.1:3196",
+                "http://localhost:3196",
+                "https://127.0.0.1:3196",
+                "http://127.0.0.1",
+                "http://127.0.0.1:0",
+                "http://127.0.0.1:65536",
+                "http://127.0.0.1:99999999999999999999",
+                "http://127.0.0.1:3196\nhttp://127.0.0.1:3197",
+            ]:
+                with pytest.raises(subprocess.CalledProcessError):
+                    run_tool(
+                        "write", "--bundle", "next", "--url", self.ADDR,
+                        "--board-url", bad, env_extra={"HOME": tmp},
+                    )
+            assert not (self._next_dir(tmp) / "board-url").exists()
+
+    def test_board_url_accepts_boundary_ports_and_trailing_slash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for good in [
+                "http://127.0.0.1:1",
+                "http://127.0.0.1:65535",
+                "http://127.0.0.1:3196/",
+            ]:
+                run_tool(
+                    "write", "--bundle", "next", "--url", self.ADDR,
+                    "--board-url", good, env_extra={"HOME": tmp},
+                )
+                board = self._next_dir(tmp) / "board-url"
+                assert board.read_text().strip() == good, good
+
+    def test_write_without_board_url_keeps_an_existing_one(self):
+        # Unlike the pair helper (withdrawn by default), a board origin is an
+        # independent setting: editing the address must not drop it.
+        with tempfile.TemporaryDirectory() as tmp:
+            run_tool(
+                "write", "--bundle", "next", "--url", self.ADDR,
+                "--board-url", self.BOARD, env_extra={"HOME": tmp},
+            )
+            run_tool(
+                "write", "--bundle", "next",
+                "--url", "http://127.0.0.1:3780/env-1/thread-2",
+                env_extra={"HOME": tmp},
+            )
+            board = self._next_dir(tmp) / "board-url"
+            assert board.exists()
+            assert board.read_text().strip() == self.BOARD
+
+    def test_board_url_leaves_no_temporaries_and_is_0600(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_tool(
+                "write", "--bundle", "next", "--url", self.ADDR,
+                "--board-url", self.BOARD, env_extra={"HOME": tmp},
+            )
+            config_dir = self._next_dir(tmp)
+            names = sorted(p.name for p in config_dir.iterdir())
+            assert names == ["board-url", "shell-url"], names
+            for name in names:
+                assert stat.S_IMODE((config_dir / name).stat().st_mode) == 0o600
+            # A refused board write stages nothing and leaves the address.
+            result = run_tool(
+                "write", "--bundle", "next", "--url", self.ADDR,
+                "--board-url", "http://127.0.0.1:3196/board",
+                env_extra={"HOME": tmp}, check=False,
+            )
+            assert result.returncode != 0
+            names = sorted(p.name for p in config_dir.iterdir())
+            assert names == ["board-url", "shell-url"], names
+            assert (config_dir / "board-url").read_text().strip() == self.BOARD
+
+    def test_show_never_echoes_a_multiline_board_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_dir = self._next_dir(tmp)
+            config_dir.mkdir(parents=True)
+            (config_dir / "board-url").write_text(
+                "http://127.0.0.1:3196\nsecond line\n"
+            )
+            shown = run_tool("show", "--bundle", "next", env_extra={"HOME": tmp}, check=False)
+            assert shown.returncode == 0
+            assert "second line" not in shown.stdout
+            assert "3196" not in shown.stdout, "no part of a multi-line board file is echoed"
+            assert "(not shown: not a single line)" in shown.stdout
+
+    def test_board_url_refusals_name_the_reason_only_never_the_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for bad, needle in [
+                ("http://127.0.0.1:3196/?token=supersecret123", "supersecret123"),
+                ("http://user:pass@127.0.0.1:3196", "user:pass"),
+                ("http://127.0.0.1:3196/#token=supersecret123", "supersecret123"),
+            ]:
+                result = run_tool(
+                    "write", "--bundle", "next", "--url", self.ADDR,
+                    "--board-url", bad, env_extra={"HOME": tmp}, check=False,
+                )
+                assert result.returncode != 0, bad
+                assert needle not in result.stderr, f"refusal echoed the value: {needle}"
+                assert needle not in result.stdout, bad
+
+    def test_board_url_writer_refuses_dot_segment_and_backslash_spellings(self):
+        # REV-WIN LOW-3 parity: these spellings normalize to the exact
+        # origin in a URL parser (dot segments, WHATWG backslash → '/'),
+        # but the writer refuses them literally — and the Rust loader
+        # (parse_board_url) refuses them too, so both sides accept exactly
+        # the same spellings: the stricter rule wins.
+        with tempfile.TemporaryDirectory() as tmp:
+            for bad in [
+                "http://127.0.0.1:3196/./",
+                "http://127.0.0.1:3196/.",
+                "http://127.0.0.1:3196\\",
+                "http://127.0.0.1:3196/\\",
+            ]:
+                result = run_tool(
+                    "write", "--bundle", "next", "--url", self.ADDR,
+                    "--board-url", bad, env_extra={"HOME": tmp}, check=False,
+                )
+                assert result.returncode != 0, bad
+            assert not (self._next_dir(tmp) / "board-url").exists()
+
+    def test_board_url_loader_and_writer_share_the_name(self):
+        # Source contract: the Rust loader and the shell writer agree on the
+        # file name and the board has its own parser, like the address.
+        assert 'BOARD_URL_CONFIG_NAME: &str = "board-url"' in SHELL_MODE_RS
+        assert "fn parse_board_url" in SHELL_MODE_RS
+        script = CONFIG_TOOL.read_text()
+        assert "board-url" in script
+        assert "--board-url" in script
 
 
 class TestPairHelper:

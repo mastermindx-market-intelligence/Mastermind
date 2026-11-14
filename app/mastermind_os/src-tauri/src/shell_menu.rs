@@ -208,6 +208,51 @@ pub fn handle_event(app: &tauri::AppHandle, id: &str) {
 mod tests {
     use super::*;
 
+    /// Lane PF (B-WIN) source contract: the native Edit menu carries all six
+    /// standard items bound to their predefined selectors, is installed as
+    /// the app menu, and the View zoom items keep their accelerators and one
+    /// symmetric handler.
+    ///
+    /// This pins the finding that the menu is NOT the cause of the T8
+    /// keyboard table's ⌘C/⌘V gap: wry 0.55.1 routes Cmd+key to the web
+    /// process before the menu (WryWebView.performKeyEquivalent calls super
+    /// for a non-child webview), so ⌘A/⌘Z work through WebKit's native
+    /// editing while ⌘C/⌘V depend on the page's own clipboard handling. The
+    /// menu items here are correct (muda binds copy:/cut:/paste: to the
+    /// standard selectors with the Command accelerator); a regression that
+    /// dropped or mis-bound them would be caught here. It passes against the
+    /// current source — a regression guard, not a fix.
+    #[test]
+    fn edit_menu_and_zoom_accelerators_are_installed() {
+        let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/shell_menu.rs"))
+            .expect("shell_menu.rs source readable");
+        // All six standard Edit items are constructed as predefined items.
+        for item in ["undo", "redo", "cut", "copy", "paste", "select_all"] {
+            assert!(
+                source.contains(&format!("PredefinedMenuItem::{item}(app, None)")),
+                "missing predefined Edit item: {item}"
+            );
+        }
+        // They are placed in the Edit submenu in the standard order.
+        assert!(
+            source.contains("&[&undo, &redo, &sep_edit, &cut, &copy, &paste, &select_all]"),
+            "Edit submenu must carry the six items"
+        );
+        assert!(source.contains("\"Edit\""), "an Edit submenu must exist");
+        // The menu is installed as the app menu (NSApp.mainMenu on macOS).
+        assert!(source.contains("app.set_menu(menu)"), "the menu must be installed");
+        // The View zoom accelerators are present.
+        for accel in ["CmdOrCtrl+=", "CmdOrCtrl+-", "CmdOrCtrl+0"] {
+            assert!(source.contains(accel), "missing zoom accelerator: {accel}");
+        }
+        // One symmetric handler dispatches all three zoom ids through set_zoom.
+        assert!(
+            source.contains("\"shell-zoom-in\" | \"shell-zoom-out\" | \"shell-zoom-actual\""),
+            "the three zoom ids must share one handler"
+        );
+        assert!(source.contains("window.set_zoom(target)"), "zoom must call set_zoom");
+    }
+
     #[test]
     fn zoom_steps_clamp_at_the_bounds_and_reset() {
         let mut z = 1.0;
