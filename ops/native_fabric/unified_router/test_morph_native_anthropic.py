@@ -175,3 +175,84 @@ def test_upstream_invalid_request_code_visible_without_provider_body(tmp_path, m
     assert body["provider_code"] == "invalid_request_error"
     assert "invalid_request:invalid_request_error" in body["message"]
     assert "private provider message" not in result.text
+
+
+def test_native_body_betas_become_header(tmp_path, monkeypatch):
+    monkeypatch.setattr(gateway, "_route_authorization", lambda *args: "fixture-only")
+    from ops.native_fabric.unified_router.test_morph_fallback_upgrade import request, success_response
+    seen = []
+    def handler(req):
+        data = json.loads(req.content)
+        seen.append(req.headers.get("anthropic-beta"))
+        assert "betas" not in data
+        assert "output_config" not in data
+        return success_response(req)
+    payload = _payload([{"role": "user", "content": "synthetic"}], effort="unknown")
+    payload["betas"] = ["interleaved-thinking-2025-05-14",
+                        "interleaved-thinking-2025-05-14", "not valid\nnew line"]
+    reply, _ = asyncio.run(request(_native_config(tmp_path), payload, handler))
+    assert reply.status_code == 200, reply.text
+    assert seen == ["interleaved-thinking-2025-05-14"]
+
+
+def test_client_beta_header_overrides_body_safely(tmp_path, monkeypatch):
+    monkeypatch.setattr(gateway, "_route_authorization", lambda *args: "fixture-only")
+    seen = []
+    def handler(req):
+        seen.append(req.headers.get("anthropic-beta"))
+        return httpx.Response(200, json={"id": "fixture", "type": "message",
+            "role": "assistant", "model": "morph-dsv41flash-1017",
+            "content": [{"type": "text", "text": "OK"}],
+            "stop_reason": "end_turn", "usage": {"input_tokens": 4, "output_tokens": 4}})
+    async def run():
+        app = create_app(_native_config(tmp_path), transport=httpx.MockTransport(handler))
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app, client=("127.0.0.1", 1)),
+                    base_url="http://router") as client:
+                payload = _payload([{"role": "user", "content": "synthetic"}])
+                payload["betas"] = ["interleaved-thinking-2025-05-14"]
+                return await client.post("/v1/messages", json=payload,
+                    headers={"authorization": "Bearer " + TOKEN,
+                             "anthropic-beta": "fine-grained-tool-streaming-2025-05-14",
+                             "x-fabric-session-id": "beta-client-fixture"})
+    result = asyncio.run(run())
+    assert result.status_code == 200, result.text
+    assert seen == ["fine-grained-tool-streaming-2025-05-14"]
+
+
+def test_native_stream_passes_complete_thinking_events_unmodified(tmp_path, monkeypatch):
+    monkeypatch.setattr(gateway, "_route_authorization", lambda *args: "fixture-only")
+    import json as _json
+    messages = [
+        ("message_start", {"type": "message_start", "message": {
+            "id": "msg_fixture", "role": "assistant", "type": "message",
+            "model": "morph-dsv41flash-1017", "content": [],
+            "stop_reason": None, "usage": {"input_tokens": 5, "output_tokens": 0}}}),
+        ("content_block_start", {"type": "content_block_start", "index": 0,
+            "content_block": {"type": "thinking", "thinking": ""}}),
+        ("content_block_delta", {"type": "content_block_delta", "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": "fixture synthetic reasoning"}}),
+        ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        ("content_block_start", {"type": "content_block_start", "index": 1,
+            "content_block": {"type": "tool_use", "id": "toolu_fixture",
+                              "name": "lookup", "input": {}}}),
+        ("content_block_delta", {"type": "content_block_delta", "index": 1,
+            "delta": {"type": "input_json_delta", "partial_json": "{\"query\":\"fixture\"}"}}),
+        ("content_block_stop", {"type": "content_block_stop", "index": 1}),
+        ("message_delta", {"type": "message_delta",
+            "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 28}}),
+        ("message_stop", {"type": "message_stop"}),
+    ]
+    wire = "".join("event: "+name+"\ndata: "+_json.dumps(data)+"\n\n"
+                   for name,data in messages).encode()
+    seen = []
+    def handler(req):
+        seen.append(req.url.path)
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=wire)
+    from ops.native_fabric.unified_router.test_morph_fallback_upgrade import request
+    payload = _payload([{"role": "user", "content": "synthetic"}], stream=True)
+    reply, _ = asyncio.run(request(_native_config(tmp_path), payload, handler))
+    assert reply.status_code == 200, reply.text
+    assert reply.content == wire
+    assert seen == ["/v1/messages"]
