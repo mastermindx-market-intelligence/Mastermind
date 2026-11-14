@@ -260,10 +260,14 @@ protocol level by the pytest suites (§6).
   `test_web_sol_transport_gates.py` 13/13 (LOW1 census/surface intersection,
   LOW2 digest-swap refusal), `test_web_sol_browser_menu_ensure.py` 28/28.
 - **Server-side pin-switch rehearsal:** §5 (PASS, zero-diff, against the new head).
-- **Staged bundle:** `~/.mastermind/mmos_dev/br2/staging/extensions/aaaaaaaaaaaaaaaaaaaaaaaa`
-  (13 files), sha256 manifest `~/.mastermind/mmos_dev/br2/staging/extension-sha256.txt`,
-  bundle digest `87a9b04e517574982256574f21b94d029b8b48e209e822ab0844f8b0c00c42f7`,
+- **Staged bundle (re-staged at the final head, includes the MED-1 fix):**
+  `~/.mastermind/mmos_dev/br2/staging/extensions/aaaaaaaaaaaaaaaaaaaaaaaa`
+  (13 files), sha256 manifest `~/.mastermind/mmos_dev/br2/staging/extension-sha256.txt`
+  (all 13 verify OK), bundle digest
+  `10932a1abd9675bbb7b8488947b372a06491397862d836c1fade7bfdf1b51582`,
   `instance_config.js` digest `08c66c33…`, manifest permissions include `storage`.
+  The bundle embeds no head commit, so its digest is stable across the doc-only
+  commits atop the MED-1 source fix; restage log `logs/restage-finalhead.txt`.
 
 ## 7. What is NOT proven (honest)
 
