@@ -43,6 +43,21 @@
 #   * The embedded PostgreSQL runs as a DIRECT CHILD of the launcher process
 #     (argv: postgres -D <data dir> -p <port>), and startServer() installs
 #     the SIGINT/SIGTERM handlers that stop it in an ordered shutdown.
+#   * Agent JWT secret (B-BOARD, 2026-11-14): the board mints per-run agent
+#     tokens from PAPERCLIP_AGENT_JWT_SECRET; without it the process adapter
+#     spawns carriers without PAPERCLIP_API_KEY and every carrier run exits
+#     2 (the PFD-1 blocker). `up` therefore provisions a per-instance secret
+#     file at <instance>/secrets/agent-jwt.hex (dir 0700, file 0600, 32
+#     random bytes as hex, created once and reused on every later start).
+#     The value NEVER appears on a command line, in the launch environment
+#     or in the server log: only the file PATH is handed to the generated
+#     launch-server.mjs (MMOS_DEV_AGENT_JWT_SECRET_FILE), which reads the
+#     file itself and sets process.env.PAPERCLIP_AGENT_JWT_SECRET (and
+#     BETTER_AUTH_SECRET only if unset) BEFORE importing the server entry.
+#     The secret path is derived from the dev instance root and refused if
+#     it resolves under ~/.paperclip. The start banner must then show
+#     "Agent JWT ... set"; `up` reads that from the banner (ruling 14 order)
+#     and refuses to call the instance ready otherwise.
 #   * This server path does not write runtime-info.json; stop/status rely
 #     on the controller pidfile plus the port listener (see identity below).
 #   * Plugin install: POST <url>/api/plugins/install with
@@ -146,8 +161,9 @@
 #   MMOS_DEV_LOG_LINES       default tail line count for `logs` (default 50)
 #   MMOS_DEV_INSTALL_TIMEOUT install readiness wait seconds (default 90)
 #
-# No provider API key is required or accepted. No secrets are read, printed
-# or committed by this script.
+# No provider API key is required or accepted. The instance's own agent JWT
+# secret is generated into secrets/agent-jwt.hex (0600) and read only by the
+# generated launcher; this script never prints, logs, exports or commits it.
 
 set -euo pipefail
 
@@ -269,6 +285,8 @@ RUNTIME_INFO="$INSTANCE_ROOT/runtime-info.json"
 LOG_DIR="$INSTANCE_ROOT/logs"
 SERVER_LOG="$LOG_DIR/dev-server.stdout.log"
 LAUNCHER_SCRIPT="$INSTANCE_ROOT/launch-server.mjs"
+SECRETS_DIR="$INSTANCE_ROOT/secrets"
+AGENT_JWT_SECRET_FILE="$SECRETS_DIR/agent-jwt.hex"
 
 # --------------------------------------------------------------------------- #
 # Refusal checks
@@ -499,6 +517,62 @@ banner_has_dev_markers() {
   return 0
 }
 
+# The Agent JWT status word from the start banner, ANSI colours stripped
+# (startup-banner.js always wraps label and value in escape codes). Echoes
+# "set" when the server loaded PAPERCLIP_AGENT_JWT_SECRET, "missing ..." or
+# "found in ... but not loaded" otherwise, "" when the row is absent.
+banner_agent_jwt_status() {
+  local esc line
+  esc="$(printf '\033')"
+  line="$(grep -a 'Agent JWT' "$SERVER_LOG" 2>/dev/null | head -n 1 || true)"
+  [ -n "$line" ] || { echo ""; return 0; }
+  printf '%s' "$line" \
+    | sed "s/${esc}\[[0-9;]*m//g" \
+    | sed -E 's/^[[:space:]]*Agent JWT[[:space:]]+//' \
+    | sed -E 's/[[:space:]]+$//'
+}
+
+# Provision the per-instance agent JWT secret file (B-BOARD, 2026-11-14).
+# The path is derived from THIS dev instance root — never from a variable
+# that could name ~/.paperclip/instances/default — and the resolved path is
+# refused when it lands under the default Paperclip home. The value is
+# written straight to the file under umask 077 (32 random bytes as hex) and
+# is never echoed, logged, exported or placed on a command line; only the
+# generated launcher reads it. An existing file is reused unchanged.
+ensure_agent_jwt_secret() {
+  local resolved
+  resolved="$(resolve_dir "$SECRETS_DIR")"
+  case "$resolved" in
+    "$DEFAULT_HOME"|"$DEFAULT_HOME/"*)
+      die_refuse "agent JWT secret path '$resolved' is under the default Paperclip home '$DEFAULT_HOME'." ;;
+  esac
+  # Fail closed: the resolved dir must be exactly this instance's secrets/
+  # (a symlink pointing anywhere else — even inside the dev home — is out).
+  if [ "$resolved" != "$INSTANCE_ROOT/secrets" ]; then
+    die_refuse "agent JWT secret dir '$resolved' does not resolve to this dev instance's secrets/ ($INSTANCE_ROOT/secrets)."
+  fi
+  if [ -L "$AGENT_JWT_SECRET_FILE" ]; then
+    die_refuse "agent JWT secret file '$AGENT_JWT_SECRET_FILE' is a symlink; refusing to write through it."
+  fi
+  mkdir -p "$SECRETS_DIR"
+  chmod 700 "$SECRETS_DIR"
+  if [ ! -f "$AGENT_JWT_SECRET_FILE" ]; then
+    ( umask 077
+      if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 32 > "$AGENT_JWT_SECRET_FILE"
+      else
+        "$PY" - "$AGENT_JWT_SECRET_FILE" <<'PYEOF'
+import secrets, sys
+with open(sys.argv[1], "w", encoding="ascii") as fh:
+    fh.write(secrets.token_hex(32) + "\n")
+PYEOF
+      fi ) || die 1 "could not generate the agent JWT secret file at $AGENT_JWT_SECRET_FILE."
+    log "created agent JWT secret file (0600): $AGENT_JWT_SECRET_FILE"
+  fi
+  chmod 600 "$AGENT_JWT_SECRET_FILE"
+  [ -s "$AGENT_JWT_SECRET_FILE" ] || die 1 "agent JWT secret file is empty: $AGENT_JWT_SECRET_FILE"
+}
+
 # Ruling-14 isolation proof. Runs after the banner check and the health
 # identity, BEFORE the instance is called ready; any failure refuses.
 isolation_checks() { # $1=launcher_pid $2=configured_db_port
@@ -557,6 +631,32 @@ const entry = process.env.MMOS_DEV_SERVER_ENTRY;
 if (!entry) {
   console.error("launch-server: MMOS_DEV_SERVER_ENTRY is not set");
   process.exit(1);
+}
+// B-BOARD (2026-11-14): load this instance's agent JWT secret from its 0600
+// file BEFORE importing the server entry, so the banner shows "Agent JWT
+// set" and the process adapter can mint per-run PAPERCLIP_API_KEY tokens for
+// carriers. Only the file PATH travels through the environment — the value
+// is read here and never printed, logged or placed on a command line.
+const secretFile = process.env.MMOS_DEV_AGENT_JWT_SECRET_FILE;
+if (!secretFile) {
+  console.error("launch-server: MMOS_DEV_AGENT_JWT_SECRET_FILE is not set");
+  process.exit(1);
+}
+const { readFileSync } = await import("node:fs");
+let agentJwtSecret = "";
+try {
+  agentJwtSecret = readFileSync(secretFile, "utf8").trim();
+} catch (err) {
+  console.error(`launch-server: cannot read agent JWT secret file ${secretFile}: ${err?.message || err}`);
+  process.exit(1);
+}
+if (!agentJwtSecret) {
+  console.error(`launch-server: agent JWT secret file ${secretFile} is empty`);
+  process.exit(1);
+}
+process.env.PAPERCLIP_AGENT_JWT_SECRET = agentJwtSecret;
+if (!process.env.BETTER_AUTH_SECRET) {
+  process.env.BETTER_AUTH_SECRET = agentJwtSecret;
 }
 const { pathToFileURL } = await import("node:url");
 let mod;
@@ -671,10 +771,14 @@ ISOLATED_HOME="$DEV_HOME/home"
 # server and the CLI's api-base inference. PAPERCLIP_DISABLE_CWD_ENV_FILE
 # stops the server from loading a .env from the controller's cwd (review
 # findings, 2026-11-12).
+# PAPERCLIP_AGENT_JWT_SECRET / BETTER_AUTH_SECRET: the dev instance always
+# uses its OWN secret file (loaded by the generated launcher); an ambient
+# value from another instance must never leak in (B-BOARD, 2026-11-14).
 SCRUB_ENV=(env -u PORT -u HOST \
     -u PAPERCLIP_HOME -u PAPERCLIP_INSTANCE_ID -u PAPERCLIP_CONFIG \
     -u PAPERCLIP_CONTEXT -u PAPERCLIP_API_URL -u PAPERCLIP_COMPANY_ID \
     -u PAPERCLIP_API_KEY -u PAPERCLIP_RUN_ID \
+    -u PAPERCLIP_AGENT_JWT_SECRET -u BETTER_AUTH_SECRET \
     -u DATABASE_URL -u DATABASE_MIGRATION_URL \
     -u PAPERCLIP_SERVER_PORT -u PAPERCLIP_SERVER_HOST \
     -u PAPERCLIP_BIND -u PAPERCLIP_BIND_HOST \
@@ -905,6 +1009,8 @@ cmd_up() {
   LOG_DIR="$INSTANCE_ROOT/logs"
   SERVER_LOG="$LOG_DIR/dev-server.stdout.log"
   LAUNCHER_SCRIPT="$INSTANCE_ROOT/launch-server.mjs"
+  SECRETS_DIR="$INSTANCE_ROOT/secrets"
+  AGENT_JWT_SECRET_FILE="$SECRETS_DIR/agent-jwt.hex"
   static_refusal_checks
 
   local server_port db_port base identity
@@ -965,6 +1071,10 @@ cmd_up() {
       || die 1 "required tool '$req_tool' not found; refusing to start without the isolation checks."
   done
 
+  # Per-instance agent JWT secret: provisioned BEFORE the launcher is
+  # written or the server starts; a refused path stops everything here.
+  ensure_agent_jwt_secret
+
   write_launcher_script
   log "starting dev instance via: $NODE_BIN $LAUNCHER_SCRIPT (direct startServer from $SERVER_ENTRY)"
   log "instance pins: PAPERCLIP_HOME=$DEV_HOME PAPERCLIP_INSTANCE_ID=$INSTANCE_ID PAPERCLIP_CONFIG=$CONFIG_PATH"
@@ -978,11 +1088,13 @@ cmd_up() {
   {
     printf '%s [%s] dev controller launching node launcher (direct startServer)\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$PROG"
   } >> "$SERVER_LOG"
+  # Only the secret file PATH rides in the environment — never its value.
   local launch_env=( "${SCRUB_ENV[@]}" \
       PAPERCLIP_HOME="$DEV_HOME" \
       PAPERCLIP_INSTANCE_ID="$INSTANCE_ID" \
       PAPERCLIP_CONFIG="$CONFIG_PATH" \
-      MMOS_DEV_SERVER_ENTRY="$SERVER_ENTRY" )
+      MMOS_DEV_SERVER_ENTRY="$SERVER_ENTRY" \
+      MMOS_DEV_AGENT_JWT_SECRET_FILE="$AGENT_JWT_SECRET_FILE" )
   nohup "${launch_env[@]}" "$NODE_BIN" "$LAUNCHER_SCRIPT" \
       </dev/null >>"$SERVER_LOG" 2>&1 &
   local srv_pid=$!
@@ -1028,6 +1140,19 @@ cmd_up() {
     grep -a "Config\|Database\|Server" "$SERVER_LOG" 2>/dev/null | tail -n 6 >&2 || true
     die 1 "dev instance did not prove its dev identity in the start banner."
   fi
+
+  # B-BOARD: the banner must show the agent JWT as "set" (ruling-14 order:
+  # read from the banner before any request). Without it the process adapter
+  # cannot mint run tokens and every carrier run exits 2 (PFD-1 blocker).
+  local jwt_status
+  jwt_status="$(banner_agent_jwt_status)"
+  if [ "$jwt_status" != "set" ]; then
+    kill_server_tree "$srv_pid"
+    rm -f "$PIDFILE"
+    err "the start banner shows Agent JWT '${jwt_status:-<absent>}' (expected 'set')."
+    die 1 "dev instance started without its agent JWT secret; carrier runs would be blocked."
+  fi
+  log "banner: Agent JWT set (per-instance secret file)"
 
   # Banner is clean and ours. Now wait for health identity.
   deadline=$(( SECONDS + START_TIMEOUT ))

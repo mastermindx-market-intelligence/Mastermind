@@ -9,8 +9,12 @@ the stub state files that the fake ``lsof`` reads.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
+import shutil
+import stat
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -43,6 +47,9 @@ echo $$ > "$FAKE_STATE_DIR/node.pid"
   echo "DATABASE_URL=${DATABASE_URL-}"
   echo "PAPERCLIP_SERVER_PORT=${PAPERCLIP_SERVER_PORT-}"
   echo "PAPERCLIP_DISABLE_CWD_ENV_FILE=${PAPERCLIP_DISABLE_CWD_ENV_FILE-}"
+  echo "MMOS_DEV_AGENT_JWT_SECRET_FILE=${MMOS_DEV_AGENT_JWT_SECRET_FILE-}"
+  echo "PAPERCLIP_AGENT_JWT_SECRET=${PAPERCLIP_AGENT_JWT_SECRET-}"
+  echo "BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET-}"
 } > "$FAKE_STATE_DIR/launch-env"
 mkdir -p "$FAKE_STATE_DIR/cmd" "$FAKE_STATE_DIR/listeners" "$FAKE_STATE_DIR/children" "$FAKE_STATE_DIR/conn"
 echo $$ > "$FAKE_STATE_DIR/listeners/$FAKE_SERVER_PORT"
@@ -144,7 +151,7 @@ class Harness:
         return self.dev_home / "instances" / INSTANCE_ID
 
     def write_banner(self, *, config_path: str | None = None, db_dir: str | None = None,
-                     pg_port: int | None = None) -> None:
+                     pg_port: int | None = None, jwt: str = "set") -> None:
         """Canned startup banner; defaults name the dev instance."""
         config_path = config_path or str(self.instance_root / "config.json")
         db_dir = db_dir or str(self.instance_root / "db")
@@ -157,6 +164,7 @@ class Harness:
                 f"Server            {SERVER_PORT}",
                 f"Database          {db_dir} (pg:{pg_port})",
                 f"Config            {config_path}",
+                "Agent JWT".ljust(16) + f" {jwt}",
                 BANNER_RULE,
                 "",
             ]),
@@ -463,6 +471,158 @@ def test_down_refuses_to_signal_a_reused_pid(harness):
 
 
 # ---------------------------------------------------------------------------
+# Per-instance agent JWT secret (B-BOARD, 2026-11-14)
+# ---------------------------------------------------------------------------
+# Without PAPERCLIP_AGENT_JWT_SECRET the board cannot mint run tokens: the
+# process adapter spawns wake_carrier.py without PAPERCLIP_API_KEY and every
+# carrier run exits 2 (PFD-1 blocker). The secret lives in a 0600 file under
+# the dev instance's secrets/ dir; only the generated launcher reads it, and
+# only the file PATH travels through the launch environment.
+
+
+def secret_file(h: Harness) -> Path:
+    return h.instance_root / "secrets" / "agent-jwt.hex"
+
+
+def test_secret_file_created_0600_and_reused_on_restart(harness):
+    proc = run_up(harness)
+    assert proc.returncode == 0, proc.stderr
+    sf = secret_file(harness)
+    assert sf.is_file(), "first up did not create the agent JWT secret file"
+    assert stat.S_IMODE(sf.stat().st_mode) == 0o600
+    assert stat.S_IMODE(sf.parent.stat().st_mode) == 0o700
+    raw = sf.read_bytes()
+    assert re.fullmatch(rb"[0-9a-f]{64}\n?", raw), "expected 32 random bytes as hex"
+    first_digest = hashlib.sha256(raw).hexdigest()
+
+    # A restart must reuse the same secret, never regenerate it.
+    assert run_down(harness).returncode == 0
+    proc2 = run_up(harness)
+    assert proc2.returncode == 0, proc2.stderr
+    assert hashlib.sha256(sf.read_bytes()).hexdigest() == first_digest
+    assert stat.S_IMODE(sf.stat().st_mode) == 0o600
+    assert stat.S_IMODE(sf.parent.stat().st_mode) == 0o700
+
+
+def test_secret_value_absent_from_log_launcher_and_argv(harness):
+    # Hostile ambient secrets: they must be scrubbed, never inherited, and
+    # the instance's own value must never surface in any recorded text.
+    proc = run_up(
+        harness,
+        PAPERCLIP_AGENT_JWT_SECRET="ambient-jwt-do-not-use",
+        BETTER_AUTH_SECRET="ambient-ba-do-not-use",
+    )
+    assert proc.returncode == 0, proc.stderr
+    value = secret_file(harness).read_text(encoding="utf-8").strip()
+    assert value
+
+    surfaces = [proc.stdout, proc.stderr]
+    for p in harness.instance_root.rglob("*"):
+        if p.is_file() and p != secret_file(harness):
+            surfaces.append(p.read_text(encoding="utf-8", errors="ignore"))
+    for p in harness.state.rglob("*"):
+        if p.is_file():
+            surfaces.append(p.read_text(encoding="utf-8", errors="ignore"))
+    for s in surfaces:
+        assert value not in s, "agent JWT secret value leaked into a recorded surface"
+        assert "ambient-jwt-do-not-use" not in s
+        assert "ambient-ba-do-not-use" not in s
+
+    # The launch environment carries the file PATH only — never the value.
+    launch_env = (harness.state / "launch-env").read_text(encoding="utf-8")
+    pins = dict(line.split("=", 1) for line in launch_env.splitlines())
+    assert pins["MMOS_DEV_AGENT_JWT_SECRET_FILE"] == str(secret_file(harness))
+    assert pins["PAPERCLIP_AGENT_JWT_SECRET"] == ""
+    assert pins["BETTER_AUTH_SECRET"] == ""
+    # The generated launcher reads the file itself, before importing the entry.
+    launcher_text = (harness.instance_root / "launch-server.mjs").read_text(encoding="utf-8")
+    assert "MMOS_DEV_AGENT_JWT_SECRET_FILE" in launcher_text
+    assert "readFileSync" in launcher_text
+    assert launcher_text.index("readFileSync") < launcher_text.index("pathToFileURL(entry)")
+
+
+def test_refuses_secret_dir_symlink_into_default_paperclip_home(harness):
+    # The secrets dir is a symlink into the DEFAULT instance home: the
+    # resolved secret path is under ~/.paperclip and must be refused before
+    # anything is launched or written.
+    target = Path.home() / ".paperclip" / "instances" / "default" / "secrets"
+    (harness.instance_root / "secrets").symlink_to(target)
+    proc = run_up(harness)
+    assert proc.returncode == 3
+    assert "REFUSED" in proc.stderr
+    assert ".paperclip" in proc.stderr
+    assert not (harness.state / "node.pid").exists(), "launched despite refusal"
+    assert not (harness.instance_root / "launch-server.mjs").exists()
+
+
+def test_up_fails_when_banner_agent_jwt_missing(harness):
+    harness.write_banner(jwt="missing (run `npx paperclipai onboard`)")
+    proc = run_up(harness)
+    assert proc.returncode == 1
+    assert "Agent JWT" in proc.stderr
+    assert_process_dead(harness.node_pid())
+    assert not (harness.instance_root / "dev-controller.pid").exists()
+
+
+def test_generated_launcher_loads_secret_file_before_import(harness, tmp_path):
+    # Exercise the GENERATED launcher with the real node interpreter and a
+    # recording server entry: the env must be set from the file before the
+    # entry imports, BETTER_AUTH_SECRET only when unset, and the value must
+    # never reach the launcher's stdout/stderr.
+    real_node = shutil.which("node")
+    if not real_node:
+        pytest.skip("real node interpreter not available")
+    assert run_up(harness).returncode == 0
+    launcher = harness.instance_root / "launch-server.mjs"
+    sf = secret_file(harness)
+    expected = sf.read_text(encoding="utf-8").strip()
+    assert expected
+
+    entry = tmp_path / "recording-entry.mjs"
+    record = tmp_path / "record.json"
+    entry.write_text(
+        'import { readFileSync, writeFileSync } from "node:fs";\n'
+        'export async function startServer() {\n'
+        '  const expected = readFileSync(process.env.MMOS_DEV_AGENT_JWT_SECRET_FILE, "utf8").trim();\n'
+        '  const jwt = process.env.PAPERCLIP_AGENT_JWT_SECRET ?? "";\n'
+        '  const ba = process.env.BETTER_AUTH_SECRET ?? "";\n'
+        '  writeFileSync(process.env.RECORD_FILE, JSON.stringify({\n'
+        '    jwtMatchesFile: jwt.length > 0 && jwt === expected,\n'
+        '    betterAuth: ba === expected ? "file" : (ba === "preset-ambient-value" ? "preset" : "other"),\n'
+        '  }));\n'
+        '  return { host: "127.0.0.1", listenPort: 0 };\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    base_env = {k: v for k, v in os.environ.items()
+                if k not in ("PAPERCLIP_AGENT_JWT_SECRET", "BETTER_AUTH_SECRET")}
+    base_env.update({
+        "MMOS_DEV_SERVER_ENTRY": str(entry),
+        "MMOS_DEV_AGENT_JWT_SECRET_FILE": str(sf),
+        "RECORD_FILE": str(record),
+    })
+
+    # Case 1: no ambient BETTER_AUTH_SECRET — both come from the file.
+    p = subprocess.run([real_node, str(launcher)], env=base_env,
+                       capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0, p.stderr
+    rec = json.loads(record.read_text(encoding="utf-8"))
+    assert rec["jwtMatchesFile"] is True
+    assert rec["betterAuth"] == "file"
+    assert expected not in p.stdout and expected not in p.stderr
+
+    # Case 2: a preset BETTER_AUTH_SECRET is preserved; JWT still from file.
+    p2 = subprocess.run([real_node, str(launcher)],
+                        env={**base_env, "BETTER_AUTH_SECRET": "preset-ambient-value"},
+                        capture_output=True, text=True, timeout=60)
+    assert p2.returncode == 0, p2.stderr
+    rec2 = json.loads(record.read_text(encoding="utf-8"))
+    assert rec2["jwtMatchesFile"] is True
+    assert rec2["betterAuth"] == "preset"
+    assert expected not in p2.stdout and expected not in p2.stderr
+
+
+# ---------------------------------------------------------------------------
 # Source-level contracts
 # ---------------------------------------------------------------------------
 
@@ -475,3 +635,22 @@ def test_script_never_invokes_the_cli_run_wrapper():
     # The direct-start launcher is the only launch path.
     assert "startServer" in source
     assert "launch-server.mjs" in source
+
+
+def test_script_secret_handling_contracts():
+    source = SCRIPT.read_text(encoding="utf-8")
+    # 32 random bytes as hex, written straight to the file under umask 077.
+    assert "openssl rand -hex 32" in source
+    assert "secrets.token_hex(32)" in source
+    assert "umask 077" in source
+    assert "chmod 700" in source
+    assert "chmod 600" in source
+    # Only the file path travels through the launch environment.
+    assert "MMOS_DEV_AGENT_JWT_SECRET_FILE" in source
+    # Ambient secrets are scrubbed so the instance always uses its own file.
+    assert "-u PAPERCLIP_AGENT_JWT_SECRET" in source
+    assert "-u BETTER_AUTH_SECRET" in source
+    # The value is never carried on a shell command line or env assignment
+    # (the generated JS assigns with spaces around '=', never 'NAME=value').
+    assert "PAPERCLIP_AGENT_JWT_SECRET=" not in source
+    assert "BETTER_AUTH_SECRET=" not in source
