@@ -1,26 +1,61 @@
 import type {RawClient} from './host';
-export type WorkAuthorization = Readonly<{schema:'mastermind.native_work_authorization.v1';state:'ELIGIBLE'|'INELIGIBLE'|'ADMIN_ACTION_REQUIRED';reason:'WORK_NOT_ESTABLISHED'|'NOT_ELIGIBLE'|'AUTHORIZATION_REFUSED';generation:number}>;
-export interface NativeWorkAuthorizationOwner {read(request:{signal:AbortSignal}):Promise<WorkAuthorization>;signIn():Promise<void>;}
-export function decodeWorkAuthorization(raw:unknown):WorkAuthorization {
- const fail=():never=>{throw Error('WORK_AUTHORIZATION_UNAVAILABLE');};
- if(!raw||typeof raw!=='object'||Object.getPrototypeOf(raw)!==Object.prototype)return fail();
- const d=Object.getOwnPropertyDescriptors(raw),keys=Reflect.ownKeys(raw);if(keys.length!==4||!['schema','state','reason','generation'].every(k=>d[k]&&'value'in d[k]))return fail();
- const v=raw as WorkAuthorization;
- if(v.schema!=='mastermind.native_work_authorization.v1'||!Number.isSafeInteger(v.generation)||v.generation<0||
- !((v.state==='ELIGIBLE'&&v.reason==='WORK_NOT_ESTABLISHED')||(v.state==='INELIGIBLE'&&v.reason==='NOT_ELIGIBLE')||(v.state==='ADMIN_ACTION_REQUIRED'&&v.reason==='AUTHORIZATION_REFUSED')))return fail();
- return Object.freeze({schema:v.schema,state:v.state,reason:v.reason,generation:v.generation});
+
+export type WorkAuthorization = Readonly<{
+  schema: 'mastermind.native_work_authorization.v1';
+  generation: number;
+} & (
+  | {state: 'INELIGIBLE'; reason: 'NOT_ELIGIBLE'}
+  | {state: 'ADMIN_ACTION_REQUIRED'; reason: 'AUTHORIZATION_REFUSED'}
+)>;
+
+export interface NativeWorkAuthorizationOwner {
+  read(request: {signal: AbortSignal}): Promise<WorkAuthorization>;
 }
-/** Metadata is observation, not clearance. Native recomputes eligibility atomically. */
-export function bindNativeWorkAuthorization(client:RawClient,hostEpoch:()=>number):NativeWorkAuthorizationOwner|undefined {
- const read=client.readWorkAuthorization,command=client.signInForWork,state=client.getState,generation=client.invalidationGeneration;
- if(!read||!command||!generation)return;
- let frame:(()=>boolean)|null=null,busy=false,uncertain=false;
- const acquire=()=>{const epoch=hostEpoch(),g=generation.call(client),s=JSON.stringify(state.call(client));return()=>{
-  try {const a=state.call(client);return client.readWorkAuthorization===read&&client.signInForWork===command&&client.getState===state&&client.invalidationGeneration===generation&&Number.isSafeInteger(g)&&g>=0&&generation.call(client)===g&&hostEpoch()===epoch&&JSON.stringify(a)===s&&a.status==='signed_in'&&a.acquisition&&a.content;}catch{return false;}
- };};
- return {async read({signal}) {frame=null;const current=acquire();if(uncertain||busy||signal.aborted||!current())throw Error('WORK_AUTHORIZATION_UNAVAILABLE');
-  const value=decodeWorkAuthorization(await read.call(client));if(signal.aborted||!current()||busy||uncertain)throw Error('WORK_AUTHORIZATION_UNAVAILABLE');if(value.state==='ELIGIBLE')frame=current;return value;
- },async signIn(){const current=frame;frame=null;if(busy||uncertain||!current?.())throw Error('WORK_AUTHORIZATION_INELIGIBLE');busy=true;
-  try {await command.call(client);}catch(error){uncertain=true;throw error;}finally{busy=false;}
- }};
+
+export function decodeWorkAuthorization(raw: unknown): WorkAuthorization {
+  const unavailable = (): never => { throw Error('WORK_AUTHORIZATION_UNAVAILABLE'); };
+  if (!raw || typeof raw !== 'object' || Object.getPrototypeOf(raw) !== Object.prototype) return unavailable();
+  const descriptors = Object.getOwnPropertyDescriptors(raw);
+  if (Reflect.ownKeys(raw).length !== 4 ||
+      !['schema', 'state', 'reason', 'generation'].every(key => descriptors[key] && 'value' in descriptors[key])) {
+    return unavailable();
+  }
+  const value = raw as WorkAuthorization;
+  if (value.schema !== 'mastermind.native_work_authorization.v1' ||
+      !Number.isSafeInteger(value.generation) || value.generation < 0) return unavailable();
+  const {schema, state, reason, generation} = value;
+  if (state === 'INELIGIBLE' && reason === 'NOT_ELIGIBLE') return Object.freeze({schema, state, reason, generation});
+  if (state === 'ADMIN_ACTION_REQUIRED' && reason === 'AUTHORIZATION_REFUSED') {
+    return Object.freeze({schema, state, reason, generation});
+  }
+  return unavailable();
+}
+
+/** This facet exposes a local observation only. */
+export function bindNativeWorkAuthorization(client: RawClient, hostEpoch: () => number): NativeWorkAuthorizationOwner | undefined {
+  const read = client.readWorkAuthorization;
+  const getState = client.getState;
+  const generation = client.invalidationGeneration;
+  if (!read || !generation) return undefined;
+
+  return {
+    async read({signal}) {
+      const epoch = hostEpoch();
+      const nativeEpoch = generation.call(client);
+      const snapshot = getState.call(client);
+      const current = () => {
+        if (signal.aborted || client.readWorkAuthorization !== read || client.getState !== getState ||
+            client.invalidationGeneration !== generation || hostEpoch() !== epoch ||
+            !Number.isSafeInteger(nativeEpoch) || nativeEpoch < 0 || generation.call(client) !== nativeEpoch) return false;
+        const state = getState.call(client);
+        return state.status === 'signed_in' && state.acquisition && state.content &&
+          state.status === snapshot.status && state.reason === snapshot.reason &&
+          state.acquisition === snapshot.acquisition && state.content === snapshot.content;
+      };
+      if (!current()) throw Error('WORK_AUTHORIZATION_UNAVAILABLE');
+      const result = await read.call(client);
+      if (!current()) throw Error('WORK_AUTHORIZATION_UNAVAILABLE');
+      return decodeWorkAuthorization(result);
+    },
+  };
 }
