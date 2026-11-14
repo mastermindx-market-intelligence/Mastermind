@@ -194,7 +194,10 @@ class TestLoopMaintenanceStepFailures:
         ran_spy = {"predictions_record": False}
         orig_predictions = sys.modules.get("portfolio.predictions")
         assert orig_predictions is not None
-        orig_predictions.record = lambda *a, **kw: ran_spy.__setitem__("predictions_record", True)
+        monkeypatch.setattr(
+            orig_predictions, "record",
+            lambda *a, **kw: ran_spy.__setitem__("predictions_record", True),
+        )
 
         # Run the real _loop_maintenance_job — it will acquire the lock and call _run_loop_maintenance_steps
         sched_mod._loop_maintenance_job()

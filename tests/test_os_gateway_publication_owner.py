@@ -641,7 +641,12 @@ def _install_host_boundaries(monkeypatch, host) -> None:
 
 
 @pytest.fixture
-def gateway_tmp_path():
+def gateway_tmp_path(tmp_path):
+    if _TRUE_PLATFORM == "linux":
+        # Hosted xdist already supplies a worker-private pytest temp tree.
+        # Checkout-local sibling fixtures must not enter this observed chain.
+        yield tmp_path
+        return
     # The reader deliberately observes mutation timestamps for the complete
     # ancestor chain. macOS's shared /var/folders/.../T changes as unrelated
     # applications create temp files; it is not a stable fixture namespace.
@@ -1219,6 +1224,54 @@ def test_studio_observation_does_not_use_legacy_pathname_payload_readers(
     observed = gateway.host.observe_studio(SHA)
     assert observed.node_sha256 == digest(gateway.studio["node"].read_bytes())
     assert observed.definition_sha256
+
+
+@pytest.mark.parametrize("mutation_target", ("checkout", "observed-parent"))
+def test_studio_acl_churn_obeys_fixture_location_contract(gateway, monkeypatch, mutation_target):
+    """Isolate Linux checkout churn without hiding actual in-bracket mutations.
+
+    Native macOS retains its checkout-rooted fixture, so checkout churn is a
+    real observed mutation there and must still refuse. No platform is faked.
+    """
+    from ops.executive_os import os_gateway_studio_reader as reader
+
+    checkout = Path(__file__).resolve().parents[1]
+    observed_parent = gateway.tmp_path.parent
+    parent_identity = _TRUE_LSTAT(observed_parent)
+    original_acl = reader._Walk._observe_object_acl_value
+    created = []
+    changes = []
+    fields = ("st_dev", "st_ino", "st_mode", "st_uid", "st_gid", "st_nlink",
+              "st_size", "st_mtime_ns", "st_ctime_ns")
+
+    def observe_then_mutate(walk, name, fd, pre, path):
+        original_acl(walk, name, fd, pre, path)
+        if created or (pre.st_dev, pre.st_ino) != (parent_identity.st_dev, parent_identity.st_ino):
+            return
+        before = _TRUE_FSTAT(fd)
+        mutation_parent = checkout if mutation_target == "checkout" else observed_parent
+        created.append(Path(tempfile.mkdtemp(prefix=".gateway-acl-churn-", dir=mutation_parent)))
+        after = _TRUE_FSTAT(fd)
+        changes.append([field for field in fields if getattr(before, field) != getattr(after, field)])
+
+    monkeypatch.setattr(reader._Walk, "_observe_object_acl_value", observe_then_mutate)
+    should_refuse = mutation_target == "observed-parent" or _TRUE_PLATFORM != "linux"
+    try:
+        if should_refuse:
+            with pytest.raises(control.GatewayPublicationError) as excinfo:
+                gateway.host.observe_studio(SHA)
+            assert excinfo.value.code == "gateway_studio_invalid"
+        else:
+            observed = gateway.host.observe_studio(SHA)
+            assert observed.node_sha256 == digest(gateway.studio["node"].read_bytes())
+            assert observed.definition_sha256
+    finally:
+        for directory in created:
+            directory.rmdir()
+        print(json.dumps({"fixture_acl_churn": mutation_target, "platform": _TRUE_PLATFORM,
+                          "changed_fields": changes}))
+    assert len(created) == len(changes) == 1
+    assert bool(changes[0]) is should_refuse
 
 
 def test_root_owned_payload_target_refuses_before_any_protected_io(gateway, monkeypatch):

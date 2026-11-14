@@ -38,6 +38,8 @@ from yaml.constructor import ConstructorError as YAMLConstructorError
 
 
 EXCLUSIONS_RELATIVE = Path("ci") / "pytest_exclusions.toml"
+TIMINGS_RELATIVE = Path("ci") / "pytest_timings.json"
+TIMINGS_SCHEMA = "mastermind.ci.pytest_module_timings.v1"
 WORKFLOW_RELATIVE = Path(".github") / "workflows" / "ci.yml"
 AUTHORITATIVE_STEP_NAME = "Run repository test gate"
 AUTHORITATIVE_RUNNER = "scripts/ci_pytest.py"
@@ -326,6 +328,9 @@ _MEASURED_THREE_JOB_PLACEMENT = {
 
 
 _MEASURED_SIX_JOB_PLACEMENT = {
+    # FALLBACK ONLY: used when ci/pytest_timings.json is missing or invalid
+    # (load_module_timings). Kept frozen so the fallback is the previously
+    # qualified placement, byte for byte.
     # Exact CI_MODULE hosted merge-group run 42708053350 (master 2614ecbae,
     # 2026-11-09, all six shards green). CI Lightning F3 re-derivation: the
     # 150 slowest measured included modules are placed longest-processing-
@@ -334,6 +339,9 @@ _MEASURED_SIX_JOB_PLACEMENT = {
     # fixed runner overhead, the hash-placed remainder, and the hermes-forward
     # keep-pin on shard 4. The five non-pytest qualification gates left shard
     # zero for a parallel job (F3). Evidence: ci/shard_timings/42708053350.json.
+    # FALLBACK ONLY: when ci/pytest_timings.json is valid, timed LPT placement
+    # decides every shard and these pins (including the hermes keep-pin) do not
+    # describe the live plan; this table is used only if that file is invalid.
     # Changes require new timings and policy review. Hash placement for others.
     'tests/test_capacity_host_artifacts.py': 2,  # 834.1s
     'tests/test_hermes_primary_application_enrollment.py': 4,  # 224.2s keep-pin (hermes-forward)
@@ -489,6 +497,87 @@ _MEASURED_SIX_JOB_PLACEMENT = {
 }
 
 
+def load_module_timings(path: Path | None = None) -> dict[str, Any] | None:
+    """Return the validated six-job timing table, or None (never raises).
+
+    Any missing, unreadable or malformed table returns None so that
+    ``partition_modules`` falls back to the frozen hash/pin placement. The
+    table only chooses placement; ``verify_partition`` still proves coverage.
+    """
+
+    import json  # local: keeps the module import block untouched for rebases
+    import math
+
+    target = path if path is not None else Path(__file__).resolve().parents[1] / TIMINGS_RELATIVE
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+    def seconds(value: Any) -> bool:
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False
+        try:  # math.isfinite(10**400) raises OverflowError
+            return math.isfinite(value) and value >= 0
+        except OverflowError:
+            return False
+
+    if not isinstance(payload, dict) or payload.get("schema") != TIMINGS_SCHEMA:
+        return None
+    if payload.get("jobs") != 6 or not seconds(payload.get("default_module_seconds")):
+        return None
+    if not seconds(payload.get("module_overhead_seconds")):
+        return None
+    base = payload.get("shard_base_seconds")
+    if not isinstance(base, list) or len(base) != 6 or not all(seconds(v) for v in base):
+        return None
+    modules = payload.get("modules")
+    if not isinstance(modules, dict) or not modules:
+        return None
+    for name, value in modules.items():
+        if not (isinstance(name, str) and _WORKFLOW_TEST_FILE_RE.match(name) and seconds(value)):
+            return None
+    return payload
+
+
+def timed_six_job_placement(
+    included: Sequence[str], timings: Mapping[str, Any]
+) -> dict[str, int]:
+    """Deterministic greedy LPT placement of ``included`` over six jobs.
+
+    Measured modules are placed longest-first onto the least-loaded shard
+    (ties: lower shard index; equal durations: path order), starting from
+    each shard's measured non-pytest base load; every module also carries the
+    measured per-module collection overhead. The LPT runs over the WHOLE
+    checked-in table, independent of today's included set, so adding or
+    removing a test file never moves a measured module. Modules absent from
+    the table then go, in path order, to the least-loaded shard at the
+    default weight; only such not-yet-measured modules can move when another
+    one is added. Table entries that are no longer included are inert.
+    """
+
+    loads = [float(value) for value in timings["shard_base_seconds"]]
+    placed: dict[str, int] = {}
+    overhead = float(timings["module_overhead_seconds"])
+    measured = {path: cost + overhead for path, cost in timings["modules"].items()}
+    for path, cost in sorted(measured.items(), key=lambda item: (-item[1], item[0])):
+        target = min(range(len(loads)), key=lambda index: (loads[index], index))
+        loads[target] += cost
+        placed[path] = target
+    included_set = set(included)
+    loads = [float(value) for value in timings["shard_base_seconds"]]
+    for path, target in placed.items():
+        if path in included_set:
+            loads[target] += measured[path]
+    result = {path: placed[path] for path in included if path in placed}
+    default = float(timings["default_module_seconds"]) + overhead
+    for path in sorted(path for path in included_set if path not in placed):
+        target = min(range(len(loads)), key=lambda index: (loads[index], index))
+        loads[target] += default
+        result[path] = target
+    return result
+
+
 def partition_modules(
     included: Sequence[str], *, jobs: int
 ) -> tuple[tuple[str, ...], ...]:
@@ -507,6 +596,11 @@ def partition_modules(
     same checkout would shard differently on every run and a failure would not
     reproduce.
 
+    The production six-job gate places modules by measured duration from
+    ``ci/pytest_timings.json`` (see ``timed_six_job_placement``). A missing
+    or invalid table falls back to the frozen hash/pin placement below, so a
+    bad table can change balance but never coverage.
+
     For the production three-job gate, the explicitly measured hot modules
     are pinned to less-loaded shards. Every other path keeps stable hash
     placement, including when a new test is added. Other job counts retain
@@ -524,6 +618,18 @@ def partition_modules(
             f"({len(included)})"
         )
     buckets: list[list[str]] = [[] for _ in range(jobs)]
+    if jobs == 6:
+        timings = load_module_timings()
+        if timings is not None:
+            timed = timed_six_job_placement(included, timings)
+            for path in included:
+                buckets[timed[path]].append(path)
+            shards = tuple(tuple(bucket) for bucket in buckets)
+            if all(shards):
+                verify_partition(included, shards)
+                return shards
+            # A tiny included set can leave a timed shard empty: fall back.
+            buckets = [[] for _ in range(jobs)]
     for path in included:
         digest = hashlib.sha256(path.encode("utf-8")).digest()
         hashed = int.from_bytes(digest[:8], "big") % jobs

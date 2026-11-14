@@ -13,10 +13,18 @@ TARGET = 'tests/test_hermes_primary_application_enrollment.py'
 # the 150 slowest measured included modules are pinned longest-processing-time-
 # first over overhead-aware starting loads, and TARGET keeps its hermes-forward
 # pin on shard 4. Any table change requires new evidence and this hash to move.
+# Since ci/pytest_timings.json landed, this frozen table is the FALLBACK used
+# only when the timing table is missing or invalid; the fixture below forces
+# that fallback so the frozen contract stays exactly verified.
 F3_EVIDENCE = 'ci/shard_timings/42708053350.json'
 F3_SOURCE_RUN = 42708053350
 F3_TABLE_SHA256 = '7b298530d545a62576288712ecdef21b57108b918fc0d37d5d690cfb0b4f1521'
 LEGACY_HERMES_FORWARD_SHA256 = 'eb8af32eaaab6403554719ca32fe7e0fa495fd92ba081badcc2f5e688474c2c2'
+
+
+@pytest.fixture(autouse=True)
+def frozen_fallback(monkeypatch):
+    monkeypatch.setattr(cip, 'load_module_timings', lambda path=None: None)
 
 
 def positions(shards):
