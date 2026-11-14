@@ -81,6 +81,21 @@ the transport itself still uses the board channel. Note: (c) touches the
 exactly-once dedup law, so this is a small reviewed code change plus a test,
 not pure config.
 
+**Built (PF-3, 2026-11-14).** The code leg (1c) is built. The transport
+takes a required `service_agent_id`; a row is ours only when its body
+carries the marker, `authorAgentId` equals that agent exactly, and
+`clientRequestId` equals the deterministic uuid5 — a board-user row is
+never ours whatever its request id
+(`control_plane/paperclip_result_delivery.py:136`, ctor `:306`).
+`DoorConfig` requires `paperclip_service_agent_id` when
+`register_transport` delivers (`door.py:303-310`) and passes it at both
+registration sites (`door.py:2028`, `:2192`). `paperclip_headers` may now
+carry an authorization header; every transport reason and the door
+client's error text are scrubbed of header values
+(`paperclip_result_delivery.py:340`, `door.py:356`, `:383`). Provisioning
+the identity (1a) and setting the config (1b) remain principal switch-on
+steps. Tests: `tests/test_paperclip_result_delivery.py` (34 passed).
+
 ### 2. A decision on whether real task text may be the worker prompt
 
 **Current state.** `_worker_prompt` (`door.py:2210-2227`) is the fixed canary
@@ -102,6 +117,21 @@ dev deliverable. This is security-sensitive: task/comments/page text are
 untrusted evidence, never instructions; the worker runs as the same OS user as
 the door (§18.5). It is a principal call, not a lane call. **No code change
 made here.**
+
+**Built (PF-3, 2026-11-14).** Approved and built behind a closed
+DEVELOPMENT-STACK switch: `worker_prompt_mode` is exactly "canary"
+(default, today's prompt byte-identical) or "task_text" (`door.py:315`).
+The description is frozen at intake (`door.py:949`); launch reads only the
+frozen text, never a re-read. The task_text prompt is a fixed door-written
+limits preamble + ONE fenced block labelled as board-task DATA (the fence
+is longer than any backtick AND tilde run in the brief, so it cannot be
+closed from inside) + the reply-format reminder AFTER the fence
+(`door.py:2326`). Before any claim or launch the frozen brief is
+re-checked: over 16384 UTF-8 bytes refuses BRIEF_TOO_LARGE (never
+truncated); a digest mismatch refuses BRIEF_DIGEST_MISMATCH; both park
+`brief-refused` and surface one blocker (`door.py:2302`, `:1673`,
+`:1392`). The launch record never reads the text. Tests:
+`tests/test_mmos_coding_job_door.py` (31 passed).
 
 ### 3. Its own local Executive store (never production)
 
