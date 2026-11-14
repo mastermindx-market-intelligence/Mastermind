@@ -22,9 +22,15 @@ Subcommands (every path is required; nothing defaults to a real path):
         Restore the exact preimage atomically; read back the sha.
 
 A settings path at/under ~/.mastermind/t3-team is refused unless the explicit
---real-root-ok flag is given (the principal's flag). A symlinked settings path
-is always refused. File contents are never printed except the presentation
-member (in plan's diff).
+--real-root-ok flag is given (the principal's flag). The fence holds by string
+(exact and case-folded) AND by file identity: on a case-insensitive filesystem
+a case-variant spelling of the root keeps its case through realpath, so the
+candidate and every existing ancestor are also compared to the real root by
+(st_dev, st_ino); when identity cannot be established the fence refuses. A
+symlinked settings path is always refused. File contents are never printed
+except the presentation member (in plan's diff). For tests only, the fenced
+root is overridable via the MMOS_PRESENTATION_REAL_ROOT env var or the
+REAL_ROOT module attribute; nothing else defaults to a real path.
 
 Atomic replacement reuses team_roster.atomic_write (0600 temp, fsync,
 os.replace, staging under <root>/run when derivable) — one writer pattern,
@@ -46,6 +52,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from team_roster import atomic_write  # noqa: E402  (same-directory tool)
 
 REAL_ROOT = "~/.mastermind/t3-team"
+# Test-only override of the fenced root (tests point it at a tmp dir).
+REAL_ROOT_ENV = "MMOS_PRESENTATION_REAL_ROOT"
 LINK_ID_RE = re.compile(r"^[a-z0-9-]{1,32}$")
 LINK_URL_RE = re.compile(r"^https?://[^\s/]+", re.IGNORECASE)
 VALUE_KEYS = {"productName", "teamMode", "lockedProviderProjectIds", "links"}
@@ -60,17 +68,70 @@ def sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def _under_root(candidate, root):
+    return candidate == root or candidate.startswith(root + os.sep)
+
+
+def _identity_fence(candidate, root_id, real_root, real_root_ok):
+    """Walk the candidate and its existing ancestors; refuse when any is the
+    real root by (st_dev, st_ino) — a case-variant spelling on a
+    case-insensitive filesystem reaches the same directory even though
+    realpath keeps the caller's case. When identity cannot be established
+    (a missing ancestor, or a stat error other than not-found for the leaf),
+    refuse rather than allow."""
+    cur = candidate
+    while True:
+        try:
+            st = os.stat(cur)
+        except FileNotFoundError:
+            if cur != candidate:
+                die(f"cannot establish identity for settings path "
+                    f"{candidate}: ancestor {cur} is missing; refusing")
+            # leaf not found: the regular-file check below refuses it
+        except OSError as exc:
+            die(f"cannot establish identity for settings path {candidate}: "
+                f"{exc}; refusing")
+        else:
+            if (st.st_dev, st.st_ino) == root_id and not real_root_ok:
+                die(f"settings path {candidate} reaches the real team root "
+                    f"{real_root} by file identity; refusing without "
+                    "--real-root-ok (the principal's flag)")
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            return
+        cur = parent
+
+
 def guard_settings(path, real_root_ok):
-    """Resolve and fence the settings path. Returns the absolute path."""
+    """Resolve and fence the settings path. Returns the absolute path.
+
+    The fence is by string (exact and case-folded) AND by file identity, so
+    a case-variant or symlinked-parent spelling of the real root is refused
+    too. --real-root-ok (the principal's flag) unlocks exactly this root.
+    """
     expanded = os.path.abspath(os.path.expanduser(path))
     real = os.path.realpath(expanded)
-    real_root = os.path.realpath(os.path.expanduser(REAL_ROOT))
+    real_root = os.path.realpath(os.path.expanduser(
+        os.environ.get(REAL_ROOT_ENV) or REAL_ROOT))
     for candidate in (expanded, real):
-        if candidate == real_root or candidate.startswith(real_root + os.sep):
+        if (_under_root(candidate, real_root)
+                or _under_root(candidate.casefold(), real_root.casefold())):
             if not real_root_ok:
                 die(f"settings path {candidate} is under the real team root "
                     f"{real_root}; refusing without --real-root-ok "
                     "(the principal's flag)")
+    try:
+        root_st = os.stat(real_root)
+    except FileNotFoundError:
+        root_st = None  # real root absent: no identity to fence
+    except OSError as exc:
+        die(f"cannot stat real team root {real_root}: {exc}; refusing")
+    if root_st is not None:
+        if not stat.S_ISDIR(root_st.st_mode):
+            die(f"real team root {real_root} is not a directory; refusing")
+        root_id = (root_st.st_dev, root_st.st_ino)
+        for candidate in (expanded, real):
+            _identity_fence(candidate, root_id, real_root, real_root_ok)
     if os.path.islink(expanded):
         die(f"symlinked settings path refused: {expanded}")
     if not os.path.isfile(expanded):

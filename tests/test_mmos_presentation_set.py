@@ -367,3 +367,131 @@ def test_compact_file_insert(tmp_path, value_file):
     # suffix after the insertion is the original closing brace
     assert new.endswith(b"}")
     assert old[:-1] == new[:len(old) - 1]
+
+
+# ---------------------------------------------------------------------------
+# F1: the real-root fence must hold by file IDENTITY, not only by string.
+# The tool's REAL_ROOT is overridable for tests via MMOS_PRESENTATION_REAL_ROOT
+# (or the module attribute); every fixture here is a tmp dir, never a real root.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def fake_real_root(tmp_path, monkeypatch):
+    """A tmp dir standing in for the real team root, via the test override."""
+    root = tmp_path / "teamroot"
+    settings = root / "home" / "userdata" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_bytes(ODD_NO_PRES)
+    settings.chmod(0o600)
+    monkeypatch.setenv("MMOS_PRESENTATION_REAL_ROOT", str(root))
+    return root, settings
+
+
+def _fs_case_insensitive(tmp_path):
+    probe = tmp_path / "CaseProbe"
+    probe.write_text("")
+    return (tmp_path / "caseprobe").exists()
+
+
+def test_real_root_case_variant_refused(fake_real_root, value_file, tmp_path):
+    root, settings = fake_real_root
+    before = settings.read_bytes()
+    if _fs_case_insensitive(tmp_path):
+        # same file through a case-variant spelling of the root component
+        variant = str(settings).replace(str(root), str(root).upper(), 1)
+        assert variant != str(settings)
+        assert os.path.exists(variant)  # same file on a case-insensitive FS
+    else:
+        # case-sensitive FS: reach the root through a symlinked alias dir;
+        # the fence must still refuse (identity walk on the resolved path)
+        alias = tmp_path / "alias"
+        alias.symlink_to(root, target_is_directory=True)
+        variant = str(alias / "home" / "userdata" / "settings.json")
+    expect = sha(before)
+    r = do_apply(variant, value_file, tmp_path / "receipts", expect=expect)
+    assert r.returncode != 0, "case/alias variant bypassed the real-root fence"
+    assert settings.read_bytes() == before
+    # the principal's flag still unlocks exactly this root
+    r2 = do_apply(variant, value_file, tmp_path / "receipts2", expect=expect,
+                  extra=("--real-root-ok",))
+    assert r2.returncode == 0, r2.stderr
+    assert json.loads(settings.read_bytes())["presentation"] == VALUE
+
+
+def test_real_root_symlinked_parent_refused(fake_real_root, value_file, tmp_path):
+    root, settings = fake_real_root
+    before = settings.read_bytes()
+    alias = tmp_path / "parentalias"
+    alias.symlink_to(root, target_is_directory=True)
+    through = alias / "home" / "userdata" / "settings.json"
+    r = do_apply(through, value_file, tmp_path / "receipts")
+    assert r.returncode != 0
+    assert settings.read_bytes() == before
+
+
+@pytest.mark.parametrize("suffix", ["/", "/./"])
+def test_real_root_trailing_slash_and_dot_segment_refused(
+        fake_real_root, value_file, tmp_path, suffix):
+    _root, settings = fake_real_root
+    before = settings.read_bytes()
+    if suffix == "/":
+        variant = str(settings) + "/"
+    else:
+        variant = str(settings.parent) + "/./" + settings.name
+    r = do_apply(variant, value_file, tmp_path / "receipts", expect=sha(before))
+    assert r.returncode != 0
+    assert settings.read_bytes() == before
+
+
+def test_real_root_exact_case_control_refused(fake_real_root, value_file, tmp_path):
+    _root, settings = fake_real_root
+    before = settings.read_bytes()
+    r = do_apply(settings, value_file, tmp_path / "receipts")
+    assert r.returncode != 0
+    assert settings.read_bytes() == before
+
+
+def test_fence_refuses_when_identity_unestablished(fake_real_root, value_file,
+                                                   tmp_path):
+    root, settings = fake_real_root
+    before = settings.read_bytes()
+    # an ancestor component is a regular file: stat fails with ENOTDIR, not
+    # not-found — the fence must refuse, not allow
+    notdir = settings / "under"
+    r = do_apply(notdir, value_file, tmp_path / "receipts", expect=sha(before))
+    assert r.returncode != 0
+    assert settings.read_bytes() == before
+    # a missing ancestor: identity cannot be established — refuse
+    missing = root / "no-such-dir" / "settings.json"
+    r2 = do_apply(missing, value_file, tmp_path / "receipts2",
+                  expect=sha(before))
+    assert r2.returncode != 0
+    assert settings.read_bytes() == before
+
+
+def test_fence_refuses_on_stat_permission_error(fake_real_root, value_file,
+                                                tmp_path):
+    _root, settings = fake_real_root
+    before = settings.read_bytes()
+    expect = sha(before)
+    settings.parent.chmod(0o000)  # search denied: stat raises EACCES
+    try:
+        r = do_apply(settings, value_file, tmp_path / "receipts", expect=expect)
+        assert r.returncode != 0
+    finally:
+        settings.parent.chmod(0o700)
+    assert settings.read_bytes() == before
+
+
+def test_env_root_absent_allows_unrelated_tmp_file(tmp_path, value_file,
+                                                   monkeypatch):
+    # override pointing at a nonexistent dir: no identity to fence, and an
+    # unrelated tmp settings file must still be writable (no false refusal)
+    monkeypatch.setenv("MMOS_PRESENTATION_REAL_ROOT",
+                       str(tmp_path / "does-not-exist"))
+    p = tmp_path / "settings.json"
+    p.write_bytes(ODD_NO_PRES)
+    p.chmod(0o600)
+    r = do_apply(p, value_file, tmp_path / "receipts")
+    assert r.returncode == 0, r.stderr
+    assert json.loads(p.read_bytes())["presentation"] == VALUE
