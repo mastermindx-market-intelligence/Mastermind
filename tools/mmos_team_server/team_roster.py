@@ -400,7 +400,7 @@ def teammate_home(spec, mate):
                         mate["slug"])
 
 
-def atomic_write(path, text, mode, staging_dir=None):
+def atomic_write(path, text, mode, staging_dir=None, pre_replace=None):
     """Replace ``path`` with ``text`` atomically (review R2a, finding 11).
 
     The running server watches settings.json and reloads it about 100 ms
@@ -409,6 +409,12 @@ def atomic_write(path, text, mode, staging_dir=None):
     half-written. The replacement is a temporary created 0600 and fsynced
     before it is moved into place. A failure leaves the destination
     untouched and removes the temporary.
+
+    ``pre_replace``: optional zero-argument callable invoked after the
+    temporary is staged and immediately before os.replace (presentation_set
+    F2 re-hashes the destination there). If it raises, the temporary is
+    removed and the destination is untouched. Default None: unchanged
+    behavior for every existing caller.
 
     ``staging_dir``: stage the temporary here instead of next to the
     destination (attack round, finding 5). Next to the destination the
@@ -441,6 +447,8 @@ def atomic_write(path, text, mode, staging_dir=None):
             fh.flush()
             os.fsync(fh.fileno())
         os.chmod(tmp, mode)
+        if pre_replace is not None:
+            pre_replace()
         os.replace(tmp, path)
     except BaseException:
         try:

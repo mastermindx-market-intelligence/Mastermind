@@ -18,7 +18,13 @@ byte outside the member is unchanged — no whole-file `json.dump`. It reuses
 `--expect-sha256`, saves the exact preimage bytes 0600 plus a receipt JSON in
 a 0700 receipt dir, writes atomically with the file mode preserved, then
 reads back and verifies parse, `presentation` equality, outside-member byte
-equality and mode. Any mismatch exits nonzero. `undo` restores the exact
+equality and mode. Any mismatch exits nonzero. Immediately before
+`os.replace` the writer re-reads and re-hashes the destination and aborts
+(`PREIMAGE_CHANGED`, nothing written) if it changed — a window remains
+between that re-hash and `os.replace` where a foreign write can still be
+lost, and the tool cannot close it without the server's cooperation.
+Precondition: part (c) is run with no live teammate run, straight after
+part (b). `undo` restores the exact
 preimage, but only while the current sha256 still equals the receipt's
 after-sha (nobody else wrote since). File contents are never printed except
 the presentation member (in `plan`'s diff). Any settings path at/under

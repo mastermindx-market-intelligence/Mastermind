@@ -10,6 +10,7 @@ Run:
     -p no:cacheprovider tests/test_mmos_presentation_set.py
 """
 import hashlib
+import importlib.util
 import json
 import os
 import stat
@@ -481,6 +482,96 @@ def test_fence_refuses_on_stat_permission_error(fake_real_root, value_file,
     finally:
         settings.parent.chmod(0o700)
     assert settings.read_bytes() == before
+
+
+# ---------------------------------------------------------------------------
+# F2: a foreign write between the preimage sha check and os.replace must not
+# be clobbered. The writer re-reads and re-hashes the destination immediately
+# before the replace (pre_replace_recheck, called from atomic_write's
+# pre_replace hook) and aborts PREIMAGE_CHANGED; the readback compares the
+# ON-DISK bytes to the planned bytes. These tests import the writer in
+# process to monkeypatch the hook; all fixtures stay in tmp dirs.
+# ---------------------------------------------------------------------------
+
+def load_writer_module():
+    spec = importlib.util.spec_from_file_location(
+        "presentation_set_under_test", TOOL)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_apply_aborts_foreign_write_before_replace(settings, value_file,
+                                                   tmp_path, monkeypatch,
+                                                   capsys):
+    mod = load_writer_module()
+    orig = mod.pre_replace_recheck
+    foreign = json.dumps(
+        {"FOREIGN_MARKER": "concurrent-writer-was-here"}).encode("utf-8")
+
+    def hook(path, expected_sha):
+        # the foreign write lands after staging, immediately before replace
+        with open(path, "wb") as fh:
+            fh.write(foreign)
+        return orig(path, expected_sha)
+
+    monkeypatch.setattr(mod, "pre_replace_recheck", hook)
+    with pytest.raises(SystemExit) as exc:
+        mod.main(["apply", "--settings", str(settings),
+                  "--value-file", str(value_file),
+                  "--expect-sha256", sha(settings.read_bytes()),
+                  "--receipt-dir", str(tmp_path / "receipts")])
+    assert exc.value.code != 0
+    assert "PREIMAGE_CHANGED" in capsys.readouterr().err
+    # the foreign bytes survive; no replace happened; no temp left behind
+    assert settings.read_bytes() == foreign
+    assert not list(settings.parent.glob(".settings.json.tmp.*"))
+    run_dir = tmp_path / "run"
+    assert not run_dir.exists() or not list(run_dir.glob(".settings.json.tmp.*"))
+
+
+def test_undo_aborts_foreign_write_before_replace(settings, value_file,
+                                                  tmp_path, monkeypatch,
+                                                  capsys):
+    mod = load_writer_module()
+    assert do_apply(settings, value_file, tmp_path / "receipts").returncode == 0
+    orig = mod.pre_replace_recheck
+    foreign = settings.read_bytes() + b'\n{"FOREIGN_MARKER": 1}'
+
+    def hook(path, expected_sha):
+        with open(path, "wb") as fh:
+            fh.write(foreign)
+        return orig(path, expected_sha)
+
+    monkeypatch.setattr(mod, "pre_replace_recheck", hook)
+    with pytest.raises(SystemExit) as exc:
+        mod.main(["undo", "--settings", str(settings),
+                  "--receipt-dir", str(tmp_path / "receipts")])
+    assert exc.value.code != 0
+    assert "PREIMAGE_CHANGED" in capsys.readouterr().err
+    assert settings.read_bytes() == foreign
+    assert not list(settings.parent.glob(".settings.json.tmp.*"))
+
+
+def test_readback_compares_on_disk_bytes_to_planned(settings, value_file,
+                                                    tmp_path, monkeypatch,
+                                                    capsys):
+    mod = load_writer_module()
+    real_atomic_write = mod.atomic_write
+
+    def foreign_after_replace(path, text, mode, staging_dir=None, **kw):
+        real_atomic_write(path, text, mode, staging_dir=staging_dir, **kw)
+        with open(path, "ab") as fh:
+            fh.write(b"\n")  # a foreign write landing after the replace
+
+    monkeypatch.setattr(mod, "atomic_write", foreign_after_replace)
+    with pytest.raises(SystemExit) as exc:
+        mod.main(["apply", "--settings", str(settings),
+                  "--value-file", str(value_file),
+                  "--expect-sha256", sha(settings.read_bytes()),
+                  "--receipt-dir", str(tmp_path / "receipts")])
+    assert exc.value.code == 1
+    assert "READBACK FAILED" in capsys.readouterr().err
 
 
 def test_env_root_absent_allows_unrelated_tmp_file(tmp_path, value_file,

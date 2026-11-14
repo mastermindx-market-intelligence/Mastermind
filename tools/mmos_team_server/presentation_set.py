@@ -14,9 +14,12 @@ Subcommands (every path is required; nothing defaults to a real path):
   apply --settings PATH --value-file JSON --expect-sha256 HEX --receipt-dir DIR
         Refuse unless the current sha256 equals --expect-sha256 (checked
         before the first write). Save the exact preimage bytes 0600 and a
-        receipt JSON in the 0700 receipt dir BEFORE writing, write atomically
-        with the file's mode preserved, then read back and verify parse,
-        presentation equality and outside-member byte equality.
+        receipt JSON in the 0700 receipt dir BEFORE writing, re-read and
+        re-hash the destination immediately before os.replace (abort
+        PREIMAGE_CHANGED if it changed), write atomically with the file's
+        mode preserved, then read back the ON-DISK bytes and verify them
+        against the planned bytes, parse, presentation equality and
+        outside-member byte equality.
   undo  --settings PATH --receipt-dir DIR
         Refuse unless the current sha256 equals the receipt's after-sha.
         Restore the exact preimage atomically; read back the sha.
@@ -66,6 +69,25 @@ def die(msg, code=2):
 
 def sha256(data):
     return hashlib.sha256(data).hexdigest()
+
+
+class PreimageChangedError(RuntimeError):
+    """The destination changed between the preimage check and os.replace."""
+
+
+def pre_replace_recheck(path, expected_sha):
+    """Re-read and re-hash the destination IMMEDIATELY before os.replace
+    (F2). A foreign write after the first sha check aborts the replace:
+    no replace, the staged temp is removed by atomic_write, and the caller
+    reports PREIMAGE_CHANGED. A window still remains between this re-hash
+    and os.replace; closing it needs the server's cooperation (see
+    integrations/mmos/pf/PART_C_PRESENTATION.md)."""
+    with open(path, "rb") as fh:
+        current = fh.read()
+    if sha256(current) != expected_sha:
+        raise PreimageChangedError(
+            f"destination {path} changed between the preimage check and the "
+            f"replace (current sha256 {sha256(current)} != {expected_sha})")
 
 
 def _under_root(candidate, root):
@@ -370,11 +392,18 @@ def cmd_apply(args):
     mode = stat.S_IMODE(os.stat(path).st_mode)
     receipt = write_receipt(args.receipt_dir, path, args.value_file,
                             data, new_data)
-    atomic_write(path, new_text, mode,
-                 staging_dir=staging_dir_for(path))
-    # readback: parse, presentation equality, outside bytes, mode, sha
+    try:
+        atomic_write(path, new_text, mode,
+                     staging_dir=staging_dir_for(path),
+                     pre_replace=lambda: pre_replace_recheck(path, current))
+    except PreimageChangedError as exc:
+        die(f"PREIMAGE_CHANGED: {exc}; nothing written")
+    # readback: ON-DISK bytes vs the planned bytes, parse, presentation
+    # equality, outside bytes, mode, sha
     back, back_text, back_parsed = load_settings(path)
     problems = []
+    if back != new_data:
+        problems.append("readback bytes differ from the planned bytes")
     if sha256(back) != receipt["after_sha256"]:
         problems.append("readback sha256 differs from the planned after-sha")
     if back_parsed.get("presentation") != value:
@@ -432,12 +461,17 @@ def cmd_undo(args):
             f"{receipt['after_sha256']}; someone wrote since the apply; "
             "refusing to undo")
     mode = stat.S_IMODE(os.stat(path).st_mode)
-    atomic_write(path, preimage.decode("utf-8"), mode,
-                 staging_dir=staging_dir_for(path))
+    try:
+        atomic_write(path, preimage.decode("utf-8"), mode,
+                     staging_dir=staging_dir_for(path),
+                     pre_replace=lambda: pre_replace_recheck(
+                         path, receipt["after_sha256"]))
+    except PreimageChangedError as exc:
+        die(f"PREIMAGE_CHANGED: {exc}; nothing written")
     with open(path, "rb") as fh:
         back = fh.read()
-    if sha256(back) != receipt["before_sha256"]:
-        die("READBACK FAILED: restored sha256 differs from the preimage",
+    if back != preimage or sha256(back) != receipt["before_sha256"]:
+        die("READBACK FAILED: restored bytes differ from the preimage",
             code=1)
     print(f"undone: {path}")
     print(f"restored_sha256: {receipt['before_sha256']}")
