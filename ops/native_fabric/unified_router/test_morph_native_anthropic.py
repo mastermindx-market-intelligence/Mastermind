@@ -11,7 +11,7 @@ import pytest
 
 from ops.native_fabric.unified_router import gateway
 from ops.native_fabric.unified_router.gateway import create_app
-from ops.native_fabric.unified_router.morph_fallback_config import upgrade
+from ops.native_fabric.unified_router.morph_fallback_config import upgrade, enable_native_deepseek
 from ops.native_fabric.unified_router.test_morph_fallback_upgrade import config, DS, TOKEN
 
 
@@ -61,7 +61,7 @@ def test_genuine_pro_alias_is_not_removed():
 def test_non_morph_origin_cannot_be_retargeted_to_subscription():
     original = _document()
     next(r for r in original["routes"] if r["route_id"] == "morph_ds")["base_url"] = "https://different.example/v1"
-    with pytest.raises(ValueError, match="unexpected upstream origin"):
+    with pytest.raises(ValueError, match="unexpected upstream binding"):
         upgrade(original)
 
 
@@ -256,3 +256,46 @@ def test_native_stream_passes_complete_thinking_events_unmodified(tmp_path, monk
     assert reply.status_code == 200, reply.text
     assert reply.content == wire
     assert seen == ["/v1/messages"]
+
+
+def test_narrow_upgrade_preserves_live_style_policy_drift():
+    """Do not reset the new Kimi/Qwen/overflow settings of the live router."""
+    original = _document()
+    policy = original["model_routing"]
+    policy["resources"]["morph_kimi"]["allow_one_oversize"] = True
+    policy["resources"]["morph_kimi_2"]["allow_one_oversize"] = True
+    policy["exact_route_allowlists"]["qwen3.8-max"] = ["bailian_2", "bailian_7"]
+    policy["overflow"]["families"]["kimi"]["preference_wait_s"] = 99
+    original["routes"][0]["priority"] = 87
+    before = copy.deepcopy(original)
+    updated = enable_native_deepseek(original)
+    assert original == before
+    assert updated["model_routing"] == before["model_routing"]
+    assert updated["routes"][0]["priority"] == 87
+    assert updated["aliases"] == {DS: [DS]}
+    assert enable_native_deepseek(updated) == updated
+
+
+def test_narrow_upgrade_refuses_partial_or_redirected_bindings():
+    first = _document()
+    first["routes"] = [r for r in first["routes"] if r["route_id"] != "morph_ds_2"]
+    with pytest.raises(ValueError, match="resource is missing"):
+        enable_native_deepseek(first)
+    for url in ("http://api.morphllm.com", "https://api.morphllm.com:8443",
+                "https://user@api.morphllm.com", "https://api.morphllm.com/v1/other",
+                "https://api.morphllm.com/?token=leak", "https://different.example/v1"):
+        document = _document()
+        document["routes"][0]["base_url"] = url
+        with pytest.raises(ValueError, match="unexpected upstream binding"):
+            enable_native_deepseek(document)
+
+
+def test_narrow_upgrade_keeps_other_models_original():
+    original = _document()
+    result = enable_native_deepseek(original)
+    before = {r["route_id"]: r for r in original["routes"]}
+    after = {r["route_id"]: r for r in result["routes"]}
+    for rid in before:
+        if rid in ("morph_ds", "morph_ds_2"):
+            continue
+        assert before[rid] == after[rid]
