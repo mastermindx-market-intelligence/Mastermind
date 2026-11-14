@@ -69,12 +69,21 @@ _CHANNEL_TOOLS = frozenset(
         "prepare_browser_type",
         "run_browser_action",
         "reconcile_browser_action",
+        "native_app_inventory",
+        "native_app_windows",
+        "observe_native_window",
+        "prepare_native_click",
+        "prepare_native_text",
+        "prepare_native_key",
+        "run_native_action",
+        "reconcile_native_action",
     }
 )
 # Modifying tools are the only admissions that can precede an effect
 # dispatch. Read/prepare/reconcile admissions never claim or publish anything.
 _CHANNEL_MODIFYING_TOOLS = frozenset(
     {
+        "run_native_action",
         "commit_text_patch",
         "run_project_command",
         "start_browser_resource",

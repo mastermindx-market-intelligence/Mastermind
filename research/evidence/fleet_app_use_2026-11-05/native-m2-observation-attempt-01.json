@@ -1,0 +1,23 @@
+{
+  "binary_sha256": "795176aaf84396b24e9e3ad10863ac0f8858e09695e3965e2b80b38c67701d8a",
+  "carrier": "peekaboo-local",
+  "error": "RuntimeError: fixture exact application identity unavailable",
+  "live_fabric_admission_proven": false,
+  "permissions": {
+    "observation_ready": true,
+    "permissions": {
+      "Accessibility": true,
+      "Event Synthesizing": true,
+      "Screen Recording": true
+    },
+    "screen_recording": true,
+    "source": "local"
+  },
+  "production_deployment_proven": false,
+  "schema": "mastermind.native_app_use_real_path_proof.v1",
+  "scope": "disposable native fixture through Workbench action port",
+  "session_ref": "2f05a000fd3ba19e92e3d140cd8f258df1a43fd7818394f4d9c50d812264cb10",
+  "source_head": "8b7abb8437452a97b070e9a2405d8dfe678af9f5",
+  "started_at_utc": "2026-11-05T11:14:05Z",
+  "status": "NOT_PROVEN"
+}

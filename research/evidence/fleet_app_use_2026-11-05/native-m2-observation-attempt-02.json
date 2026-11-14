@@ -1,0 +1,18 @@
+{
+  "candidate_source_sha256": {
+    "integrations/workbench_action_mcp/action_artifacts.py": "e344c4240e7ced17a9b44e4cc53372e9b66e2a10aec3abe2895770ec29de3b7a",
+    "integrations/workbench_app_use/contracts.py": "8d6d0a722fe0f4a3a7bd707eec6f0446f507a72425e19e2df8ef191a26b75fbd",
+    "integrations/workbench_app_use/native_port.py": "69d2b5033a3bfda8a69627d90a2071a175bae53cb128d1068a17fc9775ce7b76",
+    "integrations/workbench_app_use/peekaboo_adapter.py": "5902af9e36d197bc7a8f013977bf88783d7be9936dc6b8b1d45915692d6ac04c",
+    "integrations/workbench_app_use/tunnel.py": "9b56da0c29994e572b021d993a1f9b097d5ee4b51603f3d26410360f44710c56",
+    "tests/fixtures/native_app_use/Probe.swift": "4dfa88ecaf9d04923f1d68e7fa2578a9905401cca7890d36ee1b96d010dbf766"
+  },
+  "error": "AppUseRefused: NATIVE_RESULT_UNQUALIFIED",
+  "live_fabric_admission_proven": false,
+  "production_deployment_proven": false,
+  "schema": "mastermind.native_app_use_real_path_proof.v1",
+  "scope": "disposable native fixture through Workbench action port",
+  "source_head": "8b7abb8437452a97b070e9a2405d8dfe678af9f5",
+  "started_at_utc": "2026-11-05T11:16:51Z",
+  "status": "NOT_PROVEN"
+}
