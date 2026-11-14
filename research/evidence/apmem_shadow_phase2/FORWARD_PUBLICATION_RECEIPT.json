@@ -1,0 +1,15 @@
+{
+  "schema": "mastermind.volatility_forward_publication.v1",
+  "commit": "3de620818a38a599d6e6d0addf5050736920980f",
+  "parent": "19424ce448732f3d196adb5b2f0ae0138fdb8f63",
+  "source_code_commit": "1a7091ab97b34a29ba33905a053167a64fffc893",
+  "record_path": "research/evidence/apmem_shadow_phase2/FORWARD_2026-11-13_Tiingo_v1.json",
+  "record_sha256": "76a33f4f05d1cba899da059a91e7bd77637e83727385b6159b6ad1419c590776",
+  "github_committer_timestamp": "2026-11-14T01:56:28Z",
+  "readback_at": "2026-11-14T01:56:31.352516+00:00",
+  "exact_bytes_readback_verified": true,
+  "origin_session": "2026-11-13",
+  "matured_forward_outcomes": 0,
+  "status": "PUBLISHED_RESEARCH_FORECASTS_NOT_VALIDATED",
+  "may_trade": false
+}

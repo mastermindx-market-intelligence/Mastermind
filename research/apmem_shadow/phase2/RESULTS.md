@@ -14,7 +14,7 @@ Eleven primary ETFs: QQQ, SPY, IWM, XLB, XLE, XLI, XLK, XLP, XLU, XLV and XLY. E
 
 The primary experiment has 13,164 selected fits and 4,224 portfolio scenarios. Later disclosed extensions include options ablations, calibration-only controls, pre-2010 SPY stress, numerical diagnosis and repair. The repair has 720 new fixed-power fits, 2,520 forecast-score rows, 7,020 utility scenarios and 432 numerical reference checks. These are not independent samples. All original and unfavorable results remain in evidence/.
 
-85 dedicated tests passed in the principal container and actual empirical runtime. They verify future-data exclusion, matured labels, options timing, corporate actions, self-financing accounting, exact moment cases, analytical bounds, input digests and consumer clocks. Tests are not investment-performance validation. Empirical runtime: NumPy 2.4.6, pandas 3.0.3, SciPy 1.18.0, PyArrow 24.0.0; principal tests use a different recorded environment, with no bit-identical optimization claim.
+95 dedicated tests passed in the principal container and actual empirical runtime. They verify future-data exclusion, matured labels, options timing, corporate actions, self-financing accounting, exact moment cases, analytical bounds, input digests and consumer clocks. Tests are not investment-performance validation. Empirical runtime: NumPy 2.4.6, pandas 3.0.3, SciPy 1.18.0, PyArrow 24.0.0; principal tests use a different recorded environment, with no bit-identical optimization claim.
 
 ## Identical independent targets
 
@@ -28,7 +28,7 @@ Direct-horizon training labels must have matured by fit time. The optional recon
 
 | Asset | Existing estimator | EWMA94 | Deterministic APMEM | Reduction vs EWMA94 |
 |---|---:|---:|---:|---:|
-| QQQ | 0.610795 | 0.366398 | 0.283431 | 22.64% |
+| QQQ | 0.610795 | 0.366398 | 0.283433 | 22.64% |
 | SPY | 0.625321 | 0.384007 | 0.286778 | 25.32% |
 | IWM | 0.483726 | 0.249598 | 0.196220 | 21.39% |
 
@@ -118,7 +118,19 @@ The pure research consumer now distinguishes parameter fit cutoff from latest fi
 
 A fresh frozen forward attempt after the November 13 session FAILED CLOSED: Yahoo's long-window OHLC response had NaN latest closes for QQQ/SPY/IWM; a bounded five-day query confirmed those NaNs; independent approved Massive snapshots still ended November 12. No missing close was filled, no after-hours quote substituted, and no stale origin passed off as fresh. The child process exit 1 is recorded separately from its controller's normal exit.
 
-`ABSTAIN_INPUT_UNAVAILABLE`: zero forward forecasts created, zero matured forward outcomes. Raw captures and failure evidence remain private; the aggregate availability record is in evidence/forward_availability.json. No background collector, watcher or grading service is claimed. The next scientific gate is an actually complete fresh source observation and immutable pre-outcome forecast, not more retrospective threshold hunting.
+The initial `ABSTAIN_INPUT_UNAVAILABLE` attempt remains immutable with zero predictions. A separate bounded recovery through the existing approved Tiingo EOD reader then supplied complete single-provider raw OHLC/divCash panels through November 13. The new adapter verifies exact request, digest, instruments, dates, split encoding and finite prices; it does not splice providers, impute closes, use adjusted predictors or expose credentials. Ninety-five tests passed in both numerical and principal environments. Cross-source historical OHLC differences remain disclosed in FORWARD_RECOVERY.md and the source receipts; the original historical experiments were not reselected using Tiingo.
+
+**Actual forward result: three instruments, five fixed models each, three horizons each = 45 frozen forecast values.** The complete record was published at GitHub commit `3de620818a38a599d6e6d0addf5050736920980f`, timestamp `2026-11-14T01:56:28Z`, exact-byte SHA256 `76a33f4f05d1cba899da059a91e7bd77637e83727385b6159b6ad1419c590776`, with readback verified. All predictions concern observations strictly after origin November 13, 2026; there are zero matured outcomes in this delivery. The original generated record's awaiting-publication status is reconciled by the separate publication receipt, not retrospectively rewritten. Raw inputs remain private, not bundled as public historical datasets.
+
+| Instrument | Exact MEM H1 annualized volatility | H5 | H20 |
+|---|---:|---:|---:|
+| QQQ | 31.28% | 30.94% | 29.83% |
+| SPY | 20.09% | 20.03% | 19.82% |
+| IWM | 21.78% | 22.01% | 22.49% |
+
+These are annualized volatility estimates, not predicted returns, loss limits or a selected winning model. The other four frozen model outputs remain in the same record. The options-enhanced extension was not fabricated from the stale reconstructed options archive; it remains explicitly unavailable for this observation. No recurring collector, grader, watcher or trading service was installed.
+
+The next scientific gate is matching the frozen predictions to genuinely later outcomes under the predeclared target/clock, retaining failures and coverage. Publication proves pre-outcome existence, not future accuracy.
 
 ## Delivery and integration boundary
 
@@ -129,3 +141,8 @@ The normal Fabric route was unavailable. The principal performed implementation,
 Evidence: original primary tables, all disclosed extensions, hashes and run receipts under evidence/; extended file hashes in EXTENDED_MANIFEST.json. README.md gives reproducible offline commands using separately accessible licensed snapshots. Raw vendor histories are not published.
 
 Primary references: NYU APMEM https://vlab.stern.nyu.edu/docs/volatility/APMEM ; Moreira/Muir https://www.nber.org/papers/w22208 ; Cederburg et al. https://www.sciencedirect.com/science/article/pii/S0304405X2030132X ; Patton https://www.sciencedirect.com/science/article/pii/S030440761000076X . These references motivate methods/limitations; they do not validate this specific implementation.
+
+
+## Exact evidence locations after source-check repair
+
+The compact summary was moved byte-identically to `research/evidence/apmem_shadow_phase2/DELIVERY_SUMMARY_COMPACT.json`, the repository's existing structurally checked record plane. Scientific counts were not disguised; real peer/owner identity negative controls still fail. The forward observation and publication/recovery records use that same plane. Other aggregate tables remain under this directory's `evidence/`. The protected guard implementation and permissions were not changed.
