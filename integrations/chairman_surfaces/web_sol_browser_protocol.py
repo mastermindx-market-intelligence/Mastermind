@@ -30,18 +30,18 @@ TAB_ACTIONS = PAGE_ACTIONS | {"snapshot", "screenshot", "diagnostics", "navigate
                             "reload", "back", "forward", "close", "focus"} | ADVANCED_ACTIONS
 ACTIONS = READ_ACTIONS | TAB_ACTIONS | {"open"}
 # Browser actions of the immediately previous bridge release (commit
-# 5aa30969241163b4abb3e025bc9e52123ee4b478). The native host admits a peer
+# b640dec1461a29cd5e42910c992973f50597d93f). The native host admits a peer
 # presenting that release's transport capability digest and holds the
 # connection to exactly this set, so a fleet mixed across the two releases
 # can never dispatch an action one side of the connection cannot execute.
-# `read` is the only action the newer set adds. Keep in step with
-# web_sol_protocol.PREVIOUS_TRANSPORT_CAPABILITY_DIGEST.
+# `menu` is the only action the newer set adds. Keep in step with
+# web_sol_protocol.PREVIOUS_TRANSPORT_CAPABILITY_DIGEST (release b640dec1).
 PREVIOUS_ACTIONS = frozenset({
     "accessibility", "back", "capture", "cdp", "cdp_attach", "cdp_detach",
     "cdp_status", "click", "close", "diagnostics", "dialog", "dom", "download",
     "downloads", "emulate", "evaluate", "events", "fill", "focus", "forward",
     "frames", "interact", "locate", "navigate", "network", "open", "pdf",
-    "press", "reload", "response_body", "result", "route", "screenshot",
+    "press", "read", "reload", "response_body", "result", "route", "screenshot",
     "scroll", "select", "snapshot", "status", "tabs", "upload", "wait",
 })
 KEYS = frozenset({"Enter", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft",

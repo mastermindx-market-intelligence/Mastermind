@@ -17,9 +17,10 @@ const TRANSPORT_PROTOCOL_MAJOR = 1;
 const PACKAGE_VERSION = "0.4.0";
 // Must equal web_sol_deployment's rendered instance_config.js capabilityDigest
 // (= web_sol_protocol.transport_capability_digest()); a mismatch leaves
-// INSTANCE_CONFIG null and the extension inert. The 40-action digest of the
-// previous release (e0216d3d...) is admitted by the new host, not by this file.
-const EXPECTED_CAPABILITY_DIGEST = "1c40ec98d1086a8f8005151757b040698057019f5e9169cace91e393b6f60d40";
+// INSTANCE_CONFIG null and the extension inert. The 41-action digest of the
+// previous release (1c40ec98..., b640dec1) is admitted by the new host, not by
+// this file.
+const EXPECTED_CAPABILITY_DIGEST = "08c66c330c9d3cd6728ff67628aa314afd446389b6bd394a93a9f8b63672a05a";
 const MAX_ACTION_TTL_MS = 60000;
 const ALLOWED_FUTURE_SKEW_MS = 5000;
 const CHATGPT_TAB_PATTERNS = Object.freeze([

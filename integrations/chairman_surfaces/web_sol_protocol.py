@@ -311,10 +311,10 @@ def transport_capability_digest() -> str:
 # programmes have operators at work). The commit names the release this
 # digest belongs to; there is no wildcard and no "any older".
 PREVIOUS_TRANSPORT_CAPABILITY_RELEASE_COMMIT = (
-    "5aa30969241163b4abb3e025bc9e52123ee4b478"
+    "b640dec1461a29cd5e42910c992973f50597d93f"
 )
 PREVIOUS_TRANSPORT_CAPABILITY_DIGEST = (
-    "e0216d3d9e9f05edef32ff642cb82a1281b1a9766d5cc35f694c88e0ef0bb0bb"
+    "1c40ec98d1086a8f8005151757b040698057019f5e9169cace91e393b6f60d40"
 )
 
 

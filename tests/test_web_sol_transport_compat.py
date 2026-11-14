@@ -6,7 +6,7 @@ exactly one previous bridge release's transport capability digest alongside
 its own, and holds every admitted connection to the action set that digest
 describes. Whatever ordering of client upgrade, extension reload and host
 respawn the fleet goes through, an old peer keeps its old actions and the new
-action ``read`` exists only where both ends of the connection describe it.
+action ``menu`` exists only where both ends of the connection describe it.
 
 The previous-release client module is byte-identical to the current one
 (verified against release roots), so a client whose protocol module reports
@@ -36,20 +36,20 @@ from integrations.chairman_surfaces import web_sol_protocol as wsp
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTANCE = "a" * 64
-# The 40 browser actions of release 5aa30969241163b4abb3e025bc9e52123ee4b478:
-# the current set minus ``read`` and nothing else.
+# The 41 browser actions of release b640dec1461a29cd5e42910c992973f50597d93f:
+# the current set minus ``menu`` and nothing else.
 PREVIOUS_ACTION_NAMES = frozenset({
     "accessibility", "back", "capture", "cdp", "cdp_attach", "cdp_detach",
     "cdp_status", "click", "close", "diagnostics", "dialog", "dom", "download",
     "downloads", "emulate", "evaluate", "events", "fill", "focus", "forward",
     "frames", "interact", "locate", "navigate", "network", "open", "pdf",
-    "press", "reload", "response_body", "result", "route", "screenshot",
+    "press", "read", "reload", "response_body", "result", "route", "screenshot",
     "scroll", "select", "snapshot", "status", "tabs", "upload", "wait",
 })
 PREVIOUS_DIGEST = (
-    "e0216d3d9e9f05edef32ff642cb82a1281b1a9766d5cc35f694c88e0ef0bb0bb"
+    "1c40ec98d1086a8f8005151757b040698057019f5e9169cace91e393b6f60d40"
 )
-PREVIOUS_COMMIT = "5aa30969241163b4abb3e025bc9e52123ee4b478"
+PREVIOUS_COMMIT = "b640dec1461a29cd5e42910c992973f50597d93f"
 UNKNOWN_DIGEST = "ab" * 32
 
 
@@ -275,11 +275,12 @@ def test_previous_release_constants_name_exactly_one_admitted_digest():
     assert all(c in "0123456789abcdef" for c in PREVIOUS_DIGEST)
 
 
-def test_previous_action_set_is_the_old_forty_without_read():
+def test_previous_action_set_is_the_old_forty_one_without_menu():
     assert browser.PREVIOUS_ACTIONS == PREVIOUS_ACTION_NAMES
-    assert browser.PREVIOUS_ACTIONS == browser.ACTIONS - {"read"}
-    assert len(browser.PREVIOUS_ACTIONS) == 40
-    assert "read" not in browser.PREVIOUS_ACTIONS
+    assert browser.PREVIOUS_ACTIONS == browser.ACTIONS - {"menu"}
+    assert len(browser.PREVIOUS_ACTIONS) == 41
+    assert "menu" not in browser.PREVIOUS_ACTIONS
+    assert "read" in browser.PREVIOUS_ACTIONS
     assert "status" in browser.PREVIOUS_ACTIONS
 
 
@@ -292,17 +293,19 @@ def test_action_set_lookup_admits_current_and_previous_only():
         assert wsp.transport_capability_action_set(foreign) is None
 
 
-def test_old_client_connects_and_read_is_refused_without_forwarding(socket_dir):
+def test_old_client_connects_and_menu_is_refused_without_forwarding(socket_dir):
     harness = HostHarness(socket_dir, extension_digest=wsp.transport_capability_digest())
     harness.start()
     try:
         connection, reader, writer, boot = _raw_connect(PREVIOUS_DIGEST)
         with connection:
             native.write_frame(
-                writer, _browser_request("read", boot=boot, params={"offset": 0})
+                writer, _browser_request(
+                    "menu", boot=boot, params={"path": ["Thinking", "Extra High"]}
+                )
             )
             refused = browser.validate_receipt(native.read_frame(reader))
-            assert refused["action"] == "read"
+            assert refused["action"] == "menu"
             assert refused["effect"] == "NOT_APPLIED"
             assert refused["status"] == "ACTION_UNAVAILABLE"
             assert refused["data"]["reason"] == "transport_capability_mismatch"
@@ -339,7 +342,7 @@ def test_unmodified_old_client_accepts_the_new_host_answer(socket_dir, monkeypat
         harness.stop()
 
 
-def test_new_client_connects_and_read_is_admitted(socket_dir):
+def test_new_client_connects_and_menu_is_admitted(socket_dir):
     harness = HostHarness(socket_dir, extension_digest=wsp.transport_capability_digest())
     harness.start()
     try:
@@ -348,15 +351,15 @@ def test_new_client_connects_and_read_is_admitted(socket_dir):
             action="status",
         )
         connection_id = status["transport_boot_nonce"]
-        read = client.browser_via_extension(
-            INSTANCE, session_id="b" * 64, operation_key="read-operation",
-            action="read", connection_id=connection_id, tab_id=17,
+        menu = client.browser_via_extension(
+            INSTANCE, session_id="b" * 64, operation_key="menu-operation",
+            action="menu", connection_id=connection_id, tab_id=17,
             url_fingerprint="c" * 64, snapshot_id="snapshot-observation-001",
-            ref="e1", params={"offset": 0},
+            ref="e1", params={"path": ["Thinking", "Extra High"]},
         )
-        assert read["status"] == "OK" and read["action"] == "read"
+        assert menu["status"] == "OK" and menu["action"] == "menu"
         assert [doc.get("action") for doc in harness.extension.forwarded] == [
-            "status", "read",
+            "status", "menu",
         ]
     finally:
         harness.stop()
@@ -392,10 +395,10 @@ def test_third_digest_is_refused_at_the_handshake(socket_dir):
         harness.stop()
 
 
-def test_old_extension_holds_read_back_from_a_new_client(socket_dir):
+def test_old_extension_holds_menu_back_from_a_new_client(socket_dir):
     # The host-respawn window: the extension still runs the previous release
     # while a new-session client presents the new digest. The connection is
-    # admitted on both digests, but `read` does not exist in the extension's
+    # admitted on both digests, but `menu` does not exist in the extension's
     # set, so the host refuses it instead of forwarding it to a worker that
     # cannot execute it. Old actions keep flowing.
     harness = HostHarness(socket_dir, extension_digest=PREVIOUS_DIGEST)
@@ -407,13 +410,13 @@ def test_old_extension_holds_read_back_from_a_new_client(socket_dir):
         )
         assert status["status"] == "OK"
         refused = client.browser_via_extension(
-            INSTANCE, session_id="b" * 64, operation_key="read-operation",
-            action="read", connection_id=status["transport_boot_nonce"],
+            INSTANCE, session_id="b" * 64, operation_key="menu-operation",
+            action="menu", connection_id=status["transport_boot_nonce"],
             tab_id=17, url_fingerprint="c" * 64,
             snapshot_id="snapshot-observation-001", ref="e1",
-            params={"offset": 0},
+            params={"path": ["Thinking", "Extra High"]},
         )
-        assert refused["action"] == "read"
+        assert refused["action"] == "menu"
         assert refused["effect"] == "NOT_APPLIED"
         assert refused["status"] == "ACTION_UNAVAILABLE"
         assert refused["data"]["reason"] == "transport_capability_mismatch"
