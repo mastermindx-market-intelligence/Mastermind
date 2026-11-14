@@ -211,7 +211,7 @@ class _Retryable(RuntimeError):
     def __init__(self, reason: str, detail: str = "", *, cooldown: bool = True,
                  cooldown_s: float | None = None, rejected: bool = False,
                  retryable: bool = False, category: str = "execution_unknown",
-                 provider_code: str = "", owner_hold: bool = False, http_status: int = 502):
+                 provider_code: str = "", owner_hold: bool = False, http_status: int = HTTPStatus.BAD_GATEWAY):
         super().__init__(reason)
         self.reason = reason
         self.cooldown = cooldown
@@ -1197,7 +1197,7 @@ def create_app(cfg: Settings | None = None, *,
                 provider_code=failure.code, owner_hold=failure.owner_hold, http_status=status)
         if failure.category == "execution_unknown":
             raise _Retryable(code, cooldown_s=retry_after, provider_code=failure.code,
-                             http_status=502 if status == 500 else status)
+                             http_status=HTTPStatus.BAD_GATEWAY if status == HTTPStatus.INTERNAL_SERVER_ERROR else status)
         if failure.category == "permission" and failure.owner_hold:
             # Refusal ends this request. No alternate account/model/provider replay.
             state = app.state.router_state.routes
