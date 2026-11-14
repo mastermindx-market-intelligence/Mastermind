@@ -1,0 +1,27 @@
+{
+  "enabled": false,
+  "scratch_root": "~/.mastermind/mmos_dev/pf/t4d/exec",
+  "paperclip_base_url": "http://127.0.0.1:3196",
+  "paperclip_allowed": ["127.0.0.1:3196"],
+  "paperclip_company_id": "PFD",
+  "paperclip_headers": {},
+  "teammates": ["PLACEHOLDER_PF_AGENT_ID"],
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "register_transport": true,
+  "t3": {
+    "proof_base_url": "http://127.0.0.1:3830",
+    "home_dir": "~/.mastermind/mmos_dev/pf/staging/home",
+    "port": 3830,
+    "dev_port_range": [3830, 3839],
+    "token_path": "~/.mastermind/mmos_dev/pf/t4d/worker-token.txt",
+    "token_label": "pf-t4d-door-worker",
+    "project_id": "PLACEHOLDER_PF_T3_PROJECT_ID",
+    "model_selection": "{\"instanceId\":\"PLACEHOLDER_INSTANCE\",\"model\":\"PLACEHOLDER_MODEL\"}"
+  },
+  "intake_poll_seconds": 2.0,
+  "wait_retry_seconds": 30.0,
+  "reconcile_interval_seconds": 30.0,
+  "lease_seconds": 900,
+  "wait_deadline_seconds": 1800.0,
+  "poll_interval_seconds": 15.0
+}
