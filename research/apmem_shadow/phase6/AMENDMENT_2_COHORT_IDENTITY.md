@@ -1,0 +1,9 @@
+# Amendment 2: economic cohort versus lagged behavioral cohort
+
+Before reading any new event/payoff or policy result, freeze this separate identity test. A formal sector ETF can be a poor proxy for an individual constituent; MCD is an economic restaurant/discretionary name while the proposed defensive personality is a behavioral hypothesis.
+
+Retain the fixed economic peers as primary. The behavioral alternative chooses at most three other names from the SAME predeclared 29-stock diagnostic panel, at the first observed trading session of each month, using only data through the previous session. Rank pairwise residual-return correlations over the previous 252 sessions after removing a lag-estimated SPY beta. Require at least 126 common valid observations and positive correlation greater than 0.10; fewer than two usable peers means unknown. Freeze the selected identities for the month. No ticker, future return, observed case fit, sector outcome or chart appearance can select the peers. The source pool is current survivor-selected and therefore still not a historical investable universe.
+
+Build leave-one-name-out repair and relative-resilience context for these previously selected peers. Keep its identity, selection clock, coverage and correlation diagnostics visible. Compare economic-only, behavioral-only and their disagreement, not a retrospective best-cohort chooser or an agreement-count confidence score. The primary relative-return outcome remains the ORIGINAL economic cohort; changing a predictor's peers must not quietly change its benchmark.
+
+Also retain the two fixed calendar pairings for the 2W context as a source-robustness diagnostic, without choosing the better pairing by payoff. This is separate from the earlier three-day phase-neutral trigger. Observed price revisions, data-start seeding and provisional chart values remain distinct limitations.
