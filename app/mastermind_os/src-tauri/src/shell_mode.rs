@@ -907,6 +907,37 @@ mod tests {
         assert!(scanned >= 3, "expected release, dev and t8 configs, saw {names:?}");
     }
 
+    /// Lane PF (Mastermind OS Next): the next variant config declares the
+    /// Next identity (product name, identifier and deep-link scheme), and
+    /// that identifier maps to its own dev config folder — never the
+    /// release folder, and distinct from every existing dev bundle.
+    #[test]
+    fn next_variant_config_declares_the_next_identity_and_own_folder() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let text = fs::read_to_string(dir.join("tauri.conf.next.json"))
+            .expect("tauri.conf.next.json must exist");
+        let value: serde_json::Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(value["productName"], "Mastermind OS Next");
+        assert_eq!(value["identifier"], "com.mastermind.os.next");
+        let schemes = value["plugins"]["deep-link"]["desktop"]["schemes"]
+            .as_array()
+            .expect("deep-link desktop schemes");
+        assert_eq!(
+            schemes,
+            &[serde_json::Value::String("com.mastermind.os.next".into())]
+        );
+        let home = std::path::Path::new("/Users/test");
+        let next_dir = fixed_config_dir("com.mastermind.os.next", home);
+        assert_eq!(
+            next_dir,
+            Some(PathBuf::from("/Users/test/.mastermind/mmos_dev/window-next"))
+        );
+        // Never the release folder, and distinct from dev and t8.
+        assert_ne!(next_dir, fixed_config_dir("com.mastermind.os", home));
+        assert_ne!(next_dir, fixed_config_dir("com.mastermind.os.dev", home));
+        assert_ne!(next_dir, fixed_config_dir("com.mastermind.os.dev.t8", home));
+    }
+
     /// S1 attack finding 2 fix: exotic loopback spellings and lookalikes.
     /// url-2.5.8 normalizes IPv4 shorthands to exactly 127.0.0.1 — still
     /// loopback, and since the attack round every accepted spelling carries

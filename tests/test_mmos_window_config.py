@@ -82,8 +82,11 @@ class TestConfigDirs:
         assert '$HOME/.mastermind/window"' in script
         assert '$HOME/.mastermind/mmos_dev/window-dev"' in script
         assert '$HOME/.mastermind/mmos_dev/window-dev-t8"' in script
+        # Lane PF: the Next bundle maps to its own dev folder, exactly like
+        # shell_mode.rs::fixed_config_dir("com.mastermind.os.next").
+        assert '$HOME/.mastermind/mmos_dev/window-next"' in script
 
-    def test_release_dev_and_t8_are_three_distinct_directories(self):
+    def test_release_dev_t8_and_next_are_four_distinct_directories(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
             dirs = []
@@ -91,6 +94,7 @@ class TestConfigDirs:
                 ("release", ".mastermind/window"),
                 ("dev", ".mastermind/mmos_dev/window-dev"),
                 ("t8", ".mastermind/mmos_dev/window-dev-t8"),
+                ("next", ".mastermind/mmos_dev/window-next"),
             ]:
                 run_tool(
                     "write",
@@ -102,7 +106,7 @@ class TestConfigDirs:
                 )
                 dirs.append(home / expected)
                 assert (home / expected / "shell-url").exists(), bundle
-            assert len({str(d) for d in dirs}) == 3
+            assert len({str(d) for d in dirs}) == 4
             # The release file is not under any dev root.
             assert ".mastermind/mmos_dev" not in str(dirs[0])
 

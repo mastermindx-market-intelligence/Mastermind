@@ -9,6 +9,7 @@
 #   release (com.mastermind.os)         -> ~/.mastermind/window
 #   dev    (com.mastermind.os.dev)      -> ~/.mastermind/mmos_dev/window-dev
 #   t8     (com.mastermind.os.dev.t8)   -> ~/.mastermind/mmos_dev/window-dev-t8
+#   next   (com.mastermind.os.next)     -> ~/.mastermind/mmos_dev/window-next
 #
 # Files inside: `shell-url` (one line, the loopback thread address; never a
 # pairing token) and `pair-helper` (one line, absolute path to
@@ -48,10 +49,10 @@ set -eu
 
 usage() {
   cat >&2 <<'EOF'
-usage: window_config.sh write --bundle release|dev|t8 --url URL [--pair-helper PATH] [--keep-pair-helper]
-       window_config.sh check --bundle release|dev|t8 --app <path to the app binary>
-       window_config.sh show   --bundle release|dev|t8
-       window_config.sh clear  --bundle release|dev|t8
+usage: window_config.sh write --bundle release|dev|t8|next --url URL [--pair-helper PATH] [--keep-pair-helper]
+       window_config.sh check --bundle release|dev|t8|next --app <path to the app binary>
+       window_config.sh show   --bundle release|dev|t8|next
+       window_config.sh clear  --bundle release|dev|t8|next
 EOF
   exit 2
 }
@@ -79,7 +80,8 @@ case "$BUNDLE" in
   release) DIR="$HOME/.mastermind/window" ;;
   dev)     DIR="$HOME/.mastermind/mmos_dev/window-dev" ;;
   t8)      DIR="$HOME/.mastermind/mmos_dev/window-dev-t8" ;;
-  *) echo "window_config: unknown bundle '$BUNDLE' (release|dev|t8)" >&2; exit 2 ;;
+  next)    DIR="$HOME/.mastermind/mmos_dev/window-next" ;;
+  *) echo "window_config: unknown bundle '$BUNDLE' (release|dev|t8|next)" >&2; exit 2 ;;
 esac
 
 refuse() { # reason (panel repair L: the reason only, never the value)
