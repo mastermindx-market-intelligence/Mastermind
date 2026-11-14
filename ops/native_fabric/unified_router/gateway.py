@@ -402,6 +402,97 @@ def _route_authorization(route: Route, cfg: Settings) -> str:
     raise ValueError(f"route kind {route.kind} cannot be authorized")
 
 
+def _sanitize_messages(payload: dict) -> None:
+    """Drop non-schema keys from message objects before forwarding.
+
+    Clients (notably T3's claudeAgent driver) can leak generation options such
+    as ``output_config`` into the messages array. The Messages API rejects the
+    whole request with ``messages.N.output_config: Extra inputs are not
+    permitted``, which surfaced as a hard 400 for every Claude model on the
+    shared route. The message object schema is fixed, so this allowlist is
+    lossless for any valid request.
+    """
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return
+    kept: list = []
+    directives: list = []
+    for index, message in enumerate(messages):
+        if not isinstance(message, dict):
+            kept.append(message)
+            continue
+        if message.get("role") == "system":
+            # The Messages API only accepts a system-role entry that precedes an
+            # assistant turn or ends the array; T3 emits one mid-conversation and
+            # the whole request 400s. Fold it into the top-level system param,
+            # which is always valid, instead of discarding the instructions.
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                directives.append({"type": "text", "text": content})
+            elif isinstance(content, list) and content and all(
+                isinstance(block, dict) and block.get("type") == "text"
+                and isinstance(block.get("text"), str) and block["text"].strip()
+                for block in content
+            ):
+                directives.extend(content)
+            else:
+                # Folding a subset would silently change the instructions.
+                raise ValueError("FABRIC_INVALID_REQUEST")
+            _log.warning("fabric sanitized messages.%d folded role=system model=%s",
+                         index, payload.get("model"))
+            continue
+        extra = [key for key in message if key not in ("role", "content")]
+        if extra:
+            for key in extra:
+                del message[key]
+            _log.warning("fabric sanitized messages.%d dropped=%s model=%s",
+                         index, ",".join(sorted(extra)), payload.get("model"))
+        kept.append(message)
+    if directives:
+        system = payload.get("system", [])
+        if isinstance(system, str):
+            system = [{"type": "text", "text": system}] if system else []
+        if not isinstance(system, list):
+            raise ValueError("FABRIC_INVALID_REQUEST")
+        # APPEND, never prepend: the prompt cache is prefix-exact, so putting the
+        # folded directives in front of the system block changes the very first
+        # token of every turn and cold-prefills the whole context. Appending keeps
+        # the existing prefix intact, so only the new tail is uncached.
+        payload["system"] = system + directives
+    if len(kept) != len(messages):
+        payload["messages"] = kept
+
+
+_ALLOWED_TOP_LEVEL = frozenset({
+    "model", "messages", "system", "max_tokens", "stop_sequences", "stream",
+    "temperature", "top_k", "top_p", "metadata", "tools", "tool_choice",
+    "thinking", "output_config", "service_tier", "container", "mcp_servers", "betas",
+})
+
+
+def _sanitize_payload(payload: dict) -> None:
+    """Drop keys this Messages API does not accept, then fix message objects.
+
+    Newer clients (T3's claudeAgent driver) send forward-looking fields that the
+    pinned ``anthropic-version`` rejects outright -- one stray key fails the
+    whole request with a hard 400 the router can only pass through. Observed
+    live in sequence: ``messages.N.output_config``, then top-level
+    ``context_management``. Stripping is strictly better than a 400 because the
+    upstream would refuse the field anyway; every drop is logged so the drifting
+    client stays visible.
+
+    Request-level output_config is valid and retains effort/schema intent;
+    only its misplaced per-message occurrence is removed below.
+    """
+    extra = [key for key in payload if key not in _ALLOWED_TOP_LEVEL]
+    for key in extra:
+        del payload[key]
+    if extra:
+        _log.warning("fabric sanitized payload dropped=%s model=%s",
+                     ",".join(sorted(extra)), payload.get("model"))
+    _sanitize_messages(payload)
+
+
 def _affinity(payload: dict) -> str | None:
     metadata = payload.get("metadata")
     if isinstance(metadata, dict) and isinstance(metadata.get("user_id"), str):
@@ -1102,6 +1193,7 @@ def create_app(cfg: Settings | None = None, *,
                     payload = json.loads(bytes(body))
                     if not isinstance(payload, dict):
                         raise ValueError()
+                    _sanitize_payload(payload)
                     candidates = _model_candidates(payload, cfg.aliases)
                 except (ValueError, RecursionError, WireTranslationError) as exc:
                     state.refused += 1
