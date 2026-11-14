@@ -104,7 +104,10 @@ class _DeliveryLock:
         if self._fd is not None:
             os.close(self._fd)
             self._fd = None
-            self._path.unlink()
+            # missing_ok: a human reconciling a crashed holder may have removed
+            # the lock mid-write; that must not mask the body's own exception
+            # (e.g. a delivery refusal) with a FileNotFoundError (LOW-1).
+            self._path.unlink(missing_ok=True)
         return False
 
 

@@ -226,6 +226,23 @@ function fixture() {
     const tab={tab_id:5,url_fingerprint:hash("https://allowed.test/new")};
     await f.run(request("snapshot",tab));assert.equal((await f.run(request("close",tab))).effect,"APPLIED");
   }
+  // MED-1: the busy claim must be synchronous. Two concurrent requests race
+  // across the activity-persistence yield (`await persistActivity()`); exactly
+  // one may dispatch and the other must be refused BUSY. If the busy token is
+  // assigned only after that await, both pass the `if (busy)` gate and run
+  // concurrently — breaking the one-in-flight invariant the close boundary and
+  // the snapshot/read-back ladders rely on.
+  {
+    const f=fixture();
+    const r1=request("open",{params:{url:"https://allowed.test/new"}});
+    const r2=request("open",{params:{url:"https://allowed.test/new"}});
+    const [a,b]=await Promise.all([f.run(r1),f.run(r2)]);
+    assert.deepEqual([a.status,b.status].sort(),["ACTION_DISPATCHED","BUSY"],
+      "two concurrent opens must yield exactly one BUSY");
+    // The guard recovers: a later request after both settle is admitted.
+    const after=await f.run(request("status"));
+    assert.equal(after.status,"OK");
+  }
   // Opaque-failure contract: a native rejection must never collapse to a bare
   // BROWSER_UNAVAILABLE. Host-permission texts map to SITE_PERMISSION_REQUIRED.
   {

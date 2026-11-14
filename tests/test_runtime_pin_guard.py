@@ -273,6 +273,33 @@ class RuntimePinGuard(unittest.TestCase):
         self.assertTrue(all(seen))
         self.assertFalse((self.mmx / ".deliver.lock").exists())
 
+    def test_delivery_lock_exit_preserves_body_exception_when_externally_removed(self):
+        # LOW-1: a human reconciling a crashed holder may remove .deliver.lock
+        # while a live holder is mid-write. The holder's __exit__ must not raise
+        # FileNotFoundError over the body's own exception (e.g. a delivery
+        # refusal) — the caller would misdiagnose the failure.
+        lock = self.mmx / ".deliver.lock"
+        with self.assertRaises(RuntimeError) as caught:
+            with runtime_pin._DeliveryLock(self.mmx):
+                self.assertTrue(lock.exists(), "the lock must exist while held")
+                lock.unlink()  # the human reconciles the crashed holder's lock
+                raise RuntimeError("delivery refusal from the with body")
+        self.assertEqual(str(caught.exception), "delivery refusal from the with body")
+        self.assertFalse(lock.exists())
+
+    def test_delivery_lock_clean_exit_tolerates_externally_removed_lock(self):
+        # LOW-1, no in-flight exception: a clean exit after the lock was removed
+        # externally must also not raise FileNotFoundError.
+        lock = self.mmx / ".deliver.lock"
+        with runtime_pin._DeliveryLock(self.mmx):
+            self.assertTrue(lock.exists())
+            lock.unlink()
+        self.assertFalse(lock.exists())
+        # A later holder can still acquire the lock once it is gone.
+        with runtime_pin._DeliveryLock(self.mmx):
+            self.assertTrue(lock.exists())
+        self.assertFalse(lock.exists())
+
     def test_cli_has_no_default_root_and_requires_mmx_root(self):
         # The class rule at the CLI: no default target exists; omitting the
         # root is a usage error that writes nothing.

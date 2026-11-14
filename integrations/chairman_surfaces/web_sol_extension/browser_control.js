@@ -296,8 +296,12 @@
       const seenAt = Date.now();
       sessionActivity.set(r.session_id, seenAt);
       for (const [sid, at] of sessionActivity) if (seenAt - at > 86400000) sessionActivity.delete(sid);
-      await persistActivity();
+      // Claim the busy token synchronously, before any await: a second request
+      // arriving during the persistence yield must see BUSY, not slip past the
+      // gate (MED-1). persistActivity swallows its own errors and never throws,
+      // so the token cannot leak here; the try/finally below still clears it.
       const running={boot};busy=running;
+      await persistActivity();
       let attempted = false, orphanClose = false;
       try {
         if (r.action === "status") return receipt(r,"OK",{
@@ -354,8 +358,10 @@
           // may always close its own tab; another session's tab is closable
           // only once that opener has been silent past the live lease (an
           // orphan). Operator tabs and tabs with no record are never
-          // closable. The caller cannot forge this: close params stay empty
-          // and session identity is host-verified.
+          // closable. The caller cannot forge this: close params stay empty,
+          // and session identity is derived by the MCP bridge from the
+          // authenticated native session (browser_bridge.py); the raw
+          // transport here carries the host's assertion, not a proof.
           const rec = createdTabs.get(tab.id);
           if (!rec) return receipt(r,"TAB_NOT_BRIDGE_OPENED");
           if (rec.session_id !== r.session_id) {
