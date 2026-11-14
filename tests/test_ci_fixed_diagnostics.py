@@ -247,3 +247,123 @@ def test_workflow_retains_job_limit_and_bounds_upload_opportunity():
     assert upload['with']['name']=='ci-fixed-diagnostics-${{ matrix.index }}'
     assert upload['with']['if-no-files-found']=='warn'
     assert job['steps'].index(step)<job['steps'].index(upload)
+
+
+@pytest.mark.parametrize(('cache_restored', 'phase'), [
+    (restored, phase)
+    for restored in ('true', 'false', '')
+    for phase in [
+        'SOURCE_PREPARATION',
+        *(('DOCKER_LOAD', 'DOCKER_TAG') if restored == 'true'
+          else ('DOCKER_BUILD', 'DOCKER_SAVE')),
+        'DOCKER_RUN', 'INITIALIZER_PYTEST', 'INITIALIZER_POSITIVE_VALIDATOR',
+        'PROVIDER_PYTEST', 'PROVIDER_POSITIVE_VALIDATOR',
+        'REPORTER_UNAVAILABLE', 'SUCCESS',
+    ]
+])
+def test_h1_workflow_retains_closed_phase_and_original_exit(tmp_path, cache_restored, phase):
+    import yaml
+    from scripts.ci_pytest import _WorkflowYAMLLoader
+
+    root = Path(__file__).resolve().parents[1]
+    workflow = yaml.load((root / '.github/workflows/ci.yml').read_text(), Loader=_WorkflowYAMLLoader)
+    steps = workflow['jobs']['pytest_shards']['steps']
+    h1 = next(s for s in steps if s.get('name') == 'H1 required real Linux no-ACL positive journey')
+    command = h1['run'].replace('${{ github.sha }}', 'a' * 40)
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    shim = bin_dir / 'shim'
+    shim.write_text(f'#!{sys.executable}\n' + '''
+import os
+from pathlib import Path
+import shlex
+import subprocess
+import sys
+
+command = Path(sys.argv[0]).name
+args = sys.argv[1:]
+fault = os.environ['H1_FIXTURE_FAULT']
+python = sys.executable
+if command == 'git':
+    stage = 'SOURCE_PREPARATION'
+elif command == 'tar':
+    sys.stdin.buffer.read()
+    sys.exit(0)
+elif command == 'docker':
+    verbs = {'build': 'DOCKER_BUILD', 'load': 'DOCKER_LOAD', 'tag': 'DOCKER_TAG',
+             'save': 'DOCKER_SAVE', 'run': 'DOCKER_RUN'}
+    assert args[0] in verbs
+    stage = verbs[args[0]]
+elif 'h1-gate-failure' in args:
+    if fault == 'REPORTER_UNAVAILABLE':
+        sys.exit(9)
+    prefix = ['-I', '-B'] if args[0] == '-I' else ['-B']
+    index = args.index('h1-gate-failure')
+    os.execv(python, [python, *prefix, os.environ['H1_FIXTURE_REPORTER'], *args[index:]])
+elif 'pytest' in args:
+    stage = ('INITIALIZER_PYTEST' if '--junitxml=/tmp/h1-positive.xml' in args
+             else 'PROVIDER_PYTEST')
+elif '/repo/tests/h1_ci_fixture/require_positive.py' in args:
+    stage = 'INITIALIZER_POSITIVE_VALIDATOR'
+elif '/repo/tests/h1_ci_fixture/require_provider_entry.py' in args:
+    stage = 'PROVIDER_POSITIVE_VALIDATOR'
+else:
+    sys.exit(88)
+with open(os.environ['H1_FIXTURE_TRACE'], 'a') as trace:
+    trace.write(stage + '\\n')
+acquisition = 'DOCKER_LOAD' if os.environ['H1_FIXTURE_IMAGE_RESTORED'] == 'true' else 'DOCKER_BUILD'
+if fault == stage or fault == 'REPORTER_UNAVAILABLE' and stage == acquisition:
+    print('PRIVATE_CANARY command detail', file=sys.stderr)
+    sys.exit(17)
+if command == 'docker' and args[0] == 'run':
+    assert args[-4:-1] == ['/bin/sh', '-eu', '-c']
+    script = args[-1].replace('/usr/bin/python3.12', shlex.quote(os.environ['H1_FIXTURE_PYTHON']))
+    sys.exit(subprocess.run(['/bin/sh', '-eu', '-c', script]).returncode)
+''')
+    shim.chmod(0o700)
+    for name in ('git', 'tar', 'docker', 'python', 'python3.12'):
+        (bin_dir / name).symlink_to(shim)
+    trace = tmp_path / 'trace'
+    result = subprocess.run(['/bin/bash', '-c', command], cwd=root, env={
+        **os.environ, 'PATH': str(bin_dir) + os.pathsep + os.environ['PATH'],
+        'RUNNER_TEMP': str(tmp_path), 'H1_FIXTURE_FAULT': phase,
+        'H1_FIXTURE_IMAGE_RESTORED': cache_restored,
+        'H1_FIXTURE_TRACE': str(trace), 'H1_FIXTURE_PYTHON': str(bin_dir / 'python3.12'),
+        'H1_FIXTURE_REPORTER': str(root / 'scripts/ci_fixed_diagnostics.py'),
+    }, capture_output=True, text=True, timeout=15)
+    annotations = [line for line in result.stdout.splitlines() if line.startswith('::error ')]
+    assert all('PRIVATE_CANARY' not in line and str(tmp_path) not in line for line in annotations)
+    facts = [json.loads(line.split('::', 2)[2]) for line in annotations]
+    inner_phases = ['INITIALIZER_PYTEST', 'INITIALIZER_POSITIVE_VALIDATOR',
+                    'PROVIDER_PYTEST', 'PROVIDER_POSITIVE_VALIDATOR']
+    expected_annotations = ([] if phase in ('REPORTER_UNAVAILABLE', 'SUCCESS')
+                            else [phase, 'DOCKER_RUN'] if phase in inner_phases else [phase])
+    assert [fact['phase'] for fact in facts] == expected_annotations
+    assert all(set(fact) == {'schema', 'phase', 'target', 'exit_code'} and fact['exit_code'] == 17
+               and fact['schema'] == 'mastermind.ci.h1_gate_failure.v1' for fact in facts)
+    assert result.returncode == (0 if phase == 'SUCCESS' else 17)
+    executed = trace.read_text().splitlines()
+    cache_phases = (['DOCKER_LOAD', 'DOCKER_TAG'] if cache_restored == 'true'
+                    else ['DOCKER_BUILD', 'DOCKER_SAVE'])
+    phases = ['SOURCE_PREPARATION', *cache_phases, 'DOCKER_RUN', *inner_phases]
+    stop = cache_phases[0] if phase == 'REPORTER_UNAVAILABLE' else phase
+    if phase == 'SUCCESS':
+        expected_commands = phases
+    else:
+        expected_commands = phases[:phases.index(stop) + 1]
+    assert executed == expected_commands
+    assert ('title=H1 isolated provider module fixture proof' in result.stdout) == (phase == 'SUCCESS')
+
+
+@pytest.mark.parametrize('arguments', [
+    ['h1-gate-failure', 'PRIVATE_CANARY\n::notice::injection', '1'],
+    ['h1-gate-failure', 'DOCKER_BUILD', '0'],
+    ['h1-gate-failure', 'DOCKER_BUILD', '256'],
+    ['h1-gate-failure', 'DOCKER_BUILD', '1%0APRIVATE_CANARY'],
+    ['h1-gate-failure', 'DOCKER_BUILD', '1', 'PRIVATE_CANARY'],
+])
+def test_h1_annotation_rejects_unbounded_or_nonfailure_inputs(arguments, capsys):
+    from scripts.ci_fixed_diagnostics import main
+
+    assert main(arguments) == 2
+    assert capsys.readouterr() == ('', '')
