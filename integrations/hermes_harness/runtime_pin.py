@@ -20,7 +20,12 @@ fails every live session (the first install attempt's 31-server
 * switches only by an atomic symlink replace, so running servers keep their
   already-resolved files and only the next spawn sees the new pin.
 
-Only one host writes a given ``$MMX``; there is no cross-process queue here.
+One O_EXCL delivery lock (``$MMX/.deliver.lock``) covers every process that
+writes delivery marks under a given ``$MMX``: the check-then-write of a
+delivery is exclusive, and a migrate holds the same lock across both of its
+deliveries and the repoint. A lock left behind by a crashed holder refuses
+later writes until it is reconciled — fail closed, never overwrite a mark
+that may be live (ruling 19).
 """
 from __future__ import annotations
 
@@ -71,13 +76,40 @@ def _refuse_delivered(mmx_root, commit, what):
                            "permanent (ruling 19) and a delivered pin folder may be live — it is never overwritten")
 
 
-def deliver(mmx_root, commit, runtime_document, server_bytes):
-    """Write ``runtimes/<commit>/{runtime.json,server.js}`` exactly once.
+class _DeliveryLock:
+    """One O_EXCL lock across every process writing delivery marks under $MMX.
 
-    An existing delivery is permanent (ruling 19): it is refused, never
-    overwritten — a delivered folder may be the one running servers loaded.
+    The lock file's existence IS the held lock: a second process (or a later
+    run after a crash) refuses instead of waiting, because a delivery mark is
+    permanent and a half-written delivery may already be live. The holder
+    removes it on exit; a foreign or stale lock is never removed here.
     """
-    _check_commit(commit)
+
+    def __init__(self, mmx_root):
+        self._path = Path(mmx_root).expanduser() / ".deliver.lock"
+        self._fd = None
+
+    def __enter__(self):
+        try:
+            self._fd = os.open(self._path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            raise RuntimeError(
+                "pin writer refused: the delivery lock " + str(self._path)
+                + " is held by another process or was left by a crashed one;"
+                " one lock covers every delivery-mark writer under this root —"
+                " reconcile the lock before writing again") from None
+        return self
+
+    def __exit__(self, *exc):
+        if self._fd is not None:
+            os.close(self._fd)
+            self._fd = None
+            self._path.unlink()
+        return False
+
+
+def _deliver_locked(mmx_root, commit, runtime_document, server_bytes):
+    """The delivery check-and-write; the caller holds the delivery lock."""
     _refuse_delivered(mmx_root, commit, "pin writer refused")
     target = Path(mmx_root).expanduser() / "runtimes" / commit
     _refuse_live_folder(mmx_root, target)
@@ -85,6 +117,18 @@ def deliver(mmx_root, commit, runtime_document, server_bytes):
     write_owned(target / "server.js", server_bytes, 0o600)
     write_owned(target / "runtime.json", content, 0o600)
     return target
+
+
+def deliver(mmx_root, commit, runtime_document, server_bytes):
+    """Write ``runtimes/<commit>/{runtime.json,server.js}`` exactly once.
+
+    An existing delivery is permanent (ruling 19): it is refused, never
+    overwritten — a delivered folder may be the one running servers loaded.
+    The check and both writes happen under the cross-process delivery lock.
+    """
+    _check_commit(commit)
+    with _DeliveryLock(mmx_root):
+        return _deliver_locked(mmx_root, commit, runtime_document, server_bytes)
 
 
 def _repoint_current(mmx, target):
@@ -171,25 +215,28 @@ def migrate(mmx_root, old_commit, new_commit, build_manifest, new_source_root=No
     # first write — both versioned targets are fully checked (not delivered,
     # not the live folder; the manifest was validated above) before
     # runtimes/<OLD> is created, so a refusal leaves the whole tree unchanged
-    # instead of half-migrated.
-    for commit in (old_commit, new_commit):
-        _refuse_delivered(mmx_root, commit, "pin migration refused")
-        _refuse_live_folder(mmx_root, mmx / "runtimes" / commit)
-    server_bytes = read_owned(flat_server)
-    # runtimes/<OLD>: the verbatim live pin — the exact rollback target.
-    deliver(mmx_root, old_commit, document, server_bytes)
-    # runtimes/<NEW>: the flat pin moved to the new release; only the hashes
-    # the manifest actually pins are updated, everything else is preserved.
-    updated = dict(document)
-    updated["release_commit"] = new_commit
-    updated["source_root"] = str(new_root)
-    files = manifest["files"]
-    if isinstance(updated.get("source_files"), dict):
-        updated["source_files"] = {name: files[name] if name in files else sha
-                                   for name, sha in updated["source_files"].items()}
-    deliver(mmx_root, new_commit, updated, server_bytes)
-    target = mmx / "runtimes" / old_commit
-    _repoint_current(mmx, target)
+    # instead of half-migrated. The checks and both deliveries share ONE
+    # delivery lock, so no other process can deliver between the check and
+    # the writes (ruling 19 fold-in).
+    with _DeliveryLock(mmx_root):
+        for commit in (old_commit, new_commit):
+            _refuse_delivered(mmx_root, commit, "pin migration refused")
+            _refuse_live_folder(mmx_root, mmx / "runtimes" / commit)
+        server_bytes = read_owned(flat_server)
+        # runtimes/<OLD>: the verbatim live pin — the exact rollback target.
+        _deliver_locked(mmx_root, old_commit, document, server_bytes)
+        # runtimes/<NEW>: the flat pin moved to the new release; only the hashes
+        # the manifest actually pins are updated, everything else is preserved.
+        updated = dict(document)
+        updated["release_commit"] = new_commit
+        updated["source_root"] = str(new_root)
+        files = manifest["files"]
+        if isinstance(updated.get("source_files"), dict):
+            updated["source_files"] = {name: files[name] if name in files else sha
+                                       for name, sha in updated["source_files"].items()}
+        _deliver_locked(mmx_root, new_commit, updated, server_bytes)
+        target = mmx / "runtimes" / old_commit
+        _repoint_current(mmx, target)
     return {"state": "PIN_MIGRATED", "mmx_root": str(mmx), "current": str(current),
             "old": str(target), "new": str(mmx / "runtimes" / new_commit),
             "flat_pin_sha256": digest(read_owned(flat_pin)),

@@ -206,6 +206,73 @@ class RuntimePinGuard(unittest.TestCase):
         self.assertEqual(folder_hash(self.mmx), before)
         self.assertFalse((self.mmx / "runtimes" / OLD).exists())
 
+    def test_deliver_refuses_while_another_process_holds_the_delivery_lock(self):
+        # Ruling 19 fold-in: the delivery mark is check-then-write; a second
+        # process must not pass the check while the first is writing. The
+        # O_EXCL lock file stands in for the other process's held lock.
+        lock = self.mmx / ".deliver.lock"
+        write_owned(lock, b"held by another process\n", 0o600)
+        before = folder_hash(self.mmx)
+        with self.assertRaises(RuntimeError) as caught:
+            runtime_pin.deliver(self.mmx, NEW, self.flat_pin, SERVER_BYTES)
+        self.assertIn("delivery lock", str(caught.exception))
+        self.assertEqual(folder_hash(self.mmx), before)
+        self.assertFalse((self.mmx / "runtimes" / NEW).exists())
+        # The foreign lock is not ours to remove.
+        self.assertTrue(lock.exists())
+
+    def test_deliver_holds_the_lock_across_its_writes_and_releases_it(self):
+        seen = []
+        original = runtime_pin.write_owned
+
+        def watching(path, payload, mode=0o600):
+            seen.append((self.mmx / ".deliver.lock").exists())
+            return original(path, payload, mode)
+
+        runtime_pin.write_owned = watching
+        try:
+            runtime_pin.deliver(self.mmx, NEW, self.flat_pin, SERVER_BYTES)
+        finally:
+            runtime_pin.write_owned = original
+        self.assertTrue(seen, "deliver wrote nothing")
+        self.assertTrue(all(seen), "the lock must cover every delivery write")
+        self.assertFalse((self.mmx / ".deliver.lock").exists())
+        # A refusal also releases the lock; the permanent mark still refuses.
+        with self.assertRaises(RuntimeError) as caught:
+            runtime_pin.deliver(self.mmx, NEW, self.flat_pin, SERVER_BYTES)
+        self.assertIn("permanent", str(caught.exception))
+        self.assertFalse((self.mmx / ".deliver.lock").exists())
+
+    def test_migrate_refuses_while_the_delivery_lock_is_held(self):
+        lock = self.mmx / ".deliver.lock"
+        write_owned(lock, b"held by another process\n", 0o600)
+        before = folder_hash(self.mmx)
+        with self.assertRaises(RuntimeError) as caught:
+            self.migrate()
+        self.assertIn("delivery lock", str(caught.exception))
+        self.assertEqual(folder_hash(self.mmx), before)
+        self.assertFalse((self.mmx / "current").exists())
+        self.assertTrue(lock.exists())
+
+    def test_migrate_holds_one_lock_across_both_deliveries(self):
+        seen = []
+        original = runtime_pin.write_owned
+
+        def watching(path, payload, mode=0o600):
+            seen.append((self.mmx / ".deliver.lock").exists())
+            return original(path, payload, mode)
+
+        runtime_pin.write_owned = watching
+        try:
+            self.migrate()
+        finally:
+            runtime_pin.write_owned = original
+        # Four delivery writes (server.js + runtime.json for OLD and NEW),
+        # every one under the same held lock; released once at the end.
+        self.assertEqual(len(seen), 4)
+        self.assertTrue(all(seen))
+        self.assertFalse((self.mmx / ".deliver.lock").exists())
+
     def test_cli_has_no_default_root_and_requires_mmx_root(self):
         # The class rule at the CLI: no default target exists; omitting the
         # root is a usage error that writes nothing.
