@@ -8,6 +8,8 @@ import json
 
 import pytest
 
+import integrations.workbench_action_mcp.command_contracts as command_contracts
+
 from integrations.workbench_action_mcp.command_contracts import (
     COMMAND_HMAC_PURPOSE,
     COMMAND_TOKEN_SCHEMA,
@@ -185,3 +187,136 @@ def test_command_decoder_rejects_strict_json_damage(damage: str) -> None:
 def test_command_host_binding_is_closed(host: CommandHostBinding) -> None:
     with pytest.raises(ValueError):
         validate_command_host_binding(host)
+
+
+
+def _artifact_contract(**changes: object):
+    artifact_type = getattr(command_contracts, "PreparedActionArtifact", None)
+    derive = getattr(command_contracts, "derive_artifact_id", None)
+    assert artifact_type is not None, "PreparedActionArtifact contract is missing"
+    assert callable(derive), "artifact identity derivation is missing"
+    values: dict[str, object] = {
+        "schema": getattr(command_contracts, "ARTIFACT_TOKEN_SCHEMA", None),
+        "artifact_id": "",
+        "action_id": "1" * 32,
+        "subject_digest": "2" * 64,
+        "client_ref": "client-ref",
+        "resource": "https://example.test/mcp",
+        "project_ref": "project:alpha",
+        "context_ref": "context:alpha",
+        "responsibility_ref": "responsibility:alpha",
+        "operation_ref": "operation:alpha",
+        "owner_ref": "owner:alpha",
+        "generation": "generation:alpha",
+        "root_device": 3,
+        "root_inode": 4,
+        "artifact_store_device": 5,
+        "artifact_store_inode": 6,
+        "committed_head": None,
+        "host_id": "7" * 64,
+        "boot_session_id": "boot-alpha",
+        "relative_path": "canary.txt",
+        "recipe_id": "canary_checksum",
+        "preimage_sha256": "8" * 64,
+        "source_identity": "1:2:33188:501:20:1:12:100:101",
+        "command_issued_at_ms": 100,
+        "command_expires_at_ms": 200,
+        "stream": "stdout",
+        "media_type": "text/plain; charset=utf-8",
+        "byte_length": 12,
+        "sha256": "9" * 64,
+        "truncated": False,
+        "issued_at_ms": 1000,
+        "expires_at_ms": 2000,
+    }
+    values.update(changes)
+    if not values.get("artifact_id"):
+        try:
+            values["artifact_id"] = derive(
+                action_id=values["action_id"],
+                project_ref=values["project_ref"],
+                generation=values["generation"],
+                recipe_id=values["recipe_id"],
+                relative_path=values["relative_path"],
+                preimage_sha256=values["preimage_sha256"],
+                source_identity=values["source_identity"],
+                stream=values["stream"],
+                media_type=values["media_type"],
+                byte_length=values["byte_length"],
+                sha256=values["sha256"],
+                truncated=values["truncated"],
+            )
+        except ValueError:
+            values["artifact_id"] = "0" * 64
+    return artifact_type(**values)
+
+
+def test_artifact_tokens_are_stable_expiring_and_domain_separated() -> None:
+    codec = ActionTokenCodec(b"k" * 32)
+    artifact = _artifact_contract()
+    encode = getattr(codec, "encode_artifact", None)
+    decode = getattr(codec, "decode_artifact", None)
+    decode_evidence = getattr(codec, "decode_artifact_evidence", None)
+    assert callable(encode) and callable(decode) and callable(decode_evidence)
+
+    token = encode(artifact)
+    assert decode(token, now_ms=1000) == artifact
+    with pytest.raises(ActionContractError, match="expired"):
+        decode(token, now_ms=2000)
+    assert decode_evidence(token, now_ms=2000) == artifact
+    with pytest.raises(ActionContractError):
+        codec.decode_command(token, now_ms=1000)
+    with pytest.raises(ActionContractError):
+        codec.decode(token, now_ms=1000)
+
+    refreshed = dataclasses.replace(
+        artifact, issued_at_ms=1100, expires_at_ms=2100
+    )
+    refreshed_token = encode(refreshed)
+    assert refreshed.artifact_id == artifact.artifact_id
+    assert refreshed_token != token
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"artifact_id": "a" * 64},
+        {"stream": "../../private"},
+        {"media_type": "application/x-secret"},
+        {"byte_length": True},
+        {"byte_length": -1},
+        {"byte_length": 65537},
+        {"sha256": "A" * 64},
+        {"truncated": 1},
+        {"command_issued_at_ms": 200},
+        {"command_expires_at_ms": 100},
+        {"expires_at_ms": 301001},
+    ],
+)
+def test_artifact_reference_rejects_swaps_types_and_bounds(change) -> None:
+    validator = getattr(command_contracts, "validate_prepared_artifact", None)
+    assert callable(validator), "artifact contract validator is missing"
+    with pytest.raises(ActionContractError):
+        validator(
+            _artifact_contract(**change), now_ms=1000, require_fresh=True
+        )
+
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"project_ref": "project:beta"},
+        {"generation": "generation:beta"},
+        {"recipe_id": "canary_refuse"},
+        {"relative_path": "other.txt"},
+        {"preimage_sha256": "f" * 64},
+        {"source_identity": "9:8:33188:501:20:1:12:100:101"},
+    ],
+)
+def test_artifact_identity_cannot_be_detached_from_producer_provenance(change) -> None:
+    validator = command_contracts.validate_prepared_artifact
+    original = _artifact_contract()
+    detached = dataclasses.replace(original, **change)
+    with pytest.raises(ActionContractError):
+        validator(detached, now_ms=1000, require_fresh=True)

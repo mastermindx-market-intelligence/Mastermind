@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import dataclasses
 import hashlib
 import os
@@ -151,12 +152,7 @@ class Harness:
         self._open_port()
 
     def _open_port(self) -> None:
-        (
-            self.prepare,
-            self.run,
-            self.read_result,
-            self.reconcile,
-        ) = create_command_port(
+        ports = create_command_port(
             resolve_binding=self.resolve,
             clock_ms=lambda: self.clock,
             run_io=self.run_io,
@@ -167,6 +163,14 @@ class Harness:
             action_ttl_ms=60_000,
             admission_evidence=self.admission_evidence,
         )
+        assert len(ports) == 5, "artifact reader port is missing"
+        (
+            self.prepare,
+            self.run,
+            self.read_result,
+            self.read_artifact,
+            self.reconcile,
+        ) = ports
 
     def prepare_command(self, recipe_id: str = "canary_checksum"):
         return asyncio.run(
@@ -1107,3 +1111,528 @@ def test_command_artifact_evidence_outranks_admission_evidence(tmp_path: Path) -
 def test_command_admission_evidence_must_be_callable(tmp_path: Path) -> None:
     with pytest.raises(TypeError):
         Harness(tmp_path, admission_evidence="REFUSED_ONLY")
+
+
+
+def _artifact_by_stream(result: dict, stream: str) -> dict:
+    rows = result.get("artifacts")
+    assert isinstance(rows, list) and len(rows) == 2
+    selected = [row for row in rows if row.get("stream") == stream]
+    assert len(selected) == 1
+    return selected[0]
+
+
+def test_text_artifact_descriptor_is_stable_and_exactly_range_readable(
+    tmp_path: Path,
+) -> None:
+    harness = Harness(tmp_path)
+    try:
+        prepared = harness.prepare_command()
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        descriptor = _artifact_by_stream(applied, "stdout")
+        action_id = harness.action_id(prepared["action_ref"])
+        raw = (harness.store_path / artifact_name(action_id, "stdout")).read_bytes()
+
+        assert descriptor["schema"] == "mastermind.workbench_action_artifact_descriptor.v1"
+        assert descriptor["owner"] == "mastermind.workbench_action"
+        assert descriptor["media_type"] == "text/plain; charset=utf-8"
+        assert descriptor["byte_length"] == len(raw)
+        assert descriptor["sha256"] == _sha(raw)
+        assert descriptor["truncated"] is False
+        assert descriptor["size_state"] == "complete"
+        assert descriptor["producer"] == {
+            "kind": "workbench_action",
+            "action_id": action_id,
+            "recipe_id": "canary_checksum",
+            "project_ref": harness.project_ref,
+            "context_ref": "context:alpha",
+            "responsibility_ref": "responsibility:alpha",
+            "operation_ref": "operation:alpha",
+            "owner_ref": "owner:alpha",
+            "generation": "generation:alpha",
+            "host_id": harness.host.host_id,
+            "boot_session_id": harness.host.boot_session_id,
+        }
+        assert descriptor["source"] == {
+            "relative_path": "canary.txt",
+            "preimage_sha256": _sha(harness.target.read_bytes()),
+            "source_identity": harness.codec.decode_command_evidence(
+                prepared["action_ref"], now_ms=harness.clock
+            ).source_identity,
+        }
+        assert descriptor["transfer"] == {
+            "maximum_artifact_bytes": 65536,
+            "maximum_chunk_bytes": 49152,
+            "direct_view_supported": False,
+        }
+        assert descriptor["issued_at_ms"] == harness.clock
+        assert descriptor["expires_at_ms"] > descriptor["issued_at_ms"]
+
+        rebuilt = bytearray()
+        offset = 0
+        while True:
+            page = asyncio.run(
+                harness.read_artifact(
+                    harness.caller,
+                    {
+                        "artifact_ref": descriptor["artifact_ref"],
+                        "offset": offset,
+                        "max_bytes": 37,
+                    },
+                )
+            )
+            chunk = page["text"].encode("utf-8")
+            assert page["status"] == "OK"
+            assert page["artifact_id"] == descriptor["artifact_id"]
+            assert page["media_type"] == descriptor["media_type"]
+            assert page["byte_length"] == len(raw)
+            assert page["sha256"] == _sha(raw)
+            assert page["offset"] == offset
+            assert page["returned_bytes"] == len(chunk)
+            assert page["chunk_sha256"] == _sha(chunk)
+            assert page["content_kind"] == "text"
+            assert "_payload_base64" not in page
+            rebuilt.extend(chunk)
+            if page["next_offset"] is None:
+                break
+            offset = page["next_offset"]
+        assert bytes(rebuilt) == raw
+
+        harness.clock += 1000
+        reconciled = asyncio.run(
+            harness.reconcile(harness.caller, prepared["action_ref"])
+        )
+        refreshed = _artifact_by_stream(reconciled, "stdout")
+        assert refreshed["artifact_id"] == descriptor["artifact_id"]
+        assert refreshed["artifact_ref"] != descriptor["artifact_ref"]
+        assert refreshed["issued_at_ms"] == harness.clock
+    finally:
+        harness.close()
+
+
+def test_artifact_ref_expiry_tamper_revocation_and_missing_bytes_fail_closed(
+    tmp_path: Path,
+) -> None:
+    harness = Harness(tmp_path)
+    try:
+        prepared = harness.prepare_command()
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        descriptor = _artifact_by_stream(applied, "stdout")
+        request = {
+            "artifact_ref": descriptor["artifact_ref"],
+            "offset": 0,
+            "max_bytes": 64,
+        }
+        assert asyncio.run(
+            harness.read_artifact(harness.caller, request)
+        )["returned_bytes"] > 0
+
+        tampered = descriptor["artifact_ref"][:-1] + (
+            "A" if descriptor["artifact_ref"][-1] != "A" else "B"
+        )
+        with pytest.raises(ProjectActionRefused) as caught:
+            asyncio.run(
+                harness.read_artifact(
+                    harness.caller, {**request, "artifact_ref": tampered}
+                )
+            )
+        assert caught.value.code == "ARTIFACT_INVALID"
+
+        harness.scope = dataclasses.replace(
+            harness.scope, generation="generation:other"
+        )
+        with pytest.raises(ProjectActionRefused) as caught:
+            asyncio.run(harness.read_artifact(harness.caller, request))
+        assert caught.value.code == "ARTIFACT_BINDING_CHANGED"
+        harness.scope = dataclasses.replace(
+            harness.scope, generation="generation:alpha"
+        )
+
+        harness.clock = descriptor["expires_at_ms"]
+        with pytest.raises(ProjectActionRefused) as caught:
+            asyncio.run(harness.read_artifact(harness.caller, request))
+        assert caught.value.code == "ARTIFACT_EXPIRED"
+        harness.clock = descriptor["issued_at_ms"]
+
+        action_id = harness.action_id(prepared["action_ref"])
+        artifact = harness.store_path / artifact_name(action_id, "stdout")
+        artifact.unlink()
+        with pytest.raises(ProjectActionRefused) as caught:
+            asyncio.run(harness.read_artifact(harness.caller, request))
+        assert caught.value.code == "ARTIFACT_UNAVAILABLE"
+    finally:
+        harness.close()
+
+
+def test_truncated_stream_descriptor_names_retained_prefix_truthfully(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe_root = tmp_path / "fixture-recipes"
+    pin = _fixture_recipe(
+        recipe_root,
+        "import os,sys\n"
+        "if os.read(0,1) != b'\\x01': raise SystemExit(125)\n"
+        "os.write(1, b'x' * 70000)\n",
+    )
+    monkeypatch.setitem(command_port.RECIPE_SHA256, "canary_checksum", pin)
+    harness = Harness(tmp_path / "harness", recipe_root=str(recipe_root))
+    try:
+        prepared = harness.prepare_command()
+        result = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        descriptor = _artifact_by_stream(result, "stdout")
+        assert descriptor["byte_length"] == 65536
+        assert descriptor["truncated"] is True
+        assert descriptor["size_state"] == "retained_prefix"
+        page = asyncio.run(
+            harness.read_artifact(
+                harness.caller,
+                {
+                    "artifact_ref": descriptor["artifact_ref"],
+                    "offset": 65520,
+                    "max_bytes": 16,
+                },
+            )
+        )
+        assert page["text"] == "x" * 16
+        assert page["next_offset"] is None
+        assert page["size_state"] == "retained_prefix"
+    finally:
+        harness.close()
+
+
+
+def test_png_recipe_returns_exact_binary_artifact_without_text_coercion(
+    tmp_path: Path,
+) -> None:
+    harness = Harness(tmp_path)
+    try:
+        prepared = harness.prepare_command("source_fingerprint_png")
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        descriptor = _artifact_by_stream(applied, "stdout")
+        action_id = harness.action_id(prepared["action_ref"])
+        raw = (harness.store_path / artifact_name(action_id, "stdout")).read_bytes()
+        assert raw.startswith(b"\x89PNG\r\n\x1a\n")
+        assert descriptor["media_type"] == "image/png"
+        assert descriptor["byte_length"] == len(raw)
+        assert descriptor["sha256"] == _sha(raw)
+        assert descriptor["transfer"]["direct_view_supported"] is True
+
+        page = asyncio.run(
+            harness.read_artifact(
+                harness.caller,
+                {
+                    "artifact_ref": descriptor["artifact_ref"],
+                    "offset": 0,
+                    "max_bytes": 49152,
+                },
+            )
+        )
+        assert page["content_kind"] == "image"
+        assert page["media_type"] == "image/png"
+        assert "text" not in page
+        assert base64.b64decode(page["_payload_base64"], validate=True) == raw
+        assert page["returned_bytes"] == len(raw)
+        assert page["next_offset"] is None
+    finally:
+        harness.close()
+
+
+
+def test_png_recipe_refusal_stdout_is_blob_not_renderable_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe_root = tmp_path / "fixture-recipes"
+    pin = _fixture_recipe(
+        recipe_root,
+        "import os,sys\n"
+        "if os.read(0,1) != b'\\x01': raise SystemExit(125)\n"
+        "os.write(2, b'fingerprint-png-refused\\n')\n"
+        "raise SystemExit(125)\n",
+    )
+    (recipe_root / "canary_checksum.py").rename(
+        recipe_root / "source_fingerprint_png.py"
+    )
+    monkeypatch.setitem(command_port.RECIPE_SHA256, "source_fingerprint_png", pin)
+    harness = Harness(tmp_path / "harness", recipe_root=str(recipe_root))
+    try:
+        prepared = harness.prepare_command("source_fingerprint_png")
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        assert applied["effect_state"] == "APPLIED"
+        assert applied["exit_code"] == 125
+        descriptor = _artifact_by_stream(applied, "stdout")
+        assert descriptor["byte_length"] == 0
+        assert descriptor["media_type"] == "application/octet-stream"
+        assert descriptor["transfer"]["direct_view_supported"] is False
+
+        page = asyncio.run(
+            harness.read_artifact(
+                harness.caller,
+                {
+                    "artifact_ref": descriptor["artifact_ref"],
+                    "offset": 0,
+                    "max_bytes": 64,
+                },
+            )
+        )
+        assert page["content_kind"] == "blob"
+        assert page["media_type"] == "application/octet-stream"
+        assert base64.b64decode(page["_payload_base64"], validate=True) == b""
+        assert page["returned_bytes"] == 0
+        assert page["next_offset"] is None
+    finally:
+        harness.close()
+
+
+def test_partial_png_stdout_is_blob_even_when_recipe_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe_root = tmp_path / "fixture-recipes"
+    pin = _fixture_recipe(
+        recipe_root,
+        "import os\n"
+        "if os.read(0,1) != b'\\x01': raise SystemExit(125)\n"
+        "os.write(1, b'\\x89PNG\\r\\n\\x1a\\n')\n",
+    )
+    (recipe_root / "canary_checksum.py").rename(
+        recipe_root / "source_fingerprint_png.py"
+    )
+    monkeypatch.setitem(command_port.RECIPE_SHA256, "source_fingerprint_png", pin)
+    harness = Harness(tmp_path / "harness", recipe_root=str(recipe_root))
+    try:
+        prepared = harness.prepare_command("source_fingerprint_png")
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        assert applied["exit_code"] == 0
+        descriptor = _artifact_by_stream(applied, "stdout")
+        assert descriptor["byte_length"] == 8
+        assert descriptor["media_type"] == "application/octet-stream"
+        assert descriptor["transfer"]["direct_view_supported"] is False
+    finally:
+        harness.close()
+
+
+def test_binary_stdout_text_pager_refuses_without_downgrading_effect_truth(
+    tmp_path: Path,
+) -> None:
+    harness = Harness(tmp_path)
+    try:
+        prepared = harness.prepare_command("source_fingerprint_png")
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        assert applied["effect_state"] == "APPLIED"
+        assert applied["cleanup_state"] == "CLEAN"
+        assert applied["exit_code"] == 0
+
+        with pytest.raises(ProjectActionRefused) as caught:
+            asyncio.run(
+                harness.read_result(
+                    harness.caller,
+                    {
+                        "action_ref": prepared["action_ref"],
+                        "stream": "stdout",
+                    },
+                )
+            )
+        assert caught.value.code == "ARTIFACT_TEXT_UNSUPPORTED"
+
+        reconciled = asyncio.run(
+            harness.reconcile(harness.caller, prepared["action_ref"])
+        )
+        assert reconciled["effect_state"] == "APPLIED"
+        assert reconciled["cleanup_state"] == "CLEAN"
+        assert reconciled["exit_code"] == 0
+    finally:
+        harness.close()
+
+
+def test_utf8_artifact_ranges_never_split_or_reinterpret_code_points(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe_root = tmp_path / "fixture-recipes"
+    pin = _fixture_recipe(
+        recipe_root,
+        "import os\n"
+        "if os.read(0,1) != b'\\x01': raise SystemExit(125)\n"
+        "os.write(1, '\\u03b1\\u03b2\\u03b3\\n'.encode('utf-8'))\n",
+    )
+    monkeypatch.setitem(command_port.RECIPE_SHA256, "canary_checksum", pin)
+    harness = Harness(tmp_path / "harness", recipe_root=str(recipe_root))
+    try:
+        prepared = harness.prepare_command()
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        descriptor = _artifact_by_stream(applied, "stdout")
+        base = {"artifact_ref": descriptor["artifact_ref"]}
+
+        for request in (
+            {**base, "offset": 1, "max_bytes": 2},
+            {**base, "offset": 0, "max_bytes": 1},
+        ):
+            with pytest.raises(ProjectActionRefused) as caught:
+                asyncio.run(harness.read_artifact(harness.caller, request))
+            assert caught.value.code == "ARTIFACT_RANGE_INVALID"
+
+        alpha = asyncio.run(
+            harness.read_artifact(
+                harness.caller, {**base, "offset": 0, "max_bytes": 2}
+            )
+        )
+        assert alpha["text"] == "α"
+        assert alpha["returned_bytes"] == 2
+        assert alpha["next_offset"] == 2
+
+        beta = asyncio.run(
+            harness.read_artifact(
+                harness.caller, {**base, "offset": 2, "max_bytes": 3}
+            )
+        )
+        assert beta["text"] == "β"
+        assert beta["returned_bytes"] == 2
+        assert beta["next_offset"] == 4
+    finally:
+        harness.close()
+
+
+def test_artifact_byte_drift_between_owner_verification_and_release_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = Harness(tmp_path)
+    try:
+        prepared = harness.prepare_command()
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        descriptor = _artifact_by_stream(applied, "stdout")
+        real_read = command_port.read_action_blob
+        stdout_reads = 0
+
+        def drifting_read(store, action_id, kind):
+            nonlocal stdout_reads
+            raw = real_read(store, action_id, kind)
+            if kind == "stdout":
+                stdout_reads += 1
+                if stdout_reads == 2 and raw is not None:
+                    return raw + b"drift"
+            return raw
+
+        monkeypatch.setattr(command_port, "read_action_blob", drifting_read)
+        with pytest.raises(ProjectActionRefused) as caught:
+            asyncio.run(
+                harness.read_artifact(
+                    harness.caller,
+                    {
+                        "artifact_ref": descriptor["artifact_ref"],
+                        "offset": 0,
+                        "max_bytes": 64,
+                    },
+                )
+            )
+        assert caught.value.code == "ARTIFACT_UNAVAILABLE"
+        assert stdout_reads == 2
+    finally:
+        harness.close()
+
+
+@pytest.mark.parametrize("replacement", ["symlink", "hardlink"])
+def test_artifact_reader_refuses_symlink_and_hardlink_substitution(
+    tmp_path: Path, replacement: str
+) -> None:
+    harness = Harness(tmp_path)
+    try:
+        prepared = harness.prepare_command()
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        descriptor = _artifact_by_stream(applied, "stdout")
+        action_id = harness.action_id(prepared["action_ref"])
+        artifact = harness.store_path / artifact_name(action_id, "stdout")
+        original = artifact.read_bytes()
+        sibling = harness.store_path / "foreign.bin"
+        sibling.write_bytes(original)
+        os.chmod(sibling, 0o600)
+        artifact.unlink()
+        if replacement == "symlink":
+            artifact.symlink_to(sibling.name)
+        else:
+            os.link(sibling, artifact)
+
+        with pytest.raises(ProjectActionRefused) as caught:
+            asyncio.run(
+                harness.read_artifact(
+                    harness.caller,
+                    {
+                        "artifact_ref": descriptor["artifact_ref"],
+                        "offset": 0,
+                        "max_bytes": 64,
+                    },
+                )
+            )
+        assert caught.value.code == "ARTIFACT_UNAVAILABLE"
+    finally:
+        harness.close()
+
+
+
+def test_artifact_expiry_during_owner_qualification_releases_no_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = Harness(tmp_path)
+    try:
+        prepared = harness.prepare_command()
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        descriptor = _artifact_by_stream(applied, "stdout")
+        real_qualified = command_port._qualified_evidence
+        calls = 0
+
+        def expire_after_qualification(store, command):
+            nonlocal calls
+            calls += 1
+            observed = real_qualified(store, command)
+            if calls == 1:
+                harness.clock = descriptor["expires_at_ms"]
+            return observed
+
+        monkeypatch.setattr(
+            command_port, "_qualified_evidence", expire_after_qualification
+        )
+        with pytest.raises(ProjectActionRefused) as caught:
+            asyncio.run(
+                harness.read_artifact(
+                    harness.caller,
+                    {
+                        "artifact_ref": descriptor["artifact_ref"],
+                        "offset": 0,
+                        "max_bytes": 64,
+                    },
+                )
+            )
+        assert caught.value.code == "ARTIFACT_EXPIRED"
+        assert calls == 1
+    finally:
+        harness.close()
+
+
+def test_artifact_expiry_across_await_boundary_releases_no_content(
+    tmp_path: Path,
+) -> None:
+    harness = Harness(tmp_path)
+    try:
+        prepared = harness.prepare_command()
+        applied = asyncio.run(harness.run(harness.caller, prepared["action_ref"]))
+        descriptor = _artifact_by_stream(applied, "stdout")
+        original_run_io = harness.run_io
+
+        async def expiring_run_io(operation):
+            observed = await original_run_io(operation)
+            harness.clock = descriptor["expires_at_ms"]
+            return observed
+
+        harness.run_io = expiring_run_io
+        harness._open_port()
+        with pytest.raises(ProjectActionRefused) as caught:
+            asyncio.run(
+                harness.read_artifact(
+                    harness.caller,
+                    {
+                        "artifact_ref": descriptor["artifact_ref"],
+                        "offset": 0,
+                        "max_bytes": 64,
+                    },
+                )
+            )
+        assert caught.value.code == "ARTIFACT_EXPIRED"
+    finally:
+        harness.close()

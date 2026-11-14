@@ -185,6 +185,7 @@ def test_fixed_channel_prepares_commits_and_reconciles(tmp_path: Path) -> None:
                 "prepare_project_command",
                 "run_project_command",
                 "read_action_result",
+                "read_action_artifact",
                 "reconcile_action",
             }
             commit_tool = next(t for t in tools if t.name == "commit_text_patch")
@@ -906,6 +907,7 @@ def test_launcher_describe_is_dependency_free_and_truthful() -> None:
             "prepare_project_command",
             "run_project_command",
             "read_action_result",
+            "read_action_artifact",
             "reconcile_action",
         ],
     }
