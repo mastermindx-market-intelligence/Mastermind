@@ -239,6 +239,31 @@ receipts stowed) remains available exactly as in the hardening runbook's
 | Settings are re-read at boot | From the `-3` log (settings restored and re-read after its switch). The rehearsal booted with the copied settings and `migrationHead=80`; it did not mutate settings. |
 | New `presentation` settings key | Read by this release (`packages/contracts/src/settings.ts`: `ServerSettings.presentation`, decoded with a default from `{}`). Fields: `productName` (""), `teamMode` (false), `lockedProviderProjectIds` ([]), `links` ([]). **Inert when absent** — the real server behaves exactly as before unless the key is set. Verified in source at `50f25c7f`; not exercised by the rehearsal. |
 
+## (c) Real-face presentation — run after part (b)
+
+Full step list, rehearsal table and evidence: [`PART_C_PRESENTATION.md`](PART_C_PRESENTATION.md)
+(writer `tools/mmos_team_server/presentation_set.py`, tests
+`tests/test_mmos_presentation_set.py` 34 passed). Summary:
+
+0. Read the team project id (read-only); 0b. `lock_census.py` must exit 0 (PF-2a).
+1. Value: productName "Mastermind OS", teamMode true,
+   lockedProviderProjectIds [team project], links Work
+   `http://127.0.0.1:3100/MAS/issues`, Needs you `http://127.0.0.1:3100/MAS/inbox`
+   (3100 sends no frame-blocking header: GET 14 Nov, no X-Frame-Options, no CSP).
+2. `plan` (writes nothing, prints the sha). 3. `apply --expect-sha256 <sha>
+   --receipt-dir <principal dir> --real-root-ok`: preimage checked before the first
+   write, exact preimage saved 0600 before the write, only the `presentation` member's
+   bytes change, readback checks parse, value, outside bytes and mode.
+4. Readback. 5. Undo restores the exact preimage and refuses if anyone wrote since.
+6. Run any roster apply BEFORE part (c): a writing roster apply keeps the value but
+   reformats the whole file, after which `undo` correctly refuses.
+
+No restart: rehearsed on a 13-teammate real-shape root (port 3832) with the runner pid
+constant; the lock appeared about 1 s after the write and disappeared after undo. Open
+windows get `settingsUpdated` live; the visual re-render was not observed (no window in
+this wave). In a team-project conversation the picker offers only its current instance,
+live; model choice within that instance still works.
+
 ## (a) PF staging — `~/.mastermind/mmos_dev/pf/staging`, port 3830
 
 Staging runs as a **plain detached runner process, not launchd**: `run/runner.pid`

@@ -45,6 +45,27 @@ Every teammate primary thread carries the same `projectId`; that is the id
 for `lockedProviderProjectIds`. (Rehearsal: this read returned exactly one
 project id, `f2ea7f57-…`, for all 13 threads — ledger 09:49:58Z.)
 
+### 0b. Lock census (read-only; RULING PF-2a precondition)
+
+The value turns the picker lock on for the whole team project. Before the
+first write, check that no conversation would be stuck and every teammate
+primary is on its own instance:
+
+```sh
+/opt/homebrew/bin/python3.12 tools/mmos_team_server/lock_census.py \
+  tools/mmos_team_server/specs/team_roster.json; echo rc=$?
+```
+
+Expected output: `"onMissingInstance": []`, `"primaryMismatch": []`,
+`"ok": true`, `rc=0`; `"conversations"` 25 and `"byInstance"` as in the
+principal's 14 Nov census (13 primaries on their own instances; non-primary:
+7 `capacity_fabric`, 2 `assurance`, 2 `design-lead`, 1 `secretary`), plus
+any conversations started since. It opens the state database with
+`mode=ro`, reads settings.json and the roster state file, and prints counts
+and conversation IDs only. `"project"` is the same id step 0 returns. A
+nonzero exit stops part (c): see `LOCK_EXISTING_CONVERSATIONS.md`, "Not built".
+Rehearsed on PF staging: rc=0, 3 conversations.
+
 ### 1. Write the value file
 
 ```sh
@@ -138,6 +159,19 @@ It should print `presentation: present`, `expect-sha256: MATCH`, and
   the after-sha 10 s after the write (ledger 09:54:34Z) — no migration
   rewrite occurred on this build. If a future build's migration rewrites the
   file, `undo` will (correctly) refuse; re-plan and re-apply instead.
+
+- In a team-project conversation the provider picker offers only that
+  conversation's current instance, live, without a reload (the window
+  reads `presentation` from the pushed settings;
+  `composerInstanceLock.logic.ts:13-26`). Choosing another **model inside
+  the same instance** still works: the window filters instances, not models
+  (`applyComposerInstanceLock`, `composerInstanceLock.logic.ts:32-60`), and
+  the server allows a model change on the conversation's own instance
+  (`ProviderInstanceLock.integration.test.ts`, "allows a model change on the
+  thread's own instance"). Multi-model is off in a locked conversation.
+  The Chairman's own conversation on `capacity_fabric` stays on
+  `capacity_fabric` and keeps taking his turns (ruling 20;
+  `LOCK_EXISTING_CONVERSATIONS.md`).
 
 ### Is a restart needed?
 
