@@ -594,12 +594,21 @@
   input.addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
   sendBtn.onclick = function () { send(); };
 
+  var focusGeneration = 0;
   function open() {
+    var generation = ++focusGeneration;
     document.body.classList.add("bc-open");
     if (!body.children.length) rehydrate();
-    setTimeout(function () { input.focus(); }, 120);
+    setTimeout(function () {
+      // Closing or reopening retires the previous opening's delayed focus.
+      if (generation === focusGeneration && document.body.classList.contains("bc-open")) input.focus();
+    }, 120);
   }
-  function close() { document.body.classList.remove("bc-open"); closePaper(); }
+  function close() {
+    ++focusGeneration;
+    document.body.classList.remove("bc-open");
+    closePaper();
+  }
   launch.onclick = open;
   panel.querySelector("#bc-min").onclick = close;
   panel.querySelector("#bc-new").onclick = function () {
