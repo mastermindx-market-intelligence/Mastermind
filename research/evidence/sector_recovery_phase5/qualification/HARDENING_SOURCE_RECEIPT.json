@@ -1,0 +1,17 @@
+{
+  "changes": "Input guards and explicit private-fixture skip only; no policy or parameter change",
+  "prior_source": [
+    {
+      "file": "core_complement.py",
+      "sha256": "c50f0379e6c321d03f64868c91c50fdeff425dd4de45106aa6fec170bb2daca6"
+    },
+    {
+      "file": "consumer.py",
+      "sha256": "30006c6bf5b274b21198b8fe10f89b3b8c051108ea8ec7a9b251f4ad3855f8f6"
+    },
+    {
+      "file": "test_experiment.py",
+      "sha256": "13f93e50746e6aa54ad0089737cf0eb454bc0a04e0c8ea51fde05ff4376c85d3"
+    }
+  ]
+}

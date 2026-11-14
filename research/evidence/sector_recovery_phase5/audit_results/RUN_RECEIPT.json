@@ -1,0 +1,10 @@
+{
+  "status": "COMPLETE",
+  "comparisons": 24,
+  "exposure_matches": 36,
+  "delay_accounts": 8,
+  "holm_rejections": 3,
+  "outcome_guided_exploratory": true,
+  "may_trade": false,
+  "code_sha256": "073e50dd5b70751d0fad0f46a66361b7ea7b642253572bf9a851489176a26880"
+}

@@ -1,0 +1,12 @@
+{
+  "synthetic_prefixes": 64,
+  "eligible_t1t2_states": 0,
+  "failures": [],
+  "market_outcomes_compared": false,
+  "cases": [
+    "flat",
+    "trend",
+    "cyclical",
+    "shock"
+  ]
+}

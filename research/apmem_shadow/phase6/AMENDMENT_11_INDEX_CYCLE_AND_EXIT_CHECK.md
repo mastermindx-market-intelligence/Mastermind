@@ -1,0 +1,14 @@
+# Index-cycle and exit check: RSP, DIA and QQQ
+
+User supplied RSP/QQQ charts and a hypothesis that the 3D momentum cycle can identify buys and sells. Test the index use case directly rather than transferring stock-cohort findings. This is an outcome-guided illustrative formalization, not a claim to reproduce an unspecified discretionary trading method. RSP, DIA and QQQ are fixed in advance; retain all three and all eras, not whichever looks best.
+
+Use the existing source-bound feature snapshots and incumbent dual-basis outcomes without refitting or redownloading. Reuse native RSI-MACD, its completed 3D observation clock and the same 2W/market-context framework. The sector-ETF peer basket is a broad-market proxy, NOT the complete constituent breadth of each index. Keep the reserved January2020-May2023 interval absent, independent post-gap warmup, current-vintage and observed-history-anchor limitations.
+
+## Fixed illustrative policies
+Entries: (1) settled grey dot; (2) completed 3D RSI-MACD bullish crossover; (3) first completed 3D histogram increase while still negative, following a nonpositive prior histogram change. The third is an explicitly new early-improvement challenger, not native G0. Each is tested raw and with the existing completed slow/cohort support state. Do not infer higher confidence merely because these correlated price transforms agree.
+
+Exits: maximum63-session holding contract alone; earlier completed bearish histogram crossover; or earlier high-zone reversal requiring native 3D RSI>=70, RSI-MACD>0 and a falling histogram. These are fixed, transparent comparison rules, not fitted top detectors. Every exit is executed at the next regular session CLOSE, with the original maximum63-session backstop. The price-only native RSI is computed on the same 3D close bars, not the StochRSI value. No intrabar ideal fills, post-entry percentage stop, leverage or trial-selected target.
+
+Costs5/20bp each way, zero cash return, one position per instrument. Same terminal eligible-origin cutoff64sessions for all exit arms; early exits do not gain new near-end entries. Compare buy-and-hold of the identical instrument over the same calendar and fees, report exposure and missed upside, actual trade counts, false-turn losses and context-filtered opportunity coverage. A method need not call every top/bottom to be useful, but perfect-trading language requires actual evidence and is not assumed.
+
+Inspect source-equivalent consumer output for these indices, not just equity curves. All observations remain research-only with unchanged incumbent buyability. Preserve the original44-instrument/264-variance-value forward packet and its actual issue time; this study issues no new forecasts and starts no background collector.

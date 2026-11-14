@@ -1,0 +1,9 @@
+{
+  "source_commit": "95f4a9cdc56d26a18f76f506715c7be77b40e622",
+  "prefixes": 63,
+  "decision_fields": 36,
+  "failures": [],
+  "native_seconds": 5.671432999894023,
+  "projection_seconds": 3.579105248209089,
+  "outcome_inspection": false
+}

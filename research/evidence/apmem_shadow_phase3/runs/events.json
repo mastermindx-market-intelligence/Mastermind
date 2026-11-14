@@ -1,0 +1,2498 @@
+{
+  "started_at": "2026-11-14T05:44:38.832563+00:00",
+  "source_commit": "616a25474892b4e883183266b399e247b8dfe8b8",
+  "symbols": [
+    "FLO",
+    "PLMR",
+    "HIW",
+    "ECL",
+    "WSFS",
+    "DDD",
+    "MDLZ",
+    "TTD",
+    "PRIM",
+    "TFC",
+    "USNA",
+    "DECK",
+    "ANIP",
+    "ACAD",
+    "HBAN",
+    "DIN",
+    "DVA",
+    "KO",
+    "AME",
+    "BRBR",
+    "ZUMZ",
+    "GOOG",
+    "FITB",
+    "COHR",
+    "CBT",
+    "RMD",
+    "TXNM",
+    "GOGO",
+    "CVX",
+    "PMT",
+    "BCO",
+    "MYRG",
+    "MCHP",
+    "DOCU",
+    "SNA",
+    "FCF",
+    "SJM",
+    "GDOT",
+    "WEC",
+    "ICUI",
+    "MARA",
+    "TRST",
+    "CI",
+    "MUR",
+    "XPER",
+    "REG",
+    "ANGI",
+    "RDNT",
+    "JBGS",
+    "POWI",
+    "ENTG",
+    "APP",
+    "RH",
+    "STE",
+    "SOLV",
+    "JNJ",
+    "MHO",
+    "NAVI",
+    "CHD",
+    "VTRS"
+  ],
+  "benchmark_receipt": {
+    "instrument": "SPY",
+    "raw_sha256": "e433c3770f29b990fb8cc05e1ecd97f4030b72c86b38926695676bab836fea4a",
+    "captured_at": "2026-11-14T01:49:39.846389+00:00",
+    "source_request_path": "/tiingo/daily/SPY/prices?endDate=2026-11-13&startDate=2010-01-01",
+    "input_rows": 4243,
+    "retained_rows": 4242,
+    "data_end": "2026-11-12",
+    "split_events": 0,
+    "dividend_events": 67,
+    "historical_first_availability": null,
+    "price_imputation": false,
+    "adjusted_fields_used_as_predictors": false,
+    "unsupported_action_dates": [],
+    "adjustment_factor_log_error_max": 0.00026316444471325253,
+    "action_basis_qualified": true
+  },
+  "results": [
+    {
+      "instrument": "PLMR",
+      "counts": {
+        "t1": {
+          "observed_onsets": 3,
+          "admitted": 3
+        },
+        "t2": {
+          "observed_onsets": 17,
+          "admitted": 17
+        },
+        "union": {
+          "observed_onsets": 17,
+          "admitted": 17
+        },
+        "breakout20": {
+          "observed_onsets": 83,
+          "admitted": 65
+        },
+        "reclaim50": {
+          "observed_onsets": 31,
+          "admitted": 26
+        },
+        "trend63_126": {
+          "observed_onsets": 22,
+          "admitted": 18
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 27
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 146,
+      "path_rows": 618,
+      "input_sha256": {
+        "prices": "e9f5204d2322bb271c4e0c6fc05f82dbe63024eadfbca0aafd6460b657cb1bb9",
+        "native": "99de4a2e1b8ef178ae9cb7f024a2cfdf5d3f938cb8bd44f559bbd590d524ebdc",
+        "risk": "d16c862d15e8205141aec5ed3d4a392e94b4675a1d13b944e44af4c112bb6197"
+      }
+    },
+    {
+      "instrument": "HIW",
+      "counts": {
+        "t1": {
+          "observed_onsets": 5,
+          "admitted": 5
+        },
+        "t2": {
+          "observed_onsets": 27,
+          "admitted": 27
+        },
+        "union": {
+          "observed_onsets": 28,
+          "admitted": 28
+        },
+        "breakout20": {
+          "observed_onsets": 121,
+          "admitted": 121
+        },
+        "reclaim50": {
+          "observed_onsets": 42,
+          "admitted": 42
+        },
+        "trend63_126": {
+          "observed_onsets": 36,
+          "admitted": 36
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 259,
+      "path_rows": 1092,
+      "input_sha256": {
+        "prices": "81720fb67c04798e676277d03130ce4fa80efb7374ecedca6009d15a24f628ed",
+        "native": "d2093b93c4ae88f190cd06936e8bd55186ce5d44ec6cda39894cde045261505a",
+        "risk": "1889079bd71257220eade0a6948380587572415c01b96d2107a092f0fa17f597"
+      }
+    },
+    {
+      "instrument": "FLO",
+      "counts": {
+        "t1": {
+          "observed_onsets": 17,
+          "admitted": 17
+        },
+        "t2": {
+          "observed_onsets": 33,
+          "admitted": 33
+        },
+        "union": {
+          "observed_onsets": 42,
+          "admitted": 42
+        },
+        "breakout20": {
+          "observed_onsets": 119,
+          "admitted": 119
+        },
+        "reclaim50": {
+          "observed_onsets": 48,
+          "admitted": 48
+        },
+        "trend63_126": {
+          "observed_onsets": 42,
+          "admitted": 42
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 301,
+      "path_rows": 1288,
+      "input_sha256": {
+        "prices": "e709a587f93e4ccc78865eddae49559aa3c762bac754f99d1c449fc9504ef983",
+        "native": "322dad675ce761297b175616d5e9ecebfc35b2b2438561e0cdfc875492706fc0",
+        "risk": "e1b6ed963528c6f7de90a5ffe428439c8e3a53b15cb564be68bf2e21c97af3da"
+      }
+    },
+    {
+      "instrument": "WSFS",
+      "counts": {
+        "t1": {
+          "observed_onsets": 14,
+          "admitted": 7
+        },
+        "t2": {
+          "observed_onsets": 31,
+          "admitted": 13
+        },
+        "union": {
+          "observed_onsets": 35,
+          "admitted": 14
+        },
+        "breakout20": {
+          "observed_onsets": 123,
+          "admitted": 53
+        },
+        "reclaim50": {
+          "observed_onsets": 69,
+          "admitted": 31
+        },
+        "trend63_126": {
+          "observed_onsets": 56,
+          "admitted": 29
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 181
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 147,
+      "path_rows": 616,
+      "input_sha256": {
+        "prices": "fad94588c51af774156caa1a591279486852a54621139db01d3dfeaa2205d8a1",
+        "native": "0f0a518e08cfef94cc1d5331e343dfda32c5255be0cfe10ca49b4083ee3e8b73",
+        "risk": "9d2a6f4ca964eaf2bc5c7ee460de2f0827c13c8b35273a549cb4503f8e8736c6"
+      }
+    },
+    {
+      "instrument": "TTD",
+      "counts": {
+        "t1": {
+          "observed_onsets": 4,
+          "admitted": 0
+        },
+        "t2": {
+          "observed_onsets": 22,
+          "admitted": 5
+        },
+        "union": {
+          "observed_onsets": 24,
+          "admitted": 5
+        },
+        "breakout20": {
+          "observed_onsets": 104,
+          "admitted": 7
+        },
+        "reclaim50": {
+          "observed_onsets": 41,
+          "admitted": 1
+        },
+        "trend63_126": {
+          "observed_onsets": 28,
+          "admitted": 0
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 205
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 18,
+      "path_rows": 82,
+      "input_sha256": {
+        "prices": "86a98c67c9838a6f4bb095c02f972718892d4fe146816957f2978991d864b397",
+        "native": "4e78c93f81a5d5df799bf24856436cb26125abad74aff2be038dd36b837f880e",
+        "risk": "993de1bf392c0d2288bbcfa61eb0e56676f5bcc3b5be059c50be4e84d40a2089"
+      }
+    },
+    {
+      "instrument": "ECL",
+      "counts": {
+        "t1": {
+          "observed_onsets": 14,
+          "admitted": 14
+        },
+        "t2": {
+          "observed_onsets": 38,
+          "admitted": 38
+        },
+        "union": {
+          "observed_onsets": 43,
+          "admitted": 43
+        },
+        "breakout20": {
+          "observed_onsets": 132,
+          "admitted": 132
+        },
+        "reclaim50": {
+          "observed_onsets": 64,
+          "admitted": 64
+        },
+        "trend63_126": {
+          "observed_onsets": 57,
+          "admitted": 57
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 348,
+      "path_rows": 1478,
+      "input_sha256": {
+        "prices": "cbff2beb5b26cb6b4881ebf54b423c6a7a0cc3c5292a3c469e3059fd66915ac6",
+        "native": "1d34a83c1141e31de28423b64d40e93ad7676df8276121b655dc997172218eba",
+        "risk": "f18fe98fb8b80f5dfeb0c68a7066fffa7b529be8da49756c5c7f603a3b17a71f"
+      }
+    },
+    {
+      "instrument": "PRIM",
+      "counts": {
+        "t1": {
+          "observed_onsets": 9,
+          "admitted": 1
+        },
+        "t2": {
+          "observed_onsets": 37,
+          "admitted": 0
+        },
+        "union": {
+          "observed_onsets": 41,
+          "admitted": 1
+        },
+        "breakout20": {
+          "observed_onsets": 127,
+          "admitted": 6
+        },
+        "reclaim50": {
+          "observed_onsets": 51,
+          "admitted": 5
+        },
+        "trend63_126": {
+          "observed_onsets": 32,
+          "admitted": 1
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 283
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 14,
+      "path_rows": 58,
+      "input_sha256": {
+        "prices": "b0e177bddb65dae854b2d62f4d0aa51668e037e13b9e8ab1273a06b438798fd6",
+        "native": "6444b700e93cac7fd00b4a78c60ecd66c3083839db6cde3c5767dbdcfbf4b7bb",
+        "risk": "7b7eb983d492c1f8412941de169005d90dccd904ef5d46779f286e555e894781"
+      }
+    },
+    {
+      "instrument": "DDD",
+      "counts": {
+        "t1": {
+          "observed_onsets": 7,
+          "admitted": 5
+        },
+        "t2": {
+          "observed_onsets": 37,
+          "admitted": 22
+        },
+        "union": {
+          "observed_onsets": 39,
+          "admitted": 23
+        },
+        "breakout20": {
+          "observed_onsets": 111,
+          "admitted": 69
+        },
+        "reclaim50": {
+          "observed_onsets": 23,
+          "admitted": 15
+        },
+        "trend63_126": {
+          "observed_onsets": 33,
+          "admitted": 22
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 94
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 156,
+      "path_rows": 670,
+      "input_sha256": {
+        "prices": "710dcc0fbc03604bf74bfee76900b7f94a98ff960fbe3738b4c7cc020966115f",
+        "native": "893ba97029b4ec93ed55409e1b65d2ce3e4adf7261aa9b161227d18cbd66ac93",
+        "risk": "4795021353601884244340bb131219975e0ed486161ff328d9433532bb074dce"
+      }
+    },
+    {
+      "instrument": "USNA",
+      "counts": {
+        "t1": {
+          "observed_onsets": 6,
+          "admitted": 2
+        },
+        "t2": {
+          "observed_onsets": 38,
+          "admitted": 11
+        },
+        "union": {
+          "observed_onsets": 40,
+          "admitted": 11
+        },
+        "breakout20": {
+          "observed_onsets": 104,
+          "admitted": 27
+        },
+        "reclaim50": {
+          "observed_onsets": 42,
+          "admitted": 14
+        },
+        "trend63_126": {
+          "observed_onsets": 40,
+          "admitted": 15
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 190
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 80,
+      "path_rows": 342,
+      "input_sha256": {
+        "prices": "548b148f1c622abb0e531b630591ecee88eb73c91576e412c30af5240c6105d5",
+        "native": "32a6e013be7b9a0e6c447c8721ed7ef525963d680efabc03eb3af32963b381c4",
+        "risk": "46f91188b07942311a912071e711ab2f79d9160c3d0bd71be1b3524a6763b789"
+      }
+    },
+    {
+      "instrument": "TFC",
+      "counts": {
+        "t1": {
+          "observed_onsets": 13,
+          "admitted": 5
+        },
+        "t2": {
+          "observed_onsets": 40,
+          "admitted": 21
+        },
+        "union": {
+          "observed_onsets": 44,
+          "admitted": 22
+        },
+        "breakout20": {
+          "observed_onsets": 135,
+          "admitted": 69
+        },
+        "reclaim50": {
+          "observed_onsets": 61,
+          "admitted": 35
+        },
+        "trend63_126": {
+          "observed_onsets": 42,
+          "admitted": 23
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 160
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 175,
+      "path_rows": 744,
+      "input_sha256": {
+        "prices": "7ce2996e1267c5df373b55364a830fc6f8341b0844a7b0c153d99e43cf0c6cb9",
+        "native": "82cb21d70d1682d37306395fd61ff44a8e48750f1b45fa6634b732ea99168cc3",
+        "risk": "dbf18de9d9f9228f77cefab17fc3f76ac4d6a48496308e7f2e7b27d005c6e40a"
+      }
+    },
+    {
+      "instrument": "ANIP",
+      "counts": {
+        "t1": {
+          "observed_onsets": 9,
+          "admitted": 2
+        },
+        "t2": {
+          "observed_onsets": 25,
+          "admitted": 9
+        },
+        "union": {
+          "observed_onsets": 30,
+          "admitted": 11
+        },
+        "breakout20": {
+          "observed_onsets": 117,
+          "admitted": 34
+        },
+        "reclaim50": {
+          "observed_onsets": 47,
+          "admitted": 20
+        },
+        "trend63_126": {
+          "observed_onsets": 35,
+          "admitted": 12
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 175
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 88,
+      "path_rows": 374,
+      "input_sha256": {
+        "prices": "719f64ce791abb7889c6c219cad9ee250d76db60cd4c78c0f08dbc9df7dd1950",
+        "native": "f155bea0606b330fe2189dff46f2300c81ed87cbf437b5573e394ad8c2436e85",
+        "risk": "75e7f8b0d0dfd972ccc9a089345602543068d92b051e928c0c221ecbe5996d19"
+      }
+    },
+    {
+      "instrument": "MDLZ",
+      "counts": {
+        "t1": {
+          "observed_onsets": 13,
+          "admitted": 13
+        },
+        "t2": {
+          "observed_onsets": 37,
+          "admitted": 37
+        },
+        "union": {
+          "observed_onsets": 45,
+          "admitted": 45
+        },
+        "breakout20": {
+          "observed_onsets": 130,
+          "admitted": 130
+        },
+        "reclaim50": {
+          "observed_onsets": 57,
+          "admitted": 57
+        },
+        "trend63_126": {
+          "observed_onsets": 65,
+          "admitted": 65
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 347,
+      "path_rows": 1478,
+      "input_sha256": {
+        "prices": "e3d7ed13788826aa87664a9b295aee77116775df773c5e7a60d8d0170df165ae",
+        "native": "9a83f3aa53db29f3ee313ee13c143d8c48c5dc7e15c2f0def09c744b68f45f7b",
+        "risk": "d37bbc6ca352c63b79320d733dafd97a995b93c8af70c547d31d84e1c9440986"
+      }
+    },
+    {
+      "instrument": "ACAD",
+      "counts": {
+        "t1": {
+          "observed_onsets": 9,
+          "admitted": 2
+        },
+        "t2": {
+          "observed_onsets": 27,
+          "admitted": 2
+        },
+        "union": {
+          "observed_onsets": 31,
+          "admitted": 3
+        },
+        "breakout20": {
+          "observed_onsets": 118,
+          "admitted": 16
+        },
+        "reclaim50": {
+          "observed_onsets": 48,
+          "admitted": 5
+        },
+        "trend63_126": {
+          "observed_onsets": 45,
+          "admitted": 8
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 242
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 36,
+      "path_rows": 150,
+      "input_sha256": {
+        "prices": "6648acbfec396fc70422b40290e26006c64af888eda9a435c5d74e3d9f1f2d97",
+        "native": "cb9805750f12df6d4a30a3ed4e7530eb510bfecc7f5de384ea99cc0839bfd6fd",
+        "risk": "762bbeae01961bd9ec447f3cc04bf522dbd453c0260afdb45ccc5d49b1aef66e"
+      }
+    },
+    {
+      "instrument": "DECK",
+      "counts": {
+        "t1": {
+          "observed_onsets": 10,
+          "admitted": 10
+        },
+        "t2": {
+          "observed_onsets": 28,
+          "admitted": 28
+        },
+        "union": {
+          "observed_onsets": 35,
+          "admitted": 35
+        },
+        "breakout20": {
+          "observed_onsets": 126,
+          "admitted": 126
+        },
+        "reclaim50": {
+          "observed_onsets": 58,
+          "admitted": 58
+        },
+        "trend63_126": {
+          "observed_onsets": 29,
+          "admitted": 29
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 286,
+      "path_rows": 1214,
+      "input_sha256": {
+        "prices": "43bc869da0b90487e36f12306af7e05b219e0da2944ee432a854125dedadd321",
+        "native": "a8c2956d71208b1f69438a4ef9847037bdddf3b2f27da966a10b4cecb915e15e",
+        "risk": "db5af78ca5b53a498278c08f393eeb48c5f028a56bbe801099877db3d1d86bf2"
+      }
+    },
+    {
+      "instrument": "DIN",
+      "counts": {
+        "t1": {
+          "observed_onsets": 12,
+          "admitted": 9
+        },
+        "t2": {
+          "observed_onsets": 36,
+          "admitted": 19
+        },
+        "union": {
+          "observed_onsets": 42,
+          "admitted": 23
+        },
+        "breakout20": {
+          "observed_onsets": 118,
+          "admitted": 52
+        },
+        "reclaim50": {
+          "observed_onsets": 37,
+          "admitted": 13
+        },
+        "trend63_126": {
+          "observed_onsets": 33,
+          "admitted": 18
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 144
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 134,
+      "path_rows": 582,
+      "input_sha256": {
+        "prices": "4070c338201fd5042c04233008b8f0cc5184183759accf32101c5c0da347b44a",
+        "native": "f672b5053297f1d256564cc31e7d4a3c5a3efecefcc103373a2ee881fa549575",
+        "risk": "e7e2b55e693847c42ce7f61660e8e2e417695422f3c22a60370a3c0fa854acae"
+      }
+    },
+    {
+      "instrument": "HBAN",
+      "counts": {
+        "t1": {
+          "observed_onsets": 17,
+          "admitted": 17
+        },
+        "t2": {
+          "observed_onsets": 31,
+          "admitted": 31
+        },
+        "union": {
+          "observed_onsets": 38,
+          "admitted": 38
+        },
+        "breakout20": {
+          "observed_onsets": 131,
+          "admitted": 131
+        },
+        "reclaim50": {
+          "observed_onsets": 59,
+          "admitted": 59
+        },
+        "trend63_126": {
+          "observed_onsets": 39,
+          "admitted": 39
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 315,
+      "path_rows": 1336,
+      "input_sha256": {
+        "prices": "af0fe3a33fd4709c544692dad219a4766b8d013698f9b38217289c116bca1619",
+        "native": "806603a96115b4e8aa2eb1a55149348ab33f7b9c328731a084fb8bef254a7b0b",
+        "risk": "6e00af41a4d6846db6a365d39785bea0b1e0c4b606c94c46418fe9b6ca0d2190"
+      }
+    },
+    {
+      "instrument": "DVA",
+      "counts": {
+        "t1": {
+          "observed_onsets": 14,
+          "admitted": 14
+        },
+        "t2": {
+          "observed_onsets": 40,
+          "admitted": 40
+        },
+        "union": {
+          "observed_onsets": 47,
+          "admitted": 47
+        },
+        "breakout20": {
+          "observed_onsets": 114,
+          "admitted": 114
+        },
+        "reclaim50": {
+          "observed_onsets": 49,
+          "admitted": 49
+        },
+        "trend63_126": {
+          "observed_onsets": 38,
+          "admitted": 38
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 302,
+      "path_rows": 1302,
+      "input_sha256": {
+        "prices": "56411072e15d22f9d9396a44b368cccc07f23e6d272947da48cc4cd06fd19718",
+        "native": "081435c681bc00d53c8c5e8ada5bc4431cbc8fb9f14be1a101626413c4b48cc3",
+        "risk": "f354dcacd6254207b92c6060045bad8f1cc9db6e988885d5c3078212ac55c430"
+      }
+    },
+    {
+      "instrument": "BRBR",
+      "counts": {
+        "t1": {
+          "observed_onsets": 8,
+          "admitted": 6
+        },
+        "t2": {
+          "observed_onsets": 17,
+          "admitted": 13
+        },
+        "union": {
+          "observed_onsets": 21,
+          "admitted": 16
+        },
+        "breakout20": {
+          "observed_onsets": 70,
+          "admitted": 42
+        },
+        "reclaim50": {
+          "observed_onsets": 34,
+          "admitted": 18
+        },
+        "trend63_126": {
+          "observed_onsets": 21,
+          "admitted": 14
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 62
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 109,
+      "path_rows": 468,
+      "input_sha256": {
+        "prices": "9d5d7cec8dd9daa2ec043c84776daf4ce1d26ababc49934ad26e4768239333cd",
+        "native": "b79b830eabf6c5791c773797d3d6eab491613191108494d86e0a219f214f6149",
+        "risk": "a6ee0e7ed8c54eae0869fdb669e520c65c3f4fa5d78bdad4d9e5e56229dd305a"
+      }
+    },
+    {
+      "instrument": "ZUMZ",
+      "counts": {
+        "t1": {
+          "observed_onsets": 2,
+          "admitted": 1
+        },
+        "t2": {
+          "observed_onsets": 30,
+          "admitted": 12
+        },
+        "union": {
+          "observed_onsets": 31,
+          "admitted": 12
+        },
+        "breakout20": {
+          "observed_onsets": 110,
+          "admitted": 28
+        },
+        "reclaim50": {
+          "observed_onsets": 40,
+          "admitted": 18
+        },
+        "trend63_126": {
+          "observed_onsets": 39,
+          "admitted": 14
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 167
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 85,
+      "path_rows": 364,
+      "input_sha256": {
+        "prices": "00052cae3dc985b672dd7d8fc109fe4c15ae10e23652aaaa261dc7c2ad77b485",
+        "native": "da5a1815bdefc52edf11e0d7db0d805a90c633e41ab20552de8da9376811e52b",
+        "risk": "6ad44130243d1c92297ad533e2030acf4d945b5b0fdc2d6ac9c5d3289c0fd1b3"
+      }
+    },
+    {
+      "instrument": "AME",
+      "counts": {
+        "t1": {
+          "observed_onsets": 11,
+          "admitted": 11
+        },
+        "t2": {
+          "observed_onsets": 29,
+          "admitted": 29
+        },
+        "union": {
+          "observed_onsets": 36,
+          "admitted": 36
+        },
+        "breakout20": {
+          "observed_onsets": 134,
+          "admitted": 134
+        },
+        "reclaim50": {
+          "observed_onsets": 66,
+          "admitted": 66
+        },
+        "trend63_126": {
+          "observed_onsets": 40,
+          "admitted": 40
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 316,
+      "path_rows": 1336,
+      "input_sha256": {
+        "prices": "0ebe02b54e97c8795f1d42024e696b0dcc6ca0ddc0b665fbfc6bfce211d06e9d",
+        "native": "a752ad2932cc5f9ec13f9c61e591617b986d9b8f4e5c0d68f3aa0d4e8b2b6779",
+        "risk": "53e97f0802d1ca91cba6821c864a5cf4e666d90e33ff79f4e1b43460d736f6d1"
+      }
+    },
+    {
+      "instrument": "KO",
+      "counts": {
+        "t1": {
+          "observed_onsets": 10,
+          "admitted": 10
+        },
+        "t2": {
+          "observed_onsets": 32,
+          "admitted": 32
+        },
+        "union": {
+          "observed_onsets": 37,
+          "admitted": 37
+        },
+        "breakout20": {
+          "observed_onsets": 140,
+          "admitted": 140
+        },
+        "reclaim50": {
+          "observed_onsets": 70,
+          "admitted": 70
+        },
+        "trend63_126": {
+          "observed_onsets": 49,
+          "admitted": 49
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 338,
+      "path_rows": 1426,
+      "input_sha256": {
+        "prices": "312566d1033e7c519459e6ef7b834b05b4228b94e3df944edb6f14fbf27c3499",
+        "native": "adbb5bf6b18883cb816e31286bf0e7f7adb66d6669e509bd467a778b22fc3ed4",
+        "risk": "86dd2cb2efc9bcd77049fc15c99c5ef36e399d4892cb25760afee08ccd5d9e11"
+      }
+    },
+    {
+      "instrument": "GOOG",
+      "counts": {
+        "t1": {
+          "observed_onsets": 15,
+          "admitted": 15
+        },
+        "t2": {
+          "observed_onsets": 23,
+          "admitted": 23
+        },
+        "union": {
+          "observed_onsets": 31,
+          "admitted": 31
+        },
+        "breakout20": {
+          "observed_onsets": 146,
+          "admitted": 146
+        },
+        "reclaim50": {
+          "observed_onsets": 57,
+          "admitted": 57
+        },
+        "trend63_126": {
+          "observed_onsets": 39,
+          "admitted": 39
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 311,
+      "path_rows": 1306,
+      "input_sha256": {
+        "prices": "6a51f88eb69c233ac08f42343368e5abe7feb0eed0334b71f45d253e0c8259db",
+        "native": "136ec139c23f84ebd0b3debe0dba19a4054375f480f41aedffe4151dd91d5de1",
+        "risk": "f3f0ff87669f18dd98d3014be4453d8710134cf70fed7f47423ec5888e15e120"
+      }
+    },
+    {
+      "instrument": "COHR",
+      "counts": {
+        "t1": {
+          "observed_onsets": 9,
+          "admitted": 9
+        },
+        "t2": {
+          "observed_onsets": 35,
+          "admitted": 32
+        },
+        "union": {
+          "observed_onsets": 34,
+          "admitted": 31
+        },
+        "breakout20": {
+          "observed_onsets": 129,
+          "admitted": 111
+        },
+        "reclaim50": {
+          "observed_onsets": 44,
+          "admitted": 38
+        },
+        "trend63_126": {
+          "observed_onsets": 50,
+          "admitted": 41
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 39
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 262,
+      "path_rows": 1110,
+      "input_sha256": {
+        "prices": "71ea254f620311ac21545156ddc2915114207ac21aa77ebd052f7ec9601bdce2",
+        "native": "c775532f5c28a00cec0ff4c1a3958e198e508e8f40f28eeae33443ed57e85300",
+        "risk": "4fc6bdf51157e6b1cd049d7e0739f7f4745787543cc21754340a7ade9c3a6227"
+      }
+    },
+    {
+      "instrument": "FITB",
+      "counts": {
+        "t1": {
+          "observed_onsets": 11,
+          "admitted": 11
+        },
+        "t2": {
+          "observed_onsets": 26,
+          "admitted": 26
+        },
+        "union": {
+          "observed_onsets": 31,
+          "admitted": 31
+        },
+        "breakout20": {
+          "observed_onsets": 134,
+          "admitted": 134
+        },
+        "reclaim50": {
+          "observed_onsets": 49,
+          "admitted": 49
+        },
+        "trend63_126": {
+          "observed_onsets": 39,
+          "admitted": 39
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 290,
+      "path_rows": 1222,
+      "input_sha256": {
+        "prices": "fe98ee7ab3f9e05c9eb8cb599ccd43c36a34eac4dc4258c0c572d37068729162",
+        "native": "385484f96e050ebf50ca1567671c427986a650905ab43677354877323db3f6b3",
+        "risk": "4b3d341193dab0ba4e5d6a9ca2d59c74b33c61a0f4f5e7a7216d829798cf77c7"
+      }
+    },
+    {
+      "instrument": "CBT",
+      "counts": {
+        "t1": {
+          "observed_onsets": 10,
+          "admitted": 10
+        },
+        "t2": {
+          "observed_onsets": 25,
+          "admitted": 25
+        },
+        "union": {
+          "observed_onsets": 27,
+          "admitted": 27
+        },
+        "breakout20": {
+          "observed_onsets": 126,
+          "admitted": 126
+        },
+        "reclaim50": {
+          "observed_onsets": 53,
+          "admitted": 53
+        },
+        "trend63_126": {
+          "observed_onsets": 48,
+          "admitted": 48
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 289,
+      "path_rows": 1210,
+      "input_sha256": {
+        "prices": "a9a0d120f30b11c86d5259efee2b6a402bcd03d4c7d0c40cf40a6d7a92aa03a4",
+        "native": "9ac68b4afe5f9208f055b0baf9f418044de5a3154e747d3e65667be36e0db046",
+        "risk": "ef46b1bee1ba768299c925ef34c60476b6b7b839c302fed5aa9dd488f9f17425"
+      }
+    },
+    {
+      "instrument": "GOGO",
+      "counts": {
+        "t1": {
+          "observed_onsets": 9,
+          "admitted": 3
+        },
+        "t2": {
+          "observed_onsets": 30,
+          "admitted": 12
+        },
+        "union": {
+          "observed_onsets": 31,
+          "admitted": 11
+        },
+        "breakout20": {
+          "observed_onsets": 114,
+          "admitted": 31
+        },
+        "reclaim50": {
+          "observed_onsets": 33,
+          "admitted": 9
+        },
+        "trend63_126": {
+          "observed_onsets": 39,
+          "admitted": 15
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 175
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 81,
+      "path_rows": 346,
+      "input_sha256": {
+        "prices": "b99fe42f163a45289e10bf328aa8a40b8b5d73d7dfffd4c15f14b9eadeb8753f",
+        "native": "76806bcfcd9f24616bcee70d61f7ef1c3380433ed01c652094564e4c85eff43f",
+        "risk": "c99b20da61272f3b26de43e4a5658bd9cf2285a0f2a9ba24ba565f02e4262fc3"
+      }
+    },
+    {
+      "instrument": "PMT",
+      "counts": {
+        "t1": {
+          "observed_onsets": 14,
+          "admitted": 8
+        },
+        "t2": {
+          "observed_onsets": 31,
+          "admitted": 17
+        },
+        "union": {
+          "observed_onsets": 38,
+          "admitted": 21
+        },
+        "breakout20": {
+          "observed_onsets": 137,
+          "admitted": 70
+        },
+        "reclaim50": {
+          "observed_onsets": 40,
+          "admitted": 25
+        },
+        "trend63_126": {
+          "observed_onsets": 33,
+          "admitted": 26
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 126
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 167,
+      "path_rows": 710,
+      "input_sha256": {
+        "prices": "c510201838f5da75924f62d88b0d5d06df89931e48d6cb824e1269bda5e63f69",
+        "native": "5c959ee9676d4dae0089a6ed7d5af073b408afb582c43e9e8d7cafcef0b8a4c0",
+        "risk": "00dfae867d33aadf03f3ad2b1f344582e956e23a5203fae0200bc70f9a18cb8e"
+      }
+    },
+    {
+      "instrument": "TXNM",
+      "counts": {
+        "t1": {
+          "observed_onsets": 9,
+          "admitted": 9
+        },
+        "t2": {
+          "observed_onsets": 31,
+          "admitted": 31
+        },
+        "union": {
+          "observed_onsets": 35,
+          "admitted": 35
+        },
+        "breakout20": {
+          "observed_onsets": 135,
+          "admitted": 135
+        },
+        "reclaim50": {
+          "observed_onsets": 66,
+          "admitted": 66
+        },
+        "trend63_126": {
+          "observed_onsets": 38,
+          "admitted": 38
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 314,
+      "path_rows": 1326,
+      "input_sha256": {
+        "prices": "56bcdf532de5118e51522d54139d7d9c05214f080ac2a7401d104f235aacbf1e",
+        "native": "d4c891030488c2a57e201ffcf398acc24b734760df90457cc24eb621e6e9bdff",
+        "risk": "cf86881ca3054397a92eaf57986b37ec386dec2fe168429c1c68a64f72edf2c8"
+      }
+    },
+    {
+      "instrument": "RMD",
+      "counts": {
+        "t1": {
+          "observed_onsets": 11,
+          "admitted": 11
+        },
+        "t2": {
+          "observed_onsets": 23,
+          "admitted": 23
+        },
+        "union": {
+          "observed_onsets": 25,
+          "admitted": 25
+        },
+        "breakout20": {
+          "observed_onsets": 127,
+          "admitted": 127
+        },
+        "reclaim50": {
+          "observed_onsets": 58,
+          "admitted": 58
+        },
+        "trend63_126": {
+          "observed_onsets": 46,
+          "admitted": 46
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 290,
+      "path_rows": 1210,
+      "input_sha256": {
+        "prices": "4b24d9059317991038cad8afc4093ff134691eb98b2691c17e4006549e059035",
+        "native": "57919afcd1ae342caf85b6f199d11bdaea60ba8f7b5bd36858b39ee7ae6fbbd6",
+        "risk": "a795bcf2769a4c2ccdd62f6134f9fc05223490fd6893cb1d7fe935c734a528b1"
+      }
+    },
+    {
+      "instrument": "CVX",
+      "counts": {
+        "t1": {
+          "observed_onsets": 11,
+          "admitted": 11
+        },
+        "t2": {
+          "observed_onsets": 27,
+          "admitted": 27
+        },
+        "union": {
+          "observed_onsets": 30,
+          "admitted": 30
+        },
+        "breakout20": {
+          "observed_onsets": 138,
+          "admitted": 138
+        },
+        "reclaim50": {
+          "observed_onsets": 59,
+          "admitted": 59
+        },
+        "trend63_126": {
+          "observed_onsets": 55,
+          "admitted": 55
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 320,
+      "path_rows": 1340,
+      "input_sha256": {
+        "prices": "df87a9a895072db60b414ad173668dbe2a4731a40c1abfcdbad0e3880041bb83",
+        "native": "c2afdb93cd0a2798120ec347335ba987fde1190d53f619002c0214e405675132",
+        "risk": "d7be59f0974a4cf0825c152755c44290b2f3c27f6b8387d1e8aead82a326c6f0"
+      }
+    },
+    {
+      "instrument": "DOCU",
+      "counts": {
+        "t1": {
+          "observed_onsets": 10,
+          "admitted": 1
+        },
+        "t2": {
+          "observed_onsets": 22,
+          "admitted": 7
+        },
+        "union": {
+          "observed_onsets": 28,
+          "admitted": 8
+        },
+        "breakout20": {
+          "observed_onsets": 86,
+          "admitted": 21
+        },
+        "reclaim50": {
+          "observed_onsets": 36,
+          "admitted": 2
+        },
+        "trend63_126": {
+          "observed_onsets": 19,
+          "admitted": 3
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 159
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 42,
+      "path_rows": 184,
+      "input_sha256": {
+        "prices": "d4c1735340edac78f0ffe375158a77ab9ebc92dd40e7ba86d57c17e4ba7f519e",
+        "native": "e17bedc7203f4af3ccd81499c6cadbfa0443489d535dcc756a76e5da92adebb1",
+        "risk": "de4dc730f3669ffe0a94fa442778974e08dec55b0cef7e9e47097ad2927ac6d1"
+      }
+    },
+    {
+      "instrument": "MYRG",
+      "counts": {
+        "t1": {
+          "observed_onsets": 3,
+          "admitted": 1
+        },
+        "t2": {
+          "observed_onsets": 36,
+          "admitted": 17
+        },
+        "union": {
+          "observed_onsets": 38,
+          "admitted": 18
+        },
+        "breakout20": {
+          "observed_onsets": 136,
+          "admitted": 71
+        },
+        "reclaim50": {
+          "observed_onsets": 58,
+          "admitted": 26
+        },
+        "trend63_126": {
+          "observed_onsets": 35,
+          "admitted": 11
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 162
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 144,
+      "path_rows": 612,
+      "input_sha256": {
+        "prices": "6da7d6be6fe8da50644ae115b86efad3c2669f200d9a91adf6ce29884206e0a1",
+        "native": "1c31e4f0af7d61c6e8e6bb22a646051ccf1c95ad2a8322bb9bcf4c21699115f7",
+        "risk": "2d1614e2e75c4ec1d066d986fb92b99e24318b79cbb30f4f7d7f0e7a7a6921a4"
+      }
+    },
+    {
+      "instrument": "BCO",
+      "counts": {
+        "t1": {
+          "observed_onsets": 11,
+          "admitted": 11
+        },
+        "t2": {
+          "observed_onsets": 31,
+          "admitted": 27
+        },
+        "union": {
+          "observed_onsets": 34,
+          "admitted": 30
+        },
+        "breakout20": {
+          "observed_onsets": 128,
+          "admitted": 94
+        },
+        "reclaim50": {
+          "observed_onsets": 54,
+          "admitted": 44
+        },
+        "trend63_126": {
+          "observed_onsets": 41,
+          "admitted": 35
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 58
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 241,
+      "path_rows": 1024,
+      "input_sha256": {
+        "prices": "49fe9f51c9c7b1a46bdb57e9e7482c3fc596054dd051f9d4baac8616aa96dbf0",
+        "native": "e9aeac8893f21b6e601d3e582ecd6ec93e1429324f1bed53ea5fd6abd8b12b79",
+        "risk": "01f9af5b106160b39c3a1a84d853fe8af3c1b413b3732dca2ecbdb8f00c944a6"
+      }
+    },
+    {
+      "instrument": "FCF",
+      "counts": {
+        "t1": {
+          "observed_onsets": 11,
+          "admitted": 4
+        },
+        "t2": {
+          "observed_onsets": 35,
+          "admitted": 19
+        },
+        "union": {
+          "observed_onsets": 38,
+          "admitted": 19
+        },
+        "breakout20": {
+          "observed_onsets": 117,
+          "admitted": 57
+        },
+        "reclaim50": {
+          "observed_onsets": 51,
+          "admitted": 22
+        },
+        "trend63_126": {
+          "observed_onsets": 43,
+          "admitted": 21
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 153
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 142,
+      "path_rows": 606,
+      "input_sha256": {
+        "prices": "6d1555d34df93e944815ebe2970ee42b6bc28c4d4379bd27a91b9be71021de1e",
+        "native": "baf0be2694342d33dbbec5186f121c40f7e4c02477e0da42ffee94ad9eed149a",
+        "risk": "f73e943c6b1018e35a6c600509e69cc73862024202e1865b301448bc632ad7d7"
+      }
+    },
+    {
+      "instrument": "MCHP",
+      "counts": {
+        "t1": {
+          "observed_onsets": 15,
+          "admitted": 15
+        },
+        "t2": {
+          "observed_onsets": 36,
+          "admitted": 36
+        },
+        "union": {
+          "observed_onsets": 40,
+          "admitted": 40
+        },
+        "breakout20": {
+          "observed_onsets": 126,
+          "admitted": 126
+        },
+        "reclaim50": {
+          "observed_onsets": 70,
+          "admitted": 70
+        },
+        "trend63_126": {
+          "observed_onsets": 52,
+          "admitted": 52
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 339,
+      "path_rows": 1436,
+      "input_sha256": {
+        "prices": "b17eaa975286a881d42da702ae6032541e42d045672ce5668df189ef50112cc7",
+        "native": "de94e618c27ee6db2aab660f97bd772520ef5249d1b03025f4f3f1b36cd59a29",
+        "risk": "94b2ca22b51eb8fd83d5a6dadbeb68bb612d06de1655065263565db3b1e8fc25"
+      }
+    },
+    {
+      "instrument": "GDOT",
+      "counts": {
+        "t1": {
+          "observed_onsets": 10,
+          "admitted": 4
+        },
+        "t2": {
+          "observed_onsets": 35,
+          "admitted": 21
+        },
+        "union": {
+          "observed_onsets": 39,
+          "admitted": 23
+        },
+        "breakout20": {
+          "observed_onsets": 116,
+          "admitted": 38
+        },
+        "reclaim50": {
+          "observed_onsets": 41,
+          "admitted": 12
+        },
+        "trend63_126": {
+          "observed_onsets": 36,
+          "admitted": 12
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 167
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 110,
+      "path_rows": 486,
+      "input_sha256": {
+        "prices": "3978142c20305b002692c3ba76f6042915664c3b14cf14816aed40880a99cfd1",
+        "native": "58fd4de48c85a15f4a2734f4a60bd8f171094d5b2be4c44ca37cf452e366143e",
+        "risk": "67c9170106797daf8407eb054a4bc8f3ff14385623a825be28a379ad57812928"
+      }
+    },
+    {
+      "instrument": "SNA",
+      "counts": {
+        "t1": {
+          "observed_onsets": 13,
+          "admitted": 13
+        },
+        "t2": {
+          "observed_onsets": 40,
+          "admitted": 40
+        },
+        "union": {
+          "observed_onsets": 47,
+          "admitted": 47
+        },
+        "breakout20": {
+          "observed_onsets": 136,
+          "admitted": 136
+        },
+        "reclaim50": {
+          "observed_onsets": 52,
+          "admitted": 52
+        },
+        "trend63_126": {
+          "observed_onsets": 50,
+          "admitted": 50
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 338,
+      "path_rows": 1446,
+      "input_sha256": {
+        "prices": "03462cecce140f12bf00295d010ec29a589761dfa55bfb4ac2499fcd7bb355ce",
+        "native": "6c9bf1e6796e3e24fa9d441b6160a54b4353668a1ec164093da508cffacc7246",
+        "risk": "dcf50f8eda5e5742b6654cab41c37ea894189eebb3e84b6a00a617e3702ad642"
+      }
+    },
+    {
+      "instrument": "MARA",
+      "counts": {
+        "t1": {
+          "observed_onsets": 6,
+          "admitted": 1
+        },
+        "t2": {
+          "observed_onsets": 29,
+          "admitted": 4
+        },
+        "union": {
+          "observed_onsets": 33,
+          "admitted": 5
+        },
+        "breakout20": {
+          "observed_onsets": 81,
+          "admitted": 21
+        },
+        "reclaim50": {
+          "observed_onsets": 29,
+          "admitted": 6
+        },
+        "trend63_126": {
+          "observed_onsets": 36,
+          "admitted": 10
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 167
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 47,
+      "path_rows": 198,
+      "input_sha256": {
+        "prices": "c87a4bfc3f971d621edb9c5d0d3f52499c66675ebf1734809b55ab85f10e74bb",
+        "native": "22e0c93d48ed9dabd75fe200e31247e3d5b9198fda041ab5a956640fa1fc1c89",
+        "risk": "81e93ca42402ab13c61258fcccffd2a34a514a27b8d4bfe0a7865a87af907a56"
+      }
+    },
+    {
+      "instrument": "SJM",
+      "counts": {
+        "t1": {
+          "observed_onsets": 6,
+          "admitted": 6
+        },
+        "t2": {
+          "observed_onsets": 24,
+          "admitted": 24
+        },
+        "union": {
+          "observed_onsets": 26,
+          "admitted": 26
+        },
+        "breakout20": {
+          "observed_onsets": 127,
+          "admitted": 127
+        },
+        "reclaim50": {
+          "observed_onsets": 49,
+          "admitted": 49
+        },
+        "trend63_126": {
+          "observed_onsets": 58,
+          "admitted": 58
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 290,
+      "path_rows": 1212,
+      "input_sha256": {
+        "prices": "c3dcc686df8c7fe5a68f77eecb91d8cede0b1976effbf933eae004e6aff57484",
+        "native": "47ad4a0cf3cb9a3a01b7faecb97db61c5ccc6d885f25d6d65fc5394fea7b12ce",
+        "risk": "392edae5dbc2dd7a9d5b1666994b6491233689fafc96e4bedc4f0bd67c547fdd"
+      }
+    },
+    {
+      "instrument": "TRST",
+      "counts": {
+        "t1": {
+          "observed_onsets": 12,
+          "admitted": 0
+        },
+        "t2": {
+          "observed_onsets": 34,
+          "admitted": 1
+        },
+        "union": {
+          "observed_onsets": 38,
+          "admitted": 1
+        },
+        "breakout20": {
+          "observed_onsets": 115,
+          "admitted": 1
+        },
+        "reclaim50": {
+          "observed_onsets": 67,
+          "admitted": 4
+        },
+        "trend63_126": {
+          "observed_onsets": 37,
+          "admitted": 1
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 295
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 8,
+      "path_rows": 34,
+      "input_sha256": {
+        "prices": "1cd238868ea6ce0e953a1a0a9ab856ab404343d6a5ebfd81320012d69c2b5f25",
+        "native": "c698d0984944995c24e06ca5de9517f9a758a51efe462e41f0e0b61dac6e8919",
+        "risk": "f8d6ad8a8a453c9ee4d09b2a0c81557a5a02ff4f12e2fd31ccb7e74c618d5229"
+      }
+    },
+    {
+      "instrument": "WEC",
+      "counts": {
+        "t1": {
+          "observed_onsets": 12,
+          "admitted": 12
+        },
+        "t2": {
+          "observed_onsets": 36,
+          "admitted": 36
+        },
+        "union": {
+          "observed_onsets": 43,
+          "admitted": 43
+        },
+        "breakout20": {
+          "observed_onsets": 132,
+          "admitted": 132
+        },
+        "reclaim50": {
+          "observed_onsets": 53,
+          "admitted": 53
+        },
+        "trend63_126": {
+          "observed_onsets": 37,
+          "admitted": 37
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 313,
+      "path_rows": 1338,
+      "input_sha256": {
+        "prices": "3aa64bd954106b554fa0fafdb87c3c08ce758daadedff15c448338e851594f3a",
+        "native": "6d82f3c358f65e0250547acdac097a9c5c261bac9d50f5d9e993737e6810a88d",
+        "risk": "60e60e78d04275b15759ac408e9ecd96667bc7fceff971e04729ad30ee2f6185"
+      }
+    },
+    {
+      "instrument": "ICUI",
+      "counts": {
+        "t1": {
+          "observed_onsets": 14,
+          "admitted": 12
+        },
+        "t2": {
+          "observed_onsets": 33,
+          "admitted": 24
+        },
+        "union": {
+          "observed_onsets": 39,
+          "admitted": 30
+        },
+        "breakout20": {
+          "observed_onsets": 118,
+          "admitted": 76
+        },
+        "reclaim50": {
+          "observed_onsets": 41,
+          "admitted": 27
+        },
+        "trend63_126": {
+          "observed_onsets": 33,
+          "admitted": 27
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 82
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 196,
+      "path_rows": 844,
+      "input_sha256": {
+        "prices": "59f4b77701496bdd074113c97832093694425038107e3d9c17f77f37059f8abf",
+        "native": "83b3d0f7fa24fb2b7f4b96ad0b9a5f50100aab58f309fc9ba093df6cbafe7479",
+        "risk": "58af1e0a115ea44996c531e1abffb38d317d01e5a5c908073c5a6f06e9d6241d"
+      }
+    },
+    {
+      "instrument": "XPER",
+      "counts": {
+        "t1": {
+          "observed_onsets": 2,
+          "admitted": 0
+        },
+        "t2": {
+          "observed_onsets": 9,
+          "admitted": 0
+        },
+        "union": {
+          "observed_onsets": 9,
+          "admitted": 0
+        },
+        "breakout20": {
+          "observed_onsets": 36,
+          "admitted": 3
+        },
+        "reclaim50": {
+          "observed_onsets": 6,
+          "admitted": 3
+        },
+        "trend63_126": {
+          "observed_onsets": 10,
+          "admitted": 1
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 65
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 7,
+      "path_rows": 28,
+      "input_sha256": {
+        "prices": "25eb6d166e6b7261b66c4cbed658d240f64fd888a5fed1f412c34675437e35b8",
+        "native": "fd5beba806b31526cbd75239fb46c4e4f3a8fcac794587388d76ce2debe748cc",
+        "risk": "3a26c7eee1e78f5dbfc09421a38f1206afb4fd21fc9ba67973bc4fafb8c2a4f7"
+      }
+    },
+    {
+      "instrument": "ANGI",
+      "counts": {
+        "t1": {
+          "observed_onsets": 5,
+          "admitted": 1
+        },
+        "t2": {
+          "observed_onsets": 31,
+          "admitted": 4
+        },
+        "union": {
+          "observed_onsets": 32,
+          "admitted": 4
+        },
+        "breakout20": {
+          "observed_onsets": 99,
+          "admitted": 8
+        },
+        "reclaim50": {
+          "observed_onsets": 33,
+          "admitted": 1
+        },
+        "trend63_126": {
+          "observed_onsets": 34,
+          "admitted": 2
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 214
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 20,
+      "path_rows": 88,
+      "input_sha256": {
+        "prices": "50ad4bf4a8d725e9d96610c1dd8727ef39b4ee4526884f68de5f6a6736e1c917",
+        "native": "d2961677b1fad0d38c04d8967063a8c9c982fc3c19d943084cf8677b4d70e933",
+        "risk": "9965ff783570cf0f2485045d62542605a7160965a92944f036f0ee7106cc25bd"
+      }
+    },
+    {
+      "instrument": "CI",
+      "counts": {
+        "t1": {
+          "observed_onsets": 5,
+          "admitted": 5
+        },
+        "t2": {
+          "observed_onsets": 29,
+          "admitted": 29
+        },
+        "union": {
+          "observed_onsets": 31,
+          "admitted": 31
+        },
+        "breakout20": {
+          "observed_onsets": 123,
+          "admitted": 123
+        },
+        "reclaim50": {
+          "observed_onsets": 46,
+          "admitted": 46
+        },
+        "trend63_126": {
+          "observed_onsets": 31,
+          "admitted": 31
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 265,
+      "path_rows": 1122,
+      "input_sha256": {
+        "prices": "9b7f3629e1d5423b8194ff5e92d9f1daa38495e2995c1f8d27558cd1980957a9",
+        "native": "12cb6bd13419c07131332fee5c645e19da9aadbca04f53bd2e4af6b8e183961c",
+        "risk": "4ee3c901dfb2020010ceb4cd0c74074887aeff02a93b7df00db46e0a0f4cfc4a"
+      }
+    },
+    {
+      "instrument": "MUR",
+      "counts": {
+        "t1": {
+          "observed_onsets": 8,
+          "admitted": 8
+        },
+        "t2": {
+          "observed_onsets": 31,
+          "admitted": 31
+        },
+        "union": {
+          "observed_onsets": 34,
+          "admitted": 34
+        },
+        "breakout20": {
+          "observed_onsets": 117,
+          "admitted": 117
+        },
+        "reclaim50": {
+          "observed_onsets": 41,
+          "admitted": 41
+        },
+        "trend63_126": {
+          "observed_onsets": 39,
+          "admitted": 39
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 270,
+      "path_rows": 1148,
+      "input_sha256": {
+        "prices": "6e45a6bf978c4489de2642bbb665ac0842c3df283a13be127f235925545c8335",
+        "native": "a256ab9514f3cf99894f8e81fccbe0f6904b0a0d5f975af045d2d46b1cd0069d",
+        "risk": "46e79d16e8ecf0adaf02d32145ec8656405bedaf2460048d63f9f246b079fa07"
+      }
+    },
+    {
+      "instrument": "RDNT",
+      "counts": {
+        "t1": {
+          "observed_onsets": 14,
+          "admitted": 6
+        },
+        "t2": {
+          "observed_onsets": 42,
+          "admitted": 15
+        },
+        "union": {
+          "observed_onsets": 44,
+          "admitted": 17
+        },
+        "breakout20": {
+          "observed_onsets": 131,
+          "admitted": 54
+        },
+        "reclaim50": {
+          "observed_onsets": 45,
+          "admitted": 18
+        },
+        "trend63_126": {
+          "observed_onsets": 32,
+          "admitted": 10
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 188
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 120,
+      "path_rows": 514,
+      "input_sha256": {
+        "prices": "aed0a6fdc38c333e400c393ca7a92759946cadb363d0b0b21420bc4722981a90",
+        "native": "5f3c411ca9e5e9df4bbaf920e221ed8ec4382a1903a26e45e6cf1f0fa20963a9",
+        "risk": "cc83709e2ac0494a2f7ab8d4e5e9155dff0079db5ea3a84f57cc3b9cf9616175"
+      }
+    },
+    {
+      "instrument": "ENTG",
+      "counts": {
+        "t1": {
+          "observed_onsets": 16,
+          "admitted": 2
+        },
+        "t2": {
+          "observed_onsets": 34,
+          "admitted": 4
+        },
+        "union": {
+          "observed_onsets": 41,
+          "admitted": 5
+        },
+        "breakout20": {
+          "observed_onsets": 128,
+          "admitted": 13
+        },
+        "reclaim50": {
+          "observed_onsets": 68,
+          "admitted": 9
+        },
+        "trend63_126": {
+          "observed_onsets": 37,
+          "admitted": 5
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 286
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 38,
+      "path_rows": 162,
+      "input_sha256": {
+        "prices": "a9f86de17d9c4c3a5d16416ec5597efbfc0c232e4c44e0bf5575fe2367139cb7",
+        "native": "790ac38b52fa18440646b34788709cd4e77d25385001e7aeedd99be78ea29ef7",
+        "risk": "73b88daf03e9b1e907a697f9f2aca85233b48f63d19315533e22cc6bcff293b6"
+      }
+    },
+    {
+      "instrument": "APP",
+      "counts": {
+        "t1": {
+          "observed_onsets": 4,
+          "admitted": 0
+        },
+        "t2": {
+          "observed_onsets": 9,
+          "admitted": 0
+        },
+        "union": {
+          "observed_onsets": 11,
+          "admitted": 0
+        },
+        "breakout20": {
+          "observed_onsets": 63,
+          "admitted": 8
+        },
+        "reclaim50": {
+          "observed_onsets": 18,
+          "admitted": 3
+        },
+        "trend63_126": {
+          "observed_onsets": 11,
+          "admitted": 2
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 103
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 13,
+      "path_rows": 52,
+      "input_sha256": {
+        "prices": "cd45838d2c11dd301757ca065379a73f13c7eb13fa94d3a2beec2f2007bf89ec",
+        "native": "c534d165704ace0af5f0d903236aa3127455e4d40467e255cfc85cc630d7c699",
+        "risk": "b16b1abb1f080555bad7ba24ad239a4c5f0e648c6fea3d0745269677738004f2"
+      }
+    },
+    {
+      "instrument": "REG",
+      "counts": {
+        "t1": {
+          "observed_onsets": 9,
+          "admitted": 9
+        },
+        "t2": {
+          "observed_onsets": 38,
+          "admitted": 38
+        },
+        "union": {
+          "observed_onsets": 40,
+          "admitted": 40
+        },
+        "breakout20": {
+          "observed_onsets": 124,
+          "admitted": 124
+        },
+        "reclaim50": {
+          "observed_onsets": 71,
+          "admitted": 71
+        },
+        "trend63_126": {
+          "observed_onsets": 45,
+          "admitted": 45
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 327,
+      "path_rows": 1388,
+      "input_sha256": {
+        "prices": "db7094784e4ddd6eefcd2bbb0f6a3281722a5bd5d5e6e50b0e4f907b252d874b",
+        "native": "e227fb34ecbb83f5b535b863097b841f739f77e4c3649387eda858f94afa06ed",
+        "risk": "526868ca55f5df5ffe3dc42e847167dac1a4b7786b540dc99fb7a16a7224608b"
+      }
+    },
+    {
+      "instrument": "JBGS",
+      "counts": {
+        "t1": {
+          "observed_onsets": 3,
+          "admitted": 3
+        },
+        "t2": {
+          "observed_onsets": 25,
+          "admitted": 25
+        },
+        "union": {
+          "observed_onsets": 26,
+          "admitted": 26
+        },
+        "breakout20": {
+          "observed_onsets": 81,
+          "admitted": 81
+        },
+        "reclaim50": {
+          "observed_onsets": 31,
+          "admitted": 31
+        },
+        "trend63_126": {
+          "observed_onsets": 23,
+          "admitted": 23
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 189,
+      "path_rows": 808,
+      "input_sha256": {
+        "prices": "3b1b8d6cdd903bc6ae528272b0374c62f771b9f89ae0193615a6842089ccb0ff",
+        "native": "a41a08caf99bcdce3dbd54c800f948285b0e2d30227ea23e8ef07706f580d67b",
+        "risk": "0de05f523635a7919a778a96b32eda64d354107b659d45fa96a3f6e1337a5e3f"
+      }
+    },
+    {
+      "instrument": "POWI",
+      "counts": {
+        "t1": {
+          "observed_onsets": 10,
+          "admitted": 6
+        },
+        "t2": {
+          "observed_onsets": 34,
+          "admitted": 22
+        },
+        "union": {
+          "observed_onsets": 36,
+          "admitted": 23
+        },
+        "breakout20": {
+          "observed_onsets": 120,
+          "admitted": 66
+        },
+        "reclaim50": {
+          "observed_onsets": 53,
+          "admitted": 24
+        },
+        "trend63_126": {
+          "observed_onsets": 52,
+          "admitted": 24
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 140
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 165,
+      "path_rows": 706,
+      "input_sha256": {
+        "prices": "10d46e58a15a3e7a228006a1267ac029d84e809dd00ad7272d788b49afcc5d58",
+        "native": "aa6cc4f580ffd5dc7e0142623d24d7833443dd61768a09cb89a0941172f6e8a5",
+        "risk": "5b9424a252f2dd210449f9f28c54bdbb740ad9f6228bf2de06c51cd5bfdaf9b8"
+      }
+    },
+    {
+      "instrument": "SOLV",
+      "counts": {
+        "t1": {
+          "observed_onsets": 2,
+          "admitted": 2
+        },
+        "t2": {
+          "observed_onsets": 5,
+          "admitted": 5
+        },
+        "union": {
+          "observed_onsets": 6,
+          "admitted": 6
+        },
+        "breakout20": {
+          "observed_onsets": 21,
+          "admitted": 21
+        },
+        "reclaim50": {
+          "observed_onsets": 12,
+          "admitted": 12
+        },
+        "trend63_126": {
+          "observed_onsets": 10,
+          "admitted": 10
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 56,
+      "path_rows": 236,
+      "input_sha256": {
+        "prices": "b70e3057b60dbaa27c0ed5570cf5ef7c3add5aeb0d5035fdd90797f7a3191f94",
+        "native": "cbdbad97cac8d3524dc71856a8d87007156cc0c656536df25f03d01e68e57615",
+        "risk": "e8f4b852e05e2976524a40d44b4db10c8cab08cbf7d802ea96e50d6f567de092"
+      }
+    },
+    {
+      "instrument": "RH",
+      "counts": {
+        "t1": {
+          "observed_onsets": 11,
+          "admitted": 8
+        },
+        "t2": {
+          "observed_onsets": 25,
+          "admitted": 18
+        },
+        "union": {
+          "observed_onsets": 27,
+          "admitted": 19
+        },
+        "breakout20": {
+          "observed_onsets": 128,
+          "admitted": 74
+        },
+        "reclaim50": {
+          "observed_onsets": 46,
+          "admitted": 29
+        },
+        "trend63_126": {
+          "observed_onsets": 45,
+          "admitted": 21
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 113
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 169,
+      "path_rows": 714,
+      "input_sha256": {
+        "prices": "31ea880ba88b5d13d02bbe68f894395b03bfa3dbde064d784533ed8d27f35a24",
+        "native": "f0a6eeabb53b8c0aac456efbaf4e4b5ea8db2e5978a05ce4b7ef3bdc96e13514",
+        "risk": "237462b3ee1ed1ecc55665fe499a7892ee86afb810f3ed2005f7b8726b3c5a1c"
+      }
+    },
+    {
+      "instrument": "MHO",
+      "counts": {
+        "t1": {
+          "observed_onsets": 8,
+          "admitted": 5
+        },
+        "t2": {
+          "observed_onsets": 39,
+          "admitted": 21
+        },
+        "union": {
+          "observed_onsets": 43,
+          "admitted": 23
+        },
+        "breakout20": {
+          "observed_onsets": 120,
+          "admitted": 65
+        },
+        "reclaim50": {
+          "observed_onsets": 64,
+          "admitted": 36
+        },
+        "trend63_126": {
+          "observed_onsets": 34,
+          "admitted": 23
+        }
+      },
+      "exclusions": {
+        "membership_or_liquidity": 135
+      },
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 173,
+      "path_rows": 738,
+      "input_sha256": {
+        "prices": "6bfec9f4677ab7710b33d11c664a1c02f103afd3811e14db2134ec1dd1d264ce",
+        "native": "7388e752ac42ee69b502abd1c99488170709bbf9b1b69e5983166430417fe4ef",
+        "risk": "0809883aa25d80843410f4f609c0b1b4ab55e6aff972156449d66dc71899dfa3"
+      }
+    },
+    {
+      "instrument": "JNJ",
+      "counts": {
+        "t1": {
+          "observed_onsets": 9,
+          "admitted": 9
+        },
+        "t2": {
+          "observed_onsets": 28,
+          "admitted": 28
+        },
+        "union": {
+          "observed_onsets": 29,
+          "admitted": 29
+        },
+        "breakout20": {
+          "observed_onsets": 125,
+          "admitted": 125
+        },
+        "reclaim50": {
+          "observed_onsets": 53,
+          "admitted": 53
+        },
+        "trend63_126": {
+          "observed_onsets": 38,
+          "admitted": 38
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 282,
+      "path_rows": 1186,
+      "input_sha256": {
+        "prices": "353288b88ec3b01f754454f587d096db14bffabae75473ab7d7cc3422c86ad91",
+        "native": "f69f76b7407e284a676bfe05effd38d2702b8945278b9cf9fb3d7e7bb11469ee",
+        "risk": "a2ca0ef55ca766885e7714ef4a56550cdadbe82e2402fa5afb166caffc616654"
+      }
+    },
+    {
+      "instrument": "STE",
+      "counts": {
+        "t1": {
+          "observed_onsets": 11,
+          "admitted": 11
+        },
+        "t2": {
+          "observed_onsets": 31,
+          "admitted": 31
+        },
+        "union": {
+          "observed_onsets": 38,
+          "admitted": 38
+        },
+        "breakout20": {
+          "observed_onsets": 128,
+          "admitted": 128
+        },
+        "reclaim50": {
+          "observed_onsets": 74,
+          "admitted": 74
+        },
+        "trend63_126": {
+          "observed_onsets": 50,
+          "admitted": 50
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 332,
+      "path_rows": 1404,
+      "input_sha256": {
+        "prices": "c2394bfcdfc972b2aa38dc7df74e5738adcc65c202c1641d2d0134346e47b60f",
+        "native": "a035dfda54b809152a7313277219ab7e7991f0cf63f9c5b511f46689906ca841",
+        "risk": "23cc763cf181dbf14e8df87fa80e4fdb88bc3dd801c1d34fa7021c1e9b330f79"
+      }
+    },
+    {
+      "instrument": "NAVI",
+      "counts": {
+        "t1": {
+          "observed_onsets": 10,
+          "admitted": 10
+        },
+        "t2": {
+          "observed_onsets": 33,
+          "admitted": 33
+        },
+        "union": {
+          "observed_onsets": 38,
+          "admitted": 38
+        },
+        "breakout20": {
+          "observed_onsets": 107,
+          "admitted": 107
+        },
+        "reclaim50": {
+          "observed_onsets": 51,
+          "admitted": 51
+        },
+        "trend63_126": {
+          "observed_onsets": 42,
+          "admitted": 42
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 281,
+      "path_rows": 1200,
+      "input_sha256": {
+        "prices": "55975f91de9b7edfdb74b13030642eb702f128a9b2b4d27aba874c537c215d27",
+        "native": "b4ad0682ee8bb447851828efe46f10123f6b56130d57cca172150abb92d62466",
+        "risk": "6f30c9f4e2662ab663b117fffeffd6aae4c8243e32292c9402c2b9ec15e8d949"
+      }
+    },
+    {
+      "instrument": "VTRS",
+      "counts": {
+        "t1": {
+          "observed_onsets": 3,
+          "admitted": 3
+        },
+        "t2": {
+          "observed_onsets": 12,
+          "admitted": 12
+        },
+        "union": {
+          "observed_onsets": 15,
+          "admitted": 15
+        },
+        "breakout20": {
+          "observed_onsets": 50,
+          "admitted": 50
+        },
+        "reclaim50": {
+          "observed_onsets": 18,
+          "admitted": 18
+        },
+        "trend63_126": {
+          "observed_onsets": 23,
+          "admitted": 23
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 121,
+      "path_rows": 514,
+      "input_sha256": {
+        "prices": "2dbf5108867593aec0e45e707a7ec1b33c3ebb7db376b6b1507baa7a49f084fe",
+        "native": "28c530efe0d35c1264f85f71f3674aa2a831b86b4b356ec90847d0b6c285a891",
+        "risk": "f778e487e92179d643ebfb884ca45e03acdff23009b765e00bac641f81212af7"
+      }
+    },
+    {
+      "instrument": "CHD",
+      "counts": {
+        "t1": {
+          "observed_onsets": 13,
+          "admitted": 13
+        },
+        "t2": {
+          "observed_onsets": 29,
+          "admitted": 29
+        },
+        "union": {
+          "observed_onsets": 38,
+          "admitted": 38
+        },
+        "breakout20": {
+          "observed_onsets": 136,
+          "admitted": 136
+        },
+        "reclaim50": {
+          "observed_onsets": 61,
+          "admitted": 61
+        },
+        "trend63_126": {
+          "observed_onsets": 50,
+          "admitted": 50
+        }
+      },
+      "exclusions": {},
+      "outcomes_are_not_decision_features": true,
+      "current_vintage_reconstruction": true,
+      "event_rows": 327,
+      "path_rows": 1384,
+      "input_sha256": {
+        "prices": "357bc5cce06990777f093494ae5abacaf39d32d2cb81b50964c3fe46aba6180a",
+        "native": "3b83d506b43e3fbfb66176fda7650c3778564ed238d53f3b7585ea13b586b2a7",
+        "risk": "f889616dfb08beb6e6116329001e8076782abcbd00c484f94e8265322ea9f4cc"
+      }
+    }
+  ],
+  "failures": [],
+  "status": "COMPLETE",
+  "native_run_sha256": "074c9be44306a0779e5e62b7c30e600b942b6665c5bcc0ab69586ed0abf165e4",
+  "risk_run_sha256": "7ca7e8556bf2979a5c51eddbb6218e064ec5a57b1acc48a296fdb3b352989a88",
+  "finished_at": "2026-11-14T05:44:51.097548+00:00",
+  "events": 11689,
+  "union_events": 1427,
+  "paths": 49610,
+  "conditional_prediction_rows": 3880,
+  "classifier_fit_attempts": 25,
+  "selected_forecast_loss_rows": 16872
+}

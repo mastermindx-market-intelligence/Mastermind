@@ -1,0 +1,199 @@
+{
+  "parent": "c7feae5a49df657a323d7a05446548a56cad512c",
+  "stage": "results",
+  "created_at": "2026-11-14T11:17:08.643357+00:00",
+  "files": {
+    "research/apmem_shadow/phase6/native_replay.py": {
+      "sha256": "33522ba860ebb4a96271425d350f465d4c0f39692c9b18a27b43f56e7d3058dd",
+      "git_blob": "2893d014cef2632ea00ade9053d02f191845e50f",
+      "bytes": 4278
+    },
+    "research/apmem_shadow/phase6/features.py": {
+      "sha256": "181ff01f75bbd0fb74168d2c8b54948fb201ec876a876a739a859a435eeaebed",
+      "git_blob": "5f99c9c623841adfb4fdfd0f5ac26232b752c77e",
+      "bytes": 13256
+    },
+    "research/apmem_shadow/phase6/run_features.py": {
+      "sha256": "f5d483e85ed2c8bac8b1ee30b90fb63143874f82bb6cf81d4669f812223e510d",
+      "git_blob": "5ff73473de9f134dcd16bfa5c9d977be65804e48",
+      "bytes": 2984
+    },
+    "research/apmem_shadow/phase6/behavior.py": {
+      "sha256": "1c63a3b71ef623c801f42731a9bad6cf397a15f5d846c728805a9bcc8945c26c",
+      "git_blob": "baa6a76b2df4f8fa81b1fa1b5678e19a6a4c498f",
+      "bytes": 5042
+    },
+    "research/apmem_shadow/phase6/evaluate.py": {
+      "sha256": "6e849cfedd4da23fc16e4fd71c8b01eb1ccb01f926990d12586fa8409cecb4e8",
+      "git_blob": "2a509d7053ef5824f62a96a2811452f63a1daf0c",
+      "bytes": 10600
+    },
+    "research/apmem_shadow/phase6/modeling.py": {
+      "sha256": "58b6571ebe7da0fc227717f802635e203354cb12f03755eb7bea3ca49e0d315f",
+      "git_blob": "cf3b38bcc8f99c98da4e98a197f4d9a44670425f",
+      "bytes": 11339
+    },
+    "research/apmem_shadow/phase6/consumer.py": {
+      "sha256": "a20d19158a442d698c117f178dee3b5e246bbf30e4a407745e4990f1302a80af",
+      "git_blob": "198577542d120df14e06208794c4984c07143519",
+      "bytes": 6411
+    },
+    "research/apmem_shadow/phase6/consumer_witness.py": {
+      "sha256": "aa53e1c65fc21d19fa79e9cdce6dd699ec05b5a0683d9576f28b896e5bef0b93",
+      "git_blob": "c79916f36531e91385904227de3e90f54d106b8b",
+      "bytes": 4274
+    },
+    "research/apmem_shadow/phase6/dynamics.py": {
+      "sha256": "d945af51226653f717e0cc235da7bc584c1da1fb766742821e8f418bab3fef7c",
+      "git_blob": "b015cee2cd9ad48bb9be6f57c9507a6a8fc20134",
+      "bytes": 3748
+    },
+    "research/apmem_shadow/phase6/run_dynamics.py": {
+      "sha256": "9390293d4b089cc4814c3f36888e175191d9896d3c9ce741890d62846ee78d8e",
+      "git_blob": "c0d25f440dba7bae46b912f659d94810952c94b7",
+      "bytes": 6328
+    },
+    "research/apmem_shadow/phase6/analyze_results.py": {
+      "sha256": "3b20fd7ed0d0c66d87e79260eda19f51666cc386aca1ef7658f874f7350b8efa",
+      "git_blob": "093235f9a5e512ea63bd18f1e40cabf819602f2b",
+      "bytes": 7241
+    },
+    "research/apmem_shadow/phase6/provisional.py": {
+      "sha256": "20a092e9b4f9842c570b17a3b8f2e78d53af07c28541fa218503f38ff154d9a5",
+      "git_blob": "3bd04924e8481e70b3866553b06632390cc16930",
+      "bytes": 6181
+    },
+    "research/apmem_shadow/phase6/support_state.py": {
+      "sha256": "f7784e00fd2a95fdda27a3e7f4cdff4ed625c764e991b3c651aada5a32e991e0",
+      "git_blob": "b51febfbf3e11433f592afcb9beb00c0b34aa0b8",
+      "bytes": 6256
+    },
+    "research/apmem_shadow/phase6/conditional_response.py": {
+      "sha256": "2617eea05d56dd36285c639e34c31e0ccedc2bfc7bd96702b578009bc45d35b3",
+      "git_blob": "8e8b4535559a8c65783773b953481fea3714c6b2",
+      "bytes": 9201
+    },
+    "research/apmem_shadow/phase6/matched_exits.py": {
+      "sha256": "65ed50becfd465f3448a7aec3c0c29313ef921325661fd68994df6f862f0912f",
+      "git_blob": "08acb9b56efc29331fb854f398475e7bdb262fe1",
+      "bytes": 6543
+    },
+    "research/apmem_shadow/phase6/forward_capture.py": {
+      "sha256": "ed1252ae6933553bedd88a43e0c89202a06e62debf143365b69ecfdd22b9f730",
+      "git_blob": "79d58058c498a1413a34a61389f5fe1eb0f79068",
+      "bytes": 4598
+    },
+    "research/apmem_shadow/phase6/forward_adapter.py": {
+      "sha256": "0a2687dbf7fff925f0fc90b840bf416aaabf7be6ac912950ae5bc9927b5b7d53",
+      "git_blob": "ca16a05d634691651f8b563a83a8a70bd0748d25",
+      "bytes": 5269
+    },
+    "research/apmem_shadow/phase6/risk_observation.py": {
+      "sha256": "385ceff07fc4d573c79a6ecab54947877bf6f985a59cfa019eea2b289a270add",
+      "git_blob": "8a0e1e663aef02eaafa73ce1698a8f6d301feced",
+      "bytes": 4902
+    },
+    "research/apmem_shadow/phase6/forward_observe.py": {
+      "sha256": "9eaf8626629ca8e96abc01e13e1db4133b25a6d5eca8f0f7e823231fcac4cee0",
+      "git_blob": "eca4dc0a89abbd1438139a49352353c3041ee166",
+      "bytes": 13633
+    },
+    "research/apmem_shadow/phase6/test_features.py": {
+      "sha256": "6df218ddd44353de5bf6d5797df1b179e813738aca91ee1bd1d602e82426b8e7",
+      "git_blob": "a98587f907cd9645cd879eccb84a110934acd4cf",
+      "bytes": 6012
+    },
+    "research/apmem_shadow/phase6/test_evaluate.py": {
+      "sha256": "b9f2ff4c6a0a6638e13dd8c8626fdae1bdf5c0405d15e635086b907e4542fac0",
+      "git_blob": "5d3cbe34a7ae2aae5d4ff49dc1a89084673af9dd",
+      "bytes": 3392
+    },
+    "research/apmem_shadow/phase6/test_behavior.py": {
+      "sha256": "eca935bf5bb004a942bc092d1bca9563074415eb38d10a3af8fa04e69005dba6",
+      "git_blob": "1d3e963cc2947be618bbd52cdfd563fd632dff19",
+      "bytes": 2316
+    },
+    "research/apmem_shadow/phase6/test_modeling.py": {
+      "sha256": "70e4fabae5afa180711868e545091b31c5ba3040bd3c8ff7fdd56cb97249d884",
+      "git_blob": "92a00ca0b83ab55c75735d6ea983fb67498f5ea3",
+      "bytes": 2816
+    },
+    "research/apmem_shadow/phase6/test_dynamics_consumer.py": {
+      "sha256": "749e2450b6ae371781e18e91427495168b2ef06fd1ffa493e89a0deb3c26f26d",
+      "git_blob": "a58fcac9dc2139526bb8ccc5cfaa22239e0f281d",
+      "bytes": 6178
+    },
+    "research/apmem_shadow/phase6/test_provisional_analysis.py": {
+      "sha256": "3d497a10360055a197128a50be9decfb03c2d6cc8f8fee6cface44709efec0f3",
+      "git_blob": "5b8efd2f4c3c1dc2f5e2c3719847645bda74299d",
+      "bytes": 3233
+    },
+    "research/apmem_shadow/phase6/test_support_state.py": {
+      "sha256": "5dd5fc4fa9f5cb94b986ea376d5d00d8002665f268c64f089036ac8db227c839",
+      "git_blob": "be945d6a5c6bfba69ad4e268bb704efa613c159e",
+      "bytes": 2798
+    },
+    "research/apmem_shadow/phase6/test_conditional_response.py": {
+      "sha256": "d8d0fc7c43db9ef1f08a48563140b8f452623c01745fe3c7eb7a26946377aca6",
+      "git_blob": "5c0b88b76fe724c947eb36d696e7683fb26ab2a7",
+      "bytes": 2330
+    },
+    "research/apmem_shadow/phase6/test_matched_exits.py": {
+      "sha256": "ddcc9ee534748df7aefc22765f1dadd692f26d575e0f44d4c0dd038ad338fd03",
+      "git_blob": "03e00e8286c0e3082330bfbce2eb5ad1c019f891",
+      "bytes": 2252
+    },
+    "research/apmem_shadow/phase6/test_forward.py": {
+      "sha256": "ff3152b7e0b5815c9c998e8c380b3595c2e256a285413f4941813832d371cf57",
+      "git_blob": "300067a24c103bad6d766655c907b3395816b4dd",
+      "bytes": 6657
+    },
+    "research/apmem_shadow/phase6/test_composite_observation.py": {
+      "sha256": "56f5c0fb78476f0c42cd491340bdd07232142f1845d47cba8332e4881b8e67a2",
+      "git_blob": "ba08ca47341088e1bde4a3778f93c993af358e25",
+      "bytes": 2779
+    },
+    "research/evidence/nested_cohort_phase6/FORWARD_2026-11-13_TIINGO.json": {
+      "sha256": "ae8ce9bbb41ea274e323935a493c0a364573e8653a4955b5803b71bf7dedb434",
+      "git_blob": "83f032e2978c2003d450d033b22e9088e915bcff",
+      "bytes": 404467
+    },
+    "research/evidence/nested_cohort_phase6/FORWARD_GENERATION_RECEIPT.json": {
+      "sha256": "e6e16dfa62367ca1835101d642b27d75667de17107a882f628328a96d00de697",
+      "git_blob": "a0f476a4d9ac0b89bbdc5765f70df26e2d562c73",
+      "bytes": 1034
+    },
+    "research/evidence/nested_cohort_phase6/FORWARD_INPUT_QUALIFICATION.json": {
+      "sha256": "ff88bb2abe2ffd41fd058ae7fa388876644789eb87c5c0688910a679a849c35f",
+      "git_blob": "10d1da8ff49ac4cde60be4e2cacd43dcc48ccadc",
+      "bytes": 48924
+    },
+    "research/evidence/nested_cohort_phase6/HISTORICAL_CONSUMER_WITNESS.json": {
+      "sha256": "2f097ce1f730dbcf5a9c0af4919bc32fe8e65de6e068a37deb53308f1f0c687a",
+      "git_blob": "f8412ef05552c442afc40ee2f8597111b7039b5e",
+      "bytes": 9887
+    },
+    "research/evidence/nested_cohort_phase6/INPUT_MANIFEST.json": {
+      "sha256": "a6b9a474fdee6cae7197fd1c0ce529e3dae7c0829951121ea4195a3d60be2a40",
+      "git_blob": "ef6f9a71d6cbbe68ab5713a029d88672b8488dc7",
+      "bytes": 26547
+    },
+    "research/evidence/nested_cohort_phase6/RISK_SOURCE_MANIFEST.json": {
+      "sha256": "964a64e9253cf85640b40912f883275be7b4ed0f3891233aa638aee56a68ed2e",
+      "git_blob": "4fd7bec13f22c0c7a8dbcd9b38cfd65c6634aa90",
+      "bytes": 1071
+    },
+    "research/evidence/nested_cohort_phase6/RESULTS_TEST_LOG.txt": {
+      "sha256": "0b7619e4ad7eaa89b1fcc11045bd91762e8f51ca260fd1a88b3baef984c162e6",
+      "git_blob": "20de317676666f3f93e437b700d860cd331b55bd",
+      "bytes": 231
+    },
+    "tests/test_nested_cohort_phase6.py": {
+      "sha256": "e38d3388f9d1c63eed1ed45fcb3422c8559c7438122877ef58da08e87d66128b",
+      "git_blob": "8e35d8c3a687e00c3046dcda790201b2b8ce1cc6",
+      "bytes": 558
+    }
+  },
+  "raw_vendor_histories_published": false,
+  "production_authority": false
+}

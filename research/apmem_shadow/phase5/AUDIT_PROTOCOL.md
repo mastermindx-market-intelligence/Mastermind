@@ -1,0 +1,13 @@
+# Recovery candidate audit - fixed falsifiers, not another parameter search
+
+Primary and disclosed follow-up results have been read. This audit does not add a new optimized signal. The same-day repair and declining-new-low-pressure candidates need a mechanism/selection check before any promotion claim.
+
+Retain all previously specified phase0/1/2, horizons21/63 and costs5/20bp. Compare (a) repair versus raw dots, (b) declining-low-pressure versus repair, (c) ongoing cohort-support exits versus repair. For each, compare the candidate to an explicitly hindsight static baseline/cash mixture matched to candidate mean exposure. Record all cases and both favorable and unfavorable results. An exposure match is a diagnostic, not an implementable learned portfolio.
+
+Add one extra execution session to declining-low-pressure and ongoing-support policies on phase0 only, preserving every signal and parameter. The delay applies to entry; the ongoing-support exit remains next-close from the observed two-session deterioration. No single-stock stop or profit target enters.
+
+Decompose conditional event payoff on the SAME dates into the chosen sector and the equal-weight nine-sector market payoff. A positive total return with zero sector-relative increment is common timing, not validated sector selection. Compare no-focal-sector repair context and preserve selection counts, exact dates and event overlap. Grade closing-low persistence and monetary payoff separately; do not recast either as the local team's different trough label.
+
+Report annual calendar returns, worst drawdown start/trough/recovery and best/worst trades without deleting any episode. Run2007-2012 versus2013-2019 versus the independently reset2025-06-05-to2026-11-09 window. The last window has360 sessions and is not pristine. The omitted2020-May2023 interval and504-observation post-gap warmup remain protected and visible.
+
+Use 63-session paired calendar-block bootstrap,2000 draws, for forecast-free account contrasts in this audit, with a separate full-family Holm correction. Report both the mean-return and adverse-tail differences; no t-stat or favorable subperiod is sufficient. Preserve original48-test null results. Implement consumer-side descriptive states without automatically overriding existing ranking/entry/sizing decisions. A reusable implementation can be complete while future performance remains unproven.

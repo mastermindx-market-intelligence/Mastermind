@@ -1,0 +1,25 @@
+{
+  "ref": "f7f7dcb381c7cf1b19ceb1af6b367818268d9155",
+  "files": {
+    "research/apmem_shadow/model.py": {
+      "git_blob": "2aaad821b0e0d7e64e5a44112de6f27e1ff25602",
+      "sha256": "0a4fc09ff3c211035aa7141e6c86f6d72439cf5a9fb9418ae477bab8e8161487"
+    },
+    "research/apmem_shadow/phase2/__init__.py": {
+      "git_blob": "f57b3bf75badab0662b81b4143033e43837dd5cd",
+      "sha256": "5bf10c4374c64003ba3d281d07ddfe75f89b970f8f38b6b78b470f0cfe86bbdf"
+    },
+    "research/apmem_shadow/phase2/targets.py": {
+      "git_blob": "1ca4c7674796495fc6f6d3965c15f61c026b36de",
+      "sha256": "dad12175e54268509bd478cadefa46b2454e69e4bbcba06e845ea1b758c9d3c0"
+    },
+    "research/apmem_shadow/phase2/forecasts.py": {
+      "git_blob": "8101e591b73921a5bb2e8cf015c781405970f0cf",
+      "sha256": "5bbf270a6b0803756147616e985a621ce1ecf3604ab831d621f3809907bcadc9"
+    },
+    "research/apmem_shadow/phase2/moments.py": {
+      "git_blob": "a7ac4ab8b36977f7485caba9b49ee7da697234f1",
+      "sha256": "d155c300616ce983e4e58f4410a4d6b3c55178231bbbb0f4c0f3eef167b31769"
+    }
+  }
+}

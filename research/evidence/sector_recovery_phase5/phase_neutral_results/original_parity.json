@@ -1,0 +1,114 @@
+[
+  {
+    "era": "2007_2019",
+    "phase": 0,
+    "horizon": 21,
+    "cost_bp": 5.0,
+    "max_difference": 2.220446049250313e-16
+  },
+  {
+    "era": "2007_2019",
+    "phase": 1,
+    "horizon": 21,
+    "cost_bp": 5.0,
+    "max_difference": 2.220446049250313e-16
+  },
+  {
+    "era": "2007_2019",
+    "phase": 2,
+    "horizon": 21,
+    "cost_bp": 5.0,
+    "max_difference": 2.220446049250313e-16
+  },
+  {
+    "era": "2007_2019",
+    "phase": 0,
+    "horizon": 21,
+    "cost_bp": 20.0,
+    "max_difference": 2.220446049250313e-16
+  },
+  {
+    "era": "2007_2019",
+    "phase": 0,
+    "horizon": 63,
+    "cost_bp": 5.0,
+    "max_difference": 2.220446049250313e-16
+  },
+  {
+    "era": "2007_2019",
+    "phase": 1,
+    "horizon": 63,
+    "cost_bp": 5.0,
+    "max_difference": 2.220446049250313e-16
+  },
+  {
+    "era": "2007_2019",
+    "phase": 2,
+    "horizon": 63,
+    "cost_bp": 5.0,
+    "max_difference": 4.440892098500626e-16
+  },
+  {
+    "era": "2007_2019",
+    "phase": 0,
+    "horizon": 63,
+    "cost_bp": 20.0,
+    "max_difference": 2.220446049250313e-16
+  },
+  {
+    "era": "post_reset",
+    "phase": 0,
+    "horizon": 21,
+    "cost_bp": 5.0,
+    "max_difference": 2.220446049250313e-16
+  },
+  {
+    "era": "post_reset",
+    "phase": 1,
+    "horizon": 21,
+    "cost_bp": 5.0,
+    "max_difference": 2.220446049250313e-16
+  },
+  {
+    "era": "post_reset",
+    "phase": 2,
+    "horizon": 21,
+    "cost_bp": 5.0,
+    "max_difference": 2.220446049250313e-16
+  },
+  {
+    "era": "post_reset",
+    "phase": 0,
+    "horizon": 21,
+    "cost_bp": 20.0,
+    "max_difference": 2.220446049250313e-16
+  },
+  {
+    "era": "post_reset",
+    "phase": 0,
+    "horizon": 63,
+    "cost_bp": 5.0,
+    "max_difference": 2.220446049250313e-16
+  },
+  {
+    "era": "post_reset",
+    "phase": 1,
+    "horizon": 63,
+    "cost_bp": 5.0,
+    "max_difference": 2.220446049250313e-16
+  },
+  {
+    "era": "post_reset",
+    "phase": 2,
+    "horizon": 63,
+    "cost_bp": 5.0,
+    "max_difference": 2.220446049250313e-16
+  },
+  {
+    "era": "post_reset",
+    "phase": 0,
+    "horizon": 63,
+    "cost_bp": 20.0,
+    "max_difference": 2.220446049250313e-16
+  }
+]

@@ -1,0 +1,40 @@
+{
+  "paired_return_tests": 48,
+  "block_sessions": 63,
+  "bootstrap_draws": 2000,
+  "holm_family_size": 48,
+  "statistical_scope": "exploratory paired account returns; not independent validation",
+  "native_counts": [
+    {
+      "file": "native_pre_1.csv",
+      "events": 808,
+      "unique_dates": 426
+    },
+    {
+      "file": "native_pre_0.csv",
+      "events": 849,
+      "unique_dates": 423
+    },
+    {
+      "file": "native_pre_2.csv",
+      "events": 841,
+      "unique_dates": 426
+    },
+    {
+      "file": "native_post_2.csv",
+      "events": 105,
+      "unique_dates": 69
+    },
+    {
+      "file": "native_post_0.csv",
+      "events": 103,
+      "unique_dates": 65
+    },
+    {
+      "file": "native_post_1.csv",
+      "events": 104,
+      "unique_dates": 64
+    }
+  ],
+  "no_forecast_direction_probability_claim": true
+}

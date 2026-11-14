@@ -1,0 +1,37 @@
+[
+  {
+    "origin": "2010-12-03",
+    "ticker": "XLF",
+    "reason": "COMMON_FEATURE_SUPPORT_MISSING"
+  },
+  {
+    "origin": "2010-12-03",
+    "ticker": "XLK",
+    "reason": "COMMON_FEATURE_SUPPORT_MISSING"
+  },
+  {
+    "origin": "2010-12-08",
+    "ticker": "XLP",
+    "reason": "COMMON_FEATURE_SUPPORT_MISSING"
+  },
+  {
+    "origin": "2013-06-17",
+    "ticker": "XLP",
+    "reason": "COMMON_FEATURE_SUPPORT_MISSING"
+  },
+  {
+    "origin": "2010-12-03",
+    "ticker": "XLU",
+    "reason": "COMMON_FEATURE_SUPPORT_MISSING"
+  },
+  {
+    "origin": "2013-06-12",
+    "ticker": "XLU",
+    "reason": "COMMON_FEATURE_SUPPORT_MISSING"
+  },
+  {
+    "origin": "2010-12-03",
+    "ticker": "XLV",
+    "reason": "COMMON_FEATURE_SUPPORT_MISSING"
+  }
+]

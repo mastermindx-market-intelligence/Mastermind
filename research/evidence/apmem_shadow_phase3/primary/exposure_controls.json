@@ -1,0 +1,40 @@
+{
+  "schema": "phase3.aggregate_records.v1",
+  "original_artifact_sha256": "c1b91640151f54fc4dda7451c0f2ca143567be6142a5766251dfe2732debdf79",
+  "records": [
+    {
+      "overlay": "ewma",
+      "control": "training_static",
+      "training_end": "2019-12-31",
+      "multiplier": 0.9609375,
+      "training_open_exposure_target": 0.3391029452729716,
+      "match_error": 6.174424017679758e-06,
+      "out_of_sample_weights": true
+    },
+    {
+      "overlay": "ewma",
+      "control": "hindsight_static",
+      "multiplier": 0.886962890625,
+      "open_exposure_target": 0.36527697917811325,
+      "match_error": 4.977560929875224e-06,
+      "deployable": false
+    },
+    {
+      "overlay": "mem",
+      "control": "training_static",
+      "training_end": "2019-12-31",
+      "multiplier": 0.9630126953125,
+      "training_open_exposure_target": 0.33985401990768316,
+      "match_error": 1.4652017363614434e-05,
+      "out_of_sample_weights": true
+    },
+    {
+      "overlay": "mem",
+      "control": "hindsight_static",
+      "multiplier": 0.874267578125,
+      "open_exposure_target": 0.36006668519150675,
+      "match_error": 4.897611613374764e-06,
+      "deployable": false
+    }
+  ]
+}

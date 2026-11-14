@@ -1,0 +1,403 @@
+{
+  "created_at": "2026-11-14T08:12:04.946653+00:00",
+  "root": "/tmp/grey-dot-independent-phase5-20261114-rmlup_vo",
+  "protected_interval": [
+    "2020-01-01",
+    "2023-05-31"
+  ],
+  "source_commit": "82cb8cbf799fc3a91c9bee0f11a4db718fde68eb",
+  "inputs": [
+    {
+      "instrument": "SPY",
+      "segment": "pre",
+      "source_relative_path": "data/yahoo/SPY.parquet",
+      "original_sha256": "05533cbc489adf9fe694bbafacbfe005cc5270834321d5de8860017f3a160cd7",
+      "snapshot_sha256": "f5aa1258d12eabb74cf94bfc38bd7567039302c0cdb153f758a508fd9527d3de",
+      "rows": 6780,
+      "start": "1993-01-29",
+      "end": "2019-12-31",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "SPY",
+      "segment": "post",
+      "source_relative_path": "data/yahoo/SPY.parquet",
+      "original_sha256": "05533cbc489adf9fe694bbafacbfe005cc5270834321d5de8860017f3a160cd7",
+      "snapshot_sha256": "a8f4961285bd573a8bfa5ff6a9468f1335e423499f14f4588a0bdd9b9ab54ce9",
+      "rows": 864,
+      "start": "2023-06-01",
+      "end": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLB",
+      "segment": "pre",
+      "source_relative_path": "data/yahoo/XLB.parquet",
+      "original_sha256": "38eceed66af77463334772951362c32795c51685304e82f4d38cb4071fe2fe89",
+      "snapshot_sha256": "f17517bf9e18c9111c38c78bdec75a1383a0c5ccdef272dcbb726ee02ab478ba",
+      "rows": 5290,
+      "start": "1998-12-22",
+      "end": "2019-12-31",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLB",
+      "segment": "post",
+      "source_relative_path": "data/yahoo/XLB.parquet",
+      "original_sha256": "38eceed66af77463334772951362c32795c51685304e82f4d38cb4071fe2fe89",
+      "snapshot_sha256": "1b9f80391c5d74521ddc5c02e5e6480b00eb2a0e1dfbff2cb3d94d118681cff8",
+      "rows": 864,
+      "start": "2023-06-01",
+      "end": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLE",
+      "segment": "pre",
+      "source_relative_path": "data/yahoo/XLE.parquet",
+      "original_sha256": "4e67819801ff83cc4f25c10643a7f05e86caaf1bd365a93ac2c59be82f226c7f",
+      "snapshot_sha256": "ebbc16aa24fca9376db384ecbf4ad6467bb0dc11eed6f2078268f4fbecf0805d",
+      "rows": 5290,
+      "start": "1998-12-22",
+      "end": "2019-12-31",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLE",
+      "segment": "post",
+      "source_relative_path": "data/yahoo/XLE.parquet",
+      "original_sha256": "4e67819801ff83cc4f25c10643a7f05e86caaf1bd365a93ac2c59be82f226c7f",
+      "snapshot_sha256": "9c04708b9e9deac8990dd2f633062170e1d06d5e0df5fdbabf3a74b68c1836b0",
+      "rows": 864,
+      "start": "2023-06-01",
+      "end": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLF",
+      "segment": "pre",
+      "source_relative_path": "data/yahoo/XLF.parquet",
+      "original_sha256": "2c1312a6476173b5f1e52790c48289a87e7aa82562903b2b061e07310e16156b",
+      "snapshot_sha256": "8640851384e9a2858c5288b7cc4547d5d7e135201a0d9f0a590ea2e8c3527f2a",
+      "rows": 5290,
+      "start": "1998-12-22",
+      "end": "2019-12-31",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLF",
+      "segment": "post",
+      "source_relative_path": "data/yahoo/XLF.parquet",
+      "original_sha256": "2c1312a6476173b5f1e52790c48289a87e7aa82562903b2b061e07310e16156b",
+      "snapshot_sha256": "95a4645bc5cbeed74534c695b54f682c46b9ceec821c2e5150689a43b6d65ff1",
+      "rows": 864,
+      "start": "2023-06-01",
+      "end": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLI",
+      "segment": "pre",
+      "source_relative_path": "data/yahoo/XLI.parquet",
+      "original_sha256": "0268d59c4fb5bb7ea0f38d0f532a314db38b6daf27892a7e269385f8a8db2e3b",
+      "snapshot_sha256": "9873aed49fc8d48486c42a9f64be438f7087072a0c9336cbe73874a5c8412e86",
+      "rows": 5290,
+      "start": "1998-12-22",
+      "end": "2019-12-31",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLI",
+      "segment": "post",
+      "source_relative_path": "data/yahoo/XLI.parquet",
+      "original_sha256": "0268d59c4fb5bb7ea0f38d0f532a314db38b6daf27892a7e269385f8a8db2e3b",
+      "snapshot_sha256": "1ba9ca0a6cef62fd2bf5230bc27c2f1cd5d3334467f2cc75ea6fcd1d92bfe46d",
+      "rows": 864,
+      "start": "2023-06-01",
+      "end": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLK",
+      "segment": "pre",
+      "source_relative_path": "data/yahoo/XLK.parquet",
+      "original_sha256": "c469a3b741caecc870ad4ca2ccff9588672297de229bae8915d03d8438a5ce94",
+      "snapshot_sha256": "0ac6323719bc48ad63cc00c08b8a269a7c42abe84aabefb62b4946c0b6a645c5",
+      "rows": 5290,
+      "start": "1998-12-22",
+      "end": "2019-12-31",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLK",
+      "segment": "post",
+      "source_relative_path": "data/yahoo/XLK.parquet",
+      "original_sha256": "c469a3b741caecc870ad4ca2ccff9588672297de229bae8915d03d8438a5ce94",
+      "snapshot_sha256": "d8eb4f8730ef2b799ed10bbeba12519ce43febc39120d93ae3510a275eaf2132",
+      "rows": 864,
+      "start": "2023-06-01",
+      "end": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLP",
+      "segment": "pre",
+      "source_relative_path": "data/yahoo/XLP.parquet",
+      "original_sha256": "79e9d7da093c76d407e5b31fba34654cce0740ce329fbca9eb62bf8b6dad6317",
+      "snapshot_sha256": "ea5c3b13b6217e2787f98a59d52136a169829fb6a2502e1a583bc3c9d89bb74b",
+      "rows": 5290,
+      "start": "1998-12-22",
+      "end": "2019-12-31",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLP",
+      "segment": "post",
+      "source_relative_path": "data/yahoo/XLP.parquet",
+      "original_sha256": "79e9d7da093c76d407e5b31fba34654cce0740ce329fbca9eb62bf8b6dad6317",
+      "snapshot_sha256": "7f6e1057f2232063eb9fb56f4be2d947880dbf52ef1eff83184f6f44337b6009",
+      "rows": 864,
+      "start": "2023-06-01",
+      "end": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLU",
+      "segment": "pre",
+      "source_relative_path": "data/yahoo/XLU.parquet",
+      "original_sha256": "262147e47d4fdd859a8b008f95231f1535a376d7321767fb0385681acaea80a6",
+      "snapshot_sha256": "4c520d9c54c8b58c6f8c69a0e1f3329e4425165b57a2145f3d6e41e7fe6394af",
+      "rows": 5290,
+      "start": "1998-12-22",
+      "end": "2019-12-31",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLU",
+      "segment": "post",
+      "source_relative_path": "data/yahoo/XLU.parquet",
+      "original_sha256": "262147e47d4fdd859a8b008f95231f1535a376d7321767fb0385681acaea80a6",
+      "snapshot_sha256": "5a14f8647032d1d19493c78d52680b68667e3b96a136cdc5187bf05b1abccd78",
+      "rows": 864,
+      "start": "2023-06-01",
+      "end": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLV",
+      "segment": "pre",
+      "source_relative_path": "data/yahoo/XLV.parquet",
+      "original_sha256": "506210aea6d4643c6df82262db255cd2c5e996eca9da606d2a2b60e7fdcd4651",
+      "snapshot_sha256": "d65afaa226118b9aa3d4a6170f69c01a5e1a23127180cbd86b64cde60efb6aa0",
+      "rows": 5290,
+      "start": "1998-12-22",
+      "end": "2019-12-31",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLV",
+      "segment": "post",
+      "source_relative_path": "data/yahoo/XLV.parquet",
+      "original_sha256": "506210aea6d4643c6df82262db255cd2c5e996eca9da606d2a2b60e7fdcd4651",
+      "snapshot_sha256": "bb723b2c98ddda0890a98858aec61b92230d2968922b970774be7c451813dce5",
+      "rows": 864,
+      "start": "2023-06-01",
+      "end": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLY",
+      "segment": "pre",
+      "source_relative_path": "data/yahoo/XLY.parquet",
+      "original_sha256": "c4496f23be6499c6e9e27601c933acbd0281ba0d8d60758c9817c29ef5d65b0c",
+      "snapshot_sha256": "11c3829533423e20710c340d1503400be8830dae36a2e141f614f9beb86dc9c4",
+      "rows": 5290,
+      "start": "1998-12-22",
+      "end": "2019-12-31",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "XLY",
+      "segment": "post",
+      "source_relative_path": "data/yahoo/XLY.parquet",
+      "original_sha256": "c4496f23be6499c6e9e27601c933acbd0281ba0d8d60758c9817c29ef5d65b0c",
+      "snapshot_sha256": "e6a13ef8af056a665602a13f904e42e5581d6d62814a72d0c983d2c45c09f214",
+      "rows": 864,
+      "start": "2023-06-01",
+      "end": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "VIX",
+      "segment": "pre",
+      "source_relative_path": "data/yahoo/_VIX.parquet",
+      "original_sha256": "8255709d411b715d945068a9c4427190d4327be6079fba8d20501ae67605653d",
+      "snapshot_sha256": "21cf1271ded7e0c7e755e2f260de9ea2495d8f3528a2344f7a60d9667c728802",
+      "rows": 6799,
+      "start": "1993-01-04",
+      "end": "2019-12-31",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "VIX",
+      "segment": "post",
+      "source_relative_path": "data/yahoo/_VIX.parquet",
+      "original_sha256": "8255709d411b715d945068a9c4427190d4327be6079fba8d20501ae67605653d",
+      "snapshot_sha256": "0b9af49df2fef2adc222c48800580b93425492221c9ca5782387cb712662cd13",
+      "rows": 867,
+      "start": "2023-06-01",
+      "end": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "VVIX",
+      "segment": "pre",
+      "source_relative_path": "data/cboe/vvix.parquet",
+      "original_sha256": "0466b90fe25c3f9f2fd03b52275e6d44852713baf947e172dabd1d751dc1d687",
+      "snapshot_sha256": "720bc475d7ef4e5f6fbd66e2347f0ddca150da2dfb093db0d70cea8a0c667773",
+      "rows": 3420,
+      "start": "2006-03-06",
+      "end": "2019-12-31",
+      "columns": [
+        "vvix"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "VVIX",
+      "segment": "post",
+      "source_relative_path": "data/cboe/vvix.parquet",
+      "original_sha256": "0466b90fe25c3f9f2fd03b52275e6d44852713baf947e172dabd1d751dc1d687",
+      "snapshot_sha256": "cc2861094a5b12ae4add446766044d62871505baec56c3d27a30041150b58898",
+      "rows": 863,
+      "start": "2023-06-01",
+      "end": "2026-11-06",
+      "columns": [
+        "vvix"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "VIX3M",
+      "segment": "pre",
+      "source_relative_path": "data/yahoo/_VIX3M.parquet",
+      "original_sha256": "9bcf02d93485e0683e661fbcdd2542bbd08ccf1e5de0f725170156ec96c105c9",
+      "snapshot_sha256": "3c0bd681bf4f68487cc345694c37853582027a914065a2f9732adcfa73433506",
+      "rows": 3389,
+      "start": "2006-07-17",
+      "end": "2019-12-31",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    },
+    {
+      "instrument": "VIX3M",
+      "segment": "post",
+      "source_relative_path": "data/yahoo/_VIX3M.parquet",
+      "original_sha256": "9bcf02d93485e0683e661fbcdd2542bbd08ccf1e5de0f725170156ec96c105c9",
+      "snapshot_sha256": "737bf8e4060922e75da21f2d8b3eeab4da77a251a165cc9f6124666892723970",
+      "rows": 864,
+      "start": "2023-06-01",
+      "end": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close"
+      ],
+      "historical_available_at": null
+    }
+  ],
+  "source_files": {
+    "signal_layer/confluence.py": "30c12a90448579d689e2a9ed405055f6c44462cf0f69347940e619d020c7384d",
+    "signal_layer/confluence_v2.py": "c57376b044c7f8b5d3f2ecb47073a4201adaf9fce224019a99fbc681f6498dff"
+  }
+}

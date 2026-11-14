@@ -1,0 +1,11 @@
+{
+  "python": "3.12.4 | packaged by Anaconda, Inc. | (main, Jun 18 2024, 10:07:17) [Clang 14.0.6 ]",
+  "platform": "macOS-26.5-arm64-arm-64bit",
+  "packages": {
+    "numpy": "2.4.6",
+    "pandas": "3.0.3",
+    "scipy": "1.18.0",
+    "pyarrow": "24.0.0",
+    "PyYAML": "6.0.3"
+  }
+}

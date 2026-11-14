@@ -1,0 +1,11 @@
+# Same-panel native T1/T2 comparison - no historical proxy substitution
+
+This addition closes a comparison gap after the grey-dot phase5 outcomes were inspected. The prior phase3 stock study is not an apples-to-apples replacement test on these sector ETFs. This is disclosed exploratory work, not a new pristine holdout.
+
+Reuse the phase3 native last-marker projection and necessary-condition sieve byte-for-byte from Mastermind219b6d355108912f410d09adf35eced45c376797. Consume Macro engine source at6bbc4b0fc694c847077661ff5bf4c19ea41e4e81, exact hashes, isolated snapshot, no credentials or current live artifacts. Recheck sampled native gate decision parity on this exact input panel before replay. Do not substitute tier_stream, ordinary price MACD or a generic T1 label.
+
+Canonical research arm: engine.signal_gate.gate on each historical prefix with washout_waiver=False. T1 requires eligible native T1, TAKE and nonprovisional; T2 requires eligible native T2. Forming T1 is counted separately, not promoted to confirmed T1. Event means first active observation after3 known absent observations, no pyramiding. Missing native observations reset onset certainty.
+
+Same nine sectors, price/total-return bases, reserved2020-May2023 exclusion, independently reset post-gap state and exact next-close execution. Evaluate2007-2019 and2025-06-05-to2026-11-09. Warmup can use allowed earlier history but not the reserved interval. Grey-dot phase0 remains the disclosed dataset-anchored settled-bar representation; native Macro uses its own absolute session anchoring. This is a comparison of fixed research representations, not identical historical deployed semantics.
+
+Fixed matrix: T1, T2 and union x unfiltered, market repair, market repair with declining new-low pressure x21/63-session horizons x5/20bp costs. Keep grey-dot and simple continuation results as existing same-clock comparators. Add representative native positive and negative decision witnesses; report parity coverage, failures, unavailable rows and distinct event dates. No filters or source semantics are changed to improve this matrix. No conclusion about individual-stock live replacement follows from sector-ETF outcomes alone.

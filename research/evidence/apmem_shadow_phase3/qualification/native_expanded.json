@@ -1,0 +1,17 @@
+{
+  "source_commit": "738f3a3c4ff8efe560b51f91a846216128eba150",
+  "real_prefixes": 195,
+  "tier_counts": {
+    "None": 182,
+    "T2": 8,
+    "T1": 5
+  },
+  "sieve_excluded": 174,
+  "failures": [],
+  "timings": {
+    "native": 19.01807624916546,
+    "projected": 10.838605537544936,
+    "sieve": 0.4691865451168269
+  },
+  "market_outcomes_compared": false
+}

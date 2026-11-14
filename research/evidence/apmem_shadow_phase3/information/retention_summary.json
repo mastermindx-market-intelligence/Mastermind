@@ -1,0 +1,42 @@
+{
+  "schema": "phase3.aggregate_records.v1",
+  "original_artifact_sha256": "7655df0408b7c525ef92c46458a56982bfd74d4156f13e6802f0f416e4427112",
+  "records": [
+    {
+      "selection_kind": "rs",
+      "tested_policy": "union_rs",
+      "controls": 64,
+      "tested_cagr": 0.012136140469884,
+      "control_cagr_median": 0.003769740023919055,
+      "control_cagr_05_95": [
+        -0.005664201658184925,
+        0.016684619976857554
+      ],
+      "fraction_controls_cagr_at_least_tested": 0.125,
+      "tested_sharpe": 0.291568473280413,
+      "control_sharpe_median": 0.108079455079397,
+      "exchangeable_events": 479,
+      "exchangeable_dates": 158,
+      "exchangeable_fraction": 0.3406827880512091,
+      "not_a_confirmatory_p_value": true
+    },
+    {
+      "selection_kind": "risk_ev",
+      "tested_policy": "union_risk_ev",
+      "controls": 64,
+      "tested_cagr": 0.0371197819447728,
+      "control_cagr_median": 0.02931638698512673,
+      "control_cagr_05_95": [
+        0.021289827043562616,
+        0.03726853996525843
+      ],
+      "fraction_controls_cagr_at_least_tested": 0.0625,
+      "tested_sharpe": 0.5526430569436003,
+      "control_sharpe_median": 0.44290147821327974,
+      "exchangeable_events": 196,
+      "exchangeable_dates": 65,
+      "exchangeable_fraction": 0.2020618556701031,
+      "not_a_confirmatory_p_value": true
+    }
+  ]
+}

@@ -1,0 +1,180 @@
+{
+  "actual_source_assessor_exercised": true,
+  "production_service_called": false,
+  "entry_owner_pin": "8323d7a774a72da20d0e4db21c9080398da185e7",
+  "source_manifest_sha256": "022ed9c967265d128b29276403f3c292ea0f6fcf913d482de615cdfc9cb4a753",
+  "results": [
+    {
+      "ticker": "XLB",
+      "source_origin": "2026-11-09",
+      "expected_completed_session": "2026-11-13",
+      "incumbent_verdict": "clean",
+      "incumbent_buyable": true,
+      "incumbent_score": 60.0,
+      "incumbent_exactly_preserved": true,
+      "research_status": "STALE_RESEARCH_CONTEXT",
+      "research_state": "mixed",
+      "missing_vvix_state": true,
+      "authority": {
+        "may_rank": false,
+        "may_size": false,
+        "may_trade": false,
+        "may_override_entry": false
+      }
+    },
+    {
+      "ticker": "XLE",
+      "source_origin": "2026-11-09",
+      "expected_completed_session": "2026-11-13",
+      "incumbent_verdict": "clean",
+      "incumbent_buyable": true,
+      "incumbent_score": 60.0,
+      "incumbent_exactly_preserved": true,
+      "research_status": "STALE_RESEARCH_CONTEXT",
+      "research_state": "continuation_structure_observed",
+      "missing_vvix_state": true,
+      "authority": {
+        "may_rank": false,
+        "may_size": false,
+        "may_trade": false,
+        "may_override_entry": false
+      }
+    },
+    {
+      "ticker": "XLF",
+      "source_origin": "2026-11-09",
+      "expected_completed_session": "2026-11-13",
+      "incumbent_verdict": "rollover",
+      "incumbent_buyable": false,
+      "incumbent_score": 10.0,
+      "incumbent_exactly_preserved": true,
+      "research_status": "STALE_RESEARCH_CONTEXT",
+      "research_state": "continuation_structure_observed",
+      "missing_vvix_state": true,
+      "authority": {
+        "may_rank": false,
+        "may_size": false,
+        "may_trade": false,
+        "may_override_entry": false
+      }
+    },
+    {
+      "ticker": "XLI",
+      "source_origin": "2026-11-09",
+      "expected_completed_session": "2026-11-13",
+      "incumbent_verdict": "clean",
+      "incumbent_buyable": true,
+      "incumbent_score": 60.0,
+      "incumbent_exactly_preserved": true,
+      "research_status": "STALE_RESEARCH_CONTEXT",
+      "research_state": "mixed",
+      "missing_vvix_state": true,
+      "authority": {
+        "may_rank": false,
+        "may_size": false,
+        "may_trade": false,
+        "may_override_entry": false
+      }
+    },
+    {
+      "ticker": "XLK",
+      "source_origin": "2026-11-09",
+      "expected_completed_session": "2026-11-13",
+      "incumbent_verdict": "clean",
+      "incumbent_buyable": true,
+      "incumbent_score": 60.0,
+      "incumbent_exactly_preserved": true,
+      "research_status": "STALE_RESEARCH_CONTEXT",
+      "research_state": "mixed",
+      "missing_vvix_state": true,
+      "authority": {
+        "may_rank": false,
+        "may_size": false,
+        "may_trade": false,
+        "may_override_entry": false
+      }
+    },
+    {
+      "ticker": "XLP",
+      "source_origin": "2026-11-09",
+      "expected_completed_session": "2026-11-13",
+      "incumbent_verdict": "clean",
+      "incumbent_buyable": true,
+      "incumbent_score": 60.0,
+      "incumbent_exactly_preserved": true,
+      "research_status": "STALE_RESEARCH_CONTEXT",
+      "research_state": "continuation_structure_observed",
+      "missing_vvix_state": true,
+      "authority": {
+        "may_rank": false,
+        "may_size": false,
+        "may_trade": false,
+        "may_override_entry": false
+      }
+    },
+    {
+      "ticker": "XLU",
+      "source_origin": "2026-11-09",
+      "expected_completed_session": "2026-11-13",
+      "incumbent_verdict": "clean",
+      "incumbent_buyable": true,
+      "incumbent_score": 60.0,
+      "incumbent_exactly_preserved": true,
+      "research_status": "STALE_RESEARCH_CONTEXT",
+      "research_state": "continuation_structure_observed",
+      "missing_vvix_state": true,
+      "authority": {
+        "may_rank": false,
+        "may_size": false,
+        "may_trade": false,
+        "may_override_entry": false
+      }
+    },
+    {
+      "ticker": "XLV",
+      "source_origin": "2026-11-09",
+      "expected_completed_session": "2026-11-13",
+      "incumbent_verdict": "clean",
+      "incumbent_buyable": true,
+      "incumbent_score": 60.0,
+      "incumbent_exactly_preserved": true,
+      "research_status": "STALE_RESEARCH_CONTEXT",
+      "research_state": "continuation_structure_observed",
+      "missing_vvix_state": true,
+      "authority": {
+        "may_rank": false,
+        "may_size": false,
+        "may_trade": false,
+        "may_override_entry": false
+      }
+    },
+    {
+      "ticker": "XLY",
+      "source_origin": "2026-11-09",
+      "expected_completed_session": "2026-11-13",
+      "incumbent_verdict": "clean",
+      "incumbent_buyable": true,
+      "incumbent_score": 60.0,
+      "incumbent_exactly_preserved": true,
+      "research_status": "STALE_RESEARCH_CONTEXT",
+      "research_state": "continuation_structure_observed",
+      "missing_vvix_state": true,
+      "authority": {
+        "may_rank": false,
+        "may_size": false,
+        "may_trade": false,
+        "may_override_entry": false
+      }
+    }
+  ],
+  "all_incumbent_decisions_preserved": true,
+  "latest_source_stale_not_current": true,
+  "missing_inputs": [
+    "point-in-time constituent breadth",
+    "fundamental/catalyst context",
+    "live holdings",
+    "fresh November13 market data"
+  ],
+  "no_current_entry_recommendation": true,
+  "may_trade": false
+}

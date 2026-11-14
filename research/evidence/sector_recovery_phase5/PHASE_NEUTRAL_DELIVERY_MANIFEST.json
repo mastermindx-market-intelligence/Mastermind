@@ -1,0 +1,92 @@
+{
+  "previous_publication": "2a4828b34e4ff3b57b85936dbf2ba24e7a675333",
+  "parent": "15bf87bab4cba0218ea3459520621c0eed17273d",
+  "files": {
+    "research/apmem_shadow/phase5/phase_neutral.py": {
+      "sha256": "7c748b0f9e33ec278dd0f0d407e03d7528ed6ee64a394afd81ce13c8fad1060c",
+      "git_blob": "3e79905ca0e132d1d122caee4d8082c2a1c69de7",
+      "bytes": 6167
+    },
+    "research/apmem_shadow/phase5/phase_neutral_audit.py": {
+      "sha256": "dcc4c8638d33f01058443b9977c9e4e4d767dc04dba85c1253a59ab0061d2963",
+      "git_blob": "3bc27bc4942414287c94da8c2be718508c6bfa22",
+      "bytes": 5581
+    },
+    "research/apmem_shadow/phase5/test_phase_neutral.py": {
+      "sha256": "6c3d3cd21d77a22756eeef296cc4dad01fcc647f5165968458965951859cf80d",
+      "git_blob": "6166e6823ab0cb84a8b4e778834d797c83d86698",
+      "bytes": 2163
+    },
+    "research/apmem_shadow/phase5/PHASE_NEUTRAL_RESULTS.md": {
+      "sha256": "5745593ba3dee4c1ade97c00cdb59127b2e5c360e7192902fc38ce095e774bc5",
+      "git_blob": "288fb0042f60a81acb756b0722e00c16409a1d93",
+      "bytes": 4890
+    },
+    "research/apmem_shadow/phase5/README.md": {
+      "sha256": "f37cbe80e1a5e448509b5b1486df6327e05309c83db92aca65a4db333e6a02b0",
+      "git_blob": "24db3ae50bcde60f9eabcb56b7c5a075e60cf6e5",
+      "bytes": 4591
+    },
+    "research/apmem_shadow/phase5/RESULTS.md": {
+      "sha256": "be70eb5b2244643a1cb350ddf86eca4042fb1a4855c053ce27bf59973dfc6df2",
+      "git_blob": "3148b73e66289463f9eaeb8c68bc2c2df53f374d",
+      "bytes": 23914
+    },
+    "research/apmem_shadow/phase5/build_report.py": {
+      "sha256": "974b9cebd4d475d79cd272ebc88113357f3fc897eef645e66d48c074090b0910",
+      "git_blob": "fc555e9a439f79ccd5ecd95a99acfd9b1f6678f9",
+      "bytes": 20703
+    },
+    "research/apmem_shadow/phase5/DELIVERY_STATUS.md": {
+      "sha256": "c4fa139dd5f870d96cac482b4cefb5a79d4f2f2305d0ae5dba72825464196018",
+      "git_blob": "70d76e8f5571fce3025ec6ce6518c6429fbf82b4",
+      "bytes": 4787
+    },
+    "research/evidence/sector_recovery_phase5/phase_neutral_results/event_counts.csv": {
+      "sha256": "19b04cb8764811c7d23f77ae6a1504b3c50842f2d15157858076b8a02cac961f",
+      "git_blob": "ff3a8170bfde86cd1c4383a5a4d5e53ed607823d",
+      "bytes": 1217
+    },
+    "research/evidence/sector_recovery_phase5/phase_neutral_results/original_parity.json": {
+      "sha256": "0abad761f323037f3c6238832c7074703526b6964d8b94f7d5bacd6c4315e0f4",
+      "git_blob": "606b70e723b5c814115f475ecf7a5ba07d6a6e82",
+      "bytes": 2126
+    },
+    "research/evidence/sector_recovery_phase5/phase_neutral_results/portfolio_metrics.csv": {
+      "sha256": "181a76a00a6c934279684ce0ae53dffa2f689c245584d02941edc3a974900e9f",
+      "git_blob": "d6c5a5d5e177f74d8e92962f7a468fd74538cfe3",
+      "bytes": 29870
+    },
+    "research/evidence/sector_recovery_phase5/phase_neutral_results/RUN_RECEIPT.json": {
+      "sha256": "1e8cfe6143482f72800f8b1e5ba40eefe911053474d46f9ded01490c23e95d32",
+      "git_blob": "346051cfc27f7065afc1fe762abce78fb1ef2d20",
+      "bytes": 350
+    },
+    "research/evidence/sector_recovery_phase5/phase_neutral_audit_results/confirmation_cost.csv": {
+      "sha256": "81a720788b3c17cc27947437a698762ec26c7ddc24ae8284f4c1e2cec02fbd99",
+      "git_blob": "7393ca4f0e63948a71b67d477c81882adde55477",
+      "bytes": 2448
+    },
+    "research/evidence/sector_recovery_phase5/phase_neutral_audit_results/exposure_controls.csv": {
+      "sha256": "158ce48ce46e7af2e4a807358ab30cc5ec37239b336bc3937fb28087dd8cca4d",
+      "git_blob": "ee110bd886f68aa59db6992ceb0c3ff31eca26c8",
+      "bytes": 8585
+    },
+    "research/evidence/sector_recovery_phase5/phase_neutral_audit_results/paired_mean_return_tests.csv": {
+      "sha256": "b5e8cc3608b7c84d38d33fe240a5481582240c3305f18269bd0c11146f1ab864",
+      "git_blob": "2a3178a942488b698f8aa6bb678b64db5e3f2b26",
+      "bytes": 7991
+    },
+    "research/evidence/sector_recovery_phase5/phase_neutral_audit_results/RUN_RECEIPT.json": {
+      "sha256": "3e186f7bec4172f5a5ceb5f7033aebe23802bb0b4b19225da48b5e4eea30c704",
+      "git_blob": "3f1d95b9502d8a7681c00b5d13718a1d31d3fb79",
+      "bytes": 283
+    },
+    "research/evidence/sector_recovery_phase5/qualification/PHASE_NEUTRAL_TEST_LOG.txt": {
+      "sha256": "99ef36d77c4c717d96dd0d3a33f13044817dbf14ca9930f67bbed07e6b68acb5",
+      "git_blob": "6330cc2dd3a3a89745009768446b4e94420a1711",
+      "bytes": 172
+    }
+  },
+  "production_changed": false
+}

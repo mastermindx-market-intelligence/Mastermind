@@ -1,0 +1,8 @@
+{
+  "status": "COMPLETE",
+  "accounts": 120,
+  "event_comparison_rows": 1956,
+  "outcome_guided_exploratory": true,
+  "may_trade": false,
+  "source_sha256": "bf79d7d9083728d53228e5c006ac177ff7f0f80b6ee10eeed1a1737d392a7fd1"
+}

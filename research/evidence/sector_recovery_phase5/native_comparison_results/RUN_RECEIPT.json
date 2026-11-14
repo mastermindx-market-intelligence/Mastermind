@@ -1,0 +1,190 @@
+{
+  "status": "COMPLETE",
+  "accounts": 72,
+  "replay_receipts": [
+    {
+      "segment": "pre",
+      "ticker": "XLI",
+      "rows": 3272,
+      "unknown": 0,
+      "t1_events": 15,
+      "t2_events": 30,
+      "union_events": 41,
+      "sha256": "8420fb26186addbf538cb4c123060dcfa1592de977f9ad231a8e526c4dd12b8c"
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLE",
+      "rows": 3272,
+      "unknown": 0,
+      "t1_events": 15,
+      "t2_events": 41,
+      "union_events": 45,
+      "sha256": "4daf3066500bdc311f2e617bf215cbbe4b3056353bf3d31e186ef86fb67ae7d4"
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLF",
+      "rows": 3272,
+      "unknown": 0,
+      "t1_events": 15,
+      "t2_events": 36,
+      "union_events": 41,
+      "sha256": "29029452620f2e685688ef9bc3a24c3d364dcefae07457b86ad74036b880e598"
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLB",
+      "rows": 3272,
+      "unknown": 0,
+      "t1_events": 20,
+      "t2_events": 45,
+      "union_events": 55,
+      "sha256": "25abd51030b408256bae0ad29ceb6a58930ccbed1a70d784886f2d3ab062f2b0"
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLP",
+      "rows": 3272,
+      "unknown": 0,
+      "t1_events": 12,
+      "t2_events": 34,
+      "union_events": 39,
+      "sha256": "4d1d2c8e94fde8d6762b806858a00eae54b426699557324b06c6d91b917f84b8"
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLK",
+      "rows": 3272,
+      "unknown": 0,
+      "t1_events": 19,
+      "t2_events": 27,
+      "union_events": 34,
+      "sha256": "2cf0e9a42772a8a17e869bcb6b29e9c8a0be74c188c9f41a521be44802ecd9d1"
+    },
+    {
+      "segment": "post",
+      "ticker": "XLB",
+      "rows": 360,
+      "unknown": 0,
+      "t1_events": 2,
+      "t2_events": 6,
+      "union_events": 6,
+      "sha256": "0c6d686597e1083f7e068f3dea2b963f12e3d2e91d81eb9ed775ddc638898eee"
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLV",
+      "rows": 3272,
+      "unknown": 0,
+      "t1_events": 7,
+      "t2_events": 34,
+      "union_events": 35,
+      "sha256": "3736db33e5a717f5d03ba4c105fdee64358cc771ed189ed31b5cfff742f8092d"
+    },
+    {
+      "segment": "post",
+      "ticker": "XLF",
+      "rows": 360,
+      "unknown": 0,
+      "t1_events": 1,
+      "t2_events": 4,
+      "union_events": 5,
+      "sha256": "5ba8df240a9e8779a999bbca7ec427a5619808de70941583ad903b26e60942b7"
+    },
+    {
+      "segment": "post",
+      "ticker": "XLE",
+      "rows": 360,
+      "unknown": 0,
+      "t1_events": 3,
+      "t2_events": 7,
+      "union_events": 7,
+      "sha256": "6a75debbf519cb9f66ec3b39eabf9d3b5fe701335d0e76376f3058434adbe4a4"
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLU",
+      "rows": 3272,
+      "unknown": 0,
+      "t1_events": 14,
+      "t2_events": 36,
+      "union_events": 43,
+      "sha256": "958b89f968b02f321ee7e7a2c6b5d465c0f1bee9c12d80bf03869b1444e5424c"
+    },
+    {
+      "segment": "post",
+      "ticker": "XLK",
+      "rows": 360,
+      "unknown": 0,
+      "t1_events": 0,
+      "t2_events": 1,
+      "union_events": 1,
+      "sha256": "c4055637a3a43ec604bc1f0cc4c11adc0e6a6576682a24ab86c51fabddbaa366"
+    },
+    {
+      "segment": "post",
+      "ticker": "XLI",
+      "rows": 360,
+      "unknown": 0,
+      "t1_events": 2,
+      "t2_events": 1,
+      "union_events": 3,
+      "sha256": "83a564936b51342360a666f59e7c267822b862997297ebdfc7fc98108985220d"
+    },
+    {
+      "segment": "post",
+      "ticker": "XLV",
+      "rows": 360,
+      "unknown": 0,
+      "t1_events": 1,
+      "t2_events": 3,
+      "union_events": 3,
+      "sha256": "d61a2cb9353c7e37275fee3383a14e8583457ab2da94cf3c3164c968d8ac9d8c"
+    },
+    {
+      "segment": "post",
+      "ticker": "XLU",
+      "rows": 360,
+      "unknown": 0,
+      "t1_events": 0,
+      "t2_events": 5,
+      "union_events": 5,
+      "sha256": "4ad8822edf5e38d6c6f35cbe9ecb0a34df5883c9480d9f8e7f0faccd21c9d839"
+    },
+    {
+      "segment": "post",
+      "ticker": "XLP",
+      "rows": 360,
+      "unknown": 0,
+      "t1_events": 1,
+      "t2_events": 4,
+      "union_events": 5,
+      "sha256": "e90c93c96981da72cf5a486cf66937edd7e5b1ae0783e91662403fca87e13d0b"
+    },
+    {
+      "segment": "post",
+      "ticker": "XLY",
+      "rows": 360,
+      "unknown": 0,
+      "t1_events": 1,
+      "t2_events": 6,
+      "union_events": 7,
+      "sha256": "e506bdd9a4f88ea4986e22299f7c0374f096ef7ddab27a04f31f2e0a89f749f4"
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLY",
+      "rows": 3272,
+      "unknown": 0,
+      "t1_events": 17,
+      "t2_events": 33,
+      "union_events": 44,
+      "sha256": "db6faa01d37344e559cec7b7db0fcabf882a151272e854b4c20729c312154139"
+    }
+  ],
+  "source_sha256": "1ebc9fb3c2ce165ecd09845b423a03b6d98560ecf90b5aa2643032b210330efb",
+  "source_reused_not_reimplemented": "Mastermind219b6d355108912f410d09adf35eced45c376797 phase3 native/replay",
+  "no_historical_peer_waiver": true,
+  "may_trade": false
+}

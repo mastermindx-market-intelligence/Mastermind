@@ -1,0 +1,21 @@
+# Resume audit: statistical resolution, consumer proof and complete evidence delivery
+
+Chairman explicitly resumed the independent MCD/cohort mission after an interrupted response. The original effect was NOT empty: source and one-shot forward records already exist at 6b437176501b9510560fe3f7ee5fb61b0624efff. Preserve these effects; do not recapture/refit/republish the forward observation as a new one. PR2480 remains the original carrier; protected procedure pin is 199fd4f91ecc426b1d974eb3bf47f5162476cf24. Original numerical root: /tmp/nested-cohort-phase6-20261114-lgzc8j1e. All listed numerical jobs have COMPLETE receipts and no process on that exact root was observed active at recovery. No core-work handoff, new service, provider setting, live gate or capital authority.
+
+## Material recovered work
+The predecessor completed fixed economic/lagged-behavioral cohort features; closed and explicitly provisional slow-timeframe observations; failure memory; strict impulse and persistent-support policies; conditional models; common-admission exit comparisons; and an actual incumbent-consumer witness. Its local aggregate matrices were NOT all included in the published result mapping, so complete durable evidence and a readable report are still owed. One-shot Tiingo observations through November13, 44 instruments and 264 horizon/model variance values are already source-bound and published; no forward outcome is claimed.
+
+## Numerical inference defect and frozen repair
+modeling.block_interval uses 999 resamples and a two-sided add-one tail probability with minimum 2/(999+1)=0.002. For the first Holm test at alpha0.05, families of48,30 and200 require p<=0.0010417,0.0016667 and0.00025 respectively. Thus no family can obtain even its first rejection at that numerical resolution. A report of no corrected rejection under those settings cannot distinguish lack of evidence from inadequate Monte Carlo resolution.
+
+Repair only inference on the unchanged stored predictions and account curves. Preserve original result bytes and hashes. Use49,999 draws and fixed seeds; retain the exact original families and every contrast. Report the original percentile-tail estimate at increased resolution for direct comparability, a separately named null-centered paired bootstrap sensitivity, and coarse half-year block sensitivity for overlapping horizons. Use date-level aggregation, same-date names together, finite values only, and refuse too few independent blocks. Print achieved p-value resolution and family threshold; do not tune bootstrap count or grouping to obtain a favorable result. This is a disclosed methodological audit after seeing results, not a new confirmatory holdout.
+
+No model coefficients, features, entries, holdings or exposure rules are refitted for this repair. Keep statistical significance, expected-return value, low-preservation accuracy, source validity and production authority distinct. Prior low-preservation outcomes may partly encode distance from the reference low; no exact-bottom probability is inferred.
+
+## Remaining work in this resumed turn
+1. Verify source/input/result hashes, complete original consumer and forward readback; preserve provisional and stale/fresh distinctions.
+2. Execute the inference audit with tests capable of detecting insufficient resolution and future-data/identity errors. Reconcile original calculations before interpreting changes.
+3. Audit MCD, RSP and QQQ context as exposed descriptive cases; distinguish raw grey-dot trigger, later RSI-MACD cross, slow support, cohort support and relative level versus change. Earnings and prices do not prove fund flows. The monthly MCD screenshot remains unconfirmed; October is not declared a final bottom.
+4. Publish all aggregate evidence, adverse results, portable tests and a usable scenario/state explanation on the same source carrier. Validate no live decision is changed. Existing parent release and reserved January2020-May2023 research boundaries remain.
+
+Direct work rationale: PRINCIPAL_JUDGMENT, explicit independent-work assignment, and lower overhead for auditing the incumbent implementation. No independent reviewer or subagent-team execution is claimed.

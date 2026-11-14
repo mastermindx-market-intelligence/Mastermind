@@ -1,0 +1,16 @@
+{
+  "status": "COMPLETE",
+  "input_events": 592,
+  "missing_events": 7,
+  "prediction_rows": 5076,
+  "unique_issued_events": 423,
+  "issued_dates": 212,
+  "fits": 144,
+  "tests": 18,
+  "holm_rejections": 2,
+  "source_sha256": "7029592270a4d6220bdc7619ea18458e535070e79082a49523ff6525d5e6cd8d",
+  "outcome_guided_retrospective": true,
+  "may_rank": false,
+  "may_size": false,
+  "may_trade": false
+}

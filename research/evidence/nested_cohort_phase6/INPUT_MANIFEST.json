@@ -1,0 +1,993 @@
+{
+  "captured_at": "2026-11-14T10:17:59.444258+00:00",
+  "groups": {
+    "restaurants": [
+      "MCD",
+      "YUM",
+      "SBUX",
+      "DRI",
+      "CMG",
+      "QSR",
+      "YUMC"
+    ],
+    "staples": [
+      "KO",
+      "PEP",
+      "PG",
+      "CL",
+      "KMB"
+    ],
+    "defensive_diagnostic": [
+      "WMT",
+      "COST",
+      "JNJ",
+      "WM",
+      "RSG"
+    ],
+    "semiconductors": [
+      "NVDA",
+      "AMD",
+      "AVGO",
+      "TXN",
+      "ADI",
+      "MU",
+      "INTC"
+    ],
+    "software": [
+      "MSFT",
+      "ORCL",
+      "ADBE",
+      "CRM",
+      "INTU"
+    ]
+  },
+  "comparators": [
+    "SPY",
+    "RSP",
+    "DIA",
+    "QQQ",
+    "SMH",
+    "IGV",
+    "XLY",
+    "XLP",
+    "XLB",
+    "XLE",
+    "XLF",
+    "XLI",
+    "XLK",
+    "XLU",
+    "XLV"
+  ],
+  "protected_interval": [
+    "2020-01-01",
+    "2023-05-31"
+  ],
+  "sources": {
+    "ADBE": {
+      "sha256": "705dd0bc566035c1bf07ea6cb9e75b3b6aeed17cf442b30d7afd5fad8ff7aa7b",
+      "first": "1986-08-13",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 8415,
+          "sha256": "8df1d60cb63dad067721335c6e99be477309a3088b91bf33609ff733df72bcda"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "6fe07631349a30fc71ef1505c0a6363e5990ecd6d0e443ec74aea8bab4f1bbbf"
+        }
+      }
+    },
+    "ADI": {
+      "sha256": "1ef78895832b024c158cc0bd16f90bfda7eabbabed476cc9ad758ba9047942bc",
+      "first": "1980-03-17",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 10035,
+          "sha256": "ff6c0fcfb4eae5e9a7a2e1041d4fad3ab67cbaee6fd482e6fee19ea3b285ea83"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "048fa6c1c799ab3b1451ed469d57a33dcd2f732bb09c5aba62ed643de1548b34"
+        }
+      }
+    },
+    "AMD": {
+      "sha256": "cefca2d0dd1c52fc224724e7255443ef6cf18de6bf77c6fbb58a08de892ecb8c",
+      "first": "1980-03-17",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 10035,
+          "sha256": "9a65608aad3410b6cda17d9fd7c50dc86952cc29e4ffd1fe8977905d1b0a2d42"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "bf12b4e4edcc6a0f68642356a27038891314f918e3f4420df72d6d3e71b03777"
+        }
+      }
+    },
+    "AVGO": {
+      "sha256": "3511a86f7597dbe61c46abf942225d66052e9e3144d78c0e468e9be35b1ba96b",
+      "first": "2009-08-06",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 2619,
+          "sha256": "ce5c245700018e0f4aca2c2d1964b984f5c33ad9521e4676d3f61e118f05b26c"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "11beaf94b847e9633514eedfddf347333c22b257dc4762df2bb3f37407472d04"
+        }
+      }
+    },
+    "CL": {
+      "sha256": "dc3ed2b57558b2cd3184939523dfab32106d4fb7a459f336b5f0a17ff1f4a5e6",
+      "first": "1973-05-02",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 11772,
+          "sha256": "9b6b9f0a893674e0e7532bfc7378a480ebc4882d8339cc3250a2d710a8ae222b"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "669679451c56ddb5996ac039aaf14c28ec11600210716c85b04a1b2c6ff3e4b6"
+        }
+      }
+    },
+    "CMG": {
+      "sha256": "264386d1f1b391736e9ad2921cdbbdf32a53c0da410d392229ab64220b67a4a0",
+      "first": "2006-01-26",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 3507,
+          "sha256": "0bcefcd1e0ff4d953386ba9dcd9ce440ee8612f502296f7b029da64ac67f165a"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "04ecf3063d2e437a399cb7c2e8ba32041d3c48db0d6d13a93055b29046c095f0"
+        }
+      }
+    },
+    "COST": {
+      "sha256": "c7a59213725a8421441945ac3ee3cc12dfae5a2f9347a0aae9ddef44c6f05b9c",
+      "first": "1986-07-09",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 8440,
+          "sha256": "997628d1b4df482efae9686083e95daead788a8da0422c9fb3423e9f72351d70"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "57e7dfcc1569a72f970704d5fd19ee5284b9029e9622cb91f2cb84812dfcea0d"
+        }
+      }
+    },
+    "CRM": {
+      "sha256": "7a1d50228c00f1a6abe0fd2d865dabfac067e98b37c97a04ef96860f2e464361",
+      "first": "2004-06-23",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 3909,
+          "sha256": "00b90975fa91ae6a39e80b9c5b17fac0b239cb9ca3b8c50ba20e8c51601b727f"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "60a000f1d2d75e2c22ef02a0755b63b70b86beefd1b38f1e6e814771da1c2c35"
+        }
+      }
+    },
+    "DIA": {
+      "sha256": "9fe5821131c72d7b35b5cc3d93d50588b63cebd4d4b1692f026b047434184d11",
+      "first": "1998-01-20",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 5524,
+          "sha256": "6f5156350b44de162f32ffb802435b20fdba2352752cc9466888597e0636a3f9"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "81fcc9dc02386470d6fb05740ead1c0ce3243a028663a500b61328b39f68f26d"
+        }
+      }
+    },
+    "DRI": {
+      "sha256": "b4bd3fb96c69098407d1393dc2e3545f7cea833dd6c65875549410231d0e96cd",
+      "first": "1995-05-09",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 6206,
+          "sha256": "0b95039919140b399920f2dacb6f75936ea5fd7dbeced368e84f3cc869250275"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "bc038f4bbd746863bca2fdfadb8f87e595cf3f25f9273a1b0532643aa6617013"
+        }
+      }
+    },
+    "IGV": {
+      "sha256": "ecf39cc2725c80a0ebbc6ec324404f9fed82059d0bf143af35bfab50b8f3a03f",
+      "first": "2001-07-17",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 4644,
+          "sha256": "c704ba2a9374fe68866404b7d076311771be3393f9b8f5d1733ebe570659d27d"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "d8f782172e11825fe0076b00fac6d5891675d75cbade6a44cb045705721c41f7"
+        }
+      }
+    },
+    "INTC": {
+      "sha256": "949a9db43306c656f4cac56869cb5bb730503f77cd4876bfd989452326448ed2",
+      "first": "1980-03-17",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 10035,
+          "sha256": "b869f1552b88297429c221b352f8a3fba0b33ee97d873af79d38a3e9da10f069"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "4d5992d851d2f04f36024a463a13de3e0018817650ddefa9bf52292a26b669a8"
+        }
+      }
+    },
+    "INTU": {
+      "sha256": "7d31d5ee5051854374eebb092aa021a45c12a13db902de96bd7ac480757e7872",
+      "first": "1993-03-12",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 6751,
+          "sha256": "82a669c685949fd7b193a6a5a958c391b895f857dd9c2564209b6a1635f556e8"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "6371c7433ed8d133de14142c16d5b1350b22bc55c99f09dfbc5198d596ffea62"
+        }
+      }
+    },
+    "JNJ": {
+      "sha256": "3446e489590039443a1fdc7b1becc4cee195a8066fad7c6d1a3007a1feaed3a1",
+      "first": "1962-01-02",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 14600,
+          "sha256": "fc90499c280335852dbb3d0579f39f52ecd72a9484619f56d5f4385142c35a78"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "faf8b836945bc84326d585e1cc80744985c002dddbe02c81938a6b347492ee09"
+        }
+      }
+    },
+    "KMB": {
+      "sha256": "325d72711a1ca1915e860275be18ed68cbcdea39feff967ae16ab18b784c3fd1",
+      "first": "1980-03-17",
+      "last": "2026-11-06",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 10035,
+          "sha256": "96f9e6983fd5f5660518f5b03c733e192e02bb95cb18973b427b87aecabb712d"
+        },
+        "post": {
+          "rows": 863,
+          "sha256": "8f644fa1847727f38e7e88ed93ca3b7a498fc188e529c082b68bee55d19b1f39"
+        }
+      }
+    },
+    "KO": {
+      "sha256": "b48f6488f36cb6619de1d092fe9d6ffd25f930382d9609ffc472c4041929b036",
+      "first": "1962-01-02",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 14600,
+          "sha256": "e12f947aa4760a665a87acca268d0cd0b0fef1b326d778c89989655609a0221b"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "843e289fa9c61776a015ecca84b09986474f5f35dcf57d4d5a34efc669fecb23"
+        }
+      }
+    },
+    "MCD": {
+      "sha256": "12c88360cc1272b0c5443a31df51066d8d2c67765c9bade1c5a1b6ea50a8855f",
+      "first": "1966-07-05",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 13465,
+          "sha256": "d6c5bd79138c2ea9d516bc77f92709afa271f6f231125533db1bb056a5fc1d82"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "e071277ae93f6aabe02cdc6c9503799162bf858071c884896a1904ec22e439c1"
+        }
+      }
+    },
+    "MSFT": {
+      "sha256": "31e13cb9396f16ed4d8a3c8ab51c1acabba74dbdae5c65aef3cc87f33ea52703",
+      "first": "1986-03-13",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 8521,
+          "sha256": "963cd410a9b478b24d1e6bd66d3dea8359865f55e0b7c904e191488a9266bd81"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "a1cae07fc1b4b149b1d4260347f52df3dea4dca97ee85d04840dd98642e5f2c8"
+        }
+      }
+    },
+    "MU": {
+      "sha256": "70e6782700014fe6c50b41d0aa906f9fab075cfde5058cf426576776d5872ac7",
+      "first": "1984-06-01",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 8970,
+          "sha256": "f887fb1afd13fca7721cb4ab778bd14906b85ddff4873cb11deefb26cbe99cb5"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "15de403d281d17c3ea064f06e67a7638509a66af2fa130739367a2275cea9fd4"
+        }
+      }
+    },
+    "NVDA": {
+      "sha256": "c6fd58c6da75449e808973369f59368ac7a602ad252de6a7790dbe2a1cd6c2ad",
+      "first": "1999-01-22",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 5270,
+          "sha256": "6135787731f452f6fe6be8f8ef25aca7136f299da880361bc3879f4808e4b34e"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "1aac687d1fd91808eee36864b834d649a1dea598061afa9b5609f74db34a5919"
+        }
+      }
+    },
+    "ORCL": {
+      "sha256": "8af721415c729101be89683abe6db0aebb603af0c75aa1d0a29b522764ed2f33",
+      "first": "1986-03-12",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 8522,
+          "sha256": "eaef8b18848f45c69c83c9f999f04c16fedbc4454acb87a071509da110ee129a"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "fef6a3633f913a66b03d92da0137ce38b53e59371fcc4f26700b8ef34a9cf66e"
+        }
+      }
+    },
+    "PEP": {
+      "sha256": "5b97e7e0c051672b75dff4210a4d8424ad93ed3aaeafc0d6c50691ea9fbc6bba",
+      "first": "1972-06-01",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 12001,
+          "sha256": "fd3c50db127e0ab8eb8a5c9224a1c831db3039c27d8f6a7ead73974abce1dc67"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "07a17ed2dcf46088ed0d09f669020a1b0cc648c0cb1620fa058666d14ad75962"
+        }
+      }
+    },
+    "PG": {
+      "sha256": "4ce2664c6ce9e4be0a0cc558aa5c1f2f6ffa4ce32d91d3b331e3c5e0aebb1360",
+      "first": "1962-01-02",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 14600,
+          "sha256": "11b4e0ff4cef1a7d83e9af7d6d74894c3cae1cbdb4eaeae30799e4517a2fed37"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "b202eddbe454cc8fdceb5a29f43762d26a50cfb580e4c8c64ba2a16bf1421df4"
+        }
+      }
+    },
+    "QQQ": {
+      "sha256": "36545b7f3fb8656df8e3525905d9a7dc63024abd21b800f402daa7d20f72b63b",
+      "first": "1999-03-10",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 5238,
+          "sha256": "a3215e73280cbecf2ea0e40b74fef05a8c75f9a8c391b68a8b5c55ae63666b70"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "8ba98629e9a28dfea771b4534829d064f688cfdc4ee17ea7a7cff8a7bf08867a"
+        }
+      }
+    },
+    "QSR": {
+      "sha256": "2bfbcebd15837a4ecd1427fce76662530c12fadd3eae01bec357a3aaacbc0754",
+      "first": "2014-12-11",
+      "last": "2026-11-06",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 1272,
+          "sha256": "07f99f44860a22613d95c9a04868fba9ee6b32102f7f225e45d5f80e89fc8b40"
+        },
+        "post": {
+          "rows": 863,
+          "sha256": "c4e41b1ec8961abafc65231c2920eecae32fde547c18e7e8db82506aae357a18"
+        }
+      }
+    },
+    "RSG": {
+      "sha256": "889bceff762d1cda89c4de1908cb2633ade0293b40aaf8eed50f753de676d58a",
+      "first": "1998-07-01",
+      "last": "2026-11-06",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 5411,
+          "sha256": "8d1486328c7e14024b7fa82daff0df157c2049201c6c7b4849920c38d0188e60"
+        },
+        "post": {
+          "rows": 863,
+          "sha256": "2fb051b6ae8548a1b38d400347639e327540cf4515b22382625d437594ec6ea4"
+        }
+      }
+    },
+    "RSP": {
+      "sha256": "86e61b5b166ff8a1419e1a2e04ab0a967cc7f83a5ac56f5b51e9ce77b94ccb90",
+      "first": "2003-05-01",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 4197,
+          "sha256": "a42fe9c59eb0b0f2a53e973ecec1627dfbddcd27d4d41f032d77a1463422c443"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "58c7647571f02a0efdc64a6b79e0b3b01cf06a5ba14beacff1cbe36eeda3bb7e"
+        }
+      }
+    },
+    "SBUX": {
+      "sha256": "1f367b190db1b7cebea13fa4f699fe682300e95d145420138a1658aa757794de",
+      "first": "1992-06-26",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 6930,
+          "sha256": "cabd511179199d069090f3f8f6a6a00834d41692e078ea430c03142964e99c9d"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "27291ec08e56209da2db227ce87d00fcc8514a0e3f276bd3cf81910d2472eabc"
+        }
+      }
+    },
+    "SMH": {
+      "sha256": "463f23334ada81128c26934aedac5351c741384f7c651323b794ee3d8ce1026e",
+      "first": "2000-06-05",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 4925,
+          "sha256": "a013d0585e1b929001a1f4508352a358df381b637cfd09e6acdead18a6b45c85"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "7db12e1b97589aecc8a5d7573bbb3ea8e2e898794296a18a075d590384c46597"
+        }
+      }
+    },
+    "SPY": {
+      "sha256": "05533cbc489adf9fe694bbafacbfe005cc5270834321d5de8860017f3a160cd7",
+      "first": "1993-01-29",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 6780,
+          "sha256": "374413343b6b7477d1df6a6da9da94bde2e62c530cef8f7c8371d1772e028b83"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "644575df21e85fd107cf6f762db69a4f4ce437b945634c697217a11922e11137"
+        }
+      }
+    },
+    "TXN": {
+      "sha256": "8bde1be24b8937f344056f8a4ced3db0c016bd961142b18a196ed19f2c9d4393",
+      "first": "1972-06-01",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 12001,
+          "sha256": "c9f23316abdf7548d04bce769c801091621c3e11fd131bc31fd692cc06b9f848"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "6cdd560803f1304b62b974bd6ec291e833a6fca2f00da972d8a10d36cde0c532"
+        }
+      }
+    },
+    "WM": {
+      "sha256": "d390738d70c716771a779a8892e8fa73d56450e2a5172d63637d7f030080ae22",
+      "first": "1988-06-22",
+      "last": "2026-11-06",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 7945,
+          "sha256": "62547c8ba5767aad897880d71b727fa4f1b9a27a013c189ba745b46b28a091e5"
+        },
+        "post": {
+          "rows": 863,
+          "sha256": "f1c3902872574fdb8e502f2508717e75130ea7e0a3582796addaa256e20d0052"
+        }
+      }
+    },
+    "WMT": {
+      "sha256": "28d6553c573bab31c4fb84a19ee03e8f2c072f53809a29486c8c022b22f6a96e",
+      "first": "1972-08-25",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 11941,
+          "sha256": "56eab5af07e22822603f41b483790f0ff7c4e18f41592913b95b561a08c707d0"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "0eb354bd77318d87fa26b284411f9113a8456161dab9045d1341b8156ae69486"
+        }
+      }
+    },
+    "XLB": {
+      "sha256": "38eceed66af77463334772951362c32795c51685304e82f4d38cb4071fe2fe89",
+      "first": "1998-12-22",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 5290,
+          "sha256": "1c9320f548029452a8c91ca4d3c31d560aae65fba64d371bd50de5d79f97d400"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "030d1f11c95f36830138fb856a7457a45a638c5bbf484688cd2852ee6cd946fd"
+        }
+      }
+    },
+    "XLE": {
+      "sha256": "4e67819801ff83cc4f25c10643a7f05e86caaf1bd365a93ac2c59be82f226c7f",
+      "first": "1998-12-22",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 5290,
+          "sha256": "910bcc069040655de2628685ce408e78680f602f0966b4e0e20d2682dc5e4b15"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "5699595bc2523ed9f99f256af5348c6160af785010627db94c8ceef560af25b7"
+        }
+      }
+    },
+    "XLF": {
+      "sha256": "2c1312a6476173b5f1e52790c48289a87e7aa82562903b2b061e07310e16156b",
+      "first": "1998-12-22",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 5290,
+          "sha256": "52be5c5683b4585babc9c5851f3e5d36b4d2f9567292e7a7f79aa8773e2c4d35"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "8c02155a99cd7789e7ead0041d4b232e8cec98aa676b24e4077c18255a50148a"
+        }
+      }
+    },
+    "XLI": {
+      "sha256": "0268d59c4fb5bb7ea0f38d0f532a314db38b6daf27892a7e269385f8a8db2e3b",
+      "first": "1998-12-22",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 5290,
+          "sha256": "74f2654aa97d59fd10bde9653a25cbcb170b9f14266a9753fca0fefdeb7c4481"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "5e2d9037f7f6662d03ab824ba1b851e02efa257152a474c3089aaca9bc9bada8"
+        }
+      }
+    },
+    "XLK": {
+      "sha256": "c469a3b741caecc870ad4ca2ccff9588672297de229bae8915d03d8438a5ce94",
+      "first": "1998-12-22",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 5290,
+          "sha256": "3fa1767c03cfb74b9812d574eeb5292a3397c79cd053ed070a5da38efb11f90c"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "6a23193d4a7436ff423df6b3ecde8187b8d0c0af3a83dc21c36bc79cfda4087b"
+        }
+      }
+    },
+    "XLP": {
+      "sha256": "79e9d7da093c76d407e5b31fba34654cce0740ce329fbca9eb62bf8b6dad6317",
+      "first": "1998-12-22",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 5290,
+          "sha256": "fd9da2c12e17c39eb2d5b51fb84c90b1ff2a6489de03c4ef025a74fb30d327f0"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "4932303fcc46807d24dac99495b582a98e779494991d66d0fed196157ea86365"
+        }
+      }
+    },
+    "XLU": {
+      "sha256": "262147e47d4fdd859a8b008f95231f1535a376d7321767fb0385681acaea80a6",
+      "first": "1998-12-22",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 5290,
+          "sha256": "4f25e125dbf5843225931b77e159490ffe395f43008c1e8a0fc174364ca0b974"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "6cc465969220d99b4b0fec799b5cb3f701459339a3dbb2406b2da5cbd92686ac"
+        }
+      }
+    },
+    "XLV": {
+      "sha256": "506210aea6d4643c6df82262db255cd2c5e996eca9da606d2a2b60e7fdcd4651",
+      "first": "1998-12-22",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 5290,
+          "sha256": "6dc6eb706b66338d74b21249b938ba60ed196d9c98339997d2ec6783d330905c"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "02caf1dff50908670a8072c29cd1f91f674e801fc207119647e31f2abc4de45f"
+        }
+      }
+    },
+    "XLY": {
+      "sha256": "c4496f23be6499c6e9e27601c933acbd0281ba0d8d60758c9817c29ef5d65b0c",
+      "first": "1998-12-22",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 5290,
+          "sha256": "73255f9efaef40d1a25215030fbd45049c934e08dda2088d0a06efa2041fb3f5"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "5e267286e1941ec107b7e44449e7975cdfe8fdb4068459b4b2ab4f3f2798a051"
+        }
+      }
+    },
+    "YUM": {
+      "sha256": "95a7f27efb5083ce5672c6ac416cf15ee55acac38d2c214f2bb7232840839e82",
+      "first": "1997-09-17",
+      "last": "2026-11-06",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 5609,
+          "sha256": "2889b159ab17b158c560fa229b1580300ffc73b8c0c4cf408b99d71d4760fd87"
+        },
+        "post": {
+          "rows": 863,
+          "sha256": "5d7f25f6b7df7edb26c5ffb9af391bfb88347ca135346541da7c85551efaa0ac"
+        }
+      }
+    },
+    "YUMC": {
+      "sha256": "174ba5df95b18366514a2e048feb70814b78a3ab20562b6fce15ddfff9adc103",
+      "first": "2016-10-17",
+      "last": "2026-11-09",
+      "columns": [
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 807,
+          "sha256": "b4c44db9b9f220dd3a89b14026a021aa61b94fab732fe896e3986718706af89d"
+        },
+        "post": {
+          "rows": 864,
+          "sha256": "5d8793b0e3156e522b27c8fa35ebddd05a67cacfc34f431788b25f88076e9a9d"
+        }
+      }
+    },
+    "VIX": {
+      "sha256": "8255709d411b715d945068a9c4427190d4327be6079fba8d20501ae67605653d",
+      "first": "1990-01-02",
+      "last": "2026-11-10",
+      "columns": [
+        "high",
+        "low",
+        "close_price",
+        "close",
+        "volume"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 7559,
+          "sha256": "75c163b84b92fadda125d8d1077252660f61decaaa299eaced3de00373f59c4e"
+        },
+        "post": {
+          "rows": 868,
+          "sha256": "18844e14bbf3f96b67081f85e1e9adf23d5abfcfa12fcd23e5f1a2b900500cab"
+        }
+      }
+    },
+    "VVIX": {
+      "sha256": "0466b90fe25c3f9f2fd03b52275e6d44852713baf947e172dabd1d751dc1d687",
+      "first": "2006-03-06",
+      "last": "2026-11-06",
+      "columns": [
+        "vvix"
+      ],
+      "segments": {
+        "pre": {
+          "rows": 3420,
+          "sha256": "0789ec3164a850bea23515a55420c15639fe51fef5cbb627073e20175d1bd1fa"
+        },
+        "post": {
+          "rows": 863,
+          "sha256": "2cf19b47df61cee6f64d9c72c5e0e9387a0a4d28f50e1ea1dee43c29d5912e0e"
+        }
+      }
+    }
+  },
+  "source_files": {
+    "signal_layer/confluence.py": "30c12a90448579d689e2a9ed405055f6c44462cf0f69347940e619d020c7384d",
+    "signal_layer/confluence_v2.py": "c57376b044c7f8b5d3f2ecb47073a4201adaf9fce224019a99fbc681f6498dff"
+  },
+  "chart_case_exposed": "MCD 2026; do not aggregate for validation",
+  "current_vintage": true
+}
