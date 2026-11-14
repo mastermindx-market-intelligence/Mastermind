@@ -156,6 +156,81 @@ pub fn parse_shell_url(input: &str) -> Result<Url, ShellUrlRefusal> {
     Ok(parsed)
 }
 
+/// Lane PF: why a board-url value was refused. The board has its own codes,
+/// distinct from the shell address codes; the raw input is never part of a
+/// code, and every component stays below the dev-log redactor's long-token
+/// threshold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoardUrlRefusal {
+    Unparseable,
+    WrongScheme,
+    MissingHost,
+    UserInfo,
+    HostNotLoopback,
+    MissingPort,
+    Query,
+    Fragment,
+    /// The board address is an origin: no path beyond the root "/".
+    Path,
+}
+
+impl BoardUrlRefusal {
+    pub fn subcode(self) -> &'static str {
+        match self {
+            Self::Unparseable => "unparseable",
+            Self::WrongScheme => "wrong_scheme",
+            Self::MissingHost => "missing_host",
+            Self::UserInfo => "userinfo",
+            Self::HostNotLoopback => "host_not_loopback",
+            Self::MissingPort => "missing_port",
+            Self::Query => "query",
+            Self::Fragment => "fragment",
+            Self::Path => "path_not_allowed",
+        }
+    }
+}
+
+/// Lane PF: parse and validate the optional board origin. The
+/// [`parse_loopback_http`] structure plus the writers' exact
+/// `http://127.0.0.1:<port>` spelling and an explicit port, then the board's
+/// own rule: no query, no fragment, and no path beyond the root (a single
+/// trailing `/` is the same origin). Like the address parser, dot segments
+/// normalize before the path rule, so the loader accepts what it lands on
+/// while the writer refuses the disguise literally. No network access, ever.
+pub fn parse_board_url(input: &str) -> Result<Url, BoardUrlRefusal> {
+    let parsed = parse_loopback_http(input).map_err(|refusal| match refusal {
+        ShellUrlRefusal::Unparseable => BoardUrlRefusal::Unparseable,
+        ShellUrlRefusal::WrongScheme => BoardUrlRefusal::WrongScheme,
+        ShellUrlRefusal::MissingHost => BoardUrlRefusal::MissingHost,
+        ShellUrlRefusal::UserInfo => BoardUrlRefusal::UserInfo,
+        ShellUrlRefusal::HostNotLoopback => BoardUrlRefusal::HostNotLoopback,
+        // parse_loopback_http never returns these; the match stays exhaustive.
+        ShellUrlRefusal::MissingPort => BoardUrlRefusal::MissingPort,
+        ShellUrlRefusal::Query => BoardUrlRefusal::Query,
+        ShellUrlRefusal::Fragment => BoardUrlRefusal::Fragment,
+        ShellUrlRefusal::ReservedPath => BoardUrlRefusal::Path,
+    })?;
+    if !input.starts_with("http://127.0.0.1:") {
+        return Err(if input.starts_with("http://127.0.0.1/") || input == "http://127.0.0.1" {
+            BoardUrlRefusal::MissingPort
+        } else if input.as_bytes().get(..7) == Some(b"http://") {
+            BoardUrlRefusal::HostNotLoopback
+        } else {
+            BoardUrlRefusal::WrongScheme
+        });
+    }
+    if parsed.query().is_some() {
+        return Err(BoardUrlRefusal::Query);
+    }
+    if parsed.fragment().is_some() {
+        return Err(BoardUrlRefusal::Fragment);
+    }
+    if parsed.path() != "/" {
+        return Err(BoardUrlRefusal::Path);
+    }
+    Ok(parsed)
+}
+
 /// Read the one-time shell URL from a user-private file (the T3 pairing-file path).
 ///
 /// The path is supplied by `MM_SHELL_URL_FILE`; its contents are the URL, not a
@@ -164,6 +239,15 @@ pub fn parse_shell_url(input: &str) -> Result<Url, ShellUrlRefusal> {
 #[cfg(unix)]
 pub fn read_shell_url_file(path: &std::path::Path) -> Result<Url, ShellUrlFileRefusal> {
     read_single_line_config_file(path).and_then(|line| parse_shell_url(&line).map_err(ShellUrlFileRefusal::Url))
+}
+
+/// Lane PF: read the optional board origin from a user-private file, applying
+/// exactly the same single-line trust checks as the address file, then the
+/// board's own parser. Neither the path nor contents appear in errors.
+#[cfg(unix)]
+pub fn read_board_url_file(path: &std::path::Path) -> Result<Url, ShellUrlFileRefusal> {
+    read_single_line_config_file(path)
+        .and_then(|line| parse_board_url(&line).map_err(ShellUrlFileRefusal::BoardUrl))
 }
 
 /// Read one trimmed line from a user-private config file, applying every
@@ -237,6 +321,9 @@ pub enum ShellUrlFileRefusal {
     WrongPermissions,
     InvalidContents,
     Url(ShellUrlRefusal),
+    /// Lane PF: the board-url file's own shape codes, prefixed `board_url.`
+    /// so they never collide with the shell address's `url.` codes.
+    BoardUrl(BoardUrlRefusal),
     /// Panel repair N: the containing config directory itself is not a real,
     /// user-owned, mode-0700 directory. Reported for both files alike.
     ConfigDirSymlink,
@@ -255,6 +342,7 @@ impl ShellUrlFileRefusal {
             Self::WrongPermissions => "wrong_permissions".into(),
             Self::InvalidContents => "invalid_contents".into(),
             Self::Url(refusal) => format!("url.{}", refusal.subcode()),
+            Self::BoardUrl(refusal) => format!("board_url.{}", refusal.subcode()),
             Self::ConfigDirSymlink => "config_dir_symlink".into(),
             Self::ConfigDirNotDirectory => "config_dir_not_directory".into(),
             Self::ConfigDirWrongOwner => "config_dir_wrong_owner".into(),
@@ -312,6 +400,9 @@ pub fn log_file_refusal(refusal: ShellUrlFileRefusal) {
 pub const SHELL_URL_CONFIG_NAME: &str = "shell-url";
 /// File inside a fixed shell config directory that names the pairing helper.
 pub const PAIR_HELPER_CONFIG_NAME: &str = "pair-helper";
+/// Lane PF: file inside a fixed shell config directory that carries the
+/// optional board origin (a second loopback origin the window may load).
+pub const BOARD_URL_CONFIG_NAME: &str = "board-url";
 
 /// The fixed per-user shell config directory for one bundle identifier.
 ///
@@ -433,6 +524,26 @@ pub fn resolve_shell_settings(identifier: &str) -> (Option<Url>, ShellConfig) {
         }
     });
     (url.flatten(), config)
+}
+
+/// Lane PF: resolve the optional board origin from a resolved shell config.
+/// A missing file or folder is the normal unconfigured case (`None`); a
+/// refused file is logged input-free and treated as unconfigured, exactly
+/// like the address — never a launch blocker. The board origin is read from
+/// the same fixed config folder as the address, independent of which source
+/// (environment or file) supplied the address.
+pub fn resolve_board_origin(config: &ShellConfig) -> Option<Url> {
+    let dir = config.dir.as_ref()?;
+    match read_config_line(dir, BOARD_URL_CONFIG_NAME)
+        .and_then(|line| parse_board_url(&line).map_err(ShellUrlFileRefusal::BoardUrl))
+    {
+        Ok(url) => Some(url),
+        Err(ShellUrlFileRefusal::Missing) => None,
+        Err(refusal) => {
+            log_file_refusal(refusal);
+            None
+        }
+    }
 }
 
 fn helper_config(identifier: &str) -> ShellConfig {
@@ -1011,6 +1122,75 @@ mod tests {
         assert_eq!(parsed.port(), Some(3790));
     }
 
+    /// Lane PF: the board address is an origin — the loopback http structure
+    /// and the writers' exact `http://127.0.0.1:<port>` spelling, with no
+    /// path beyond the root, no query and no fragment. Its refusal codes are
+    /// its own, distinct from the shell address codes.
+    #[test]
+    fn board_url_parser_accepts_only_the_origin_spelling() {
+        for value in ["http://127.0.0.1:3196", "http://127.0.0.1:3196/"] {
+            let parsed = parse_board_url(value)
+                .unwrap_or_else(|refusal| panic!("case refused as {}", refusal.subcode()));
+            assert_eq!(parsed.host_str(), Some("127.0.0.1"));
+            assert_eq!(parsed.path(), "/");
+            assert!(parsed.query().is_none() && parsed.fragment().is_none());
+        }
+        for (value, expected) in [
+            ("http://127.0.0.1:3196/board", BoardUrlRefusal::Path),
+            ("http://127.0.0.1:3196//", BoardUrlRefusal::Path),
+            ("http://127.0.0.1:3196/pair", BoardUrlRefusal::Path),
+            ("http://127.0.0.1:3196/?x=1", BoardUrlRefusal::Query),
+            ("http://127.0.0.1:3196/#f", BoardUrlRefusal::Fragment),
+            ("http://user:pass@127.0.0.1:3196", BoardUrlRefusal::UserInfo),
+            ("http://localhost:3196", BoardUrlRefusal::HostNotLoopback),
+            ("https://127.0.0.1:3196", BoardUrlRefusal::WrongScheme),
+            ("http://127.0.0.1", BoardUrlRefusal::MissingPort),
+            ("http://127.0.0.1/", BoardUrlRefusal::MissingPort),
+            ("http://127.1:3196", BoardUrlRefusal::HostNotLoopback),
+            ("HTTP://127.0.0.1:3196", BoardUrlRefusal::WrongScheme),
+            ("not a url", BoardUrlRefusal::Unparseable),
+        ] {
+            assert_eq!(parse_board_url(value), Err(expected), "{value}");
+        }
+        // Dot segments normalize before the path rule, exactly like the
+        // shell address: the loader accepts what it lands on (the root),
+        // while the shell writer refuses the disguise literally.
+        assert!(parse_board_url("http://127.0.0.1:3196/./").is_ok());
+    }
+
+    /// Lane PF: the board refusal codes are distinct from each other, stay
+    /// below the dev-log redactor's long-token threshold, and the file-level
+    /// code carries a `board_url.` prefix no shell-address code uses.
+    #[test]
+    fn board_url_refusal_codes_are_their_own_and_input_free() {
+        let subcodes = [
+            BoardUrlRefusal::Unparseable,
+            BoardUrlRefusal::WrongScheme,
+            BoardUrlRefusal::MissingHost,
+            BoardUrlRefusal::UserInfo,
+            BoardUrlRefusal::HostNotLoopback,
+            BoardUrlRefusal::MissingPort,
+            BoardUrlRefusal::Query,
+            BoardUrlRefusal::Fragment,
+            BoardUrlRefusal::Path,
+        ]
+        .map(BoardUrlRefusal::subcode);
+        let mut unique = subcodes.to_vec();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), subcodes.len());
+        for code in &subcodes {
+            assert!(code.len() < 20, "{code} too long for the redactor");
+        }
+        let board = ShellUrlFileRefusal::BoardUrl(BoardUrlRefusal::Path).subcode();
+        let shell = ShellUrlFileRefusal::Url(ShellUrlRefusal::ReservedPath).subcode();
+        assert_eq!(board, "board_url.path_not_allowed");
+        assert_ne!(board, shell);
+        for part in board.split('.') {
+            assert!(part.len() < 20, "{board} part {part} too long");
+        }
+    }
+
     #[test]
     fn bootstrap_installs_the_page_api_and_carries_no_credentials() {
         assert!(!SHELL_PAGE_BOOTSTRAP.trim().is_empty());
@@ -1079,6 +1259,89 @@ mod tests {
             assert_eq!(url.port(), Some(3796));
             assert_eq!(url.path(), "/env-1/t");
             assert!(url.query().is_none() && url.fragment().is_none());
+            fs::remove_dir_all(&dir).ok();
+        }
+
+        /// Lane PF: the board-url file goes through the same single-line
+        /// trust checks as the address file, then the board's own parser.
+        #[test]
+        fn board_url_file_uses_the_same_trust_checks() {
+            let dir = unique_temp_dir();
+            let good = write_file(&dir, "board-url", "http://127.0.0.1:3196\n", 0o600);
+            let url = read_board_url_file(&good).expect("clean board origin accepted");
+            assert_eq!(url.host_str(), Some("127.0.0.1"));
+            assert_eq!(url.port(), Some(3196));
+            assert_eq!(url.path(), "/");
+
+            let loose = write_file(&dir, "board-loose", "http://127.0.0.1:3196\n", 0o644);
+            assert_eq!(
+                read_board_url_file(&loose),
+                Err(ShellUrlFileRefusal::WrongPermissions)
+            );
+            let multi = write_file(
+                &dir,
+                "board-multi",
+                "http://127.0.0.1:3196\nhttp://127.0.0.1:3197\n",
+                0o600,
+            );
+            assert_eq!(
+                read_board_url_file(&multi),
+                Err(ShellUrlFileRefusal::InvalidContents)
+            );
+            let shaped = write_file(&dir, "board-shaped", "http://127.0.0.1:3196/board\n", 0o600);
+            assert_eq!(
+                read_board_url_file(&shaped),
+                Err(ShellUrlFileRefusal::BoardUrl(BoardUrlRefusal::Path))
+            );
+            fs::remove_dir_all(&dir).ok();
+        }
+
+        /// Lane PF: the board origin resolves from the same fixed config
+        /// folder; a missing file or folder is the normal unconfigured case
+        /// and a refused file is logged input-free, never a launch blocker.
+        #[test]
+        fn resolve_board_origin_reads_the_config_folder() {
+            let _guard = crate::ENV_SWAP_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            let dir = unique_temp_dir();
+            let config_dir = dir.join(".mastermind").join("mmos_dev").join("window-next");
+            fs::create_dir_all(&config_dir).expect("config dir");
+            fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o700))
+                .expect("config dir mode");
+            let config = ShellConfig { dir: Some(config_dir.clone()), pair_helper: None };
+
+            let previous_home = std::env::var_os("HOME");
+            let previous_dev_root = std::env::var_os("MMOS_DEV_ROOT");
+            std::env::set_var("HOME", &dir);
+            std::env::set_var("MMOS_DEV_ROOT", dir.join("dev-log"));
+
+            // Absent file: unconfigured, silently.
+            assert_eq!(resolve_board_origin(&config), None);
+            write_file(&config_dir, BOARD_URL_CONFIG_NAME, "http://127.0.0.1:3196\n", 0o600);
+            assert_eq!(
+                resolve_board_origin(&config).map(|u| u.to_string()),
+                Some("http://127.0.0.1:3196/".to_string())
+            );
+            // A loosened file is refused and treated as unconfigured.
+            fs::set_permissions(
+                config_dir.join(BOARD_URL_CONFIG_NAME),
+                fs::Permissions::from_mode(0o644),
+            )
+            .expect("loosen board file");
+            assert_eq!(resolve_board_origin(&config), None);
+            // No folder at all, or no folder mapped: unconfigured.
+            let absent = ShellConfig { dir: Some(dir.join("absent")), pair_helper: None };
+            assert_eq!(resolve_board_origin(&absent), None);
+            let no_dir = ShellConfig { dir: None, pair_helper: None };
+            assert_eq!(resolve_board_origin(&no_dir), None);
+
+            match previous_home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+            match previous_dev_root {
+                Some(value) => std::env::set_var("MMOS_DEV_ROOT", value),
+                None => std::env::remove_var("MMOS_DEV_ROOT"),
+            }
             fs::remove_dir_all(&dir).ok();
         }
 

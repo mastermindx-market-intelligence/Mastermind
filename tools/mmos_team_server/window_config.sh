@@ -12,23 +12,29 @@
 #   next   (com.mastermind.os.next)     -> ~/.mastermind/mmos_dev/window-next
 #
 # Files inside: `shell-url` (one line, the loopback thread address; never a
-# pairing token) and `pair-helper` (one line, absolute path to
-# window_pair_helper.sh or a wrapper). Both must be mode 0600 and owned by
-# the user, inside a mode-0700 non-symlink directory, or the window refuses
-# them.
+# pairing token), `pair-helper` (one line, absolute path to
+# window_pair_helper.sh or a wrapper) and, lane PF, the optional `board-url`
+# (one line, a second loopback origin the window may load). All must be mode
+# 0600 and owned by the user, inside a mode-0700 non-symlink directory, or
+# the window refuses them.
 #
 # Usage:
-#   window_config.sh write --bundle release|dev|t8 --url URL [--pair-helper PATH] [--keep-pair-helper]
-#   window_config.sh check --bundle release|dev|t8 --app <path to the app binary>
-#   window_config.sh show   --bundle release|dev|t8
-#   window_config.sh clear  --bundle release|dev|t8
+#   window_config.sh write --bundle release|dev|t8|next --url URL [--pair-helper PATH] [--keep-pair-helper] [--board-url URL]
+#   window_config.sh check --bundle release|dev|t8|next --app <path to the app binary>
+#   window_config.sh show   --bundle release|dev|t8|next
+#   window_config.sh clear  --bundle release|dev|t8|next
 #
 # `write` without --pair-helper removes an existing pair-helper (the window
 # must not keep minting pairing addresses a config edit meant to withdraw);
-# pass --keep-pair-helper to preserve one. Address and helper are staged in
-# mode-0600 temporaries under umask 077 — a trap removes them on any exit —
-# and committed helper-first, so a crash between the two renames never
-# leaves a fresh address beside a stale helper.
+# pass --keep-pair-helper to preserve one. The board origin is independent:
+# a write without --board-url keeps an existing board-url. Address, helper
+# and board are staged in mode-0600 temporaries under umask 077 — a trap
+# removes them on any exit — and committed helper-first, then address, then
+# board, so a crash between renames never leaves a fresh address beside a
+# stale helper.
+#
+# The board address is an origin only: exactly `http://127.0.0.1:<port>`
+# (at most a single trailing `/`), no path, query, fragment or userinfo.
 #
 # `check` is one judge (panel repair M): it runs the app binary itself in
 # `--check-window-config` mode, which uses exactly the loader a real launch
@@ -49,7 +55,7 @@ set -eu
 
 usage() {
   cat >&2 <<'EOF'
-usage: window_config.sh write --bundle release|dev|t8|next --url URL [--pair-helper PATH] [--keep-pair-helper]
+usage: window_config.sh write --bundle release|dev|t8|next --url URL [--pair-helper PATH] [--keep-pair-helper] [--board-url URL]
        window_config.sh check --bundle release|dev|t8|next --app <path to the app binary>
        window_config.sh show   --bundle release|dev|t8|next
        window_config.sh clear  --bundle release|dev|t8|next
@@ -61,6 +67,7 @@ BUNDLE=""
 URL=""
 HELPER=""
 KEEP_HELPER=""
+BOARD_URL=""
 APP=""
 CMD="${1:-}"
 [ $# -ge 1 ] && shift
@@ -70,6 +77,7 @@ while [ $# -gt 0 ]; do
     --url) [ $# -ge 2 ] || usage; URL="$2"; shift 2 ;;
     --pair-helper) [ $# -ge 2 ] || usage; HELPER="$2"; shift 2 ;;
     --keep-pair-helper) KEEP_HELPER=yes; shift ;;
+    --board-url) [ $# -ge 2 ] || usage; BOARD_URL="$2"; shift 2 ;;
     --app) [ $# -ge 2 ] || usage; APP="$2"; shift 2 ;;
     *) usage ;;
   esac
@@ -141,6 +149,46 @@ case "$CMD" in
       //*|/|/pair|/pair/*)
         refuse "the server root and /pair belong to the pairing flow, never to the config" ;;
     esac
+    # Lane PF: the optional board origin — the same loopback spelling as the
+    # address but an origin only: no path beyond a single trailing '/', no
+    # query, no fragment, no userinfo. Every refusal names the reason only.
+    if [ -n "$BOARD_URL" ]; then
+      case "$BOARD_URL" in
+        *[[:cntrl:]]*) refuse "a control character or newline is never part of an address" ;;
+      esac
+      case "$BOARD_URL" in
+        *@*) refuse "userinfo never belongs in the config" ;;
+      esac
+      case "$BOARD_URL" in
+        *token=*) refuse "a token parameter never belongs in the config" ;;
+      esac
+      case "$BOARD_URL" in
+        *\?*) refuse "a query never belongs in the config" ;;
+      esac
+      case "$BOARD_URL" in
+        *\#*) refuse "a fragment never belongs in the config" ;;
+      esac
+      # The path part is optional (an origin may carry a single trailing '/').
+      board_rest=$(printf '%s\n' "$BOARD_URL" | sed -n 's|^http://127\.0\.0\.1:\([0-9][0-9]*\)\(/.*\)\{0,1\}$|\1 \2|p')
+      if [ -z "$board_rest" ]; then
+        case "$BOARD_URL" in
+          http://localhost:*|http://LOCALHOST:*)
+            refuse "use the 127.0.0.1 literal (the server prints its address as 127.0.0.1)" ;;
+          *) refuse "must be exactly http://127.0.0.1:<port> (the board address is an origin)" ;;
+        esac
+      fi
+      board_port=${board_rest%% *}
+      board_path=${board_rest#* }
+      board_port_num=$(printf '%s\n' "$board_port" | sed 's/^0*//')
+      [ -n "$board_port_num" ] || board_port_num=0
+      if [ "${#board_port_num}" -gt 5 ] || [ "$board_port_num" -lt 1 ] || [ "$board_port_num" -gt 65535 ]; then
+        refuse "the port must be between 1 and 65535"
+      fi
+      case "$board_path" in
+        ""|/) ;;
+        *) refuse "the board address is an origin: no path, query or fragment" ;;
+      esac
+    fi
     if [ -n "$HELPER" ]; then
       case "$HELPER" in
         /*) ;;
@@ -184,10 +232,14 @@ case "$CMD" in
     umask 077
     url_tmp="$DIR/shell-url.tmp.$$"
     helper_tmp="$DIR/pair-helper.tmp.$$"
-    trap 'rm -f "$url_tmp" "$helper_tmp"' EXIT HUP INT TERM
+    board_tmp="$DIR/board-url.tmp.$$"
+    trap 'rm -f "$url_tmp" "$helper_tmp" "$board_tmp"' EXIT HUP INT TERM
     printf '%s\n' "$URL" > "$url_tmp"
     if [ -n "$HELPER" ]; then
       printf '%s\n' "$HELPER" > "$helper_tmp"
+    fi
+    if [ -n "$BOARD_URL" ]; then
+      printf '%s\n' "$BOARD_URL" > "$board_tmp"
     fi
     if [ -z "$HELPER" ] && [ "$KEEP_HELPER" != yes ] && [ -f "$DIR/pair-helper" ]; then
       rm -f "$DIR/pair-helper"
@@ -197,8 +249,14 @@ case "$CMD" in
       mv "$helper_tmp" "$DIR/pair-helper"
     fi
     mv "$url_tmp" "$DIR/shell-url"
+    if [ -n "$BOARD_URL" ]; then
+      mv "$board_tmp" "$DIR/board-url"
+    fi
     trap - EXIT HUP INT TERM
     echo "wrote $DIR/shell-url (mode 0600)"
+    if [ -n "$BOARD_URL" ]; then
+      echo "wrote $DIR/board-url (mode 0600)"
+    fi
     if [ "${removed_helper:-}" = yes ]; then
       echo "removed $DIR/pair-helper (no --pair-helper; pass --keep-pair-helper to keep one)"
     elif [ -f "$DIR/pair-helper" ]; then
@@ -222,7 +280,7 @@ case "$CMD" in
     # multi-line config is ever echoed.
     nl='
 '
-    for name in shell-url pair-helper; do
+    for name in shell-url pair-helper board-url; do
       f="$DIR/$name"
       if [ -f "$f" ]; then
         printf '%s mode=%s owner=%s' "$f" "$(stat -f '%Lp' "$f")" "$(stat -f '%u' "$f")"
@@ -236,6 +294,8 @@ case "$CMD" in
           *@*|*\?*|*\#*)
             printf ' -> (not shown: carries a query, fragment or userinfo)\n' ;;
           http://127.0.0.1:[0-9]*/*)
+            printf ' -> %s\n' "$line" ;;
+          http://127.0.0.1:[0-9]*)
             printf ' -> %s\n' "$line" ;;
           /*)
             printf ' -> %s\n' "$line" ;;
@@ -251,7 +311,7 @@ case "$CMD" in
     [ -d "$DIR" ] || { echo "no config directory: $DIR"; exit 0; }
     # Attack round: never delete through a symlinked config directory.
     if [ -L "$DIR" ]; then echo "window_config: refusing to clear a symlinked config directory" >&2; exit 1; fi
-    rm -f "$DIR/shell-url" "$DIR/pair-helper"
+    rm -f "$DIR/shell-url" "$DIR/pair-helper" "$DIR/board-url"
     echo "cleared $DIR"
     ;;
   *) usage ;;

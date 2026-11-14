@@ -117,6 +117,7 @@ fn shell_url_from_env(identifier: &str) -> (Option<url::Url>, shell_mode::ShellC
 fn create_main_window(
     app: &tauri::AppHandle,
     shell: Option<&url::Url>,
+    board: Option<&url::Url>,
 ) -> Result<tauri::WebviewWindow, &'static str> {
     let config = app
         .config()
@@ -131,10 +132,11 @@ fn create_main_window(
     // navigation allowlist.
     if let Some(url) = shell {
         let origin = url.clone();
+        let board_origin = board.cloned();
         let failure_page = shell_pairing::failure_page_url().to_string();
         let handle = app.clone();
         builder = builder.on_navigation(move |url| {
-            match shell_pairing::navigation_allowed(url, &origin, &failure_page) {
+            match shell_pairing::navigation_allowed(url, &origin, &failure_page, board_origin.as_ref()) {
                 shell_pairing::NavDecision::Allow => true,
                 shell_pairing::NavDecision::External => {
                     // The maintained way to hand an outside address to the
@@ -195,21 +197,40 @@ fn terminal_callback_owner(url: &url::Url) -> bool {
 /// repair-N folder check, the 0600/no-symlink file readers, the URL and
 /// helper-line parsers, the helper trust walk) and prints one line per
 /// item — `shell-url: ok` or `shell-url: refused <code>`, same for
-/// `pair-helper` and `config-dir`. No window is built, no helper or
-/// watchdog is started, and no address or file contents are printed. Exit 0
-/// only when every item passes.
+/// `pair-helper` and `config-dir`. Lane PF adds `board-url: ok|absent|refused
+/// <code>`: the board origin is optional, so `absent` is normal and does not
+/// fail the check. No window is built, no helper or watchdog is started, and
+/// no address or file contents are printed. Exit 0 only when every required
+/// item passes.
 fn run_window_config_check(identifier: &str) -> i32 {
     use std::io::Write as _;
+    let (code, lines) = window_config_check_report(identifier);
+    for line in &lines {
+        println!("{line}");
+    }
+    let _ = std::io::stdout().flush();
+    code
+}
+
+/// The judge's exact line list and exit code, separated from printing so a
+/// test can assert the reported lines. Same loader a real launch uses.
+fn window_config_check_report(identifier: &str) -> (i32, Vec<String>) {
+    let mut lines: Vec<String> = Vec::new();
     let mut all_ok = true;
-    let mut line = |item: &str, outcome: Result<(), String>| {
+    fn line(
+        lines: &mut Vec<String>,
+        all_ok: &mut bool,
+        item: &str,
+        outcome: Result<(), String>,
+    ) {
         match outcome {
-            Ok(()) => println!("{item}: ok"),
+            Ok(()) => lines.push(format!("{item}: ok")),
             Err(code) => {
-                all_ok = false;
-                println!("{item}: refused {code}");
+                *all_ok = false;
+                lines.push(format!("{item}: refused {code}"));
             }
         }
-    };
+    }
     let home = std::env::var_os("HOME")
         .filter(|home| !home.is_empty())
         .map(std::path::PathBuf::from);
@@ -217,12 +238,14 @@ fn run_window_config_check(identifier: &str) -> i32 {
         shell_mode::fixed_config_dir(identifier, home)
     }) else {
         for item in ["config-dir", "shell-url", "pair-helper"] {
-            line(item, Err("no_dir_for_identifier".into()));
+            line(&mut lines, &mut all_ok, item, Err("no_dir_for_identifier".into()));
         }
-        let _ = std::io::stdout().flush();
-        return 1;
+        lines.push("board-url: absent".into());
+        return (1, lines);
     };
     line(
+        &mut lines,
+        &mut all_ok,
         "config-dir",
         shell_mode::config_dir_refusal(&dir).map_or(Ok(()), |r| Err(r.subcode())),
     );
@@ -231,27 +254,34 @@ fn run_window_config_check(identifier: &str) -> i32 {
             shell_mode::parse_shell_url(&value).map_err(shell_mode::ShellUrlFileRefusal::Url)
         });
     match address {
-        Ok(_) => line("shell-url", Ok(())),
-        Err(refusal) => line("shell-url", Err(refusal.subcode())),
+        Ok(_) => line(&mut lines, &mut all_ok, "shell-url", Ok(())),
+        Err(refusal) => line(&mut lines, &mut all_ok, "shell-url", Err(refusal.subcode())),
     }
     let helper = shell_mode::read_config_line(&dir, shell_mode::PAIR_HELPER_CONFIG_NAME)
         .and_then(|value| shell_mode::parse_pair_helper_line(&value));
     match helper {
         Ok(path) => {
             if shell_pairing::helper_is_trusted(&path) {
-                line("pair-helper", Ok(()));
+                line(&mut lines, &mut all_ok, "pair-helper", Ok(()));
             } else {
-                line("pair-helper", Err("helper_untrusted".into()));
+                line(&mut lines, &mut all_ok, "pair-helper", Err("helper_untrusted".into()));
             }
         }
-        Err(refusal) => line("pair-helper", Err(refusal.subcode())),
+        Err(refusal) => line(&mut lines, &mut all_ok, "pair-helper", Err(refusal.subcode())),
     }
-    let _ = std::io::stdout().flush();
-    if all_ok {
-        0
-    } else {
-        1
+    // Lane PF: the board origin is optional — a missing file or folder is the
+    // normal unconfigured case (`absent`, exit stays 0); a clean origin is
+    // `ok`; any other refusal fails the check with the board's own code.
+    let board = shell_mode::read_config_line(&dir, shell_mode::BOARD_URL_CONFIG_NAME)
+        .and_then(|value| {
+            shell_mode::parse_board_url(&value).map_err(shell_mode::ShellUrlFileRefusal::BoardUrl)
+        });
+    match board {
+        Ok(_) => line(&mut lines, &mut all_ok, "board-url", Ok(())),
+        Err(shell_mode::ShellUrlFileRefusal::Missing) => lines.push("board-url: absent".into()),
+        Err(refusal) => line(&mut lines, &mut all_ok, "board-url", Err(refusal.subcode())),
     }
+    (if all_ok { 0 } else { 1 }, lines)
 }
 
 fn dispatch_auth_callback(app: tauri::AppHandle, url: url::Url) {
@@ -265,7 +295,11 @@ fn dispatch_auth_callback(app: tauri::AppHandle, url: url::Url) {
 }
 
 #[cfg(target_os = "macos")]
-fn reopen_main_window(app: &tauri::AppHandle, shell: Option<&url::Url>) -> Result<(), &'static str> {
+fn reopen_main_window(
+    app: &tauri::AppHandle,
+    shell: Option<&url::Url>,
+    board: Option<&url::Url>,
+) -> Result<(), &'static str> {
     use tauri::Manager;
 
     // Closing the macOS window can leave the existing application alive. Reopen
@@ -275,7 +309,7 @@ fn reopen_main_window(app: &tauri::AppHandle, shell: Option<&url::Url>) -> Resul
     // minted for the previous instance and re-arms.
     let window = match app.get_webview_window(MAIN_WINDOW_LABEL) {
         Some(window) => window,
-        None => create_main_window(app, shell)?,
+        None => create_main_window(app, shell, board)?,
     };
     window.show().map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
     window.unminimize().map_err(|_| "MAIN_WINDOW_REOPEN_UNAVAILABLE")?;
@@ -294,6 +328,10 @@ fn main() {
         std::process::exit(run_window_config_check(&context.config().identifier));
     }
     let (shell_url, shell_config) = shell_url_from_env(&context.config().identifier);
+    // Lane PF: the optional board origin comes from the same fixed config
+    // folder as the address, independent of the address source. Resolve it
+    // before `shell_config` moves into the setup closure.
+    let board_url = shell_mode::resolve_board_origin(&shell_config);
     if shell_url.is_some() {
         // Shell mode builds the main window in `setup` so it can carry the page
         // bootstrap; stop Tauri from creating an unstamped one first.
@@ -305,8 +343,10 @@ fn main() {
     }
     let setup_shell_url = shell_url.clone();
     let setup_shell_config = shell_config;
+    let setup_board_url = board_url.clone();
     // Captured for the single-instance callback below (repair G).
     let single_instance_shell_url = shell_url.clone();
+    let single_instance_board_url = board_url.clone();
     let app = tauri::Builder::default()
         .manage(auth::NativeAuth::new().expect("native transport configuration"))
         .manage(terminal_session::TerminalSession::new().expect("Terminal transport configuration"))
@@ -320,7 +360,7 @@ fn main() {
             move |app, _argv, _cwd| {
                 #[cfg(target_os = "macos")]
                 if let Err(code) =
-                    reopen_main_window(app, single_instance_shell_url.as_ref())
+                    reopen_main_window(app, single_instance_shell_url.as_ref(), single_instance_board_url.as_ref())
                 {
                     // Only a fixed local window error is logged, never callback data.
                     eprintln!("Mastermind OS: {code}");
@@ -360,7 +400,7 @@ fn main() {
                 }
             }
             if let Some(url) = setup_shell_url.as_ref() {
-                create_main_window(app.handle(), Some(url))?;
+                create_main_window(app.handle(), Some(url), setup_board_url.as_ref())?;
                 // One watchdog per app process (repair A): started here, once,
                 // only when a pair helper is configured. It follows the window
                 // by generation, not label, and outlives every window build.
@@ -462,7 +502,7 @@ fn main() {
     app.run(move |_app, _event| {
         #[cfg(target_os = "macos")]
         if let tauri::RunEvent::Reopen { has_visible_windows: false, .. } = _event {
-            if let Err(code) = reopen_main_window(_app, shell_url.as_ref()) {
+            if let Err(code) = reopen_main_window(_app, shell_url.as_ref(), board_url.as_ref()) {
                 // Only a fixed local window error is logged, never callback data.
                 eprintln!("Mastermind OS: {code}");
             }
@@ -532,6 +572,87 @@ mod readiness_tests {
         assert_eq!(broken, 1, "a symlinked config folder fails the check");
 
         let _ = fs::remove_file(&config);
+        fs::remove_dir_all(&home).ok();
+    }
+
+    /// Lane PF: the judge reports the optional board origin — `ok` when the
+    /// file is a clean origin, `absent` when unconfigured (still exit 0), and
+    /// `refused <code>` with the board's own code otherwise (exit 1). The
+    /// report is the exact line list the printer emits.
+    #[test]
+    fn window_config_check_reports_board_url_ok_absent_and_refused() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::ENV_SWAP_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!(
+            "mmos-board-check-{}-{}",
+            std::process::id(),
+            nanos
+        ));
+        let config = home
+            .join(".mastermind")
+            .join("mmos_dev")
+            .join("window-next");
+        let bin = home.join("bin");
+        fs::create_dir_all(&config).unwrap();
+        fs::create_dir_all(&bin).unwrap();
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o700)).unwrap();
+        let helper = bin.join("helper.sh");
+        fs::write(&helper, "#!/bin/sh\ntrue\n").unwrap();
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+        for (name, contents) in [
+            ("shell-url", "http://127.0.0.1:3780/env-1/thread-1"),
+            ("pair-helper", helper.to_str().unwrap()),
+        ] {
+            fs::write(config.join(name), format!("{contents}\n")).unwrap();
+            fs::set_permissions(config.join(name), fs::Permissions::from_mode(0o600)).unwrap();
+        }
+
+        let previous = std::env::var_os("HOME");
+        std::env::set_var("HOME", &home);
+
+        // Absent board file: normal, exit 0, one absent line.
+        let (code, lines) = window_config_check_report("com.mastermind.os.next");
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(lines.contains(&"board-url: absent".to_string()), "{lines:?}");
+
+        // Clean origin: ok.
+        fs::write(config.join("board-url"), "http://127.0.0.1:3196\n").unwrap();
+        fs::set_permissions(config.join("board-url"), fs::Permissions::from_mode(0o600)).unwrap();
+        let (code, lines) = window_config_check_report("com.mastermind.os.next");
+        assert_eq!(code, 0, "{lines:?}");
+        assert!(lines.contains(&"board-url: ok".to_string()), "{lines:?}");
+
+        // A path is not an origin: refused with the board's own code.
+        fs::write(config.join("board-url"), "http://127.0.0.1:3196/board\n").unwrap();
+        let (code, lines) = window_config_check_report("com.mastermind.os.next");
+        assert_eq!(code, 1, "{lines:?}");
+        assert!(
+            lines.contains(&"board-url: refused board_url.path_not_allowed".to_string()),
+            "{lines:?}"
+        );
+
+        // A loosened file is refused like the address file.
+        fs::write(config.join("board-url"), "http://127.0.0.1:3196\n").unwrap();
+        fs::set_permissions(config.join("board-url"), fs::Permissions::from_mode(0o644)).unwrap();
+        let (code, lines) = window_config_check_report("com.mastermind.os.next");
+        assert_eq!(code, 1, "{lines:?}");
+        assert!(
+            lines.contains(&"board-url: refused wrong_permissions".to_string()),
+            "{lines:?}"
+        );
+
+        match previous {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
         fs::remove_dir_all(&home).ok();
     }
 

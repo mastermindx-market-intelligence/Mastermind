@@ -517,14 +517,28 @@ pub enum NavDecision {
 /// The navigation allowlist for the shell window: the configured origin
 /// (scheme, host and port exact), the inert blank page used as the token's
 /// disclosure boundary, and this module's own failure page (exact constant).
-/// Nothing else is loadable in the window; every other http or https address
-/// is [`NavDecision::External`].
-pub fn navigation_allowed(url: &Url, origin: &Url, failure_page: &str) -> NavDecision {
+/// Lane PF: an optional second `board_origin` (a loopback origin from the
+/// same trusted config folder) is also loadable. wry 0.55.1's `on_navigation`
+/// callback carries only the URL — no frame identity — so main-frame and
+/// sub-frame navigations are indistinguishable and the board origin is
+/// admitted for both. Nothing else is loadable in the window; every other
+/// http or https address is [`NavDecision::External`].
+pub fn navigation_allowed(
+    url: &Url,
+    origin: &Url,
+    failure_page: &str,
+    board_origin: Option<&Url>,
+) -> NavDecision {
     if same_origin(url, origin) {
         return NavDecision::Allow;
     }
     if url.as_str() == BLANK_PAGE || url.as_str() == failure_page {
         return NavDecision::Allow;
+    }
+    if let Some(board) = board_origin {
+        if same_origin(url, board) {
+            return NavDecision::Allow;
+        }
     }
     if url.scheme() == "http" || url.scheme() == "https" {
         NavDecision::External
@@ -1462,7 +1476,8 @@ mod tests {
     /// Panel repair B: the navigation allowlist. The configured origin (any
     /// path, query or fragment), the inert blank page and the failure page
     /// load; every other http(s) address is External (refused in the window,
-    /// opened in the default browser); everything else is Refuse.
+    /// opened in the default browser); everything else is Refuse. With no
+    /// board origin configured the rule is exactly the pre-PF one.
     #[test]
     fn navigation_allowlist_permits_only_the_configured_origin_and_two_constants() {
         let origin = url("http://127.0.0.1:3780/env-1/thread-1");
@@ -1475,13 +1490,13 @@ mod tests {
         ];
         for value in allowed {
             assert_eq!(
-                navigation_allowed(&url(value), &origin, &failure_page),
+                navigation_allowed(&url(value), &origin, &failure_page, None),
                 NavDecision::Allow,
                 "{value}"
             );
         }
         assert_eq!(
-            navigation_allowed(&failure_page_url(), &origin, &failure_page),
+            navigation_allowed(&failure_page_url(), &origin, &failure_page, None),
             NavDecision::Allow,
             "the failure page constant must be loadable"
         );
@@ -1493,7 +1508,7 @@ mod tests {
         ];
         for value in external {
             assert_eq!(
-                navigation_allowed(&url(value), &origin, &failure_page),
+                navigation_allowed(&url(value), &origin, &failure_page, None),
                 NavDecision::External,
                 "{value}"
             );
@@ -1507,7 +1522,72 @@ mod tests {
         ];
         for value in refused {
             assert_eq!(
-                navigation_allowed(&url(value), &origin, &failure_page),
+                navigation_allowed(&url(value), &origin, &failure_page, None),
+                NavDecision::Refuse,
+                "{value}"
+            );
+        }
+    }
+
+    /// Lane PF: a configured board origin is a second allowed origin — any
+    /// path, query or fragment on it loads in the window (wry 0.55.1's
+    /// on_navigation carries only the URL, so main-frame and sub-frame
+    /// navigations are indistinguishable and both are admitted). Without a
+    /// board origin nothing changes; other ports, hosts and schemes keep
+    /// their pre-PF decisions, and the shell origin and the two constants
+    /// stay allowed.
+    #[test]
+    fn navigation_allowlist_admits_the_configured_board_origin() {
+        let origin = url("http://127.0.0.1:3780/env-1/thread-1");
+        let board = url("http://127.0.0.1:3196");
+        let failure_page = failure_page_url().to_string();
+        let board_urls = [
+            "http://127.0.0.1:3196/",
+            "http://127.0.0.1:3196/board",
+            "http://127.0.0.1:3196/board?x=1#f",
+        ];
+        for value in board_urls {
+            assert_eq!(
+                navigation_allowed(&url(value), &origin, &failure_page, Some(&board)),
+                NavDecision::Allow,
+                "{value}"
+            );
+            // Without the board origin the same addresses go external.
+            assert_eq!(
+                navigation_allowed(&url(value), &origin, &failure_page, None),
+                NavDecision::External,
+                "{value} without board"
+            );
+        }
+        // The shell origin and the constants are unchanged with a board set.
+        for value in ["http://127.0.0.1:3780/pair", "about:blank"] {
+            assert_eq!(
+                navigation_allowed(&url(value), &origin, &failure_page, Some(&board)),
+                NavDecision::Allow,
+                "{value}"
+            );
+        }
+        assert_eq!(
+            navigation_allowed(&failure_page_url(), &origin, &failure_page, Some(&board)),
+            NavDecision::Allow
+        );
+        // A different port, host or scheme on the board address is not the
+        // board origin.
+        for value in [
+            "http://127.0.0.1:3197/board",
+            "http://localhost:3196/board",
+            "https://127.0.0.1:3196/board",
+            "http://example.com/",
+        ] {
+            assert_eq!(
+                navigation_allowed(&url(value), &origin, &failure_page, Some(&board)),
+                NavDecision::External,
+                "{value}"
+            );
+        }
+        for value in ["file:///etc/passwd", "data:text/html,x"] {
+            assert_eq!(
+                navigation_allowed(&url(value), &origin, &failure_page, Some(&board)),
                 NavDecision::Refuse,
                 "{value}"
             );
