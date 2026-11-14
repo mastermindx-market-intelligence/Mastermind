@@ -1,0 +1,48 @@
+{
+  "kind": "development_baseline_replay",
+  "reconstruction_method_sha256": "1a83d3ac7480ced87e0856002bef5fcfee737a79fbb4714c9d0f00d6373f431f",
+  "comparisons": [
+    {
+      "name": "first_admission",
+      "artifact_sha256": "ee7faddbd0bf053a0ec674344fa6a7d5c95fd9fecdab822188606f81c27809cd",
+      "counts": {
+        "became_available_not_economic_change": 2,
+        "unchanged_refusal": 2
+      },
+      "requested_variables": 4
+    },
+    {
+      "name": "later_admission_refusal",
+      "artifact_sha256": "52cb04350d7cee2769b106827a0b39a592fd85d7a723a1c64c8cc8e5db7ad82b",
+      "counts": {
+        "became_not_evaluable": 1,
+        "unchanged_refusal": 2,
+        "unchanged_value": 1
+      },
+      "requested_variables": 4
+    },
+    {
+      "name": "source_cutoff_refusal",
+      "artifact_sha256": "007542c487242ff0e2536b0b03ff6412ffd47e54ab349f3554ceaa1e6a855eca",
+      "counts": {
+        "became_not_evaluable": 1,
+        "unchanged_refusal": 2,
+        "unchanged_value": 1
+      },
+      "requested_variables": 4
+    },
+    {
+      "name": "identical_cutoff",
+      "artifact_sha256": "efeb04d0ef1f53b8eeed2d14c9474492e95e0ab186cb67e3305ba7448bcaba41",
+      "counts": {
+        "unchanged_refusal": 3,
+        "unchanged_value": 1
+      },
+      "requested_variables": 4
+    }
+  ],
+  "completed_at": "2026-10-04T00:10:01.835130+00:00",
+  "i3_accepted": false,
+  "product_preview_built": false,
+  "production_proof": false
+}

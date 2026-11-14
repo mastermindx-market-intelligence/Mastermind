@@ -1,0 +1,27 @@
+{
+  "kind": "baseline_fixture_adversarial_red",
+  "observed_at": "2026-10-04T00:08:57.978227+00:00",
+  "replay_module_sha256": "57dc50061e80d04fc5bddec414cb839e2a15e88c22c5ad54819e11e7ed2c0c41",
+  "test_driver_sha256": "c54c4bc52b98d447b59dd0183e7ab152d5175801a09c9c09d83389b16f5e7670",
+  "tests_run": 36,
+  "failures": 11,
+  "failure_names": [
+    "test_aggregate_policy_mismatch",
+    "test_boolean_integer_authority_confusion_rejected",
+    "test_coverage_float_is_not_integer_proof",
+    "test_first_admission_is_not_economic_change",
+    "test_identical_cutoff_has_no_new_change",
+    "test_later_admission_preserves_unlinked_refusal",
+    "test_missing_slots_survive_identical_early_cutoff",
+    "test_selected_occurrence_must_belong_to_receipt",
+    "test_source_receipt_hash_shape",
+    "test_source_receipt_must_agree_with_owner_provenance",
+    "test_source_time_refusal_separate_from_system_admission"
+  ],
+  "output_sha256": "89e6cc7df557e04fe2bd2e0b60c0d8eb151f1a241a65a6db6f9d83a990359f50",
+  "output_bytes": 11493,
+  "test_exit_code": null,
+  "wrapper_error": "Tests completed and output was saved; subsequent zsh status=$? assignment failed because status is read-only. No source/owner mutation or replay occurred after that error.",
+  "i3_acceptance": false,
+  "production_proof": false
+}

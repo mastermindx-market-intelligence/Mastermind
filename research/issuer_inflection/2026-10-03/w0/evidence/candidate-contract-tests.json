@@ -1,0 +1,20 @@
+{
+  "kind": "candidate_schema_shape_test_receipt",
+  "source_candidate_before_extension": "26e7c5c90b298cf5a98591d742da912a8966ae36",
+  "test_path": "research/issuer_inflection/2026-10-03/w0/test_candidate_schema.py",
+  "test_sha256_recorded_before_execution": "12348f912fdf81253f9a1821f2e01aaff1a7affc48d3a33dd2658249b52b2980",
+  "schema_sha256": "eba8c328e9b2a42e4678c3b4717ff9d3e7e7b374c165fa14b7683fb277e71384",
+  "started_at": "2026-10-03T20:21:04.660920+00:00",
+  "completed_at": "2026-10-03T20:21:04.871864+00:00",
+  "exit_code": 0,
+  "output": "........................\n----------------------------------------------------------------------\nRan 24 tests in 0.080s\n\nOK\n",
+  "output_sha256": "0a0e50efbb3ebb9953565c8f7483922d3e9e74e2a8de3c7eb94663ea77bf2d67",
+  "test_count": 24,
+  "data_kind": "synthetic_non_resolving_shape_objects_only",
+  "owner_reference_resolution": false,
+  "arithmetic_validation": false,
+  "rights_admission_validation": false,
+  "clock_ordering_validation": false,
+  "i3_acceptance": false,
+  "production_proof": false
+}

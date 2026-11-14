@@ -1,0 +1,41 @@
+{
+  "archive_sha256": "a02aec7db76da6a145c35c078182c90c2b257cf850afab912babf602edbd467f",
+  "command": [
+    "/opt/homebrew/opt/python@3.14/bin/python3.14",
+    "-m",
+    "pytest",
+    "-c",
+    "/dev/null",
+    "--noconftest",
+    "-p",
+    "no:cacheprovider",
+    "-q",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_required_governed_aapl_values",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_unlinked_vintages_are_not_evaluable",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_pit_cutoffs_hide_future_knowledge",
+    "tests/test_fundamental_forensics_ixbrl_raw_ledger.py::test_statement_query_reconciliation_for_direct_metrics"
+  ],
+  "completed_at": "2026-10-03T19:43:28.685507+00:00",
+  "exit_code": 1,
+  "harness_change": "Add exact same-pin canonical security master omitted from the isolated input snapshot; no synthetic issuer binding.",
+  "i3_acceptance": false,
+  "kind": "read_only_owner_input_preflight",
+  "observed_result": "4 FAILED at provider admission: issuer_master missing from snapshot",
+  "prior_attempt_receipts": [
+    "pytest-attempt-1.json",
+    "pytest-attempt-2.json"
+  ],
+  "production_proof": false,
+  "python": "3.14.7 (main, Aug  5 2026, 10:29:49) [Clang 21.0.0 (clang-2100.1.1.101)]",
+  "restored_input": {
+    "bytes": 79371,
+    "path": "data/reference/security_master.parquet",
+    "sha256": "ed45e4a4f9e17cc91da1a382ebeffbb1e73ae4d9fb2556036eb4efedb5b30158",
+    "source_commit": "37122b69fffa98cb160022c4831df0338ef3e7e3"
+  },
+  "source_commit": "37122b69fffa98cb160022c4831df0338ef3e7e3",
+  "source_or_tests_modified": false,
+  "started_at": "2026-10-03T19:43:26.690355+00:00",
+  "stdout_bytes": 9087,
+  "stdout_sha256": "210abe2e534f2a924af6ff175ea27f445f63b8047dc0f2aa6d5450930736ba86"
+}

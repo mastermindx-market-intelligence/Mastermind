@@ -1,0 +1,69 @@
+{
+  "child_carrier": "Mastermind#1195",
+  "comparison_id": "i3devcmp_75b3515ed838ab4f97ac8ed9",
+  "file_sha256": {
+    "COMPARATOR_DEFINITION_CANDIDATE.json": "9ed1d94937fda6755caecdb04fcc4c6777b91762a9d9ebaea5bdedbff6b02209",
+    "baseline_replay.py": "196732a08c42c2a76328295e3cffbe051b3618a6cff1975ea7d147a2870b4896",
+    "corpus_preselection_protocol.py": "14e73eee775cfdba6085997ac01e033d0aea0e54abc00dd32e4147f2f447d0ef",
+    "equal_duration_comparison.py": "e7c7536e904ad9f5a2e772d6c6bf5e42a6713e81bd56cdb01d1519c959c8779d",
+    "evidence/CORPUS_IDENTITY_QUALIFICATION.json": "5d581797edbf27e680595df10d64a61e26403734584f97c5aad9f245407bba58",
+    "evidence/equal-duration-comparison/result.json": "fb4271bd63437dfc11d8fc6ccf711efca35824cb4b88413c064ca45e6171de6f",
+    "test_baseline_replay.py": "d0afe64136efd7217d20b42a66c297b640460d8aacc4ed61c67a208967888364",
+    "test_comparator_policy.py": "439f12e17f3e366d73c61c74db3c120c4d05d5811a08f470ec2132b398c247ef",
+    "test_corpus_identity_qualification.py": "00e30d2c1aafec1a8f1b945a10df3d6d0dff9c2e1cbde64140cac07a60528346",
+    "test_corpus_preselection_protocol.py": "b0b506e5e738943badb6b001fa50339117a03fbac7a33b5c7d1b45825c8e92b9",
+    "test_equal_duration_comparison.py": "c1b6c154aa0d98a14e64a29ee13759ea3126b0ab22a631dfef4dfaf1b1a93caf"
+  },
+  "kind": "i3_equal_duration_comparison_development_receipt_r2",
+  "macro_contract_pin": "94e5865e13fc42063f9c7d1e9b485958ccaee5b1",
+  "maturity": {
+    "annual_or_yoy_claim_permitted": false,
+    "comparison_admitted": false,
+    "independent_review_accepted": false,
+    "owner_typed_annual": false,
+    "product_publication_admitted": false,
+    "production_proof": false,
+    "trial_registered": false
+  },
+  "operation_id": "i3-w0-issuer-inflection-20261003-astra-c4",
+  "owner_contract_hardening": {
+    "declared_entity_metric_period_membership_bound": true,
+    "issuer_chain_bound": true,
+    "proof_scope_bound": true,
+    "query_hash_recomputed": true,
+    "reason_provenance_bound": true,
+    "receipt_schema_bound": true,
+    "selection_proof_bound": true,
+    "shared_validator": "baseline_replay.owner_snapshot",
+    "status_state_bound": true
+  },
+  "owner_entity_id": "0000320193",
+  "owner_response_sha256": "a752302d0d11457920be1425cb9ebb6d1f29560b7f1e8f41a5de98075083c6af",
+  "parent_carrier": "Mastermind#1183",
+  "protected_master_observed": "17b9fa1363db6071d338be3373a4fdb11fc0076d",
+  "recorded_at": "2026-10-04T08:52:01.635205+00:00",
+  "relationship_state": "descriptive_equal_duration_source_intervals",
+  "reported_value_result": {
+    "absolute_change": "25126000000",
+    "current_value": "416161000000",
+    "inferred_week_count": 52,
+    "interval_days": 364,
+    "prior_value": "391035000000",
+    "relative_change_exact": {
+      "denominator": "78207",
+      "numerator": "502520"
+    },
+    "relative_change_percent_display": "6.43"
+  },
+  "source_head_before_increment": "449ec36240d5aab72778c6e7b5317882aca43437",
+  "tests": {
+    "baseline_replay": 52,
+    "candidate_schema": 29,
+    "comparator_policy": 17,
+    "corpus_identity_qualification": 10,
+    "corpus_preselection_protocol": 4,
+    "equal_duration_comparator": 22,
+    "source_binding": 15,
+    "verified_reader": 26
+  }
+}
