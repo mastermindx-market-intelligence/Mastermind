@@ -1,0 +1,13 @@
+{
+  "schema": "mastermind.codex_computer_use_policy.v1",
+  "apps": [
+    {
+      "bundle_id": "com.apple.calculator",
+      "display_name": "Calculator",
+      "elicitation": "Allow ChatGPT to use Calculator?",
+      "read": true,
+      "write": false,
+      "preapproved": true
+    }
+  ]
+}
