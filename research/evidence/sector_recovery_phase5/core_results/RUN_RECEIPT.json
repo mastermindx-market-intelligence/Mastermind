@@ -1,0 +1,9 @@
+{
+  "status": "COMPLETE",
+  "core_accounts": 16,
+  "fixed_mixtures": 96,
+  "initial_mixture_weight": 0.5,
+  "outcome_guided_exploratory_extension": true,
+  "may_trade": false,
+  "source_sha256": "c50f0379e6c321d03f64868c91c50fdeff425dd4de45106aa6fec170bb2daca6"
+}

@@ -1,0 +1,731 @@
+{
+  "cases": 90,
+  "positive_cases": {
+    "T1": 3,
+    "T2": 5
+  },
+  "records": [
+    {
+      "segment": "pre",
+      "ticker": "XLB",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLB",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLB",
+      "prefix_rows": 1200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLB",
+      "prefix_rows": 1800,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLB",
+      "prefix_rows": 2400,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLB",
+      "prefix_rows": 3200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLB",
+      "prefix_rows": 4100,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLB",
+      "prefix_rows": 5000,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLE",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLE",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLE",
+      "prefix_rows": 1200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLE",
+      "prefix_rows": 1800,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLE",
+      "prefix_rows": 2400,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLE",
+      "prefix_rows": 3200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLE",
+      "prefix_rows": 4100,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLE",
+      "prefix_rows": 5000,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLF",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLF",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLF",
+      "prefix_rows": 1200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLF",
+      "prefix_rows": 1800,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLF",
+      "prefix_rows": 2400,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLF",
+      "prefix_rows": 3200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLF",
+      "prefix_rows": 4100,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLF",
+      "prefix_rows": 5000,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLI",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLI",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLI",
+      "prefix_rows": 1200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLI",
+      "prefix_rows": 1800,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLI",
+      "prefix_rows": 2400,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLI",
+      "prefix_rows": 3200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLI",
+      "prefix_rows": 4100,
+      "tier": null,
+      "eligible": true,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLI",
+      "prefix_rows": 5000,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLK",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLK",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLK",
+      "prefix_rows": 1200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLK",
+      "prefix_rows": 1800,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLK",
+      "prefix_rows": 2400,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLK",
+      "prefix_rows": 3200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLK",
+      "prefix_rows": 4100,
+      "tier": null,
+      "eligible": true,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLK",
+      "prefix_rows": 5000,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLP",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLP",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLP",
+      "prefix_rows": 1200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLP",
+      "prefix_rows": 1800,
+      "tier": "T2",
+      "eligible": true,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLP",
+      "prefix_rows": 2400,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLP",
+      "prefix_rows": 3200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLP",
+      "prefix_rows": 4100,
+      "tier": "T2",
+      "eligible": true,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLP",
+      "prefix_rows": 5000,
+      "tier": "T1",
+      "eligible": true,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLU",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLU",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLU",
+      "prefix_rows": 1200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLU",
+      "prefix_rows": 1800,
+      "tier": "T3",
+      "eligible": true,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLU",
+      "prefix_rows": 2400,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLU",
+      "prefix_rows": 3200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLU",
+      "prefix_rows": 4100,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLU",
+      "prefix_rows": 5000,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLV",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLV",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLV",
+      "prefix_rows": 1200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLV",
+      "prefix_rows": 1800,
+      "tier": "T2",
+      "eligible": true,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLV",
+      "prefix_rows": 2400,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLV",
+      "prefix_rows": 3200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLV",
+      "prefix_rows": 4100,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLV",
+      "prefix_rows": 5000,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLY",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLY",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLY",
+      "prefix_rows": 1200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLY",
+      "prefix_rows": 1800,
+      "tier": "T2",
+      "eligible": true,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLY",
+      "prefix_rows": 2400,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLY",
+      "prefix_rows": 3200,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLY",
+      "prefix_rows": 4100,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "pre",
+      "ticker": "XLY",
+      "prefix_rows": 5000,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLB",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": true,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLB",
+      "prefix_rows": 850,
+      "tier": "T2",
+      "eligible": true,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLE",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLE",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLF",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLF",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLI",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLI",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLK",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLK",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLP",
+      "prefix_rows": 600,
+      "tier": "T1",
+      "eligible": true,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLP",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLU",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLU",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLV",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLV",
+      "prefix_rows": 850,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLY",
+      "prefix_rows": 600,
+      "tier": null,
+      "eligible": false,
+      "decision_equal": true
+    },
+    {
+      "segment": "post",
+      "ticker": "XLY",
+      "prefix_rows": 850,
+      "tier": "T1",
+      "eligible": true,
+      "decision_equal": true
+    }
+  ],
+  "native_pin": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+  "full_chart_payload_parity_claimed": false
+}

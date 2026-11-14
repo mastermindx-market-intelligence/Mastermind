@@ -1,0 +1,24 @@
+{
+  "source": "incumbent_fred_BAMLH0A0HYM2",
+  "original_sha256": "f5e475c5bd8e2115d436fd3c3d6b7b288ac3a157739f99e67f34ec3e606a8b8f",
+  "captured_at": "2026-11-14T08:35:37.396381+00:00",
+  "historical_published_at": null,
+  "history_vintage": "current_incumbent_snapshot",
+  "raw_history_publication": false,
+  "snapshots": [
+    {
+      "segment": "pre",
+      "rows": 6003,
+      "snapshot_sha256": "8ec10141e2319b6c64099442b8a5ecce8b8cf5f236c851b26af9a85e094bc92d",
+      "first": "1996-12-31",
+      "last": "2019-12-31"
+    },
+    {
+      "segment": "post",
+      "rows": 900,
+      "snapshot_sha256": "af48d97d23dc77fad40467dba4ecca1cc9e6543170743598e364d6afec143f2a",
+      "first": "2023-06-01",
+      "last": "2026-11-05"
+    }
+  ]
+}

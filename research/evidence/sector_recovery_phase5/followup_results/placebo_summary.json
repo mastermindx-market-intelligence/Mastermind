@@ -1,0 +1,54 @@
+[
+  {
+    "segment": "pre",
+    "horizon": 21,
+    "actual_cagr": 0.03716312168261693,
+    "actual_sharpe": 0.6733620117123268,
+    "placebo_cagr_median": 0.022173473030274393,
+    "placebo_cagr_05_95": [
+      0.0073276890233966675,
+      0.03359697192472437
+    ],
+    "fraction_at_least_actual": 0.015625,
+    "not_a_confirmatory_p_value": true
+  },
+  {
+    "segment": "pre",
+    "horizon": 63,
+    "actual_cagr": 0.050974654110726325,
+    "actual_sharpe": 0.6001739280080622,
+    "placebo_cagr_median": 0.044365411547208966,
+    "placebo_cagr_05_95": [
+      0.026687272695561128,
+      0.05662324542840477
+    ],
+    "fraction_at_least_actual": 0.171875,
+    "not_a_confirmatory_p_value": true
+  },
+  {
+    "segment": "post",
+    "horizon": 21,
+    "actual_cagr": 0.04020521695856494,
+    "actual_sharpe": 1.2507784932309491,
+    "placebo_cagr_median": 0.018878473125676476,
+    "placebo_cagr_05_95": [
+      -0.00431059977267244,
+      0.048317974037284765
+    ],
+    "fraction_at_least_actual": 0.1875,
+    "not_a_confirmatory_p_value": true
+  },
+  {
+    "segment": "post",
+    "horizon": 63,
+    "actual_cagr": 0.05312439825454329,
+    "actual_sharpe": 1.237801820794199,
+    "placebo_cagr_median": 0.048704553914921456,
+    "placebo_cagr_05_95": [
+      0.02153707454130982,
+      0.0945026733345859
+    ],
+    "fraction_at_least_actual": 0.390625,
+    "not_a_confirmatory_p_value": true
+  }
+]

@@ -1,0 +1,45 @@
+{
+  "macro_pin": "6bbc4b0fc694c847077661ff5bf4c19ea41e4e81",
+  "files": {
+    "engine/confluence_tiers.py": {
+      "sha256": "ac0fda6d5ea30d35ad404c84eb848a176c872af42567937cd00adcdb49a51f65",
+      "bytes": 58981
+    },
+    "engine/signal_gate.py": {
+      "sha256": "8ac545beb3d9cd1164069bd4850c2406e7f2ea88f972c6382490896653dff2fb",
+      "bytes": 44184
+    },
+    "engine/signal_quality.py": {
+      "sha256": "70eaddae38aefe8be41f9fe41cbe245b4e5f67350717c5c1eb8464eff2b0733a",
+      "bytes": 57460
+    },
+    "engine/session_anchor.py": {
+      "sha256": "1da03cb44684e4b0f91710c7279e3fff40d2344e253ab83473a83f7e2afa5c3f",
+      "bytes": 9996
+    },
+    "engine/technicals.py": {
+      "sha256": "83e90996d3f6eb58162cc6005ac292116ae784332700ef5323b381d495269739",
+      "bytes": 11329
+    },
+    "engine/hysteresis.py": {
+      "sha256": "49eeeccf6f02110e11e57a4f5fd6b82de4d1c804157dc9a9605cf40dd5eca6a7",
+      "bytes": 7125
+    },
+    "lib/nyse_calendar.py": {
+      "sha256": "7c9167fd416babb64c3067ae7e6237615011ad79e26d826e57005486496410ce",
+      "bytes": 29814
+    },
+    "lib/config.py": {
+      "sha256": "fa22ec934ec5294072b6bb4bf081d787f3f8ad5da4702ce3f4818b1674dbd53f",
+      "bytes": 1131
+    },
+    "engine/__init__.py": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "lib/__init__.py": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  }
+}

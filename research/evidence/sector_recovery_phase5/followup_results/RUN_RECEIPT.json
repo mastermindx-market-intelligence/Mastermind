@@ -1,0 +1,13 @@
+{
+  "status": "COMPLETE",
+  "new_accounts": 120,
+  "exposure_controls": 16,
+  "date_cluster_controls": 256,
+  "all_original_accounts_unchanged": true,
+  "outcome_guided_followup": true,
+  "may_trade": false,
+  "source_sha256": {
+    "experiment.py": "2cce3c537ecff36f8d3def01507b1d7ca3f9a45d9dd7b356a90c4d24978ae7a0",
+    "robustness.py": "5ddc9f19b5b5d0fce9b51742d7d68d75980f9dcb40ed9be478014d28bec15ed3"
+  }
+}

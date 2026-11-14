@@ -1,0 +1,14 @@
+era,phase,lag,evaluation_sessions,valid_credit_sessions,historical_availability_proven
+2007_2019,0,1,3272,3212,False
+2007_2019,0,2,3272,3212,False
+2007_2019,0,5,3272,3212,False
+2001_2006,0,2,1507,1507,False
+2007_2019,1,2,3272,3212,False
+2001_2006,1,2,1507,1507,False
+2007_2019,2,2,3272,3212,False
+2001_2006,2,2,1507,1507,False
+post_reset,0,1,360,359,False
+post_reset,0,2,360,360,False
+post_reset,0,5,360,360,False
+post_reset,1,2,360,360,False
+post_reset,2,2,360,360,False

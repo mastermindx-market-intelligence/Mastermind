@@ -1,0 +1,9 @@
+{
+  "status": "COMPLETE",
+  "accounts": 258,
+  "outcome_guided_exploratory": true,
+  "source_sha256": "6ca63a89b58f4eb43eec1efd9d72394d3bc6ffc286bac02665c063bcff0f962e",
+  "primary_credit_delay_sessions": 2,
+  "historical_availability_proven": false,
+  "may_trade": false
+}
