@@ -70,7 +70,7 @@ class _AuthorizedStore:
 
 class RuntimeReplyEventHost:
     def __init__(self, returns, cipher, policies, *, clock, enabled=False, resolver=None,
-                 connector=None, canary_policy_provider=None):
+                 connector=None, canary_policy_provider=None, native_monitor_enabled=False):
         if (type(returns) is not RuntimeSessionReturn or type(cipher) is not ExecutiveReplyCipher
                 or not isinstance(policies,ReplyPolicySelection) or type(enabled) is not bool
                 or not callable(clock)):
@@ -98,6 +98,27 @@ class RuntimeReplyEventHost:
             resolver=resolver,connector=connector,audience_owner=self.audiences)
         self.ingress = ReplyEventIngressOwner(self.runtime,self.validate_frame,self.handle_frame)
         self.consumer = ReplyEventCommitConsumer(self.runtime,self.handle_committed)
+        if type(native_monitor_enabled) is not bool:
+            raise TypeError("Native return observation requires explicit selection")
+        self.t3_monitor = None
+        if native_monitor_enabled:
+            if not enabled or returns.t3_replies is None:
+                raise ValueError("Native return observation requires its existing armed source")
+            from .t3_reply_monitor import RuntimeT3ReplyMonitor
+            self.t3_monitor = RuntimeT3ReplyMonitor(self)
+
+    async def start_native_returns(self):
+        if self.t3_monitor is None:
+            return {"state": "NOT_SELECTED", "native_inference_started": False}
+        try:
+            return await self.t3_monitor.reconcile()
+        except Exception:
+            self.t3_monitor.last_error = "ORIGINAL_NATIVE_OBSERVATION_UNAVAILABLE"
+            return {"state": "UNAVAILABLE", "native_inference_started": False}
+
+    async def close_native_returns(self):
+        if self.t3_monitor is not None:
+            await self.t3_monitor.close()
 
     def validate_frame(self, frame):
         if (type(frame) is not dict or set(frame) != {"schema","operation","principal","arguments","source_policy_sha256"}
@@ -165,27 +186,102 @@ class RuntimeReplyEventHost:
             else:
                 cls = EventSubscribeRequest if operation == "subscribe" else EventUnsubscribeRequest
                 data = dataclasses.asdict(await getattr(adapter,operation)(principal,cls(**frame["arguments"])))
+                if self.t3_monitor is not None:
+                    # The canonical subscribe/unsubscribe receipt is already
+                    # settled. Observer readiness is separate and inspectable;
+                    # an optional observer failure must not replay that write.
+                    await self.start_native_returns()
             return result(operation,data=data)
         except (SubscriptionUnavailable,ReplyPolicyDenied):
             return result(operation,code="subscription_unavailable")
         except Exception:
             return result(operation,code="effect_unknown" if operation in MODIFYING else "backend_unavailable")
 
+    async def observe_t3_reply(self, principal, request_ref):
+        """Installed native-event producer edge, not a public caller-supplied reply.
+
+        Native notifications are hints only. Re-read the exact authorized native
+        run, retain its digest in Runtime, then use the SAME subscription,
+        retained-policy, signature, reservation and delivery owners as other
+        canonical replies. No new listener, scheduler or automatic replay.
+        """
+        if not self.enabled or self.returns.t3_replies is None:
+            raise SubscriptionUnavailable("native T3 event producer is not enrolled")
+        source = self.returns.t3_replies
+        receipt = await source.observe(principal, request_ref)
+        observed = await source.read(principal, {"read_ref": receipt["read_ref"]})
+        projected = await source.project(principal, request_ref)
+        deliveries = await self.handle_committed(read_ref=receipt["read_ref"],
+            message_key=projected.event["data"]["message_key"],
+            fingerprint=observed["answer_sha256"])
+        return {"request_ref": request_ref, "read_ref": receipt["read_ref"],
+                "reply_committed": True, "deliveries": deliveries,
+                "parent_consumed": False}
+
+    async def observe_t3_terminal(self, principal, request_ref):
+        """Observed terminal status without a qualified answer is not success."""
+        if not self.enabled or self.returns.t3_replies is None:
+            raise SubscriptionUnavailable("native T3 terminal producer is not enrolled")
+        from .t3_terminal_reply import observe
+        source = self.returns.t3_replies
+        receipt = await observe(source, principal, request_ref)
+        value = await source.read(principal, {"read_ref": receipt["read_ref"], "message_key": receipt["message_key"]})
+        deliveries = await self.handle_committed(read_ref=receipt["read_ref"],
+            message_key=receipt["message_key"], fingerprint=value["terminal_sha256"])
+        return {"request_ref": request_ref, "read_ref": receipt["read_ref"], "message_key": receipt["message_key"],
+                "reply_committed": True, "native_terminal": True, "successful": False,
+                "deliveries": deliveries, "parent_consumed": False}
+
+    async def observe_t3_question(self, principal, request_ref, pending_request_id):
+        """Existing native producer -> exact pending question -> original subscriber.
+
+        A committed question is not a terminal reply or permission approval. Its
+        exact message key follows the delivery all the way to the canonical read.
+        An answered, changed, foreign-run or expired question cannot be sent.
+        """
+        if not self.enabled or self.returns.t3_replies is None:
+            raise SubscriptionUnavailable("native T3 question producer is not enrolled")
+        source = self.returns.t3_replies
+        receipt = await source.observe_question(principal, request_ref, pending_request_id)
+        observed = await source.read(principal, {"read_ref": receipt["read_ref"],
+                                                "message_key": receipt["message_key"]})
+        deliveries = await self.handle_committed(read_ref=receipt["read_ref"],
+            message_key=receipt["message_key"], fingerprint=observed["question_sha256"])
+        return {"request_ref": request_ref, "read_ref": receipt["read_ref"],
+                "message_key": receipt["message_key"], "reply_committed": True,
+                "run_complete": False, "deliveries": deliveries, "parent_consumed": False}
+
     async def handle_committed(self, *, read_ref, message_key, fingerprint):
+        from .t3_native_client import Unavailable as T3Unavailable, Conflict as T3Conflict
         if not self.enabled: return ()
         event, _ = self.returns._stored_request(read_ref)
         observations = []
         for ident in self.store.subscriptions_for_reply(event.command_id,read_ref):
             try:
                 audience = self.audiences.capture(ident)
-                binding = await self.returns.resolve_read(principal=self.audiences.current(audience),read_ref=read_ref)
-                if binding.reply_message_key != message_key or binding.reply_fingerprint != fingerprint:
-                    raise SubscriptionUnavailable("commit differs from canonical retained reply")
-                observations.append(await self.delivery.deliver_subscription(ident))
+                projection = self.audiences.current(audience)
+                from .t3_reply_events import is_t3_read_ref
+                selection = {}
+                if is_t3_read_ref(read_ref):
+                    source = self.returns.t3_replies
+                    if source is None:
+                        raise SubscriptionUnavailable("native T3 reply source is not enrolled")
+                    native = await source.read(projection, {"read_ref": read_ref, "message_key": message_key})
+                    projected = await source.project(projection, native["request_ref"], message_key=message_key)
+                    if (projected.event["data"]["message_key"] != message_key
+                            or native.get("answer_sha256", native.get("question_sha256", native.get("terminal_sha256"))) != fingerprint):
+                        raise SubscriptionUnavailable("native T3 commit differs from original response")
+                    selection = {"message_key": message_key}
+                else:
+                    binding = await self.returns.resolve_read(principal=projection,read_ref=read_ref)
+                    if binding.reply_message_key != message_key or binding.reply_fingerprint != fingerprint:
+                        raise SubscriptionUnavailable("commit differs from canonical retained reply")
+                observations.append(await self.delivery.deliver_subscription(ident, **selection))
             except ObservedReplyPolicyDenial as denial:
                 await self.audiences.revoke_observed(denial)
                 observations.append({"state":"NOT_SENT","parent_consumed":False})
-            except (SubscriptionUnavailable, ReplyDeliveryUnavailable, BoundedReplyAuthorizationUnavailable):
+            except (SubscriptionUnavailable, ReplyDeliveryUnavailable, BoundedReplyAuthorizationUnavailable,
+                    T3Unavailable, T3Conflict):
                 # Typed pre-send refusal, including an expired bounded
                 # authorization. No callback was attempted and no reservation
                 # was made.

@@ -160,7 +160,9 @@ test('configured gateway exposes typed Git tools with exact truthful annotations
     assert.equal(commit.annotations.destructiveHint, true);
     assert.equal(commit.annotations.idempotentHint, true);
     assert.equal(commit.annotations.openWorldHint, false);
-    assert.deepEqual(Object.keys(commit.inputSchema.properties).sort(), ['expected_head_sha', 'merge', 'message', 'operation_id']);
+    assert.deepEqual(Object.keys(commit.inputSchema.properties).sort(), ['expected_head_sha', 'index_recovery', 'merge', 'message', 'operation_id']);
+    assert.equal(commit.inputSchema.required.includes('index_recovery'), false);
+    assert.equal(commit.inputSchema.properties.index_recovery.additionalProperties, false);
     assert.equal(commit.inputSchema.required.includes('merge'), false);
     assert.equal(commit.inputSchema.properties.merge.additionalProperties, false);
     assert.deepEqual(commit.inputSchema.properties.merge.required,

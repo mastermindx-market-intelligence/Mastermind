@@ -1,0 +1,47 @@
+{
+  "schema": "mastermind.source_pin_qualification.v1",
+  "source_revision": "0979fbfe1d525d507ccf40409df581f90b790927",
+  "procedure_pin": "fc91f33ccce3e8f18c78546f03c955c2ced0c704",
+  "review": "SELF_REVIEWED",
+  "unchanged_anchors": {
+    "scripts/executive_os_phase1c.py": {
+      "source_sha256": "75b54b59fbe00163e52bbc389e843c74f387af206bfeb6771093229856266b1b",
+      "unchanged_anchor_sha256": {
+        "serve_installed_control": "060525ac61b01452e7a84397f0e68ab4be9c0a05f6dac560113bce8180adc819"
+      }
+    },
+    "control_plane/executive_service.py": {
+      "source_sha256": "99171953900c4bbb2875ff871cf62305601be7ccf243a989fbfbe35f021e79a2",
+      "unchanged_anchor_sha256": {
+        "_bind_company_consultation_server": "01c585ea0efc7e2ba1a09f68ceac6962a74d72e572c10343af4dcf1fdf930236",
+        "_handle_ceo_ingress_connection": "27f53e5690ad71c86f01f2ad657535aa022e0565472fef95ee773fc8c7837eaf"
+      }
+    }
+  },
+  "catalog_literal_sites": [
+    [
+      6058,
+      66,
+      69,
+      "int",
+      403
+    ],
+    [
+      6071,
+      74,
+      77,
+      "int",
+      403
+    ],
+    [
+      6073,
+      75,
+      78,
+      "int",
+      503
+    ]
+  ],
+  "qualification_command_change": "add both scoped T3 gateway tests to the incumbent expected step; remove no checks",
+  "native_execution": false,
+  "independent_approval": false
+}

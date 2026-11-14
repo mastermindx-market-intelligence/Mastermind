@@ -162,7 +162,8 @@ class RuntimeSessionReturn:
     def __init__(self, runtime: Runtime, *, fabric: RuntimeFabricTargetProjector,
                  codex: RuntimeCodexTargetProjector, socket_path: Path,
                  service_call=call_service, authorized_policies: AppPolicies | None = None,
-                 reference_cursor_key: bytes | None = None, hermes: Any | None = None):
+                 reference_cursor_key: bytes | None = None, hermes: Any | None = None,
+                 t3_replies: Any | None = None):
         if (type(runtime) is not Runtime or type(fabric) is not RuntimeFabricTargetProjector
                 or type(codex) is not RuntimeCodexTargetProjector
                 or not Path(socket_path).is_absolute() or not callable(service_call)):
@@ -170,7 +171,11 @@ class RuntimeSessionReturn:
         from .hermes_native import HermesNativeSession
         if hermes is not None and type(hermes) is not HermesNativeSession:
             raise TypeError("installed native Secretary owner required")
-        self.hermes = hermes
+        from .t3_reply_events import T3OriginalReplySource
+        if t3_replies is not None and (type(t3_replies) is not T3OriginalReplySource
+                                      or t3_replies.runtime is not runtime):
+            raise TypeError("exact existing Runtime T3 original-return source required")
+        self.hermes, self.t3_replies = hermes, t3_replies
         self.runtime, self.fabric, self.codex = runtime, fabric, codex
         self.socket_path, self.service_call = Path(socket_path), service_call
         self._trusted_read_pair = _trusted_read_pair(authorized_policies)
@@ -813,6 +818,11 @@ class RuntimeSessionReturn:
                               "original continuation could not be reconciled") from None
 
     def _stored_request(self, read_ref: str):
+        from .t3_reply_events import is_t3_read_ref, stored_t3_request
+        if is_t3_read_ref(read_ref):
+            if self.t3_replies is None:
+                raise BridgeError("source_unavailable", "native T3 return source is not enrolled")
+            return stored_t3_request(self.runtime, read_ref)
         return stored_continuation_request(self.runtime, read_ref)
 
     def _request(self, read_ref: str):
@@ -912,6 +922,11 @@ class RuntimeSessionReturn:
         cannot grant fresh subscriptions using a retired writer's provenance.
         """
         from .web_reply_subscription_owner import OriginalReplyGrant, owner_key
+        from .t3_reply_events import is_t3_request_ref
+        if is_t3_request_ref(request_ref):
+            if self.t3_replies is None:
+                raise BridgeError("source_unavailable", "native T3 return source is not enrolled")
+            return await self.t3_replies.resolve(principal, request_ref)
 
         try:
             identity = _principal(principal)

@@ -9,6 +9,7 @@ from __future__ import annotations
 import subprocess
 import json
 import plistlib
+import shlex
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -97,6 +98,14 @@ def _write_executable(path: Path, source: str) -> Path:
     path.write_text(source, encoding="utf-8")
     path.chmod(0o755)
     return path
+
+
+def _write_python_shim(path: Path, source: str, *, executable: str | None = None) -> Path:
+    """Keep interpreter and fixture paths with spaces out of a kernel shebang."""
+    payload = path.with_name(path.name + "-source.py")
+    payload.write_text(source, encoding="utf-8")
+    return _write_executable(path, "#!/bin/bash\nexec " + shlex.quote(executable or sys.executable)
+                             + " " + shlex.quote(str(payload)) + ' "$@"\n')
 
 
 def _native_shims(tmp_path: Path) -> dict[str, Path]:
@@ -1368,7 +1377,7 @@ def _qualified_gateway_run(tmp_path, plan, *, changes=None, config_changes=None,
                               '#!/bin/bash\nexec /usr/bin/plutil "$@"\n')
             return
         shim = tmp_path / "native-shims" / "plutil"
-        shim.write_text("#!" + sys.executable + "\n" + r'''import sys,json,plistlib
+        _write_python_shim(shim, r'''import sys,json,plistlib
 from pathlib import Path
 args=sys.argv[1:]
 try:
@@ -1980,3 +1989,17 @@ def test_control_resume_wrapper_rejects_incomplete_or_unbound_argv(tmp_path, ext
     result, argv, _ = _component_run(tmp_path, "resume-control-component", extra)
     code, _, _, calls, remaining, *_ = result
     assert code == 64 and argv is None and not calls and not remaining
+
+
+def test_python_fixture_shim_supports_spaced_interpreter_and_script_paths(tmp_path):
+    spaced = tmp_path / 'fixture paths with spaces'
+    spaced.mkdir()
+    interpreter = spaced / 'python with spaces'
+    interpreter.symlink_to(sys.executable)
+    shim = _write_python_shim(spaced / 'parser shim',
+        'import json,sys\nprint(json.dumps(sys.argv[1:]))\n', executable=str(interpreter))
+    result = subprocess.run([str(shim), 'argument with spaces', "quote'and;literal"],
+                            capture_output=True, text=True, check=False, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == ['argument with spaces', "quote'and;literal"]
+    assert shim.read_text().splitlines()[0] == '#!/bin/bash'

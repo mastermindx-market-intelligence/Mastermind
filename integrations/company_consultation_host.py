@@ -172,6 +172,7 @@ class CompanyConsultationHost:
             raise TypeError("native return arm must be boolean")
         self.native_return_armed = native_return_armed
         self.reply_event_consumer = None
+        self.reply_event_host = None
         if reply_event_host is not None:
             from integrations.session_bridge.installed_reply_events import RuntimeReplyEventHost
             if type(reply_event_host) is not RuntimeReplyEventHost or reply_event_host.runtime is not runtime:
@@ -180,6 +181,7 @@ class CompanyConsultationHost:
                 if native_return_armed is not True:
                     raise ValueError("reply events require existing native return composition")
                 self.reply_event_consumer = reply_event_host.consumer
+                self.reply_event_host = reply_event_host
         self.runtime = runtime
         self.repository_root = Path(repository_root).resolve(strict=True)
         self.worker_uid, self.relay_socket_path = worker_uid, path

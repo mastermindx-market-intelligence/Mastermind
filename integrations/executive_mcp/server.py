@@ -1988,6 +1988,7 @@ def build_web_ceo_v3_mcp_app(
     session_reply_handler: Any,
     session_summon_handler: Any,
     session_reply_read_tool=None,
+    t3_return_tools=None,
     reply_event_rpc=None,
     session_reply_references_tool=None,
     session_web_read_tools=None,
@@ -2070,6 +2071,14 @@ def build_web_ceo_v3_mcp_app(
                     "reply read must read the same installed Session Bridge client"
                 )
         configuration = session_reply_read_tool.extend_host_configuration(configuration)
+    if t3_return_tools is not None:
+        from integrations.session_bridge.t3_return_tools import T3ReturnTools
+        if (type(t3_return_tools) is not T3ReturnTools or session_reply_read_tool is None
+                or getattr(getattr(session_reply_read_tool, "_reader", None), "__self__", None) is not t3_return_tools.client):
+            raise TypeError("original T3 returns must share the exact installed canonical reply client")
+        if reply_event_rpc is None:
+            raise ValueError("original T3 return tools require the authenticated event receiver")
+        configuration = t3_return_tools.extend_host_configuration(configuration)
     if reply_event_rpc is not None:
         # Callback notifications must point to the same authenticated
         # canonical read tool, never a second full-result endpoint.
@@ -2103,6 +2112,7 @@ def build_web_ceo_v3_with_coo_mcp_app(
     session_reply_handler: Any,
     session_summon_handler: Any,
     session_reply_read_tool=None,
+    t3_return_tools=None,
     reply_event_rpc=None,
     session_reply_references_tool=None,
     workspace_app=None,
@@ -2148,6 +2158,7 @@ def build_web_ceo_v3_with_coo_mcp_app(
         session_reply_handler=session_reply_handler,
         session_summon_handler=session_summon_handler,
         session_reply_read_tool=session_reply_read_tool,
+        t3_return_tools=t3_return_tools,
         reply_event_rpc=reply_event_rpc,
         session_reply_references_tool=session_reply_references_tool,
         workspace_app=workspace_app,

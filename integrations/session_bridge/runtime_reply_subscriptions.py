@@ -212,10 +212,10 @@ class RuntimeReplySubscriptionStore:
         semantic = {"previous": expected_version, "record": metadata, "binding": binding, "kind": "REPLY_SUBSCRIPTION_COMMITTED"}
         associated = {"metadata": metadata, "previous": expected_version, "binding": binding}
         if authorization is not None:
-            from control_plane.native_continuation import stored_continuation_request
+            from .t3_reply_events import stored_original_reply_request
             from .installed import _principal
             from .web_reply_subscription_owner import owner_key
-            event, value = stored_continuation_request(self._runtime, record.read_ref)
+            event, value = stored_original_reply_request(self._runtime, record.read_ref)
             if (type(authorization) is not dict or authorization.get("request_ref") != record.request_ref
                     or authorization.get("read_ref") != record.read_ref or authorization.get("expires_at") != record.expires_at
                     or authorization.get("request_event_sha256") != _hash(event.to_dict())
@@ -280,6 +280,26 @@ class RuntimeReplySubscriptionStore:
         if type(value) is not dict:
             raise ValueError("legacy subscription has no retained authorization")
         return snapshot, json.loads(_json(value))
+
+    def active_subscriptions(self, *, limit=128):
+        """Bounded restart projection from this incumbent store, not a registry.
+
+        Contains no callback URL, key or retained authorization bytes. Consumers
+        must capture and revalidate each original audience before using a row.
+        """
+        if type(limit) is not int or not 1 <= limit <= 256:
+            raise ValueError("bounded subscription projection required")
+        events = self._store.list_events(aggregate_type=_AGGREGATE)
+        if len(events) > _MAX_HISTORY:
+            raise ValueError("subscription projection exceeds retained history bound")
+        now, rows = self._now(), []
+        for ident in sorted({event.aggregate_id for event in events}):
+            snapshot, _, _ = self._state(ident)
+            if snapshot.record is not None and now < snapshot.record.expires_at:
+                rows.append(snapshot.record)
+                if len(rows) > limit:
+                    raise ValueError("active subscription projection exceeds bound")
+        return tuple(rows)
 
     def subscriptions_for_reply(self, request_ref, read_ref):
         # Existing event owner only; no new index/database/queue. Refuse an

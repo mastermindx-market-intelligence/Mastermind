@@ -41,17 +41,17 @@
       "path": "apps/server/src/mcp/AcpMcpStdioBridge.ts"
     },
     {
-      "after_sha256": "5264f689409b443624a6380327b5501a47e8695af10a0d7da85b5cee3948f876",
+      "after_sha256": "daeeb70365f0bf5fd1168cc149c26b2bb306f7d044d25e6f8d3258edf2b82457",
       "before_sha256": null,
       "path": "apps/server/src/mcp/toolkits/thread/handlers.test.ts"
     },
     {
-      "after_sha256": "18ff6594a47f2c20b936143fe004c6001ddef49b014a734bb5cff740203ef8f9",
+      "after_sha256": "f9160308663819a78aa11c6ec1876169094a239ee3f26c50540b29f715338a1f",
       "before_sha256": "5d59fa9fdac547c69870e19f23bb02e0799203ac5bc3e60b3efcd4131e76bcb3",
       "path": "apps/server/src/mcp/toolkits/thread/handlers.ts"
     },
     {
-      "after_sha256": "e115e61408ae3a8e6fcac9a04cf00e5a97c081641a7a890fec833433ea1ba9b1",
+      "after_sha256": "a584fc5812c2ee9e5f0454d13ad142fbd69f3b3ff9a93feb1950fb2da809941f",
       "before_sha256": "2197e8ededd75df3fd94d57e993f3fe405203418774cddf10738fbf5c31b2a05",
       "path": "apps/server/src/mcp/toolkits/thread/tools.ts"
     },
@@ -93,7 +93,7 @@
     }
   },
   "output_kind": "affected-source-files-only; not a standalone server or runtime installation",
-  "patch_sha256": "60357937f08597de7229b84258c33430a190a35bfb244c2546837732bf5d2a0f",
+  "patch_sha256": "a53d84f5adf745c8563029dff2fc55405c6f6bfb4f84668351a384dc0efcbb0f",
   "runtime_effects": "none; existing runtime owner must reconcile loaded source, apply and validate the release separately",
   "schema": "mastermind.t3-agent-bus-native-overlay.v1",
   "upstream_repository": "pingdotgg/t3code",

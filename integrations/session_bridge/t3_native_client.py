@@ -812,6 +812,30 @@ class T3NativeClient:
             raise Conflict("Native pending-question identity or shape differs")
         return value
 
+    async def read_question_for_run(self, run: Run, request_id: str) -> dict:
+        """Read a pending question only with native original-run provenance.
+
+        Older native servers return question text without its run identity. They
+        remain usable for explicit thread-scoped reads, but cannot authorize an
+        asynchronous original-parent notification. Never infer this join from
+        the thread's latest or active run.
+        """
+        if type(run) is not Run:
+            raise ValueError("Exact original native run required")
+        self._target(run.thread)
+        state = await self.wait(run, timeout_ms=1)
+        if state.get("status") in {"completed", "failed", "interrupted", "cancelled"}:
+            raise Unavailable("Original native run is no longer awaiting input")
+        value = await self.read_question(run.thread, request_id)
+        if (value.get("threadId") != run.thread.thread_id
+                or value.get("runId") != run.run_id
+                or value.get("kind") != "user_input"
+                or value.get("status") != "pending"):
+            raise Conflict("Native question lacks exact original-run provenance")
+        if not value["questions"] or len(_json(value)) > 20 * 1024:
+            raise Unavailable("Native question exceeds the canonical reply budget")
+        return value
+
     async def answer_question(self, thread: Thread, *, request_id: str,
                               operation_id: str, answers: Mapping[str, Any]) -> dict:
         """Respond to an actual user-input question, NEVER grant native approval.

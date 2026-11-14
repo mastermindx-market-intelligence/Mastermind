@@ -104,6 +104,12 @@ def _principal(value: Any) -> NeutralPrincipalProjection:
 
 
 def _validate_arguments(tool, arguments):
+    if tool in {"session_t3_return_link", "session_t3_return_status"}:
+        from .t3_return_tools import validate_return_arguments
+        try:
+            return validate_return_arguments(tool, arguments)
+        except (ValueError, TypeError, KeyError):
+            raise BridgeError("invalid_input", "exact original T3 return arguments required") from None
     if tool == "session_web_census":
         if type(arguments) is not dict or arguments:
             raise BridgeError("invalid_input", "profile census takes no selectors")
@@ -151,6 +157,7 @@ class InstalledSessionBridgeProvider:
         reply_read_handler: Callable | None = None,
         reference_handler: Callable | None = None,
         web_census_handler: Callable | None = None,
+        t3_return_handler: Callable | None = None,
     ) -> None:
         for name, value in (
             ("target_projector", target_projector),
@@ -171,6 +178,9 @@ class InstalledSessionBridgeProvider:
         if web_census_handler is not None and not callable(web_census_handler):
             raise TypeError("profile census handler must be callable")
         self._web_census_handler = web_census_handler
+        if t3_return_handler is not None and not callable(t3_return_handler):
+            raise TypeError("original T3 return handler must be callable")
+        self._t3_return_handler = t3_return_handler
 
     async def handle_frame(self, frame: Any) -> dict[str, Any]:
         tool, principal, arguments = validate_private_frame(frame)
@@ -200,6 +210,10 @@ class InstalledSessionBridgeProvider:
                 if self._web_census_handler is None:
                     raise BridgeError("backend_unavailable", "profile observation is unavailable")
                 data = await _maybe(self._web_census_handler(principal, dict(arguments)))
+            elif tool in {"session_t3_return_link", "session_t3_return_status"}:
+                if self._t3_return_handler is None:
+                    raise BridgeError("backend_unavailable", "original T3 return source is not enrolled")
+                data = await _maybe(self._t3_return_handler(principal, tool, dict(arguments)))
             elif tool == "session_send":
                 data = await _maybe(self._reply_handler(principal, dict(arguments)))
             else:
@@ -311,6 +325,8 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                                  authorized_policies: Any = None,
                                  reference_cursor_key: bytes | None = None,
                                  hermes_session: Any | None = None,
+                                 t3_replies: Any | None = None,
+                                 t3_return_control: Any | None = None,
                                  web_census_handler: Callable | None = None):
     """Compose the installed fabric path from existing Runtime/Dialogue owners.
 
@@ -334,9 +350,15 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                                    socket_path=dialogue_socket_path,
                                    authorized_policies=authorized_policies,
                                    reference_cursor_key=reference_cursor_key,
-                                   hermes=hermes_session)
+                                   hermes=hermes_session, t3_replies=t3_replies)
+    if t3_return_control is not None:
+        from .t3_return_tools import RuntimeT3ReturnControl
+        if (type(t3_return_control) is not RuntimeT3ReturnControl
+                or t3_return_control.source is not t3_replies
+                or t3_return_control.host.runtime is not runtime):
+            raise TypeError("same Runtime original-return source and control required")
     reply_reader = NativeReplyReader(returns, socket_path=dialogue_socket_path,
-                                    projected_principal=True)
+                                    projected_principal=True, t3_replies=t3_replies)
     reader = CanonicalTargetReader(
         fabric_reader=projector.project, codex_reader=codex.project, claude_reader=lambda: [])
 
@@ -399,6 +421,11 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
         if read_ref is None:
             read_ref = returns.resolve_operation_read_ref(
                 principal=principal, operation_key=arguments["operation_key"])
+        from .t3_reply_events import is_t3_read_ref
+        if is_t3_read_ref(read_ref):
+            # T3 owns its original request format, not Agent Dialogue. Its
+            # reader revalidates the native source and exact account itself.
+            return await reply_reader(principal, arguments)
         if returns.original_request_schema(
                 principal=principal, read_ref=read_ref) in HERMES_REQUEST_SCHEMAS:
             return await returns.read_hermes(principal, read_ref)
@@ -410,6 +437,7 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
     return private_ingress_owner(InstalledSessionBridgeProvider(
         target_projector=targets, reply_handler=send, reply_read_handler=read_reply,
         reference_handler=references, web_census_handler=web_census_handler,
+        t3_return_handler=t3_return_control,
         summon_handler=(summon_handler if summon_handler is not None else unavailable)))
 
 
@@ -537,6 +565,11 @@ class InstalledSessionBridgeClient:
 
     async def reply_read(self, principal: VerifiedPrincipal, arguments: Mapping[str, Any]) -> Any:
         return await self._call(principal, "session_reply_read", arguments)
+
+    async def return_control(self, principal: VerifiedPrincipal, name: str, arguments: Mapping[str, Any]) -> Any:
+        if name not in {"session_t3_return_link", "session_t3_return_status"}:
+            raise BridgeError("invalid_input", "unknown original-return operation")
+        return await self._call(principal, name, arguments)
 
     async def reply_references(self, principal: VerifiedPrincipal, arguments: Mapping[str, Any]) -> Any:
         return await self._call(principal, "session_reply_references", arguments)

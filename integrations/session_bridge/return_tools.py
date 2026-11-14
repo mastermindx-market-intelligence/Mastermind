@@ -49,8 +49,14 @@ class NativeReplyReadTool:
                         "send instructions, choose a recipient, or advance a Job.",
             input_schema={"type": "object", "properties": {
                 "read_ref": {"type": "string", "minLength": 1, "maxLength": 256},
-                "operation_key": {"type": "string", "minLength": 1, "maxLength": 256}},
-                "oneOf": [{"required": ["read_ref"]}, {"required": ["operation_key"]}],
+                "operation_key": {"type": "string", "minLength": 1, "maxLength": 256},
+                "message_key": {"type": "string", "minLength": 1, "maxLength": 256,
+                    "description": "For a T3 notification, use its exact message_key with read_ref; this never selects the latest unrelated reply."}},
+                "oneOf": [{"required": ["read_ref"], "maxProperties": 1},
+                          {"required": ["operation_key"], "maxProperties": 1},
+                          {"required": ["read_ref", "message_key"], "maxProperties": 2,
+                           "properties": {"read_ref": {"pattern": "^t3-reply-[0-9a-f]{64}$"},
+                                          "message_key": {"pattern": "^t3-native-(reply|question|status)-[0-9a-f]{64}$"}}}],
                 "additionalProperties": False},
             output_description=RESULT_SCHEMA, read_only=True)
 
@@ -59,12 +65,15 @@ class NativeReplyReadTool:
         if name != TOOL_NAME:
             raise GatewayError("not_found", _ERRORS["not_found"])
         if not isinstance(arguments, Mapping) or set(arguments) not in (
-                {"read_ref"}, {"operation_key"}):
+                {"read_ref"}, {"operation_key"}, {"read_ref", "message_key"}):
             raise GatewayError("invalid_input", _ERRORS["invalid_input"])
-        field = next(iter(arguments))
-        if not isinstance(arguments[field], str) or _REF.fullmatch(arguments[field]) is None:
+        if any(type(value) is not str or _REF.fullmatch(value) is None for value in arguments.values()):
             raise GatewayError("invalid_input", _ERRORS["invalid_input"])
-        return {field: arguments[field]}
+        if "message_key" in arguments:
+            from .t3_reply_events import is_t3_read_ref, is_t3_message_key
+            if not is_t3_read_ref(arguments["read_ref"]) or not is_t3_message_key(arguments["message_key"]):
+                raise GatewayError("invalid_input", _ERRORS["invalid_input"])
+        return dict(arguments)
 
     @staticmethod
     def error(name: str, code: Any, _message: Any = None) -> dict[str, Any]:
@@ -83,7 +92,14 @@ class NativeReplyReadTool:
             principal_projection(principal)
             data = await self._reader(principal, validated)
             from .hermes_native import RESULT_SCHEMAS as HERMES_RESULT_SCHEMAS, validate_public_result
-            if type(data) is dict and data.get("schema") in HERMES_RESULT_SCHEMAS:
+            from .t3_reply_events import RESULT_SCHEMAS as T3_RESULT_SCHEMAS, validate_t3_public_reply
+            if type(data) is dict and data.get("schema") in T3_RESULT_SCHEMAS:
+                data = validate_t3_public_reply(data)
+                if (set(validated) not in ({"read_ref"}, {"read_ref", "message_key"})
+                        or data["read_ref"] != validated["read_ref"]
+                        or "message_key" in data and data["message_key"] != validated.get("message_key")):
+                    raise ValueError
+            elif type(data) is dict and data.get("schema") in HERMES_RESULT_SCHEMAS:
                 data = validate_public_result(data)
                 if any(data[field] != value for field, value in validated.items()):
                     raise ValueError

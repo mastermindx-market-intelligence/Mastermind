@@ -1030,10 +1030,12 @@ diff --git a/apps/server/src/mcp/toolkits/thread/handlers.test.ts b/apps/server/
 new file mode 100644
 --- /dev/null
 +++ b/apps/server/src/mcp/toolkits/thread/handlers.test.ts
-@@ -0,0 +1,337 @@
+@@ -0,0 +1,412 @@
 +import { expect, it } from "@effect/vitest";
 +import {
 +  EnvironmentId,
++  RuntimeRequestId,
++  RunId,
 +  ProviderInstanceId,
 +  type OrchestrationV2ServerCommand,
 +  type OrchestrationV2ThreadProjection,
@@ -1088,6 +1090,7 @@ new file mode 100644
 +interface HarnessInput {
 +  readonly invocation?: McpInvocationContext.McpInvocationScope;
 +  readonly target?: Partial<OrchestrationV2ThreadShell>;
++  readonly projection?: Partial<OrchestrationV2ThreadProjection>;
 +}
 +
 +const projectionOf = (shell: OrchestrationV2ThreadShell) =>
@@ -1117,13 +1120,13 @@ new file mode 100644
 +        getThreadShell: (threadId: ThreadId) =>
 +          threadId === TARGET_ID ? Ref.get(target) : Effect.succeed(caller),
 +        getProjectThreadRecords: () =>
-+          Ref.get(target).pipe(Effect.map((shell) => projectionOf(shell))),
++          Ref.get(target).pipe(Effect.map((shell) => ({ ...projectionOf(shell), ...input.projection }))),
 +        getThreadSnapshotWindow: () =>
 +          Ref.get(target).pipe(
 +            Effect.map((shell) => ({
 +              schemaVersion: 1,
 +              snapshotSequence: 40,
-+              projection: projectionOf(shell),
++              projection: ({ ...projectionOf(shell), ...input.projection }),
 +            })),
 +          ),
 +        dispatch: (command: OrchestrationV2ServerCommand) =>
@@ -1150,7 +1153,14 @@ new file mode 100644
 +        Effect.map((chunk) => chunk.at(-1)!.result),
 +        Effect.provide(layerDependencies),
 +      );
-+    return { commands, call };
++    const callQuestion = (params: Parameters<typeof toolkit.handle<"t3_pending_request">>[1]) =>
++      toolkit.handle("t3_pending_request", params).pipe(
++        Stream.unwrap,
++        Stream.runCollect,
++        Effect.map((chunk) => chunk.at(-1)!.result),
++        Effect.provide(layerDependencies),
++      );
++    return { commands, call, callQuestion };
 +  });
 +
 +it.effect("delete passes its exact-target preconditions to one native command", () =>
@@ -1368,6 +1378,71 @@ new file mode 100644
 +    expect(yield* Ref.get(harness.commands)).toEqual([]);
 +  }),
 +);
++
++const QUESTION_ID = RuntimeRequestId.make("question:original");
++const ORIGINAL_RUN = RunId.make("run:original-question");
++
++// Deliberately minimal projection: the handler must join these recorded native
++// identities, never the shell's active run or caller-provided notification text.
++const questionProjection = (changes: {
++  runId?: string | null;
++  nodeId?: string | null;
++  itemThreadId?: string;
++  status?: string;
++  kind?: string;
++} = {}) => ({
++  runtimeRequests: [{ id: QUESTION_ID, nodeId: "node:question", kind: changes.kind ?? "user_input",
++    status: changes.status ?? "pending" }],
++  turnItems: [{ id: "item:question", type: "user_input_request", requestId: QUESTION_ID,
++    threadId: changes.itemThreadId ?? TARGET_ID,
++    nodeId: changes.nodeId === undefined ? "node:question" : changes.nodeId,
++    runId: changes.runId === undefined ? ORIGINAL_RUN : changes.runId,
++    questions: [{ id: "dataset", header: "Dataset", question: "Which dataset?", options: [], required: true }] }],
++}) as unknown as Partial<OrchestrationV2ThreadProjection>;
++
++it.effect("pending question returns its recorded run, not the current shell run", () =>
++  Effect.gen(function* () {
++    const harness = yield* makeHarness({ projection: questionProjection(),
++      target: { activeRunId: RunId.make("run:newer") } });
++    const result = yield* harness.callQuestion({ action: "read", threadId: TARGET_ID, requestId: QUESTION_ID });
++    expect(result).toMatchObject({ requestId: QUESTION_ID, threadId: TARGET_ID,
++      runId: ORIGINAL_RUN, kind: "user_input", status: "pending" });
++    expect(yield* Ref.get(harness.commands)).toEqual([]);
++  }),
++);
++
++it.effect("pending question with missing or conflicting provenance never guesses a run", () =>
++  Effect.gen(function* () {
++    for (const changes of [{ runId: null }, { nodeId: null }, { nodeId: "node:foreign" },
++      { itemThreadId: "thread:foreign" }]) {
++      const harness = yield* makeHarness({ projection: questionProjection(changes) });
++      const result = yield* harness.callQuestion({ action: "read", threadId: TARGET_ID, requestId: QUESTION_ID });
++      expect(result).toMatchObject({ requestId: QUESTION_ID, runId: null });
++      expect(yield* Ref.get(harness.commands)).toEqual([]);
++    }
++  }),
++);
++
++it.effect("resolved questions and permission approvals cannot become input notifications", () =>
++  Effect.gen(function* () {
++    for (const changes of [{ status: "resolved" }, { status: "cancelled" }, { kind: "command" }]) {
++      const harness = yield* makeHarness({ projection: questionProjection(changes) });
++      const result = yield* harness.callQuestion({ action: "read", threadId: TARGET_ID, requestId: QUESTION_ID });
++      expect(result).toMatchObject({ _tag: "OrchestratorMcpFailure", code: "invalid_request" });
++      expect(yield* Ref.get(harness.commands)).toEqual([]);
++    }
++  }),
++);
++
++it.effect("question provenance does not bypass the native capability gate", () =>
++  Effect.gen(function* () {
++    const harness = yield* makeHarness({ projection: questionProjection(),
++      invocation: { ...threadInvocation, capabilities: new Set() } });
++    const result = yield* harness.callQuestion({ action: "read", threadId: TARGET_ID, requestId: QUESTION_ID });
++    expect(result).toMatchObject({ _tag: "OrchestratorMcpFailure", code: "capability_denied" });
++    expect(yield* Ref.get(harness.commands)).toEqual([]);
++  }),
++);
 diff --git a/apps/server/src/mcp/toolkits/thread/handlers.ts b/apps/server/src/mcp/toolkits/thread/handlers.ts
 --- a/apps/server/src/mcp/toolkits/thread/handlers.ts
 +++ b/apps/server/src/mcp/toolkits/thread/handlers.ts
@@ -1387,10 +1462,37 @@ diff --git a/apps/server/src/mcp/toolkits/thread/handlers.ts b/apps/server/src/m
  import { modelSelectionCommandType } from "@t3tools/shared/model";
  
  import * as McpInvocationContext from "../../McpInvocationContext.ts";
-@@ -332,6 +335,84 @@
+@@ -239,8 +242,21 @@
+           };
+         }
+         const requestId = yield* required(input.requestId, "requestId");
+-        const { item } = yield* readQuestion({ threadId: input.threadId, requestId });
+-        return { requestId, questions: item.questions };
++        const { projection, request, item } = yield* readQuestion({ threadId: input.threadId, requestId });
++        // Never infer a pending question's origin from active/latestRunId. Old
++        // or incomplete item provenance remains readable but is not push-eligible.
++        const runId =
++          item.threadId === projection.thread.id && item.nodeId === request.nodeId
++            ? item.runId
++            : null;
++        return {
++          requestId,
++          threadId: projection.thread.id,
++          runId,
++          kind: "user_input" as const,
++          status: "pending" as const,
++          questions: item.questions,
++        };
        }),
      ),
-   ),
+     writesThread((input) =>
+@@ -329,6 +345,84 @@
+               runId,
+             }));
+         }
++      }),
++    ),
++  ),
 +  t3_thread_lifecycle: McpToolAccess.either(
 +    (input) => input.action === "inspect",
 +    McpToolAccess.reads((input) =>
@@ -1466,12 +1568,9 @@ diff --git a/apps/server/src/mcp/toolkits/thread/handlers.ts b/apps/server/src/m
 +          })
 +          .pipe(Effect.mapError(dispatchFailure));
 +        return { commandId, sequence: result.sequence };
-+      }),
-+    ),
-+  ),
-   t3_thread_organize: writesThread((input) =>
-     Effect.gen(function* () {
-       const { threads, projection, caller } = yield* readThread(input.threadId);
+       }),
+     ),
+   ),
 diff --git a/apps/server/src/mcp/toolkits/thread/tools.ts b/apps/server/src/mcp/toolkits/thread/tools.ts
 --- a/apps/server/src/mcp/toolkits/thread/tools.ts
 +++ b/apps/server/src/mcp/toolkits/thread/tools.ts
@@ -1481,10 +1580,27 @@ diff --git a/apps/server/src/mcp/toolkits/thread/tools.ts b/apps/server/src/mcp/
    OrchestratorMcpEnvironmentTarget,
    ScheduledTaskId,
    ScheduledTask,
-@@ -162,6 +163,37 @@
+@@ -137,7 +138,14 @@
+   }),
+   success: Schema.Union([
+     Schema.Struct({ requestIds: Schema.Array(RuntimeRequestId) }),
+-    Schema.Struct({ requestId: RuntimeRequestId, questions: Schema.Array(question) }),
++    Schema.Struct({
++      requestId: RuntimeRequestId,
++      threadId: ThreadId,
++      runId: Schema.NullOr(RunId),
++      kind: Schema.Literal("user_input"),
++      status: Schema.Literal("pending"),
++      questions: Schema.Array(question),
++    }),
+     OrchestrationV2DispatchCommandResult,
+   ]),
+ })
+@@ -161,6 +169,37 @@
+   }),
    success: Schema.Union([threadConfiguration, OrchestrationV2DispatchCommandResult]),
  }).annotate(Tool.Destructive, true);
- 
++
 +const ThreadLifecycleTool = Tool.make("t3_thread_lifecycle", {
 +  ...commandTool,
 +  description:
@@ -1515,11 +1631,10 @@ diff --git a/apps/server/src/mcp/toolkits/thread/tools.ts b/apps/server/src/mcp/
 +  .annotate(Tool.Title, "Inspect or safely change a thread")
 +  .annotate(Tool.Strict, true)
 +  .annotate(Tool.Destructive, true);
-+
+ 
  const ThreadTransferTool = Tool.make("t3_thread_transfer", {
    ...commandTool,
-   description:
-@@ -241,6 +273,7 @@
+@@ -241,6 +280,7 @@
    ScheduledTaskRunTool,
    ThreadSearchTool,
    ThreadConfigureTool,

@@ -46,6 +46,25 @@ class InstalledReplyPolicySelection(ReplyPolicySelection):
         # a current installed document change or inaccessible/seal-broken file.
         self.policies()
 
+    def native_returns_selected(self):
+        # Keep native-return opt-in under the SAME sealed, current receiver
+        # policy. A previously constructed native source cannot outlive disarm.
+        self.policies()
+        from ops.executive_os.executive_mcp_entry import require_sealed_path, validate_document
+        try:
+            require_sealed_path(self._path)
+            raw = validate_document(json.loads(self._path.read_text(encoding="utf-8")))
+            if (raw["release_sha"] != self._release_sha or raw["service_uid"] != self._peer_uid
+                    or raw.get("executive_mcp_profile") != "web_ceo_v3"):
+                raise ValueError
+            if raw.get("t3_returns_armed", False) is not True:
+                raise ReplyPolicyDenied("installed original T3 return receiver disarmed")
+            return True
+        except ReplyPolicyDenied:
+            raise
+        except Exception:
+            raise ReplyPolicyUnavailable("current installed native return selection unavailable") from None
+
     def policies(self):
         from ops.executive_os.executive_mcp_entry import (
             require_sealed_path, validate_document, build_additional_policies,

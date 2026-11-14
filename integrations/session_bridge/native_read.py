@@ -72,7 +72,7 @@ def _canonical(value: Any) -> str:
 
 class NativeReplyReader:
     def __init__(self, resolver: NativeReplyReadResolver, *, socket_path: Path,
-                 service_call=call_service, clock=time.time, projected_principal=False):
+                 service_call=call_service, clock=time.time, projected_principal=False, t3_replies=None):
         if (not callable(getattr(resolver, "resolve_read", None))
                 or not callable(service_call) or not callable(clock)):
             raise TypeError("canonical reader dependencies are required")
@@ -83,6 +83,10 @@ class NativeReplyReader:
             raise TypeError("projected principal mode must be explicit")
         # Only the installed authenticated private-peer composition selects this.
         # Public tool calls retain the exact VerifiedPrincipal boundary.
+        from .t3_reply_events import T3OriginalReplySource
+        if t3_replies is not None and type(t3_replies) is not T3OriginalReplySource:
+            raise TypeError("exact installed T3 return source required")
+        self._t3_replies = t3_replies
         self._projected_principal = projected_principal
         self._resolver, self._socket_path = resolver, path
         self._service_call, self._clock = service_call, clock
@@ -134,13 +138,23 @@ class NativeReplyReader:
     async def __call__(self, principal, arguments: Mapping[str, Any]) -> dict[str, Any]:
         try:
             if not isinstance(arguments, Mapping) or set(arguments) not in (
-                    {"read_ref"}, {"operation_key"}):
+                    {"read_ref"}, {"operation_key"}, {"read_ref", "message_key"}):
                 raise ValueError
-            field = next(iter(arguments))
-            if not isinstance(arguments[field], str) or _ID.fullmatch(arguments[field]) is None:
+            field = "read_ref" if "read_ref" in arguments else "operation_key"
+            if any(type(value) is not str or _ID.fullmatch(value) is None for value in arguments.values()):
                 raise ValueError
             current = self._current_principal(principal)
             read_ref = arguments.get("read_ref")
+            from .t3_reply_events import is_t3_read_ref, is_t3_message_key
+            if "message_key" in arguments and (
+                    not is_t3_read_ref(read_ref) or not is_t3_message_key(arguments["message_key"])):
+                raise ValueError
+            if is_t3_read_ref(read_ref):
+                if self._t3_replies is None:
+                    raise ValueError("native T3 return source is not enrolled")
+                value = await self._t3_replies.read(current, dict(arguments))
+                self._current_principal(principal)
+                return value
             if field == "operation_key":
                 # Runtime owns this join. Do not derive a public reference, bind
                 # a request, revive a target or invoke any continuation owner.

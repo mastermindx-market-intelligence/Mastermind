@@ -43,12 +43,17 @@ def validate_additional_resources(raw):
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'reply_events_armed', 'public_mcp_resource', 'selected_child_target', 'dot_canary', 'session_web_observation'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target', 'reply_events_armed', 'public_mcp_resource', 'selected_child_target', 'dot_canary', 'session_web_observation', 't3_returns_armed'}):
         raise ValueError('installed MCP configuration fields differ')
     if type(raw.get('reply_events_armed',False)) is not bool:
         raise ValueError('event receiver selection must be boolean')
     if raw.get('reply_events_armed',False) and raw.get('executive_mcp_profile') != 'web_ceo_v3':
         raise ValueError('reply events require explicit Web-CEO v3 receiver')
+    if type(raw.get('t3_returns_armed', False)) is not bool:
+        raise ValueError('original T3 return selection must be boolean')
+    if raw.get('t3_returns_armed', False) and (not raw.get('reply_events_armed', False)
+            or raw.get('executive_mcp_profile') != 'web_ceo_v3'):
+        raise ValueError('original T3 returns require the authenticated v3 event receiver')
     from integrations.session_bridge.dot_canary_policy_selection import validate_dot_canary_settings
     validate_dot_canary_settings(raw)
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
@@ -975,6 +980,9 @@ def main(argv=None):
                     settings.ceo_ingress_socket_path,ReplyPolicySelection((policies,*additional_policies)),
                     clock=lambda:int(settings.clock()),enabled=True,
                     canary_enabled=validate_dot_canary_settings(raw) is not None)
+            if raw.get("t3_returns_armed", False):
+                from integrations.session_bridge.t3_return_tools import T3ReturnTools
+                v3_kwargs["t3_return_tools"] = T3ReturnTools(session_client)
             # One installed client instance; the opt-in OS session transport
             # receives this same object only while the transport is enabled.
             os_transport_enabled = raw.get('os_executive_transport', False)
