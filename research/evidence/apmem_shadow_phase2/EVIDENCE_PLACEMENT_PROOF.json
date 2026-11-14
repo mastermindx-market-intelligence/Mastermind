@@ -1,0 +1,17 @@
+{
+  "old_path": "research/apmem_shadow/phase2/evidence/DELIVERY_SUMMARY_COMPACT.json",
+  "new_path": "research/evidence/apmem_shadow_phase2/DELIVERY_SUMMARY_COMPACT.json",
+  "sha256_before_and_after": "6d1c14b9d12de23fec6c53dd4151c27b974e6b6496999a2fb290c04c40f61f0a",
+  "git_blob_unchanged": "755fed37e9f8c40a64aeebc995fa3153d6bacdfe",
+  "unchanged_guard_source_sha256": "862c7d95e5f3cf3836be2f2a97ab965bd242df70a39aeb1c94e6da8e8641228e",
+  "structural_evidence_scan": [],
+  "negative_controls": {
+    "peer_uid_720_rejected": true,
+    "nested_owner_uid_432_rejected": true
+  },
+  "numeric_scientific_counts_preserved": {
+    "fixed_power_fits": 720,
+    "numerical_reference_checks": 432
+  },
+  "guard_or_permission_code_changed": false
+}
