@@ -1,0 +1,12 @@
+{
+  "source": "approved Yahoo/yfinance route",
+  "instrument": "SPY",
+  "version": "1.4.1",
+  "captured_at": "2026-11-14T01:07:10.659526+00:00",
+  "rows": 4264,
+  "first": "1993-01-29",
+  "last": "2009-12-31",
+  "nonzero_split_events": 0,
+  "sha256": "49ab45e0e2d8792709e22d7296aac737235528ed644cb64bd71ad546f5072f71",
+  "historical_first_availability": null
+}

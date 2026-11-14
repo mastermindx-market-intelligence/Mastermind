@@ -1,0 +1,118 @@
+{
+  "schema": "mastermind.volatility_forward_availability.v1",
+  "economic_origin": "2026-11-13",
+  "recorded_at": "2026-11-14T01:34:40.528435+00:00",
+  "status": "ABSTAIN_INPUT_UNAVAILABLE",
+  "forecasts_created": 0,
+  "matured_forecast_outcomes": 0,
+  "source_commit": "7e0d2adbdd3de0b279250a6b39a5c6a29c198640",
+  "reason": "Completed-session closing price missing in both long-window and five-day Yahoo responses; independent approved Massive snapshot ends one session earlier. No price imputation, stale-origin substitution or after-hours quote was admitted.",
+  "primary_capture_receipts": {
+    "QQQ": {
+      "instrument": "QQQ",
+      "sha256": "f23bdb81ef7db31084dbde7063d857d09646adff46a2619aaed5cdee554a2610",
+      "captured_at": "2026-11-14T01:29:23.103622+00:00",
+      "rows": 4243,
+      "first": "2010-01-04",
+      "last": "2026-11-13",
+      "source": "approved Yahoo/yfinance route",
+      "library_version": "1.4.1",
+      "auto_adjust": false,
+      "back_adjust": false,
+      "repair": false,
+      "historical_first_availability": null
+    },
+    "SPY": {
+      "instrument": "SPY",
+      "sha256": "2fa3df07ada54f7f75d961463bb7390f868a94f1bc965975de2dd59011364045",
+      "captured_at": "2026-11-14T01:29:23.266883+00:00",
+      "rows": 4243,
+      "first": "2010-01-04",
+      "last": "2026-11-13",
+      "source": "approved Yahoo/yfinance route",
+      "library_version": "1.4.1",
+      "auto_adjust": false,
+      "back_adjust": false,
+      "repair": false,
+      "historical_first_availability": null
+    },
+    "IWM": {
+      "instrument": "IWM",
+      "sha256": "43aea4703dc89b6555148ec994297cf77172115eb4b7d46b1ab4ee571d6de983",
+      "captured_at": "2026-11-14T01:29:23.415277+00:00",
+      "rows": 4243,
+      "first": "2010-01-04",
+      "last": "2026-11-13",
+      "source": "approved Yahoo/yfinance route",
+      "library_version": "1.4.1",
+      "auto_adjust": false,
+      "back_adjust": false,
+      "repair": false,
+      "historical_first_availability": null
+    }
+  },
+  "short_window_receipts": [
+    {
+      "instrument": "QQQ",
+      "query": "period=5d interval=1d auto_adjust=False back_adjust=False repair=False actions=True",
+      "captured_at": "2026-11-14T01:32:59.188837+00:00",
+      "sha256": "bdc107454771cb25d24c2a501a1f846f39e1a4838cbac3ac10ae3ae817c309ee",
+      "last": "2026-11-13",
+      "last_ohlc_finite": false,
+      "rows": 5
+    },
+    {
+      "instrument": "SPY",
+      "query": "period=5d interval=1d auto_adjust=False back_adjust=False repair=False actions=True",
+      "captured_at": "2026-11-14T01:32:59.258071+00:00",
+      "sha256": "c3837db7bd9155c8218911d90fd17d004525456c9275b5c3b0f9bd484e44d07a",
+      "last": "2026-11-13",
+      "last_ohlc_finite": false,
+      "rows": 5
+    },
+    {
+      "instrument": "IWM",
+      "query": "period=5d interval=1d auto_adjust=False back_adjust=False repair=False actions=True",
+      "captured_at": "2026-11-14T01:32:59.343803+00:00",
+      "sha256": "d72d9165a90beba05d8861df12192d1780e3edf9bbbba3d3ffff4d5fb38df1bd",
+      "last": "2026-11-13",
+      "last_ohlc_finite": false,
+      "rows": 5
+    }
+  ],
+  "independent_source_receipts": [
+    {
+      "instrument": "QQQ",
+      "source": "existing approved Massive R2 price plane",
+      "captured_at": "2026-11-14T01:32:07.592181+00:00",
+      "sha256": "f272f6cbe25a1a22878de77244a9613684d4facde42dfd04d2db80de8e1a2d78",
+      "last": "2026-11-12",
+      "rows": 1346
+    },
+    {
+      "instrument": "SPY",
+      "source": "existing approved Massive R2 price plane",
+      "captured_at": "2026-11-14T01:32:07.926288+00:00",
+      "sha256": "219c83cdfde7cddf5798a3535241018f98e3a1b257d8a0051bbe23db27a11d8a",
+      "last": "2026-11-12",
+      "rows": 1347
+    },
+    {
+      "instrument": "IWM",
+      "source": "existing approved Massive R2 price plane",
+      "captured_at": "2026-11-14T01:32:08.476970+00:00",
+      "sha256": "d6e22614fcb588ffddaeaa7403f00d0c6f52e165237c3fce084842bcd455e1ac",
+      "last": "2026-11-12",
+      "rows": 1346
+    }
+  ],
+  "original_process_pid": 67597,
+  "research_child_exit_code": 1,
+  "controller_shell_exit_code": 0,
+  "last_confirmed_effect": "Three raw captures retained; zero forecasts generated; rejected before parameter fitting.",
+  "next_input_condition": "Actually complete fresh same-origin OHLC with source digest and capture receipt, then new version under this original research operation.",
+  "background_collector_or_grader_installed": false,
+  "may_rank": false,
+  "may_size": false,
+  "may_trade": false
+}

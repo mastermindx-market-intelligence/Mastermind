@@ -1,0 +1,45 @@
+{
+  "schema": "mastermind.volatility_research_context.v2",
+  "instrument": "QQQ",
+  "origin_session": "2026-11-12",
+  "decision_at": "2026-11-14T01:21:19.128295+00:00",
+  "state_last_session": "2026-11-12",
+  "parameter_fit_cutoffs": {
+    "apmem": "2026-10-15",
+    "har_h1": "2026-10-16",
+    "har_h5": "2026-10-22",
+    "har_h20": "2026-11-12"
+  },
+  "computed_at": "2026-11-14T01:21:19.128295+00:00",
+  "forecast_scope": "reconstructed_research_asof",
+  "status": "RESEARCH_ONLY",
+  "reason_codes": [],
+  "horizons_sessions": [
+    1,
+    5,
+    20
+  ],
+  "annualized_vol_percent": [
+    27.95632901401024,
+    27.80656377228152,
+    26.87581126505576
+  ],
+  "upper90_variance": [
+    0.0006317038233189395,
+    0.0006138511126164957,
+    0.0005140191385431918
+  ],
+  "source_sha256": "cbef1aa4123621bbd7f1547b8ee9eb67a9f66efbc776764ddb40b9c4a9dfcfe4",
+  "point_in_time_historical_validation": false,
+  "may_rank": false,
+  "may_size": false,
+  "may_trade": false,
+  "note": "Historical research, not certified coverage or a production trading instruction.",
+  "observed_clock_meaning": "Actual file read in this research run; not historical vendor publication",
+  "numerical_method": "deterministic two-moment approximation plus HAR/EWMA",
+  "current_conditional_mean_approximation_bound_width": [
+    0.0,
+    0.0,
+    0.0
+  ]
+}
