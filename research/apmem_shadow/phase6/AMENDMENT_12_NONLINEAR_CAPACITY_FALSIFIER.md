@@ -1,0 +1,17 @@
+# Fixed nonlinear-capacity falsifier
+
+The prior conditional studies used shrinkage-regularized linear predictors and a fixed set of cohort-response interactions. Their lack of incremental directional accuracy does not establish that all nonlinear combinations are useless. Test that possible model-capacity limitation directly, while preserving all previous failed/favorable results.
+
+This extension is outcome-guided retrospective development. It is not a new untouched holdout and it cannot validate the supplied MCD 2026 case. Use only unchanged event/features/outcomes and the same protected-interval exclusions. No threshold search, account change, new data purchase or production authority.
+
+## Exactly frozen model roster
+Existing scikit-learn1.9.0 is installed on the authorized numerical host; no dependency/environment installation. Two histogram-gradient-boosting models: tree_price uses the existing PRICE feature set; tree_context uses existing PRICE+CYCLE+COHORT+VOL. Both include the same fixed five economic-group indicators and two entry-family indicators, but no ticker identity or future grouping. Existing past-observation personality measures remain numeric features. Input NaNs stay missing for the estimator rather than becoming calm conditions. No whole-sample scaling, feature selection or early-stopping validation.
+
+Parameters for both: max_iter100, learning_rate0.05, max_leaf_nodes7, max_depth3, min_samples_leaf40, l2_regularization1.0, max_bins63, early_stoppingFalse, random_state612. Classification loss is log loss; payoff-magnitude regression uses squared error on the already defined log-net/log-peer-excess targets. No parameter is selected after this result is observed.
+
+Targets: positive net return, positive cohort-relative return, preservation of the prior closing low, log net return and log cohort-relative return; horizons21/63. Train only on fully matured labels strictly before each fit; exclude the exposed MCD design case. Use the incumbent fixed63-business-day fit cadence and date-equal training weights. Minimum200 training rows,60 distinct dates and25 per class for classification. Failed fits abstain rather than reusing stale models. Retain each exact fit clock, last-label-end and feature roster.
+
+## Evaluation and falsifier
+Compare tree_price and tree_context against the same matured symbol/family-shrunk baseline used previously, on common observations. Additional input information earns credit only through tree_context versus tree_price; more flexible fitting earns no assumed alpha. Keep per-cohort and per-entry-family results, log loss/Brier for classification, squared error for log payoff, and every target/horizon. Use the repaired49,999-resample quarter and half-year analysis with whole-family Holm correction; report numerical resolution, sampling limits and method sensitivity.
+
+This test changes no existing trading rule and uses no fitted probability for live ranking or sizing. It does not reissue or alter the immutable44-instrument/264-variance-value forward record. Any later experimental forecast must have its own actual issue clock, exact source/input identity, model version and explicit unvalidated status; no past test outcome may be relabeled prospective.
