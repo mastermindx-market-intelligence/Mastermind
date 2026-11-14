@@ -2274,3 +2274,32 @@ An independent review of the next two items (scratch removal, floor guard) is ru
 2. The janitor's remaining items, each after review.
 3. The bridge still waits on the Chairman's five reloads.
 4. Later list for the teammates: who each new teammate may ask; the roster's wait for a settings reload.
+
+## 61. Amendment, 2026-11-14 06:10 UTC: the product had no owner for a day; lane PF opened
+
+**What went wrong.** From 08:20 UTC on 13 November to 06:00 UTC on 14 November no product lane was running. Section 60's "Next" list has four items and none of them builds the product. The janitor order and items waiting on the Chairman took the whole programme. The Chairman said so on 14 November: "Mastermind OS has not made progress and is not finished."
+
+**What a person sees today.** The app is the stock T3 client in a window, with thirteen teammates in the list. Section 14 recorded this gap and deferred it until after the first milestone. The first milestone's loop is proven, so the deferral has ended.
+
+**Lane PF (product finish).** One lead owns this outcome and reports to the principal:
+
+1. A separately named app, "Mastermind OS Next", on its own staging team server. The Chairman's app and the real team server are not touched (ruling 18).
+2. It reads as Mastermind OS. The product name and the team-mode switches come from server settings, through a small patch set on the pinned client. No fork, and no Mastermind name inside T3 code.
+3. Three places in one click: Team, Work, Needs you. Work and Needs you show the board's own pages; they are not rebuilt.
+4. A teammate's conversation offers only that teammate's own provider instance (ruling 20c). The T10f patch is included. Together these are the release that section 46 called "-4"; it is no longer a separate lane.
+5. The open window items from the T8b panel are closed or listed with a reason.
+6. One real journey proven in that app, and a step list rehearsed on a copy: loading the staging server, then later the real team server with one announced restart.
+7. Second wave: the governed coding job on the installed app (T4d), prepared and not enabled.
+
+**DONE_WHEN, as it stands.** 5, 6, 7, 8 and 9 are done. 1 and 2 work but their on-screen proof is owed; PF supplies it in the new app. 3 needs the linked-environment switch in the Chairman's own T3 app. 4 owes one rotation on a real teammate. 10 owes the coding job on the installed app.
+
+**Janitor.** The fixed Linux /tmp cleanup is installed on the four hosts and freed about 80 GiB. Round 6 of the remaining four items is back and under one independent review. Nothing else is installed. Repairs from that review are ruled by the deputy; installs stay with the principal.
+
+**Class rule.** Product work always has a running owner. An infrastructure order gets its own lane and does not take the product lead's or the principal's attention from the product. A "Next" list that contains no product item is a defect in the plan.
+
+**Next, in order.**
+
+1. PF: gap table, then the new app with its face, its three places and the provider lock.
+2. The principal places the new app and loads its staging server, then asks the Chairman to judge it.
+3. Janitor round 6: review, repairs, installs.
+4. Waiting on the Chairman, none of which blocks item 1: the Grok Bot sitting, five extension reloads, a restart of the Mac, the linked-environment switch.
