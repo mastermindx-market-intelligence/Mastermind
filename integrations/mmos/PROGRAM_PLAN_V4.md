@@ -2359,3 +2359,39 @@ change have had no independent review.
    Chairman agrees.
 3. BR2 under the deputy; janitor check b after 11:20Z.
 
+
+## 64. Amendment, 2026-11-14 10:40 UTC: product branch merged; real switch is ready and waits for a time
+
+**Product.** Lane PF wave 2 returned DONE at `56b7b0fbd`. Both gating reviews came back with
+findings and were repaired (dev-launcher secret: symlinked ancestor, atomic create; coding-job
+door: three more refused ports, `enabled` must be literal true). The principal read both diffs and
+merged the branch to trunk (`082515fca`). Nothing is installed on a real root.
+
+**Ready, not run.** Three rehearsed lists in `integrations/mmos/pf/`:
+(b) new server release `t3team-0.1.7-pinf5248ab2` on the real team server (about 10 s of restart
+in rehearsal; rollback to `-3` about 7 s);
+(c) the `presentation` setting on the real server through `presentation_set.py` (no restart; undo
+restores the exact preimage);
+(d) the Next window switched from staging to the real server and board (quit and reopen; pairs
+once by itself; undo is the same write back).
+Order: (b), roster apply if any, (c), (d). All are the principal's acts at a time the Chairman
+agrees.
+
+**Lock.** The picker lock goes on as built. The proposed "way home" change is not built: the
+census on the real team project (25 conversations) finds every teammate's primary on its own
+instance and no conversation on a removed instance. `lock_census.py` is step 0b of (c).
+
+**Bridge.** BR2 was sent back for one round. The accepted previous release becomes the one that
+is live at both ends (5aa30969), so the Chairman reloads the five profiles once and b640dec1 is
+skipped. The "owner still alive" window of the tab-close rule goes from 2 to 90 minutes, and an
+owner with no known activity counts as alive.
+Class rule: "previous release" in ruling 17 means the release running at both ends at the time of
+the switch, never one that was only staged.
+
+**Next.**
+1. PF wave 3 (running): what the Chairman's daily app shows after (b) and (c); an independent
+   review of the presentation writer (gates (c)); the coding job proven end to end on a stack of
+   the lane's own (service-agent writer identity, real task text fenced as data, ports 3796 and
+   3800 refused under every config), with a switch-on list for a real teammate.
+2. Principal: (b), (c), (d) at the agreed time; then one rotation on a real teammate.
+3. BR2 round 2 under the deputy; janitor check b at 11:21Z.
