@@ -80,7 +80,7 @@ _EXPECTED_QUALIFICATION_STEPS = [
             'node --test gateway-modern-fabric.test.mjs gateway-fleet-git-failure.test.mjs '
             'gateway.test.mjs gateway-shared-backend.test.mjs '
             'gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs '
-            'fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs\n'
+            'fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs t3-control.test.mjs gateway-t3-control.test.mjs\n'
             "python -m unittest discover -s . -p 'private_service*test.py'\n"
             "python -m unittest discover -s . -p 'control_bundle*test.py'\n"},
     {'name': 'Compile source',

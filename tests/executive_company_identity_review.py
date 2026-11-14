@@ -7,6 +7,12 @@ catalog composition adds three exact HTTP response Constants in the existing
 ingress method. Each method's full AST, owning class, literal values and spelling
 remain pinned; all other identity tokens stay visible to the generic D8 guard.
 No runtime authority is added.
+
+Dot/T3 source0979fbfe was self-reviewed in the assigned Web session: only the
+full-file fingerprint and downstream literal line positions move. Both existing
+method ASTs, literal values/spellings and their structural paths are unchanged.
+This is not a new independent approval or a native release authorization.
+Evidence: docs/evidence/dot-t3-pin-qualification.json.
 """
 
 REVIEWED_PATH = "control_plane/executive_service.py"
@@ -50,7 +56,7 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                                   456,
                                                   '0o710'))},
  '_handle_ceo_ingress_connection': {'node_type': 'AsyncFunctionDef',
-                                    'source_sha256': '2a4b7858ab2cdf874ad8fb029374050521f0732e82296d32ffcca679faaf37ce',
+                                    'source_sha256': '99171953900c4bbb2875ff871cf62305601be7ccf243a989fbfbe35f021e79a2',
                                     'ast_sha256': '27f53e5690ad71c86f01f2ad657535aa022e0565472fef95ee773fc8c7837eaf',
                                     'sites': ((('body',
                                                 3,
