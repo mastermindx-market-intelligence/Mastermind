@@ -67,7 +67,8 @@ def test_rollback_rows_are_truthful_about_the_reverse_reload_and_the_backups():
     # the exact gap MED-2 found (a pin-only rollback strands reloaded profiles).
     undo3 = rows["3"][2].lower()
     assert "load unpacked" in undo3, "step 3's undo must name the reverse Load unpacked"
-    assert "0.5.0" in undo3, "step 3's undo must name the untouched old staging folder"
+    # BR2's untouched old staging folder is b640dec1's (release 3's was 0.5.0).
+    assert "0.6.0-b640dec1" in undo3, "step 3's undo must name the untouched old staging folder"
     # Step 4's undo is the same atomic repoint back; running sessions never need it.
     undo4 = rows["4"][2].lower()
     assert ("repoint" in undo4 or "switch" in undo4) and "old" in undo4, \
