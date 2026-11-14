@@ -22,6 +22,7 @@ import uuid
 import os
 import re
 import time
+from urllib.parse import urlsplit
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from pathlib import Path
@@ -584,11 +585,29 @@ def _sanitize_messages(payload: dict) -> None:
 _ALLOWED_TOP_LEVEL = frozenset({
     "model", "messages", "system", "max_tokens", "stop_sequences", "stream",
     "temperature", "top_k", "top_p", "metadata", "tools", "tool_choice",
-    "thinking", "service_tier", "container", "mcp_servers", "betas",
+    "thinking", "service_tier", "container", "mcp_servers",
 })
 
 
-def _sanitize_payload(payload: dict) -> None:
+def _extract_betas(payload: dict) -> str | None:
+    """Translate provider beta feature IDs without accepting arbitrary headers."""
+    raw = payload.pop("betas", None)
+    if isinstance(raw, str):
+        parts = raw.split(",")
+    elif isinstance(raw, list):
+        parts = raw
+    else:
+        return None
+    kept = []
+    for part in parts[:16]:
+        if isinstance(part, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,64}", part.strip()):
+            cleaned = part.strip()
+            if cleaned not in kept:
+                kept.append(cleaned)
+    return ",".join(kept)[:512] or None
+
+
+def _sanitize_payload(payload: dict) -> str | None:
     """Drop keys this Messages API does not accept, then fix message objects.
 
     Newer clients (T3's claudeAgent driver) send forward-looking fields the
@@ -599,6 +618,7 @@ def _sanitize_payload(payload: dict) -> None:
     the upstream would refuse the field anyway; every drop is logged so the
     drifting client stays visible.
     """
+    beta_header = _extract_betas(payload)
     extra = [key for key in payload if key not in _ALLOWED_TOP_LEVEL]
     for key in extra:
         del payload[key]
@@ -606,6 +626,40 @@ def _sanitize_payload(payload: dict) -> None:
         _log.warning("fabric sanitized payload dropped=%s model=%s",
                      ",".join(sorted(extra)), payload.get("model"))
     _sanitize_messages(payload)
+    return beta_header
+
+
+def _morph_deepseek_effort(output_config) -> str | None:
+    """Allowlist DeepSeek Anthropic effort without forwarding unsupported fields.
+
+    Every non-Morph target keeps the old sanitizer behavior. The mapping follows
+    the provider's documented low/high/max vocabulary; it does not invent a
+    stronger inference tier for an unknown client setting.
+    """
+    if not isinstance(output_config, dict):
+        return None
+    effort = output_config.get("effort")
+    if not isinstance(effort, str):
+        return None
+    return {"minimal": "low", "low": "low", "medium": "high",
+            "high": "high", "xhigh": "high", "max": "max",
+            "ultra": "max"}.get(effort.strip().lower())
+
+
+def _morph_deepseek_native(route: Route, model: str) -> bool:
+    url = urlsplit(route.base_url)
+    return (route.wire == WIRE_ANTHROPIC and url.scheme == "https"
+            and url.hostname == "api.morphllm.com"
+            and model in ("deepseek-v4.1-flash", "deepseek-v4.1-flash-1017"))
+
+
+def _morph_anthropic_version_headers(route: Route) -> dict[str, str]:
+    """Morph's native Messages route uses the standard versioned API contract."""
+    url = urlsplit(route.base_url)
+    if (route.wire == WIRE_ANTHROPIC and url.scheme == "https"
+            and url.netloc == "api.morphllm.com"):
+        return {"anthropic-version": "2023-06-01"}
+    return {}
 
 
 def _session_headers(route: Route, payload: dict, admission=None) -> dict[str, str]:
@@ -823,7 +877,12 @@ def create_app(cfg: Settings | None = None, *,
             if "tools" in payload and (not isinstance(payload["tools"], list)
                     or any(not isinstance(tool, dict) for tool in payload["tools"])):
                 raise ValueError("invalid tools")
-            _sanitize_payload(payload)
+            morph_deepseek_effort = _morph_deepseek_effort(payload.get("output_config"))
+            beta_header = _sanitize_payload(payload)
+            # Explicit client header supersedes the optional body form.
+            client_beta = _extract_betas({"betas": request.headers.get("anthropic-beta", "")})
+            if client_beta:
+                beta_header = client_beta
             candidates = _model_candidates(payload, cfg.aliases)
         except (ValueError, WireTranslationError):
             return JSONResponse({"error": {"message": "invalid request body or model", "type": "invalid_request_error"}}, status_code=400)
@@ -887,6 +946,10 @@ def create_app(cfg: Settings | None = None, *,
 
         async def invoke(route, resolved, admission):
             forwarded = dict(payload, model=route.wire_model(resolved))
+            # This is after route selection: Qwen, Claude and other providers
+            # never receive DeepSeek-only effort fields they may reject.
+            if not counting and morph_deepseek_effort and _morph_deepseek_native(route, resolved):
+                forwarded["output_config"] = {"effort": morph_deepseek_effort}
             # Caller routing/provenance hints are consumed locally, not unsupported provider fields.
             metadata = forwarded.get("metadata")
             if isinstance(metadata, dict):
@@ -908,10 +971,12 @@ def create_app(cfg: Settings | None = None, *,
                 raise _Retryable("FABRIC_ROUTE_CREDENTIAL", cooldown=True,
                                  rejected=True, retryable=True, category="local_preflight")
             if counting:
-                return await _forward_anthropic_count(app, route, authorization, forwarded, admission=admission)
+                return await _forward_anthropic_count(app, route, authorization, forwarded,
+                                                      admission=admission, beta_header=beta_header)
             if route.wire == WIRE_ANTHROPIC:
                 return await _forward_anthropic(app, route, authorization, forwarded,
-                                                wants_stream, admission=admission)
+                                                wants_stream, admission=admission,
+                                                beta_header=beta_header)
             return await _forward_openai(app, route, authorization, forwarded,
                                          wants_stream, resolved, admission=admission)
 
@@ -1150,14 +1215,18 @@ def create_app(cfg: Settings | None = None, *,
             app.state.model_policy.checkpoint()
         return JSONResponse({"error": {"type": "upstream_error", "code": code,
             "category": failure.category, "provider_code": failure.code,
-            "message": "upstream refused; request was not replayed"}}, status_code=status)
+            "message": ("upstream refused (" + failure.category + ":" + failure.code
+                        + "); request was not replayed")}}, status_code=status)
 
-    async def _forward_anthropic_count(app, route, authorization, payload, *, admission=None) -> Response:
+    async def _forward_anthropic_count(app, route, authorization, payload, *,
+                                       admission=None, beta_header=None) -> Response:
         upstream: httpx.AsyncClient = app.state.upstream
         upstream_request = upstream.build_request(
             "POST", f"{_route_base_url(route).rstrip('/')}/v1/messages/count_tokens",
             headers={**_upstream_auth_headers(route, authorization),
                      **_session_headers(route, payload),
+                     **_morph_anthropic_version_headers(route),
+                     **({"anthropic-beta": beta_header} if beta_header else {}),
                      "content-type": "application/json",
                      "accept-encoding": "identity"},
             content=json.dumps(payload).encode())
@@ -1173,11 +1242,13 @@ def create_app(cfg: Settings | None = None, *,
                         media_type="application/json")
 
     async def _forward_anthropic(app, route, authorization, payload,
-                                 wants_stream, *, admission=None) -> Response:
+                                 wants_stream, *, admission=None, beta_header=None) -> Response:
         cfg: Settings = app.state.settings
         upstream: httpx.AsyncClient = app.state.upstream
         request_headers = {**_upstream_auth_headers(route, authorization),
                            **_session_headers(route, payload, admission),
+                           **_morph_anthropic_version_headers(route),
+                           **({"anthropic-beta": beta_header} if beta_header else {}),
                            "content-type": "application/json", "accept-encoding": "identity"}
         upstream_request = upstream.build_request("POST",
             f"{_route_base_url(route).rstrip('/')}/v1/messages", headers=request_headers,

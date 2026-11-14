@@ -6,6 +6,46 @@ installer separately fences the actual source/config preimage and drains8313.
 from __future__ import annotations
 
 import copy
+from urllib.parse import urlsplit
+
+
+def enable_native_deepseek(document):
+    """Narrow, idempotent live migration; preserve all other provider policies.
+
+    Do not rerun the broader historical `upgrade()` against an independently
+    evolved production document: it also edits Kimi, Qwen and overflow settings.
+    This helper changes only the two Morph DeepSeek bindings and their labels.
+    """
+    result = copy.deepcopy(document)
+    routes = {route["route_id"]: route for route in result["routes"]}
+    for rid in ("morph_ds", "morph_ds_2"):
+        if rid not in routes:
+            raise ValueError("required Morph DeepSeek resource is missing")
+        route = routes[rid]
+        url = urlsplit(str(route.get("base_url", "")))
+        if (url.scheme != "https" or url.netloc != "api.morphllm.com"
+                or url.path.rstrip("/") not in ("", "/v1")
+                or url.query or url.fragment
+                or route.get("wire", "openai") not in ("openai", "anthropic")):
+            raise ValueError("Morph DeepSeek route has an unexpected upstream binding")
+        route["base_url"] = "https://api.morphllm.com"
+        route["wire"] = "anthropic"
+        note = str(route.get("notes") or "")
+        marker = "Native Anthropic Messages preserves reasoning/tool history."
+        if marker not in note:
+            route["notes"] = (note.rstrip() + " " + marker).strip()
+
+    aliases = result.setdefault("aliases", {})
+    stale_pro = aliases.get("deepseek-v4-pro")
+    labels = result.setdefault("model_labels", {})
+    if stale_pro in (["deepseek-v4.1-flash"], ["deepseek-v4.1-flash-1017"]):
+        del aliases["deepseek-v4-pro"]
+        labels.pop("deepseek-v4-pro", None)
+    labels.update({
+        "deepseek-v4.1-flash": "DeepSeek V4.1 Flash 1017 (not V4 Pro)",
+        "deepseek-v4.1-flash-1017": "DeepSeek V4.1 Flash 1017 (not V4 Pro)",
+    })
+    return result
 
 
 def upgrade(document):
@@ -98,4 +138,4 @@ def upgrade(document):
         "no replay after possible upstream acceptance or a permission refusal",
         "local reservations are estimates, never authoritative quota balances",
     ]
-    return result
+    return enable_native_deepseek(result)
