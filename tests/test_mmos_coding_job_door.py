@@ -88,9 +88,9 @@ def _config(scratch, t3_overrides=None):
         "paperclip_service_agent_id": "ag-pf-delivery",
         "teammates": ["ag-1"],
         "t3": {
-            "proof_base_url": "http://127.0.0.1:3800",
+            "proof_base_url": "http://127.0.0.1:3794",
             "home_dir": str(scratch / "t3home"),
-            "port": 3800,
+            "port": 3794,
             "token_path": "/x", "project_id": "p",
             "model_selection": "{}"},
     }
@@ -133,7 +133,7 @@ def test_config_requires_the_dev_server_pin(scratch):
             "proof_base_url": "http://127.0.0.1:3773"}))
     with pytest.raises(ValueError, match="same dev server"):
         door_mod.DoorConfig(_config(scratch, {
-            "proof_base_url": "http://127.0.0.1:3801"}))  # != port 3800
+            "proof_base_url": "http://127.0.0.1:3801"}))  # != port 3794
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +363,30 @@ def test_pf3_brief_over_16384_bytes_refuses_and_16384_is_accepted(
     d._execute(None, command2, entry2)
     assert entry2["blocker"]["code"] == "THREAD_BUDGET_EXHAUSTED"
     assert entry2["phase"] == "budget-exhausted"
+
+
+# ---------------------------------------------------------------------------
+# PF-3 item 3: 3796 and 3800 are refused under EVERY config — the default
+# range included — and the dev stack moves to 3794.
+# ---------------------------------------------------------------------------
+
+
+def test_pf3_3796_and_3800_refused_under_every_config(scratch):
+    # The DEFAULT range (no dev_port_range field) must refuse both ports.
+    for port in (3796, 3800):
+        with pytest.raises(ValueError, match="real service"):
+            door_mod.DoorConfig(_config(scratch, {
+                "port": port, "proof_base_url": f"http://127.0.0.1:{port}"}))
+    # A custom range that CONTAINS them still refuses them.
+    for port in (3796, 3800):
+        with pytest.raises(ValueError, match="real service"):
+            door_mod.DoorConfig(_config(scratch, {
+                "port": port, "proof_base_url": f"http://127.0.0.1:{port}",
+                "dev_port_range": [3790, 3810]}))
+    # 3794 is accepted under the default range.
+    cfg = door_mod.DoorConfig(_config(scratch, {
+        "port": 3794, "proof_base_url": "http://127.0.0.1:3794"}))
+    assert cfg.t3_port == 3794
 
 
 # ---------------------------------------------------------------------------

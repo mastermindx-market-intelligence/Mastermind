@@ -117,7 +117,7 @@ def test_no_3773_default_anywhere(monkeypatch):
 
 def test_target_is_required_positional_compat_raises(monkeypatch, tmp_path):
     home = tmp_path / "home"
-    _state(home, port=3796, pid=os.getpid())
+    _state(home, port=3794, pid=os.getpid())
     calls = _cli(monkeypatch)
     # old call shape (the canaries' / the incident's shape) must fail loudly
     with pytest.raises(TypeError):
@@ -135,43 +135,43 @@ def test_mint_refused_when_home_has_no_runtime_state(monkeypatch, tmp_path):
     with pytest.raises(RuntimeError, match="server-runtime"):
         harness.obtain_mcp_access_token(
             str(tmp_path / "tok.txt"), "label",
-            base_url="http://127.0.0.1:3796", home_dir=str(home))
+            base_url="http://127.0.0.1:3794", home_dir=str(home))
     assert calls == [], "the pairing CLI must never run for an unpinned home"
 
 
 def test_mint_refused_when_state_names_a_foreign_port(monkeypatch, tmp_path):
     calls = _cli(monkeypatch)
     home = tmp_path / "home"
-    # the home's own server runs on 3800, but the pinned base says 3796:
+    # the home's own server runs on 3833, but the pinned base says 3794:
     # a stale/foreign home is exactly the 14-code incident's shape
-    _state(home, port=3800, pid=os.getpid())
-    with pytest.raises(RuntimeError, match="names port 3800"):
+    _state(home, port=3833, pid=os.getpid())
+    with pytest.raises(RuntimeError, match="names port 3833"):
         harness.obtain_mcp_access_token(
             str(tmp_path / "tok.txt"), "label",
-            base_url="http://127.0.0.1:3796", home_dir=str(home))
+            base_url="http://127.0.0.1:3794", home_dir=str(home))
     assert calls == []
 
 
 def test_mint_refused_when_state_origin_disagrees(monkeypatch, tmp_path):
     calls = _cli(monkeypatch)
     home = tmp_path / "home"
-    _state(home, port=3796, pid=os.getpid(),
+    _state(home, port=3794, pid=os.getpid(),
            origin="http://127.0.0.1:3773")  # a lie in the state file
     with pytest.raises(RuntimeError, match="origin"):
         harness.obtain_mcp_access_token(
             str(tmp_path / "tok.txt"), "label",
-            base_url="http://127.0.0.1:3796", home_dir=str(home))
+            base_url="http://127.0.0.1:3794", home_dir=str(home))
     assert calls == []
 
 
 def test_mint_refused_when_state_pid_is_dead(monkeypatch, tmp_path):
     calls = _cli(monkeypatch)
     home = tmp_path / "home"
-    _state(home, port=3796, pid=999999999)  # not a live process
+    _state(home, port=3794, pid=999999999)  # not a live process
     with pytest.raises(RuntimeError, match="not alive"):
         harness.obtain_mcp_access_token(
             str(tmp_path / "tok.txt"), "label",
-            base_url="http://127.0.0.1:3796", home_dir=str(home))
+            base_url="http://127.0.0.1:3794", home_dir=str(home))
     assert calls == [], "a stale state file names no live server; no mint"
 
 
@@ -192,9 +192,9 @@ def test_mint_refused_for_non_dev_base(monkeypatch, tmp_path):
 
 def test_mint_pins_cli_env_and_http_base_to_the_pinned_server(
         monkeypatch, tmp_path):
-    base = "http://127.0.0.1:3796"
+    base = "http://127.0.0.1:3794"
     home = tmp_path / "home"
-    _state(home, port=3796, pid=os.getpid())
+    _state(home, port=3794, pid=os.getpid())
     calls = _cli(monkeypatch)
     urls = _oauth(monkeypatch, base)
     token_path = tmp_path / "worker-token.txt"
@@ -209,7 +209,7 @@ def test_mint_pins_cli_env_and_http_base_to_the_pinned_server(
     assert argv[1:4] == ["auth", "pairing", "create"]
     env = calls[0]["kwargs"]["env"]
     assert env["T3CODE_HOME"] == str(home)
-    assert env["T3CODE_PORT"] == "3796"
+    assert env["T3CODE_PORT"] == "3794"
     # every HTTP leg went to the PINNED base, never to 3773
     assert urls and all(u.startswith(base + "/oauth/mcp/") for u in urls), urls
     # the token is a 0600 file
@@ -224,7 +224,7 @@ def test_cached_token_never_mints(monkeypatch, tmp_path):
     home = tmp_path / "home"  # no state at all: reuse needs no server
     token, _reg = harness.obtain_mcp_access_token(
         str(token_path), "label",
-        base_url="http://127.0.0.1:3796", home_dir=str(home))
+        base_url="http://127.0.0.1:3794", home_dir=str(home))
     assert token == "cached-token"
     assert calls == []
 
@@ -252,9 +252,9 @@ def test_door_executor_pins_base_and_home_and_survives_refusal(
         "paperclip_company_id": "c",
         "paperclip_service_agent_id": "ag-pf-delivery",
         "t3": {
-            "proof_base_url": "http://127.0.0.1:3796",
+            "proof_base_url": "http://127.0.0.1:3794",
             "home_dir": str(tmp_path / "t3home"),  # no runtime state at all
-            "port": 3796,
+            "port": 3794,
             "token_path": str(tmp_path / "worker-token.txt"),
             "token_label": "t4c-door-worker",
             "project_id": "p", "model_selection": "{}"},
@@ -270,7 +270,7 @@ def test_door_executor_pins_base_and_home_and_survives_refusal(
     import integrations.t3.live_proof.t3_live_proof as real_proof
     monkeypatch.setattr(real_proof, "obtain_mcp_access_token", fake_mint)
 
-    class _R:  # the readiness probe passes: something answers on 3796
+    class _R:  # the readiness probe passes: something answers on 3794
         status = 200
 
         def __enter__(self):
@@ -305,5 +305,5 @@ def test_door_executor_pins_base_and_home_and_survives_refusal(
     # the executor TRIED the mint exactly once, with the pinned target, and
     # the guard refused it — no crash, no live-app fallback
     assert len(mint_calls) == 1
-    assert mint_calls[0]["base_url"] == "http://127.0.0.1:3796"
+    assert mint_calls[0]["base_url"] == "http://127.0.0.1:3794"
     assert mint_calls[0]["home_dir"] == str(tmp_path / "t3home")

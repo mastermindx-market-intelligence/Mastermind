@@ -65,7 +65,7 @@ wc = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(wc)
 
 DEV_PAPERCLIP = "http://127.0.0.1:3190"
-DEV_T3_PORT = 3796
+DEV_T3_PORT = 3794  # PF-3 item 3: 3796 is another lane's listener now
 DEAD_DEV_T3_PORT = 3799  # inside the dev range, never started: for `wait`
 # PF-3 item 1: the result transport delivers as a dedicated service agent,
 # never the board.  This is the dev-journey placeholder identity; the

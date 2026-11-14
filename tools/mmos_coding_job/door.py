@@ -147,10 +147,10 @@ DEV_T3_PORT_LAST = 3810
 RESERVED_NEIGHBOUR_PORTS = frozenset({3100, 3179, 3773, 3774, 3780})
 
 # Real services a configured dev range may never reach, whatever it spans.
-# 3796/3800 sit inside the historical default range and stay legal there (the
-# pairing-target test and the T4b journey use it); a custom range refuses them.
-# 3784 is lane HM's (BRIEF §4); 45003 Multilogin; 54329 the real Paperclip
-# postgres (REV-DOOR F1).
+# PF-3 item 3: 3796/3800 sit inside the historical default range but are
+# refused under EVERY config now (3796 is another lane's listener — BRIEF
+# §4 — and 3800 is reserved); the dev stack moved to 3794. 3784 is lane
+# HM's; 45003 Multilogin; 54329 the real Paperclip postgres (REV-DOOR F1).
 REAL_T3_TARGET_PORTS = frozenset({3100, 3179, 3190, 3193, 3773, 3774, 3780})
 CUSTOM_RANGE_REFUSED_PORTS = REAL_T3_TARGET_PORTS | {3784, 3796, 3800, 45003, 54329}
 
@@ -280,10 +280,12 @@ class DoorConfig:
                 f"t3.port must be a dev-server port "
                 f"({self.t3_dev_port_first}-{self.t3_dev_port_last}), "
                 f"got {self.t3_port}")
-        if dev_range is not None and self.t3_port in CUSTOM_RANGE_REFUSED_PORTS:
+        # PF-3 item 3: refused under EVERY config — the default range
+        # included.  A dev range widens dev ports, never the real ones.
+        if self.t3_port in CUSTOM_RANGE_REFUSED_PORTS:
             raise ValueError(
                 f"t3.port {self.t3_port} is a real service or another "
-                "lane's port; a configured dev_port_range never admits it")
+                "lane's port; it is refused under every dev port range")
         base_port = urllib.parse.urlsplit(self.t3_proof_base).port
         if base_port != self.t3_port:
             raise ValueError(
