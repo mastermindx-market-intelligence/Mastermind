@@ -1,0 +1,60 @@
+# Phase 3 frozen experiment protocol
+
+Recorded before new market-outcome comparisons. Operation entry-risk-functional-phase3-20261114. This is a finite, original retrospective experiment, not a claim of untouched market history or prospective validation. Later changes must be dated and explain whether outcomes were already inspected. Preserve all arms, failures, exclusions and nulls.
+
+## Question and component jobs
+
+Does a better estimate of the risk surrounding a genuine technical entry improve the same decision after costs, or merely reduce exposure? Does a distinct slow momentum/relative-strength representation improve opportunity selection beyond the entry trigger? Can the system preserve favorable high-volatility rebounds rather than reject all turbulent entries? A timing signal, expected return, volatility forecast, path/stop risk, execution cost, portfolio concentration and exit policy are distinct objects. No agreement-count score is a calibrated probability.
+
+Primary hypotheses:
+H1: common-target fixed-power MEM improves event-conditioned variance loss relative to EWMA .94.
+H2: adding predicted risk level/change and stop-to-noise information improves matured-label stop/target outcome prediction beyond a rolling base rate and price/tier-only model.
+H3: risk-aware sizing of unchanged T1/T2 opportunities improves loss measures, with separate economic and risk-adjusted scorecards and exposure-matched controls.
+H4: relative-strength opportunity selection can complement timing; forecast risk alone does not create positive expected returns.
+H5: exits change the payoff distribution and must be evaluated jointly with entry, including foregone winners and repeat stop-outs, not ranked by win rate alone.
+
+## Source, sample and availability
+
+Reuse phase2 source at f7f7dcb381c7cf1b19ceb1af6b367818268d9155 and unchanged accepted forecast evidence. Canonical Macro source pin 6bbc4b0fc694c847077661ff5bf4c19ea41e4e81. Use named-source commercial rights already approved by Chairman attestation. Raw data remain private. Preserve exact hashes and capture clocks. Recomputed histories and current vendor vintages are not original publication vintages.
+
+ETF transfer panel: the eleven already qualified phase2 ETFs QQQ/SPY/IWM/XLB/XLE/XLI/XLK/XLP/XLU/XLV/XLY; use existing qualified data and frozen forecasts where identities match, with a separately labelled source/clock adapter if needed. Do not silently restore excluded XLF.
+
+Stock primary panel: deterministically select 64 names from the intersection of local baskets/ohlcv filenames and the preserved SP1500 membership history, ordered by SHA256('entry-risk-phase3-20261114|' + uppercase ticker). Selection may inspect identifiers and schema/coverage, not returns or outcomes. Selected failures are retained and not replaced. AAPL/MSFT/NVDA may be separate declared consumer/parity diagnostics but cannot be silently added to primary results. Record missing historical-member price coverage and the snapshot limitation; PIT membership alone does not prove complete delisted coverage. Data cutoff for stock membership-based admission is 2026-06-02, the recorded membership-snapshot boundary, with outcomes no later than 2026-11-12. ETF evaluation extends only through the frozen phase2 endpoint. Minimum 504 observations for fitted forecasts; minimum 270 for canonical technical logic. New IPOs, missing rows and input failures stay explicit.
+
+Prefer complete single-provider raw OHLC, cash distributions, split factors and volume from the existing approved Tiingo EOD owner for the selected stocks. No provider splice or missing-price imputation. If raw actions cannot be qualified, retain that lane as unavailable; any adjusted-only diagnostic must be separately named and cannot impersonate executable raw-price stops. Existing price files provide discovery/coverage, not permission to invent action fields. Bound acquisition to the selected panel and the declared diagnostics; no new data service.
+
+## Technical signals and timing
+
+Primary entry families: confirmed native T1; native T2; their union. Replay engine.signal_gate.gate on each historical prefix, with washout_waiver=False because the contemporaneous peer-waiver artifact is not established. This is the canonical no-peer-waiver research arm, not the full historical live board. T1 with tier_observation_provisional=True is separately counted but not silently treated as confirmed. T2 uses its actual observed daily-prefix decision, not a historical full-series label. Native event date, observation date, confirmation and next fill remain separate clocks.
+
+Do not substitute confluence_tiers.tier_stream for the native gate: its T1 definition and trailing/interior basis differ. A source-preserving last-marker projection may accelerate native gate() only after critical-decision-field equality against the untouched native function on synthetic and deterministic real prefixes. It may omit historical chart lists but not change admission, tier, provisional flags, event clocks or reasons. No side artifact/default-current data read is permitted in historical replay.
+
+Event = first eligible observation after three consecutive observations absent from that same entry family. Portfolio policy never pyramids a held symbol or counts repeated board days as new trades. Earliest fill is next available scheduled regular-session open; missing sessions are not silently treated as consecutive trading days. All feature lookbacks end at the origin close.
+
+Fixed momentum controls, no tuning: (a) 20-session close breakout above the prior 20-session maximum; (b) 50-session mean reclaim with positive 126-session total return; (c) positive 63- and 126-session total-return trend state. These are known simple controls, not revived/promoted historical failed overlays. Event comparisons use the same onset/holding convention; continuous trend allocation is a separate policy, not conflated with event selectivity. Relative-strength feature = stock 126-session total return excluding the latest 21 sessions minus the same benchmark return; the fixed T1/T2 selection arm admits positive relative strength. No current sector membership is backfilled as historical truth. Price-only momentum alternatives do not claim fundamental information.
+
+## Risk forecasts and outcomes
+
+Primary risk forecasters: EWMA retention .94 and the phase2 fixed-power delta=1 MEM, using the same positive overnight-plus-Parkinson variance target, chronological 504-minimum/1260-maximum fit windows and 63-origin refits. Forecasts cover 1/5/20 sessions. A failed model is missing, never a zero-risk observation or success. Long-run stationarity diagnostics remain separate from finite-horizon forecasting.
+
+Event descriptors: tier; log forecast H5 variance; its five-session change; H1/H20 ratio; stop distance / sqrt(5 * H5 mean variance); trailing 21-session variance; 126-minus-21 relative momentum; distance from 63-session high; overnight variance share. Fit standardization and clipping from training observations only. No per-symbol threshold optimization.
+
+Main path label: first +8% price target versus -5% price stop within 21 sessions after next-open fill, with a distinct timeout class. Raw prices use known split adjustments to held shares and order levels; cash dividends are credited only to prior holders. A gap through a stop executes at the open, not magically at the stop. If both barriers occur within an OHLC bar and order is unknown, primary accounting is stop-first and the ambiguous-bar count plus opposite-order sensitivity are disclosed. Missing price paths are unavailable, not a timeout or zero return. Report end return, maximum adverse/favorable excursion, time under water and stop-then-recovery separately.
+
+Risk models: rolling matured-class-frequency baseline; price/tier-only regularized multinomial model; risk-augmented model; a small declared interaction extension (T2 x volatility change, relative momentum x volatility change). Same fitting and outcome population across models. Use chronological fits, minimum 300 matured training events and 30 observations per represented class, refit on 63-session dates, fixed ridge strength 1.0 and training-only preprocessing. Targets whose endpoint is after the fit origin are excluded; no in-sample fitted probability is graded. Compare log loss, multiclass Brier, calibration and conditional adverse outcomes. Do not promote a risk model merely for AUC or use uncalibrated probabilities as live authority.
+
+## Economic comparisons
+
+Keep opportunities fixed when measuring sizing: baseline, EWMA sizing and MEM sizing. Fixed size multiplier min(1, target_annual_vol / forecast_annual_vol); target 30% for individual stocks and 15% for ETFs. These are research counterfactuals, not live sizing instructions. Compare entry-only sizing with the separately labelled continuous-volatility policy; no silent resizing of baseline positions.
+
+Portfolio: long/cash, no borrowing or shorting; at most ten concurrent positions, new base allocation at most 8% of current wealth each, total gross at most 80%; no leverage or renormalization of risk reductions. Stable identifier ordering is the non-selection control; positive relative-strength selection and descending relative-strength ranking are distinct arms. If several orders compete for cash, record the deterministic allocation and all rejected candidates. Cash yields 0% primary, fixed 3% sensitivity (not historical Treasury performance). Entry and exit costs are 5 bp per side primary, 20 bp sensitivity; one additional open of latency is a sensitivity. Liquidity floor: last 20 sessions' mean dollar volume at least $5 million and latest raw close at least $5, both known at origin and applied identically to relevant arms.
+
+Exit ablations on the same union entries: fixed 21-session time exit; 5% stop plus 21-session time exit; 5% stop / 8% target / 21-session timeout. A separately named 63-session, no-fixed-profit-cap trend-following arm exits on a confirmed close below the trailing 20-session low, executed next open, or at the maximum horizon. No hindsight best exit selection. Keep dividends, split transformations, drifted weights, gap losses, terminal liquidation and capital occupancy explicit.
+
+Primary scorecards remain separate: CAGR/net excess and upside capture; Sharpe/Sortino/Calmar; drawdown/expected shortfall/worst loss/repeat-stop burden and recovery. Add training-era static exposure reduction, exact hindsight exposure-match (diagnostic only), event-count/date-matched controls and the existing simple trend comparator. Avoiding trades is not independently demonstrated forecasting skill. A better forecast loss may still produce worse utility.
+
+## Statistical and acceptance rules
+
+Main stock evaluation: 2020 onward after matured training; report 2020-2023 and 2024-membership-cutoff separately. Earlier years supply training and descriptive development. ETF eras reuse 2015-2019/2020-2023/2024-2026 labels. None is called a pristine holdout to the wider research program. Calendar-block paired bootstrap (63-session blocks, seed 20261114, 2000 draws) and the declared full contrast-family multiplicity correction; preserve effective event/date counts and cross-name dependence. Do not interpret more parameter/cost scenarios as independent evidence. Always report raw paired differences and uncertainty, including unfavorable cases and coverage.
+
+A candidate is retained only for the specific objective supported: lower forecast loss, better calibrated entry risk, useful loss protection, or improved net economic return. No universal winner is forced. Numerical/source tests, historical performance, forward prepublication, protected merge and production predictive acceptance remain separate gates. Fresh observations can be published in the existing evidence plane with no ranking/sizing/trading authority; future outcomes cannot be accelerated or fabricated. No new scheduler, watcher, store or automatic promotion controller.
