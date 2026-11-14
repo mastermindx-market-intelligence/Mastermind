@@ -24,7 +24,13 @@ def save(path: Path, value) -> None:
 
 def _load(path: Path, columns: list[str], index_column: str) -> pd.DataFrame:
     # Filter in the parquet reader, before any target or statistical operation.
-    frame = pd.read_parquet(path, columns=columns, filters=[(index_column,'<=',CUTOFF)])
+    import pyarrow.parquet as pq
+    metadata=pq.ParquetFile(path).schema_arrow.metadata or {}
+    stored=json.loads(metadata.get(b'pandas',b'{}')).get('index_columns',[])
+    if (len(stored)!=1 or not isinstance(stored[0],str)
+            or stored[0].casefold()!=index_column.casefold()):
+        raise ContractError('declared economic date index absent or ambiguous')
+    frame = pd.read_parquet(path, columns=columns, filters=[(stored[0],'<=',CUTOFF)])
     calendar_index(frame.index)
     if frame.index[-1] > CUTOFF:
         raise ContractError('reader crossed the sealed evaluation boundary')
@@ -37,6 +43,7 @@ def main(argv=None) -> int:
     ap.add_argument('--macro-data-root',type=Path,required=True)
     ap.add_argument('--output',type=Path,required=True)
     ap.add_argument('--source-commit',required=True)
+    ap.add_argument('--reuse-from',type=Path)
     args=ap.parse_args(argv)
     if len(args.source_commit)!=40 or any(x not in '0123456789abcdef' for x in args.source_commit):
         ap.error('immutable source commit required')
@@ -61,6 +68,23 @@ def main(argv=None) -> int:
         save(args.output/'run_receipt.json',receipt)
         return 2
     all_rows=[];fit_logs=[]
+    reuse_receipt=None;reuse_data=None;reuse_fits=[]
+    if args.reuse_from is not None:
+        reuse_receipt=json.loads((args.reuse_from/'run_receipt.json').read_text())
+        for name in ('core.py','risk_axis.py'):
+            if reuse_receipt.get('source_files',{}).get(name)!=sha(Path(__file__).parent/name):
+                raise ContractError('reuse model source changed')
+        if reuse_receipt.get('model_roster')!=list(MODELS) or reuse_receipt.get('cutoff')!=str(CUTOFF.date()):
+            raise ContractError('reuse experiment contract changed')
+        for key in ('VIX','VVIX'):
+            if reuse_receipt['inputs'][key]['filtered_sha256']!=receipt['inputs'][key]['filtered_sha256']:
+                raise ContractError('reuse index input changed')
+        reuse_data=pd.read_parquet(args.reuse_from/'private_predictions.parquet')
+        if (pd.to_datetime(reuse_data.label_end)>CUTOFF).any():
+            raise ContractError('reused outcomes cross the fixed boundary')
+        reuse_fits=json.loads((args.reuse_from/'fit_log.json').read_text())
+        receipt['reused_from']=str(args.reuse_from)
+        receipt['reused_instruments']=[]
     prior=args.etf_root/'run_receipt.json'
     if not prior.is_file():
         raise ContractError('retained ETF lineage receipt absent')
@@ -72,7 +96,14 @@ def main(argv=None) -> int:
                 raise ContractError('original prepared-target lineage absent')
             frame=load_bound(ticker,args.etf_root/f'{ticker}_prices.parquet',['variance','return_log'],'date')
             receipt['inputs'][ticker]['original_prepared_sha256']=parents[ticker]['prepared_input_sha256']
-            rows,fits=walk_forward(frame,vix,vvix)
+            if reuse_receipt and ticker in reuse_receipt.get('instruments_completed',[]):
+                if reuse_receipt['inputs'][ticker]['filtered_sha256']!=receipt['inputs'][ticker]['filtered_sha256']:
+                    raise ContractError('reused ETF target input changed')
+                rows=reuse_data.loc[reuse_data.instrument==ticker].copy()
+                fits=[x for x in reuse_fits if x['instrument']==ticker]
+                receipt['reused_instruments'].append(ticker)
+            else:
+                rows,fits=walk_forward(frame,vix,vvix)
             if rows.empty:raise ContractError('no qualified common predictions')
             rows['instrument']=ticker
             all_rows.append(rows)
