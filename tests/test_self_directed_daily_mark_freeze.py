@@ -15,7 +15,17 @@ pytestmark = pytest.mark.strict_book_dirs
 
 def _isolate_self_directed_sweep(monkeypatch):
     from app import scheduler
+    from control_plane import locks
     from portfolio import marks, registry, self_directed
+
+    class _Lock:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(locks, "acquire_or_log", lambda *args, **kwargs: _Lock())
 
     events: list[tuple[str, str, str, str, str]] = []
     ledger_ends: list[tuple[str, str | None]] = []
@@ -224,4 +234,28 @@ def test_real_daily_mark_refusal_preserves_account_and_last_publication(tmp_path
     assert SD._PUBLISHED_PATH.read_bytes() == publication_bytes
     assert not SD._NAV_PATH.exists()
     assert SD._price_resolver is None
+    assert ledger_ends == [("ok", None)]
+
+
+def test_daily_mark_skips_self_directed_when_book_lock_is_held(monkeypatch) -> None:
+    scheduler, self_directed, events, ledger_ends = _isolate_self_directed_sweep(monkeypatch)
+    from control_plane import locks
+
+    monkeypatch.setattr(locks, "acquire_or_log", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        self_directed,
+        "mark",
+        lambda **kwargs: pytest.fail("mark must not run without book:self_directed lock"),
+    )
+    monkeypatch.setattr(
+        self_directed,
+        "publish",
+        lambda **kwargs: pytest.fail("publish must not run without book:self_directed lock"),
+    )
+
+    scheduler._daily_mark_job()
+
+    assert events == [
+        ("daily_mark", "self_directed", "lock_held:self_directed", "RuntimeError", "ADVISORY_ONLY")
+    ]
     assert ledger_ends == [("ok", None)]
