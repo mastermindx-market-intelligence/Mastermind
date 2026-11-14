@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mastermind Long Horizon"
+  short_description: "Orchestrate T3 work, native tools, and verified continuity"
+  default_prompt: "Use $mastermind-long-horizon to advance the assigned project without losing scope across steering or compaction."

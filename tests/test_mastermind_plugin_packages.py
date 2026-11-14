@@ -1355,3 +1355,39 @@ def test_navigator_manifest_truth_bearing_descriptions_are_closed(
 
     codes = _codes_without_exception(tmp_path)
     assert "NAVIGATOR_CONTENT_CONTRACT_MISMATCH" in codes
+
+
+@pytest.mark.parametrize("mutation", ["changed", "extra_file", "extra_skill", "missing", "symlink"])
+def test_repository_discovery_exception_is_exact_and_closed(tmp_path: Path, mutation: str) -> None:
+    _copy_package(tmp_path)
+    wrapper = tmp_path / ".agents/skills/mastermind-long-horizon/SKILL.md"
+    if mutation == "changed":
+        wrapper.write_text(wrapper.read_text() + "\nAdditional unreviewed instructions.\n")
+        expected = "REPOSITORY_DISCOVERY_CONTENT_MISMATCH"
+    elif mutation == "extra_file":
+        (wrapper.parent / "run.py").write_text("print('unexpected')\n")
+        expected = "UNEXPECTED_PACKAGE_FILE"
+    elif mutation == "extra_skill":
+        other = wrapper.parent.parent / "unreviewed"
+        other.mkdir()
+        (other / "SKILL.md").write_text("unexpected\n")
+        expected = "UNEXPECTED_PACKAGE_DIRECTORY"
+    elif mutation == "missing":
+        wrapper.unlink()
+        expected = None
+    else:
+        target = tmp_path / "external.md"
+        target.write_text(wrapper.read_text())
+        wrapper.unlink()
+        wrapper.symlink_to(target)
+        expected = "SYMLINK_FORBIDDEN"
+    result = validate_repository(tmp_path)
+    assert result["ok"] is False
+    if expected:
+        assert expected in {error["code"] for error in result["errors"]}
+
+
+def test_exported_package_does_not_require_repository_discovery(tmp_path: Path) -> None:
+    _copy_package(tmp_path)
+    shutil.rmtree(tmp_path / ".agents/skills")
+    assert validate_repository(tmp_path)["ok"] is True

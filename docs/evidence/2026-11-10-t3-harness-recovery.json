@@ -1,0 +1,282 @@
+{
+  "auxiliary_minimax_vision": "UNQUALIFIED_NOT_ACTIVATED",
+  "browser_cleanup": "OWED_ORIGINAL_TAB_1925952352; no close was attempted, no click was performed",
+  "fresh_source_tests": {
+    "command": "python3 -m pytest -o addopts='' -q tests/test_t3_orchestration.py tests/test_t3_harness.py --tb=short --maxfail=1",
+    "exit_code": 0,
+    "result": "72 passed in 6.70s",
+    "scope": "SOURCE_CONTRACT_TESTS_NOT_LIVE_T3_MODEL",
+    "studio_process_id": 80043
+  },
+  "live_t3_agent_consumption": "UNPROVEN",
+  "mission_complete": false,
+  "operation_id": "claude-t3-long-horizon-20261109",
+  "original_browser_effect_events": [
+    {
+      "action": "open",
+      "event": "CALL",
+      "tab_id": null
+    },
+    {
+      "action": "open",
+      "effect": "APPLIED",
+      "event": "RETURN",
+      "reason": null,
+      "request_ref": {
+        "action": "open",
+        "browser_id": "d02b92f53e2dcb73b610aab244ca080bde4998bde8737b7f314ebd7c168b6981",
+        "connection_id": "GGxRjUGmzKPp4boKrqhlI-kdu4efQ4wy",
+        "nonce": "61ef433218dad0171d984efdce48ea06b8563afdbfbb2128",
+        "operation_key": "hermes-browser-5ade69194466c9c338c6d53832108103"
+      },
+      "state": "RECEIPT",
+      "status": "ACTION_DISPATCHED",
+      "tab_id": 1925952352
+    },
+    {
+      "action": "tabs",
+      "event": "CALL",
+      "tab_id": null
+    },
+    {
+      "action": "tabs",
+      "effect": "NOT_APPLIED",
+      "event": "RETURN",
+      "reason": null,
+      "request_ref": {
+        "action": "tabs",
+        "browser_id": "d02b92f53e2dcb73b610aab244ca080bde4998bde8737b7f314ebd7c168b6981",
+        "connection_id": "GGxRjUGmzKPp4boKrqhlI-kdu4efQ4wy",
+        "nonce": "b4748d58d264494c1f744da929146a254f0a54c4edc8d492",
+        "operation_key": "hermes-browser-f711f54f51f5c42464322deb1300e02e"
+      },
+      "state": "RECEIPT",
+      "status": "OK",
+      "tab_id": null
+    },
+    {
+      "action": "snapshot",
+      "event": "CALL",
+      "tab_id": 1925952352
+    },
+    {
+      "action": "snapshot",
+      "effect": "NOT_APPLIED",
+      "event": "RETURN",
+      "reason": null,
+      "request_ref": {
+        "action": "snapshot",
+        "browser_id": "d02b92f53e2dcb73b610aab244ca080bde4998bde8737b7f314ebd7c168b6981",
+        "connection_id": "GGxRjUGmzKPp4boKrqhlI-kdu4efQ4wy",
+        "nonce": "65997458bd2c0895d4ade4ba2187b6e354f147457ce59ad0",
+        "operation_key": "hermes-browser-3098506eb5d97da49c1790eeed0b4751"
+      },
+      "state": "RECEIPT",
+      "status": "BROWSER_UNAVAILABLE",
+      "tab_id": null
+    },
+    {
+      "boundary": "BROWSER_UNAVAILABLE",
+      "browser_profile": "d02b92f53e2dcb73b610aab244ca080bde4998bde8737b7f314ebd7c168b6981",
+      "checks": [],
+      "cleanup": "OWED_ORIGINAL_TAB",
+      "event": "FINAL",
+      "fixture_contains_private_data": false,
+      "native_model_calls": 0,
+      "state": "PARTIAL",
+      "tab_id": 1925952352
+    },
+    {
+      "action": "status",
+      "effect": "NOT_APPLIED",
+      "event": "RECOVERY_RETURN",
+      "request_ref": {
+        "action": "status",
+        "browser_id": "d02b92f53e2dcb73b610aab244ca080bde4998bde8737b7f314ebd7c168b6981",
+        "connection_id": null,
+        "nonce": "576c6e51129a8507bfaa7949facb1880fed2acc99b008b83",
+        "operation_key": "hermes-browser-1f67a5d0c5cf87aa02dc7a143d41ffb5"
+      },
+      "state": "RECEIPT",
+      "status": "OK"
+    },
+    {
+      "action": "tabs",
+      "effect": "NOT_APPLIED",
+      "event": "RECOVERY_RETURN",
+      "request_ref": {
+        "action": "tabs",
+        "browser_id": "d02b92f53e2dcb73b610aab244ca080bde4998bde8737b7f314ebd7c168b6981",
+        "connection_id": "GGxRjUGmzKPp4boKrqhlI-kdu4efQ4wy",
+        "nonce": "11db6d8100c17e8ecd672446dcf7aa60e1e9945376b5e5df",
+        "operation_key": "hermes-browser-890988ba30933528e60265f235888591"
+      },
+      "state": "RECEIPT",
+      "status": "OK"
+    },
+    {
+      "action": "snapshot",
+      "effect": "NOT_APPLIED",
+      "event": "RECOVERY_RETURN",
+      "request_ref": {
+        "action": "snapshot",
+        "browser_id": "d02b92f53e2dcb73b610aab244ca080bde4998bde8737b7f314ebd7c168b6981",
+        "connection_id": "GGxRjUGmzKPp4boKrqhlI-kdu4efQ4wy",
+        "nonce": "ce100fafc1c8fd858b5b97c9ce17dcb06b518aed22a41c34",
+        "operation_key": "hermes-browser-58963d580202c888bfd62f92f9f7e874"
+      },
+      "state": "RECEIPT",
+      "status": "BROWSER_UNAVAILABLE"
+    },
+    {
+      "data": {
+        "reason": "CDP_SESSION_REQUIRED"
+      },
+      "effect": "NOT_APPLIED",
+      "event": "ORIGINAL_NATIVE_ACCESSIBILITY_READ",
+      "reason": null,
+      "request_ref": {
+        "action": "accessibility",
+        "browser_id": "d02b92f53e2dcb73b610aab244ca080bde4998bde8737b7f314ebd7c168b6981",
+        "connection_id": "GGxRjUGmzKPp4boKrqhlI-kdu4efQ4wy",
+        "nonce": "c2873dba1d6bed02b4215c1a2ffedc718ea86f28ddc5e878",
+        "operation_key": "hermes-browser-7f75913e66d8e9118c8c4d302cf3ba46"
+      },
+      "state": "RECEIPT",
+      "status": "CDP_SESSION_REQUIRED"
+    }
+  ],
+  "previous_remote_head": "336062e39625b4231553fd725af01931fa5df87c",
+  "protected_pin": "b85f7273597c6d129a0073abac3b74efc8503f62",
+  "recorded_at": "2026-11-10T12:45:05.095987+00:00",
+  "recovered_browser_journey_receipt": {
+    "browser_descriptor_sha256": "29993246e4738ab244d3d0f5c0ae923d47fd142cac2412e2cd34f533bdd6256e",
+    "browser_or_desktop_mutations": "OWNED_FIXTURE_TAB_ONLY",
+    "checks": [
+      "real_mcp_sdk_initialize_and_closed_tool_discovery",
+      "real_stdio_round_trip_retains_all_bound_requirements",
+      "incumbent_browser_inventory_through_actual_mcp_process",
+      "selected_existing_chrome_extension_connection_observed",
+      "native_mcp_read_observes_config_revocation"
+    ],
+    "live_t3_agent_consumption": "UNPROVEN",
+    "mcp_sdk_version": "2.3.0",
+    "mission_accepted": false,
+    "observations": {
+      "enrolled_browser_count_not_live_count": 8,
+      "owned_browser_journey": {
+        "boundary": "BROWSER_UNAVAILABLE",
+        "browser_profile": "d02b92f53e2dcb73b610aab244ca080bde4998bde8737b7f314ebd7c168b6981",
+        "checks": [],
+        "cleanup": "OWED_ORIGINAL_TAB",
+        "fixture_contains_private_data": false,
+        "native_model_calls": 0,
+        "state": "PARTIAL",
+        "tab_id": 1925952352
+      },
+      "selected_browser": {
+        "connection_observed": true,
+        "controls_enabled": true,
+        "reason": null,
+        "receipt_status": "OK",
+        "screenshot_enabled": true,
+        "state": "RECEIPT",
+        "version": "0.4.1"
+      }
+    },
+    "production_provider_configuration_changed": false,
+    "provider_calls": 0,
+    "schema": "mastermind.t3_harness_mcp_qualification.v1",
+    "scope": "REAL_MCP_PROTOCOL_AND_NATIVE_READ_ONLY_OWNERS_WITH_DISPOSABLE_THREAD_ATTRIBUTION",
+    "source_sha256": {
+      "integrations/__init__.py": "cdd316a5a23f07d22f51f90a2b29603474eeaae96e630d2f0550a0be7b4aeb2a",
+      "integrations/session_bridge/__init__.py": "b6ba50083687b29d4556ff83c7162d182b730957121ed82c03a8c0b815f36f46",
+      "integrations/session_bridge/long_horizon_guidance.py": "d310986ebdd2a023270f5901e92687b84af40225f8996975167f286323eea9f5",
+      "integrations/session_bridge/project_task_context.py": "68943a458d4f8247f0fb38e9e7d6f904c6baa7d0f55b719438be7d33502c0739",
+      "integrations/t3_harness/__init__.py": "1ae790954088be5537c7dff1e7df25bc69c97d0172841213689d6866a74a2513",
+      "integrations/t3_harness/native_launch.py": "fbf5d55d45913bdcc45aae487b24977ed88e3a51f75eef7f0197b8c08c2b51ca",
+      "integrations/t3_harness/runtime.py": "c6e4c7d7bf950c86705b58903c992db4ba4d41a1ba789138f669ea1d91e3254f",
+      "integrations/t3_harness/server.py": "3a63951ba73bc5bb4030a35a109553a67a499da68b2c6ff9c2910ebf84fc4e2a"
+    },
+    "status": "PARTIAL"
+  },
+  "recovered_local_head": "cfc8a899884a4c8b0b4ac878053ba2f0db67c375",
+  "recovered_native_mcp_receipt": {
+    "browser_descriptor_sha256": "29993246e4738ab244d3d0f5c0ae923d47fd142cac2412e2cd34f533bdd6256e",
+    "browser_or_desktop_mutations": 0,
+    "checks": [
+      "real_mcp_sdk_initialize_and_closed_tool_discovery",
+      "real_stdio_round_trip_retains_all_bound_requirements",
+      "incumbent_browser_inventory_through_actual_mcp_process",
+      "selected_existing_chrome_extension_connection_observed",
+      "fixed_peekaboo_launcher_real_mcp_round_trip",
+      "native_mcp_read_observes_config_revocation",
+      "real_peekaboo_mcp_discovery_on_original_bridge_owner",
+      "native_peekaboo_permissions_read_round_trip"
+    ],
+    "live_t3_agent_consumption": "UNPROVEN",
+    "mcp_sdk_version": "2.3.0",
+    "mission_accepted": false,
+    "observations": {
+      "enrolled_browser_count_not_live_count": 8,
+      "peekaboo": {
+        "catalog_sha256": "dd18e458a1f674b2a7da8f47df1db67b42223696afc1457d8b88107fc52a15c3",
+        "tool_count": 26,
+        "version": "4.2.2"
+      },
+      "selected_browser": {
+        "connection_observed": true,
+        "controls_enabled": true,
+        "reason": null,
+        "receipt_status": "OK",
+        "screenshot_enabled": true,
+        "state": "RECEIPT",
+        "version": "0.4.1"
+      }
+    },
+    "production_provider_configuration_changed": false,
+    "provider_calls": 0,
+    "schema": "mastermind.t3_harness_mcp_qualification.v1",
+    "scope": "REAL_MCP_PROTOCOL_AND_NATIVE_READ_ONLY_OWNERS_WITH_DISPOSABLE_THREAD_ATTRIBUTION",
+    "source_sha256": {
+      "integrations/__init__.py": "cdd316a5a23f07d22f51f90a2b29603474eeaae96e630d2f0550a0be7b4aeb2a",
+      "integrations/session_bridge/__init__.py": "b6ba50083687b29d4556ff83c7162d182b730957121ed82c03a8c0b815f36f46",
+      "integrations/session_bridge/long_horizon_guidance.py": "d310986ebdd2a023270f5901e92687b84af40225f8996975167f286323eea9f5",
+      "integrations/session_bridge/project_task_context.py": "68943a458d4f8247f0fb38e9e7d6f904c6baa7d0f55b719438be7d33502c0739",
+      "integrations/t3_harness/__init__.py": "1ae790954088be5537c7dff1e7df25bc69c97d0172841213689d6866a74a2513",
+      "integrations/t3_harness/native_launch.py": "fbf5d55d45913bdcc45aae487b24977ed88e3a51f75eef7f0197b8c08c2b51ca",
+      "integrations/t3_harness/runtime.py": "c6e4c7d7bf950c86705b58903c992db4ba4d41a1ba789138f669ea1d91e3254f",
+      "integrations/t3_harness/server.py": "3a63951ba73bc5bb4030a35a109553a67a499da68b2c6ff9c2910ebf84fc4e2a"
+    },
+    "status": "PASS"
+  },
+  "release": {
+    "auto_merge_request": null,
+    "draft_readback": true,
+    "pr": 2375,
+    "reason": "Interrupted candidate preserved; full live T3 acceptance remains open"
+  },
+  "runtime_configuration_changes_this_recovery": false,
+  "schema": "mastermind.t3_harness_recovery_evidence.v1",
+  "source_sha256": {
+    "integrations/session_bridge/t3_orchestration.py": "3410b4e55c7952825f2d068bfc5b287206a3c37f5f1ca63d98d1c489ef3969bd",
+    "integrations/t3_harness/__init__.py": "1ae790954088be5537c7dff1e7df25bc69c97d0172841213689d6866a74a2513",
+    "integrations/t3_harness/native_launch.py": "fbf5d55d45913bdcc45aae487b24977ed88e3a51f75eef7f0197b8c08c2b51ca",
+    "integrations/t3_harness/runtime.py": "c6e4c7d7bf950c86705b58903c992db4ba4d41a1ba789138f669ea1d91e3254f",
+    "integrations/t3_harness/server.py": "3a63951ba73bc5bb4030a35a109553a67a499da68b2c6ff9c2910ebf84fc4e2a",
+    "scripts/build_t3_harness_bundle.py": "0bf8ed09082567b69884509c98ec3b1d25b7d279cd14c7dda484524ca17f3cd2",
+    "scripts/qualify_t3_harness_mcp.py": "28598e42af03b02753c68c9aec8684de7668be382c726f17c05d1fb8845159d8",
+    "scripts/t3_browser_journey.py": "cce4b5f3abe0324261aeb2574a9e9728183c4d903f72df3ac68161dd5e5995b9",
+    "skills/mastermind-long-horizon/SKILL.md": "fc3fda358ac9ca1dd43c07f3838a11d3440ca2d9a350b51e1c864e789edbbfcf",
+    "skills/mastermind-long-horizon/agents/openai.yaml": "1df9b4d8a71ab23de7f80031e807482f63c99c05e3c894f7b8fa44f8a2539b8a",
+    "skills/mastermind-long-horizon/references/browser-desktop-vision.md": "e83abaeb39d8de387aa70231fb0acba4592367b3a4c10c5b250531e4d42bb398",
+    "skills/mastermind-long-horizon/references/continuity-patterns.md": "86aa201b389c4a8e94304216d866fc8452481d1ce8a3a3bb4698162d8d65cad3",
+    "skills/mastermind-long-horizon/references/design-verification.md": "0029349b45e6ef64e95834c33124c4e5afcaa6d0e0de69a7a21e4e0d42dde266",
+    "skills/mastermind-long-horizon/references/native-hermes.md": "85d96be91b7795c026bfe6000229f92ad8227df8f5ff8fda3557b0b2adee97e7",
+    "skills/mastermind-long-horizon/references/native-t3.md": "59327efc35ac0fcd954f9a60ca67b5f9ad6e415643378e1b016a58286ddbf58c",
+    "skills/mastermind-long-horizon/references/t3-orchestration.md": "b57ef1776e543442ab258f2b18b63da1d76851547c46a5aab5011fc14199d239",
+    "tests/test_t3_harness.py": "db92647cca2accde30dd67bd6e879795a88f9a4ee8b68627b4dd6f6b35add627",
+    "tests/test_t3_orchestration.py": "705eda0af8296e034175e7989831f47abdda6cd65729bddef85de8cf6eb01b10"
+  },
+  "workers_started_this_recovery": 0
+}
