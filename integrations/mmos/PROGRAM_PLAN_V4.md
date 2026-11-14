@@ -2327,3 +2327,35 @@ The sparse-checkout step is not installed. It changes a setting in the Chairman'
 2. The next bridge release (lane BR2): set the effort level in a menu first, as Prophet asked.
 3. Deputy tracks the first unattended runs of the two host programs.
 4. Waiting on the Chairman, none of which blocks item 1: the sparse step, the Grok Bot sitting, five extension reloads, a restart of the Mac, the linked-environment switch.
+
+## 63. Amendment, 2026-11-14 09:20 UTC: the new app is placed; wave 2 prepares the real team
+
+**Product.** Lane PF returned DONE at `c9f6a6c94` (branch `t3/mmos-v4-pf`). In the new window on its
+staging server every wave-1 item is met and read from the window's own text: the Mastermind face,
+Team / Work / Needs you one click apart, the teammate provider lock, copy and paste, visible
+streaming, and one journey (task created and assigned from Work, the teammate did it, the output
+opened from Work and from the conversation, Needs you cleared). Reviews: picker lock (one), window
+board allowlist (two, second "ready"). The real-server step list was rehearsed twice on a copy
+(forward 10 s, back 7 s).
+
+**Placed.** The principal copied the app to `~/Applications/Mastermind OS Next.app` at 09:13Z as a
+separate app (identifier `com.mastermind.os.next`), opened it once and read Scout, Writer, Work and
+Needs you from its window. The Chairman's app, its config and the real team server were not touched.
+It shows the staging team (two test teammates), not the real one.
+
+**Other.** A router restart at 07:13Z cost three Opus turns (two of Sector's, one of ours); the
+gateway waits 120 s and then refuses without logging why. T3 then holds the queue and sends no
+notice (harness item 10). Two router changes are put to the Chairman. First hourly hygiene run under
+rev 7 was clean on four hosts.
+
+**Not merged.** The branch is not on trunk: the dev-launcher secret change and the coding-job door
+change have had no independent review.
+
+**Next.**
+1. PF wave 2 (running): the two reviews; a rehearsed step list that puts the same face on the real
+   team (the `presentation` setting on the real server, the window switched to the real server and
+   board); what the lock does to existing conversations on another provider, with a recommendation.
+2. Principal: merge after the reviews; run the real switch in one announced restart at a time the
+   Chairman agrees.
+3. BR2 under the deputy; janitor check b after 11:20Z.
+
