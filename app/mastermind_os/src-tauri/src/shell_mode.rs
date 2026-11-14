@@ -143,6 +143,11 @@ pub fn parse_shell_url(input: &str) -> Result<Url, ShellUrlRefusal> {
             ShellUrlRefusal::WrongScheme
         });
     }
+    // Writer parity (REV-WIN2 LOW-1): the writers refuse port 0
+    // ("the port must be between 1 and 65535"); the url parser accepts it.
+    if parsed.port() == Some(0) {
+        return Err(ShellUrlRefusal::MissingPort);
+    }
     if parsed.query().is_some() {
         return Err(ShellUrlRefusal::Query);
     }
@@ -221,6 +226,10 @@ pub fn parse_board_url(input: &str) -> Result<Url, BoardUrlRefusal> {
         } else {
             BoardUrlRefusal::WrongScheme
         });
+    }
+    // Writer parity (REV-WIN2 LOW-1): `window_config.sh` refuses port 0.
+    if parsed.port() == Some(0) {
+        return Err(BoardUrlRefusal::MissingPort);
     }
     if parsed.query().is_some() {
         return Err(BoardUrlRefusal::Query);
@@ -1114,6 +1123,7 @@ mod tests {
             ),
             ("http://127.0.0.1/env-1/t", ShellUrlRefusal::MissingPort),
             ("http://127.0.0.1", ShellUrlRefusal::MissingPort),
+            ("http://127.0.0.1:0/env-1/t", ShellUrlRefusal::MissingPort),
             (
                 "HTTP://127.0.0.1:8080/env-1/t",
                 ShellUrlRefusal::WrongScheme,
@@ -1160,6 +1170,8 @@ mod tests {
             ("http://127.1:3196", BoardUrlRefusal::HostNotLoopback),
             ("HTTP://127.0.0.1:3196", BoardUrlRefusal::WrongScheme),
             ("not a url", BoardUrlRefusal::Unparseable),
+            ("http://127.0.0.1:0", BoardUrlRefusal::MissingPort),
+            ("http://127.0.0.1:00000/", BoardUrlRefusal::MissingPort),
         ] {
             assert_eq!(parse_board_url(value), Err(expected), "{value}");
         }
