@@ -190,6 +190,17 @@ def test_t4d_real_ports_stay_refused_under_the_pf_range(scratch):
             door_mod.DoorConfig(values)
 
 
+def test_t4d_a_wide_custom_range_cannot_reach_a_real_port(scratch):
+    # A configured range that SPANS a real port must not make it legal: the
+    # range widens dev ports, never the real ones.  (Lead review: a range
+    # such as [3770, 3810] would otherwise admit the live team server 3780.)
+    for port in (3773, 3774, 3780, 3100, 3179, 3190, 3193, 3796, 3800):
+        with pytest.raises(ValueError, match="real service"):
+            door_mod.DoorConfig(_config(scratch, {
+                "port": port, "proof_base_url": f"http://127.0.0.1:{port}",
+                "dev_port_range": [3000, 3900]}))
+
+
 def test_t4d_a_disabled_config_is_refused(scratch):
     # `enabled: false` is a REAL refusal, not an inert label: a prepared
     # example can never construct a runnable door.  The principal switches

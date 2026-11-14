@@ -141,6 +141,12 @@ DEV_T3_PORT_LAST = 3810
 # team server (3780).
 RESERVED_NEIGHBOUR_PORTS = frozenset({3100, 3179, 3773, 3774, 3780})
 
+# Real services a configured dev range may never reach, whatever it spans.
+# 3796/3800 sit inside the historical default range and stay legal there (the
+# pairing-target test and the T4b journey use it); a custom range refuses them.
+REAL_T3_TARGET_PORTS = frozenset({3100, 3179, 3190, 3193, 3773, 3774, 3780})
+CUSTOM_RANGE_REFUSED_PORTS = REAL_T3_TARGET_PORTS | {3796, 3800}
+
 
 # ---------------------------------------------------------------------------
 # Config
@@ -251,6 +257,10 @@ class DoorConfig:
                 f"t3.port must be a dev-server port "
                 f"({self.t3_dev_port_first}-{self.t3_dev_port_last}), "
                 f"got {self.t3_port}")
+        if dev_range is not None and self.t3_port in CUSTOM_RANGE_REFUSED_PORTS:
+            raise ValueError(
+                f"t3.port {self.t3_port} is a real service or another "
+                "lane's port; a configured dev_port_range never admits it")
         base_port = urllib.parse.urlsplit(self.t3_proof_base).port
         if base_port != self.t3_port:
             raise ValueError(

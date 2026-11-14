@@ -200,3 +200,6 @@ the principal rehearses it on a scratch copy first (RELEASE REHEARSAL ruling).
   disabled config cannot start a door.
 - Nothing was installed. No real teammate has a `coding_job_door` entry. The
   production Executive is untouched.
+
+## Lead review (09:10Z)
+Accepted with one repair. The first version checked a configured range only for its bounds, so a range that spans a real port (for example `[3770, 3810]`) would have admitted the live team server 3780. Now any configured `dev_port_range` refuses 3100, 3179, 3190, 3193, 3773, 3774, 3780, 3796 and 3800 as the T3 target, whatever it spans (`REAL_T3_TARGET_PORTS`, `CUSTOM_RANGE_REFUSED_PORTS` in `door.py`). Proving test: `test_t4d_a_wide_custom_range_cannot_reach_a_real_port` (failed first). Without a configured range the historical default is unchanged. door 17/17, door_t4c 42/42, pairing target 10/10.
