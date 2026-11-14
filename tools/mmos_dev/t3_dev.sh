@@ -19,7 +19,9 @@ ACCESS_FILE="$RUN_DIR/access.txt"     # pairing URL + token; 0600; never print
 ENV_FILE="$DEV_ROOT/fabric.env"       # ANTHROPIC_* route env; 0600; never print
 T3_BIN="${T3_BIN:-$HOME/.t3/bin/t3}"
 REAL_T3_HOME="$HOME/.t3"
-FORBIDDEN_PORTS=" 3773 3774 "
+# REV-CODE F3: also refuse the neighbour dev listeners 3796 (another lane —
+# BRIEF §4) and 3800 (reserved); 3773/3774 (the live T3 app) stay refused.
+FORBIDDEN_PORTS=" 3773 3774 3796 3800 "
 PORT_MIN=3790
 PORT_MAX=3810
 

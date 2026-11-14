@@ -143,8 +143,10 @@ DEV_T3_PORT_LAST = 3810
 # F9 (R4b review): reserved neighbour ports that are NEVER a legal
 # Paperclip target for this door, even if a config lists them — the
 # installed Paperclip (3100, 3179), the live T3 app (3773/3774) and the
-# team server (3780).
-RESERVED_NEIGHBOUR_PORTS = frozenset({3100, 3179, 3773, 3774, 3780})
+# team server (3780).  REV-CODE F2: also the neighbour dev listeners 3796
+# (another lane's — BRIEF §4) and 3800 (reserved), already refused as T3
+# targets under every config, now refused as Paperclip targets too.
+RESERVED_NEIGHBOUR_PORTS = frozenset({3100, 3179, 3773, 3774, 3780, 3796, 3800})
 
 # Real services a configured dev range may never reach, whatever it spans.
 # PF-3 item 3: 3796/3800 sit inside the historical default range but are

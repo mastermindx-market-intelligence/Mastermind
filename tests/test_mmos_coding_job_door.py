@@ -460,9 +460,10 @@ def test_t4d_real_ports_stay_refused_under_the_pf_range(scratch):
             door_mod.DoorConfig(_config(scratch, {
                 "port": port, "proof_base_url": f"http://127.0.0.1:{port}",
                 "dev_port_range": [3830, 3839]}))
-    # The reserved Paperclip neighbour refusals are unchanged (F9): these are
-    # refused as Paperclip targets even when explicitly allowlisted.
-    for port in (3100, 3179, 3773, 3774, 3780):
+    # The reserved Paperclip neighbour refusals (F9 + REV-CODE F2): these are
+    # refused as Paperclip targets even when explicitly allowlisted — now
+    # including the neighbour dev listeners 3796 (another lane) / 3800.
+    for port in (3100, 3179, 3773, 3774, 3780, 3796, 3800):
         values = _config(scratch)
         values["paperclip_base_url"] = f"http://127.0.0.1:{port}"
         values["paperclip_allowed"] = [f"127.0.0.1:{port}"]

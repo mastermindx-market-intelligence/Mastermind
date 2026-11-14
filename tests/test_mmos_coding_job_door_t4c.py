@@ -96,9 +96,10 @@ def test_f9_paperclip_base_must_match_an_explicit_allowlist(scratch):
 
 
 def test_f9_reserved_neighbour_ports_are_refused_even_if_listed(scratch):
-    # the installed Paperclip (3100), the live T3 app (3773/3774) and the
-    # team server (3780) are never legal Paperclip targets for this door
-    for port in (3100, 3179, 3773, 3774, 3780):
+    # the installed Paperclip (3100/3179), the live T3 app (3773/3774), the
+    # team server (3780) and — REV-CODE F2 — the neighbour dev listeners
+    # 3796 (another lane) / 3800 (reserved) are never legal Paperclip targets
+    for port in (3100, 3179, 3773, 3774, 3780, 3796, 3800):
         with pytest.raises(ValueError, match="reserved"):
             door_mod.DoorConfig(_config_t4c(
                 scratch,
