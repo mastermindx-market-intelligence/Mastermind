@@ -21,8 +21,10 @@ Subcommands (every path is required; nothing defaults to a real path):
         against the planned bytes, parse, presentation equality and
         outside-member byte equality.
   undo  --settings PATH --receipt-dir DIR
-        Refuse unless the current sha256 equals the receipt's after-sha.
-        Restore the exact preimage atomically; read back the sha.
+        Refuse a receipt written for another settings file (resolved path
+        and file identity must match --settings), and refuse unless the
+        current sha256 equals the receipt's after-sha. Restore the exact
+        preimage atomically; read back the bytes and sha.
 
 A settings path at/under ~/.mastermind/t3-team is refused unless the explicit
 --real-root-ok flag is given (the principal's flag). The fence holds by string
@@ -291,13 +293,21 @@ def staging_dir_for(settings_path):
 
 
 def write_receipt(receipt_dir, settings_path, value_file, before, after):
-    """Preimage bytes 0600 + receipt JSON, in a 0700 dir, BEFORE the write."""
+    """Preimage bytes 0600 + receipt JSON, in a 0700 dir, BEFORE the write.
+
+    F4: a dir that already holds a receipt is refused — fresh dir per apply,
+    so a second apply can never O_TRUNC the first preimage/receipt and
+    destroy the first undo path."""
+    preimage = os.path.join(receipt_dir, "preimage.bin")
+    rp = os.path.join(receipt_dir, "receipt.json")
+    if os.path.lexists(rp) or os.path.lexists(preimage):
+        die(f"receipt dir already holds a receipt; use a fresh receipt dir "
+            f"per apply: {receipt_dir}")
     os.makedirs(receipt_dir, mode=0o700, exist_ok=True)
     st = os.stat(receipt_dir)
     if st.st_uid != os.getuid():
         die(f"receipt dir not owned by this user: {receipt_dir}")
     os.chmod(receipt_dir, 0o700)
-    preimage = os.path.join(receipt_dir, "preimage.bin")
     fd = os.open(preimage, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:
         with os.fdopen(fd, "wb") as fh:
@@ -316,7 +326,6 @@ def write_receipt(receipt_dir, settings_path, value_file, before, after):
         "after_sha256": sha256(after),
         "time_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
-    rp = os.path.join(receipt_dir, "receipt.json")
     fd = os.open(rp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump(receipt, fh, indent=2)
@@ -454,6 +463,24 @@ def verify_outside(text, spans, new_text, value):
 def cmd_undo(args):
     path = guard_settings(args.settings, args.real_root_ok)
     receipt, preimage = read_receipt(args.receipt_dir)
+    # F3: the receipt must have been written for THIS settings file — by
+    # resolved path and by file identity — not merely one with a matching
+    # after-sha (two files can share an after-sha yet differ in preimage).
+    rec_settings = receipt.get("settings_path")
+    if not isinstance(rec_settings, str) or not rec_settings:
+        die("receipt has no settings_path; refusing to undo")
+    if os.path.realpath(rec_settings) != os.path.realpath(path):
+        die(f"receipt was written for {rec_settings}, not {path}; "
+            "refusing to undo")
+    try:
+        st_rec = os.stat(rec_settings)
+        st_path = os.stat(path)
+    except OSError as exc:
+        die(f"cannot verify receipt settings identity: {exc}; "
+            "refusing to undo")
+    if (st_rec.st_dev, st_rec.st_ino) != (st_path.st_dev, st_path.st_ino):
+        die(f"receipt settings_path {rec_settings} is not the same file as "
+            f"{path}; refusing to undo")
     with open(path, "rb") as fh:
         current = fh.read()
     if sha256(current) != receipt["after_sha256"]:

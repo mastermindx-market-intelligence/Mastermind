@@ -574,6 +574,74 @@ def test_readback_compares_on_disk_bytes_to_planned(settings, value_file,
     assert "READBACK FAILED" in capsys.readouterr().err
 
 
+# ---------------------------------------------------------------------------
+# F3: undo must refuse a receipt written for a DIFFERENT settings file, even
+# when the current sha matches the receipt's after-sha (identical after-bytes
+# are easy: two files differing only in the old presentation value).
+# ---------------------------------------------------------------------------
+
+def test_undo_refuses_receipt_for_other_settings_file(tmp_path, value_file):
+    base = {"providerInstances": {"x": {"enabled": True}}, "a": 1}
+    pres_a = {**VALUE, "productName": "OldA"}
+    pres_b = {**VALUE, "productName": "OldB"}
+    a = tmp_path / "A.json"
+    b = tmp_path / "B.json"
+    a.write_bytes(json.dumps({**base, "presentation": pres_a}).encode("utf-8"))
+    b.write_bytes(json.dumps({**base, "presentation": pres_b}).encode("utf-8"))
+    a.chmod(0o600)
+    b.chmod(0o600)
+    assert do_apply(a, value_file, tmp_path / "rcptA").returncode == 0
+    assert do_apply(b, value_file, tmp_path / "rcptB").returncode == 0
+    after_b = b.read_bytes()
+    assert a.read_bytes() == after_b  # identical after-sha, different preimage
+    r = run_tool("undo", "--settings", str(b),
+                 "--receipt-dir", str(tmp_path / "rcptA"))
+    assert r.returncode != 0, "undo accepted a receipt for another file"
+    assert b.read_bytes() == after_b
+
+
+def test_undo_refuses_tampered_receipt_settings_path(settings, value_file,
+                                                     tmp_path):
+    receipts = tmp_path / "receipts"
+    assert do_apply(settings, value_file, receipts).returncode == 0
+    rp = receipts / "receipt.json"
+    receipt = json.loads(rp.read_text())
+    receipt["settings_path"] = str(tmp_path / "elsewhere.json")
+    rp.write_text(json.dumps(receipt))
+    current = settings.read_bytes()
+    r = run_tool("undo", "--settings", str(settings),
+                 "--receipt-dir", str(receipts))
+    assert r.returncode != 0
+    assert settings.read_bytes() == current
+
+
+# ---------------------------------------------------------------------------
+# F4: a receipt dir that already holds a receipt is refused — a second apply
+# into the same dir used to O_TRUNC the first preimage/receipt, destroying
+# the first undo path. Fresh dir per apply.
+# ---------------------------------------------------------------------------
+
+def test_apply_refuses_reused_receipt_dir(settings, value_file, tmp_path):
+    receipts = tmp_path / "receipts"
+    original = settings.read_bytes()
+    assert do_apply(settings, value_file, receipts).returncode == 0
+    first_after = settings.read_bytes()
+    v2 = {**VALUE, "productName": "Second"}
+    vf2 = tmp_path / "v2.json"
+    vf2.write_text(json.dumps(v2), encoding="utf-8")
+    r = do_apply(settings, vf2, receipts)
+    assert r.returncode != 0, "apply reused a receipt dir and clobbered it"
+    assert settings.read_bytes() == first_after
+    # the first undo path is intact: preimage still the ORIGINAL bytes
+    assert sha((receipts / "preimage.bin").read_bytes()) == sha(original)
+    ru = run_tool("undo", "--settings", str(settings),
+                  "--receipt-dir", str(receipts))
+    assert ru.returncode == 0, ru.stderr
+    assert settings.read_bytes() == original
+    # a fresh dir for the next apply still works
+    assert do_apply(settings, vf2, tmp_path / "receipts2").returncode == 0
+
+
 def test_env_root_absent_allows_unrelated_tmp_file(tmp_path, value_file,
                                                    monkeypatch):
     # override pointing at a nonexistent dir: no identity to fence, and an

@@ -16,7 +16,8 @@ byte outside the member is unchanged — no whole-file `json.dump`. It reuses
 `team_roster.atomic_write` (0600 temp, fsync, `os.replace`, staging under
 `<root>/run`). Before the first write it checks the file's sha256 against
 `--expect-sha256`, saves the exact preimage bytes 0600 plus a receipt JSON in
-a 0700 receipt dir, writes atomically with the file mode preserved, then
+a 0700 receipt dir (a FRESH dir per apply — a dir that already holds a
+receipt is refused), writes atomically with the file mode preserved, then
 reads back and verifies parse, `presentation` equality, outside-member byte
 equality and mode. Any mismatch exits nonzero. Immediately before
 `os.replace` the writer re-reads and re-hashes the destination and aborts
@@ -117,9 +118,14 @@ python3.12 tools/mmos_team_server/presentation_set.py apply \
   --settings "$HOME/.mastermind/t3-team/home/userdata/settings.json" \
   --value-file "$HOME/.mastermind/t3-team/run/presentation-value.json" \
   --expect-sha256 <SETTINGS_SHA> \
-  --receipt-dir "$HOME/.mastermind/t3-team/run/presentation-receipts" \
+  --receipt-dir "$HOME/.mastermind/t3-team/run/presentation-receipts-1" \
   --real-root-ok
 ```
+
+Use a FRESH receipt dir for every apply (`presentation-receipts-1`, `-2`,
+…): the writer refuses a dir that already holds a receipt, so a second
+apply can never overwrite the first preimage and destroy the first undo
+path.
 
 Refuses unless the current sha256 equals `--expect-sha256` (checked before
 any write), refuses a symlinked settings path, and refuses without
@@ -190,11 +196,14 @@ restart the team server for this change.
 ```sh
 python3.12 tools/mmos_team_server/presentation_set.py undo \
   --settings "$HOME/.mastermind/t3-team/home/userdata/settings.json" \
-  --receipt-dir "$HOME/.mastermind/t3-team/run/presentation-receipts" \
+  --receipt-dir "$HOME/.mastermind/t3-team/run/presentation-receipts-1" \
   --real-root-ok
 ```
 
-Refuses unless the current sha256 equals the receipt's after-sha — i.e. if
+`--receipt-dir` is the dir of the apply being undone. Undo also refuses a
+receipt whose `settings_path` is not this settings file (resolved path and
+file identity must both match). Refuses unless the current sha256 equals
+the receipt's after-sha — i.e. if
 anyone (including a writing `team_roster.py apply` or a server migration)
 wrote the file since the apply, undo refuses and changes nothing. Restore
 the exact preimage atomically; reads back the sha. The lock is gone again
@@ -212,7 +221,8 @@ without restart (rehearsal proof (e)).
   presentation still equal to the value). Consequence: a later `undo`
   against the old receipt **refuses** (proved, ledger 09:56:17Z). If you
   need undo after a writing roster apply, re-plan and re-apply presentation
-  first to get a fresh receipt.
+  first into a FRESH receipt dir (`presentation-receipts-<next>`; the writer
+  refuses a dir that already holds a receipt) to get a fresh receipt.
 - Recommended order for the real root: run any roster apply FIRST, then
   presentation LAST, so the presentation receipt matches the final bytes.
 
