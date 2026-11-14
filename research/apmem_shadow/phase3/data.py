@@ -91,6 +91,8 @@ def prepare_prices(raw: pd.DataFrame) -> pd.DataFrame:
     if (not np.isfinite(a).all() or (a[:, :4] <= 0).any() or (a[:, 4:6] < 0).any()
             or (a[:, 6] <= 0).any()):
         raise ValueError('invalid price/action numbers')
+    if (p.high < p[['open','low','close']].max(axis=1)).any() or (p.low > p[['open','high','close']].min(axis=1)).any():
+        raise ValueError('inconsistent OHLC')
     previous = p.close.shift(1)
     gross = p.split * (p.close + p.dividend) / previous
     gross.iloc[0] = 1.0

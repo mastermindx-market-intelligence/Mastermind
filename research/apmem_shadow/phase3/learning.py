@@ -22,7 +22,8 @@ class LearningSettings:
     ridge: float = 1.0
 
     def validate(self):
-        if (self.minimum < 3 or self.minimum_class < 1 or self.refit_sessions < 1
+        if (any(type(v) is not int for v in (self.minimum,self.minimum_class,self.refit_sessions,self.window_sessions))
+                or self.minimum < 3 or self.minimum_class < 1 or self.refit_sessions < 1
                 or self.window_sessions < 63 or not np.isfinite(self.ridge) or self.ridge <= 0):
             raise ValueError('invalid learning settings')
 
@@ -101,13 +102,14 @@ def walk_forward(events: pd.DataFrame, calendar: pd.DatetimeIndex,
         today = np.flatnonzero(common & origin.eq(day))
         if not len(today):
             continue
-        if t-last_attempt >= config.refit_sessions or fit_bundle is None:
+        if t-last_attempt >= config.refit_sessions:
+            last_attempt = t
+            fit_bundle = None
             earliest = calendar[max(0, t-config.window_sessions)]
             eligible = common & (origin >= earliest) & (origin < day) & (endpoint <= day)
             ids = np.flatnonzero(eligible)
             counts = np.bincount(e.class_id.iloc[ids].to_numpy(int), minlength=3)
             if len(ids) >= config.minimum and min(counts) >= config.minimum_class:
-                last_attempt = t
                 fitted = {}
                 for name, names in FEATURE_GROUPS.items():
                     fitted[name] = fit_multinomial(e.loc[ids, list(names)].to_numpy(float),
@@ -125,6 +127,9 @@ def walk_forward(events: pd.DataFrame, calendar: pd.DatetimeIndex,
                                  'class_net_payoff': means.tolist(),
                                  'models': {k: {'success': v['success'], 'iterations': v['iterations'],
                                                 'message': v['message']} for k,v in fitted.items()}})
+            else:
+                receipts.append({'fit_origin':str(day.date()),'status':'TRAINING_UNAVAILABLE',
+                                 'n':len(ids),'class_counts':counts.tolist()})
         if fit_bundle is None:
             continue
         if fit_bundle['latest_label'] > fit_bundle['origin'] or fit_bundle['origin'] > day:

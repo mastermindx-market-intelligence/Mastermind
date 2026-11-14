@@ -234,7 +234,7 @@ class PortfolioTests(unittest.TestCase):
         p=panel(40);p.loc[p.index[2],'dividend']=2
         r=self.run_book(p,policy=portfolio.Policy('r',cash_rate=.03))
         s=self.run_book(p,policy=portfolio.Policy('s',cash_rate=.03,distribution_cash='ex_date_spendable'))
-        self.assertAlmostEqual(r['metrics']['terminal_receivable_wealth'],.0016)
+        self.assertAlmostEqual(r['metrics']['terminal_receivable_wealth'],float(r['fills'].query("side == 'buy'").iloc[0].notional_equity_units)/100*2)
         self.assertGreater(s['equity'][-1],r['equity'][-1])
 
     def test_open_exposure_retains_same_day_stop(self):

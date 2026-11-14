@@ -48,7 +48,7 @@ def verify_source(root: Path, manifest: Mapping) -> dict:
     hashes = {}
     for rel in sorted(required):
         path = root / rel
-        if path.resolve().parent != (root / Path(rel).parent).resolve():
+        if not path.resolve().is_relative_to(root) or path.is_symlink():
             raise ValueError('unexpected source resolution')
         data = path.read_bytes()
         digest = hashlib.sha256(data).hexdigest()
