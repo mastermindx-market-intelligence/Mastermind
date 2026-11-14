@@ -1,0 +1,177 @@
+{
+  "schema": "mastermind.volatility_numerical_repair.v1",
+  "started_at": "2026-11-14T01:20:35.375833+00:00",
+  "ended_at": "2026-11-14T01:23:23.789090+00:00",
+  "inputs": {
+    "SPY": {
+      "prepared_prices_sha256": "489c49cd2d6d34c8a0633816489751fc6ff8137e8640342281329b4c46c8d2f0",
+      "original_fit_log_sha256": "e89f5bb69e97cec8bd5946dd553753bb49bf325866494dfe61fc367f4f724141"
+    },
+    "XLI": {
+      "prepared_prices_sha256": "339c6eea29c3b87c1c0451e078658995b3f778f7f114818b6727b243059432b8",
+      "original_fit_log_sha256": "08d02daf40bdad5e02e65463ecbf8eb61e755757a3e28ee7657e180bc25b0543"
+    },
+    "QQQ": {
+      "prepared_prices_sha256": "cbef1aa4123621bbd7f1547b8ee9eb67a9f66efbc776764ddb40b9c4a9dfcfe4",
+      "original_fit_log_sha256": "6fa427df04dfb9414b60c59734a20b04454155b4b640e3a9608f4e6ad6d99efe"
+    },
+    "XLP": {
+      "prepared_prices_sha256": "75bfcc6d276f99841690893b270c3a19215c3bf9e16d3768fb4f6264f4c3aef1",
+      "original_fit_log_sha256": "4fa7079a9ef01b413f5646a62c371bb3815ae2600729afef9099cac0337601e8"
+    },
+    "XLV": {
+      "prepared_prices_sha256": "66ce2a256dd756a7753cabc0fc425b31d8af9b2012a903db037c21e27f051ea0",
+      "original_fit_log_sha256": "de0d89698da0671bccf77c085bfa42a9859e90d15cc454b40abf451586bad859"
+    },
+    "IWM": {
+      "prepared_prices_sha256": "9aea944a315e6579698200f1d62a57756d21b4100c7898be6aedd501ae2ee900",
+      "original_fit_log_sha256": "4302c8071c095b70e51ceccb4feac8d061a93fd1a0650ecc8ed17747daefff9c"
+    },
+    "XLU": {
+      "prepared_prices_sha256": "5136a1525d34bfc20b7ad95cdfa1934c83eb8750f7a5930a7039e90fb5a32261",
+      "original_fit_log_sha256": "4709f0ce177187b1ed87415f77ef5015dd52e3a5dcae9f0616315a873868c466"
+    },
+    "XLY": {
+      "prepared_prices_sha256": "d458b1606667d59e0eb0af9a852e404303cc351d7b900105c123854a514618e9",
+      "original_fit_log_sha256": "a54fb2565eab6847c24094f86e15a487678bc9c651fe95db7eaf90f730aa6253"
+    },
+    "XLE": {
+      "prepared_prices_sha256": "ce118e7dc91cc65bc2eb8e7bb63bfdc31d5bb78cb5c086d458780618d6d46b40",
+      "original_fit_log_sha256": "2d7315b1d35fd9b346bf188f87319be817069e84452f07cedd23e4107fdd88c5"
+    },
+    "XLB": {
+      "prepared_prices_sha256": "ea8868740ec787a5baf0496aeeab98ca078013e5d96d22ff7ea3cebd4d6e228b",
+      "original_fit_log_sha256": "be252d3e53b316bff1307e87ba30188c9c2d92d8b5936e43c86cbe2726db9e5e"
+    },
+    "XLK": {
+      "prepared_prices_sha256": "46d37b865e052fc14ee9a6b76f782eab6aa897a3e7f0a9b32acdb2777b1b3590",
+      "original_fit_log_sha256": "ace9381bff3b461fc80e734eeae6c2d44e3bb86877a8a171e1fb0bae2e7e1c3b"
+    },
+    "SPY_EARLY": {
+      "prepared_prices_sha256": "08157e3f10a8f523ff8d85bdb7782ddc68c07ea0717c7c684eeca755893b5f59",
+      "original_fit_log_sha256": "0982c3bd0cc751f165632ff53ea1bd9f1e3e722b4a3d39d8d89fb04631acd69c"
+    }
+  },
+  "fits": [
+    {
+      "instrument": "SPY",
+      "linear_fits": 60,
+      "linear_successful": 60,
+      "moment_projection_failures": 0,
+      "moment_fits_with_variance_mean_coefficient_ge1": 0,
+      "linear_fits_with_mean_coefficient_ge1": 13
+    },
+    {
+      "instrument": "XLI",
+      "linear_fits": 60,
+      "linear_successful": 60,
+      "moment_projection_failures": 0,
+      "moment_fits_with_variance_mean_coefficient_ge1": 0,
+      "linear_fits_with_mean_coefficient_ge1": 1
+    },
+    {
+      "instrument": "QQQ",
+      "linear_fits": 60,
+      "linear_successful": 60,
+      "moment_projection_failures": 0,
+      "moment_fits_with_variance_mean_coefficient_ge1": 0,
+      "linear_fits_with_mean_coefficient_ge1": 0
+    },
+    {
+      "instrument": "XLP",
+      "linear_fits": 60,
+      "linear_successful": 60,
+      "moment_projection_failures": 0,
+      "moment_fits_with_variance_mean_coefficient_ge1": 0,
+      "linear_fits_with_mean_coefficient_ge1": 2
+    },
+    {
+      "instrument": "XLV",
+      "linear_fits": 60,
+      "linear_successful": 60,
+      "moment_projection_failures": 0,
+      "moment_fits_with_variance_mean_coefficient_ge1": 0,
+      "linear_fits_with_mean_coefficient_ge1": 3
+    },
+    {
+      "instrument": "IWM",
+      "linear_fits": 60,
+      "linear_successful": 60,
+      "moment_projection_failures": 0,
+      "moment_fits_with_variance_mean_coefficient_ge1": 0,
+      "linear_fits_with_mean_coefficient_ge1": 0
+    },
+    {
+      "instrument": "XLU",
+      "linear_fits": 60,
+      "linear_successful": 60,
+      "moment_projection_failures": 0,
+      "moment_fits_with_variance_mean_coefficient_ge1": 0,
+      "linear_fits_with_mean_coefficient_ge1": 1
+    },
+    {
+      "instrument": "XLY",
+      "linear_fits": 60,
+      "linear_successful": 60,
+      "moment_projection_failures": 0,
+      "moment_fits_with_variance_mean_coefficient_ge1": 0,
+      "linear_fits_with_mean_coefficient_ge1": 3
+    },
+    {
+      "instrument": "XLE",
+      "linear_fits": 60,
+      "linear_successful": 60,
+      "moment_projection_failures": 0,
+      "moment_fits_with_variance_mean_coefficient_ge1": 0,
+      "linear_fits_with_mean_coefficient_ge1": 15
+    },
+    {
+      "instrument": "XLB",
+      "linear_fits": 60,
+      "linear_successful": 60,
+      "moment_projection_failures": 0,
+      "moment_fits_with_variance_mean_coefficient_ge1": 0,
+      "linear_fits_with_mean_coefficient_ge1": 0
+    },
+    {
+      "instrument": "XLK",
+      "linear_fits": 60,
+      "linear_successful": 60,
+      "moment_projection_failures": 0,
+      "moment_fits_with_variance_mean_coefficient_ge1": 0,
+      "linear_fits_with_mean_coefficient_ge1": 1
+    },
+    {
+      "instrument": "SPY_EARLY",
+      "linear_fits": 60,
+      "linear_successful": 60,
+      "moment_projection_failures": 0,
+      "moment_fits_with_variance_mean_coefficient_ge1": 0,
+      "linear_fits_with_mean_coefficient_ge1": 5
+    }
+  ],
+  "source_sha256": {
+    "targets.py": "dad12175e54268509bd478cadefa46b2454e69e4bbcba06e845ea1b758c9d3c0",
+    "run_moments.py": "5d6e73ddcb9aee7b753285a55c43a402de21eaabede07c5aef3180c0b7363a93",
+    "evaluation.py": "c2ba4eb88ce6015175503c1b2b69536ee0b58d40a3a81f80949f10fab4b8b6fd",
+    "moments.py": "d155c300616ce983e4e58f4410a4d6b3c55178231bbbb0f4c0f3eef167b31769",
+    "__init__.py": "5bf10c4374c64003ba3d281d07ddfe75f89b970f8f38b6b78b470f0cfe86bbdf",
+    "extensions.py": "8955341d63b1556cd3c4bb3d69932bf29791bb319e49a21cdaf8ea37dd053865",
+    "forecasts.py": "5bbf270a6b0803756147616e985a621ce1ecf3604ab831d621f3809907bcadc9",
+    "followup.py": "1c3a238aa4f8116ed77691fbfeec4a62c932f4e24b641a26d6ec4a8dafe2c339",
+    "corporate_actions.py": "e91e4df4e04cc8cc791148d9182d4550df91fb9bfe7a0538cc7eb063faf2a517",
+    "consumer.py": "52f0d0c99c04fe03cc838c7cbeb801a62561f5a5e5e2ed8ee590142487ca6309",
+    "run_followup.py": "4c6d58c31d3a158220ff23a781fb0a4d16d1ec8514fb104d5aa029f750291a22",
+    "run_extensions.py": "5925d6d9d99fdb4b1024d7db684e3959abc0c9d1d5538de7f33f1752ccb93856",
+    "__main__.py": "fe4fc4c064572867e1822c18b2040b64ea3d2c93452e7c6c942f6a379ed05ffd",
+    "calibration.py": "3053f818f883191960e1ab3179b04ebe649ea98d6dbf82e35fae3a103599a8b6"
+  },
+  "original_fits_refitted": false,
+  "fixed_power_new_selected_fits": 720,
+  "forecast_score_rows": 2520,
+  "utility_scenarios": 7020,
+  "reference_checks": 432,
+  "exploratory_after_numerical_defect": true,
+  "prospective": false,
+  "may_trade": false
+}

@@ -1,0 +1,82 @@
+"""Research-context projection only; no signal/ranking/sizing/trading API."""
+from __future__ import annotations
+from datetime import datetime
+import re
+import numpy as np
+
+
+def _utc(value):
+    if not isinstance(value,str):
+        raise ValueError("missing clock")
+    d=datetime.fromisoformat(value.replace("Z","+00:00"))
+    if d.tzinfo is None:
+        raise ValueError("timezone required")
+    return d
+
+
+def research_context(*,instrument,origin_session,forecast,upper90,decision_at,
+                     observed_at=None,computed_at=None,source_sha256=None,
+                     fit_cutoffs=None,state_last_session=None,max_age_days=4):
+    """Pure checker: parameter-fit cutoff and current filtered state are distinct.
+
+    Computation includes the latest filtering/feature update; older parameter
+    estimation is lawful. Supplied clocks still need external provenance.
+    """
+    reasons=[]
+    if not isinstance(max_age_days,int) or max_age_days<0:
+        raise ValueError("invalid freshness bound")
+    try:
+        decision=_utc(decision_at)
+        origin=datetime.fromisoformat(origin_session).date()
+        if str(origin)!=origin_session:
+            raise ValueError("noncanonical origin")
+    except (ValueError,TypeError):
+        raise ValueError("invalid decision/origin clock")
+    if not isinstance(instrument,str) or not re.fullmatch(r"[A-Z]{1,8}",instrument):
+        raise ValueError("invalid instrument")
+    if not isinstance(source_sha256,str) or not re.fullmatch(r"[a-f0-9]{64}",source_sha256):
+        reasons.append("SOURCE_DIGEST_UNVERIFIED")
+    clocks={}
+    for key,value in (("observed",observed_at),("computed",computed_at)):
+        try:
+            clocks[key]=_utc(value)
+        except (ValueError,TypeError):
+            reasons.append(key.upper()+"_CLOCK_UNKNOWN")
+    if any(d>decision for d in clocks.values()):
+        reasons.append("FUTURE_AVAILABILITY")
+    if "observed" in clocks and "computed" in clocks and clocks["computed"]<clocks["observed"]:
+        reasons.append("COMPUTE_PRECEDES_CAPTURE")
+    if state_last_session!=origin_session:
+        reasons.append("STATE_SESSION_MISMATCH")
+    if not isinstance(fit_cutoffs,dict) or not fit_cutoffs:
+        reasons.append("FIT_CUTOFFS_UNKNOWN")
+    else:
+        for model,value in fit_cutoffs.items():
+            try:
+                cutoff=datetime.fromisoformat(value).date()
+                if str(cutoff)!=value or not isinstance(model,str):
+                    raise ValueError("invalid fit cutoff")
+                if cutoff>origin:reasons.append("FUTURE_FIT_INPUT")
+            except (ValueError,TypeError):
+                reasons.append("FIT_CUTOFF_INVALID")
+    age=(decision.date()-origin).days
+    if age<0:
+        reasons.append("FUTURE_ORIGIN")
+    if age>max_age_days:
+        reasons.append("STALE_ORIGIN")
+    f,u=np.asarray(forecast,float),np.asarray(upper90,float)
+    if f.shape!=(3,) or not np.isfinite(f).all() or (f<=0).any():
+        reasons.append("FORECAST_UNAVAILABLE")
+    if u.shape!=(3,) or not np.isfinite(u).all() or (u<=0).any():
+        reasons.append("ENVELOPE_UNAVAILABLE")
+    valid=not reasons
+    return {"schema":"mastermind.volatility_research_context.v2","instrument":instrument,
+            "origin_session":origin_session,"decision_at":decision_at,
+            "state_last_session":state_last_session,"parameter_fit_cutoffs":fit_cutoffs,
+            "computed_at":computed_at,"forecast_scope":"reconstructed_research_asof",
+            "status":"RESEARCH_ONLY" if valid else "ABSTAIN","reason_codes":sorted(set(reasons)),
+            "horizons_sessions":[1,5,20],"annualized_vol_percent":(np.sqrt(f*252)*100).tolist() if valid else None,
+            "upper90_variance":u.tolist() if valid else None,
+            "source_sha256":source_sha256,"point_in_time_historical_validation":False,
+            "may_rank":False,"may_size":False,"may_trade":False,
+            "note":"Historical research, not certified coverage or a production trading instruction."}

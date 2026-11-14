@@ -1,0 +1,164 @@
+{
+  "schema": "mastermind.volatility_forward_delivery_summary.v1",
+  "publication": {
+    "schema": "mastermind.volatility_forward_publication.v1",
+    "commit": "3de620818a38a599d6e6d0addf5050736920980f",
+    "parent": "19424ce448732f3d196adb5b2f0ae0138fdb8f63",
+    "source_code_commit": "1a7091ab97b34a29ba33905a053167a64fffc893",
+    "record_path": "research/evidence/apmem_shadow_phase2/FORWARD_2026-11-13_Tiingo_v1.json",
+    "record_sha256": "76a33f4f05d1cba899da059a91e7bd77637e83727385b6159b6ad1419c590776",
+    "github_committer_timestamp": "2026-11-14T01:56:28Z",
+    "readback_at": "2026-11-14T01:56:31.352516+00:00",
+    "exact_bytes_readback_verified": true,
+    "origin_session": "2026-11-13",
+    "matured_forward_outcomes": 0,
+    "status": "PUBLISHED_RESEARCH_FORECASTS_NOT_VALIDATED",
+    "may_trade": false
+  },
+  "status": "PUBLISHED_RESEARCH_FORECASTS_NOT_VALIDATED",
+  "matured_forward_outcomes": 0,
+  "options_extension": "UNAVAILABLE_NO_FRESH_SAME_ORIGIN_OPTIONS_CAPTURE",
+  "source": "complete approved Tiingo raw EOD capture",
+  "original_missing_close_abstention_preserved": true,
+  "models": {
+    "QQQ": {
+      "economic_origin": "2026-11-13",
+      "captured_at": "2026-11-14T01:49:39.523745+00:00",
+      "computed_at": "2026-11-14T01:54:51.391000+00:00",
+      "source_sha256": "df0a5bc5ada1cef01a26f29b9d00b0156b75143d6472191acae3a4f1a43fc169",
+      "fit_cutoffs": {
+        "apmem": "2026-10-15",
+        "mem_delta1": "2026-10-15",
+        "har_h1": "2026-10-16",
+        "har_h5": "2026-10-22",
+        "har_h20": "2026-11-12"
+      },
+      "annualized_volatility_percent": {
+        "ewma94": [
+          26.207395,
+          26.207395,
+          26.207395
+        ],
+        "apmem_moment": [
+          31.653007,
+          31.036358,
+          29.124518
+        ],
+        "har_extended": [
+          28.295927,
+          27.643539,
+          26.857231
+        ],
+        "equal_moment": [
+          28.806249,
+          28.368106,
+          27.424903
+        ],
+        "mem_delta1": [
+          31.284996,
+          30.935895,
+          29.829203
+        ]
+      },
+      "horizons_sessions": [
+        1,
+        5,
+        20
+      ]
+    },
+    "SPY": {
+      "economic_origin": "2026-11-13",
+      "captured_at": "2026-11-14T01:49:39.846389+00:00",
+      "computed_at": "2026-11-14T01:55:10.914401+00:00",
+      "source_sha256": "8c3d652b8af521aa1baa46d655db7c9a8f81e6598bd8b261223fa1bf940e4f70",
+      "fit_cutoffs": {
+        "apmem": "2026-10-15",
+        "mem_delta1": "2026-10-15",
+        "har_h1": "2026-10-16",
+        "har_h5": "2026-10-22",
+        "har_h20": "2026-11-12"
+      },
+      "annualized_volatility_percent": {
+        "ewma94": [
+          16.300184,
+          16.300184,
+          16.300184
+        ],
+        "apmem_moment": [
+          20.209673,
+          20.007559,
+          19.278717
+        ],
+        "har_extended": [
+          17.073984,
+          17.128303,
+          17.098105
+        ],
+        "equal_moment": [
+          17.941087,
+          17.88274,
+          17.604073
+        ],
+        "mem_delta1": [
+          20.094029,
+          20.026042,
+          19.815549
+        ]
+      },
+      "horizons_sessions": [
+        1,
+        5,
+        20
+      ]
+    },
+    "IWM": {
+      "economic_origin": "2026-11-13",
+      "captured_at": "2026-11-14T01:49:40.176446+00:00",
+      "computed_at": "2026-11-14T01:55:29.073236+00:00",
+      "source_sha256": "4fee9d0c24ff9d592bb47076734a8a8ad38746d55971433f4029730e0c970998",
+      "fit_cutoffs": {
+        "apmem": "2026-10-15",
+        "mem_delta1": "2026-10-15",
+        "har_h1": "2026-10-16",
+        "har_h5": "2026-10-22",
+        "har_h20": "2026-11-12"
+      },
+      "annualized_volatility_percent": {
+        "ewma94": [
+          19.780143,
+          19.780143,
+          19.780143
+        ],
+        "apmem_moment": [
+          21.71113,
+          21.986935,
+          22.440032
+        ],
+        "har_extended": [
+          19.644374,
+          20.176091,
+          21.224138
+        ],
+        "equal_moment": [
+          20.400397,
+          20.670059,
+          21.176033
+        ],
+        "mem_delta1": [
+          21.778173,
+          22.014261,
+          22.490338
+        ]
+      },
+      "horizons_sessions": [
+        1,
+        5,
+        20
+      ]
+    }
+  },
+  "may_rank": false,
+  "may_size": false,
+  "may_trade": false,
+  "background_collector_or_grader_installed": false
+}

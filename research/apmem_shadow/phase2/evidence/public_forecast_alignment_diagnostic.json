@@ -1,0 +1,82 @@
+[
+  {
+    "alignment": "public_date_predicts_same_session",
+    "model": "apmem",
+    "n": 753,
+    "public_qlike": 0.4692536958236229,
+    "candidate_qlike": 0.3997672203854313,
+    "timestamp_or_target_identity_verified": false
+  },
+  {
+    "alignment": "public_date_predicts_same_session",
+    "model": "equal_blend",
+    "n": 753,
+    "public_qlike": 0.4692536958236229,
+    "candidate_qlike": 0.4173587844179108,
+    "timestamp_or_target_identity_verified": false
+  },
+  {
+    "alignment": "public_date_predicts_same_session",
+    "model": "adaptive_blend",
+    "n": 753,
+    "public_qlike": 0.4692536958236229,
+    "candidate_qlike": 0.41608425904916024,
+    "timestamp_or_target_identity_verified": false
+  },
+  {
+    "alignment": "public_date_predicts_same_session",
+    "model": "ewma94",
+    "n": 753,
+    "public_qlike": 0.4692536958236229,
+    "candidate_qlike": 0.49282552471513913,
+    "timestamp_or_target_identity_verified": false
+  },
+  {
+    "alignment": "public_date_predicts_same_session",
+    "model": "incumbent",
+    "n": 753,
+    "public_qlike": 0.4692536958236229,
+    "candidate_qlike": 0.6518766665956691,
+    "timestamp_or_target_identity_verified": false
+  },
+  {
+    "alignment": "public_date_predicts_next_session",
+    "model": "apmem",
+    "n": 752,
+    "public_qlike": 0.507060960473458,
+    "candidate_qlike": 0.3999371924084355,
+    "timestamp_or_target_identity_verified": false
+  },
+  {
+    "alignment": "public_date_predicts_next_session",
+    "model": "equal_blend",
+    "n": 752,
+    "public_qlike": 0.507060960473458,
+    "candidate_qlike": 0.41748217154083983,
+    "timestamp_or_target_identity_verified": false
+  },
+  {
+    "alignment": "public_date_predicts_next_session",
+    "model": "adaptive_blend",
+    "n": 752,
+    "public_qlike": 0.507060960473458,
+    "candidate_qlike": 0.41620526545223985,
+    "timestamp_or_target_identity_verified": false
+  },
+  {
+    "alignment": "public_date_predicts_next_session",
+    "model": "ewma94",
+    "n": 752,
+    "public_qlike": 0.507060960473458,
+    "candidate_qlike": 0.4930054106080877,
+    "timestamp_or_target_identity_verified": false
+  },
+  {
+    "alignment": "public_date_predicts_next_session",
+    "model": "incumbent",
+    "n": 752,
+    "public_qlike": 0.507060960473458,
+    "candidate_qlike": 0.6520037940745002,
+    "timestamp_or_target_identity_verified": false
+  }
+]

@@ -1,0 +1,409 @@
+{
+  "instruments": [
+    {
+      "instrument": "IWM",
+      "source": {
+        "instrument": "IWM",
+        "price_sha256": "95a53e4b3e8b1e2c1bf3de4483d6433e8841e1f6efe3f56e0e1c190d62c55c5e",
+        "price_rows": 4242,
+        "first": "2010-01-04",
+        "last": "2026-11-12",
+        "options_sha256": "62fc01585c47227839e615611e929fe0fcd1f59e75d66db68790e004995b344f",
+        "options_rows": 2469,
+        "nonzero_distribution_days": 67,
+        "historical_first_availability": null,
+        "dataset_vintage": "current_snapshot",
+        "python": "3.12.4",
+        "numpy": "2.4.6",
+        "pandas": "3.0.3",
+        "scipy": "1.18.0"
+      },
+      "fit_summary": {
+        "apmem": {
+          "fits": 60,
+          "successful": 60
+        },
+        "har": {
+          "fits": 531,
+          "successful": 531
+        },
+        "har_extended": {
+          "fits": 531,
+          "successful": 531
+        },
+        "har_options": {
+          "fits": 274,
+          "successful": 274
+        }
+      },
+      "forecast_rows": 240,
+      "utility_rows": 384
+    },
+    {
+      "instrument": "QQQ",
+      "source": {
+        "instrument": "QQQ",
+        "price_sha256": "836e4de1519fd615265aab7c6dacc346410ad42a39827c8f38471564ac315edc",
+        "price_rows": 4242,
+        "first": "2010-01-04",
+        "last": "2026-11-12",
+        "options_sha256": "048a8f0ab9bb878c54fbe086df165add178c09a250dff47ee56a09d42d1278ac",
+        "options_rows": 2469,
+        "nonzero_distribution_days": 70,
+        "historical_first_availability": null,
+        "dataset_vintage": "current_snapshot",
+        "python": "3.12.4",
+        "numpy": "2.4.6",
+        "pandas": "3.0.3",
+        "scipy": "1.18.0"
+      },
+      "fit_summary": {
+        "apmem": {
+          "fits": 60,
+          "successful": 60
+        },
+        "har": {
+          "fits": 531,
+          "successful": 531
+        },
+        "har_extended": {
+          "fits": 531,
+          "successful": 531
+        },
+        "har_options": {
+          "fits": 274,
+          "successful": 274
+        }
+      },
+      "forecast_rows": 240,
+      "utility_rows": 384
+    },
+    {
+      "instrument": "SPY",
+      "source": {
+        "instrument": "SPY",
+        "price_sha256": "82219d68bc34b713f792c61eb00a12e18ea8ffc5c0d99231f15b10d7ce7b5902",
+        "price_rows": 4242,
+        "first": "2010-01-04",
+        "last": "2026-11-12",
+        "options_sha256": "9c412d845582105068fad3802c4ea50b36d1246207173b0460fc96af1a086388",
+        "options_rows": 2470,
+        "nonzero_distribution_days": 67,
+        "historical_first_availability": null,
+        "dataset_vintage": "current_snapshot",
+        "python": "3.12.4",
+        "numpy": "2.4.6",
+        "pandas": "3.0.3",
+        "scipy": "1.18.0"
+      },
+      "fit_summary": {
+        "apmem": {
+          "fits": 60,
+          "successful": 60
+        },
+        "har": {
+          "fits": 531,
+          "successful": 531
+        },
+        "har_extended": {
+          "fits": 531,
+          "successful": 531
+        },
+        "har_options": {
+          "fits": 274,
+          "successful": 274
+        }
+      },
+      "forecast_rows": 240,
+      "utility_rows": 384
+    },
+    {
+      "instrument": "XLI",
+      "source": {
+        "instrument": "XLI",
+        "price_sha256": "0a8c0de0fc763f8c1983dd6dfd3ef29b577195ba5e51085495b4148a9904f57a",
+        "price_rows": 4242,
+        "first": "2010-01-04",
+        "last": "2026-11-12",
+        "options_sha256": null,
+        "options_rows": 0,
+        "nonzero_distribution_days": 67,
+        "historical_first_availability": null,
+        "dataset_vintage": "current_snapshot",
+        "python": "3.12.4",
+        "numpy": "2.4.6",
+        "pandas": "3.0.3",
+        "scipy": "1.18.0"
+      },
+      "fit_summary": {
+        "apmem": {
+          "fits": 60,
+          "successful": 60
+        },
+        "har": {
+          "fits": 531,
+          "successful": 531
+        },
+        "har_extended": {
+          "fits": 531,
+          "successful": 531
+        }
+      },
+      "forecast_rows": 216,
+      "utility_rows": 384
+    },
+    {
+      "instrument": "XLP",
+      "source": {
+        "instrument": "XLP",
+        "price_sha256": "4d77188d0829c96d62440b8f6a7f16fb22706511484985b516d6728b7b589fa9",
+        "price_rows": 4242,
+        "first": "2010-01-04",
+        "last": "2026-11-12",
+        "options_sha256": null,
+        "options_rows": 0,
+        "nonzero_distribution_days": 67,
+        "historical_first_availability": null,
+        "dataset_vintage": "current_snapshot",
+        "python": "3.12.4",
+        "numpy": "2.4.6",
+        "pandas": "3.0.3",
+        "scipy": "1.18.0"
+      },
+      "fit_summary": {
+        "apmem": {
+          "fits": 60,
+          "successful": 60
+        },
+        "har": {
+          "fits": 531,
+          "successful": 531
+        },
+        "har_extended": {
+          "fits": 531,
+          "successful": 531
+        }
+      },
+      "forecast_rows": 216,
+      "utility_rows": 384
+    },
+    {
+      "instrument": "XLV",
+      "source": {
+        "instrument": "XLV",
+        "price_sha256": "f9fd2e5efd0f881bf4f1111399a61c7f4774a5ed5c1cb211cdd3a98fcb351f1f",
+        "price_rows": 4242,
+        "first": "2010-01-04",
+        "last": "2026-11-12",
+        "options_sha256": null,
+        "options_rows": 0,
+        "nonzero_distribution_days": 68,
+        "historical_first_availability": null,
+        "dataset_vintage": "current_snapshot",
+        "python": "3.12.4",
+        "numpy": "2.4.6",
+        "pandas": "3.0.3",
+        "scipy": "1.18.0"
+      },
+      "fit_summary": {
+        "apmem": {
+          "fits": 60,
+          "successful": 60
+        },
+        "har": {
+          "fits": 531,
+          "successful": 531
+        },
+        "har_extended": {
+          "fits": 531,
+          "successful": 531
+        }
+      },
+      "forecast_rows": 216,
+      "utility_rows": 384
+    },
+    {
+      "instrument": "XLB",
+      "source": {
+        "instrument": "XLB",
+        "price_sha256": "39383f8a10f06c65beb84a7ef76dcc91af778ca84957d40c61f6efb5459859cb",
+        "price_rows": 4242,
+        "first": "2010-01-04",
+        "last": "2026-11-12",
+        "options_sha256": null,
+        "options_rows": 0,
+        "nonzero_distribution_days": 67,
+        "historical_first_availability": null,
+        "dataset_vintage": "current_snapshot",
+        "python": "3.12.4",
+        "numpy": "2.4.6",
+        "pandas": "3.0.3",
+        "scipy": "1.18.0"
+      },
+      "fit_summary": {
+        "apmem": {
+          "fits": 60,
+          "successful": 60
+        },
+        "har": {
+          "fits": 531,
+          "successful": 531
+        },
+        "har_extended": {
+          "fits": 531,
+          "successful": 531
+        }
+      },
+      "forecast_rows": 216,
+      "utility_rows": 384
+    },
+    {
+      "instrument": "XLE",
+      "source": {
+        "instrument": "XLE",
+        "price_sha256": "a681602a92980a9a384b2ab3d6357992f8425d27e65f820b7ae0e5feed85472c",
+        "price_rows": 4242,
+        "first": "2010-01-04",
+        "last": "2026-11-12",
+        "options_sha256": null,
+        "options_rows": 0,
+        "nonzero_distribution_days": 68,
+        "historical_first_availability": null,
+        "dataset_vintage": "current_snapshot",
+        "python": "3.12.4",
+        "numpy": "2.4.6",
+        "pandas": "3.0.3",
+        "scipy": "1.18.0"
+      },
+      "fit_summary": {
+        "apmem": {
+          "fits": 60,
+          "successful": 60
+        },
+        "har": {
+          "fits": 531,
+          "successful": 531
+        },
+        "har_extended": {
+          "fits": 531,
+          "successful": 531
+        }
+      },
+      "forecast_rows": 216,
+      "utility_rows": 384
+    },
+    {
+      "instrument": "XLK",
+      "source": {
+        "instrument": "XLK",
+        "price_sha256": "88bb0f56db9893f431fedf2c768c07a0dd68cbee39f6b87a3f624df46795ab86",
+        "price_rows": 4242,
+        "first": "2010-01-04",
+        "last": "2026-11-12",
+        "options_sha256": null,
+        "options_rows": 0,
+        "nonzero_distribution_days": 67,
+        "historical_first_availability": null,
+        "dataset_vintage": "current_snapshot",
+        "python": "3.12.4",
+        "numpy": "2.4.6",
+        "pandas": "3.0.3",
+        "scipy": "1.18.0"
+      },
+      "fit_summary": {
+        "apmem": {
+          "fits": 60,
+          "successful": 60
+        },
+        "har": {
+          "fits": 531,
+          "successful": 531
+        },
+        "har_extended": {
+          "fits": 531,
+          "successful": 531
+        }
+      },
+      "forecast_rows": 216,
+      "utility_rows": 384
+    },
+    {
+      "instrument": "XLU",
+      "source": {
+        "instrument": "XLU",
+        "price_sha256": "6d8a03a28cc81024fc60067aa185f7fc3ae83c8fb32a93717eec7bef3d50c76c",
+        "price_rows": 4242,
+        "first": "2010-01-04",
+        "last": "2026-11-12",
+        "options_sha256": null,
+        "options_rows": 0,
+        "nonzero_distribution_days": 67,
+        "historical_first_availability": null,
+        "dataset_vintage": "current_snapshot",
+        "python": "3.12.4",
+        "numpy": "2.4.6",
+        "pandas": "3.0.3",
+        "scipy": "1.18.0"
+      },
+      "fit_summary": {
+        "apmem": {
+          "fits": 60,
+          "successful": 60
+        },
+        "har": {
+          "fits": 531,
+          "successful": 531
+        },
+        "har_extended": {
+          "fits": 531,
+          "successful": 531
+        }
+      },
+      "forecast_rows": 216,
+      "utility_rows": 384
+    },
+    {
+      "instrument": "XLY",
+      "source": {
+        "instrument": "XLY",
+        "price_sha256": "0378d16d400834ece9e33d91ffa89cb9b3d6945788b0cc58485c2f224e6850e3",
+        "price_rows": 4242,
+        "first": "2010-01-04",
+        "last": "2026-11-12",
+        "options_sha256": null,
+        "options_rows": 0,
+        "nonzero_distribution_days": 67,
+        "historical_first_availability": null,
+        "dataset_vintage": "current_snapshot",
+        "python": "3.12.4",
+        "numpy": "2.4.6",
+        "pandas": "3.0.3",
+        "scipy": "1.18.0"
+      },
+      "fit_summary": {
+        "apmem": {
+          "fits": 60,
+          "successful": 60
+        },
+        "har": {
+          "fits": 531,
+          "successful": 531
+        },
+        "har_extended": {
+          "fits": 531,
+          "successful": 531
+        }
+      },
+      "forecast_rows": 216,
+      "utility_rows": 384
+    }
+  ],
+  "excluded": {
+    "XLF": "unqualified in-kind corporate-action basis"
+  },
+  "paired_family": 264,
+  "utility_scenarios": 4224,
+  "forecast_rows": 2448,
+  "fit_count": 13164,
+  "successful_selected_fits": 13164
+}

@@ -1,0 +1,57 @@
+{
+  "schema": "mastermind.volatility_extensions.v1",
+  "started_at": "2026-11-14T01:10:19.767594+00:00",
+  "ended_at": "2026-11-14T01:10:37.379345+00:00",
+  "candidate_inputs": {
+    "QQQ": {
+      "prepared_prices_sha256": "cbef1aa4123621bbd7f1547b8ee9eb67a9f66efbc776764ddb40b9c4a9dfcfe4",
+      "candidate_predictions_sha256": "29442736f1187b5ec91d7ad6d422a6ee4deed2e6136cc7076c25b76712b06656",
+      "last_common_execution_open": "2026-11-10"
+    },
+    "SPY": {
+      "prepared_prices_sha256": "489c49cd2d6d34c8a0633816489751fc6ff8137e8640342281329b4c46c8d2f0",
+      "candidate_predictions_sha256": "19fa429e03a1c7f306aa7206d793c977450aec854f6a1487c12289269e5d3e70",
+      "last_common_execution_open": "2026-11-10"
+    },
+    "IWM": {
+      "prepared_prices_sha256": "9aea944a315e6579698200f1d62a57756d21b4100c7898be6aedd501ae2ee900",
+      "candidate_predictions_sha256": "69a77c43c9cd10015fc1509b498e9ed12dd89745361fe465ef812829944c479d",
+      "last_common_execution_open": "2026-11-10"
+    }
+  },
+  "early_stress_source_sha256": "49ab45e0e2d8792709e22d7296aac737235528ed644cb64bd71ad546f5072f71",
+  "source_sha256": {
+    "targets.py": "dad12175e54268509bd478cadefa46b2454e69e4bbcba06e845ea1b758c9d3c0",
+    "evaluation.py": "c2ba4eb88ce6015175503c1b2b69536ee0b58d40a3a81f80949f10fab4b8b6fd",
+    "__init__.py": "5bf10c4374c64003ba3d281d07ddfe75f89b970f8f38b6b78b470f0cfe86bbdf",
+    "extensions.py": "8955341d63b1556cd3c4bb3d69932bf29791bb319e49a21cdaf8ea37dd053865",
+    "forecasts.py": "5bbf270a6b0803756147616e985a621ce1ecf3604ab831d621f3809907bcadc9",
+    "followup.py": "1c3a238aa4f8116ed77691fbfeec4a62c932f4e24b641a26d6ec4a8dafe2c339",
+    "corporate_actions.py": "e91e4df4e04cc8cc791148d9182d4550df91fb9bfe7a0538cc7eb063faf2a517",
+    "consumer.py": "7159e22d119451daaf3b318f16e7c2fe640348ca9347d2f67aac792836867b4e",
+    "run_followup.py": "4c6d58c31d3a158220ff23a781fb0a4d16d1ec8514fb104d5aa029f750291a22",
+    "run_extensions.py": "5925d6d9d99fdb4b1024d7db684e3959abc0c9d1d5538de7f33f1752ccb93856",
+    "__main__.py": "fe4fc4c064572867e1822c18b2040b64ea3d2c93452e7c6c942f6a379ed05ffd",
+    "calibration.py": "3053f818f883191960e1ab3179b04ebe649ea98d6dbf82e35fae3a103599a8b6"
+  },
+  "candidate_utility_scenarios": 1044,
+  "early_stress_utility_scenarios": 408,
+  "numerical_origin_horizon_checks": 396,
+  "earlier_regime_fit_summary": {
+    "apmem": {
+      "fits": 60,
+      "successful": 60
+    },
+    "har": {
+      "fits": 534,
+      "successful": 534
+    },
+    "har_extended": {
+      "fits": 534,
+      "successful": 534
+    }
+  },
+  "exploratory_after_primary": true,
+  "prospective": false,
+  "may_trade": false
+}

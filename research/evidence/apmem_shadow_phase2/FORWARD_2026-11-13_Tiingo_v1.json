@@ -1,0 +1,571 @@
+{
+  "schema": "mastermind.volatility_forward_research.v1",
+  "started_at": "2026-11-14T01:54:35.080514+00:00",
+  "completed_at": "2026-11-14T01:55:30.784071+00:00",
+  "source_commit": "1a7091ab97b34a29ba33905a053167a64fffc893",
+  "source_sha256": {
+    "tiingo_adapter.py": "d8426e51e5adb5abb9885f0196e060befe5c4bf5f286fd853acdaf0be5e62038",
+    "targets.py": "dad12175e54268509bd478cadefa46b2454e69e4bbcba06e845ea1b758c9d3c0",
+    "run_moments.py": "5d6e73ddcb9aee7b753285a55c43a402de21eaabede07c5aef3180c0b7363a93",
+    "evaluation.py": "c2ba4eb88ce6015175503c1b2b69536ee0b58d40a3a81f80949f10fab4b8b6fd",
+    "moments.py": "d155c300616ce983e4e58f4410a4d6b3c55178231bbbb0f4c0f3eef167b31769",
+    "__init__.py": "5bf10c4374c64003ba3d281d07ddfe75f89b970f8f38b6b78b470f0cfe86bbdf",
+    "extensions.py": "8955341d63b1556cd3c4bb3d69932bf29791bb319e49a21cdaf8ea37dd053865",
+    "forecasts.py": "5bbf270a6b0803756147616e985a621ce1ecf3604ab831d621f3809907bcadc9",
+    "followup.py": "1c3a238aa4f8116ed77691fbfeec4a62c932f4e24b641a26d6ec4a8dafe2c339",
+    "corporate_actions.py": "e91e4df4e04cc8cc791148d9182d4550df91fb9bfe7a0538cc7eb063faf2a517",
+    "consumer.py": "52f0d0c99c04fe03cc838c7cbeb801a62561f5a5e5e2ed8ee590142487ca6309",
+    "run_followup.py": "4c6d58c31d3a158220ff23a781fb0a4d16d1ec8514fb104d5aa029f750291a22",
+    "forward.py": "9f757475d4972224a0424e4c33bb74012de05e5330c3514c5d93f9e80f6a7ae2",
+    "run_extensions.py": "5925d6d9d99fdb4b1024d7db684e3959abc0c9d1d5538de7f33f1752ccb93856",
+    "__main__.py": "fe4fc4c064572867e1822c18b2040b64ea3d2c93452e7c6c942f6a379ed05ffd",
+    "calibration.py": "3053f818f883191960e1ab3179b04ebe649ea98d6dbf82e35fae3a103599a8b6"
+  },
+  "capture_receipt_sha256": "e51f65e13ddbf5e178e165a3dcba5a0cdd9ed67309cb40f2157ead3cf8652c07",
+  "instruments": {
+    "QQQ": {
+      "instrument": "QQQ",
+      "economic_origin": "2026-11-13",
+      "captured_at": "2026-11-14T01:49:39.523745+00:00",
+      "computed_at": "2026-11-14T01:54:51.391000+00:00",
+      "source_sha256": "df0a5bc5ada1cef01a26f29b9d00b0156b75143d6472191acae3a4f1a43fc169",
+      "prepared_sha256": "eb22585d2513fd011a630aca14aa02bac97b2483c56317718450f32ea7f4487b",
+      "source_rows": 4243,
+      "source_vintage": "captured_current_snapshot",
+      "historical_first_availability": null,
+      "horizons_next_trading_observations": [
+        1,
+        5,
+        20
+      ],
+      "target": "mean_future_overnight_plus_parkinson_daily_variance",
+      "secondary_target": "mean_future_squared_total_close_return",
+      "annualization_sessions": 252,
+      "models": {
+        "ewma94": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.0002725506228234895,
+            0.0002725506228234895,
+            0.0002725506228234895
+          ],
+          "annualized_volatility_percent": [
+            26.20739532107671,
+            26.20739532107671,
+            26.20739532107671
+          ],
+          "empirical_upper90_variance": [
+            0.0006102368567987613,
+            0.000595325763601547,
+            0.0006157261517933205
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        },
+        "apmem_moment": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.00039758445373352973,
+            0.00038224425623696725,
+            0.00033660219724902687
+          ],
+          "annualized_volatility_percent": [
+            31.653006546116515,
+            31.036358125868404,
+            29.124517799743018
+          ],
+          "empirical_upper90_variance": [
+            0.0007781797854129948,
+            0.0007203111349968448,
+            0.000548550390473886
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        },
+        "har_extended": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.0003177220235756716,
+            0.00030324018043312924,
+            0.0002862344711535396
+          ],
+          "annualized_volatility_percent": [
+            28.29592725836516,
+            27.643539112991405,
+            26.857231192118814
+          ],
+          "empirical_upper90_variance": [
+            0.0006591784299216228,
+            0.0006152602627341485,
+            0.0005048579935202122
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        },
+        "equal_moment": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.00032928570004423034,
+            0.00031934501983119535,
+            0.0002984624304086853
+          ],
+          "annualized_volatility_percent": [
+            28.806248699048968,
+            28.368106210577615,
+            27.424903365917025
+          ],
+          "empirical_upper90_variance": [
+            0.0006707580815874285,
+            0.0006395427123704015,
+            0.0005350828850180752
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        },
+        "mem_delta1": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.0003883932508860596,
+            0.0003797736488543937,
+            0.0003530878442211862
+          ],
+          "annualized_volatility_percent": [
+            31.284996279892223,
+            30.93589492988803,
+            29.82920326521292
+          ],
+          "empirical_upper90_variance": [
+            0.0007255072229410744,
+            0.0007390473026201093,
+            0.000565891775535741
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        }
+      },
+      "parameter_fit_cutoffs": {
+        "apmem": "2026-10-15",
+        "mem_delta1": "2026-10-15",
+        "har_h1": "2026-10-16",
+        "har_h5": "2026-10-22",
+        "har_h20": "2026-11-12"
+      },
+      "filtered_state_origin": "2026-11-13",
+      "options_extension_status": "UNAVAILABLE_NO_FRESH_SAME_ORIGIN_OPTIONS_CAPTURE",
+      "matured_forward_outcomes": 0,
+      "live_trading_or_ranking_authority": false,
+      "method_notes": [
+        "Fractional APMEM means use a deterministic two-moment approximation.",
+        "Conditional-mean numerical bounds are not market prediction intervals.",
+        "Delta=1 model has exact finite-horizon empirical conditional means, not guaranteed market accuracy."
+      ],
+      "apmem_conditional_mean_numerical_bounds": {
+        "lower": [
+          0.00039758445373352973,
+          0.00038224425623696725,
+          0.00033660219724902687
+        ],
+        "upper": [
+          0.00039758445373352973,
+          0.00038224425623696725,
+          0.00033660219724902687
+        ],
+        "relative_width": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "is_future_market_outcome_interval": false
+      },
+      "apmem_last_transition_diagnostic": {
+        "origin": 4220,
+        "power": 2.0,
+        "mean_power_state_coefficient": 0.9500076569988308,
+        "second_power_state_coefficient": 0.9139868486518402,
+        "variance_mean_moment_coefficient": 0.9139868486518402,
+        "variance_mean_stationarity_diagnostic": true,
+        "point_estimate_exact_under_empirical_recursion": true,
+        "bounds_are_market_prediction_intervals": false
+      },
+      "mem_delta1_last_transition_diagnostic": {
+        "origin": 4220,
+        "power": 1.0,
+        "mean_power_state_coefficient": 0.9689295033337428,
+        "second_power_state_coefficient": 1.0088985481006523,
+        "variance_mean_moment_coefficient": 0.9689295033337428,
+        "variance_mean_stationarity_diagnostic": true,
+        "point_estimate_exact_under_empirical_recursion": true,
+        "bounds_are_market_prediction_intervals": false
+      }
+    },
+    "SPY": {
+      "instrument": "SPY",
+      "economic_origin": "2026-11-13",
+      "captured_at": "2026-11-14T01:49:39.846389+00:00",
+      "computed_at": "2026-11-14T01:55:10.914401+00:00",
+      "source_sha256": "8c3d652b8af521aa1baa46d655db7c9a8f81e6598bd8b261223fa1bf940e4f70",
+      "prepared_sha256": "a9ecf90d6b11c4bf8abdb4442e3f99d797adb05e90efdab481d346d27bbb939e",
+      "source_rows": 4243,
+      "source_vintage": "captured_current_snapshot",
+      "historical_first_availability": null,
+      "horizons_next_trading_observations": [
+        1,
+        5,
+        20
+      ],
+      "target": "mean_future_overnight_plus_parkinson_daily_variance",
+      "secondary_target": "mean_future_squared_total_close_return",
+      "annualization_sessions": 252,
+      "models": {
+        "ewma94": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.00010543492194248657,
+            0.00010543492194248657,
+            0.00010543492194248657
+          ],
+          "annualized_volatility_percent": [
+            16.30018414911519,
+            16.30018414911519,
+            16.30018414911519
+          ],
+          "empirical_upper90_variance": [
+            0.00024476686174535253,
+            0.00024144728314607524,
+            0.0002485757611680074
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        },
+        "apmem_moment": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.00016207574957874285,
+            0.00015885016487440307,
+            0.00014748767442344238
+          ],
+          "annualized_volatility_percent": [
+            20.209673152686857,
+            20.007558958641,
+            19.278717269234352
+          ],
+          "empirical_upper90_variance": [
+            0.00030772377489144504,
+            0.0002903165003147313,
+            0.00021750062218545566
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        },
+        "har_extended": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.00011568290785697919,
+            0.00011642014051495712,
+            0.0001160100018340448
+          ],
+          "annualized_volatility_percent": [
+            17.073983946331552,
+            17.128302720867936,
+            17.09810529332981
+          ],
+          "empirical_upper90_variance": [
+            0.00023697800947839156,
+            0.00021319186463388988,
+            0.0001664695257871013
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        },
+        "equal_moment": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.00012773119312606954,
+            0.00012690174244394891,
+            0.00012297753273332457
+          ],
+          "annualized_volatility_percent": [
+            17.941087109695868,
+            17.882740029390106,
+            17.60407289487231
+          ],
+          "empirical_upper90_variance": [
+            0.00024739058349361893,
+            0.00024239366327794768,
+            0.00020212858821550645
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        },
+        "mem_delta1": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.00016022618763097507,
+            0.00015914379593611708,
+            0.00015581586135955878
+          ],
+          "annualized_volatility_percent": [
+            20.09402878543915,
+            20.026042189085068,
+            19.815548708680467
+          ],
+          "empirical_upper90_variance": [
+            0.0003022940427534608,
+            0.00029400922040052197,
+            0.00021889921505601173
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        }
+      },
+      "parameter_fit_cutoffs": {
+        "apmem": "2026-10-15",
+        "mem_delta1": "2026-10-15",
+        "har_h1": "2026-10-16",
+        "har_h5": "2026-10-22",
+        "har_h20": "2026-11-12"
+      },
+      "filtered_state_origin": "2026-11-13",
+      "options_extension_status": "UNAVAILABLE_NO_FRESH_SAME_ORIGIN_OPTIONS_CAPTURE",
+      "matured_forward_outcomes": 0,
+      "live_trading_or_ranking_authority": false,
+      "method_notes": [
+        "Fractional APMEM means use a deterministic two-moment approximation.",
+        "Conditional-mean numerical bounds are not market prediction intervals.",
+        "Delta=1 model has exact finite-horizon empirical conditional means, not guaranteed market accuracy."
+      ],
+      "apmem_conditional_mean_numerical_bounds": {
+        "lower": [
+          0.00016207574957874285,
+          0.00015885016487440307,
+          0.00014748767442344238
+        ],
+        "upper": [
+          0.00016207574957874285,
+          0.00015885016487440307,
+          0.00014748767442344238
+        ],
+        "relative_width": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "is_future_market_outcome_interval": false
+      },
+      "apmem_last_transition_diagnostic": {
+        "origin": 4220,
+        "power": 2.0,
+        "mean_power_state_coefficient": 0.9411346909521636,
+        "second_power_state_coefficient": 0.9021152478189783,
+        "variance_mean_moment_coefficient": 0.9021152478189783,
+        "variance_mean_stationarity_diagnostic": true,
+        "point_estimate_exact_under_empirical_recursion": true,
+        "bounds_are_market_prediction_intervals": false
+      },
+      "mem_delta1_last_transition_diagnostic": {
+        "origin": 4220,
+        "power": 1.0,
+        "mean_power_state_coefficient": 0.9677766576868959,
+        "second_power_state_coefficient": 1.0527800219230286,
+        "variance_mean_moment_coefficient": 0.9677766576868959,
+        "variance_mean_stationarity_diagnostic": true,
+        "point_estimate_exact_under_empirical_recursion": true,
+        "bounds_are_market_prediction_intervals": false
+      }
+    },
+    "IWM": {
+      "instrument": "IWM",
+      "economic_origin": "2026-11-13",
+      "captured_at": "2026-11-14T01:49:40.176446+00:00",
+      "computed_at": "2026-11-14T01:55:29.073236+00:00",
+      "source_sha256": "4fee9d0c24ff9d592bb47076734a8a8ad38746d55971433f4029730e0c970998",
+      "prepared_sha256": "f7747cddc9d29c08742b2b28b289f1187c7675428c65856070b99a3cd78569f6",
+      "source_rows": 4243,
+      "source_vintage": "captured_current_snapshot",
+      "historical_first_availability": null,
+      "horizons_next_trading_observations": [
+        1,
+        5,
+        20
+      ],
+      "target": "mean_future_overnight_plus_parkinson_daily_variance",
+      "secondary_target": "mean_future_squared_total_close_return",
+      "annualization_sessions": 252,
+      "models": {
+        "ewma94": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.00015525954845853717,
+            0.00015525954845853717,
+            0.00015525954845853717
+          ],
+          "annualized_volatility_percent": [
+            19.780143126770184,
+            19.780143126770184,
+            19.780143126770184
+          ],
+          "empirical_upper90_variance": [
+            0.00031253296184836004,
+            0.0002876954979237434,
+            0.00030308624875270885
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        },
+        "apmem_moment": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.00018705284167286047,
+            0.00019183543912612997,
+            0.00019982343574657949
+          ],
+          "annualized_volatility_percent": [
+            21.711129888046095,
+            21.98693490684519,
+            22.440032488420787
+          ],
+          "empirical_upper90_variance": [
+            0.00034612425503321244,
+            0.00029371746231728334,
+            0.0002787145347701755
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        },
+        "har_extended": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.00015313548290177756,
+            0.0001615375652378397,
+            0.0001787555705784513
+          ],
+          "annualized_volatility_percent": [
+            19.64437367065897,
+            20.176091405407444,
+            21.224138094577533
+          ],
+          "empirical_upper90_variance": [
+            0.00029024331210797025,
+            0.0002570586647105921,
+            0.0002418623352924847
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        },
+        "equal_moment": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.00016514929101105842,
+            0.00016954418427416894,
+            0.000177946184927856
+          ],
+          "annualized_volatility_percent": [
+            20.400397382106732,
+            20.670059128384363,
+            21.17603329280999
+          ],
+          "empirical_upper90_variance": [
+            0.0002978742432997621,
+            0.0002655445778670576,
+            0.0002627069507194591
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        },
+        "mem_delta1": {
+          "status": "RESEARCH_FORECAST",
+          "daily_variance": [
+            0.00018820985423369685,
+            0.0001923125740437478,
+            0.0002007203538799584
+          ],
+          "annualized_volatility_percent": [
+            21.778173308818076,
+            22.014260982150738,
+            22.49033774262839
+          ],
+          "empirical_upper90_variance": [
+            0.00033644369973308773,
+            0.00029479217880630564,
+            0.00028001051663062936
+          ],
+          "may_rank": false,
+          "may_size": false,
+          "may_trade": false
+        }
+      },
+      "parameter_fit_cutoffs": {
+        "apmem": "2026-10-15",
+        "mem_delta1": "2026-10-15",
+        "har_h1": "2026-10-16",
+        "har_h5": "2026-10-22",
+        "har_h20": "2026-11-12"
+      },
+      "filtered_state_origin": "2026-11-13",
+      "options_extension_status": "UNAVAILABLE_NO_FRESH_SAME_ORIGIN_OPTIONS_CAPTURE",
+      "matured_forward_outcomes": 0,
+      "live_trading_or_ranking_authority": false,
+      "method_notes": [
+        "Fractional APMEM means use a deterministic two-moment approximation.",
+        "Conditional-mean numerical bounds are not market prediction intervals.",
+        "Delta=1 model has exact finite-horizon empirical conditional means, not guaranteed market accuracy."
+      ],
+      "apmem_conditional_mean_numerical_bounds": {
+        "lower": [
+          0.00018705284167286047,
+          0.00019183543912612997,
+          0.00019982343574657949
+        ],
+        "upper": [
+          0.00018705284167286047,
+          0.00019183543912612997,
+          0.00019982343574657949
+        ],
+        "relative_width": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "is_future_market_outcome_interval": false
+      },
+      "apmem_last_transition_diagnostic": {
+        "origin": 4220,
+        "power": 2.0,
+        "mean_power_state_coefficient": 0.8968594649054838,
+        "second_power_state_coefficient": 0.8139742492058948,
+        "variance_mean_moment_coefficient": 0.8139742492058948,
+        "variance_mean_stationarity_diagnostic": true,
+        "point_estimate_exact_under_empirical_recursion": true,
+        "bounds_are_market_prediction_intervals": false
+      },
+      "mem_delta1_last_transition_diagnostic": {
+        "origin": 4220,
+        "power": 1.0,
+        "mean_power_state_coefficient": 0.895481750719566,
+        "second_power_state_coefficient": 0.863795486804458,
+        "variance_mean_moment_coefficient": 0.895481750719566,
+        "variance_mean_stationarity_diagnostic": true,
+        "point_estimate_exact_under_empirical_recursion": true,
+        "bounds_are_market_prediction_intervals": false
+      }
+    }
+  },
+  "status": "COMPUTED_AWAITING_PUBLICATION_TIME_VERIFICATION",
+  "matured_forward_outcomes": 0,
+  "background_collector_or_grader_installed": false,
+  "may_trade": false
+}

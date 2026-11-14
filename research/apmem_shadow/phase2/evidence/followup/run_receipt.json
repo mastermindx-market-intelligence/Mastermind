@@ -1,0 +1,93 @@
+{
+  "schema": "mastermind.volatility_followup.v1",
+  "started_at": "2026-11-14T01:02:39.512628+00:00",
+  "ended_at": "2026-11-14T01:03:22.346201+00:00",
+  "source_inputs": {
+    "IWM": {
+      "prepared_prices.parquet": "9aea944a315e6579698200f1d62a57756d21b4100c7898be6aedd501ae2ee900",
+      "predictions.npz": "5813c1c1a3ffa7919929171e4fa210e5bff79f718e1f070a90528ae9a508c763",
+      "utility_paths.npz": "8fc1fec15ecfe3d32959712ef50a745799d7716097b36894ff3c81d39de1e1ce",
+      "summary.json": "a2b182869c1d81a801d676c80932ef964c309d0c1c76b2176ea9b4885b59c1d8",
+      "options_sha256": "62fc01585c47227839e615611e929fe0fcd1f59e75d66db68790e004995b344f"
+    },
+    "QQQ": {
+      "prepared_prices.parquet": "cbef1aa4123621bbd7f1547b8ee9eb67a9f66efbc776764ddb40b9c4a9dfcfe4",
+      "predictions.npz": "8b184ef38e2783ab7be0276ead44e1d654596b344f2217d52d465369d92d68b6",
+      "utility_paths.npz": "b593a297ea532991938f03d4ef832834e23c92de66cff78db0acd3428a85e4e8",
+      "summary.json": "2f295a8d28102da16bd62f48890a5988fb0b982c196f52ac9f733a8b131442f7",
+      "options_sha256": "048a8f0ab9bb878c54fbe086df165add178c09a250dff47ee56a09d42d1278ac"
+    },
+    "SPY": {
+      "prepared_prices.parquet": "489c49cd2d6d34c8a0633816489751fc6ff8137e8640342281329b4c46c8d2f0",
+      "predictions.npz": "ec29cb6b8b913a4f6a8d487bbcaeb5ccaff0f6d2384e1fc359434b11e62f8937",
+      "utility_paths.npz": "ad4ad636fb2671187dd68253a824b3f7d4fb8a24db8d8d48aaef37474b1ad6b7",
+      "summary.json": "0ad8aec8b20ed27be28079c753dc5d174f3be25c8f2d7f527fff097060198f64",
+      "options_sha256": "9c412d845582105068fad3802c4ea50b36d1246207173b0460fc96af1a086388"
+    },
+    "XLB": {
+      "prepared_prices.parquet": "ea8868740ec787a5baf0496aeeab98ca078013e5d96d22ff7ea3cebd4d6e228b",
+      "predictions.npz": "e1ae40868f14342aa7e97eb7094b7c8b31abf67ff91c2460171942b816858dd8",
+      "utility_paths.npz": "4a209f9276f0260f2239e9427134391bfe0accaa670f5ec223fdd954fce80d62",
+      "summary.json": "0f778be561714460294b00bb67fefe8238d10f61a8eee28389f63632f1bd12ef"
+    },
+    "XLE": {
+      "prepared_prices.parquet": "ce118e7dc91cc65bc2eb8e7bb63bfdc31d5bb78cb5c086d458780618d6d46b40",
+      "predictions.npz": "da89a77a8ff2bb1bdb82606b8a35c28ee0031864d782060f40f842d322439dc2",
+      "utility_paths.npz": "e5b35207afa180c6942460879eec30426550381181d190cd3a5dcb87c63c4dff",
+      "summary.json": "1b8b3bc90ebdc17246902d1ea9c507c48cea2eb748cefb786249d164196f33fb"
+    },
+    "XLI": {
+      "prepared_prices.parquet": "339c6eea29c3b87c1c0451e078658995b3f778f7f114818b6727b243059432b8",
+      "predictions.npz": "d7d3731c3b6941b387652a12a3ed27dcedc097d5824f3ec5b88fb4a862626539",
+      "utility_paths.npz": "367965e8aa8bad9189deb237ca6843557ec9228100e689ee9ea9cc4cc6cf992c",
+      "summary.json": "c12ad3be25672d0bc2192c1a35a6d83f062624ed4e1e69baf18a67062253fe87"
+    },
+    "XLK": {
+      "prepared_prices.parquet": "46d37b865e052fc14ee9a6b76f782eab6aa897a3e7f0a9b32acdb2777b1b3590",
+      "predictions.npz": "920e9bc1e45473190b1892b545ea92445bf40efd0b9e409ea4395dde3ad41b8e",
+      "utility_paths.npz": "aae3882fd71acc942168a8c80b54122d30356ad2ddfa261dc81413a9d10ab4f4",
+      "summary.json": "b86adca2d015a9b8a18f0a112ee86286b797a0ca2476e08a3e700a3d5737924e"
+    },
+    "XLP": {
+      "prepared_prices.parquet": "75bfcc6d276f99841690893b270c3a19215c3bf9e16d3768fb4f6264f4c3aef1",
+      "predictions.npz": "c85892aee89a505eecc8c0e842a9fa8b4cd8c40076f5b804ed948295ea203109",
+      "utility_paths.npz": "37d954985a063a3b4cdd532f9fba26d7869fe674fce23807f75f22d3691d06b8",
+      "summary.json": "df98c0e9ffe2879e19a9564fb74d0cb483f89add8ca4640ec0426dfe6b6bf9f8"
+    },
+    "XLU": {
+      "prepared_prices.parquet": "5136a1525d34bfc20b7ad95cdfa1934c83eb8750f7a5930a7039e90fb5a32261",
+      "predictions.npz": "c163f3a0050ca605f7b3dc1f3848c578a4528a98c02cb6122874db454a538433",
+      "utility_paths.npz": "a7fab2ddf0e8977c38529430186159e0775e18d10b1f4530e8966cddadd9092b",
+      "summary.json": "5a813fc87247688bc0f475f31a92a8c3ec6dfec53b6d1fe39816681c33758778"
+    },
+    "XLV": {
+      "prepared_prices.parquet": "66ce2a256dd756a7753cabc0fc425b31d8af9b2012a903db037c21e27f051ea0",
+      "predictions.npz": "77f33c58eaeef1920a110bbce3458faaa8303336ddcbeaabcfa870a7906f4b9d",
+      "utility_paths.npz": "b474932fbd3a2c74915d891e1e581dc859f0d3c44eda8def12f3a728caf0d244",
+      "summary.json": "38dc0d124629e75bcd09bb4aae1ce3e3f528b343b66aa3763f9c26869328145a"
+    },
+    "XLY": {
+      "prepared_prices.parquet": "d458b1606667d59e0eb0af9a852e404303cc351d7b900105c123854a514618e9",
+      "predictions.npz": "e3cd32bd96f27325e6dcac6ed39ea86a5d2f280dac030d83004590af1d530ffd",
+      "utility_paths.npz": "8190579d5a1c08516c95851b882055676774cad6e3ea1c31cbcb8f3f7f185604",
+      "summary.json": "6d9cd94a6148c3b67ae396e44e8eb43f637f33b5805f9e1bf8353ea39d32db23"
+    }
+  },
+  "source_sha256": {
+    "targets.py": "dad12175e54268509bd478cadefa46b2454e69e4bbcba06e845ea1b758c9d3c0",
+    "evaluation.py": "c2ba4eb88ce6015175503c1b2b69536ee0b58d40a3a81f80949f10fab4b8b6fd",
+    "__init__.py": "5bf10c4374c64003ba3d281d07ddfe75f89b970f8f38b6b78b470f0cfe86bbdf",
+    "forecasts.py": "5bbf270a6b0803756147616e985a621ce1ecf3604ab831d621f3809907bcadc9",
+    "followup.py": "1c3a238aa4f8116ed77691fbfeec4a62c932f4e24b641a26d6ec4a8dafe2c339",
+    "corporate_actions.py": "e91e4df4e04cc8cc791148d9182d4550df91fb9bfe7a0538cc7eb063faf2a517",
+    "consumer.py": "7159e22d119451daaf3b318f16e7c2fe640348ca9347d2f67aac792836867b4e",
+    "run_followup.py": "4c6d58c31d3a158220ff23a781fb0a4d16d1ec8514fb104d5aa029f750291a22",
+    "__main__.py": "fe4fc4c064572867e1822c18b2040b64ea3d2c93452e7c6c942f6a379ed05ffd",
+    "calibration.py": "3053f818f883191960e1ab3179b04ebe649ea98d6dbf82e35fae3a103599a8b6"
+  },
+  "paired_tests": 264,
+  "options_comparisons": 576,
+  "exploratory_after_primary": true,
+  "prospective": false,
+  "may_trade": false
+}
