@@ -264,6 +264,26 @@ windows get `settingsUpdated` live; the visual re-render was not observed (no wi
 this wave). In a team-project conversation the picker offers only its current instance,
 live; model choice within that instance still works.
 
+## (d) Window switch — `com.mastermind.os.next` from staging to the real server, and back
+
+Full step list, rehearsal and evidence: [`PART_D_WINDOW_SWITCH.md`](PART_D_WINDOW_SWITCH.md). Summary:
+
+- One bundle id, one target: the window reads ONE fixed folder
+  (`~/.mastermind/mmos_dev/window-next`: `shell-url`, `pair-helper`, `board-url`). The switch
+  rewrites those three files with `window_config.sh write --bundle next`; it is never a second app or instance.
+- Back up the three files (sha256 only), write the real values (3780 address, real pair helper,
+  board `http://127.0.0.1:3100`), run the app binary with `--check-window-config` (exits before
+  any window is built), then relaunch at the agreed time. The config is read only at launch, so a
+  running window does not pick it up.
+- Cookies: T3 session cookies are named per port, so the 3830 cookie stays and a 3780 cookie is
+  added (30-day session); nothing is cleared. The helper runs only when the page lands on `/pair`,
+  so it pairs once on the first open against 3780.
+- Undo: write the staging values back (byte-identical in the rehearsal), check, relaunch; no
+  pairing while the 3830 cookie is valid.
+- Rehearsed with a throwaway HOME and the realshape root on 3832: switch and undo all ok, files
+  byte-identical after undo, pairing through a wrapper produced one `/pair` URL (token never
+  printed). The in-window journey was not observed (no window in this wave).
+
 ## (a) PF staging — `~/.mastermind/mmos_dev/pf/staging`, port 3830
 
 Staging runs as a **plain detached runner process, not launchd**: `run/runner.pid`
