@@ -1235,10 +1235,11 @@ def _roster() -> list[dict[str, object]]:
 
 def test_invocation_ceilings_are_unchanged_by_semantic_revalidation() -> None:
     module = _module()
-    assert module._MAX_COLLISION_PRS == 490
-    assert module._MAX_HTTP_CALLS == 1152
-    assert module._MAX_HTTP_NORMALIZED_BYTES == 128 * 1024 * 1024
-    assert module._HTTP_READ_BUDGET_SECONDS == 300.0
+    assert module._MAX_COLLISION_PRS == 1500
+    assert module._MAX_ROSTER_PAGES == 16
+    assert module._MAX_HTTP_CALLS == 4096
+    assert module._MAX_HTTP_NORMALIZED_BYTES == 768 * 1024 * 1024
+    assert module._HTTP_READ_BUDGET_SECONDS == 900.0
 
 
 def test_open_pull_roster_changed_200_with_identical_semantics_does_not_starve() -> None:

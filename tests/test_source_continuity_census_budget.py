@@ -110,15 +110,18 @@ class Clock:
         return self.now
 
 
-def run_cli(module, capsys, http, *, kind="checkpoint", runner=None):
+def run_cli(module, capsys, http, *, kind="checkpoint", runner=None, read_failure=None):
     exit_code = fx._run_cli(module, fx._cli_argv(kind), http=http, runner=runner)
     captured = capsys.readouterr()
-    assert captured.err == ""
+    if read_failure is None:
+        assert captured.err == ""
+    else:
+        assert json.loads(captured.err) == {"diagnostic": "READ_FAILED", **read_failure}
     assert captured.out.count("\n") == 1
     return exit_code, json.loads(captured.out)
 
 
-@pytest.mark.parametrize("count", [1, 100, 143, 200, 256, 409, 419, 450, 451, 457, 458, 465, 470, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490])
+@pytest.mark.parametrize("count", [1, 100, 143, 200, 256, 409, 419, 450, 451, 457, 458, 465, 470, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 903, 907, 999, 1000, 1001, 1499, 1500])
 @pytest.mark.parametrize("kind", ["checkpoint", "remote-complete"])
 def test_real_main_completes_bounded_estate(count, kind, capsys, monkeypatch):
     module = fx._cli_module()
@@ -133,15 +136,18 @@ def test_real_main_completes_bounded_estate(count, kind, capsys, monkeypatch):
     assert payload["collision_state"] == ("NONE" if count == 1 else "DISJOINT")
 
 
-@pytest.mark.parametrize("count", [491, 1000])
+@pytest.mark.parametrize("count", [1501, 1600, 1601, 2000])
 def test_over_ceiling_refuses_before_foreign_files(count, capsys, monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
     http = EstateHTTP(count)
     rc, payload = run_cli(module, capsys, http)
     assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
-    assert not any("/pulls/1" in url and "/files?" in url
+    assert not any("/files?" in url and f"/pulls/{fx.PR_NUMBER}/" not in url
                    for url, _, _ in http.calls)
+    roster_pages = [int(parse_qs(urlparse(url).query)["page"][0])
+                    for url, _, _ in http.calls if urlparse(url).path.endswith("/pulls")]
+    assert max(roster_pages) == module._MAX_ROSTER_PAGES == 16
 
 
 @pytest.mark.parametrize("change,code", [
@@ -312,7 +318,7 @@ def test_invalid_or_expired_clock_never_emits_receipt(defect, capsys, monkeypatc
     monkeypatch.setattr(module, "monotonic", clock, raising=False)
     http = EstateHTTP(1)
     def advance(_url, _result):
-        clock.now = {"late": 500.0, "backwards": -1.0,
+        clock.now = {"late": 1000.0, "backwards": -1.0,
                      "nan": float("nan"), "infinity": float("inf")}[defect]
     http.after_read = advance
     rc, payload = run_cli(module, capsys, http)
@@ -327,7 +333,14 @@ def test_auth_failure_is_not_relabeled_budget_or_retried(capsys, monkeypatch):
     def denied(url, **kwargs):
         calls.append(url)
         raise module._AuthProbeError()
-    rc, payload = run_cli(module, capsys, denied)
+    rc, payload = run_cli(module, capsys, denied, read_failure={
+        "endpoint": "repos/mastermindx-market-intelligence/Mastermind/pulls/410",
+        "cause": "unclassified",
+        "attempts": 1,
+        "retryable": False,
+        "failed_reads": 1,
+        "recovered_reads": 0,
+    })
     assert rc == 2 and payload["code"] == "AUTH_UNAVAILABLE"
     assert len(calls) == 1
 
@@ -336,10 +349,11 @@ def test_auth_failure_is_not_relabeled_budget_or_retried(capsys, monkeypatch):
 def test_large_foreign_file_fanout_remains_bounded(files, capsys, monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock(), raising=False)
-    http = EstateHTTP(90, files_per_pr=files)
+    http = EstateHTTP(200, files_per_pr=files)
     rc, payload = run_cli(module, capsys, http)
     assert rc == 2 and payload["code"] == "REMOTE_CENSUS_INCOMPLETE"
-    assert len(http.calls) <= 1152
+    # The call budget binds: admission refuses the 4,097th read before transport.
+    assert len(http.calls) == 4096
 
 
 def test_accounting_preserves_unconsumed_unicode_metadata(capsys, monkeypatch):
@@ -362,7 +376,7 @@ def test_deadline_is_rechecked_after_json_accounting(capsys, monkeypatch):
     def slow_account(value):
         result = original(value)
         if isinstance(value, dict) and "state" in value and "head" in value:
-            clock.now = 301.0
+            clock.now = 901.0
         return result
     monkeypatch.setattr(module, "canonical_json", slow_account)
     rc, payload = run_cli(module, capsys, EstateHTTP(1))
@@ -407,7 +421,7 @@ def test_deadline_is_rechecked_after_pure_verification(capsys, monkeypatch):
     original = module.verify_source_continuity
     def slow_verify(*args):
         result = original(*args)
-        clock.now = 301.0
+        clock.now = 901.0
         return result
     monkeypatch.setattr(module, "verify_source_continuity", slow_verify)
     rc, payload = run_cli(module, capsys, EstateHTTP(1))
@@ -420,7 +434,7 @@ def test_transport_timeout_is_clipped_to_remaining_budget(capsys, monkeypatch):
     monkeypatch.setattr(module, "monotonic", clock)
     http = EstateHTTP(1)
     def advance(_url, _result):
-        clock.now = 290.0
+        clock.now = 890.0
     http.after_read = advance
     assert run_cli(module, capsys, http)[0] == 0
     assert http.calls[0][2] == 20.0
@@ -454,10 +468,20 @@ def test_exact_call_and_byte_limit_remains_successful(capsys, monkeypatch):
 
 def test_budget_constants_are_closed_and_raw_response_cap_is_unchanged():
     module = fx._cli_module()
-    assert (module._MAX_COLLISION_PRS, module._MAX_HTTP_CALLS) == (490, 1152)
-    assert module._MAX_HTTP_NORMALIZED_BYTES == 128 * 1024 * 1024
-    assert module._HTTP_READ_BUDGET_SECONDS == 300.0
+    assert (module._MAX_COLLISION_PRS, module._MAX_HTTP_CALLS) == (1500, 4096)
+    assert module._MAX_ROSTER_PAGES == 16
+    assert module._MAX_HTTP_NORMALIZED_BYTES == 768 * 1024 * 1024
+    assert module._HTTP_READ_BUDGET_SECONDS == 900.0
     assert module._MAX_HTTP_BODY_BYTES == 5_000_000
+    assert module._FOREIGN_PR_WORKERS == 4
+
+
+# Live production census of macro#7870 on 2026-11-02 (stdlib transport, four
+# workers, conditional roster revalidation): 903 open PRs, 106 owned paths.
+MEASURED_OPEN_PRS = 903
+MEASURED_CALLS = 1_537
+MEASURED_NORMALIZED_BYTES = 286_139_447
+MEASURED_SECONDS = 286.0
 
 
 def test_current_macro_estate_payload_fits_successor_byte_budget(monkeypatch):
@@ -465,19 +489,36 @@ def test_current_macro_estate_payload_fits_successor_byte_budget(monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock())
     bounded = module._BoundedHTTPGet(lambda *_args, **_kwargs: None)
-    bounded._bytes = 104_630_037
+    bounded._bytes = MEASURED_NORMALIZED_BYTES
 
-    assert bounded._bytes > 96 * 1024 * 1024
-    assert bounded._bytes < 128 * 1024 * 1024
+    assert bounded._bytes > 128 * 1024 * 1024
+    assert bounded._bytes < 768 * 1024 * 1024
     bounded.check()
 
 
-def test_normalized_byte_budget_accepts_exact_128_mib_and_refuses_one_over(monkeypatch):
+def test_measured_macro_census_scales_to_ceiling_inside_every_budget():
+    """The 903-PR measurement overran the old profile; linear growth to the new
+    PR ceiling keeps at least 1.6x headroom on calls, bytes and time."""
+    module = fx._cli_module()
+    assert MEASURED_CALLS > 1152
+    assert MEASURED_NORMALIZED_BYTES > 128 * 1024 * 1024
+    assert MEASURED_OPEN_PRS > 490
+
+    scale = module._MAX_COLLISION_PRS / MEASURED_OPEN_PRS
+    for measured, budget in (
+        (MEASURED_CALLS, module._MAX_HTTP_CALLS),
+        (MEASURED_NORMALIZED_BYTES, module._MAX_HTTP_NORMALIZED_BYTES),
+        (MEASURED_SECONDS, module._HTTP_READ_BUDGET_SECONDS),
+    ):
+        assert budget / (measured * scale) >= 1.6
+
+
+def test_normalized_byte_budget_accepts_exact_768_mib_and_refuses_one_over(monkeypatch):
     module = fx._cli_module()
     monkeypatch.setattr(module, "monotonic", Clock())
     bounded = module._BoundedHTTPGet(lambda *_args, **_kwargs: None)
 
-    bounded._bytes = 128 * 1024 * 1024
+    bounded._bytes = 768 * 1024 * 1024
     bounded.check()
 
     bounded._bytes += 1
@@ -493,7 +534,7 @@ def test_single_get_rejects_accounting_overrun_before_return(monkeypatch):
     original = module.canonical_json
     def slow_account(payload):
         result = original(payload)
-        clock.now = 301.0
+        clock.now = 901.0
         return result
     monkeypatch.setattr(module, "canonical_json", slow_account)
     calls = []
