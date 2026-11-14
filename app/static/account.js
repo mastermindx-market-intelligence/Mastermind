@@ -235,11 +235,23 @@
     } catch (e) {}
     _hydrating = false;
   }
+  var _prefPending = {}, _prefAccount = null;
   function persistPref(key, val) {
     if (_hydrating || !state.acct || !state.acct.authenticated) return;
+    if (_prefAccount !== state.acct) {
+      _prefPending = {};
+      _prefAccount = state.acct;
+    }
+    _prefPending[key] = val;
     clearTimeout(_prefTimer);
+    var account = state.acct;
     _prefTimer = setTimeout(function () {
-      var body = {}; body[key] = val;
+      if (state.acct !== account || !account.authenticated) {
+        if (_prefAccount === account) _prefPending = {};
+        return;
+      }
+      var body = _prefPending;
+      _prefPending = {};
       api('/api/account/prefs', { method: 'POST', body: body });
     }, 500);
   }
