@@ -61,7 +61,10 @@ class CooFactsClient:
     async def agentos_discovery_context(self, principal, workspace, context, capability_profile_digest):
         return await self._context_read(principal, context, capability_profile_digest, workspace=workspace, discovery=True)
 
-    async def _context_read(self, principal, context, capability_profile_digest, *, workspace=None, discovery=False):
+    async def agentos_knowledge_context(self, principal, workspace, context, capability_profile_digest):
+        return await self._context_read(principal, context, capability_profile_digest, workspace=workspace, knowledge=True)
+
+    async def _context_read(self, principal, context, capability_profile_digest, *, workspace=None, discovery=False, knowledge=False):
         from common import coo_agentos_context_contract as wire
         client, request = self._context_client, self._context_request
         def current():
@@ -70,13 +73,13 @@ class CooFactsClient:
                     or getattr(client.request, "__func__", None) is not request.__func__):
                 raise ValueError("installed COO context transport changed")
         current()
-        frame = {"schema": wire.DISCOVERY_FRAME_SCHEMA if discovery else wire.CURRENT_FRAME_SCHEMA if workspace is not None else wire.FRAME_SCHEMA,
+        frame = {"schema": wire.KNOWLEDGE_FRAME_SCHEMA if knowledge else wire.DISCOVERY_FRAME_SCHEMA if discovery else wire.CURRENT_FRAME_SCHEMA if workspace is not None else wire.FRAME_SCHEMA,
             "principal": principal_frame(principal),
             "principal_context": dataclasses.asdict(context), "capability_profile_digest": capability_profile_digest}
         if workspace is not None:
             from integrations.mastermind_workspace_app.contract import principal_frame as workspace_frame
             frame["workspace_principal"] = workspace_frame(workspace)
-            (wire.validate_discovery_frame if discovery else wire.validate_current_frame)(frame)
+            (wire.validate_knowledge_frame if knowledge else wire.validate_discovery_frame if discovery else wire.validate_current_frame)(frame)
         else:
             wire.validate_frame(frame)
         response = await request(frame)
@@ -85,7 +88,7 @@ class CooFactsClient:
             raise ValueError("installed COO context unavailable")
         value = response["result"]
         if workspace is not None:
-            validator = wire.validate_discovery_result if discovery else wire.validate_current_result
+            validator = wire.validate_knowledge_result if knowledge else wire.validate_discovery_result if discovery else wire.validate_current_result
             validator(value, expected_context=frame["principal_context"],
                 capability_profile_digest=capability_profile_digest, expected_workspace_principal=frame["workspace_principal"])
         else:

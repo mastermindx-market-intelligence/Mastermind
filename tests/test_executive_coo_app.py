@@ -295,3 +295,17 @@ def test_role_policy_cannot_drift_from_existing_executive_resource(rsa_key, tmp_
         "policy_id": {"policy_id": settings.executive.policies.read.policy_id}}
     with pytest.raises(ValueError):
         dataclasses.replace(settings, policy=dataclasses.replace(settings.policy, **changes[change]))
+
+
+def test_existing_memory_assessment_route_survives_project_tool_composition(rsa_key, tmp_path):
+    app, token, _, _ = setup(rsa_key, tmp_path)
+
+    async def empty_assessment():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://127.0.0.1") as client:
+            return await client.post("/v1/memory/evaluation-assessment",
+                                     headers={"authorization": "Bearer " + token}, content=b"")
+
+    result = asyncio.run(empty_assessment())
+    assert result.status_code == 400, result.text
+    assert result.json()["error"]["code"] == "invalid_input"

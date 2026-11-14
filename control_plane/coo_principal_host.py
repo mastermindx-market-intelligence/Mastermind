@@ -347,13 +347,16 @@ class CooHostProvider:
     def read_discovery_agentos_context(self, frame):
         return self._read_current_agentos_context(frame, discovery=True)
 
-    def _read_current_agentos_context(self, frame, *, discovery):
+    def read_knowledge_agentos_context(self, frame):
+        return self._read_current_agentos_context(frame, discovery=False, knowledge=True)
+
+    def _read_current_agentos_context(self, frame, *, discovery, knowledge=False):
         """Join two authenticated projections to the original installed DATA owner."""
         import base64
         from common import coo_agentos_context_contract as wire
         from common.executive_workspace_contract import permission_stamp
         from control_plane.installed_canonical_project_data_binding import read_installed_project_data
-        (wire.validate_discovery_frame if discovery else wire.validate_current_frame)(frame)
+        (wire.validate_knowledge_frame if knowledge else wire.validate_discovery_frame if discovery else wire.validate_current_frame)(frame)
         context = wire.context(frame["principal_context"])
         source, workspace = self.source, self.workspace
         binding, authorize, runtime = workspace._canonical_project_data, workspace.authorize, workspace.runtime
@@ -374,7 +377,7 @@ class CooHostProvider:
                     or authority.capability_profile_digest != frame["capability_profile_digest"]
                     or wire.CURRENT_ACTION not in authority.principal_actions
                     or source.catalogue_for_principal(frame["principal"]) !=
-                        (wire.DISCOVERY_CATALOGUE if discovery else wire.CURRENT_CATALOGUE)
+                        (wire.KNOWLEDGE_CATALOGUE if knowledge else wire.DISCOVERY_CATALOGUE if discovery else wire.CURRENT_CATALOGUE)
                     or authorize(frame["workspace_principal"]) is not True):
                 _refuse()
             stamp = permission_stamp(authorize, frame["workspace_principal"])
@@ -393,7 +396,7 @@ class CooHostProvider:
         raw = base64.b64decode(body["bundle_base64"], validate=True)
         result = wire.current_result(raw, body["receipt"], principal_context=frame["principal_context"],
             capability_profile_digest=frame["capability_profile_digest"], workspace_principal=frame["workspace_principal"],
-            discovery=discovery)
+            discovery=discovery, knowledge=knowledge)
         view.check()
         if capture() != before:
             _refuse()

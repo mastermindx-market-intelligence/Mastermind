@@ -176,6 +176,66 @@ def coo_discovery_tool_schema_digest():
     return hashlib.sha256(canonical_json(snapshot)).hexdigest()
 
 
+# Explicit v5 opt-in; all v1-v4 descriptors above remain byte-identical.
+from common import coo_project_knowledge_contract as knowledge_wire
+
+
+def _knowledge_identity(action):
+    return {
+        "request_id": {"type": "string", "pattern": "^" + knowledge_wire.ACTION_PREFIXES[action] + "[0-9a-f]{40}$",
+                       "maxLength": len(knowledge_wire.ACTION_PREFIXES[action]) + 40},
+        "work_ref": _record_ref("WS:"), "source_commit": _hex_schema(40), "base_revision": _hex_schema(64),
+    }
+
+
+_KNOWLEDGE_FILE_REQUEST = _closed({
+    "schema": {"const": knowledge_wire.FILE_REQUEST_SCHEMA},
+    **_knowledge_identity(knowledge_wire.ADD_ACTION),
+    "file": _closed({"display_name": {"type": "string", "minLength": 1, "maxLength": 128},
+                     "media_type": {"type": "string", "enum": ["text/markdown", "text/plain"]},
+                     "content_utf8": {"type": "string", "minLength": 1, "maxLength": 32768}}),
+})
+_KNOWLEDGE_PREFERENCE_REQUEST = _closed({
+    "schema": {"const": knowledge_wire.PREFERENCE_REQUEST_SCHEMA},
+    **_knowledge_identity(knowledge_wire.PREFERENCE_ACTION),
+    "expected_preference_revision": {"anyOf": [_hex_schema(64), {"type": "null"}]},
+    "value": {"type": "string", "minLength": 1, "maxLength": 2000},
+})
+_KNOWLEDGE_LOOKUP = {"oneOf": [
+    _closed({"action": {"const": action}, **_knowledge_identity(action), "request_sha256": _hex_schema(64),
+             "expected_preference_revision": ({"type": "null"} if action == knowledge_wire.ADD_ACTION
+                 else {"anyOf": [_hex_schema(64), {"type": "null"}]})})
+    for action in (knowledge_wire.ADD_ACTION, knowledge_wire.PREFERENCE_ACTION)
+]}
+COO_KNOWLEDGE_TOOL_SPECS = (*COO_DISCOVERY_TOOL_SPECS,
+    ToolSpec(knowledge_wire.READ_TOOL,
+        "Read current project knowledge, the project communication preference, or one complete source at its opaque catalogue reference and exact blob revision. CODE and current DATA provenance remain distinct; EMPTY is not UNAVAILABLE.",
+        {"type": "object", "oneOf": [
+            _closed({"mode": {"enum": ["catalogue", "memory"]}, "work_ref": _record_ref("WS:")}),
+            _closed({"mode": {"const": "source"}, "work_ref": _record_ref("WS:"),
+                     "source_ref": {"type": "string", "pattern": "^project-(?:file|record)\\.v1\\.[0-9a-f]{64}$", "maxLength": 82},
+                     "expected_revision": _hex_schema(40)}),
+        ]}, "Unchanged current Workspace knowledge body with explicit availability and source provenance.", True),
+    ToolSpec(knowledge_wire.AUTHOR_TOOL,
+        "Prepare, read, submit or reconcile an original project note or communication-preference change. Derive source_commit/base_revision from the current catalogue; preference expected_preference_revision is its content SHA-256 or null only after EMPTY. Prepare rechecks these original preimages and returns a review. Submit requires its exact witness. Retain all seven original lookup fields after uncertainty; never create a replacement request.",
+        {"type": "object", "oneOf": [
+            _closed({"operation": {"const": "prepare"}, "request": {"oneOf": [
+                copy.deepcopy(_KNOWLEDGE_FILE_REQUEST), copy.deepcopy(_KNOWLEDGE_PREFERENCE_REQUEST)]}}),
+            _closed({"operation": {"enum": ["read", "reconcile"]}, "lookup": copy.deepcopy(_KNOWLEDGE_LOOKUP)}),
+            _closed({"operation": {"const": "submit"}, "lookup": copy.deepcopy(_KNOWLEDGE_LOOKUP),
+                     "preview_witness": copy.deepcopy(_PREVIEW_WITNESS)}),
+        ]}, "Original two-postimage review or operation status; proposal, publication and current recall are separate owner facts.", False),
+)
+COO_KNOWLEDGE_TOOL_NAMES = tuple(spec.name for spec in COO_KNOWLEDGE_TOOL_SPECS)
+
+
+def coo_knowledge_tool_schema_digest():
+    snapshot = [{"annotations": copy.deepcopy(spec.annotations), "input_schema": copy.deepcopy(spec.input_schema),
+                 "name": spec.name, "output_schema": None}
+                for spec in sorted(COO_KNOWLEDGE_TOOL_SPECS, key=lambda item: item.name)]
+    return hashlib.sha256(canonical_json(snapshot)).hexdigest()
+
+
 def coo_context_tool_schema_snapshot():
     return [{"annotations": copy.deepcopy(spec.annotations), "input_schema": copy.deepcopy(spec.input_schema),
              "name": spec.name, "output_schema": None}
@@ -198,10 +258,16 @@ def catalogue_specs(catalogue):
     if catalogue == context_wire.CATALOGUE: return COO_CONTEXT_TOOL_SPECS
     if catalogue == context_wire.CURRENT_CATALOGUE: return COO_CURRENT_CONTEXT_TOOL_SPECS
     if catalogue == discovery_wire.CATALOGUE: return COO_DISCOVERY_TOOL_SPECS
+    if catalogue == knowledge_wire.CATALOGUE: return COO_KNOWLEDGE_TOOL_SPECS
     raise GatewayError("invalid_input", "unknown COO catalogue")
 
 
 def validate_coo_context_tool_arguments(name, arguments):
+    if name in (knowledge_wire.READ_TOOL, knowledge_wire.AUTHOR_TOOL):
+        try:
+            return knowledge_wire.arguments(name, arguments)
+        except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
+            raise GatewayError("invalid_input", "invalid COO project knowledge request") from None
     if name in discovery_wire.TOOLS:
         try:
             return discovery_wire.arguments(name, arguments)

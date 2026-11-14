@@ -1,4 +1,4 @@
-"""Two explicitly enrolled v4 tools on the original native PluginContext.
+"""Publication-selected v4/v5 tools on the original native PluginContext.
 
 ConsumerSlot retains registration, the original in-flight call and recovery
 lookup. Native registry leases own unload; SDK lock/tasks own transport;
@@ -14,7 +14,8 @@ from typing import Any, Callable
 
 from common import coo_agentos_context_contract as context_wire
 from common import coo_discovery_contract as wire
-from integrations.executive_mcp.coo import COO_DISCOVERY_TOOL_SPECS
+from common import coo_project_knowledge_contract as knowledge_wire
+from integrations.executive_mcp.coo import COO_DISCOVERY_TOOL_SPECS, COO_KNOWLEDGE_TOOL_SPECS
 from .native_agentos_context import decode_native_tool_result, expected_context, MAX_MCP_RESULT_BYTES
 from .native_executive_consumer import (
     CONSUMER_PLUGIN_NAME, CONSUMER_SLOT_ATTRIBUTE, ConsumerSlot,
@@ -27,10 +28,20 @@ from .native_tool_registration import (
 TOOLSET = "mmx_discovery"
 
 
-def schemas():
+def _contract(publication):
+    return knowledge_wire if publication.knowledge else wire
+
+
+def _authoring_tool(contract, tool):
+    return tool == wire.CORRECTION_TOOL or contract is knowledge_wire and tool == knowledge_wire.AUTHOR_TOOL
+
+
+def schemas(publication=None):
+    contract = wire if publication is None else _contract(publication)
+    specs = COO_KNOWLEDGE_TOOL_SPECS if contract is knowledge_wire else COO_DISCOVERY_TOOL_SPECS
     return {spec.name: {"name": spec.name, "description": spec.description,
                        "parameters": copy.deepcopy(spec.input_schema)}
-            for spec in COO_DISCOVERY_TOOL_SPECS if spec.name in wire.TOOLS}
+            for spec in specs if spec.name in contract.TOOLS}
 
 
 @dataclass(frozen=True)
@@ -76,6 +87,9 @@ class NativeDiscoveryRegistration:
 def qualify_binding(*, slot, server, session, loop, profile_id, session_id, session_key,
                     currentness, trust_gate, timeout):
     publication = slot.publication
+    contract = _contract(publication)
+    required_actions = (knowledge_wire.REQUIRED_ACTIONS if publication.knowledge
+                        else (context_wire.CURRENT_ACTION, wire.READ_ACTION, wire.CORRECTION_ACTION))
     caller = _NativeMcpCaller(server=server, session=session, loop=loop,
         currentness=currentness, wait_for_lock=False, timeout=timeout)
     binding = NativeDiscoveryBinding(slot, publication, caller, profile_id, session_id,
@@ -88,7 +102,7 @@ def qualify_binding(*, slot, server, session, loop, profile_id, session_id, sess
                 for key in ("work_ref", "mission_authority_ref", "authority_generation_digest"))
             or type(capability) is not dict or capability.get("capability_profile_digest") != publication.capability_profile_digest
             or type(capability.get("principal_actions")) is not list
-            or not {context_wire.CURRENT_ACTION, wire.READ_ACTION, wire.CORRECTION_ACTION}.issubset(capability["principal_actions"])
+            or not set(required_actions).issubset(capability["principal_actions"])
             or currentness() is not True):
         raise NativeToolRegistrationError("NATIVE_DISCOVERY_MANDATE_MISMATCH")
     return binding
@@ -96,6 +110,7 @@ def qualify_binding(*, slot, server, session, loop, profile_id, session_id, sess
 
 def registration_current(binding):
     try:
+        wire = _contract(binding.publication)
         slot = binding.slot
         registration = slot.discovery_registration
         loaded = getattr(slot.manager, "_plugins", {}).get(CONSUMER_PLUGIN_NAME)
@@ -133,9 +148,10 @@ def _lineage(binding, session_id, task_id):
             and (binding.session_key is None or _bound_session_key() == binding.session_key))
 
 
-def _recovered(pending, tool, value, result):
+def _recovered(pending, tool, value, result, *, contract=wire):
+    wire = contract
     if (pending is None or wire.lookup(tool, value) != pending["lookup"] or result["state"] != "OBSERVED"
-            or tool != wire.CORRECTION_TOOL or value["operation"] not in {"read", "reconcile"}):
+            or not _authoring_tool(wire, tool) or value["operation"] not in {"read", "reconcile"}):
         return False
     status = result["data"]
     if status["disposition"] == "refused" and status["reason"] == "NOT_DISPATCHED":
@@ -178,6 +194,7 @@ def _settle_original_future(slot):
 
 
 def handler_for(binding, tool):
+    wire = _contract(binding.publication)
     def handle(arguments, *, session_id=None, task_id=None):
         try:
             value = wire.arguments(tool, arguments)
@@ -198,7 +215,7 @@ def handler_for(binding, tool):
             _settle_original_future(slot)
             pending = slot.discovery_uncertain
             if (slot.discovery_call is not None or pending is not None and mutation and
-                    not (tool == wire.CORRECTION_TOOL and value["operation"] == "reconcile" and selected == pending["lookup"])):
+                    not (_authoring_tool(wire, tool) and value["operation"] == "reconcile" and selected == pending["lookup"])):
                 return context_wire.encode(outcome("NOT_DISPATCHED", "ORIGINAL_OPERATION_UNRESOLVED"), limit=wire.MAX_RESULT_BYTES).decode()
             slot.discovery_call = call
         try:
@@ -248,7 +265,7 @@ def handler_for(binding, tool):
                 if slot.discovery_uncertain is None:
                     slot.discovery_uncertain = {"operation": wire.operation(tool, value), "lookup": selected}
                     slot.discovery_uncertain_call = call
-            elif _recovered(slot.discovery_uncertain, tool, value, result):
+            elif _recovered(slot.discovery_uncertain, tool, value, result, contract=wire):
                 slot.discovery_uncertain = slot.discovery_uncertain_call = None
             if (slot.discovery_call is call and not call.get("refund_unknown")
                     and "original_future" not in call):
@@ -266,7 +283,8 @@ def register_discovery_tools(ctx, slot):
             or _ctx_scope(ctx) != slot.scope or getattr(ctx, "_manager", None) is not slot.manager):
         raise NativeToolRegistrationError("NATIVE_DISCOVERY_BINDING_INVALID")
     from registration_lifecycle import replacement_coordinator
-    registry, source_schemas = _registry(), schemas()
+    wire = _contract(binding.publication)
+    registry, source_schemas = _registry(), schemas(binding.publication)
     with replacement_coordinator.transaction(), slot._lock:
         if slot.discovery_attempted or slot.discovery_registration is not None:
             raise NativeToolRegistrationError("NATIVE_CONSUMER_ORIGINAL_REGISTRATION_RETAINED")
@@ -320,6 +338,7 @@ def readback(slot):
     binding = slot.discovery_binding
     if type(binding) is not NativeDiscoveryBinding or not registration_current(binding):
         raise NativeToolRegistrationError("NATIVE_DISCOVERY_REGISTRATION_UNAVAILABLE")
+    wire = _contract(binding.publication)
     with slot._lock:
         _settle_original_future(slot)
         return {"catalogue": wire.CATALOGUE, "registered": True,

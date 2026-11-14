@@ -28,6 +28,9 @@ CURRENT_TOOL = "executive_agentos_current_context"
 DISCOVERY_FRAME_SCHEMA = "mastermind.ceo_ingress.coo_discovery_context.v1"
 DISCOVERY_RESULT_SCHEMA = "mastermind.coo_discovery_context_result.v1"
 DISCOVERY_CATALOGUE = "coo.discovery_correction.v1"
+KNOWLEDGE_FRAME_SCHEMA = "mastermind.ceo_ingress.coo_project_knowledge_context.v1"
+KNOWLEDGE_RESULT_SCHEMA = "mastermind.coo_project_knowledge_context_result.v1"
+KNOWLEDGE_CATALOGUE = "coo.project_knowledge.v1"
 MAX_REQUEST_BYTES = 8192
 MAX_RESPONSE_BYTES = 224 * 1024
 MAX_BUNDLE_BYTES = 128 * 1024
@@ -130,9 +133,15 @@ def validate_discovery_frame(frame):
     return _validate_frame(frame, current=True, discovery=True)
 
 
-def _validate_frame(frame, *, current, discovery=False):
+def validate_knowledge_frame(frame):
+    return _validate_frame(frame, current=True, knowledge=True)
+
+
+def _validate_frame(frame, *, current, discovery=False, knowledge=False):
+    if ((discovery or knowledge) and not current) or (discovery and knowledge):
+        _refuse()
     _shape(frame, _CURRENT_FRAME_KEYS if current else _FRAME_KEYS)
-    schema = DISCOVERY_FRAME_SCHEMA if discovery else CURRENT_FRAME_SCHEMA if current else FRAME_SCHEMA
+    schema = KNOWLEDGE_FRAME_SCHEMA if knowledge else DISCOVERY_FRAME_SCHEMA if discovery else CURRENT_FRAME_SCHEMA if current else FRAME_SCHEMA
     if type(frame["schema"]) is not str or frame["schema"] != schema:
         _refuse()
     selected = context(frame["principal_context"])
@@ -167,15 +176,24 @@ def validate_discovery_result(value, *, expected_context, capability_profile_dig
         discovery=True)
 
 
-def _validate_result(value, *, expected_context, capability_profile_digest, expected_workspace_principal, discovery=False):
+def validate_knowledge_result(value, *, expected_context, capability_profile_digest, expected_workspace_principal):
+    workspace_principal(expected_workspace_principal)
+    return _validate_result(value, expected_context=expected_context,
+        capability_profile_digest=capability_profile_digest, expected_workspace_principal=expected_workspace_principal,
+        knowledge=True)
+
+
+def _validate_result(value, *, expected_context, capability_profile_digest, expected_workspace_principal, discovery=False, knowledge=False):
     from control_plane.agentos_context_bundle import validate_context_read, validate_current_context_read, TOKEN_BUDGET
     from ops.fabric_launch.agentos import validate_bundle
     current = expected_workspace_principal is not None
+    if ((discovery or knowledge) and not current) or (discovery and knowledge):
+        _refuse()
     _shape(value, _CURRENT_RESULT_KEYS if current else _RESULT_KEYS)
     expected = context(expected_context)
     observed = context(value["principal_context"])
-    schema = DISCOVERY_RESULT_SCHEMA if discovery else CURRENT_RESULT_SCHEMA if current else RESULT_SCHEMA
-    catalogue = DISCOVERY_CATALOGUE if discovery else CURRENT_CATALOGUE if current else CATALOGUE
+    schema = KNOWLEDGE_RESULT_SCHEMA if knowledge else DISCOVERY_RESULT_SCHEMA if discovery else CURRENT_RESULT_SCHEMA if current else RESULT_SCHEMA
+    catalogue = KNOWLEDGE_CATALOGUE if knowledge else DISCOVERY_CATALOGUE if discovery else CURRENT_CATALOGUE if current else CATALOGUE
     if (type(value["schema"]) is not str or value["schema"] != schema
             or type(value["catalogue"]) is not str or value["catalogue"] != catalogue
             or observed != expected or _digest(value["capability_profile_digest"]) != _digest(capability_profile_digest)
@@ -219,15 +237,17 @@ def result(raw, receipt, *, principal_context, capability_profile_digest):
     return decode(encode(value))  # Detach the already bounded owner result.
 
 
-def current_result(raw, receipt, *, principal_context, capability_profile_digest, workspace_principal, discovery=False):
+def current_result(raw, receipt, *, principal_context, capability_profile_digest, workspace_principal, discovery=False, knowledge=False):
+    if discovery and knowledge:
+        _refuse()
     if type(raw) is not bytes or not 0 < len(raw) <= MAX_BUNDLE_BYTES:
         _refuse()
-    value = {"schema": DISCOVERY_RESULT_SCHEMA if discovery else CURRENT_RESULT_SCHEMA,
-        "catalogue": DISCOVERY_CATALOGUE if discovery else CURRENT_CATALOGUE,
+    value = {"schema": KNOWLEDGE_RESULT_SCHEMA if knowledge else DISCOVERY_RESULT_SCHEMA if discovery else CURRENT_RESULT_SCHEMA,
+        "catalogue": KNOWLEDGE_CATALOGUE if knowledge else DISCOVERY_CATALOGUE if discovery else CURRENT_CATALOGUE,
         "principal_context": dict(principal_context), "capability_profile_digest": capability_profile_digest,
         "workspace_principal": dict(workspace_principal), "bundle_encoding": "base64",
         "bundle_base64": base64.b64encode(raw).decode("ascii"), "receipt": receipt}
-    validator = validate_discovery_result if discovery else validate_current_result
+    validator = validate_knowledge_result if knowledge else validate_discovery_result if discovery else validate_current_result
     validator(value, expected_context=principal_context,
         capability_profile_digest=capability_profile_digest, expected_workspace_principal=workspace_principal)
     return decode(encode(value))

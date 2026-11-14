@@ -50,8 +50,8 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
                                                   456,
                                                   '0o710'))},
  '_handle_ceo_ingress_connection': {'node_type': 'AsyncFunctionDef',
-                                    'source_sha256': '2a4b7858ab2cdf874ad8fb029374050521f0732e82296d32ffcca679faaf37ce',
-                                    'ast_sha256': '27f53e5690ad71c86f01f2ad657535aa022e0565472fef95ee773fc8c7837eaf',
+                                    'source_sha256': '54cd809752fab7cb63a2d788bb0129a92268cce93cf39416520fdc24120ba457',
+                                    'ast_sha256': 'a8bff99c855851a365b41e64507852df973e205650dabd08eef5fb18b1ef1d04',
                                     'sites': ((('body',
                                                 3,
                                                 'body',
@@ -161,3 +161,8 @@ REVIEWED_ANCHORS = {'_bind_company_consultation_server': {'node_type': 'AsyncFun
 
 # Capacity Fabric adds one fixed read before the catalog. The original Company
 # listener, catalog response branch and six qualified literals are preserved.
+
+# 2026-11-12 v5 composition on accepted 81c08810: complete Company listener
+# and Fabric response subtree, six original literals and current body[59]
+# paths are unchanged. Only enclosing source/ingress digests are requalified.
+# Parent source inspection; no GitHub approval or runtime authority claimed.

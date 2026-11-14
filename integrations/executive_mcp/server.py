@@ -2406,11 +2406,12 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
     from control_plane import ceo_intent
     from integrations.executive_mcp.coo import (
         COO_MCP_PATH, COO_SERVER_NAME, COO_SERVER_VERSION, COO_TOOL_SPECS,
-        COO_CONTEXT_TOOL_SPECS, COO_CURRENT_CONTEXT_TOOL_SPECS, COO_DISCOVERY_TOOL_SPECS,
+        COO_CONTEXT_TOOL_SPECS, COO_CURRENT_CONTEXT_TOOL_SPECS, COO_DISCOVERY_TOOL_SPECS, COO_KNOWLEDGE_TOOL_SPECS,
         validate_coo_tool_arguments, validate_coo_context_tool_arguments,
     )
     from common import coo_agentos_context_contract as context_wire
     from common import coo_discovery_contract as discovery_wire
+    from common import coo_project_knowledge_contract as knowledge_wire
     from integrations.mastermind_executive_app.coo import create_coo_app, unknown
     from integrations.mastermind_workspace_app.contract import principal_frame as workspace_principal_frame
 
@@ -2442,7 +2443,8 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
     tools = {context_wire.LEGACY_CATALOGUE: descriptors(COO_TOOL_SPECS),
              context_wire.CATALOGUE: descriptors(COO_CONTEXT_TOOL_SPECS),
              context_wire.CURRENT_CATALOGUE: descriptors(COO_CURRENT_CONTEXT_TOOL_SPECS),
-             discovery_wire.CATALOGUE: descriptors(COO_DISCOVERY_TOOL_SPECS)}
+             discovery_wire.CATALOGUE: descriptors(COO_DISCOVERY_TOOL_SPECS),
+             knowledge_wire.CATALOGUE: descriptors(COO_KNOWLEDGE_TOOL_SPECS)}
     # Opt-in WO-07 preview facet: the read-only shared-law route_preview is
     # appended to the legacy catalogue only, served locally, and never
     # forwarded to the inner App. Compositions that do not opt in keep their
@@ -2493,7 +2495,7 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
         # RoutePreview.v1 record is likewise a plain answer with no ``ok``.
         is_error = payload.get("ok") is not True
         if isinstance(payload, dict) and (
-                payload.get("schema") in {SELECTED_CHILD_SCHEMA, discovery_wire.RESULT_SCHEMA}
+                payload.get("schema") in {SELECTED_CHILD_SCHEMA, discovery_wire.RESULT_SCHEMA, knowledge_wire.RESULT_SCHEMA}
                 or (preview_schema is not None and payload.get("schema") == preview_schema)):
             is_error = False
         return mcp_types.CallToolResult(content=[mcp_types.TextContent(type="text",
@@ -2523,18 +2525,19 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
                 return result(error(name))
         try:
             validated = (validate_coo_context_tool_arguments(name, arguments)
-                         if name in (context_wire.TOOL, context_wire.CURRENT_TOOL, *discovery_wire.TOOLS)
+                         if name in (context_wire.TOOL, context_wire.CURRENT_TOOL, *knowledge_wire.TOOLS)
                          else validate_coo_tool_arguments(name, arguments))
         except GatewayError as exc:
             return result(error(name, exc.code))
-        if name in discovery_wire.TOOLS:
+        if name in knowledge_wire.TOOLS:
             from integrations.mastermind_executive_app.coo_discovery import forward_discovery_mcp
             payload = await forward_discovery_mcp(core, inner, request, name, validated)
             reply = result(payload)
+            contract = knowledge_wire if payload.get("catalogue") == knowledge_wire.CATALOGUE else discovery_wire
             if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - 4096:
-                payload = discovery_wire.result(name, validated,
-                    state="EFFECT_UNKNOWN" if discovery_wire.mutating(name, validated) else "UNAVAILABLE",
-                    reason="ORIGINAL_OUTCOME_UNKNOWN" if discovery_wire.mutating(name, validated) else "SOURCE_UNAVAILABLE")
+                payload = contract.result(name, validated,
+                    state="EFFECT_UNKNOWN" if contract.mutating(name, validated) else "UNAVAILABLE",
+                    reason="ORIGINAL_OUTCOME_UNKNOWN" if contract.mutating(name, validated) else "SOURCE_UNAVAILABLE")
                 reply = result(payload)
             return reply
         is_submit = name == "submit_principal_intent"
@@ -2561,14 +2564,16 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
                 held_digest = held_target.material_digest()
             headers = {"authorization": request.headers["authorization"]}
             context_auth = None
-            discovery_context = False
+            discovery_context = knowledge_context = False
             if name == context_wire.CURRENT_TOOL:
                 companion = request.headers.getlist("x-mastermind-workspace-authorization")
                 if len(companion) != 1:
                     return result(error(name, "authority_refused"))
                 headers["x-mastermind-workspace-authorization"] = companion[0]
                 context_auth = await core.current_context_auth(request)
-                discovery_context = await core.catalogue(*context_auth[0], work_ref=validated["work_ref"]) == context_wire.DISCOVERY_CATALOGUE
+                catalogue = await core.catalogue(*context_auth[0], work_ref=validated["work_ref"])
+                discovery_context = catalogue == context_wire.DISCOVERY_CATALOGUE
+                knowledge_context = catalogue == context_wire.KNOWLEDGE_CATALOGUE
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=inner),
                     base_url="http://127.0.0.1", trust_env=False, follow_redirects=False) as client:
                 response = await client.post("/v1/tools/" + name,
@@ -2633,7 +2638,7 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
                 payload = failed()
             elif not preflight and name in (context_wire.TOOL, context_wire.CURRENT_TOOL):
                 data = payload["data"]
-                validator = context_wire.validate_discovery_result if discovery_context else context_wire.validate_current_result if name == context_wire.CURRENT_TOOL else context_wire.validate_result
+                validator = context_wire.validate_knowledge_result if knowledge_context else context_wire.validate_discovery_result if discovery_context else context_wire.validate_current_result if name == context_wire.CURRENT_TOOL else context_wire.validate_result
                 validator(data, expected_context=data["principal_context"],
                     capability_profile_digest=data["capability_profile_digest"],
                     **({"expected_workspace_principal": workspace_principal_frame(context_auth[1][0])}
@@ -2648,7 +2653,7 @@ def _build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_targe
         except Exception:
             payload = selected_child_failed() if is_selected_child else failed()
         reply = result(payload, challenge)
-        reply_ceiling = (MAX_RESPONSE_BYTES - 4096 if name in (context_wire.TOOL, context_wire.CURRENT_TOOL, *discovery_wire.TOOLS)
+        reply_ceiling = (MAX_RESPONSE_BYTES - 4096 if name in (context_wire.TOOL, context_wire.CURRENT_TOOL, *knowledge_wire.TOOLS)
                          else MAX_RESPONSE_BYTES - MAX_REQUEST_BYTES - 4096)
         if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > reply_ceiling:
             reply = result(selected_child_failed() if is_selected_child

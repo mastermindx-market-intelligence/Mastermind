@@ -944,13 +944,7 @@ REVIEWED_FILES['ops/executive_os/provider_worker_slots.py'] = {'sha256': '5e22af
 
 # Material protected320 context composition: only line locations/file digest
 # move for the same six accepted Memory HTTP-status operands; no new mask.
-REVIEWED_FILES['integrations/mastermind_executive_app/coo.py'] = {'sha256': '5522cf9369fc4c04e585bd24a32e22fc4690c82f4048c65ed52dbe2467a4ae99',
- 'sites': [(245, 75, 78, 'int', '400'),
-           (255, 93, 96, 'int', '503'),
-           (636, 37, 40, 'int', '400'),
-           (657, 54, 57, 'int', '503'),
-           (677, 54, 57, 'int', '503'),
-           (687, 56, 59, 'int', '503')]}
+REVIEWED_FILES['integrations/mastermind_executive_app/coo.py'] = {'sha256': '3818fc65ae8c3af73aa7e17d063c6f28a73bbbfd29c54ffcb91eaf6be1b3a811', 'sites': [(246, 75, 78, 'int', '400'), (256, 93, 96, 'int', '503'), (637, 37, 40, 'int', '400'), (659, 54, 57, 'int', '503'), (679, 54, 57, 'int', '503'), (689, 56, 59, 'int', '503')]}
 
 # Exact synthetic APPLICATION HTTP refusal assertion; not an OS identity.
 # Full-source or token-site drift restores the ordinary identity guard.

@@ -195,3 +195,39 @@ def test_unqualified_vendor_cannot_supply_semantic_validator_imports(tmp_path, r
     assert result["outcome"] == "RuntimeError:C57_QUALIFIED_BEFORE_EFFECT"
     assert result["consumer_loaded"] and result["effect_boundary_loaded"]
     assert result["closed"] and result["first_party_after"] == []
+
+
+@pytest.mark.parametrize("version", [3, 4, 5])
+@pytest.mark.parametrize("kind", ["workspace_oauth_privacy", "native_eval_inputs", None])
+def test_structural_privacy_gate_keeps_v5_out_of_native_eval(version, kind):
+    from ops.executive_os import release_manifest as manifest
+
+    document = installation("mmmeta")
+    recipe = next(row["native_gateway"] for row in document["roles"]
+                  if row["role"] == "mmmeta")
+    recipe["executive_consumer"]["schema"] = (
+        f"mastermind.hermes_native_executive_consumer/v{version}")
+    if kind is None:
+        recipe.pop("vendor_derivation", None)
+    else:
+        digests = {
+            "workspace_oauth_privacy": "1d1df9a1fde6654d1690715e52ed10524c6b1b4d9af24b406243324d212146ce",
+            "native_eval_inputs": "8c2a20ab5b7dde2bda052ad275a0defe5f5e689b1cabf6e5882c412d948a9211",
+        }
+        recipe["vendor_derivation"] = {
+            "kind": kind, "base_sha": "1c0cd667746d3395fe9e1b6c74f8f85952486f18",
+            "patch_sha256": digests[kind], "source_root": "/opt/hermes/pristine-source",
+        }
+        if kind == "native_eval_inputs":
+            recipe["evaluation_inputs"] = {
+                "schema": "mastermind.hermes_native_eval_inputs/v1",
+                "artifact_root": "/opt/mastermind-evaluation-artifacts",
+            }
+    if kind is None or version == 5 and kind == "native_eval_inputs":
+        with pytest.raises(manifest.ReleaseManifestError,
+                           match="current context requires Workspace OAuth privacy derivation"):
+            manifest._hermes_native_gateway(recipe, role="mmmeta", _defer_consumer=True)
+    else:
+        qualified = manifest._hermes_native_gateway(recipe, role="mmmeta", _defer_consumer=True)
+        assert qualified["executive_consumer"]["schema"].endswith(f"/v{version}")
+        assert qualified["vendor_derivation"]["kind"] == kind

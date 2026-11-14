@@ -1,4 +1,4 @@
-"""Finite v4 forwarding through the original audited Workspace App.
+"""Finite v4/v5 forwarding through the original audited Workspace App.
 
 This creates no source owner, authenticated principal, durable operation,
 publication engine, queue or retry. Both resource bearers are independently
@@ -11,7 +11,8 @@ import dataclasses
 import httpx
 from starlette.responses import JSONResponse
 
-from common import coo_discovery_contract as wire
+from common import coo_discovery_contract as discovery_wire
+from common import coo_project_knowledge_contract as knowledge_wire
 from common import coo_agentos_context_contract as context_wire
 from control_plane.workspace_owned_task import await_owned
 from integrations.mastermind_workspace_app.contract import principal_frame
@@ -19,14 +20,17 @@ from integrations.mastermind_workspace_app.contract import principal_frame
 
 async def forward_discovery_mcp(core, inner, request, tool, value):
     """Qualify the original MCP resource pair around the same HTTP adapter."""
+    wire = knowledge_wire if tool in (knowledge_wire.READ_TOOL, knowledge_wire.AUTHOR_TOOL) else discovery_wire
     invoked = False
     try:
         value = wire.arguments(tool, value)
         pair = await core.current_context_auth(request)
         work_ref = wire.lookup(tool, value)["work_ref"]
         authority, context = await core._authority(pair[0][0], work_ref, pair[0][1])
-        if (wire.action(tool, value) not in authority.principal_actions
-                or await core.catalogue(*pair[0], work_ref=work_ref) != wire.CATALOGUE):
+        catalogue = await core.catalogue(*pair[0], work_ref=work_ref)
+        if catalogue == knowledge_wire.CATALOGUE:
+            wire = knowledge_wire
+        if (wire.action(tool, value) not in authority.principal_actions or catalogue != wire.CATALOGUE):
             raise ValueError("discovery_grant_unavailable")
         core.require_current_context_auth(*pair)
         headers = {"authorization": request.headers["authorization"],
@@ -65,6 +69,7 @@ async def forward_discovery_mcp(core, inner, request, tool, value):
 
 
 async def forward_discovery(core, request, authenticated, tool, value):
+    wire = knowledge_wire if tool in (knowledge_wire.READ_TOOL, knowledge_wire.AUTHOR_TOOL) else discovery_wire
     value = wire.arguments(tool, value)
     selection, mode = wire.lookup(tool, value), wire.operation(tool, value)
     possible_mutation = False
@@ -83,8 +88,10 @@ async def forward_discovery(core, request, authenticated, tool, value):
             raise ValueError("principal_changed")
         principal, stamp = authenticated
         authority, context = await core._authority(principal, selection["work_ref"], stamp)
-        if (wire.action(tool, value) not in authority.principal_actions
-                or await core.catalogue(principal, stamp, work_ref=selection["work_ref"]) != wire.CATALOGUE):
+        catalogue = await core.catalogue(principal, stamp, work_ref=selection["work_ref"])
+        if catalogue == knowledge_wire.CATALOGUE:
+            wire = knowledge_wire
+        if (wire.action(tool, value) not in authority.principal_actions or catalogue != wire.CATALOGUE):
             raise ValueError("discovery_grant_unavailable")
         identity = {"principal_context": dataclasses.asdict(context),
                     "capability_profile_digest": authority.capability_profile_digest,
@@ -122,8 +129,14 @@ async def forward_discovery(core, request, authenticated, tool, value):
                 stage_reason = "SOURCE_UNAVAILABLE"
                 if mutation:
                     possible_mutation = True
+                params = payload
+                if (method == "GET" and path == "/workspace/source-operation/operation"
+                        and "expected_preference_revision" in payload and payload["expected_preference_revision"] is None):
+                    # The incumbent HTTP query parser uses the literal null;
+                    # preserve actual None in the original seven-field lookup.
+                    params = dict(payload, expected_preference_revision="null")
                 owned = asyncio.create_task(client.request(method, path, headers=headers,
-                    **({"params": payload} if method == "GET" else {"json": payload})))
+                    **({"params": params} if method == "GET" else {"json": payload})))
                 try:
                     response = await await_owned(owned)
                 except asyncio.CancelledError:
@@ -135,16 +148,26 @@ async def forward_discovery(core, request, authenticated, tool, value):
                     raise ValueError("workspace_result_unavailable")
                 return context_wire.decode(response.content, limit=wire.MAX_RESULT_BYTES)
 
-            if tool == wire.SOURCE_TOOL:
+            if wire is knowledge_wire and tool == wire.READ_TOOL:
+                body = await invoke("GET", wire.READ_ROUTES[mode], selection)
+            elif tool == wire.SOURCE_TOOL:
                 path = ("/workspace/project-discovery-source/current" if mode == "current"
                         else "/workspace/source-operation/original")
                 body = await invoke("GET", path, selection)
             elif mode == "prepare":
+                if wire is knowledge_wire and tool == wire.AUTHOR_TOOL:
+                    catalogue_body = await invoke("GET", wire.READ_ROUTES["catalogue"], {"work_ref": selection["work_ref"]})
+                    memory = (await invoke("GET", wire.READ_ROUTES["memory"], {"work_ref": selection["work_ref"]})
+                              if selection["action"] == wire.PREFERENCE_ACTION else None)
+                    # Compare the immutable original request; never refresh its
+                    # identity or silently substitute newer preimages.
+                    wire.validate_prepare_current(value["request"], catalogue_body, memory)
                 body = await invoke("POST", "/workspace/source-operation/prepare",
-                    {"action": wire.CORRECTION_ACTION, "request": value["request"]}, mutation=True)
+                    {"action": selection["action"], "request": value["request"]}, mutation=True)
             elif mode == "submit":
-                # Bind all eight original fields before the three-field submit
-                # carrier. An already-progressed original is observed only.
+                # Bind the full original lookup (eight correction fields or
+                # seven knowledge fields) before the incumbent submit carrier.
+                # An already-progressed original is observed only.
                 body = await invoke("GET", "/workspace/source-operation/operation", selection)
                 body = wire.validate_data(tool, value, body, workspace_principal=identity["workspace_principal"])
                 if body["receipt"] is not None and body["receipt"]["kind"] == "INTENT":

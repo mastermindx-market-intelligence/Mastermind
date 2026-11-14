@@ -33,6 +33,9 @@ PRINCIPAL_ACTIONS = (
     "read_current_agentos_context",
     "read_project_discovery",
     "correct_project_discovery",
+    "read_project_knowledge",
+    "add_project_file",
+    "set_project_communication_preference",
 )
 DEFAULT_PRINCIPAL_ACTIONS = ("bounded_intent",)
 
