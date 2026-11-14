@@ -31,6 +31,13 @@
         "source": "local",
         "path": "./plugins/mastermind-navigator"
       }
+    },
+    {
+      "name": "mastermind-reality",
+      "source": {
+        "source": "local",
+        "path": "./plugins/mastermind-reality"
+      }
     }
   ]
 }

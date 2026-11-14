@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import errno
+import hashlib
 import json
 import os
 import re
@@ -41,6 +42,8 @@ OPERATOR_SKILLS = (
 )
 CORTEX_SKILLS = ("orient-mastermind-mission",)
 NAVIGATOR_SKILLS = ("navigate-mastermind-universe",)
+REALITY_SKILLS = ("inspect-product-journey",)
+REALITY_FILES = ('.codex-plugin/plugin.json', 'references/catalog.fragment.json', 'references/reality-boundary.md', 'references/reality-observation.schema.json', 'scripts/verify_reality_observation.py', 'skills/inspect-product-journey/SKILL.md')
 
 
 def _copy_package(destination: Path) -> None:
@@ -125,6 +128,9 @@ def _closed_json_document_paths() -> tuple[str, ...]:
         "plugins/mastermind-operator/.codex-plugin/plugin.json",
         "plugins/mastermind-cortex/.codex-plugin/plugin.json",
         "plugins/mastermind-navigator/.codex-plugin/plugin.json",
+        "plugins/mastermind-reality/.codex-plugin/plugin.json",
+        "plugins/mastermind-reality/references/catalog.fragment.json",
+        "plugins/mastermind-reality/references/reality-observation.schema.json",
         "plugins/mastermind-sol/references/app-bindings.template.json",
         "plugins/mastermind-operator/references/app-bindings.template.json",
         "plugins/mastermind-cortex/fixtures/orientation-cases.json",
@@ -184,6 +190,12 @@ def test_repository_plugin_package_is_valid(tmp_path: Path) -> None:
                 "version": "0.1.0",
                 "manifest": "plugins/mastermind-navigator/.codex-plugin/plugin.json",
                 "skills": list(NAVIGATOR_SKILLS),
+            },
+            {
+                "name": "mastermind-reality",
+                "version": "0.1.0",
+                "manifest": "plugins/mastermind-reality/.codex-plugin/plugin.json",
+                "skills": list(REALITY_SKILLS),
             },
         ],
         "errors": [],
@@ -722,6 +734,13 @@ def test_repository_documents_match_the_closed_contract() -> None:
                     "path": "./plugins/mastermind-navigator",
                 },
             },
+            {
+                "name": "mastermind-reality",
+                "source": {
+                    "source": "local",
+                    "path": "./plugins/mastermind-reality",
+                },
+            },
         ],
     }
     expected_bindings = {
@@ -1181,7 +1200,7 @@ def test_closed_json_scalar_alias_sweep_refuses_every_mutation(tmp_path: Path) -
             )
             for numeric in aliases:
                 mutations.append((path, text, index, numeric))
-    assert len(mutations) == 327
+    assert len(mutations) == 477
 
     for path, original, index, numeric in mutations:
         matches = list(re.finditer(r"\b(?:true|false)\b", original))
@@ -1302,7 +1321,8 @@ def test_additional_live_company_identities_are_refused(
 
 @pytest.mark.parametrize(
     ("plugin", "skills"),
-    (("mastermind-sol", SOL_SKILLS), ("mastermind-operator", OPERATOR_SKILLS)),
+    (("mastermind-sol", SOL_SKILLS), ("mastermind-operator", OPERATOR_SKILLS),
+     ("mastermind-reality", REALITY_SKILLS)),
 )
 def test_skill_descriptions_are_trigger_only(plugin: str, skills: tuple[str, ...]) -> None:
     for skill in skills:
@@ -1355,3 +1375,166 @@ def test_navigator_manifest_truth_bearing_descriptions_are_closed(
 
     codes = _codes_without_exception(tmp_path)
     assert "NAVIGATOR_CONTENT_CONTRACT_MISMATCH" in codes
+
+
+# Reality joins the incumbent closed package owner without acquiring runtime authority.
+def test_reality_package_preserves_literal_revision_state_and_inert_catalog(tmp_path: Path) -> None:
+    _copy_package(tmp_path)
+    result = _validate_repository_twice_without_exception(tmp_path)
+    assert result["ok"] is True
+    package = tmp_path / "plugins/mastermind-reality"
+    assert {
+        path.relative_to(package).as_posix()
+        for path in package.rglob("*") if path.is_file()
+    } == set(REALITY_FILES)
+    matches = [
+        match.group()
+        for relative in REALITY_FILES
+        for match in re.finditer(r"\bC[A-Z0-9]{8,}\b", (package / relative).read_text())
+    ]
+    assert matches == ["CORRECTION"] * 4
+    catalog = json.loads((package / "references/catalog.fragment.json").read_text())
+    assert catalog["source_state"] == "SOURCE_CANDIDATE"
+    assert catalog["installation_state"] == "NOT_INSTALLED"
+    manifest = json.loads((package / ".codex-plugin/plugin.json").read_text())
+    assert manifest["interface"]["capabilities"] == ["Read"]
+    assert "apps" not in manifest and "mcpServers" not in manifest
+
+
+@pytest.mark.parametrize("relative", REALITY_FILES)
+def test_reality_requires_every_qualified_file(tmp_path: Path, relative: str) -> None:
+    _copy_package(tmp_path)
+    (tmp_path / "plugins/mastermind-reality" / relative).unlink()
+    assert "MISSING_FILE" in _codes_without_exception(tmp_path)
+
+
+@pytest.mark.parametrize("relative", REALITY_FILES)
+def test_reality_qualified_content_rejects_even_whitespace_drift(tmp_path: Path, relative: str) -> None:
+    _copy_package(tmp_path)
+    path = tmp_path / "plugins/mastermind-reality" / relative
+    path.write_text(path.read_text() + "\n")
+    assert "REALITY_CONTENT_CONTRACT_MISMATCH" in _codes_without_exception(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("relative", "expected"),
+    (
+        (".app.json", "LIVE_APP_BINDING_FORBIDDEN"),
+        (".mcp.json", "MCP_DECLARATION_FORBIDDEN"),
+        ("scripts/unapproved.py", "UNEXPECTED_PACKAGE_FILE"),
+    ),
+)
+def test_reality_closed_inventory_refuses_unapproved_action_files(
+    tmp_path: Path, relative: str, expected: str
+) -> None:
+    _copy_package(tmp_path)
+    path = tmp_path / "plugins/mastermind-reality" / relative
+    path.write_text("{}\n")
+    assert expected in _codes_without_exception(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("change", "expected"),
+    (
+        ("capability", "INVALID_MANIFEST"),
+        ("apps", "LIVE_APP_BINDING_FORBIDDEN"),
+        ("mcpServers", "MCP_DECLARATION_FORBIDDEN"),
+        ("authority", "REALITY_CONTENT_CONTRACT_MISMATCH"),
+    ),
+)
+def test_reality_manifest_cannot_widen_its_read_only_proposal(
+    tmp_path: Path, change: str, expected: str
+) -> None:
+    _copy_package(tmp_path)
+    path = tmp_path / "plugins/mastermind-reality/.codex-plugin/plugin.json"
+    manifest = json.loads(path.read_text())
+    if change == "capability":
+        manifest["interface"]["capabilities"].append("Write")
+    elif change == "authority":
+        manifest["description"] = "This package grants production release and installation authority."
+    else:
+        manifest[change] = {}
+    _write_json(path, manifest)
+    assert expected in _codes_without_exception(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    (
+        ("C12345678", "LIVE_STATE_FORBIDDEN"),
+        ("CABCDABCD", "LIVE_STATE_FORBIDDEN"),
+        ("JOB-fixture-live-identity", "LIVE_STATE_FORBIDDEN"),
+        ("a" * 40, "LIVE_STATE_FORBIDDEN"),
+        ("DEC:PRIVATE-FIXTURE", "LIVE_STATE_FORBIDDEN"),
+        ("asdk_app_fixture_only", "INSTALLED_APP_ID_FORBIDDEN"),
+        ("xoxb-fixture-forbidden", "SECRET_MARKER_FORBIDDEN"),
+    ),
+)
+def test_reality_revision_token_never_hides_a_later_live_identifier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str, expected: str
+) -> None:
+    _copy_package(tmp_path)
+    relative = "references/reality-boundary.md"
+    path = tmp_path / "plugins/mastermind-reality" / relative
+    original = path.read_text()
+    assert "CORRECTION" in original
+    changed = original + "\n" + content + "\n"
+    path.write_text(changed)
+    # A future content pin must not turn a permitted first token into a scan bypass.
+    monkeypatch.setitem(
+        plugin_validator.REALITY_CONTENT_DIGESTS,
+        relative,
+        hashlib.sha256(changed.encode()).hexdigest(),
+    )
+    codes = _codes_without_exception(tmp_path)
+    assert "REALITY_CONTENT_CONTRACT_MISMATCH" not in codes
+    assert expected in codes
+
+
+@pytest.mark.parametrize(
+    "relative",
+    (
+        "plugins/mastermind-reality/references/catalog.fragment.json",
+        "plugins/mastermind-reality/skills/inspect-product-journey/SKILL.md",
+        "plugins/mastermind-sol/references/authority-boundaries.md",
+    ),
+)
+def test_reality_revision_token_exception_is_limited_to_qualified_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str
+) -> None:
+    _copy_package(tmp_path)
+    path = tmp_path / relative
+    if path.suffix == ".json":
+        document = json.loads(path.read_text())
+        document["unexpected_transport_alias"] = "CORRECTION"
+        _write_json(path, document)
+    else:
+        path.write_text(path.read_text() + "\nCORRECTION\n")
+    if relative.startswith("plugins/mastermind-reality/"):
+        monkeypatch.setitem(
+            plugin_validator.REALITY_CONTENT_DIGESTS,
+            relative.removeprefix("plugins/mastermind-reality/"),
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+    assert "LIVE_STATE_FORBIDDEN" in _codes_without_exception(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("marker", "expected"),
+    (
+        ("Read protected Mastermind " + chr(96) + "master" + chr(96), "CURRENT_SOURCE_GATE_MISSING"),
+        ("../../references/reality-boundary.md", "PACKAGE_REFERENCE_MISSING"),
+        ("../../references/reality-observation.schema.json", "PACKAGE_REFERENCE_MISSING"),
+        ("../../scripts/verify_reality_observation.py", "PACKAGE_REFERENCE_MISSING"),
+        ("never live use or runtime authority", "REALITY_TRUTH_GATE_MISSING"),
+    ),
+)
+def test_reality_skill_preserves_its_own_source_and_evidence_boundaries(
+    tmp_path: Path, marker: str, expected: str
+) -> None:
+    _copy_package(tmp_path)
+    path = tmp_path / "plugins/mastermind-reality/skills/inspect-product-journey/SKILL.md"
+    original = path.read_text()
+    assert marker in original
+    path.write_text(original.replace(marker, "missing qualified boundary"))
+    assert expected in _codes_without_exception(tmp_path)

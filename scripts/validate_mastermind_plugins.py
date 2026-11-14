@@ -21,6 +21,7 @@ PLUGIN_VERSIONS = {
     "mastermind-operator": "0.1.0",
     "mastermind-cortex": "0.1.0",
     "mastermind-navigator": "0.1.0",
+    "mastermind-reality": "0.1.0",
 }
 BINDING_TEMPLATE_VERSIONS = {
     "mastermind-sol": "0.1.0",
@@ -49,11 +50,13 @@ OPERATOR_SKILLS = (
 )
 CORTEX_SKILLS = ("orient-mastermind-mission",)
 NAVIGATOR_SKILLS = ("navigate-mastermind-universe",)
+REALITY_SKILLS = ("inspect-product-journey",)
 EXPECTED_SKILLS = {
     "mastermind-sol": SOL_SKILLS,
     "mastermind-operator": OPERATOR_SKILLS,
     "mastermind-cortex": CORTEX_SKILLS,
     "mastermind-navigator": NAVIGATOR_SKILLS,
+    "mastermind-reality": REALITY_SKILLS,
 }
 
 MARKETPLACE = {
@@ -75,6 +78,10 @@ MARKETPLACE = {
         {
             "name": "mastermind-navigator",
             "source": {"source": "local", "path": "./plugins/mastermind-navigator"},
+        },
+        {
+            "name": "mastermind-reality",
+            "source": {"source": "local", "path": "./plugins/mastermind-reality"},
         },
     ],
 }
@@ -170,6 +177,25 @@ MANIFESTS = {
             "capabilities": ["Read"],
         },
     },
+    "mastermind-reality": {
+        "name": "mastermind-reality",
+        "version": PLUGIN_VERSIONS["mastermind-reality"],
+        "description": "Governed inspection of one approved Mastermind product journey with actual visual, semantic, runtime, uncertainty, and negative-control evidence.",
+        "author": {
+            "name": "Mastermind-X"
+        },
+        "skills": "./skills/",
+        "interface": {
+            "displayName": "Mastermind Reality",
+            "shortDescription": "Inspect real product journeys and degraded states",
+            "longDescription": "Inspect one approved Mastermind product journey through existing browser and observability owners, consume actual pixels, and return bounded evidence without creating another browser, lifecycle, identity, evidence, or control plane.",
+            "developerName": "Mastermind-X",
+            "category": "Productivity",
+            "capabilities": [
+                "Read"
+            ]
+        }
+    },
 }
 
 TEMPLATES = {
@@ -232,6 +258,11 @@ REFERENCES = {
         "owner-routing.json",
         "role-profiles.json",
     ),
+    "mastermind-reality": (
+        "catalog.fragment.json",
+        "reality-boundary.md",
+        "reality-observation.schema.json",
+    ),
 }
 CORTEX_FIXTURE_PATH = "plugins/mastermind-cortex/fixtures/orientation-cases.json"
 NAVIGATOR_FIXTURE_PATHS = (
@@ -293,6 +324,22 @@ CORTEX_FIXTURES = {
     ],
 }
 
+REALITY_VERIFIER_PATH = "plugins/mastermind-reality/scripts/verify_reality_observation.py"
+# Content pins bind the source proposal; they do not grant release or installation authority.
+REALITY_CONTENT_DIGESTS = {
+    ".codex-plugin/plugin.json": "9ae6c590a45f4443206c01ebc2fde591d0d8f2a2d7f7a4470047cf9c85532b3c",
+    "references/catalog.fragment.json": "fdd7d053e98bcb94f485ada78bf968ae224c8297b79599962fee3a40ce2d94b2",
+    "references/reality-boundary.md": "661c17ec8050de20f1c0e65091183c7ab83506cab980b47e5f09c0949a345628",
+    "references/reality-observation.schema.json": "b2628bd4ca674f9bd1f796209251e3df5dd879a0a90e7b0d48bf313a02c50ecb",
+    "scripts/verify_reality_observation.py": "b446352978a31632b5be61d5f543c51f276e97191ff8f5a5d1c50e03b913ba8d",
+    "skills/inspect-product-journey/SKILL.md": "7f2ba1722de05605ab910cf6ebd10894934637372d39223290cb202ebccc0f0b"
+}
+REALITY_CORRECTION_PATHS = frozenset({
+    "plugins/mastermind-reality/references/reality-boundary.md",
+    "plugins/mastermind-reality/references/reality-observation.schema.json",
+    "plugins/mastermind-reality/scripts/verify_reality_observation.py",
+})
+
 ALLOWED_PACKAGE_FILES = frozenset(
     {MARKETPLACE_PATH.as_posix()}
     | {
@@ -315,6 +362,7 @@ ALLOWED_PACKAGE_FILES = frozenset(
     }
     | {CORTEX_FIXTURE_PATH}
     | set(NAVIGATOR_FIXTURE_PATHS)
+    | {REALITY_VERIFIER_PATH}
 )
 SOL_REFERENCE_MARKER = "../../references/authority-boundaries.md"
 OPERATOR_REFERENCE_MARKER = "../../references/dialogue-boundary.md"
@@ -329,6 +377,17 @@ NAVIGATOR_REFERENCE_MARKERS = (
     "../../references/boot-sources.json",
     "../../references/capability-health.schema.json",
     "../../references/capability-state-rules.json",
+)
+REALITY_REFERENCE_MARKERS = (
+    "../../references/reality-boundary.md",
+    "../../references/reality-observation.schema.json",
+    "../../scripts/verify_reality_observation.py",
+)
+REALITY_TRUTH_MARKERS = (
+    "a valid receipt proves supplied-record and artifact consistency only",
+    "never live use or runtime authority",
+    "Do not open, inspect, or actuate a managed Chairman account surface",
+    "Under `EFFECT_UNKNOWN`, perform read-only reconciliation on the same operation",
 )
 SOL_GATE_MARKERS = (
     "Read protected Mastermind `master`",
@@ -752,6 +811,26 @@ def _validate_navigator_content_digest(
         )
 
 
+def _validate_reality_content(
+    root: Path, plugin_root: Path, errors: list[dict[str, str]]
+) -> None:
+    """Require every pinned Reality file, including the exact inert verifier."""
+    for relative_path, expected in REALITY_CONTENT_DIGESTS.items():
+        path = plugin_root / relative_path
+        text = _read_required_text(root, path, errors)
+        if text is None:
+            continue
+        if hashlib.sha256(text.encode("utf-8")).hexdigest() != expected:
+            errors.append(
+                _error(
+                    root,
+                    path,
+                    "REALITY_CONTENT_CONTRACT_MISMATCH",
+                    "Reality package content differs from the qualified source candidate",
+                )
+            )
+
+
 def _json(root: Path, path: Path, errors: list[dict[str, str]]) -> Any | None:
     text = _read_required_text(root, path, errors)
     if text is None:
@@ -1152,6 +1231,17 @@ def _validate_skill(
                     f"Navigator skill is missing truth marker(s): {missing}",
                 )
             )
+    elif plugin == "mastermind-reality":
+        for markers, code, message in (
+            (SOL_GATE_MARKERS, "CURRENT_SOURCE_GATE_MISSING", "current-source marker"),
+            (REALITY_REFERENCE_MARKERS, "PACKAGE_REFERENCE_MISSING", "packaged reference"),
+            (REALITY_TRUTH_MARKERS, "REALITY_TRUTH_GATE_MISSING", "truth marker"),
+        ):
+            missing = [marker for marker in markers if marker not in body]
+            if missing:
+                errors.append(
+                    _error(root, path, code, f"Reality skill is missing {message}(s): {missing}")
+                )
     else:
         if "one already-bound operation and dialogue" not in body:
             errors.append(
@@ -1183,15 +1273,15 @@ def _validate_reference(
         errors.append(_error(root, path, "EMPTY_REFERENCE", "reference file is empty"))
     if plugin == "mastermind-navigator":
         _validate_navigator_content_digest(root, path, relative_path, text, errors)
-    if plugin == "mastermind-navigator" and path.suffix == ".json":
+    if plugin in {"mastermind-navigator", "mastermind-reality"} and path.suffix == ".json":
         document = _json(root, path, errors)
         if document is not None and not isinstance(document, Mapping):
             errors.append(
                 _error(
                     root,
                     path,
-                    "INVALID_NAVIGATOR_REFERENCE",
-                    "Navigator JSON references must be top-level objects",
+                    "INVALID_NAVIGATOR_REFERENCE" if plugin == "mastermind-navigator" else "INVALID_REALITY_REFERENCE",
+                    "Navigator JSON references must be top-level objects" if plugin == "mastermind-navigator" else "Reality JSON references must be top-level objects",
                 )
             )
     if plugin == "mastermind-cortex" and text != CORTEX_CONTENT_TEXTS[relative_path]:
@@ -1297,6 +1387,26 @@ def _package_tree(root: Path, errors: list[dict[str, str]]) -> tuple[list[Path],
     )
 
 
+def _has_forbidden_live_state(relative: str, text: str) -> bool:
+    # The revision enum resembles a Slack ID. Only that exact token in one
+    # complete, content-pinned Reality file is exempt; every match is inspected.
+    package_relative = relative.removeprefix("plugins/mastermind-reality/")
+    correction_allowed = (
+        relative in REALITY_CORRECTION_PATHS
+        and hashlib.sha256(text.encode("utf-8")).hexdigest()
+        == REALITY_CONTENT_DIGESTS.get(package_relative)
+    )
+    return any(
+        not (
+            correction_allowed
+            and pattern is SLACK_CHANNEL_RE
+            and match.group() == "CORRECTION"
+        )
+        for pattern in LIVE_STATE_PATTERNS
+        for match in pattern.finditer(text)
+    )
+
+
 def _scan_files(root: Path, errors: list[dict[str, str]]) -> None:
     templates = {
         root / "plugins" / plugin / "references/app-bindings.template.json"
@@ -1360,7 +1470,7 @@ def _scan_files(root: Path, errors: list[dict[str, str]]) -> None:
             errors.append(
                 _error(root, path, "INSTALLED_APP_ID_FORBIDDEN", "installed app identifier is forbidden")
             )
-        if any(pattern.search(text) for pattern in LIVE_STATE_PATTERNS):
+        if _has_forbidden_live_state(relative, text):
             errors.append(
                 _error(
                     root,
@@ -1434,6 +1544,8 @@ def _validate_repository_snapshot(
                     _error(root, manifest_path, "MCP_DECLARATION_FORBIDDEN", "P1 manifests must not declare MCP servers")
                 )
         _validate_manifest(root, manifest_path, plugin, manifest, errors)
+        if plugin == "mastermind-reality":
+            _validate_reality_content(root, plugin_root, errors)
 
         if plugin in TEMPLATES:
             template_path = plugin_root / "references/app-bindings.template.json"
