@@ -192,7 +192,27 @@ class RuntimeReplyEventHost:
                 "reply_committed": True, "deliveries": deliveries,
                 "parent_consumed": False}
 
+    async def observe_t3_question(self, principal, request_ref, pending_request_id):
+        """Existing native producer -> exact pending question -> original subscriber.
+
+        A committed question is not a terminal reply or permission approval. Its
+        exact message key follows the delivery all the way to the canonical read.
+        An answered, changed, foreign-run or expired question cannot be sent.
+        """
+        if not self.enabled or self.returns.t3_replies is None:
+            raise SubscriptionUnavailable("native T3 question producer is not enrolled")
+        source = self.returns.t3_replies
+        receipt = await source.observe_question(principal, request_ref, pending_request_id)
+        observed = await source.read(principal, {"read_ref": receipt["read_ref"],
+                                                "message_key": receipt["message_key"]})
+        deliveries = await self.handle_committed(read_ref=receipt["read_ref"],
+            message_key=receipt["message_key"], fingerprint=observed["question_sha256"])
+        return {"request_ref": request_ref, "read_ref": receipt["read_ref"],
+                "message_key": receipt["message_key"], "reply_committed": True,
+                "run_complete": False, "deliveries": deliveries, "parent_consumed": False}
+
     async def handle_committed(self, *, read_ref, message_key, fingerprint):
+        from .t3_native_client import Unavailable as T3Unavailable, Conflict as T3Conflict
         if not self.enabled: return ()
         event, _ = self.returns._stored_request(read_ref)
         observations = []
@@ -201,24 +221,27 @@ class RuntimeReplyEventHost:
                 audience = self.audiences.capture(ident)
                 projection = self.audiences.current(audience)
                 from .t3_reply_events import is_t3_read_ref
+                selection = {}
                 if is_t3_read_ref(read_ref):
                     source = self.returns.t3_replies
                     if source is None:
                         raise SubscriptionUnavailable("native T3 reply source is not enrolled")
-                    native = await source.read(projection, {"read_ref": read_ref})
-                    projected = await source.project(projection, native["request_ref"])
+                    native = await source.read(projection, {"read_ref": read_ref, "message_key": message_key})
+                    projected = await source.project(projection, native["request_ref"], message_key=message_key)
                     if (projected.event["data"]["message_key"] != message_key
-                            or native["answer_sha256"] != fingerprint):
+                            or native.get("answer_sha256", native.get("question_sha256")) != fingerprint):
                         raise SubscriptionUnavailable("native T3 commit differs from original response")
+                    selection = {"message_key": message_key}
                 else:
                     binding = await self.returns.resolve_read(principal=projection,read_ref=read_ref)
                     if binding.reply_message_key != message_key or binding.reply_fingerprint != fingerprint:
                         raise SubscriptionUnavailable("commit differs from canonical retained reply")
-                observations.append(await self.delivery.deliver_subscription(ident))
+                observations.append(await self.delivery.deliver_subscription(ident, **selection))
             except ObservedReplyPolicyDenial as denial:
                 await self.audiences.revoke_observed(denial)
                 observations.append({"state":"NOT_SENT","parent_consumed":False})
-            except (SubscriptionUnavailable, ReplyDeliveryUnavailable, BoundedReplyAuthorizationUnavailable):
+            except (SubscriptionUnavailable, ReplyDeliveryUnavailable, BoundedReplyAuthorizationUnavailable,
+                    T3Unavailable, T3Conflict):
                 # Typed pre-send refusal, including an expired bounded
                 # authorization. No callback was attempted and no reservation
                 # was made.

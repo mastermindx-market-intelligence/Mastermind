@@ -99,3 +99,11 @@ This is an ordered release contract, not permission to repeat the refused live p
 Python unit/integration coverage is in `test_t3_dot_tools.py`, `test_t3_dot_native_owner.py`, `test_t3_dot_contract.py`, `test_t3_reply_events.py`, and `test_t3_reply_integration.py`, plus the existing native/session-bridge suites. Node control and actual gateway/MCP coverage is in `t3-control.test.mjs` and `gateway-t3-control.test.mjs`. The generated gateway catalog is checked for exact parity with the Python contract.
 
 The fixtures deliberately use fake native transport and callback endpoints. Never relabel them as a real fleet worker, real Dot, installed event owner, independent review, or completed six-account rollout.
+
+## Exact-message pending-question returns
+
+The existing reply-event host also accepts an original native pending-question observation via `observe_t3_question`. It rereads the actual T3 user-input request and requires native thread/run provenance; older native servers without the reviewed provenance fields fail closed for this asynchronous path. A question is not a permission approval, terminal result, or grant for new work.
+
+A signed `session.reply_committed` notification contains only original references and a `t3-native-question-...` message key. The receiving Dot calls `session_reply_read` with both `read_ref` and this exact `message_key`. It receives `status=question_pending`, the permitted question contents, `run_complete=false` and `parent_consumed=false`. A later answer, changed question, revoked access or expired source invalidates the pending read; the receiver never silently gets a different latest question. The Dot answers through the separately authorized `t3_question_answer` tool. Final results have distinct `t3-native-reply-...` keys and are not inferred from pending-question delivery.
+
+This source path reuses Runtime event persistence, sealed original-subscription authorization, signatures and delivery reservations. Tests simulate native and HTTPS peers. The native overlay and the actual event producer/consumer still require qualified installation and original-Dot proof; this section does not claim a live account was changed.

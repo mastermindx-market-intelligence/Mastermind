@@ -32,6 +32,17 @@ READ_PREFIX = "t3-reply-"
 RETURN_PREFIX = "t3-return-"
 REQUEST_SCHEMA = "mastermind.t3_original_return_binding.v1"
 READ_SCHEMA = "mastermind.t3_original_reply_read.v1"
+QUESTION_READ_SCHEMA = "mastermind.t3_original_question_read.v1"
+RESULT_SCHEMAS = frozenset({READ_SCHEMA, QUESTION_READ_SCHEMA})
+_QUESTION_SCHEMA = "mastermind.t3_original_question_observation.v1"
+_QUESTION_EVENT = "T3_ORIGINAL_QUESTION_OBSERVED"
+_QUESTION_PREFIX = "t3-question-"
+_QUESTION_KEY_PREFIX = "t3-native-question-"
+_QUESTION_FIELDS = {"schema", "request_ref", "read_ref", "owner_key", "pending_request_id",
+                    "question_sha256", "observed_at", "message_key"}
+_QUESTION_PUBLIC = {"schema", "request_ref", "read_ref", "message_key", "environment_id",
+                    "project_id", "thread_id", "run_id", "pending_request_id", "status", "questions",
+                    "question_sha256", "redacted", "reply_committed", "parent_consumed", "run_complete"}
 _OBSERVATION_SCHEMA = "mastermind.t3_original_reply_observation.v1"
 _BINDING_EVENT = "T3_ORIGINAL_RETURN_BOUND"
 _RETURN_EVENT = "T3_ORIGINAL_REPLY_OBSERVED"
@@ -123,7 +134,44 @@ def stored_original_reply_request(runtime: Runtime, read_ref: str):
     return stored_continuation_request(runtime, read_ref)
 
 
+def is_t3_message_key(value: Any) -> bool:
+    return type(value) is str and re.fullmatch(r"t3-native-(reply|question)-[0-9a-f]{64}", value) is not None
+
+
+def _question_identity(request_ref: str, pending_request_id: str, digest: str) -> str:
+    return _hash({"request_ref": request_ref, "pending_request_id": pending_request_id,
+                  "question_sha256": digest})
+
+
+def validate_t3_question_reply(value: Any) -> dict:
+    """A committed question is explicitly not a terminal or accepted run."""
+    if (type(value) is not dict or set(value) != _QUESTION_PUBLIC
+            or value["schema"] != QUESTION_READ_SCHEMA
+            or not is_t3_request_ref(value["request_ref"]) or not is_t3_read_ref(value["read_ref"])
+            or value["request_ref"][len(REQUEST_PREFIX):] != value["read_ref"][len(READ_PREFIX):]
+            or value["status"] != "question_pending" or value["run_complete"] is not False
+            or value["reply_committed"] is not True or value["parent_consumed"] is not False
+            or type(value["redacted"]) is not bool
+            or type(value["question_sha256"]) is not str or not _SHA.fullmatch(value["question_sha256"])):
+        raise ValueError("Original T3 question is unqualified")
+    for field in ("environment_id", "project_id", "thread_id", "run_id", "pending_request_id"):
+        if type(value[field]) is not str or not _ID.fullmatch(value[field]):
+            raise ValueError("Original T3 question identity is invalid")
+    expected = _QUESTION_KEY_PREFIX + _question_identity(
+        value["request_ref"], value["pending_request_id"], value["question_sha256"])
+    questions = value["questions"]
+    if (value["message_key"] != expected or type(questions) is not list or not 1 <= len(questions) <= 64
+            or any(type(q) is not dict or type(q.get("id")) is not str or not q["id"]
+                   or type(q.get("question")) is not str for q in questions)
+            or len({q["id"] for q in questions}) != len(questions)
+            or len(_json(value).encode("ascii")) > 22 * 1024):
+        raise ValueError("Original T3 question content is malformed or too large")
+    return json.loads(_json(value))
+
+
 def validate_t3_public_reply(value: Any) -> dict:
+    if type(value) is dict and value.get("schema") == QUESTION_READ_SCHEMA:
+        return validate_t3_question_reply(value)
     if (type(value) is not dict or set(value) != _PUBLIC or value["schema"] != READ_SCHEMA
             or not is_t3_request_ref(value["request_ref"]) or not is_t3_read_ref(value["read_ref"])
             or value["request_ref"][len(REQUEST_PREFIX):] != value["read_ref"][len(READ_PREFIX):]
@@ -317,10 +365,17 @@ class T3OriginalReplySource:
         self._binding(principal, request_ref)
         return binding, run, result, observation
 
-    async def project(self, principal, request_ref):
-        """Pure read projection for the incumbent signed delivery owner."""
+    async def project(self, principal, request_ref, *, message_key: str | None = None):
+        """Pure exact-message projection for the incumbent signed delivery owner."""
         from .runtime_reply_delivery import ResolvedReplyEvent
+        if message_key is not None:
+            if not is_t3_message_key(message_key):
+                raise Unavailable("Exact original T3 notification identity required")
+            if message_key.startswith(_QUESTION_KEY_PREFIX):
+                return await self._project_question(principal, request_ref, message_key)
         binding, _, _, observation = await self._committed_answer(principal, request_ref)
+        if message_key is not None and observation["message_key"] != message_key:
+            raise Conflict("Native response differs from the selected notification")
         identity = observation["message_key"][len("t3-native-reply-"):]
         event = {"eventId": "evt-" + identity, "name": EVENT_NAME,
             "timestamp": datetime.fromtimestamp(observation["observed_at"], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -331,13 +386,127 @@ class T3OriginalReplySource:
         return ResolvedReplyEvent(event, binding["read_ref"], binding["owner_key"])
 
     async def read(self, principal, arguments: dict) -> dict:
-        if type(arguments) is not dict or set(arguments) != {"read_ref"} or not is_t3_read_ref(arguments["read_ref"]):
+        if (type(arguments) is not dict or set(arguments) not in ({"read_ref"}, {"read_ref", "message_key"})
+                or not is_t3_read_ref(arguments.get("read_ref"))):
             raise Unavailable("Exact T3 original read reference required")
         request_ref = REQUEST_PREFIX + arguments["read_ref"][len(READ_PREFIX):]
+        message_key = arguments.get("message_key")
+        if "message_key" in arguments:
+            if not is_t3_message_key(message_key):
+                raise Unavailable("Exact original T3 message key required")
+            if message_key.startswith(_QUESTION_KEY_PREFIX):
+                return await self._read_question(principal, request_ref, message_key)
         binding, run, result, observation = await self._committed_answer(principal, request_ref)
+        if message_key is not None and message_key != observation["message_key"]:
+            raise Conflict("Native response differs from the selected notification")
         answer, redacted = _public(result.answer)
         return validate_t3_public_reply({"schema": READ_SCHEMA, "request_ref": request_ref,
             "read_ref": binding["read_ref"], "environment_id": run.thread.scope.environment_id,
             "project_id": run.thread.scope.project_id, "thread_id": run.thread.thread_id, "run_id": run.run_id,
             "status": result.status, "answer": answer, "answer_sha256": observation["answer_sha256"],
             "redacted": redacted, "reply_committed": True, "parent_consumed": False})
+
+    async def _question(self, principal, request_ref: str, pending_request_id: str):
+        projection, event, binding, run = self._binding(principal, request_ref)
+        client = await self._client(projection, run)
+        question = await client.read_question_for_run(run, pending_request_id)
+        current, current_event, _, _ = self._binding(principal, request_ref)
+        if current_event.to_dict() != event.to_dict():
+            raise Conflict("Original question binding changed during native observation")
+        await self._client(current, run)
+        return binding, run, question
+
+    async def observe_question(self, principal, request_ref: str, pending_request_id: str) -> dict:
+        """Commit one observed pending user-input question, never answer it.
+
+        The existing native event producer supplies only the request identity.
+        Its payload is not trusted as question text, provenance or permission.
+        The original native run is reread and only a digest is retained here.
+        """
+        binding, _, question = await self._question(principal, request_ref, pending_request_id)
+        digest = _hash(question["questions"])
+        ident = _question_identity(request_ref, pending_request_id, digest)
+        command_id = _QUESTION_PREFIX + ident
+        value = {"schema": _QUESTION_SCHEMA, "request_ref": request_ref,
+                 "read_ref": binding["read_ref"], "owner_key": binding["owner_key"],
+                 "pending_request_id": pending_request_id, "question_sha256": digest,
+                 "observed_at": self.clock(), "message_key": _QUESTION_KEY_PREFIX + ident}
+        self._binding(principal, request_ref)
+        attempted = False
+        try:
+            with self.runtime.store.transaction() as connection:
+                previous = self.runtime.store.get_event_by_command_id(command_id, connection=connection)
+                if previous is None:
+                    attempted = True
+                    self.runtime.store.append_event(connection, aggregate_type=_AGGREGATE,
+                        aggregate_id=request_ref, event_type=_QUESTION_EVENT, actor=_ACTOR,
+                        command_id=command_id, payload=value)
+            observed = self.runtime.events.get_event_by_command_id(command_id)
+            self._validate_question_observation(observed, binding, value["message_key"])
+            self._binding(principal, request_ref)
+        except (Exception, asyncio.CancelledError):
+            if attempted:
+                raise T3ReturnEffectUnknown("observe_question", request_ref, binding["read_ref"]) from None
+            raise
+        return {"request_ref": request_ref, "read_ref": binding["read_ref"],
+                "message_key": value["message_key"], "event_command_id": command_id,
+                "reply_committed": True, "run_complete": False,
+                "delivered": False, "parent_consumed": False}
+
+    @staticmethod
+    def _validate_question_observation(event, binding: dict, message_key: str) -> dict:
+        if (not is_t3_message_key(message_key) or not message_key.startswith(_QUESTION_KEY_PREFIX)
+                or event is None or event.event_type != _QUESTION_EVENT
+                or event.aggregate_type != _AGGREGATE or event.aggregate_id != binding["request_ref"]
+                or event.actor != _ACTOR or type(event.payload) is not dict):
+            raise Conflict("Original question observation is unavailable or unqualified")
+        value = event.payload
+        if (set(value) != _QUESTION_FIELDS or value["schema"] != _QUESTION_SCHEMA
+                or value["request_ref"] != binding["request_ref"] or value["read_ref"] != binding["read_ref"]
+                or value["owner_key"] != binding["owner_key"]
+                or type(value["pending_request_id"]) is not str or not _ID.fullmatch(value["pending_request_id"])
+                or type(value["question_sha256"]) is not str or not _SHA.fullmatch(value["question_sha256"])
+                or type(value["observed_at"]) is not int
+                or not binding["created_at"] <= value["observed_at"] < binding["expires_at"]):
+            raise Conflict("Original question observation provenance changed")
+        ident = _question_identity(binding["request_ref"], value["pending_request_id"], value["question_sha256"])
+        if (message_key != _QUESTION_KEY_PREFIX + ident or value["message_key"] != message_key
+                or event.command_id != _QUESTION_PREFIX + ident):
+            raise Conflict("Original question observation identity changed")
+        return value
+
+    async def _committed_question(self, principal, request_ref: str, message_key: str):
+        _, _, binding, _ = self._binding(principal, request_ref)
+        if not is_t3_message_key(message_key) or not message_key.startswith(_QUESTION_KEY_PREFIX):
+            raise Unavailable("An exact original question message key is required")
+        event = self.runtime.events.get_event_by_command_id(
+            _QUESTION_PREFIX + message_key[len(_QUESTION_KEY_PREFIX):])
+        observed = self._validate_question_observation(event, binding, message_key)
+        binding, run, question = await self._question(principal, request_ref, observed["pending_request_id"])
+        if _hash(question["questions"]) != observed["question_sha256"]:
+            raise Conflict("Native question changed after the selected notification")
+        self._binding(principal, request_ref)
+        return binding, run, question, observed
+
+    async def _project_question(self, principal, request_ref: str, message_key: str):
+        from .runtime_reply_delivery import ResolvedReplyEvent
+        binding, _, _, observed = await self._committed_question(principal, request_ref, message_key)
+        event = {"eventId": "evt-" + message_key[len(_QUESTION_KEY_PREFIX):], "name": EVENT_NAME,
+                 "timestamp": datetime.fromtimestamp(observed["observed_at"], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                 "cursor": None,
+                 "data": {"request_ref": request_ref, "read_ref": binding["read_ref"],
+                          "message_key": message_key, "in_reply_to": request_ref,
+                          "summary": "The original T3 worker has a pending question, not a completed task. Read this exact message_key before responding.",
+                          "reply_committed": True, "parent_consumed": False}}
+        return ResolvedReplyEvent(event, binding["read_ref"], binding["owner_key"])
+
+    async def _read_question(self, principal, request_ref: str, message_key: str) -> dict:
+        binding, run, question, observed = await self._committed_question(principal, request_ref, message_key)
+        questions, redacted = _public(question["questions"])
+        return validate_t3_question_reply({"schema": QUESTION_READ_SCHEMA,
+            "request_ref": request_ref, "read_ref": binding["read_ref"], "message_key": message_key,
+            "environment_id": run.thread.scope.environment_id, "project_id": run.thread.scope.project_id,
+            "thread_id": run.thread.thread_id, "run_id": run.run_id,
+            "pending_request_id": observed["pending_request_id"], "status": "question_pending",
+            "questions": questions, "question_sha256": observed["question_sha256"],
+            "redacted": redacted, "reply_committed": True, "parent_consumed": False, "run_complete": False})

@@ -60,14 +60,16 @@ class RuntimeReplyEventResolver:
         except Exception:
             raise ReplyDeliveryUnavailable("current original READ principal required") from None
 
-    async def resolve(self, principal, request_ref):
+    async def resolve(self, principal, request_ref, *, message_key=None):
         try:
             projection = self.current(principal)
             from .t3_reply_events import is_t3_request_ref
             if is_t3_request_ref(request_ref):
                 if self._owner.t3_replies is None:
                     raise ReplyDeliveryUnavailable("native T3 return source is not enrolled")
-                return await self._owner.t3_replies.project(projection, request_ref)
+                return await self._owner.t3_replies.project(projection, request_ref, message_key=message_key)
+            if message_key is not None:
+                raise ReplyDeliveryUnavailable("notification selection is not enrolled for this source")
             event = self._owner.runtime.events.get_event_by_command_id(request_ref)
             if event is None:
                 raise ValueError
@@ -161,21 +163,22 @@ class RuntimeReplyDelivery:
         return send_once(view.callback_url, packet, resolver=self._resolver, connector=self._connector,
             before_request=lambda: prepare_current()[1])
 
-    async def deliver_current(self, principal, subscription_id):
+    async def deliver_current(self, principal, subscription_id, *, message_key=None):
         principal_projection(principal)  # Public current-token path stays exact.
-        return await self._deliver(principal,subscription_id)
+        return await self._deliver(principal, subscription_id, message_key=message_key)
 
-    async def deliver_subscription(self, subscription_id):
+    async def deliver_subscription(self, subscription_id, *, message_key=None):
         if not self._enabled or self._events._audience_owner is None:
             raise ReplyDeliveryUnavailable("retained delivery is not selected")
         try:
             audience = self._events._audience_owner.capture(subscription_id)
-            return await self._deliver(audience,subscription_id)
+            return await self._deliver(audience, subscription_id, message_key=message_key)
         except ObservedReplyPolicyDenial as denial:
             await self._events._audience_owner.revoke_observed(denial)
             return {"state":"NOT_SENT","fresh_send":False,"parent_consumed":False}
 
-    async def _deliver(self, principal, subscription_id):
+    async def _deliver(self, principal, subscription_id, *, message_key=None):
+        selection = {} if message_key is None else {"message_key": message_key}
         if not self._enabled:
             raise ReplyDeliveryUnavailable("reply delivery is not selected by the host")
         projection = self._events.current(principal)
@@ -183,7 +186,7 @@ class RuntimeReplyDelivery:
         record = snapshot.record
         if record is None or record.owner_key != owner_key(projection):
             raise ReplyDeliveryUnavailable("original subscriber unavailable")
-        resolved = await self._events.resolve(principal, record.request_ref)
+        resolved = await self._events.resolve(principal, record.request_ref, **selection)
         if resolved.read_ref != record.read_ref or resolved.principal_ref != record.owner_key:
             raise ReplyDeliveryUnavailable("original reply subscription changed")
         view = self._store.delivery_view(subscription_id, expected_version=snapshot.version,
@@ -200,7 +203,7 @@ class RuntimeReplyDelivery:
         # the one external effect. Revocation after actual I/O starts remains an
         # in-flight effect; no cancellation or external exactly-once is promised.
         try:
-            fresh = await self._events.resolve(principal, record.request_ref)
+            fresh = await self._events.resolve(principal, record.request_ref, **selection)
             current = await self._store.snapshot(subscription_id)
             self._events.current(principal)
             if fresh != resolved or current != snapshot:

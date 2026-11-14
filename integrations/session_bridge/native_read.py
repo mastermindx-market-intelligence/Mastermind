@@ -138,18 +138,21 @@ class NativeReplyReader:
     async def __call__(self, principal, arguments: Mapping[str, Any]) -> dict[str, Any]:
         try:
             if not isinstance(arguments, Mapping) or set(arguments) not in (
-                    {"read_ref"}, {"operation_key"}):
+                    {"read_ref"}, {"operation_key"}, {"read_ref", "message_key"}):
                 raise ValueError
-            field = next(iter(arguments))
-            if not isinstance(arguments[field], str) or _ID.fullmatch(arguments[field]) is None:
+            field = "read_ref" if "read_ref" in arguments else "operation_key"
+            if any(type(value) is not str or _ID.fullmatch(value) is None for value in arguments.values()):
                 raise ValueError
             current = self._current_principal(principal)
             read_ref = arguments.get("read_ref")
-            from .t3_reply_events import is_t3_read_ref
+            from .t3_reply_events import is_t3_read_ref, is_t3_message_key
+            if "message_key" in arguments and (
+                    not is_t3_read_ref(read_ref) or not is_t3_message_key(arguments["message_key"])):
+                raise ValueError
             if is_t3_read_ref(read_ref):
                 if self._t3_replies is None:
                     raise ValueError("native T3 return source is not enrolled")
-                value = await self._t3_replies.read(current, {"read_ref": read_ref})
+                value = await self._t3_replies.read(current, dict(arguments))
                 self._current_principal(principal)
                 return value
             if field == "operation_key":
