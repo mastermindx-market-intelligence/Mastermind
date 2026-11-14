@@ -184,7 +184,8 @@ def test_partial_fstat_failure_still_closes_opened_descriptor(monkeypatch):
     monkeypatch.setattr(w,'os',SimpleNamespace(**vars(w.os)))
     closed=[]
     monkeypatch.setattr(w.os,'open',lambda *a,**k:91)
-    monkeypatch.setattr(w.os,'fstat',lambda _:(_ for _ in ()).throw(OSError('inert failure')))
+    real_fstat = os.fstat
+    monkeypatch.setattr(w.os,'fstat',lambda fd: (_ for _ in ()).throw(OSError('inert failure')) if fd == 91 else real_fstat(fd))
     monkeypatch.setattr(w.os,'close',lambda fd:closed.append(fd))
     with pytest.raises(OSError):
         with w.Custody() as c:c.open('/inert',owners={0})

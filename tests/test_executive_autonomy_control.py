@@ -4322,8 +4322,9 @@ def test_transaction_owner_claim_refuses_a_competing_writer_and_closes_its_fd(
         "open",
         lambda path, flags: ledger.append(("open", path, flags)) or 91,
     )
-    monkeypatch.setattr(control.os, "fstat", lambda fd: info)
-    monkeypatch.setattr(control.Path, "lstat", lambda _path: info)
+    real_fstat, real_lstat = os.fstat, Path.lstat
+    monkeypatch.setattr(control.os, "fstat", lambda fd: info if fd == 91 else real_fstat(fd))
+    monkeypatch.setattr(control.Path, "lstat", lambda path: info if path == control.AUTONOMY_TRANSACTION else real_lstat(path))
     monkeypatch.setattr(
         control.fcntl,
         "flock",
@@ -4415,8 +4416,14 @@ def test_transaction_owner_directory_lock_excludes_competing_process_carriers(
     # os.fstat is used by pytest internals; patch only this owner's module binding.
     monkeypatch.setattr(control, "os", types.SimpleNamespace(**vars(control.os)))
     monkeypatch.setattr(control, "AUTONOMY_TRANSACTION", marker)
-    monkeypatch.setattr(control.os, "fstat", lambda _fd: safe)
-    monkeypatch.setattr(control.Path, "lstat", lambda _path: safe)
+    real_lstat = Path.lstat
+    def _marker_fstat(fd):
+        observed = real_fstat(fd)
+        if (observed.st_dev, observed.st_ino) == (actual.st_dev, actual.st_ino):
+            return safe
+        return observed
+    monkeypatch.setattr(control.os, "fstat", _marker_fstat)
+    monkeypatch.setattr(control.Path, "lstat", lambda path: safe if path == marker else real_lstat(path))
 
     first._claim_transaction_owner()
     try:
