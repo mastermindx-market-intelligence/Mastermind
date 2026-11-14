@@ -72,6 +72,13 @@ DEAD_DEV_T3_PORT = 3799  # inside the dev range, never started: for `wait`
 # principal provisions the real agent on the instance at switch-on and the
 # door config names it (paperclip_service_agent_id is required to deliver).
 DEV_SERVICE_AGENT_ID = "ag-journey-delivery"
+# REV-CODE F1: the service agent's bearer token file (0600, regular,
+# non-symlink).  Placeholder path only — the principal mints the real key on
+# the instance at switch-on and writes it here; the transport reads and
+# validates it at each delivery (paperclip_service_agent_token_path is
+# required to deliver).
+DEV_SERVICE_AGENT_TOKEN_PATH = (
+    "~/.mastermind/mmos-dev/paperclip/keys/service-agent.bearer")
 DEV_T3_HOME = "~/.mastermind/mmos-dev/t3/home"
 PAPERCLIP_STATE = Path(
     "~/.mastermind/mmos-dev/paperclip/instances/mmos-dev/"
@@ -204,6 +211,9 @@ def door_config(scratch: Path, *, crash_mode=None, fleet_limit=None,
         # the RESULT transport delivers as the dedicated service agent.
         "paperclip_headers": {"x-instance-role": "local_trusted"},
         "paperclip_service_agent_id": DEV_SERVICE_AGENT_ID,
+        # REV-CODE F1: the writer's bearer token file (placeholder path; the
+        # principal provisions the real 0600 key at switch-on)
+        "paperclip_service_agent_token_path": DEV_SERVICE_AGENT_TOKEN_PATH,
         # R4b finding 10: the enrolled-teammate roster; the journey's tasks
         # are assigned to the journey teammate before the reply is posted
         "teammates": teammates or [COMPANY["agent_id"]],

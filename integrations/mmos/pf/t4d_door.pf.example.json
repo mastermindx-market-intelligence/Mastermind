@@ -6,6 +6,7 @@
   "paperclip_company_id": "PFD",
   "paperclip_headers": {},
   "paperclip_service_agent_id": "PLACEHOLDER_PF_SERVICE_AGENT_ID",
+  "paperclip_service_agent_token_path": "~/.mastermind/mmos_dev/pf/t4d/keys/service-agent.bearer",
   "teammates": ["PLACEHOLDER_PF_AGENT_ID"],
   "repository": "mastermindx-market-intelligence/Mastermind",
   "register_transport": true,

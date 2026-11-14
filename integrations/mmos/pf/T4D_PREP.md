@@ -81,20 +81,32 @@ the transport itself still uses the board channel. Note: (c) touches the
 exactly-once dedup law, so this is a small reviewed code change plus a test,
 not pure config.
 
-**Built (PF-3, 2026-11-14).** The code leg (1c) is built. The transport
-takes a required `service_agent_id`; a row is ours only when its body
-carries the marker, `authorAgentId` equals that agent exactly, and
-`clientRequestId` equals the deterministic uuid5 — a board-user row is
-never ours whatever its request id
-(`control_plane/paperclip_result_delivery.py:136`, ctor `:306`).
-`DoorConfig` requires `paperclip_service_agent_id` when
-`register_transport` delivers (`door.py:303-310`) and passes it at both
-registration sites (`door.py:2028`, `:2192`). `paperclip_headers` may now
-carry an authorization header; every transport reason and the door
-client's error text are scrubbed of header values
-(`paperclip_result_delivery.py:340`, `door.py:356`, `:383`). Provisioning
-the identity (1a) and setting the config (1b) remain principal switch-on
-steps. Tests: `tests/test_paperclip_result_delivery.py` (34 passed).
+**Built (PF-3, 2026-11-14; writer corrected by REV-CODE F1).** The code leg
+(1c) is built, and the writer is now the **service agent itself**, not the
+board. The transport takes a required `service_agent_id` AND a required
+`service_agent_token_path` (a 0600 regular non-symlink bearer file, read and
+validated at each delivery — missing / wrong mode / symlink / empty refuses
+`SERVICE_TOKEN_UNAVAILABLE`). Each delivery that must POST invokes ONE
+heartbeat run for the agent (`POST /api/agents/{id}/heartbeat/invoke`, Bearer)
+and then POSTs the comment with Bearer + `X-Paperclip-Run-Id`; the document
+write rides the same run. The run is never cancelled (the agent key cannot
+cancel — board only). Comment GETs (the dedupe scan) stay on the board
+`paperclip_headers`. The token never appears in any body, receipt, output or
+state file; it rides only as the authorization header and is scrubbed from
+every reason (`control_plane/paperclip_result_delivery.py`).
+
+Exactly-once: the live probe (dev board 3196, build 2026.1106.0) showed the
+server **drops `clientRequestId` on agent rows** (stores null), so the
+deterministic uuid5 request id rides IN the marker instead. A row is ours
+only when `authorAgentId == service_agent_id` exactly AND its body contains
+the whole marker LINE `paperclip-return-attempt: <attempt> request: <uuid5>`
+(a whole line, never a substring of a longer line). A board-user row, a
+foreign agent's row, or a substring marker is never ours whatever its
+request id. `DoorConfig` requires both `paperclip_service_agent_id` and
+`paperclip_service_agent_token_path` when `register_transport` delivers and
+passes them at both registration sites. Provisioning the identity and minting
+the key (1a/1b) remain principal switch-on steps. Tests:
+`tests/test_paperclip_result_delivery.py` (58 passed).
 
 ### 2. A decision on whether real task text may be the worker prompt
 
@@ -172,7 +184,15 @@ the principal rehearses it on a scratch copy first (RELEASE REHEARSAL ruling).
    approved, make the small `_worker_prompt` change + test; if not, keep the
    canary shape.
 2. **Principal.** Provision the non-board writer identity on the PF board
-   (owed item 1). Set `paperclip_headers`; make the dedup change (1c) + test.
+   (owed item 1) and **mint its agent key** (`POST /api/agents/{id}/keys`,
+   field `token`). Write the bearer to `paperclip_service_agent_token_path`
+   as a **0600 regular non-symlink file** (the example names
+   `~/.mastermind/mmos_dev/pf/t4d/keys/service-agent.bearer`); set
+   `paperclip_service_agent_id` to that agent. The dedup change (1c) is built.
+   **Run-per-delivery residue:** each delivery that POSTs leaves ONE heartbeat
+   run on the board (the transport never cancels it — the agent key cannot);
+   this is expected, not a leak. The board `paperclip_headers`
+   (`x-instance-role: local_trusted`) stay for the dedupe comment GETs only.
 3. **Builder (done).** Configurable port range, `enabled` guard, example
    config, failing-first tests.
 4. **Principal.** Copy `t4d_door.pf.example.json` to a real PF door config under

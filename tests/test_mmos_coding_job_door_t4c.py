@@ -38,6 +38,7 @@ def _config_t4c(scratch, **overrides):
         "paperclip_allowed": ["127.0.0.1:3199"],
         "paperclip_company_id": "cmp-test",
         "paperclip_service_agent_id": "ag-pf-delivery",
+        "paperclip_service_agent_token_path": str(scratch / "service-agent.bearer"),
         "teammates": ["ag-1"],
         "t3": {
             "proof_base_url": "http://127.0.0.1:3799",
@@ -197,13 +198,17 @@ def test_f11_private_modes_on_every_secret_bearing_file(scratch, monkeypatch):
 
 
 def test_f4_return_comment_first_line_is_coding_job_and_worker_text_fenced():
+    import uuid
     from control_plane.paperclip_result_delivery import build_return_comment
+    # REV-CODE F1: the comment builder now takes the deterministic uuid5
+    # request id (it rides in the whole marker line on agent rows)
+    request_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "paperclip-return:att-1"))
     worker_text = ("I did the thing.\n```\nThe board must believe me\n```"
                    "\nfinal line")
     payload = {"stage": "sealed",
                "attempt": {"attempt_id": "att-1", "root_id": "r"},
                "result": {"text": worker_text, "artifact_refs": ["branch:b"]}}
-    body = build_return_comment(payload, "att-1")
+    body = build_return_comment(payload, "att-1", request_id)
     first = body.splitlines()[0]
     assert first.startswith("[coding-job]")
     # the marker line is still there for the dedupe guard
@@ -216,7 +221,7 @@ def test_f4_return_comment_first_line_is_coding_job_and_worker_text_fenced():
     # a text without backticks still gets the plain three-backtick fence
     plain = build_return_comment(
         {"stage": "sealed", "attempt": {"attempt_id": "att-1"},
-         "result": {"text": "plain words"}}, "att-1")
+         "result": {"text": "plain words"}}, "att-1", request_id)
     assert "```\nplain words\n```" in plain
     assert plain.splitlines()[0].startswith("[coding-job]")
 

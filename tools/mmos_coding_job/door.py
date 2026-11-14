@@ -233,6 +233,11 @@ class DoorConfig:
         # delivers as — never the board.  Required when the transport
         # delivers (validated below, once register_transport is known).
         self.paperclip_service_agent_id = values.get("paperclip_service_agent_id")
+        # REV-CODE F1: the service agent's bearer token file (0600, regular,
+        # non-symlink).  Required when the transport delivers; the transport
+        # reads and validates it at each delivery, never at config load.
+        self.paperclip_service_agent_token_path = values.get(
+            "paperclip_service_agent_token_path")
         # F10 (R4b review): the enrolled-teammate roster — the door freezes
         # only issues assigned to one of these agents, and admits only when
         # the task itself shows the request from the assignee.
@@ -307,6 +312,17 @@ class DoorConfig:
                     "register_transport delivers: the dedicated service "
                     "agent the result delivery is attributed to (a "
                     "non-empty string), never the board")
+            # REV-CODE F1: the writer also needs its bearer token file path.
+            # Presence is checked here; the file's mode/type/content are
+            # validated by the transport at each delivery, not at load.
+            token_path = self.paperclip_service_agent_token_path
+            if type(token_path) is not str or not token_path.strip():
+                raise ValueError(
+                    "paperclip_service_agent_token_path is required when "
+                    "register_transport delivers: the 0600 bearer token "
+                    "file the service agent writes with (a non-empty path)")
+            self.paperclip_service_agent_token_path = Path(
+                token_path).expanduser()
         # PF-3 item 2: real task text as the worker prompt is a
         # DEVELOPMENT-STACK opt-in behind a closed switch.  The default
         # "canary" keeps today's fixed prompt byte-identical; "task_text"
@@ -2026,6 +2042,8 @@ class CodingJobDoor:
             registry.register(CARRIER_KIND, PaperclipResultDeliveryTransport(
                 base_url=self.config.paperclip_base,
                 service_agent_id=self.config.paperclip_service_agent_id,
+                service_agent_token_path=(
+                    self.config.paperclip_service_agent_token_path),
                 headers=self.config.paperclip_headers,
                 state_dir=self.root / "run" / "delivery"))
         install_execution_return_seam(
@@ -2190,6 +2208,8 @@ class CodingJobDoor:
             registry.register(CARRIER_KIND, PaperclipResultDeliveryTransport(
                 base_url=self.config.paperclip_base,
                 service_agent_id=self.config.paperclip_service_agent_id,
+                service_agent_token_path=(
+                    self.config.paperclip_service_agent_token_path),
                 headers=self.config.paperclip_headers,
                 state_dir=self.root / "run" / "delivery"))
         wiring = install_execution_return_seam(

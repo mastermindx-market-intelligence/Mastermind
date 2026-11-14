@@ -60,6 +60,7 @@ def _make_door(scratch: Path, **config_overrides):
         "paperclip_allowed": ["127.0.0.1:3199"],
         "paperclip_company_id": "cmp-test",
         "paperclip_service_agent_id": "ag-pf-delivery",
+        "paperclip_service_agent_token_path": str(scratch / "service-agent.bearer"),
         "teammates": ["ag-1"],
         "t3": {
             # A dead port INSIDE the dev range: the pairing CLI leg is pinned
@@ -86,6 +87,7 @@ def _config(scratch, t3_overrides=None):
         "paperclip_allowed": ["127.0.0.1:3190"],
         "paperclip_company_id": "c",
         "paperclip_service_agent_id": "ag-pf-delivery",
+        "paperclip_service_agent_token_path": str(scratch / "service-agent.bearer"),
         "teammates": ["ag-1"],
         "t3": {
             "proof_base_url": "http://127.0.0.1:3794",
@@ -156,6 +158,26 @@ def test_pf3_config_requires_service_agent_id_when_delivering(scratch):
             door_mod.DoorConfig(values)
     values = _config(scratch)
     del values["paperclip_service_agent_id"]
+    values["register_transport"] = False
+    cfg = door_mod.DoorConfig(values)
+    assert cfg.register_transport is False
+
+
+def test_f1_config_requires_service_agent_token_path_when_delivering(scratch):
+    """REV-CODE F1: a config that would deliver also needs the writer's bearer
+    token file path; without it (or with a blank/non-string) it refuses at
+    load.  A config that does not deliver does not require it.  The file
+    itself is validated by the transport at delivery, not at config load."""
+    values = _config(scratch)
+    del values["paperclip_service_agent_token_path"]
+    with pytest.raises(ValueError, match="paperclip_service_agent_token_path"):
+        door_mod.DoorConfig(values)
+    for bad in ("", "   ", None, 7):
+        values["paperclip_service_agent_token_path"] = bad
+        with pytest.raises(ValueError, match="paperclip_service_agent_token_path"):
+            door_mod.DoorConfig(values)
+    values = _config(scratch)
+    del values["paperclip_service_agent_token_path"]
     values["register_transport"] = False
     cfg = door_mod.DoorConfig(values)
     assert cfg.register_transport is False

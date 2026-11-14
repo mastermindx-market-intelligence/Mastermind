@@ -19,15 +19,37 @@ Laws:
 * **Honest receipts, never a guess.**  Every failure path returns a REFUSED
   receipt with the exact reason; a network failure mid-flight is never
   reported as DELIVERED.  No exception escapes ``deliver``.
+* **The writer is a dedicated service agent, never the board** (REV-CODE
+  F1).  Each delivery that must write reads the agent's bearer from a 0600
+  regular non-symlink token file (``service_agent_token_path``, read fresh at
+  every delivery), invokes ONE heartbeat run for that agent
+  (``POST /api/agents/{id}/heartbeat/invoke``), then posts the comment and
+  writes the document with ``Authorization: Bearer`` + ``X-Paperclip-Run-Id``.
+  The run is never cancelled by the transport (the agent key cannot cancel it
+  anyway — board only).  Comment GETs (the dedupe scan) may ride the board
+  ``headers`` — reads only.
 * **Exactly-once posting, two guards.**  (a) Before posting, the issue's
-  comments are read and a body already carrying the dedupe marker
-  ``paperclip-return-attempt: <attempt_id>`` short-circuits the post; (b) a
+  comments are read and a row already carrying the dedupe marker LINE
+  ``paperclip-return-attempt: <attempt_id> request: <uuid5 request id>`` as a
+  WHOLE line, authored by THIS service agent, short-circuits the post; (b) a
   durable sidecar mark (jsonl in ``state_dir``, keyed by attempt id) is
   appended after each 2xx, so a retry after a partial delivery resumes at the
   step that did not land instead of duplicating the one that did.
-* **No secrets in bodies.**  Auth headers are held in memory and sent only as
-  headers; nothing in this module logs, echoes or embeds them in a comment or
-  document body.
+
+  Deviation from "authorAgentId + clientRequestId" (probe fact, dev board
+  3196, build 2026.1106.0): on agent rows the server DROPS clientRequestId
+  (stores null), so a scan keyed on the row's clientRequestId can never match
+  an agent row on this build.  The request id therefore rides IN the marker
+  line itself, and a row is ours only when ``authorAgentId`` equals the
+  service agent exactly AND the body contains that exact marker line as a
+  whole line.  Only the service agent's key can produce that authorAgentId,
+  so another author cannot forge it; a board row with the marker is never
+  ours.  clientRequestId is still sent on the POST (harmless).
+* **No secrets in bodies.**  Auth headers and the bearer token are held in
+  memory and sent only as headers; nothing in this module logs, echoes or
+  embeds them in a comment or document body, a receipt, an error text or a
+  log.  The token file's contents are scrubbed from every reason this
+  transport produces.
 * **Delivery is not acceptance.**  The transport writes the record's own
   ``acceptance`` (``not_accepted`` in v1) and changes no issue status.
 """
@@ -36,6 +58,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import stat
 import time
 import urllib.error
 import urllib.parse
@@ -64,11 +87,17 @@ _REASON_MAX = 300
 
 
 class _TransportError(Exception):
-    """One failed HTTP step; ``reason`` is safe to put in a receipt."""
+    """One failed HTTP step; ``reason`` is safe to put in a receipt.
 
-    def __init__(self, reason: str) -> None:
+    ``code`` optionally names the typed refusal this failure maps to (e.g.
+    the token-file and heartbeat-invoke refusals); ``None`` lets the caller
+    apply its own step-specific code.
+    """
+
+    def __init__(self, reason: str, *, code: str | None = None) -> None:
         super().__init__(reason)
         self.reason = reason
+        self.code = code
 
 
 def _loopback_base(base_url: Any) -> str:
@@ -134,36 +163,42 @@ def _comment_rows(value: Any) -> list[Any]:
 
 
 def _comment_row_is_own_delivery(
-    row: Any, marker: str, request_id: str, service_agent_id: str,
+    row: Any, marker_line: str, service_agent_id: str,
 ) -> bool:
     """T4c repair round 1, R2 (panel MED, 2026-11-11): a comment row counts
     as THIS transport's own earlier delivery only when the row itself says
     so — never a bare marker substring, which any comment author could
     forge (the attempt id is public: the worker prompt names it).
 
-    PF-3 item 1: the delivery writer is a DEDICATED SERVICE AGENT, never
-    the board.  A row is ours only when ALL THREE hold:
+    PF-3 item 1 + REV-CODE F1: the delivery writer is a DEDICATED SERVICE
+    AGENT, never the board.  A row is ours only when BOTH hold:
 
-    * its body is a string containing the return marker;
     * ``authorAgentId`` equals this transport's ``service_agent_id``
       exactly — a board-user row (``authorType "user"``, no
-      ``authorAgentId``) is NEVER ours whatever its request id, and
-      another agent's row is never ours;
-    * ``clientRequestId`` equals the deterministic uuid5 this module
-      computes (keyed on the attempt, so a retried delivery re-uses the
-      same request id).
+      ``authorAgentId``) is NEVER ours whatever its body, and another
+      agent's row is never ours;
+    * its body is a string containing the exact marker LINE
+      ``paperclip-return-attempt: <attempt_id> request: <uuid5 request id>``
+      as a WHOLE line (equal to one of ``body.splitlines()``), never a
+      substring of a longer line.
 
-    Anything else — even with the marker and our request id in it — is
-    another author's word and suppresses nothing.
+    Deviation from the earlier "authorAgentId + clientRequestId" rule, with
+    the probe fact (dev board 3196, build 2026.1106.0): on agent rows the
+    server DROPS clientRequestId (stores null), so matching the row's
+    clientRequestId field can never succeed for an agent row on this build.
+    The deterministic uuid5 request id therefore rides IN the marker line.
+    Only the service agent's key can produce ``authorAgentId == svc``, so
+    another author cannot forge our row; a board row carrying the marker is
+    never ours.  Anything else suppresses nothing.
     """
     if not isinstance(row, Mapping):
         return False
-    body = row.get("body")
-    if type(body) is not str or marker not in body:
-        return False
     if row.get("authorAgentId") != service_agent_id:
         return False  # board-user (no agent id) or another agent — not ours
-    return str(row.get("clientRequestId") or "") == request_id
+    body = row.get("body")
+    if type(body) is not str:
+        return False
+    return marker_line in body.splitlines()
 
 
 def _document_key(attempt_id: str) -> str:
@@ -186,7 +221,9 @@ def _quoted_worker_text(text: str) -> str:
     return f"{fence}\n{text}\n{fence}"
 
 
-def build_return_comment(payload: Mapping[str, Any], attempt_id: str) -> str:
+def build_return_comment(
+    payload: Mapping[str, Any], attempt_id: str, request_id: str,
+) -> str:
     """The comment body: deterministic, built only from fields that exist.
 
     Job identity (attempt, root, idempotency key, T3 thread/run), the result
@@ -196,6 +233,10 @@ def build_return_comment(payload: Mapping[str, Any], attempt_id: str) -> str:
     F4 (R4b review): the first line is the ``[coding-job]`` marker — every
     comment this transport writes opens with it, so the carrier never takes
     it as a board note — and the worker's text is fenced as quoted output.
+
+    REV-CODE F1: the dedupe marker is a WHOLE line carrying both the attempt
+    id and the deterministic uuid5 ``request_id`` (the server drops
+    clientRequestId on agent rows, so the request id rides here instead).
     """
     attempt = payload.get("attempt")
     attempt = attempt if isinstance(attempt, Mapping) else {}
@@ -209,7 +250,7 @@ def build_return_comment(payload: Mapping[str, Any], attempt_id: str) -> str:
     lines: list[str] = [
         f"[coding-job] Coding job result — {stage}",
         "",
-        f"{PAPERCLIP_RETURN_MARKER_PREFIX} {attempt_id}",
+        return_marker_line(attempt_id, request_id),
         "",
         "**Job identity**",
     ]
@@ -271,13 +312,26 @@ def build_return_comment(payload: Mapping[str, Any], attempt_id: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def build_return_document(payload: Mapping[str, Any], attempt_id: str) -> str:
+def return_marker_line(attempt_id: str, request_id: str) -> str:
+    """The exact whole-line dedupe marker (REV-CODE F1).
+
+    Carries the attempt id AND the deterministic uuid5 request id, because
+    the server drops ``clientRequestId`` on agent rows (probe fact, dev board
+    3196, build 2026.1106.0) — the request id must ride in the body to be
+    recoverable by the exactly-once scan.
+    """
+    return f"{PAPERCLIP_RETURN_MARKER_PREFIX} {attempt_id} request: {request_id}"
+
+
+def build_return_document(
+    payload: Mapping[str, Any], attempt_id: str, request_id: str,
+) -> str:
     """The issue document: the full result payload, canonical and readable."""
     body = json.dumps(
         payload, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False)
     return (
         f"# Coding job return — {attempt_id}\n\n"
-        f"{PAPERCLIP_RETURN_MARKER_PREFIX} {attempt_id}\n\n"
+        f"{return_marker_line(attempt_id, request_id)}\n\n"
         "The full `mastermind.execution_return/v1` record delivered to this "
         "task.\n\n"
         f"```json\n{body}\n```\n"
@@ -288,15 +342,21 @@ class PaperclipResultDeliveryTransport:
     """Write one verified result onto the Paperclip task that asked for it.
 
     ``base_url`` must be loopback (ValueError otherwise).  ``headers`` are
-    the per-request auth headers (they may carry an authorization header);
-    they are sent as headers only and no value from them ever appears in a
-    body, a receipt, an error text or a log — every reason this transport
-    produces is scrubbed of the configured header values.
+    the board read headers (the dedupe comment GETs ride them); they are sent
+    as headers only and no value from them ever appears in a body, a receipt,
+    an error text or a log — every reason this transport produces is scrubbed
+    of the configured header values.
     ``service_agent_id`` (PF-3 item 1) is the REQUIRED dedicated service
     agent the delivery is attributed to — never the board; the exactly-once
-    scan counts only rows authored by this agent.  ``documents`` toggles
-    the issue document write.  ``state_dir`` holds the durable dedupe
-    sidecar.
+    scan counts only rows authored by this agent.  REV-CODE F5: an id with
+    surrounding whitespace is refused (never silently stripped).
+    ``service_agent_token_path`` (REV-CODE F1) is the REQUIRED path to that
+    agent's bearer token: a 0600 regular non-symlink file, read fresh at each
+    delivery that must write.  The token is sent only as an authorization
+    header and is scrubbed from every reason; a missing, non-regular,
+    symlinked or wrong-mode file is a typed refusal, never a guess.
+    ``documents`` toggles the issue document write.  ``state_dir`` holds the
+    durable dedupe sidecar.
     """
 
     def __init__(
@@ -304,15 +364,34 @@ class PaperclipResultDeliveryTransport:
         *,
         base_url: str,
         service_agent_id: str,
+        service_agent_token_path: str | os.PathLike[str],
         headers: Mapping[str, str] | None = None,
         documents: bool = True,
         state_dir: str | os.PathLike[str],
         timeout: float = 30.0,
     ) -> None:
         self._base_url = _loopback_base(base_url)
-        if type(service_agent_id) is not str or not service_agent_id.strip():
-            raise ValueError("service_agent_id must be a non-empty string")
+        # F5: refuse surrounding whitespace rather than store a stripped id —
+        # a padded id would never equal the server's authorAgentId and would
+        # silently break the exactly-once scan.
+        if (type(service_agent_id) is not str or not service_agent_id
+                or service_agent_id.strip() != service_agent_id):
+            raise ValueError(
+                "service_agent_id must be a non-empty string without "
+                "surrounding whitespace")
         self._service_agent_id = service_agent_id
+        if (service_agent_token_path is None
+                or not str(service_agent_token_path).strip()):
+            raise ValueError(
+                "service_agent_token_path must name the service agent's "
+                "0600 bearer token file")
+        self._service_agent_token_path = Path(
+            str(service_agent_token_path)).expanduser()
+        # Transient per-delivery secrets (the bearer token read from the
+        # file) and the cached heartbeat run context; both cleared after each
+        # delivery so no token is retained.  ``_scrub`` redacts the secrets.
+        self._delivery_secrets: tuple[str, ...] = ()
+        self._run_context: tuple[str, str] | None = None
         if headers is None:
             headers = {}
         if not isinstance(headers, Mapping):
@@ -338,8 +417,9 @@ class PaperclipResultDeliveryTransport:
         self._timeout = float(timeout)
 
     def _scrub(self, text: str) -> str:
-        """Remove every configured header value from a reason/error text."""
-        for value in self._header_values:
+        """Remove every configured header value AND the transient bearer
+        token from a reason/error text (raw and %r forms)."""
+        for value in self._header_values + self._delivery_secrets:
             text = text.replace(value, "[redacted-header]")
             # exception texts often carry the %r form (a newline becomes
             # a literal \n), which the raw replace above cannot match
@@ -347,6 +427,75 @@ class PaperclipResultDeliveryTransport:
             if escaped != value:
                 text = text.replace(escaped, "[redacted-header]")
         return text
+
+    # --- the service-agent writer (REV-CODE F1) ---------------------------
+
+    def _read_service_token(self) -> str:
+        """Read the agent bearer fresh from its 0600 regular non-symlink
+        file.  A missing, symlinked, non-regular, wrong-mode, unreadable or
+        empty file is a typed ``SERVICE_TOKEN_UNAVAILABLE`` refusal.  The
+        reason texts are static — the token value never appears in them.
+        """
+        path = self._service_agent_token_path
+        code = "SERVICE_TOKEN_UNAVAILABLE"
+        try:
+            st = os.lstat(path)  # lstat: never follow a symlink
+        except OSError:
+            raise _TransportError(
+                "service agent token file is missing", code=code) from None
+        if stat.S_ISLNK(st.st_mode):
+            raise _TransportError(
+                "service agent token file is a symlink", code=code)
+        if not stat.S_ISREG(st.st_mode):
+            raise _TransportError(
+                "service agent token file is not a regular file", code=code)
+        if stat.S_IMODE(st.st_mode) != 0o600:
+            raise _TransportError(
+                "service agent token file mode is not 0600", code=code)
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                token = handle.read().strip()
+        except OSError:
+            raise _TransportError(
+                "service agent token file is unreadable", code=code) from None
+        if not token:
+            raise _TransportError(
+                "service agent token file is empty", code=code)
+        return token
+
+    def _invoke_heartbeat(self, token: str) -> str:
+        """Invoke ONE heartbeat run for the service agent with its bearer;
+        return the run id.  Never cancels the run.  Any failure is a typed
+        ``HEARTBEAT_INVOKE_FAILED`` refusal (no comment POST is attempted).
+        """
+        code = "HEARTBEAT_INVOKE_FAILED"
+        agent = urllib.parse.quote(self._service_agent_id, safe="")
+        try:
+            _, body = self._request(
+                "POST", f"/api/agents/{agent}/heartbeat/invoke", {},
+                auth={"authorization": f"Bearer {token}"})
+        except _TransportError as exc:
+            raise _TransportError(exc.reason, code=code) from None
+        if not isinstance(body, Mapping) or type(body.get("id")) is not str \
+                or not body["id"]:
+            raise _TransportError(
+                "heartbeat invoke returned no run id", code=code)
+        return body["id"]
+
+    def _agent_write_headers(self) -> dict[str, str]:
+        """The bearer + run-id headers for an agent write.  Reads the token
+        and invokes one heartbeat run on first use, cached for the rest of
+        this delivery (one run per delivery).  Raises ``_TransportError``
+        with a typed ``code`` on token/heartbeat failure.
+        """
+        if self._run_context is None:
+            token = self._read_service_token()
+            self._delivery_secrets = (token,)
+            run_id = self._invoke_heartbeat(token)
+            self._run_context = (token, run_id)
+        token, run_id = self._run_context
+        return {"authorization": f"Bearer {token}",
+                "X-Paperclip-Run-Id": run_id}
 
     # --- HTTP ------------------------------------------------------------
 
@@ -357,11 +506,17 @@ class PaperclipResultDeliveryTransport:
         body: Any = None,
         *,
         allow: tuple[int, ...] = (),
+        auth: Mapping[str, str] | None = None,
     ) -> tuple[int, Any]:
-        """One request, no retries.  Raises ``_TransportError`` on failure."""
+        """One request, no retries.  Raises ``_TransportError`` on failure.
+
+        ``auth`` (agent writes) REPLACES the board read headers — an agent
+        write rides only its bearer + run id, never the board channel.
+        ``None`` (reads) uses the configured board headers.
+        """
         url = f"{self._base_url}{path}"
         data = None
-        headers = dict(self._headers)
+        headers = dict(auth) if auth is not None else dict(self._headers)
         if body is not None:
             data = json.dumps(body, sort_keys=True).encode("utf-8")
             headers["content-type"] = "application/json"
@@ -488,9 +643,15 @@ class PaperclipResultDeliveryTransport:
             return self._deliver(origin, payload)
         except Exception as exc:  # last-resort fence: an honest refusal
             safe = payload if isinstance(payload, Mapping) else {}
+            # F4: scrub THEN truncate — pass the full text to _refused (which
+            # scrubs the whole string) and let _receipt apply the length cap,
+            # so a secret straddling the cap can never leave a fragment.
             return self._refused(
-                safe, "TRANSPORT_FAILED",
-                f"{type(exc).__name__}: {exc}"[:_REASON_MAX])
+                safe, "TRANSPORT_FAILED", f"{type(exc).__name__}: {exc}")
+        finally:
+            # never retain the bearer token or run context past a delivery
+            self._delivery_secrets = ()
+            self._run_context = None
 
     def _deliver(
         self, origin: Any, payload: Mapping[str, Any],
@@ -517,18 +678,20 @@ class PaperclipResultDeliveryTransport:
                 payload, "ATTEMPT_ID_MISSING",
                 "payload carries no attempt.attempt_id to key the return on")
 
-        marker = f"{PAPERCLIP_RETURN_MARKER_PREFIX} {attempt_id}"
         quoted_issue = urllib.parse.quote(issue, safe="")
         marks = self._marks(attempt_id)
         # R2: the request id this transport posts its delivery comment
-        # with — deterministic per attempt, so the dedupe scan below can
-        # demand it echoed on a row authored by THIS service agent (see
-        # ``_comment_row_is_own_delivery``, PF-3 item 1).
+        # with — deterministic per attempt, so a retried delivery re-uses it.
+        # REV-CODE F1: it rides IN the marker line (the server drops
+        # clientRequestId on agent rows), and the scan demands that whole
+        # line on a row authored by THIS service agent.
         request_id = str(uuid.uuid5(
             uuid.NAMESPACE_URL, f"paperclip-return:{attempt_id}"))
+        marker_line = return_marker_line(attempt_id, request_id)
 
         # Guard (a): the issue's own comments are the authority on what was
-        # already posted; the sidecar is the fast path.
+        # already posted; the sidecar is the fast path.  The scan is a READ
+        # and rides the board headers.
         comment_posted = "comment" in marks
         already_delivered = comment_posted
         if not comment_posted:
@@ -539,7 +702,7 @@ class PaperclipResultDeliveryTransport:
                 return self._refused(
                     payload, "COMMENTS_READ_FAILED", exc.reason)
             if any(_comment_row_is_own_delivery(
-                    row, marker, request_id, self._service_agent_id)
+                    row, marker_line, self._service_agent_id)
                    for row in _comment_rows(listing)):
                 comment_posted = True
                 already_delivered = True
@@ -547,18 +710,23 @@ class PaperclipResultDeliveryTransport:
 
         comment_id: str | None = None
         if not comment_posted:
-            body = build_return_comment(payload, attempt_id)
+            body = build_return_comment(payload, attempt_id, request_id)
             try:
+                # REV-CODE F1: the writer is the service agent — read its
+                # token, invoke ONE heartbeat run, post with bearer+run id.
+                # A token/heartbeat failure refuses typed BEFORE any comment
+                # POST is attempted (exc.code names which step failed).
+                auth = self._agent_write_headers()
                 _, created = self._request(
                     "POST", f"/api/issues/{quoted_issue}/comments",
-                    # the API requires a UUID here (invalid_format otherwise);
-                    # uuid5 keyed on the attempt keeps it deterministic so a
-                    # retried delivery posts the same request id
-                    {"clientRequestId": request_id,
-                     "body": body})
+                    # clientRequestId is still sent (harmless): the API
+                    # requires a UUID here, but the server DROPS it on agent
+                    # rows — the request id rides in the marker line instead.
+                    {"clientRequestId": request_id, "body": body},
+                    auth=auth)
             except _TransportError as exc:
                 return self._refused(
-                    payload, "COMMENT_POST_FAILED", exc.reason)
+                    payload, exc.code or "COMMENT_POST_FAILED", exc.reason)
             self._mark(attempt_id, issue, "comment")
             if isinstance(created, Mapping) and type(created.get("id")) is str:
                 comment_id = created["id"]
@@ -567,7 +735,8 @@ class PaperclipResultDeliveryTransport:
         document_key = _document_key(attempt_id)
         document_written = "document" in marks
         if self._documents and not document_written:
-            document_body = build_return_document(payload, attempt_id)
+            document_body = build_return_document(
+                payload, attempt_id, request_id)
             quoted_key = urllib.parse.quote(document_key, safe="")
             try:
                 status, existing = self._request(
@@ -584,16 +753,20 @@ class PaperclipResultDeliveryTransport:
                 document_written = True
             else:
                 try:
+                    # the document write rides the SAME bearer + run id as
+                    # the comment (one heartbeat run per delivery, reused).
+                    auth = self._agent_write_headers()
                     self._request(
                         "PUT",
                         f"/api/issues/{quoted_issue}/documents/{quoted_key}",
                         {"format": "markdown",
                          "title": f"Coding job return — {attempt_id}",
                          "body": document_body,
-                         "changeSummary": "coding job result return"})
+                         "changeSummary": "coding job result return"},
+                        auth=auth)
                 except _TransportError as exc:
                     return self._refused(
-                        payload, "DOCUMENT_WRITE_FAILED",
+                        payload, exc.code or "DOCUMENT_WRITE_FAILED",
                         f"{exc.reason} (comment already posted)")
                 self._mark(attempt_id, issue, "document")
                 document_written = True
@@ -612,4 +785,5 @@ __all__ = [
     "PaperclipResultDeliveryTransport",
     "build_return_comment",
     "build_return_document",
+    "return_marker_line",
 ]
