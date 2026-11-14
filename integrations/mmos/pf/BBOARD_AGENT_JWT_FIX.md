@@ -55,3 +55,13 @@ Run: `TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q -p
 Restarting the PF dev board through the fixed launcher (`down` + `up`, same
 home/instance/port 3196/db 54396) provisions the secret and unblocks carrier
 runs. Evidence: `~/.mastermind/mmos_evidence/pf-20261114/board2/`.
+## Review REV-JWT (qwen4-max-preview, 2026-11-14) and repairs
+
+Verdict PASS_WITH_FINDINGS. Q2 (value never printed, logged, in argv or env dumps) and Q3 (no argument reaches a real root) confirmed.
+
+- F1 (MAJOR): `resolve_dir` normalised a not-yet-existing path lexically, so a symlinked ancestor (`instances -> ~/.paperclip/instances`) passed both checks. Now `os.path.realpath`. Test: symlinked instance root refused, nothing written at the target.
+- F2/F3: generation goes to a private `mktemp` in `secrets/` and is published with `ln` (atomic, never overwrites); a failed generation leaves nothing, and the next `up` recovers. Concurrent first `up`s converge on one value. Test with a failing `openssl`.
+- F4: `secrets/` is created under umask 077 (0700 from creation).
+- F5: tests added for a symlink at the secret file, an intermediate symlink, and failed generation. The F1 and F2 tests fail on the pre-repair script.
+
+`tests/test_paperclip_dev_launcher.py`: 18 passed.

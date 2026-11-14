@@ -206,7 +206,9 @@ die_refuse() { err "REFUSED: $*"; err "This controller only operates on the isol
 
 # Resolve a directory to an absolute physical path when it exists (follows
 # symlinks via pwd -P, which defeats symlink aliases of ~/.paperclip), else
-# normalize lexically.
+# resolve every existing ancestor physically (os.path.realpath). REV-JWT F1:
+# a lexical normpath let a symlinked intermediate (instances -> ~/.paperclip/
+# instances) pass the default-home and equality checks.
 resolve_dir() {
   local p="$1"
   if [ -d "$p" ]; then
@@ -222,7 +224,7 @@ resolve_dir() {
   else
     "$PY" - "$p" <<'PYEOF'
 import os, sys
-print(os.path.normpath(os.path.abspath(sys.argv[1])))
+print(os.path.realpath(os.path.abspath(sys.argv[1])))
 PYEOF
   fi
 }
@@ -554,20 +556,37 @@ ensure_agent_jwt_secret() {
   if [ -L "$AGENT_JWT_SECRET_FILE" ]; then
     die_refuse "agent JWT secret file '$AGENT_JWT_SECRET_FILE' is a symlink; refusing to write through it."
   fi
-  mkdir -p "$SECRETS_DIR"
+  # REV-JWT F4: the directory is 0700 from creation (umask 077 subshell).
+  ( umask 077; mkdir -p "$SECRETS_DIR" ) || die 1 "could not create $SECRETS_DIR."
   chmod 700 "$SECRETS_DIR"
-  if [ ! -f "$AGENT_JWT_SECRET_FILE" ]; then
-    ( umask 077
+  if [ ! -e "$AGENT_JWT_SECRET_FILE" ]; then
+    # REV-JWT F2/F3: generate into a private temporary in the same folder,
+    # then publish it with `ln` (atomic, never overwrites). A failed
+    # generation leaves no file behind; a concurrent `up` that published
+    # first wins and both reuse its value.
+    local tmp
+    tmp="$(umask 077; mktemp "$SECRETS_DIR/.agent-jwt.hex.XXXXXX")" \
+      || die 1 "could not create a temporary in $SECRETS_DIR."
+    if ! ( umask 077
       if command -v openssl >/dev/null 2>&1; then
-        openssl rand -hex 32 > "$AGENT_JWT_SECRET_FILE"
+        openssl rand -hex 32 > "$tmp"
       else
-        "$PY" - "$AGENT_JWT_SECRET_FILE" <<'PYEOF'
+        "$PY" - "$tmp" <<'PYEOF'
 import secrets, sys
 with open(sys.argv[1], "w", encoding="ascii") as fh:
     fh.write(secrets.token_hex(32) + "\n")
 PYEOF
-      fi ) || die 1 "could not generate the agent JWT secret file at $AGENT_JWT_SECRET_FILE."
-    log "created agent JWT secret file (0600): $AGENT_JWT_SECRET_FILE"
+      fi ) || [ ! -s "$tmp" ]; then
+      rm -f "$tmp"
+      die 1 "could not generate the agent JWT secret file at $AGENT_JWT_SECRET_FILE."
+    fi
+    if ln "$tmp" "$AGENT_JWT_SECRET_FILE" 2>/dev/null; then
+      log "created agent JWT secret file (0600): $AGENT_JWT_SECRET_FILE"
+    fi
+    rm -f "$tmp"
+  fi
+  if [ -L "$AGENT_JWT_SECRET_FILE" ] || [ ! -f "$AGENT_JWT_SECRET_FILE" ]; then
+    die_refuse "agent JWT secret file '$AGENT_JWT_SECRET_FILE' is not a regular file."
   fi
   chmod 600 "$AGENT_JWT_SECRET_FILE"
   [ -s "$AGENT_JWT_SECRET_FILE" ] || die 1 "agent JWT secret file is empty: $AGENT_JWT_SECRET_FILE"

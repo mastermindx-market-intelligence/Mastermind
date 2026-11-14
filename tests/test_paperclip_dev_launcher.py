@@ -555,6 +555,56 @@ def test_refuses_secret_dir_symlink_into_default_paperclip_home(harness):
     assert not (harness.instance_root / "launch-server.mjs").exists()
 
 
+def test_refuses_symlinked_instance_root_before_writing_a_secret(harness, tmp_path):
+    # REV-JWT F1: an INTERMEDIATE symlink (the instance root points outside
+    # the dev home) with no secrets/ yet must be refused; a lexical path check
+    # would pass and write the secret into the link's target.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    for child in harness.instance_root.iterdir():
+        child.rename(elsewhere / child.name)
+    harness.instance_root.rmdir()
+    harness.instance_root.symlink_to(elsewhere)
+    proc = run_up(harness)
+    assert proc.returncode == 3, proc.stderr
+    assert "REFUSED" in proc.stderr
+    assert not (elsewhere / "secrets" / "agent-jwt.hex").exists()
+    assert not (harness.state / "node.pid").exists(), "launched despite refusal"
+
+
+def test_refuses_a_symlink_at_the_secret_file(harness, tmp_path):
+    decoy = tmp_path / "decoy.hex"
+    decoy.write_text("0" * 64 + "\n", encoding="ascii")
+    secrets_dir = harness.instance_root / "secrets"
+    secrets_dir.mkdir(mode=0o700)
+    (secrets_dir / "agent-jwt.hex").symlink_to(decoy)
+    proc = run_up(harness)
+    assert proc.returncode == 3, proc.stderr
+    assert "symlink" in proc.stderr
+    assert decoy.read_text(encoding="ascii") == "0" * 64 + "\n"
+    assert not (harness.state / "node.pid").exists()
+
+
+def test_failed_generation_leaves_no_file_and_the_next_up_recovers(harness, tmp_path):
+    # REV-JWT F2: a generator that fails must not leave an empty or partial
+    # secret that every later `up` refuses or reuses.
+    bin_dir = Path(harness.env["PATH"].split(":")[0])
+    _write_stub(bin_dir / "openssl", "exit 1\n")
+    proc = run_up(harness)
+    assert proc.returncode != 0
+    secrets_dir = harness.instance_root / "secrets"
+    assert not (secrets_dir / "agent-jwt.hex").exists()
+    assert [p.name for p in secrets_dir.iterdir()] == []
+    assert stat.S_IMODE(secrets_dir.stat().st_mode) == 0o700
+    (bin_dir / "openssl").unlink()
+    proc = run_up(harness)
+    assert proc.returncode == 0, proc.stderr
+    created = secrets_dir / "agent-jwt.hex"
+    assert created.stat().st_size > 0
+    assert stat.S_IMODE(created.stat().st_mode) == 0o600
+    assert [p.name for p in secrets_dir.iterdir()] == ["agent-jwt.hex"]
+
+
 def test_up_fails_when_banner_agent_jwt_missing(harness):
     harness.write_banner(jwt="missing (run `npx paperclipai onboard`)")
     proc = run_up(harness)
