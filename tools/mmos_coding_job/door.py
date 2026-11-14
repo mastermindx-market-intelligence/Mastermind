@@ -144,8 +144,10 @@ RESERVED_NEIGHBOUR_PORTS = frozenset({3100, 3179, 3773, 3774, 3780})
 # Real services a configured dev range may never reach, whatever it spans.
 # 3796/3800 sit inside the historical default range and stay legal there (the
 # pairing-target test and the T4b journey use it); a custom range refuses them.
+# 3784 is lane HM's (BRIEF §4); 45003 Multilogin; 54329 the real Paperclip
+# postgres (REV-DOOR F1).
 REAL_T3_TARGET_PORTS = frozenset({3100, 3179, 3190, 3193, 3773, 3774, 3780})
-CUSTOM_RANGE_REFUSED_PORTS = REAL_T3_TARGET_PORTS | {3796, 3800}
+CUSTOM_RANGE_REFUSED_PORTS = REAL_T3_TARGET_PORTS | {3784, 3796, 3800, 45003, 54329}
 
 
 # ---------------------------------------------------------------------------
@@ -162,9 +164,11 @@ class DoorConfig:
         # config.  Switching it on is a deliberate principal act (remove the
         # flag); absent or true means "not blocked by this flag", and every
         # other boundary below still applies.
-        if values.get("enabled") is False:
+        # REV-DOOR F2: only the JSON literal `true` (or no key) enables; a
+        # string "false", 0, null or any other value is a refusal.
+        if "enabled" in values and values["enabled"] is not True:
             raise ValueError(
-                "door config is disabled (enabled=false): a prepared example, "
+                "door config is disabled (enabled is present and not true): a prepared example, "
                 "not a runnable door — the principal switches it on")
         self.scratch_root = Path(values["scratch_root"]).expanduser()
         self.paperclip_base = loopback_only(

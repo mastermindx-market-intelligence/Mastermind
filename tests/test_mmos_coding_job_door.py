@@ -194,11 +194,16 @@ def test_t4d_a_wide_custom_range_cannot_reach_a_real_port(scratch):
     # A configured range that SPANS a real port must not make it legal: the
     # range widens dev ports, never the real ones.  (Lead review: a range
     # such as [3770, 3810] would otherwise admit the live team server 3780.)
-    for port in (3773, 3774, 3780, 3100, 3179, 3190, 3193, 3796, 3800):
+    for port in (3773, 3774, 3780, 3784, 3100, 3179, 3190, 3193, 3796, 3800):
         with pytest.raises(ValueError, match="real service"):
             door_mod.DoorConfig(_config(scratch, {
                 "port": port, "proof_base_url": f"http://127.0.0.1:{port}",
                 "dev_port_range": [3000, 3900]}))
+    for port in (45003, 54329):
+        with pytest.raises(ValueError, match="real service"):
+            door_mod.DoorConfig(_config(scratch, {
+                "port": port, "proof_base_url": f"http://127.0.0.1:{port}",
+                "dev_port_range": [1024, 65535]}))
 
 
 def test_t4d_a_disabled_config_is_refused(scratch):
@@ -216,6 +221,16 @@ def test_t4d_a_disabled_config_is_refused(scratch):
     assert data["enabled"] is False
     with pytest.raises(ValueError, match="disabled"):
         door_mod.DoorConfig(data)
+    # REV-DOOR F2: a falsy or mistyped flag is a refusal too.
+    for bad in ("false", 0, None, "true", 1):
+        values["enabled"] = bad
+        with pytest.raises(ValueError, match="disabled"):
+            door_mod.DoorConfig(values)
+    # REV-DOOR F5: the file path (DoorConfig.load) refuses the example as well.
+    on_disk = scratch / "t4d_door.example.json"
+    on_disk.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="disabled"):
+        door_mod.DoorConfig.load(str(on_disk))
     # `enabled: true` (or absent) is not a refusal — the flag only blocks when
     # explicitly false; every other boundary still applies.
     values["enabled"] = True
