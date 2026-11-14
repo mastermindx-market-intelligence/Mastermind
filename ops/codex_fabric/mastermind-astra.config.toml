@@ -1,0 +1,14 @@
+# Reviewed profile for attended Mastermind Codex principal sessions.
+# Install as $CODEX_HOME/mastermind-astra.config.toml and launch with:
+#   codex -p mastermind-astra
+#
+# Project delivery delegates through the existing Executive Fabric. Native Codex
+# agents stay off by default so frontier context remains with the Astra parent.
+model = "gpt-6-astra"
+model_reasoning_effort = "high"
+
+[agents]
+enabled = false
+max_concurrent_threads_per_session = 1
+default_subagent_model = "gpt-5.6-sol"
+default_subagent_reasoning_effort = "high"
