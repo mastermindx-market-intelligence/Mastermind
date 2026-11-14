@@ -639,14 +639,20 @@ function showBlock(id) { var e = document.getElementById(id); if (e) e.style.dis
 function showGrid(id) { var e = document.getElementById(id); if (e) e.style.display = "grid"; }
 
 /* ── fetch & render ──────────────────────────────────────────────────────── */
+var _readGeneration = 0;
 function load() {
+  var generation = ++_readGeneration;
   fetch("/api/pfolio/positions", { headers: { Accept: "application/json" }, credentials: "same-origin" })
     .then(function(r) {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     })
-    .then(function(d) { render(d); })
+    .then(function(d) {
+      if (generation !== _readGeneration) return;
+      render(d);
+    })
     .catch(function(err) {
+      if (generation !== _readGeneration) return;
       hide("pf-loading");
       showBlock("pf-error");
       document.getElementById("pf-error").textContent = "Failed to load: " + err;
