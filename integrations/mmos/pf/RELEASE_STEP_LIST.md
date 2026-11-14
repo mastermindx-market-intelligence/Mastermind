@@ -21,6 +21,18 @@ request list in team mode) change only web/server code behind the same
 - Before packing for (b), rebuild dist at `f5248ab2` (web `npm run build` in
   `apps/web`, then `node scripts/cli.ts build` in `apps/server`); the current
   dist is already at `f5248ab2` (`build_*_f52.log`).
+- **Re-rehearsed at `f5248ab2`** (B-REHEARSE2, 09:02–09:05Z, same scratch copy,
+  fake launchd, port 3831): forward stop→installed **10 s**, rollback **7 s**,
+  doctor green ×3, thread lists byte-identical before/after both switches and
+  to the 07:39Z baseline; real launchctl count 0; live staging untouched.
+  Ledger `~/.mastermind/mmos_evidence/pf-20261114/rehearse2/LEDGER.md`. The
+  one harness-only snag (fake instant `sleep` shortening `start`'s wait) cannot
+  occur on the real root.
+- **What running sessions see on the real server (b):** the server is down for
+  about 10 s (one announced restart). A turn in progress is interrupted by the
+  stop; its thread and history stay; the Chairman's app and teammate threads
+  reconnect when the server answers. The new `presentation` key is absent on
+  the real server, so the real client looks and behaves exactly as before.
 
 
 Builder B-REHEARSE, 2026-11-14. Rehearsed END TO END on a scratch copy under
