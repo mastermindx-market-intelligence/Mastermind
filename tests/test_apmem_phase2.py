@@ -191,7 +191,7 @@ class ConsumerTests(unittest.TestCase):
     def args(self):
         return dict(instrument="QQQ",origin_session="2026-11-12",forecast=[.001,.001,.001],upper90=[.002]*3,
             decision_at="2026-11-13T16:00:00+00:00",source_sha256="a"*64,observed_at="2026-11-13T12:00:00+00:00",
-            fit_completed_at="2026-11-13T13:00:00+00:00",fit_last_session="2026-11-12")
+            computed_at="2026-11-13T13:00:00+00:00",fit_cutoffs={"apmem":"2026-10-01"},state_last_session="2026-11-12")
     def test_valid_still_no_authority(self):
         r=research_context(**self.args());self.assertEqual(r["status"],"RESEARCH_ONLY")
         for k in ("may_rank","may_size","may_trade"):self.assertIs(r[k],False)
@@ -199,7 +199,7 @@ class ConsumerTests(unittest.TestCase):
         a=self.args();a["observed_at"]=None;r=research_context(**a)
         self.assertEqual(r["status"],"ABSTAIN");self.assertIn("OBSERVED_CLOCK_UNKNOWN",r["reason_codes"])
     def test_future_fit_abstains(self):
-        a=self.args();a["fit_completed_at"]="2026-11-14T00:00:00+00:00"
+        a=self.args();a["computed_at"]="2026-11-14T00:00:00+00:00"
         self.assertIn("FUTURE_AVAILABILITY",research_context(**a)["reason_codes"])
     def test_stale_abstains(self):
         a=self.args();a["origin_session"]="2026-10-01"
@@ -208,8 +208,22 @@ class ConsumerTests(unittest.TestCase):
         a=self.args();a["forecast"]=[np.nan]*3
         self.assertIn("FORECAST_UNAVAILABLE",research_context(**a)["reason_codes"])
     def test_fit_capture_order(self):
-        a=self.args();a["fit_completed_at"]="2026-11-13T11:00:00+00:00"
-        self.assertIn("FIT_PRECEDES_CAPTURE",research_context(**a)["reason_codes"])
+        a=self.args();a["computed_at"]="2026-11-13T11:00:00+00:00"
+        self.assertIn("COMPUTE_PRECEDES_CAPTURE",research_context(**a)["reason_codes"])
+
+
+    def test_older_fit_with_fresh_state_is_valid(self):
+        a=self.args();a["fit_cutoffs"]={"apmem":"2026-09-01","har_h5":"2026-10-30"}
+        self.assertEqual(research_context(**a)["status"],"RESEARCH_ONLY")
+    def test_future_fit_inputs_refused(self):
+        a=self.args();a["fit_cutoffs"]={"apmem":"2026-11-13"}
+        self.assertIn("FUTURE_FIT_INPUT",research_context(**a)["reason_codes"])
+    def test_stale_filter_state_refused(self):
+        a=self.args();a["state_last_session"]="2026-11-10"
+        self.assertIn("STATE_SESSION_MISMATCH",research_context(**a)["reason_codes"])
+    def test_missing_fit_cutoff_refused(self):
+        a=self.args();a["fit_cutoffs"]={}
+        self.assertIn("FIT_CUTOFFS_UNKNOWN",research_context(**a)["reason_codes"])
 
 
 if __name__ == "__main__":unittest.main()
