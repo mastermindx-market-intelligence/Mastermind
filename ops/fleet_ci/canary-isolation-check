@@ -1,0 +1,246 @@
+#!/bin/bash
+# Fleet CI canary isolation harness (docs/FLEET_CI_POOL.md, "Canary plan").
+# Operator-run as root on a CANARY host, after provisioning the slot users and
+# applying the render-nft ruleset. Starts probe processes as two slot users A and B
+# (default ghrunner-1 / ghrunner-2) and verifies cross-slot isolation:
+#   proc-cross-read          A cannot read B's /proc (hidepid=invisible)
+#   shm-cross-read           A cannot read B's /dev/shm files
+#   home-cross-read          A cannot list B's home
+#   port-range-egress        A's out-of-range loopback service is unreachable (nft)
+#   lan-egress-denied        A cannot reach the host's LAN address (nft)
+#   internet-egress-allowed  A CAN reach the internet (control)
+#   sudo-denied              A cannot sudo
+#   wipe-residue             nothing of A's survives the wipe
+# Prints PASS/FAIL per check and exits nonzero on any FAIL.
+#
+# Note on ports: nftables filters packets, not bind() — a slot can still bind any
+# port, but egress to loopback outside its own range is dropped, so the service is
+# unreachable. That blocked reachability is what this harness verifies.
+#
+# Reversible: removes only the probe files/processes it created and wipes and recreates
+# A's home. It NEVER remounts the host /proc: if the host /proc is not already
+# hidepid=invisible, the cross-read check runs inside `unshare --mount --pid --fork`
+# with its own /proc mounted hidepid=invisible (namespace-local, host unchanged), or is
+# reported as WARN with the host's current hidepid setting when unshare is unavailable.
+# Never handles a credential or a JIT config. No real host identity in this file.
+#
+#   canary-isolation-check [A B]     run the checks (root)
+#   canary-isolation-check --list-checks   print the check IDs (no host needed)
+set -euo pipefail
+
+CHECKS=(proc-cross-read shm-cross-read home-cross-read port-range-egress
+        lan-egress-denied internet-egress-allowed sudo-denied wipe-residue)
+if [ "${1:-}" = "--list-checks" ]; then printf '%s\n' "${CHECKS[@]}"; exit 0; fi
+
+A="${1:-1}"; B="${2:-2}"
+for s in "$A" "$B"; do
+  case "$s" in [1-9]|[12][0-9]|3[0-2]) ;; *) echo "slot numbers must be 1-32" >&2; exit 2 ;; esac
+done
+[ "$A" != "$B" ] || { echo "A and B must be different slots" >&2; exit 2; }
+[ "$(id -u)" = 0 ] || { echo "canary-isolation-check: must run as root on a canary host" >&2; exit 2; }
+for tool in nft setpriv findmnt python3; do
+  command -v "$tool" >/dev/null || { echo "canary-isolation-check: $tool not installed" >&2; exit 2; }
+done
+ua="ghrunner-$A"; ub="ghrunner-$B"
+for u in "$ua" "$ub"; do
+  getent passwd "$u" >/dev/null || { echo "canary-isolation-check: $u missing; provision the slot users first" >&2; exit 2; }
+done
+uida="$(id -u "$ua")"
+port_a=$((20000 + A * 100)); port_b=$((20000 + B * 100))
+# Seconds the long-lived B probe process stays alive for the /proc cross-read check.
+PROBE_TTL=600
+export PROBE_TTL
+
+FAILS=0
+report() { # <check-id> <0=pass|1=fail> [reason]
+  if [ "$2" = 0 ]; then echo "PASS: $1"; else echo "FAIL: $1${3:+ ($3)}"; FAILS=$((FAILS + 1)); fi
+}
+run_as() { local who="$1"; shift; setpriv --reuid="$who" --regid="$who" --init-groups "$@"; }
+# Background a long-lived probe as user $1 for $2 seconds; exec so $! is the probe itself.
+spawn_probe() { exec setpriv --reuid="$1" --regid="$1" --init-groups sleep "$2"; }
+
+PORT_PROBE='import socket, sys
+def probe(port):
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        srv.bind(("", port)); srv.listen(1)
+    except OSError:
+        return "bind-failed"
+    c = socket.socket(); c.settimeout(3)
+    try:
+        c.connect(("localhost", port)); c.close(); srv.close(); return "reachable"
+    except OSError:
+        srv.close(); return "blocked"
+print(probe(int(sys.argv[1])), probe(int(sys.argv[2])))'
+
+LAN_PROBE='import socket, sys
+s = socket.socket(); s.settimeout(3)
+try:
+    s.connect((sys.argv[1], int(sys.argv[2]))); print("connected")
+except socket.timeout:
+    print("timeout")
+except OSError as e:
+    print("error:%s" % e.errno)'
+
+NET_PROBE='import socket
+s = socket.socket(); s.settimeout(8)
+try:
+    s.connect(("api.github.com", socket.getservbyname("https"))); print("connected")
+except OSError:
+    print("blocked")'
+
+# --- setup -------------------------------------------------------------------------------
+for u in "$ua" "$ub"; do
+  if [ ! -d "/home/$u" ]; then
+    mkdir -p "/home/$u/tmp" && cp -a /etc/skel/. "/home/$u/" && chown -R "$u:$u" "/home/$u" && chmod 0700 "/home/$u" \
+      || { echo "canary-isolation-check: cannot prepare /home/$u" >&2; exit 2; }
+  fi
+done
+NFT_PRESENT=1
+nft list table inet fleet_ci >/dev/null 2>&1 || NFT_PRESENT=0
+[ "$NFT_PRESENT" = 1 ] || echo "note: table inet fleet_ci not loaded; apply fleet_gate.py render-nft first" >&2
+
+proc_opts="$(findmnt -no OPTIONS /proc)"
+# Never remount the host /proc. The cross-read check below uses the host's existing
+# hidepid=invisible, a private mount+pid namespace, or reports WARN (host unchanged).
+
+BPID=""
+cleanup() {
+  if [ -n "$BPID" ]; then kill -KILL "$BPID" 2>/dev/null || true; fi
+  rm -f "/dev/shm/fleet-canary-$B" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# Start a long-lived probe process as B (the /proc cross-read target).
+spawn_probe "$ub" "$PROBE_TTL" &
+BPID=$!
+sleep 0.3
+
+# --- checks ------------------------------------------------------------------------------
+# /proc cross-read: never touch the host /proc. If it is already hidepid=invisible, test
+# directly against the host B probe. Otherwise run the check in a private mount+pid
+# namespace with its own /proc (namespace-local, host unchanged), or WARN if unshare is
+# unavailable.
+case ",$proc_opts," in
+  *,hidepid=invisible,*)
+    if ! kill -0 "$BPID" 2>/dev/null; then
+      report proc-cross-read 1 "B probe process did not start"
+    elif run_as "$ua" cat "/proc/$BPID/status" >/dev/null 2>&1; then
+      report proc-cross-read 1 "A read B's /proc"
+    else
+      report proc-cross-read 0
+    fi
+    ;;
+  *)
+    if command -v unshare >/dev/null; then
+      ns_out="$(UA="$ua" UB="$ub" unshare --mount --pid --fork bash -c '
+        mount -t proc -o hidepid=invisible proc /proc || exit 3
+        sp() { exec setpriv --reuid="$1" --regid="$1" --init-groups sleep "$2"; }
+        sp "$UB" "$PROBE_TTL" &
+        bpid=$!
+        sleep 0.3
+        if setpriv --reuid="$UA" --regid="$UA" --init-groups cat "/proc/$bpid/status" >/dev/null 2>&1; then
+          echo readable
+        else
+          echo blocked
+        fi
+        kill -KILL "$bpid" 2>/dev/null || true
+      ' 2>/dev/null)" || ns_out="ns-error"
+      case "$ns_out" in
+        blocked) report proc-cross-read 0 "private mount+pid namespace, hidepid=invisible" ;;
+        readable) report proc-cross-read 1 "A read B's /proc in the test namespace" ;;
+        *) report proc-cross-read 1 "namespace probe failed ($ns_out)" ;;
+      esac
+    else
+      echo "WARN: proc-cross-read: host /proc options '$proc_opts' (no hidepid=invisible); unshare unavailable, cross-read not tested; host /proc left unchanged"
+    fi
+    ;;
+esac
+
+run_as "$ub" bash -c "umask 077; printf 'canary' > /dev/shm/fleet-canary-$B"
+if run_as "$ua" cat "/dev/shm/fleet-canary-$B" >/dev/null 2>&1; then
+  report shm-cross-read 1 "A read B's /dev/shm file"
+else
+  report shm-cross-read 0
+fi
+
+if run_as "$ua" ls "/home/$ub" >/dev/null 2>&1; then
+  report home-cross-read 1 "A listed B's home"
+else
+  report home-cross-read 0
+fi
+
+if [ "$NFT_PRESENT" != 1 ]; then
+  report port-range-egress 1 "nft rules not loaded"
+else
+  out="$(run_as "$ua" python3 -c "$PORT_PROBE" "$((port_b + 99))" "$((port_a + 99))" 2>/dev/null)" || out="probe-error"
+  if [ "$out" = "blocked reachable" ]; then
+    report port-range-egress 0
+  else
+    report port-range-egress 1 "got '$out', want 'blocked reachable'"
+  fi
+fi
+
+lan_target="$(hostname -I 2>/dev/null | awk '{print $1}')"
+if [ "$NFT_PRESENT" != 1 ]; then
+  report lan-egress-denied 1 "nft rules not loaded"
+elif [ -z "$lan_target" ]; then
+  report lan-egress-denied 1 "no host LAN address found"
+else
+  out="$(run_as "$ua" python3 -c "$LAN_PROBE" "$lan_target" 22 2>/dev/null)" || out="probe-error"
+  if [ "$out" = "timeout" ]; then
+    report lan-egress-denied 0
+  else
+    report lan-egress-denied 1 "got '$out', want 'timeout' (dropped)"
+  fi
+fi
+
+out="$(run_as "$ua" python3 -c "$NET_PROBE" 2>/dev/null)" || out="probe-error"
+if [ "$out" = "connected" ]; then
+  report internet-egress-allowed 0
+else
+  report internet-egress-allowed 1 "got '$out', want 'connected'"
+fi
+
+if ! command -v sudo >/dev/null; then
+  report sudo-denied 0 "sudo not installed"
+elif run_as "$ua" sudo -n true >/dev/null 2>&1; then
+  report sudo-denied 1 "A ran sudo"
+else
+  report sudo-denied 0
+fi
+
+# Wipe A exactly as the slot loop does, then assert nothing of A's remains.
+wipe_ok=1
+prc=0; pkill -KILL -u "$ua" || prc=$?
+case "$prc" in 0|1) ;; *) wipe_ok=0 ;; esac
+if [ -e "/var/spool/cron/crontabs/$ua" ] || [ -L "/var/spool/cron/crontabs/$ua" ]; then
+  crontab -r -u "$ua" || wipe_ok=0
+fi
+{ [ ! -e "/var/spool/cron/crontabs/$ua" ] && [ ! -L "/var/spool/cron/crontabs/$ua" ]; } || wipe_ok=0
+if command -v atq >/dev/null; then
+  for j in $(atq 2>/dev/null | awk -v u="$ua" '$NF == u {print $1}'); do atrm "$j" || wipe_ok=0; done
+fi
+for d in /tmp /var/tmp /dev/shm /dev/mqueue /run/lock; do
+  [ -d "$d" ] || continue
+  find "$d" -xdev -user "$ua" -delete 2>/dev/null || wipe_ok=0
+  [ -z "$(find "$d" -xdev -user "$ua" -print -quit 2>/dev/null)" ] || wipe_ok=0
+done
+rm -rf "/home/$ua" || wipe_ok=0
+prc=0; pgrep -u "$ua" >/dev/null || prc=$?
+[ "$prc" = 1 ] || wipe_ok=0
+[ ! -e "/home/$ua" ] || wipe_ok=0
+[ ! -e "/run/user/$uida" ] || wipe_ok=0
+# Recreate A's home so the slot can run after the harness.
+{ mkdir -p "/home/$ua/tmp" && cp -a /etc/skel/. "/home/$ua/" && chown -R "$ua:$ua" "/home/$ua" && chmod 0700 "/home/$ua"; } \
+  || wipe_ok=0
+if [ "$wipe_ok" = 1 ]; then report wipe-residue 0; else report wipe-residue 1 "residue or wipe step failed"; fi
+
+echo "----"
+if [ "$FAILS" = 0 ]; then
+  echo "canary-isolation-check: all checks PASS"
+  exit 0
+fi
+echo "canary-isolation-check: $FAILS check(s) FAILED"
+exit 1

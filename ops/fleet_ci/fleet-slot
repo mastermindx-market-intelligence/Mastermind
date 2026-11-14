@@ -1,0 +1,231 @@
+#!/bin/bash
+# Fleet CI pool: load-aware ephemeral JIT runner slot (docs/FLEET_CI_POOL.md).
+# Runs as root in fleet-slot@N.service (NoNewPrivileges=yes, RestrictSUIDSGID=yes).
+# Adapted from the Terminal e2e lane's slot loop: minting runs as fleetmint via setpriv
+# (sudo is setuid and refuses to run under NoNewPrivileges), each job runs as
+# ghrunner-N in a fresh child cgroup.
+#
+# Loop: ADMIT (host headroom gates; no registration while refused) -> MINT one JIT
+# config -> RUN exactly one job -> WIPE -> repeat. GitHub only dispatches to registered
+# runners, so a loaded host simply stops offering slots: pull-based load balancing.
+#
+# An ordinary failure exits 1 (Restart=on-failure brings the unit back after RestartSec).
+# An uncertain registration writes a hold file first (write, sync, read back), then
+# exits 78 — RestartPreventExitStatus=78, so the unit does NOT restart until an operator
+# reconciles the registration and removes the hold. Never echo $jit.
+set -euo pipefail
+N="${1:-}"
+case "$N" in [1-9]|[12][0-9]|3[0-2]) ;; *) echo "fleet-slot: slot number must be 1-32" >&2; exit 1 ;; esac
+GATE=(/usr/bin/python3 -I /usr/local/lib/fleet-ci/fleet_gate.py)
+STATUS_DIR=/run/fleet-ci
+HOLD="/var/lib/fleet-ci/hold-$N"
+HOLD_FALLBACK="$STATUS_DIR/hold-$N"
+HOLD_PERSIST_FALLBACK="/var/lib/fleet-ci/hold-fallback-$N"
+HOLD_EXIT=78
+cls="$("${GATE[@]}" get FLEET_CLASS)" || { echo "fleet-slot: invalid /etc/fleet-ci/fleet.conf" >&2; exit 1; }
+gid="$("${GATE[@]}" get RUNNER_GROUP_ID)" || exit 1
+pin="$("${GATE[@]}" get RUNNER_TARBALL_SHA256)" || exit 1
+host="$(hostname -s)"
+case "$host" in ''|*[!a-z0-9-]*) echo "fleet-slot: hostname -s must be [a-z0-9-]" >&2; exit 1 ;; esac
+u="ghrunner-$N"
+name="$host-fleet-$cls-$N"
+labels="self-hosted,Linux,X64,fleet,fleet-$cls"
+slot="/opt/actions-runner/fleet/$name"
+tarball=/opt/actions-runner/actions-runner-linux-x64.tar.gz
+crontab_file="/var/spool/cron/crontabs/$u"
+port_base=$((20000 + N * 100))
+scratch=(/tmp /var/tmp /dev/shm /dev/mqueue /run/lock)
+state() { "${GATE[@]}" status --slot "$N" --state "$1" --detail "${2:-}" >/dev/null || true; }
+die() { echo "fleet-slot $name: $*" >&2; state stopped "$*"; exit 1; }
+# hold: persist the marker explicitly (write, sync, read back), then exit 78 so the
+# unit never restarts over an uncertain registration. If the primary marker cannot be
+# persisted, still exit 78 (no restart): leave a runtime fallback marker AND a best-effort
+# persistent fallback under /var/lib/fleet-ci, and disable the unit. A failed disable does
+# not change the exit: the markers alone block startup (and a reboot) until reconciled.
+hold() {
+  local msg="$*" ok=1
+  mkdir -p /var/lib/fleet-ci && printf '%s\n' "$msg" > "$HOLD" && sync \
+    && [ "$(cat "$HOLD" 2>/dev/null)" = "$msg" ] || ok=0
+  if [ "$ok" != 1 ]; then
+    echo "fleet-slot $name: HOLD PERSISTENCE FAILED for $HOLD; leaving fallback markers and disabling the unit" >&2
+    { mkdir -p "$STATUS_DIR" && printf '%s\n' "$msg" > "$HOLD_FALLBACK"; } || true
+    { mkdir -p /var/lib/fleet-ci && printf '%s\n' "$msg" > "$HOLD_PERSIST_FALLBACK" && sync; } || true
+    if ! systemctl disable "fleet-slot@$N.service" >/dev/null 2>&1; then
+      echo "fleet-slot $name: systemctl disable failed; hold markers still block startup (exit $HOLD_EXIT)" >&2
+    fi
+  fi
+  echo "fleet-slot $name: HOLD: $msg" >&2
+  state stopped "HOLD: $msg"
+  exit "$HOLD_EXIT"
+}
+
+if [ -e "$HOLD" ] || [ -e "$HOLD_FALLBACK" ] || [ -e "$HOLD_PERSIST_FALLBACK" ]; then
+  echo "fleet-slot $name: hold present ($HOLD, $HOLD_FALLBACK or $HOLD_PERSIST_FALLBACK); reconcile the $name registration (docs/FLEET_CI_POOL.md), then remove it" >&2
+  exit "$HOLD_EXIT"
+fi
+state starting
+
+# --- Host prerequisites, asserted on every start (same as the Terminal lane) -------------
+mapfile -t cgl < /proc/self/cgroup
+[ "${#cgl[@]}" = 1 ] && [ "${cgl[0]#0::}" != "${cgl[0]}" ] || die "not unified cgroup v2"
+unit_cg="/sys/fs/cgroup${cgl[0]#0::}"
+[ "$unit_cg" = "/sys/fs/cgroup/fleet_ci.slice/fleet-slot@$N.service" ] \
+  || die "not running as fleet-slot@$N.service in fleet_ci.slice"
+job_cg="$unit_cg/job"
+procopts="$(findmnt -no OPTIONS /proc)" || die "findmnt failed"
+case ",$procopts," in *,hidepid=invisible,*) ;; *) die "/proc is not hidepid=invisible" ;; esac
+ipc_self="$(readlink /proc/self/ns/ipc)" && ipc_host="$(readlink /proc/1/ns/ipc)" || die "cannot read IPC namespaces"
+[ -n "$ipc_self" ] && [ "$ipc_self" != "$ipc_host" ] || die "IPC namespace is the host's (PrivateIPC=yes missing)"
+pw="$(getent passwd "$u")" || die "no user $u"
+IFS=: read -r _ _ uid ugid _ home shell <<<"$pw"
+[ "$shell" = /usr/sbin/nologin ] || die "$u has a login shell"
+[ "$home" = "/home/$u" ] || die "$u home is not /home/$u"
+[ "$uid" -ge 1000 ] && [ "$uid" -lt 60000 ] || die "$u uid out of range"
+# Identity: the uid belongs to this account alone, and the primary group is private
+# (same name as the user, no members, no other account's primary gid).
+[ "$(getent passwd | awk -F: -v x="$uid" '$3 == x' | wc -l)" = 1 ] || die "uid $uid is shared with another account"
+grp="$(getent group "$ugid")" || die "no group for gid $ugid"
+IFS=: read -r gname _ ggid gmembers <<<"$grp"
+[ "$gname" = "$u" ] && [ "$ggid" = "$ugid" ] && [ -z "$gmembers" ] || die "$u primary group is not private"
+[ "$(getent passwd | awk -F: -v x="$ugid" '$4 == x' | wc -l)" = 1 ] || die "gid $ugid is another account's primary group"
+[ "$(id -G "$u")" = "$ugid" ] || die "$u has supplementary groups (docker group is not allowed)"
+# NoNewPrivileges=yes makes sudo itself refuse to run, so inspect the policy files
+# directly: any mention of the slot user, its private group, or its numeric ids
+# (#<uid> user grant, %#<gid> group grant) in sudoers refuses. Word-bounded so a
+# different slot (ghrunner-10, #10010) is not a match. Unreadable policy fails closed.
+# (The user also has no supplementary groups, so no sudo/wheel/admin group grants rights.)
+for f in /etc/sudoers /etc/sudoers.d/*; do
+  [ -e "$f" ] || continue
+  [ -f "$f" ] && [ -r "$f" ] || die "cannot read sudoers policy $f"
+  src=0; grep -Eq "(^|[^[:alnum:]_])(%?$u|#$uid|%#$ugid)([^[:alnum:]_-]|$)" "$f" || src=$?
+  case "$src" in
+    0) die "sudoers mentions $u in $f" ;;
+    1) ;;
+    *) die "sudoers check failed for $f (rc=$src)" ;;
+  esac
+done
+[ ! -e "/var/lib/systemd/linger/$u" ] || die "linger on for $u"
+# cron/at: deny-listed AND never allow-listed. When an allow file exists it overrides
+# the deny file, so an allow-listed user would get cron/at despite the deny entry.
+for tool in cron at; do
+  grep -qx "$u" "/etc/$tool.deny" || die "$u not in /etc/$tool.deny"
+  if [ -e "/etc/$tool.allow" ]; then
+    [ -r "/etc/$tool.allow" ] || die "cannot read /etc/$tool.allow"
+    ! grep -qx "$u" "/etc/$tool.allow" || die "$u is allow-listed in /etc/$tool.allow"
+  fi
+done
+[ -s "$tarball" ] || die "runner tarball missing"
+
+backoff=15
+mint_backoff=15
+while :; do
+  state wiping
+  # 1. No timer may fire as $u after the reset: purge cron/at BEFORE killing anything.
+  if [ -e "$crontab_file" ] || [ -L "$crontab_file" ]; then
+    crontab -r -u "$u" || die "crontab -r failed"
+    { [ ! -e "$crontab_file" ] && [ ! -L "$crontab_file" ]; } || die "crontab spool $crontab_file survived crontab -r"
+  fi
+  if command -v atq >/dev/null; then
+    atjobs="$(atq)" || die "atq failed"
+    for j in $(awk -v u="$u" '$NF == u {print $1}' <<<"$atjobs"); do atrm "$j" || die "atrm $j failed"; done
+  fi
+  # 2. Kill the previous job's cgroup, bounded wait.
+  if [ -d "$job_cg" ]; then
+    echo 1 > "$job_cg/cgroup.kill" || die "cgroup.kill failed (kernel < 5.14?)"
+    for _ in $(seq 300); do
+      grep -qx 'populated 0' "$job_cg/cgroup.events" && break
+      sleep 0.2
+    done
+    grep -qx 'populated 0' "$job_cg/cgroup.events" || die "job cgroup still populated after 60s"
+    rmdir "$job_cg" || die "rmdir job cgroup failed"
+  fi
+  prc=0; pkill -KILL -u "$u" || prc=$?
+  case "$prc" in 1) ;; 0) die "killed a $u process outside the job cgroup; investigate" ;; *) die "pkill failed rc=$prc" ;; esac
+  # 3. Fresh IPC, scratch, HOME, TMPDIR and runner tree, readable by this slot only.
+  ipcrm --all || die "ipcrm failed"
+  for d in "${scratch[@]}"; do
+    find "$d" -xdev -user "$u" -delete || die "cleanup of $d failed"
+    left="$(find "$d" -xdev -user "$u" -print -quit)" || die "re-scan of $d failed"
+    [ -z "$left" ] || die "files of $u survived in $d"
+  done
+  rm -rf "/home/$u" "$slot" || die "cannot remove the previous home or runner tree"
+  { mkdir -p "/home/$u/tmp" && cp -a /etc/skel/. "/home/$u/" && chown -R "$u:$u" "/home/$u" && chmod 0700 "/home/$u"; } \
+    || die "cannot rebuild /home/$u"
+  # Verify the tarball against the fleet.conf pin BEFORE extracting it, every cycle.
+  actual_sha="$(sha256sum "$tarball" | awk '{print $1}')" || die "cannot hash the runner tarball"
+  [ "$actual_sha" = "$pin" ] || die "runner tarball sha256 does not match the fleet.conf pin"
+  { mkdir -p "$slot" && tar xzf "$tarball" -C "$slot" && chown -R "$u:$u" "$slot" && chmod 0700 "$slot"; } \
+    || die "cannot rebuild the runner tree"
+  mkdir "$job_cg" || die "cannot create the job cgroup"
+
+  # 4. ADMIT. While any gate refuses, do not register: back off 15s -> 30s -> 60s.
+  arc=0; "${GATE[@]}" admit --slot "$N" >/dev/null || arc=$?
+  if [ "$arc" = 10 ]; then
+    sleep "$backoff"; backoff=$(( backoff * 2 > 60 ? 60 : backoff * 2 ))
+    rmdir "$job_cg" || die "rmdir job cgroup failed"
+    continue
+  fi
+  [ "$arc" = 0 ] || die "admission check failed rc=$arc"
+  backoff=15
+
+  # 5. Fail closed before the mint. A failed query is not "none".
+  sessions="$(loginctl list-sessions --no-legend)" || die "loginctl list-sessions failed"
+  [ "$(awk -v id="$uid" '$2 == id' <<<"$sessions" | wc -l)" = 0 ] || die "$u has a logind session; not minting"
+  prc=0; pgrep -u "$u" >/dev/null || prc=$?
+  case "$prc" in 1) ;; 0) die "$u has a live process; not minting" ;; *) die "pgrep failed rc=$prc" ;; esac
+  [ ! -e "/run/user/$uid" ] || die "/run/user/$uid exists; not minting"
+
+  # 6. One-shot JIT config, minted as fleetmint. setpriv (not sudo: setuid binaries
+  #    cannot elevate under NoNewPrivileges=yes) drops to the minter account.
+  #    Exit 75 is an API/network failure.
+  state minting
+  mrc=0
+  jit="$(setpriv --reuid=fleetmint --regid=fleetmint --init-groups /usr/local/bin/fleet-mint mint "$name" "$labels" "$gid")" || mrc=$?
+  if [ "$mrc" = 75 ]; then
+    unset jit
+    echo "fleet-slot $name: mint failed (API/network); retrying in ${mint_backoff}s" >&2
+    state refused "mint-tempfail"
+    sleep "$mint_backoff"; mint_backoff=$(( mint_backoff * 2 > 300 ? 300 : mint_backoff * 2 ))
+    rmdir "$job_cg" || die "rmdir job cgroup failed"
+    continue
+  fi
+  if [ "$mrc" != 0 ] || [ -z "$jit" ]; then
+    unset jit
+    hold "mint refused (rc=$mrc); reconcile the $name registration"
+  fi
+  mint_backoff=15
+  state registered
+  echo "fleet-slot $name: runner registered; waiting for one job"
+
+  # 7. Hand the JIT config to run.sh in the environment, never in argv (see the Terminal
+  #    lane runbook): Runner.Listener reads ACTIONS_RUNNER_INPUT_JITCONFIG and unsets it
+  #    on the pinned runner version (a canary checklist item); /proc/<pid>/environ is
+  #    readable only by the job uid and root. setpriv execs in place. errexit is off
+  #    inside a subshell on the left of ||: every step checks.
+  started=$SECONDS
+  rc=0
+  (
+    lang="${LANG:-C.UTF-8}"
+    mapfile -t exported < <(compgen -e) || exit 1
+    mapfile -t functions < <(compgen -A function) || exit 1
+    unset "${exported[@]}" || exit 1
+    unset -f "${functions[@]}" || exit 1
+    if compgen -e >/dev/null || compgen -A function >/dev/null; then exit 1; fi
+    export HOME="/home/$u" USER="$u" LOGNAME="$u" LANG="$lang" SHELL=/bin/bash \
+      TMPDIR="/home/$u/tmp" FLEET_SLOT="$N" FLEET_CLASS="$cls" \
+      FLEET_PORT_BASE="$port_base" FLEET_PORT_COUNT=100 \
+      PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+      ACTIONS_RUNNER_INPUT_JITCONFIG="$jit" || exit 1
+    echo "$BASHPID" > "$job_cg/cgroup.procs" || exit 1
+    cd "/home/$u" || exit 1
+    exec setpriv --reuid="$u" --regid="$u" --init-groups "$slot/run.sh"
+  ) || rc=$?
+  unset jit
+  state exited "rc=$rc"
+  echo "fleet-slot $name: runner exited rc=$rc"
+  # A runner that exits nonzero within 30s never took a job; its registration may still
+  # exist offline. Never re-mint over an uncertain start.
+  if [ "$rc" != 0 ] && [ $((SECONDS - started)) -lt 30 ]; then
+    hold "runner failed to start (rc=$rc); reconcile the $name registration"
+  fi
+done

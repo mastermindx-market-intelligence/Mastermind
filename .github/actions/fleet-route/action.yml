@@ -1,0 +1,107 @@
+name: fleet-route
+description: >-
+  Choose runs-on for the next job(s): GitHub-hosted, or the load-aware fleet slot pool
+  (docs/FLEET_CI_POOL.md). Default mode is off, which always returns ubuntu-24.04.
+  Callers MUST use the cross-repo form pinned to master or a SHA:
+  uses: mastermindx-market-intelligence/Mastermind/.github/actions/fleet-route@<sha>
+  — never ./.github/actions/fleet-route: a local reference would run the decision from
+  the caller's checkout (PR-head code) while holding the token. All decision logic and
+  the only token-using code live in this action directory and are read through
+  github.action_path, i.e. from the pinned ref.
+inputs:
+  mode:
+    description: "off | hybrid | fleet-only. Pass vars.CI_FLEET_MODE; empty or unknown means off."
+    required: false
+    default: "off"
+  class:
+    description: "Fleet runner class: std or heavy."
+    required: false
+    default: "std"
+  jobs_needed:
+    description: "How many fleet slots the routed job(s) need at once (matrix width)."
+    required: false
+    default: "1"
+  is_trusted_source:
+    description: >-
+      "true" only for a trusted source. The caller MUST compute it in the workflow
+      expression:
+      github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+      Untrusted sources (fork PRs) never receive fleet labels, in any mode. Defense in
+      depth: the action recomputes this from github.event_name and the head/base repo
+      itself and ANDs it with this input, so a caller passing "true" cannot override a fork.
+    required: false
+    default: "false"
+  repo_private:
+    description: >-
+      Pass github.event.repository.private. Informational (recorded in the decision);
+      private repositories have no outside forks, so the trusted-source guard is the
+      binding control while the repos are public.
+    required: false
+    default: "false"
+  token:
+    description: >-
+      Read-only org token (secrets.FLEET_ROUTE_TOKEN): "Self-hosted runners: read" plus
+      "Actions: read" for the queued-job count. Only used in hybrid mode, and only by
+      the pinned fleet-capacity script in this directory. Missing or failing -> hosted.
+      Never the minting credential.
+    required: false
+    default: ""
+  group_id:
+    description: "Fleet runner group id (vars.CI_FLEET_RUNNER_GROUP_ID). Hybrid only."
+    required: false
+    default: ""
+  spill_ratio:
+    description: "Hybrid: route to fleet when idle/jobs_needed >= ratio (1.0 = whole batch only)."
+    required: false
+    default: "1.0"
+outputs:
+  runner:
+    description: 'JSON for runs-on, use as runs-on: ${{ fromJSON(steps.<id>.outputs.runner) }}'
+    value: ${{ steps.route.outputs.runner }}
+  target:
+    description: "hosted or fleet"
+    value: ${{ steps.route.outputs.target }}
+runs:
+  using: composite
+  steps:
+    - id: route
+      shell: bash
+      env:
+        FLEET_MODE: ${{ inputs.mode }}
+        FLEET_CLASS_IN: ${{ inputs.class }}
+        FLEET_JOBS: ${{ inputs.jobs_needed }}
+        FLEET_ROUTE_TOKEN: ${{ inputs.token }}
+        FLEET_RUNNER_GROUP_ID: ${{ inputs.group_id }}
+        FLEET_SPILL_RATIO: ${{ inputs.spill_ratio }}
+        FLEET_TRUSTED_SOURCE: ${{ inputs.is_trusted_source }}
+        FLEET_REPO_PRIVATE: ${{ inputs.repo_private }}
+        FLEET_ACTION_DIR: ${{ github.action_path }}
+        FLEET_EVENT_NAME: ${{ github.event_name }}
+        FLEET_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        FLEET_BASE_REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        # Defense in depth: recompute trust from the event context INSIDE this pinned
+        # action, then AND it with the caller's is_trusted_source. A caller passing true
+        # cannot override a fork: for pull_request events the head repo must equal this
+        # repository. Non-pull_request events (push/schedule/dispatch) are trusted.
+        computed_trusted=false
+        if [ "$FLEET_EVENT_NAME" != "pull_request" ]; then
+          computed_trusted=true
+        elif [ -n "$FLEET_HEAD_REPO" ] && [ "$FLEET_HEAD_REPO" = "$FLEET_BASE_REPO" ]; then
+          computed_trusted=true
+        fi
+        caller_trusted=false
+        case "$(printf '%s' "$FLEET_TRUSTED_SOURCE" | tr '[:upper:]' '[:lower:]')" in
+          true|1|yes) caller_trusted=true ;;
+        esac
+        trusted=false
+        if [ "$computed_trusted" = true ] && [ "$caller_trusted" = true ]; then trusted=true; fi
+        # Single decision script from the PINNED action checkout (github.action_path),
+        # never from the caller's checkout. It runs the sibling fleet-capacity from the
+        # same directory; only that pinned code reads FLEET_ROUTE_TOKEN.
+        python3 "$FLEET_ACTION_DIR/fleet_route.py" \
+          --mode "${FLEET_MODE:-off}" --class "$FLEET_CLASS_IN" \
+          --jobs-needed "$FLEET_JOBS" --spill-ratio "$FLEET_SPILL_RATIO" \
+          --trusted-source "$trusted" --repo-private "$FLEET_REPO_PRIVATE" \
+          --fetch-capacity --github-output "$GITHUB_OUTPUT"

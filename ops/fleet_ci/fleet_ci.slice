@@ -1,0 +1,10 @@
+[Unit]
+Description=Fleet CI pool slots (whole-pool ceiling below the host's other services)
+
+[Slice]
+# Provisioning rewrites these from fleet.conf: slots x SLOT_MEMORY_MAX, capped at
+# MemTotal - RESERVE_GB. Placeholders sized for one 8G slot.
+MemoryHigh=7G
+MemoryMax=8G
+CPUWeight=50
+IOWeight=50
