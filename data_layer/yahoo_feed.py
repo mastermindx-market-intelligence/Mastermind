@@ -600,4 +600,3 @@ def clear_cache() -> None:
     _CLOSE_EVIDENCE = {}
     _OPEN_EVIDENCE = {}
     _FETCHED_DAY = None
-
