@@ -194,9 +194,12 @@ impl BoardUrlRefusal {
 /// [`parse_loopback_http`] structure plus the writers' exact
 /// `http://127.0.0.1:<port>` spelling and an explicit port, then the board's
 /// own rule: no query, no fragment, and no path beyond the root (a single
-/// trailing `/` is the same origin). Like the address parser, dot segments
-/// normalize before the path rule, so the loader accepts what it lands on
-/// while the writer refuses the disguise literally. No network access, ever.
+/// trailing `/` is the same origin). REV-WIN LOW-3: the spelling gate is
+/// literal, exactly like `window_config.sh write --board-url` — the url
+/// parser normalizes dot segments (`/./`) and WHATWG backslashes onto the
+/// origin, but the writer refuses those disguises literally, so the loader
+/// refuses them too (the stricter rule wins on both sides). No network
+/// access, ever.
 pub fn parse_board_url(input: &str) -> Result<Url, BoardUrlRefusal> {
     let parsed = parse_loopback_http(input).map_err(|refusal| match refusal {
         ShellUrlRefusal::Unparseable => BoardUrlRefusal::Unparseable,
@@ -225,7 +228,15 @@ pub fn parse_board_url(input: &str) -> Result<Url, BoardUrlRefusal> {
     if parsed.fragment().is_some() {
         return Err(BoardUrlRefusal::Fragment);
     }
-    if parsed.path() != "/" {
+    // Writer parity (REV-WIN LOW-3): the writer accepts exactly
+    // `http://127.0.0.1:<digits>` with at most one trailing `/` — literally.
+    // A parsed-path check alone would accept the disguises the url parser
+    // normalizes onto the origin (`/./`, WHATWG `\` → `/`); the literal gate
+    // refuses them and subsumes the origin path rule (an input that passes
+    // it always parses with path `/`).
+    let rest = &input["http://127.0.0.1:".len()..];
+    let port_spelling = rest.strip_suffix('/').unwrap_or(rest);
+    if port_spelling.is_empty() || !port_spelling.bytes().all(|byte| byte.is_ascii_digit()) {
         return Err(BoardUrlRefusal::Path);
     }
     Ok(parsed)
@@ -1152,10 +1163,39 @@ mod tests {
         ] {
             assert_eq!(parse_board_url(value), Err(expected), "{value}");
         }
-        // Dot segments normalize before the path rule, exactly like the
-        // shell address: the loader accepts what it lands on (the root),
-        // while the shell writer refuses the disguise literally.
-        assert!(parse_board_url("http://127.0.0.1:3196/./").is_ok());
+        // Writer parity (REV-WIN LOW-3): dot-segment disguises normalize
+        // to the origin, but the writer refuses them literally — so the
+        // loader refuses them too (the stricter rule wins on both sides).
+        assert_eq!(
+            parse_board_url("http://127.0.0.1:3196/./"),
+            Err(BoardUrlRefusal::Path)
+        );
+    }
+
+    /// Lane PF (REV-WIN LOW-3): literal-spelling parity with
+    /// `window_config.sh write --board-url`. The writer refuses `/./` and
+    /// backslash spellings literally; the url parser normalizes both onto
+    /// the exact origin (dot segments, and WHATWG `\` → `/`), so the loader
+    /// must refuse them too. The clean writer spellings stay accepted.
+    #[test]
+    fn board_url_parser_refuses_the_disguises_the_writer_refuses() {
+        for value in [
+            "http://127.0.0.1:3196/./",
+            "http://127.0.0.1:3196/.",
+            "http://127.0.0.1:3196\\",
+            "http://127.0.0.1:3196\\/",
+            "http://127.0.0.1:3196/\\",
+            "http://127.0.0.1:3196/./\\",
+        ] {
+            assert_eq!(
+                parse_board_url(value),
+                Err(BoardUrlRefusal::Path),
+                "{value}"
+            );
+        }
+        for value in ["http://127.0.0.1:3196", "http://127.0.0.1:3196/"] {
+            assert!(parse_board_url(value).is_ok(), "{value}");
+        }
     }
 
     /// Lane PF: the board refusal codes are distinct from each other, stay

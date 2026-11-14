@@ -188,8 +188,24 @@ fn create_main_window(
     Ok(window)
 }
 
+/// The Terminal callback's scheme family: the release identifier and every
+/// dev/Next variant (`com.mastermind.os`, `com.mastermind.os.next`,
+/// `com.mastermind.os.dev.t8`, ...), mirroring `fixed_config_dir`'s family
+/// rule — a non-empty variant of `[A-Za-z0-9.-]`. REV-WIN LOW-4: matching
+/// only the release scheme misrouted a Next-scheme terminal callback to
+/// the Auth0 owner.
 fn terminal_callback_owner(url: &url::Url) -> bool {
-    url.scheme() == "com.mastermind.os" && url.host_str() == Some("terminal")
+    let scheme = url.scheme();
+    let in_family = scheme == "com.mastermind.os"
+        || scheme
+            .strip_prefix("com.mastermind.os.")
+            .is_some_and(|variant| {
+                !variant.is_empty()
+                    && variant.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'-'
+                    })
+            });
+    in_family && url.host_str() == Some("terminal")
 }
 
 /// Panel repair M: `--check-window-config`. One judge: this mode runs the
@@ -410,6 +426,9 @@ fn main() {
                         MAIN_WINDOW_LABEL,
                         url.clone(),
                         helper.to_path_buf(),
+                        // REV-WIN HIGH-1: the watchdog bounces a board-origin
+                        // top-level URL back to the configured address.
+                        setup_board_url,
                     );
                 }
             }
@@ -654,6 +673,36 @@ mod readiness_tests {
             None => std::env::remove_var("HOME"),
         }
         fs::remove_dir_all(&home).ok();
+    }
+
+    /// REV-WIN LOW-4: the Terminal callback owner matches the whole scheme
+    /// family, so a Next-bundle (`com.mastermind.os.next`) terminal callback
+    /// routes to the Terminal owner, not Auth0 — while lookalike schemes
+    /// and hosts stay out.
+    #[test]
+    fn terminal_callback_owner_matches_the_next_scheme_family() {
+        for value in [
+            "com.mastermind.os.next://terminal/callback?code=synthetic",
+            "com.mastermind.os.dev.t8://terminal/callback?code=synthetic",
+            "com.mastermind.os.dev-t8://terminal/wrong-path#rejected",
+        ] {
+            assert!(
+                terminal_callback_owner(&url::Url::parse(value).unwrap()),
+                "{value}"
+            );
+        }
+        for value in [
+            "com.mastermind.os.next://oauth/callback?code=synthetic",
+            "com.mastermind.os.next://terminal.evil/callback",
+            "com.mastermind.osx://terminal/callback",
+            "com.mastermind.os+evil://terminal/callback",
+            "https://terminal/callback",
+        ] {
+            assert!(
+                !terminal_callback_owner(&url::Url::parse(value).unwrap()),
+                "{value}"
+            );
+        }
     }
 
     #[test]

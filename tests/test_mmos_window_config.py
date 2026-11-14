@@ -751,6 +751,26 @@ class TestBoardUrl:
                 assert needle not in result.stderr, f"refusal echoed the value: {needle}"
                 assert needle not in result.stdout, bad
 
+    def test_board_url_writer_refuses_dot_segment_and_backslash_spellings(self):
+        # REV-WIN LOW-3 parity: these spellings normalize to the exact
+        # origin in a URL parser (dot segments, WHATWG backslash → '/'),
+        # but the writer refuses them literally — and the Rust loader
+        # (parse_board_url) refuses them too, so both sides accept exactly
+        # the same spellings: the stricter rule wins.
+        with tempfile.TemporaryDirectory() as tmp:
+            for bad in [
+                "http://127.0.0.1:3196/./",
+                "http://127.0.0.1:3196/.",
+                "http://127.0.0.1:3196\\",
+                "http://127.0.0.1:3196/\\",
+            ]:
+                result = run_tool(
+                    "write", "--bundle", "next", "--url", self.ADDR,
+                    "--board-url", bad, env_extra={"HOME": tmp}, check=False,
+                )
+                assert result.returncode != 0, bad
+            assert not (self._next_dir(tmp) / "board-url").exists()
+
     def test_board_url_loader_and_writer_share_the_name(self):
         # Source contract: the Rust loader and the shell writer agree on the
         # file name and the board has its own parser, like the address.

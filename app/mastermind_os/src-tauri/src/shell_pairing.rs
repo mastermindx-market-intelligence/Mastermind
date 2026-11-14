@@ -799,6 +799,11 @@ pub(crate) enum Action {
     LoadMinted(Url),
     /// The exchange finished: return the window to the configured address.
     ReturnToThread,
+    /// Lane PF (REV-WIN HIGH-1): board content took the top frame: replace
+    /// the board document with the configured address. Not a pairing
+    /// failure — no record is written and nothing is minted; the core
+    /// re-armed when it decided the bounce.
+    BounceToOrigin,
     /// A session is verified: log `PAIRING.DONE` and re-arm.
     Verified,
     /// Show the failure page for this input-free reason, log once, re-arm.
@@ -815,6 +820,11 @@ pub struct WatchdogCore {
     /// Whether the rate-limited failure page has already been shown for the
     /// current blocked episode (one page per episode).
     rate_limit_shown: bool,
+    /// Lane PF (REV-WIN HIGH-1): the optional board origin from the same
+    /// trusted config the navigation allowlist reads. A top-level URL on
+    /// it is board content owning the window, never a pairing state (see
+    /// [`Self::observe`]).
+    board_origin: Option<Url>,
 }
 
 impl WatchdogCore {
@@ -824,7 +834,15 @@ impl WatchdogCore {
             generation,
             mints: MintPolicy::new(),
             rate_limit_shown: false,
+            board_origin: None,
         }
+    }
+
+    /// Lane PF (REV-WIN HIGH-1): configure the optional board origin the
+    /// watchdog bounces off. `None` keeps the pre-PF behaviour exactly.
+    pub fn with_board_origin(mut self, board_origin: Option<Url>) -> Self {
+        self.board_origin = board_origin;
+        self
     }
 
     pub fn phase_is_armed(&self) -> bool {
@@ -852,6 +870,21 @@ impl WatchdogCore {
             self.phase = Phase::Armed;
             return Action::Wait;
         };
+        // Lane PF (REV-WIN HIGH-1): the allowlist admits the board origin
+        // for main frames too (wry's callback carries no frame identity),
+        // so board content can take the top frame. That is a takeover,
+        // never a pairing state: in every phase, bounce the window back to
+        // the configured address — one bounce per poll, no failure record,
+        // no mint — and re-arm, dropping any minted address an interrupted
+        // exchange was holding. The shell origin wins when the board is
+        // configured equal to it: that equality is allowed and behaves
+        // exactly as without a board.
+        if self.board_origin.as_ref().is_some_and(|board| {
+            same_origin(current, board) && !same_origin(current, original)
+        }) {
+            self.phase = Phase::Armed;
+            return Action::BounceToOrigin;
+        }
         if self.phase_is_armed() {
             if !needs_pairing(current, original) {
                 // Off the pairing page with budget available again: a fresh
@@ -927,12 +960,25 @@ impl WatchdogCore {
 /// configured origin. The return to the configured address uses
 /// `location.replace`, so the spent one-time address is replaced in the back
 /// list instead of remaining behind the person (panel repair E).
-pub fn spawn_watchdog(app: tauri::AppHandle, window_label: &str, original: Url, helper: PathBuf) {
+///
+/// Lane PF (REV-WIN HIGH-1): `board_origin` is the optional board origin
+/// the navigation allowlist admits. wry's callback carries no frame
+/// identity, so board content can take the top frame; when the polled
+/// top-level URL is on the board origin (and not the shell origin), the
+/// watchdog replaces it with the configured address — one bounce per poll,
+/// in every phase, with no failure record and no mint.
+pub fn spawn_watchdog(
+    app: tauri::AppHandle,
+    window_label: &str,
+    original: Url,
+    helper: PathBuf,
+    board_origin: Option<Url>,
+) {
     let window_label = window_label.to_string();
     std::thread::spawn(move || {
         use tauri::Manager;
         let blank = Url::parse(BLANK_PAGE).expect("blank page url must parse");
-        let mut core = WatchdogCore::new(window_generation());
+        let mut core = WatchdogCore::new(window_generation()).with_board_origin(board_origin);
         loop {
             std::thread::sleep(POLL_INTERVAL);
             let generation = window_generation();
@@ -1003,6 +1049,23 @@ pub fn spawn_watchdog(app: tauri::AppHandle, window_label: &str, original: Url, 
                         continue;
                     }
                     core.verifying();
+                }
+                Action::BounceToOrigin => {
+                    // The same location.replace mechanism ReturnToThread
+                    // uses: the board document is replaced, not pushed onto
+                    // history, so Back cannot walk into it. A bounce is not
+                    // a pairing failure: nothing is logged or minted, and
+                    // the core already re-armed. If the script cannot run,
+                    // fall back to a plain navigation; if that fails too,
+                    // the next poll bounces again.
+                    let script = format!(
+                        "location.replace({})",
+                        serde_json::to_string(original.as_str())
+                            .expect("thread address serializes as json")
+                    );
+                    if window.eval(&script).is_err() {
+                        let _ = window.navigate(original.clone());
+                    }
                 }
                 Action::Verified => {
                     log_pairing_done();
@@ -1469,6 +1532,198 @@ mod tests {
                 &original,
                 t0 + MINT_WINDOW + Duration::from_secs(2)
             ),
+            Action::Mint
+        ));
+    }
+
+    /// Lane PF (REV-WIN HIGH-1a): Armed must not stay on the board. A
+    /// top-level URL on the configured board origin is board content owning
+    /// the window (wry's callback carries no frame identity, so the
+    /// allowlist admits it for main frames too): the watchdog bounces it
+    /// back to the configured address. A bounce is not a pairing failure —
+    /// no record, no mint — and it never consumes the mint budget.
+    #[test]
+    fn watchdog_bounces_a_board_origin_top_url_while_armed() {
+        let original = url("http://127.0.0.1:3780/env-1/thread-1");
+        let board = url("http://127.0.0.1:3196");
+        let now = Instant::now();
+        let mut core = WatchdogCore::new(1).with_board_origin(Some(board.clone()));
+        for value in [
+            "http://127.0.0.1:3196/",
+            "http://127.0.0.1:3196/board",
+            "http://127.0.0.1:3196/board?x=1#f",
+        ] {
+            assert!(
+                matches!(
+                    core.observe(1, Some(&url(value)), &original, now),
+                    Action::BounceToOrigin
+                ),
+                "{value} must bounce"
+            );
+            assert!(core.phase_is_armed(), "a bounce keeps the watchdog armed");
+        }
+        // More bounces than the whole mint budget: none of them may count
+        // as a mint, so a real pairing page afterwards still mints.
+        for _ in 0..MINT_LIMIT + 1 {
+            assert!(matches!(
+                core.observe(1, Some(&url("http://127.0.0.1:3196/")), &original, now),
+                Action::BounceToOrigin
+            ));
+        }
+        assert!(matches!(
+            core.observe(1, Some(&url("http://127.0.0.1:3780/pair")), &original, now),
+            Action::Mint
+        ));
+    }
+
+    /// Lane PF (REV-WIN HIGH-1b): Verifying must not run to ExchangeTimeout
+    /// because of a board-origin top URL. The board URL bounces — both in a
+    /// fresh Verifying phase and in one already past its deadline — and the
+    /// bounce writes no failure and never enters Verifying itself, so it
+    /// cannot manufacture a false PAIRING.DONE either.
+    #[test]
+    fn watchdog_bounces_a_board_origin_top_url_while_verifying() {
+        let original = url("http://127.0.0.1:3780/env-1/thread-1");
+        let board = url("http://127.0.0.1:3196");
+        let board_top = url("http://127.0.0.1:3196/board");
+        let now = Instant::now();
+        let mut core = WatchdogCore::new(1).with_board_origin(Some(board.clone()));
+
+        // A fresh Verifying phase: the board URL bounces instead of waiting
+        // toward the exchange deadline.
+        core.verifying();
+        assert!(matches!(
+            core.observe(1, Some(&board_top), &original, now),
+            Action::BounceToOrigin
+        ));
+        assert!(core.phase_is_armed());
+
+        // A Verifying phase already past its deadline: the board URL still
+        // bounces — no ExchangeTimeout failure is counted from it.
+        core.phase = Phase::Verifying {
+            since: now - EXCHANGE_TIMEOUT - Duration::from_secs(1),
+        };
+        assert!(matches!(
+            core.observe(1, Some(&board_top), &original, now),
+            Action::BounceToOrigin
+        ));
+        assert!(core.phase_is_armed());
+        // While the board keeps the top frame the watchdog keeps bouncing,
+        // never failing...
+        for _ in 0..3 {
+            assert!(matches!(
+                core.observe(1, Some(&board_top), &original, now),
+                Action::BounceToOrigin
+            ));
+        }
+        // ...and a return to the configured address is an Armed wait, not a
+        // false Verified: the bounce never enters the Verifying phase.
+        assert!(matches!(
+            core.observe(1, Some(&original), &original, now),
+            Action::Wait
+        ));
+    }
+
+    /// Lane PF (REV-WIN HIGH-1): the bounce applies in every phase — a
+    /// board-origin top URL during Blanking or Awaiting drops the minted
+    /// address and re-arms instead of waiting or timing out.
+    #[test]
+    fn watchdog_bounces_a_board_origin_top_url_in_every_phase() {
+        let original = url("http://127.0.0.1:3780/env-1/thread-1");
+        let board = url("http://127.0.0.1:3196");
+        let minted = url("http://127.0.0.1:3780/pair#token=synthetic0123456789");
+        let board_top = url("http://127.0.0.1:3196/board");
+        let now = Instant::now();
+        let stale = now - EXCHANGE_TIMEOUT - Duration::from_secs(1);
+        let phases = [
+            Phase::Armed,
+            Phase::Blanking { pairing_url: minted.clone(), since: now },
+            Phase::Awaiting { since: now },
+            Phase::Verifying { since: now },
+            Phase::Blanking { pairing_url: minted.clone(), since: stale },
+            Phase::Awaiting { since: stale },
+            Phase::Verifying { since: stale },
+        ];
+        for phase in phases {
+            let mut core = WatchdogCore::new(1).with_board_origin(Some(board.clone()));
+            core.phase = phase;
+            assert!(
+                matches!(
+                    core.observe(1, Some(&board_top), &original, now),
+                    Action::BounceToOrigin
+                ),
+                "every phase bounces a board-origin top URL"
+            );
+            assert!(core.phase_is_armed(), "a bounce re-arms");
+        }
+    }
+
+    /// Lane PF (REV-WIN HIGH-1c): with no board origin configured the
+    /// watchdog behaves exactly as before — a board-port URL is just a
+    /// foreign address: Armed waits, a stale Verifying phase times out,
+    /// and the pairing page still mints.
+    #[test]
+    fn watchdog_without_a_board_origin_is_unchanged() {
+        let original = url("http://127.0.0.1:3780/env-1/thread-1");
+        let board_top = url("http://127.0.0.1:3196/board");
+        let now = Instant::now();
+        for core in [
+            WatchdogCore::new(1),
+            WatchdogCore::new(1).with_board_origin(None),
+        ] {
+            let mut core = core;
+            assert!(matches!(
+                core.observe(1, Some(&board_top), &original, now),
+                Action::Wait
+            ));
+            core.phase = Phase::Verifying {
+                since: now - EXCHANGE_TIMEOUT - Duration::from_secs(1),
+            };
+            assert!(matches!(
+                core.observe(1, Some(&board_top), &original, now),
+                Action::Fail(PairingFailure::ExchangeTimeout)
+            ));
+            core.rearm();
+            assert!(matches!(
+                core.observe(1, Some(&url("http://127.0.0.1:3780/pair")), &original, now),
+                Action::Mint
+            ));
+        }
+    }
+
+    /// Lane PF (REV-WIN HIGH-1d): the bounce needs the exact board origin.
+    /// A URL that only shares the host with a different port is not the
+    /// board, nor is a different scheme or host spelling; and when the
+    /// board is configured equal to the shell origin (an allowed equality),
+    /// the shell behaviour wins — no bounce, pairing unchanged.
+    #[test]
+    fn watchdog_board_bounce_requires_the_exact_board_origin() {
+        let original = url("http://127.0.0.1:3780/env-1/thread-1");
+        let board = url("http://127.0.0.1:3196");
+        let now = Instant::now();
+        let mut core = WatchdogCore::new(1).with_board_origin(Some(board.clone()));
+        for value in [
+            "http://127.0.0.1:3197/board",
+            "https://127.0.0.1:3196/board",
+            "http://localhost:3196/board",
+        ] {
+            assert!(
+                matches!(
+                    core.observe(1, Some(&url(value)), &original, now),
+                    Action::Wait
+                ),
+                "{value} is not the board origin and must not bounce"
+            );
+        }
+        // Board == shell origin: the configured address and its pairing
+        // page behave exactly as without a board (no bounce, mint intact).
+        let mut same = WatchdogCore::new(1).with_board_origin(Some(original.clone()));
+        assert!(matches!(
+            same.observe(1, Some(&original), &original, now),
+            Action::Wait
+        ));
+        assert!(matches!(
+            same.observe(1, Some(&url("http://127.0.0.1:3780/pair")), &original, now),
             Action::Mint
         ));
     }
