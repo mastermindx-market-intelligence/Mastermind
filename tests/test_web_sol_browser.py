@@ -50,7 +50,7 @@ def request(action="click", **changes):
 def test_closed_actions_round_trip(action):
     params = {"open":{"url":"https://example.test/"}, "navigate":{"url":"http://localhost:8080/page"},
         "fill":{"text":"Hello\nworld"}, "select":{"value":"one"}, "press":{"key":"Enter"},
-        "scroll":{"x":0,"y":700}, "read":{"offset":0},
+        "scroll":{"x":0,"y":700}, "read":{"offset":0}, "menu":{"path":["Thinking","Extra High"]},
         # Advanced actions carry their payload in params; each needs its own
         # minimal valid shape to round-trip validate_window.
         "cdp":{"method":"Page.enable"}, "evaluate":{"expression":"1+1"},

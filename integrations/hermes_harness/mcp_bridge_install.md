@@ -190,9 +190,9 @@ Check after every step; every step has a rollback.
    Check: `git rev-parse HEAD` = `$NEW`; `shasum -a 256` of the changed runtime
    files equals `7e801a71ad620688096a636754550ed72cfc1da5b367e933d4d83e43056ddb97`
    (`web_sol_browser_protocol.py`),
-   `4ff2113f4eebf9abbfc4aa847a1264f95e01d549459c9b08bae1d6a9460db67f`
+   `f1d78a60343c113ea01fef399ec93cd0b6da461c7b944bf932524cc4f4788d18`
    (`browser_bridge.py`),
-   `08c4066074d7ac5cbc21943b8bdb4d33262b2291121c30ed493c60c8fd516edb`
+   `c34bf7a30383a6eab3079259e6d9333d4dc8be179565b7a104d86860308cdf55`
    (`browser_tool_schema.json`); `background.js` pins
    `EXPECTED_CAPABILITY_DIGEST = "1c40ec98…b6f60d40"`. Then:
 
