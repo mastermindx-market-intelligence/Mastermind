@@ -1,5 +1,7 @@
 """Finite predeclared counterfactuals, not an optimization search space."""
 from dataclasses import replace
+import numpy as np
+import pandas as pd
 from .portfolio import Policy
 
 
@@ -49,6 +51,23 @@ def data_for_policy(events,predictions,policy):
     e=events[events.common_risk_available].copy()
     if policy.name in MODEL_ARMS or policy.name.endswith('_model_common'):
         if predictions.empty:return e.iloc[:0].assign(expected_net_payoff=float('nan'),p_stop=float('nan'))
+        expected={'price','risk','interaction','frequency'}
+        required={'event_id','ticker','origin','model','fit_origin','latest_training_label_end',
+                  'p_stop','p_target','p_timeout','expected_net_payoff'}
+        if not required.issubset(predictions) or not set(predictions.model).issubset(expected):
+            raise ValueError('unknown conditional model or missing prediction lineage')
+        if predictions.duplicated(['event_id','model']).any():
+            raise ValueError('duplicate conditional prediction identity')
+        clocks=predictions[['origin','fit_origin','latest_training_label_end']].apply(pd.to_datetime,errors='raise')
+        if clocks.isna().any().any() or (clocks.fit_origin>clocks.origin).any() or (clocks.latest_training_label_end>clocks.fit_origin).any():
+            raise ValueError('conditional prediction contains future or unknown fit clocks')
+        prob=predictions[['p_stop','p_target','p_timeout']].to_numpy(float)
+        if not np.isfinite(prob).all() or ((prob<0)|(prob>1)).any() or not np.allclose(prob.sum(axis=1),1.,atol=1e-9):
+            raise ValueError('invalid outcome probability distribution')
+        lineage=predictions[['event_id','ticker','origin']].drop_duplicates().merge(
+            events[['event_id','ticker','origin']],on='event_id',how='left',suffixes=('_p','_e'),validate='many_to_one')
+        if lineage.ticker_e.isna().any() or not lineage.ticker_p.eq(lineage.ticker_e).all() or not lineage.origin_p.eq(lineage.origin_e).all():
+            raise ValueError('prediction is not bound to the same observed opportunity')
         counts=predictions.groupby('event_id').model.nunique()
         common=set(counts[counts==4].index)
         e=e[e.event_id.isin(common)].copy()
