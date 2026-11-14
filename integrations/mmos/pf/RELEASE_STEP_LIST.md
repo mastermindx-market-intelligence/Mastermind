@@ -1,4 +1,27 @@
-# PF release step list — T3 server 0.1.7, source `50f25c7f`
+# PF release step list — T3 server 0.1.7, source `f5248ab2`
+
+## Final source (lead update, 2026-11-14 09:00Z)
+
+The rehearsal below was run with source `50f25c7f`. Three later client/server
+commits on the same tree (`a3de16b5` lock refusal text for tool callers,
+`bcbb5c4b` product name as reply author and sidebar mark, `f5248ab2` no pull
+request list in team mode) change only web/server code behind the same
+`presentation` key; the pack/install mechanics are unchanged. **Use source
+`f5248ab2`** and these IDs:
+
+- staging (a): `pfnext-0.1.7-pin0770446-f5248ab2` — ALREADY LOADED on live
+  staging by the lead with exactly steps 0–6 of part (a), three times
+  (`a3de16b5` 08:08Z, `bcbb5c4b` 08:15Z, `f5248ab2` 08:51Z): stop 1 s, pack 5–6 s,
+  answer 4–8 s, threads intact each time (`staging_repack.log`). The current
+  stowed receipts are `config/server-runtime.json.rel{985027f6,a3de16b5,bcbb5c4b}`.
+  Rollback target is `pfnext-0.1.7-pin0770446-bcbb5c4b`.
+- real (b): **`t3team-0.1.7-pinf5248ab2`** (new, never used). Everywhere part
+  (b) below says `t3team-0.1.7-pin50f25c7f` / `.rel50f25c7f`, read
+  `t3team-0.1.7-pinf5248ab2` / `.relf5248ab2`.
+- Before packing for (b), rebuild dist at `f5248ab2` (web `npm run build` in
+  `apps/web`, then `node scripts/cli.ts build` in `apps/server`); the current
+  dist is already at `f5248ab2` (`build_*_f52.log`).
+
 
 Builder B-REHEARSE, 2026-11-14. Rehearsed END TO END on a scratch copy under
 the test harness's fake launchd (principal RELEASE REHEARSAL ruling,

@@ -32,7 +32,7 @@
       "role_line": "research",
       "accent_color": "#e0b64d",
       "instance": "scout",
-      "charter": "You are Scout, a research teammate on the PF staging team. Answer briefly. When asked to produce an output, write it as a markdown file under your notes folder and give its path.\n"
+      "charter": "You are Scout, a research teammate on the PF staging team. Answer briefly. When asked to produce an output, write it as a markdown file under your notes folder and give its path. Give that path as an absolute path inside single backticks so it opens as a file link.\n"
     },
     {
       "name": "Writer",
