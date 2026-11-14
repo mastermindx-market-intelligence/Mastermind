@@ -86,6 +86,7 @@
     security: ['Security', '安全'], login_method: ['Login method', '登录方式'],
     member_since: ['Member since', '注册于'], last_signin: ['Last sign-in', '上次登录'],
     user_id: ['User ID', '用户 ID'], copy: ['Copy', '复制'], copied: ['Copied', '已复制'],
+    copying: ['Copying…', '复制中…'], copy_failed: ['Copy failed', '复制失败'],
     sign_out: ['Sign out', '退出登录'], sign_out_all: ['Sign out everywhere', '退出所有设备'],
     danger: ['Danger zone', '危险区域'], delete_acct: ['Delete account', '删除账户'],
     delete_warn: ['This permanently deletes your account and data.', '这将永久删除你的账户及数据。'],
@@ -472,14 +473,37 @@
       else setMsg('mmacc-signin-msg', T('link_sent'), 'ok');
     }).catch(function () { busy(btn, false); setMsg('mmacc-signin-msg', T('err'), 'bad'); });
   }
+  var _copyGeneration = 0;
   function copyId() {
-    var id = state.acct && state.acct.id; if (!id) return;
-    var done = function () {
-      var b = _root && _root.querySelector('[data-act="copy-id"]'); if (!b) return;
-      var t = b.textContent; b.textContent = T('copied');
-      setTimeout(function () { b.textContent = t; }, 1400);
-    };
-    if (navigator.clipboard) navigator.clipboard.writeText(id).then(done, done); else done();
+    var id = state.acct && state.acct.id;
+    var root = _root;
+    var button = root && root.querySelector('[data-act="copy-id"]');
+    if (!id || !button) return;
+    var generation = ++_copyGeneration;
+    function current() {
+      return generation === _copyGeneration && _root === root &&
+        state.acct && state.acct.id === id &&
+        root.querySelector('[data-act="copy-id"]') === button;
+    }
+    function finish(ok) {
+      if (!current()) return;
+      button.disabled = false;
+      button.textContent = T(ok ? 'copied' : 'copy_failed');
+      setTimeout(function () {
+        if (current()) button.textContent = T('copy');
+      }, 1400);
+    }
+    button.disabled = true;
+    button.textContent = T('copying');
+    try {
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+        finish(false);
+        return;
+      }
+      Promise.resolve(navigator.clipboard.writeText(id)).then(function () {
+        finish(true);
+      }, function () { finish(false); });
+    } catch (_) { finish(false); }
   }
   function clearSharedCookie() {
     try {
