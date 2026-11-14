@@ -2303,3 +2303,27 @@ An independent review of the next two items (scratch removal, floor guard) is ru
 2. The principal places the new app and loads its staging server, then asks the Chairman to judge it.
 3. Janitor round 6: review, repairs, installs.
 4. Waiting on the Chairman, none of which blocks item 1: the Grok Bot sitting, five extension reloads, a restart of the Mac, the linked-environment switch.
+
+## 62. Amendment, 2026-11-14 07:45 UTC: the new app is built; the janitor is installed and proven
+
+**Product (lane PF).** The face, the three places and the provider lock are in the patched client and reviewed. A staging team server and a development board are running. The app "Mastermind OS Next" is built and its window config is written. It has not been opened yet. PF still owes: one journey on staging, the review of the window's board allowlist, and the rehearsed step list. A board run on staging stopped with a reconciliation hold after the carrier exited; PF is diagnosing it.
+
+**Janitor.** The one review of round 6 found no blocking defect. Installed by the principal, each with a receipt and an undo:
+
+- The Linux hygiene program, revision 7, on the four hosts. Its new /tmp pass is not switched on.
+- The rulebook, the session prompt and the holds file on the Mac.
+- The breach trigger on the Mac, loaded. It checks free space every five minutes and costs nothing while the disk is healthy. Below 100 GiB free it starts one janitor session, at most once an hour.
+- The receiver is a scheduled task in T3 that starts a new session per call.
+
+One deliberate firing proved the whole path: trigger, relay, new session, first check, one line, stop. Nothing was scanned or removed.
+
+The sparse-checkout step is not installed. It changes a setting in the Chairman's T3 app, so it waits for his word.
+
+**Path decision.** The frozen prompt names the trigger under the storage-cleanup folder; the installer places it in its own folder. The prompt was kept and one symlink joins the two names.
+
+**Next, in order.**
+
+1. PF finishes the journey and the step list. The principal reads them, places the app and tells the Chairman it is ready to open.
+2. The next bridge release (lane BR2): set the effort level in a menu first, as Prophet asked.
+3. Deputy tracks the first unattended runs of the two host programs.
+4. Waiting on the Chairman, none of which blocks item 1: the sparse step, the Grok Bot sitting, five extension reloads, a restart of the Mac, the linked-environment switch.
