@@ -158,8 +158,11 @@ path.write_text(json.dumps(data, indent=2) + "\\n")
     def test_existing_empty_env_browser_entry_is_preserved(self):
         p = self.homes[0] / ".claude.json"
         config = json.loads(p.read_text())
-        existing = {"type": "stdio", "command": str(self.home / ".local/share/mastermind-runtime/node/bin/node"),
-                    "args": [str(self.t3 / "mcp/mmx-browser/server.js")], "env": {}}
+        # The setup owner canonicalizes its home first. On macOS tempfile's
+        # /var path resolves through /private/var; test empty-env preservation,
+        # not an unrelated noncanonical-command conflict.
+        existing = {"type": "stdio", "command": str((self.home / ".local/share/mastermind-runtime/node/bin/node").resolve()),
+                    "args": [str((self.t3 / "mcp/mmx-browser/server.js").resolve())], "env": {}}
         config["mcpServers"]["mmx-browser"] = existing
         self.write_json(p, config)
         plan = self.plan()

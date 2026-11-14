@@ -46,7 +46,7 @@ class RuntimeReplyEventResolver:
         self._audience_owner = audience_owner
         self._owner = owner
         self._reader = NativeReplyReader(owner, socket_path=owner.socket_path,
-            service_call=owner.service_call, clock=clock)
+            service_call=owner.service_call, clock=clock, t3_replies=owner.t3_replies)
 
     def current(self, principal):
         if type(principal) is RetainedReplyAudience:
@@ -63,6 +63,11 @@ class RuntimeReplyEventResolver:
     async def resolve(self, principal, request_ref):
         try:
             projection = self.current(principal)
+            from .t3_reply_events import is_t3_request_ref
+            if is_t3_request_ref(request_ref):
+                if self._owner.t3_replies is None:
+                    raise ReplyDeliveryUnavailable("native T3 return source is not enrolled")
+                return await self._owner.t3_replies.project(projection, request_ref)
             event = self._owner.runtime.events.get_event_by_command_id(request_ref)
             if event is None:
                 raise ValueError

@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import signal
 import sys
 
 from .t3_cli_transport import _decode
@@ -31,12 +32,40 @@ async def execute(profile_path: str, profile_sha256: str, frame: dict) -> dict:
     profile = read_profile(profile_path, profile_sha256)
     owner = NativeDotFleetOwner(profile,
         current_profile=lambda: read_profile(profile_path, profile_sha256))
-    result = await T3DotTools(owner).call(frame["principal_key"], frame["tool"], frame["arguments"])
+    try:
+        result = await T3DotTools(owner).call(frame["principal_key"], frame["tool"], frame["arguments"])
+    except asyncio.CancelledError:
+        modifying = any(tool["name"] == frame["tool"] and not tool["annotations"]["readOnlyHint"] for tool in TOOLS)
+        status = "EFFECT_UNKNOWN" if modifying and owner.runner.last_effect is not None else "UNAVAILABLE"
+        result = T3DotTools._failure(status, "OWNED_PORT_CANCELLED", operation=frame["tool"],
+            operation_id=frame["arguments"].get("operation_id"), environment_id=frame["arguments"].get("environment_id"),
+            project_id=frame["arguments"].get("project_id"), thread_id=frame["arguments"].get("thread_id"))
     if result["status"] == "EFFECT_UNKNOWN":
         result["native_helper"] = owner.runner.last_effect
         result["original_connection_id"] = profile["connection_id"]
         result["local_environment_id"] = profile["local_environment_id"]
     return result
+
+
+async def execute_with_shutdown(profile_path, profile_sha256, frame):
+    """Cancel this invocation on SIGTERM so its existing runner cleans its helper.
+
+    Native run termination is NOT inferred from helper cancellation. The fixed
+    gateway still retains effect uncertainty if this process cannot return.
+    """
+    loop = asyncio.get_running_loop()
+    task = asyncio.create_task(execute(profile_path, profile_sha256, frame))
+    installed = False
+    try:
+        try:
+            loop.add_signal_handler(signal.SIGTERM, task.cancel)
+            installed = True
+        except (NotImplementedError, RuntimeError):
+            pass
+        return await task
+    finally:
+        if installed:
+            loop.remove_signal_handler(signal.SIGTERM)
 
 
 def main(argv=None):
@@ -55,7 +84,7 @@ def main(argv=None):
     try:
         raw = sys.stdin.buffer.read(MAX_BYTES + 1)
         frame = _decode(raw.decode("utf-8"), MAX_BYTES)
-        result = asyncio.run(execute(args.profile, args.profile_sha256, frame))
+        result = asyncio.run(execute_with_shutdown(args.profile, args.profile_sha256, frame))
     except (ValueError, TypeError, OSError, UnicodeError, Unavailable, Rejected):
         # Input/profile failures happen before execute dispatches a native action.
         result = T3DotTools._failure("UNAVAILABLE", "INSTALLED_PROFILE_OR_INPUT_UNAVAILABLE")

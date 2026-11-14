@@ -11,7 +11,7 @@ export const T3_CONTROL_NAMES = new Set(T3_CONTROL_TOOLS.map(tool => tool.name))
 const BY_NAME = new Map(T3_CONTROL_TOOLS.map(tool => [tool.name, tool]));
 const MAX_BYTES = 256 * 1024;
 const SHA = /^[0-9a-f]{64}$/;
-const PRINCIPAL = /^p:tunnel:[a-z0-9][a-z0-9_-]{0,63}$/;
+const PRINCIPAL = /^p:tunnel:[a-z0-9][a-z0-9._-]{0,63}$/;
 const RESOLVED = new WeakSet();
 const STATUSES = new Set(['OBSERVED', 'EFFECT_UNKNOWN', 'REJECTED', 'CONFLICT', 'UNAVAILABLE', 'INVALID_ARGUMENT']);
 

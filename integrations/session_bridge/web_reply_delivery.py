@@ -118,9 +118,21 @@ def _validated_event(event: Mapping[str, Any], request_ref: str) -> bytes:
         raise ValueError("event data is not the fixed read-only projection")
     for key in ("request_ref", "message_key", "in_reply_to", "read_ref"):
         _identifier(data[key])
+    # T3 is a separate exact original-run source, never a forged Dialogue reply.
+    from .t3_reply_events import is_t3_request_ref, is_t3_read_ref, REQUEST_PREFIX, READ_PREFIX
+    t3 = is_t3_request_ref(request_ref)
+    source_qualified = (
+        is_t3_read_ref(data["read_ref"])
+        and data["read_ref"][len(READ_PREFIX):] == request_ref[len(REQUEST_PREFIX):]
+        and data["in_reply_to"] == request_ref
+        and re.fullmatch(r"t3-native-reply-[0-9a-f]{64}", data["message_key"]) is not None
+    ) if t3 else (
+        data["message_key"].startswith("asd-native-reply-")
+        and data["in_reply_to"].startswith("asd-")
+        and not is_t3_read_ref(data["read_ref"])
+    )
     if (data["request_ref"] != request_ref
-            or not data["message_key"].startswith("asd-native-reply-")
-            or not data["in_reply_to"].startswith("asd-")
+            or not source_qualified
             or data["reply_committed"] is not True
             or data["parent_consumed"] is not False
             or type(data["summary"]) is not str

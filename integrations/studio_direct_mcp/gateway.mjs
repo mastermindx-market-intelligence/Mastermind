@@ -423,6 +423,15 @@ export function resolveConfig(partial = {}) {
   cfg.paperDesign = resolvePaperDesignConfig(cfg.paperDesign);
   cfg.fleetStatus = resolveFleetStatusConfig(cfg.fleetStatus);
   cfg.t3Control = resolveT3ControlConfig(cfg.t3Control);
+  if (cfg.t3Only !== undefined && typeof cfg.t3Only !== 'boolean') {
+    throw new TypeError('config.t3Only must be boolean when supplied');
+  }
+  cfg.t3Only = cfg.t3Only === true;
+  if (cfg.t3Only && (!cfg.t3Control || cfg.fabricOnly || cfg.modernFabricProtocol ||
+      cfg.gitPublish || cfg.repositoryWorkspaces || cfg.commissionPublication ||
+      cfg.paperDesign || cfg.fleetStatus || cfg.originalCollection || cfg.publicUrl)) {
+    throw new TypeError('T3-only gateway requires its exact private T3 profile and refuses unrelated host capabilities');
+  }
   if (cfg.fabricOnly === true && (cfg.gitPublish || cfg.repositoryWorkspaces ||
       cfg.commissionPublication || cfg.paperDesign || cfg.fleetStatus || cfg.t3Control)) {
     throw new TypeError("Fabric-only gateway refuses unrelated host capabilities");
@@ -1091,8 +1100,9 @@ class GatewaySession {
       { name: 'private-studio-mcp-gateway', version: GATEWAY_VERSION },
       {
         capabilities: { tools: { listChanged: false }, resources: {}, prompts: {} },
-        instructions:
-          'HTTP gateway in front of the local Desktop Commander stdio server. ' +
+        instructions: this.cfg.t3Only
+          ? 'Authenticated T3-only view of the existing Studio gateway. Only approved native T3 tasks and reads, studio_ping, and original output paging are exposed. No shell, SSH, general filesystem, provider credentials, permission approvals or Desktop Commander proxy. A platform refusal cannot be replayed through another tool or account. Native receipts, completion, notification receipt and parent acceptance are distinct.'
+          : 'HTTP gateway in front of the local Desktop Commander stdio server. ' +
           'studio_ping, studio_output_page, configured studio_fleet_status, configured studio_git_* tools, and configured paper_* design tools are gateway-owned. ' +
           'studio_output_page reads retained output without repeating the original action. ' +
           'Paper design tools use the host-pinned guarded Paper adapter; Desktop Commander is not on their dispatch path. ' +
@@ -1115,6 +1125,10 @@ class GatewaySession {
     const proxyCatalog = (schema, capability, method, emptyResult) => {
       server.setRequestHandler(schema, async (request, extra) =>
         session.withBackendSlot(async () => {
+          if (session.cfg.t3Only) {
+            if (emptyResult) return { ...emptyResult };
+            throw new McpError(ErrorCode.InvalidParams, 'T3-only view exposes no backend resources');
+          }
           const backend = await session.ensureBackend();
           if (!backend.client.getServerCapabilities()?.[capability]) {
             if (emptyResult) return { ...emptyResult };
@@ -1137,6 +1151,13 @@ class GatewaySession {
 
   async listTools(request, extra) {
     return this.withBackendSlot(async () => {
+      if (this.cfg.t3Only) {
+        const tools = [{ ...STUDIO_PING_TOOL }, { ...OUTPUT_PAGE_TOOL }];
+        try { tools.push(...await this.t3Controller.tools()); } catch {}
+        for (const tool of tools) this.rememberToolAnnotations(tool);
+        this.bumpTool(LIST_TOOLS_KEY);
+        return { tools };
+      }
       const backend = await this.ensureBackend();
       const result = await backend.client.listTools(request.params ?? {}, {
         timeout: this.cfg.requestTimeoutMs,
@@ -1192,6 +1213,10 @@ class GatewaySession {
 
   async callTool(request, extra) {
     const name = request?.params?.name;
+    if (this.cfg.t3Only && !T3_CONTROL_NAMES.has(name) &&
+        name !== STUDIO_PING_TOOL.name && name !== OUTPUT_PAGE_TOOL.name) {
+      throw new McpError(ErrorCode.InvalidParams, 'T3-only view refuses unrelated host tools');
+    }
     const requestLog = fabricRequestLogFields(name, request?.params?.arguments);
     const started = Date.now();
 
@@ -1216,6 +1241,11 @@ class GatewaySession {
     }
 
     if (name === OUTPUT_PAGE_TOOL.name) {
+      if (this.cfg.t3Only) {
+        // A retained result reference is not permission after profile revocation.
+        try { await this.t3Controller.tools(); }
+        catch { throw new McpError(ErrorCode.InvalidParams, 'T3-only account profile is no longer current'); }
+      }
       this.touch();
       this.bumpTool(name);
       return this.outputPager.read(request?.params?.arguments ?? {});

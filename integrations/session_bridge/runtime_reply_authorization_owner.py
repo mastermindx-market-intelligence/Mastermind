@@ -67,8 +67,9 @@ class RuntimeReplyAuthorizationOwner:
         if (owner_key(projection) != record.owner_key or value["request_ref"] != record.request_ref
                 or value["read_ref"] != record.read_ref or value["expires_at"] != record.expires_at):
             raise ValueError("bounded audience differs from accepted subscription")
-        from control_plane.native_continuation import stored_continuation_request, _digest
-        event, _ = stored_continuation_request(self.store._runtime,record.read_ref)
+        from control_plane.native_continuation import _digest
+        from .t3_reply_events import stored_original_reply_request
+        event, _ = stored_original_reply_request(self.store._runtime,record.read_ref)
         if event.command_id != record.request_ref or _digest(event.to_dict()) != value["request_event_sha256"]:
             raise ValueError("original request provenance changed")
         return projection

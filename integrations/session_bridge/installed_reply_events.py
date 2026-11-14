@@ -171,6 +171,27 @@ class RuntimeReplyEventHost:
         except Exception:
             return result(operation,code="effect_unknown" if operation in MODIFYING else "backend_unavailable")
 
+    async def observe_t3_reply(self, principal, request_ref):
+        """Installed native-event producer edge, not a public caller-supplied reply.
+
+        Native notifications are hints only. Re-read the exact authorized native
+        run, retain its digest in Runtime, then use the SAME subscription,
+        retained-policy, signature, reservation and delivery owners as other
+        canonical replies. No new listener, scheduler or automatic replay.
+        """
+        if not self.enabled or self.returns.t3_replies is None:
+            raise SubscriptionUnavailable("native T3 event producer is not enrolled")
+        source = self.returns.t3_replies
+        receipt = await source.observe(principal, request_ref)
+        observed = await source.read(principal, {"read_ref": receipt["read_ref"]})
+        projected = await source.project(principal, request_ref)
+        deliveries = await self.handle_committed(read_ref=receipt["read_ref"],
+            message_key=projected.event["data"]["message_key"],
+            fingerprint=observed["answer_sha256"])
+        return {"request_ref": request_ref, "read_ref": receipt["read_ref"],
+                "reply_committed": True, "deliveries": deliveries,
+                "parent_consumed": False}
+
     async def handle_committed(self, *, read_ref, message_key, fingerprint):
         if not self.enabled: return ()
         event, _ = self.returns._stored_request(read_ref)
@@ -178,9 +199,21 @@ class RuntimeReplyEventHost:
         for ident in self.store.subscriptions_for_reply(event.command_id,read_ref):
             try:
                 audience = self.audiences.capture(ident)
-                binding = await self.returns.resolve_read(principal=self.audiences.current(audience),read_ref=read_ref)
-                if binding.reply_message_key != message_key or binding.reply_fingerprint != fingerprint:
-                    raise SubscriptionUnavailable("commit differs from canonical retained reply")
+                projection = self.audiences.current(audience)
+                from .t3_reply_events import is_t3_read_ref
+                if is_t3_read_ref(read_ref):
+                    source = self.returns.t3_replies
+                    if source is None:
+                        raise SubscriptionUnavailable("native T3 reply source is not enrolled")
+                    native = await source.read(projection, {"read_ref": read_ref})
+                    projected = await source.project(projection, native["request_ref"])
+                    if (projected.event["data"]["message_key"] != message_key
+                            or native["answer_sha256"] != fingerprint):
+                        raise SubscriptionUnavailable("native T3 commit differs from original response")
+                else:
+                    binding = await self.returns.resolve_read(principal=projection,read_ref=read_ref)
+                    if binding.reply_message_key != message_key or binding.reply_fingerprint != fingerprint:
+                        raise SubscriptionUnavailable("commit differs from canonical retained reply")
                 observations.append(await self.delivery.deliver_subscription(ident))
             except ObservedReplyPolicyDenial as denial:
                 await self.audiences.revoke_observed(denial)

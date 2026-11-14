@@ -212,10 +212,10 @@ class RuntimeReplySubscriptionStore:
         semantic = {"previous": expected_version, "record": metadata, "binding": binding, "kind": "REPLY_SUBSCRIPTION_COMMITTED"}
         associated = {"metadata": metadata, "previous": expected_version, "binding": binding}
         if authorization is not None:
-            from control_plane.native_continuation import stored_continuation_request
+            from .t3_reply_events import stored_original_reply_request
             from .installed import _principal
             from .web_reply_subscription_owner import owner_key
-            event, value = stored_continuation_request(self._runtime, record.read_ref)
+            event, value = stored_original_reply_request(self._runtime, record.read_ref)
             if (type(authorization) is not dict or authorization.get("request_ref") != record.request_ref
                     or authorization.get("read_ref") != record.read_ref or authorization.get("expires_at") != record.expires_at
                     or authorization.get("request_event_sha256") != _hash(event.to_dict())

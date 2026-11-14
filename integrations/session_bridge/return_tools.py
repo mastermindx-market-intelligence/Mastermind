@@ -83,7 +83,12 @@ class NativeReplyReadTool:
             principal_projection(principal)
             data = await self._reader(principal, validated)
             from .hermes_native import RESULT_SCHEMAS as HERMES_RESULT_SCHEMAS, validate_public_result
-            if type(data) is dict and data.get("schema") in HERMES_RESULT_SCHEMAS:
+            from .t3_reply_events import READ_SCHEMA as T3_READ_SCHEMA, validate_t3_public_reply
+            if type(data) is dict and data.get("schema") == T3_READ_SCHEMA:
+                data = validate_t3_public_reply(data)
+                if set(validated) != {"read_ref"} or data["read_ref"] != validated["read_ref"]:
+                    raise ValueError
+            elif type(data) is dict and data.get("schema") in HERMES_RESULT_SCHEMAS:
                 data = validate_public_result(data)
                 if any(data[field] != value for field, value in validated.items()):
                     raise ValueError

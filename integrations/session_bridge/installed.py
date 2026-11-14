@@ -311,6 +311,7 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                                  authorized_policies: Any = None,
                                  reference_cursor_key: bytes | None = None,
                                  hermes_session: Any | None = None,
+                                 t3_replies: Any | None = None,
                                  web_census_handler: Callable | None = None):
     """Compose the installed fabric path from existing Runtime/Dialogue owners.
 
@@ -334,9 +335,9 @@ def build_runtime_session_bridge(runtime: Any, *, dialogue_socket_path: Path,
                                    socket_path=dialogue_socket_path,
                                    authorized_policies=authorized_policies,
                                    reference_cursor_key=reference_cursor_key,
-                                   hermes=hermes_session)
+                                   hermes=hermes_session, t3_replies=t3_replies)
     reply_reader = NativeReplyReader(returns, socket_path=dialogue_socket_path,
-                                    projected_principal=True)
+                                    projected_principal=True, t3_replies=t3_replies)
     reader = CanonicalTargetReader(
         fabric_reader=projector.project, codex_reader=codex.project, claude_reader=lambda: [])
 
