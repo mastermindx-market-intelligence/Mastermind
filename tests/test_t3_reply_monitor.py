@@ -235,3 +235,39 @@ def test_close_drains_admitted_result_effect_instead_of_cancelling_it(t3_host):
         await closing
         assert observer.state == 'STOPPED'
     asyncio.run(scenario())
+
+
+def test_native_wait_is_capped_below_remaining_original_invocation_budget(t3_host):
+    case = t3_host
+    class BudgetedRead:
+        def remaining_wait_ms(self): return 1200
+        async def __call__(self, name, arguments): return await case.native(name, arguments)
+    async def scenario():
+        client = T3NativeClient(SCOPE, BudgetedRead(), SCHEMAS)
+        async def resolve(): return case.auth.principal, Run(THREAD, 'run-1', 'original-request', 'launched'), client
+        async def consume(*args): return False
+        observer = T3NativeReturnWait(resolve, consume, capacity=asyncio.Semaphore(1))
+        baseline_calls = len(case.native.calls)
+        await observer.start()
+        await observer.task
+        waits = [args for name, args in case.native.calls[baseline_calls:] if name == 't3_thread_wait']
+        assert len(waits) == 1 and waits[0]['timeoutMs'] == 950
+        assert observer.state == 'STOPPED'
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('budget', [0, -1, True, 30001])
+def test_unqualified_native_wait_budget_stops_before_native_call(t3_host, budget):
+    case = t3_host
+    class BudgetedRead:
+        def remaining_wait_ms(self): return budget
+        async def __call__(self, name, arguments): raise AssertionError('no native call allowed')
+    async def scenario():
+        client = T3NativeClient(SCOPE, BudgetedRead(), SCHEMAS)
+        async def resolve(): return case.auth.principal, Run(THREAD, 'run-1', 'original-request', 'launched'), client
+        async def consume(*args): raise AssertionError('no result effect allowed')
+        observer = T3NativeReturnWait(resolve, consume, capacity=asyncio.Semaphore(1))
+        await observer.start()
+        await observer.task
+        assert observer.state == 'UNAVAILABLE' and observer.observations == 0
+    asyncio.run(scenario())

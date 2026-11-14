@@ -56,7 +56,7 @@ class NativeReplyReadTool:
                           {"required": ["operation_key"], "maxProperties": 1},
                           {"required": ["read_ref", "message_key"], "maxProperties": 2,
                            "properties": {"read_ref": {"pattern": "^t3-reply-[0-9a-f]{64}$"},
-                                          "message_key": {"pattern": "^t3-native-(reply|question)-[0-9a-f]{64}$"}}}],
+                                          "message_key": {"pattern": "^t3-native-(reply|question|status)-[0-9a-f]{64}$"}}}],
                 "additionalProperties": False},
             output_description=RESULT_SCHEMA, read_only=True)
 

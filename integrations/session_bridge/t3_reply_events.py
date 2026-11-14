@@ -33,7 +33,8 @@ RETURN_PREFIX = "t3-return-"
 REQUEST_SCHEMA = "mastermind.t3_original_return_binding.v1"
 READ_SCHEMA = "mastermind.t3_original_reply_read.v1"
 QUESTION_READ_SCHEMA = "mastermind.t3_original_question_read.v1"
-RESULT_SCHEMAS = frozenset({READ_SCHEMA, QUESTION_READ_SCHEMA})
+TERMINAL_READ_SCHEMA = "mastermind.t3_original_terminal_read.v1"
+RESULT_SCHEMAS = frozenset({READ_SCHEMA, QUESTION_READ_SCHEMA, TERMINAL_READ_SCHEMA})
 _QUESTION_SCHEMA = "mastermind.t3_original_question_observation.v1"
 _QUESTION_EVENT = "T3_ORIGINAL_QUESTION_OBSERVED"
 _QUESTION_PREFIX = "t3-question-"
@@ -135,7 +136,7 @@ def stored_original_reply_request(runtime: Runtime, read_ref: str):
 
 
 def is_t3_message_key(value: Any) -> bool:
-    return type(value) is str and re.fullmatch(r"t3-native-(reply|question)-[0-9a-f]{64}", value) is not None
+    return type(value) is str and re.fullmatch(r"t3-native-(reply|question|status)-[0-9a-f]{64}", value) is not None
 
 
 def _question_identity(request_ref: str, pending_request_id: str, digest: str) -> str:
@@ -170,6 +171,9 @@ def validate_t3_question_reply(value: Any) -> dict:
 
 
 def validate_t3_public_reply(value: Any) -> dict:
+    if type(value) is dict and value.get("schema") == TERMINAL_READ_SCHEMA:
+        from .t3_terminal_reply import validate_public
+        return validate_public(value)
     if type(value) is dict and value.get("schema") == QUESTION_READ_SCHEMA:
         return validate_t3_question_reply(value)
     if (type(value) is not dict or set(value) != _PUBLIC or value["schema"] != READ_SCHEMA
@@ -373,6 +377,9 @@ class T3OriginalReplySource:
                 raise Unavailable("Exact original T3 notification identity required")
             if message_key.startswith(_QUESTION_KEY_PREFIX):
                 return await self._project_question(principal, request_ref, message_key)
+            if message_key.startswith("t3-native-status-"):
+                from .t3_terminal_reply import project
+                return await project(self, principal, request_ref, message_key)
         binding, _, _, observation = await self._committed_answer(principal, request_ref)
         if message_key is not None and observation["message_key"] != message_key:
             raise Conflict("Native response differs from the selected notification")
@@ -396,6 +403,9 @@ class T3OriginalReplySource:
                 raise Unavailable("Exact original T3 message key required")
             if message_key.startswith(_QUESTION_KEY_PREFIX):
                 return await self._read_question(principal, request_ref, message_key)
+            if message_key.startswith("t3-native-status-"):
+                from .t3_terminal_reply import read
+                return await read(self, principal, request_ref, message_key)
         binding, run, result, observation = await self._committed_answer(principal, request_ref)
         if message_key is not None and message_key != observation["message_key"]:
             raise Conflict("Native response differs from the selected notification")

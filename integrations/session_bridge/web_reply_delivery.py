@@ -125,7 +125,7 @@ def _validated_event(event: Mapping[str, Any], request_ref: str) -> bytes:
         is_t3_read_ref(data["read_ref"])
         and data["read_ref"][len(READ_PREFIX):] == request_ref[len(REQUEST_PREFIX):]
         and data["in_reply_to"] == request_ref
-        and re.fullmatch(r"t3-native-(reply|question)-[0-9a-f]{64}", data["message_key"]) is not None
+        and re.fullmatch(r"t3-native-(reply|question|status)-[0-9a-f]{64}", data["message_key"]) is not None
     ) if t3 else (
         data["message_key"].startswith("asd-native-reply-")
         and data["in_reply_to"].startswith("asd-")

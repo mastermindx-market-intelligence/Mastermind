@@ -8,6 +8,7 @@ No desktop credential is copied into the Executive service or model context.
 from __future__ import annotations
 
 import re
+import time
 from pathlib import PurePosixPath
 
 from control_plane.principal_projection import NeutralPrincipalProjection
@@ -51,7 +52,6 @@ class InstalledT3ReplyNativeAccess:
         self.configuration = validate_native_return_config(configuration)
         self.rows = {row['owner_key']: row for row in self.configuration['profiles']}
         self.owner_factory = owner_factory
-        self._owners = {}  # Reuse incumbent catalog metadata only; no credential/session cache.
 
     def _profile(self, principal):
         if type(principal) is not NeutralPrincipalProjection:
@@ -78,16 +78,13 @@ class InstalledT3ReplyNativeAccess:
         row, profile = self._profile(principal)
         if scope.connection_id != profile['connection_id']:
             raise Conflict('Original native connection does not match the selected account profile')
-        key = owner_key(principal)
-        owner = self._owners.get(key)
-        if owner is None:
-            owner = self.owner_factory(profile,
-                current_profile=lambda: read_profile(row['profile_path'], row['profile_sha256']))
-            if not isinstance(owner, NativeDotFleetOwner):
-                raise TypeError('Existing native profile owner required')
-            self._owners[key] = owner
-        if owner.profile != profile:
-            raise Unavailable('Selected native profile changed; cached capabilities are not authority')
+        # The native runner's deadline belongs to one observation, not the
+        # lifetime of a subscription. Never cache that expiring caller or reset
+        # an already-created invocation's deadline to extend its authority.
+        owner = self.owner_factory(profile,
+            current_profile=lambda: read_profile(row['profile_path'], row['profile_sha256']))
+        if not isinstance(owner, NativeDotFleetOwner):
+            raise TypeError('Existing native profile owner required')
         await owner.authorize(profile['principal_key'], operation='t3_run_result',
             environment_id=scope.environment_id, project_id=scope.project_id,
             thread_id=None, arguments={})
@@ -95,4 +92,36 @@ class InstalledT3ReplyNativeAccess:
         self.current(principal)
         if client.scope != scope:
             raise Conflict('Native profile returned a different original scope')
+        client.call_tool = _OriginalReturnRead(owner, self, principal)
         return client
+
+
+class _OriginalReturnRead:
+    """Shrink-only read caller using the incumbent invocation's real deadline."""
+    _READS = frozenset({'t3_thread_wait', 't3_thread_read', 't3_item_read', 't3_pending_request'})
+
+    def __init__(self, owner, access, principal):
+        self.owner, self.access, self.principal = owner, access, principal
+        # The fallback applies to injected, non-process test runners only.
+        self.deadline = getattr(owner.runner, 'deadline', time.monotonic() + owner.profile['timeout_seconds'])
+        if type(self.deadline) not in (int, float):
+            raise ValueError('Exact native observation deadline required')
+
+    def remaining_wait_ms(self):
+        remaining = min(30000, int((self.deadline - time.monotonic()) * 1000) - 1000)
+        if remaining < 1:
+            raise Unavailable('Original native observation has no remaining wait budget')
+        return remaining
+
+    async def __call__(self, name, arguments):
+        if (name not in self._READS or type(arguments) is not dict
+                or name == 't3_pending_request' and arguments.get('action') not in {'list', 'read'}):
+            raise Unavailable('Original-return source is read-only')
+        self.access.current(self.principal)
+        if time.monotonic() >= self.deadline:
+            raise Unavailable('Original native observation budget expired')
+        if name == 't3_thread_wait':
+            requested = arguments.get('timeoutMs')
+            if type(requested) is not int or requested > self.remaining_wait_ms():
+                raise Unavailable('Native wait exceeds its original invocation budget')
+        return await self.owner.transport.call_tool(name, arguments)

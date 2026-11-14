@@ -12,7 +12,7 @@ import hashlib
 import json
 from collections.abc import Callable
 
-from .t3_native_client import Run, Conflict, Unavailable
+from .t3_native_client import Run, Conflict, Unavailable, TERMINAL
 from .t3_native_watch import T3NativeReturnWait
 from .t3_reply_events import is_t3_request_ref, is_t3_read_ref
 from .web_reply_subscription_owner import owner_key, SubscriptionUnavailable
@@ -92,9 +92,16 @@ class RuntimeT3ReplyMonitor:
         unique = {}
         for record, principal, run in targets:
             unique.setdefault(record.request_ref, (principal, run))
-        if state.get('status') in {'completed', 'failed', 'interrupted', 'cancelled'}:
-            for request_ref, (principal, _) in unique.items():
-                await self.host.observe_t3_reply(principal, request_ref)
+        if state.get('status') in TERMINAL and state.get('timedOut') is False:
+            for request_ref, (principal, run) in unique.items():
+                client = await self.source._client(principal, run)
+                observed = await client.original_result(run)
+                if observed.status not in TERMINAL:
+                    raise Conflict("Original terminal run changed before return")
+                if observed.complete is True and type(observed.answer) is str:
+                    await self.host.observe_t3_reply(principal, request_ref)
+                else:
+                    await self.host.observe_t3_terminal(principal, request_ref)
             return False
         principal, run = next(iter(unique.values()))
         client = await self.source._client(principal, run)

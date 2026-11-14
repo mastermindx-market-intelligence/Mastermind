@@ -39,14 +39,14 @@ def native_access(tmp_path, authenticated_receiver):
     return auth, access, scope, runner, file, enabled, created, config
 
 
-def test_original_oauth_account_uses_fixed_native_profile_and_reuses_only_catalog(native_access):
+def test_original_oauth_account_uses_fresh_bounded_native_observations(native_access):
     auth, access, scope, runner, _, _, created, _ = native_access
     async def scenario():
         first = await access(auth.principal, scope)
         second = await access(auth.principal, scope)
         assert first.scope == second.scope == scope
-        assert len(created) == 1
-        assert len([call for call in runner.calls if 'native-catalog' in call.argv]) == 1
+        assert len(created) == 2 and created[0] is not created[1]
+        assert len([call for call in runner.calls if 'native-catalog' in call.argv]) == 2
         assert all('t3_thread_launch' not in call.argv and 't3_thread_send' not in call.argv for call in runner.calls)
     asyncio.run(scenario())
 
@@ -155,3 +155,41 @@ def test_actual_host_factory_attaches_source_and_monitor_only_after_both_selecti
     selected[0] = False
     with pytest.raises((ValueError, Unavailable)):
         host.returns.t3_replies.current(case.auth.principal)
+
+
+def test_native_return_wait_budget_uses_original_runner_deadline(native_access, monkeypatch):
+    from integrations.session_bridge import t3_reply_native_access as module
+    auth, access, scope, runner, _, _, _, _ = native_access
+    client = asyncio.run(access(auth.principal, scope))
+    call = client.call_tool
+    original_deadline = call.deadline
+    monkeypatch.setattr(module.time, 'monotonic', lambda: original_deadline - 1.75)
+    assert call.remaining_wait_ms() == 750
+    with pytest.raises(Unavailable):
+        asyncio.run(call('t3_thread_wait', {'threadId': 'thread-1', 'runId': 'run-1', 'timeoutMs': 1000}))
+    assert call.deadline == original_deadline  # No extending an admitted invocation.
+    monkeypatch.setattr(module.time, 'monotonic', lambda: original_deadline)
+    with pytest.raises(Unavailable): call.remaining_wait_ms()
+
+
+@pytest.mark.parametrize('name,args', [
+    ('t3_thread_launch', {}), ('t3_thread_send', {}), ('t3_thread_interrupt', {}),
+    ('t3_pending_request', {'action': 'answer', 'requestId': 'pending-1', 'answers': {}}),
+    ('t3_thread_lifecycle', {'action': 'delete'}),
+])
+def test_original_return_caller_is_read_only_even_when_profile_allows_user_control(native_access, name, args):
+    auth, access, scope, runner, _, _, _, _ = native_access
+    client = asyncio.run(access(auth.principal, scope))
+    before = len(runner.calls)
+    with pytest.raises(Unavailable): asyncio.run(client.call_tool(name, args))
+    assert len(runner.calls) == before
+
+
+def test_profile_disarm_between_client_creation_and_read_rejects_before_native_io(native_access):
+    auth, access, scope, runner, _, selected, _, _ = native_access
+    client = asyncio.run(access(auth.principal, scope))
+    selected[0] = False
+    before = len(runner.calls)
+    with pytest.raises(Unavailable):
+        asyncio.run(client.call_tool('t3_thread_read', {'threadId': 'thread-1'}))
+    assert len(runner.calls) == before

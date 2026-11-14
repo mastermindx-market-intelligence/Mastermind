@@ -218,6 +218,20 @@ class RuntimeReplyEventHost:
                 "reply_committed": True, "deliveries": deliveries,
                 "parent_consumed": False}
 
+    async def observe_t3_terminal(self, principal, request_ref):
+        """Observed terminal status without a qualified answer is not success."""
+        if not self.enabled or self.returns.t3_replies is None:
+            raise SubscriptionUnavailable("native T3 terminal producer is not enrolled")
+        from .t3_terminal_reply import observe
+        source = self.returns.t3_replies
+        receipt = await observe(source, principal, request_ref)
+        value = await source.read(principal, {"read_ref": receipt["read_ref"], "message_key": receipt["message_key"]})
+        deliveries = await self.handle_committed(read_ref=receipt["read_ref"],
+            message_key=receipt["message_key"], fingerprint=value["terminal_sha256"])
+        return {"request_ref": request_ref, "read_ref": receipt["read_ref"], "message_key": receipt["message_key"],
+                "reply_committed": True, "native_terminal": True, "successful": False,
+                "deliveries": deliveries, "parent_consumed": False}
+
     async def observe_t3_question(self, principal, request_ref, pending_request_id):
         """Existing native producer -> exact pending question -> original subscriber.
 
@@ -255,7 +269,7 @@ class RuntimeReplyEventHost:
                     native = await source.read(projection, {"read_ref": read_ref, "message_key": message_key})
                     projected = await source.project(projection, native["request_ref"], message_key=message_key)
                     if (projected.event["data"]["message_key"] != message_key
-                            or native.get("answer_sha256", native.get("question_sha256")) != fingerprint):
+                            or native.get("answer_sha256", native.get("question_sha256", native.get("terminal_sha256"))) != fingerprint):
                         raise SubscriptionUnavailable("native T3 commit differs from original response")
                     selection = {"message_key": message_key}
                 else:

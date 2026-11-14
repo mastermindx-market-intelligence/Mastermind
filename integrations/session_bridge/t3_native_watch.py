@@ -56,7 +56,18 @@ class T3NativeReturnWait:
                         raise Unavailable("Original native return scope changed")
                     if self._stop.is_set(): break
                     self.state = "WAITING_NATIVE"
-                    state = await client.wait(run, timeout_ms=self.timeout_ms)
+                    native_budget = getattr(client.call_tool, "remaining_wait_ms", None)
+                    timeout_ms = self.timeout_ms
+                    if native_budget is not None:
+                        if not callable(native_budget):
+                            raise Unavailable("Native observation budget is unqualified")
+                        remaining = native_budget()
+                        if type(remaining) is not int or not 1 <= remaining <= 30000:
+                            raise Unavailable("Native observation has no qualified wait budget")
+                        # Leave room for time spent validating the call before
+                        # the same runner enforces its original hard deadline.
+                        timeout_ms = min(timeout_ms, max(1, remaining - 250))
+                    state = await client.wait(run, timeout_ms=timeout_ms)
                     if self._stop.is_set(): break
                     self.state = "CONSUMING_ORIGINAL_OBSERVATION"
                     outcome = await self.consume(principal, run, state)
