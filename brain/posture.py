@@ -247,7 +247,10 @@ def posture(portfolio_id: str | None, *, data_dir: Path | None = None) -> dict[s
         data_dir = Path(data_dir)
 
         book = _load_json(data_dir / "latest.json")
-        decision = _latest_meaningful(_read_jsonl_tail(data_dir / "decisions.jsonl"))
+        from bot import decision_rows
+        decision = _latest_meaningful(
+            decision_rows.read_effective_rows(data_dir / "decisions.jsonl", tail=80)
+        )
         if not book and not decision:
             return _stub(book_id, "no book yet")
 

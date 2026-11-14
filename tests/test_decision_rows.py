@@ -43,20 +43,36 @@ def test_failed_rerun_does_not_erase_good_book():
 
 
 def test_good_rerun_still_supersedes():
-    """A better book replaces an earlier one — normal idempotent-per-date behaviour."""
+    """A better book replaces an earlier one — idempotent per date in the EFFECTIVE view.
+
+    Raw truth (append-only): the ledger grows by one row; the appended row names the row it
+    supersedes and no prior byte is touched."""
     better = {**BOOK, "summary": "revised after the close"}
-    assert dr.replace_for_asof([BOOK], better, "2026-07-24") == [better]
+    rows = dr.replace_for_asof([BOOK], better, "2026-07-24")
+    assert len(rows) == 2
+    assert rows[0] == BOOK
+    assert rows[1]["supersede_mode"] == "asof"
+    assert rows[1]["supersedes"] == [dr.row_identity(BOOK)]
+    assert [dr.strip_supersession(r) for r in dr.effective_rows(rows)] == [better]
 
 
 def test_barren_entry_recorded_when_nothing_good_exists():
-    """First run of the day fails → the stub IS the row (nothing to protect)."""
-    assert dr.replace_for_asof([], STUB, "2026-07-24") == [STUB]
+    """First run of the day fails → the stub IS the effective row (nothing to protect)."""
+    rows = dr.replace_for_asof([], STUB, "2026-07-24")
+    assert len(rows) == 1
+    assert rows[0]["supersede_mode"] == "asof"
+    assert rows[0]["supersedes"] == []
+    assert [dr.strip_supersession(r) for r in dr.effective_rows(rows)] == [STUB]
 
 
 def test_barren_replaces_barren():
-    """A stub may replace an earlier stub — no information is lost."""
+    """A stub may replace an earlier stub — no information is lost (in the effective view)."""
     older = {"asof": "2026-07-24", "holdings": [], "error": "auth revoked"}
-    assert dr.replace_for_asof([older], STUB, "2026-07-24") == [STUB]
+    rows = dr.replace_for_asof([older], STUB, "2026-07-24")
+    assert len(rows) == 2
+    assert rows[0] == older
+    assert rows[1]["supersedes"] == [dr.row_identity(older)]
+    assert [dr.strip_supersession(r) for r in dr.effective_rows(rows)] == [STUB]
 
 
 def test_other_dates_preserved_in_order():
@@ -71,7 +87,11 @@ def test_other_dates_preserved_in_order():
 def test_new_date_appends():
     d22 = {"asof": "2026-07-22", "summary": "s", "holdings": [{"t": 1}]}
     new = {"asof": "2026-07-27", "summary": "fresh", "holdings": [{"t": 2}]}
-    assert dr.replace_for_asof([d22], new, "2026-07-27") == [d22, new]
+    rows = dr.replace_for_asof([d22], new, "2026-07-27")
+    # raw truth: a new date is a pure append — the earlier date's row is untouched
+    assert rows[0] == d22
+    assert len(rows) == 2
+    assert [dr.strip_supersession(r) for r in dr.effective_rows(rows)] == [d22, new]
 
 
 def test_duplicate_good_rows_for_a_date_all_survive_a_stub():
