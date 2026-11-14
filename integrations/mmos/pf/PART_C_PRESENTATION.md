@@ -67,10 +67,15 @@ Expected output: `"onMissingInstance": []`, `"primaryMismatch": []`,
 `"ok": true`, `rc=0`; `"conversations"` 25 and `"byInstance"` as in the
 principal's 14 Nov census (13 primaries on their own instances; non-primary:
 7 `capacity_fabric`, 2 `assurance`, 2 `design-lead`, 1 `secretary`), plus
-any conversations started since. It opens the state database with
-`mode=ro`, reads settings.json and the roster state file, and prints counts
-and conversation IDs only. `"project"` is the same id step 0 returns. A
-nonzero exit stops part (c): see `LOCK_EXISTING_CONVERSATIONS.md`, "Not built".
+any conversations started since, plus the database `"journalMode"`. It
+opens the state database with its own `mode=ro` connection (never
+`immutable=1`), reads settings.json and the roster state file, and prints
+counts and conversation IDs only. The main database file is never written;
+on a WAL-mode database with the server running the `-wal`/`-shm` files
+already exist and are the server's, and with the server stopped sqlite may
+create them when the census opens its read-only connection. `"project"` is
+the same id step 0 returns. A nonzero exit stops part (c): see
+`LOCK_EXISTING_CONVERSATIONS.md`, "Not built".
 Rehearsed on PF staging: rc=0, 3 conversations.
 
 ### 1. Write the value file

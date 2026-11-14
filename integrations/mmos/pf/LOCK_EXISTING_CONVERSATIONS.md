@@ -77,9 +77,13 @@ Before switching it on, the principal runs the census (read-only; part (c) preco
 
 Expected: exit 0, `"onMissingInstance": []`, `"primaryMismatch": []`, `"ok": true`, and
 `"conversations"` with `"byInstance"` matching the principal's count (25 on 14 Nov).
-It reads the state database with `mode=ro`, settings.json and the roster state file,
-and prints counts and conversation IDs only. Rehearsed on PF staging: exit 0, 3
-conversations, `{"scout": 2, "writer": 1}`.
+It opens the state database with its own `mode=ro` connection (never `immutable=1`,
+which could read stale data while the server runs), reads settings.json and the roster
+state file, and prints counts, conversation IDs and the database `"journalMode"` only.
+The main database file is never written; on a WAL-mode database with the server running
+the `-wal`/`-shm` files already exist and are the server's, and with the server stopped
+sqlite may create them when the census opens its read-only connection. Rehearsed on PF
+staging: exit 0, 3 conversations, `{"scout": 2, "writer": 1}`.
 
 ## Not built: a "way home"
 
