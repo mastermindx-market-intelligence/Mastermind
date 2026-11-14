@@ -44,3 +44,7 @@ The T1/T2 comparator reuses Mastermind phase3 native.py and replay.py from commi
 GitHub aggregate evidence belongs under research/evidence/sector_recovery_phase5/. The downloadable packet places the same small aggregate directories alongside the code for easy reading. Raw parquet histories, per-event source price paths and individual predictions are deliberately excluded; reproduction requires the authorized retained private copies. Aggregate counts are not independent market sample sizes.
 
 The original protocol and each outcome-guided extension retain their own dating and status. No original null result was removed. Source publication, local tests, protected merge, live integration and investment acceptance remain separate facts. No production verdict, ranking, sizing, service, schedule, provider, credential or order was changed.
+
+## Later phase-neutral momentum challenger
+
+PHASE_NEUTRAL_RESULTS.md records the disclosed post-development test. Run `python phase_neutral.py --root "$STUDY_ROOT"` and `python phase_neutral_audit.py --root "$STUDY_ROOT"` only on the unchanged native observations and original snapshot identities. The extended numerical suite passed72 tests; no original test or result was removed. The new phase votes are correlated representations, not independent confidence.

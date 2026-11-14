@@ -1,0 +1,12 @@
+{
+  "status": "COMPLETE",
+  "accounts": 144,
+  "event_count_rows": 27,
+  "source_sha256": "7c748b0f9e33ec278dd0f0d407e03d7528ed6ee64a394afd81ce13c8fad1060c",
+  "outcome_guided_source_robustness_experiment": true,
+  "independent_phase_votes": false,
+  "native_producer_unchanged": true,
+  "may_rank": false,
+  "may_size": false,
+  "may_trade": false
+}

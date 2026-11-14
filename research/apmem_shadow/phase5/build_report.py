@@ -169,5 +169,8 @@ The source and measured comparison framework are delivered as research. A univer
 
 [P5] Federal Reserve, Recession Risk and the Excess Bond Premium (April8,2016): distinguishes corporate risk pricing from expected defaults. This OAS test is not an excess-bond-premium model and does not reproduce its recession results. https://www.federalreserve.gov/econresdata/notes/feds-notes/2016/recession-risk-and-the-excess-bond-premium-20160408.html
 '''
+extension=ROOT/'PHASE_NEUTRAL_RESULTS.md'
+if extension.exists():
+    report += '\n\n---\n\n' + extension.read_text()
 (ROOT/'RESULTS.md').write_text(report)
 print('REPORT_WRITTEN',len(report.encode()),'bytes')

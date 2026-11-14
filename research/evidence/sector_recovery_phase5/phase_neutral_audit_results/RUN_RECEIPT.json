@@ -1,0 +1,9 @@
+{
+  "status": "COMPLETE",
+  "paired_tests": 54,
+  "holm_rejections": 0,
+  "conditional_confirmation_measure_not_all_dot_coverage": true,
+  "outcome_guided_diagnostic": true,
+  "may_trade": false,
+  "source_sha256": "dcc4c8638d33f01058443b9977c9e4e4d767dc04dba85c1253a59ab0061d2963"
+}
