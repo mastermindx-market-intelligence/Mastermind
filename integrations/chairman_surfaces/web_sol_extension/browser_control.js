@@ -70,11 +70,48 @@
     const start = Date.parse(r.issued_at), end = Date.parse(r.expires_at), now = Date.now();
     return Number.isFinite(start) && Number.isFinite(end) && end > now && end > start && end-start <= 60000 && start-now <= 5000;
   }
-  function createController(chromeApi, instanceId, connection) {
+  function createController(chromeApi, instanceId, connection, options = {}) {
     const chrome = chromeApi;
     const documents = new Map();
     const nonces = new Map();
+    // Opener records: tab.id -> {session_id, opened_at}. The bridge closes a
+    // tab only on its OWN record that it opened the tab — never on a caller's
+    // claim. Records and session liveness persist in chrome.storage.session
+    // so they survive a service-worker restart; a browser restart clears
+    // that storage, and without the storage API the maps are memory-only.
+    // Both losses fail CLOSED: no record, no close.
     const createdTabs = new Map();
+    const sessionActivity = new Map();
+    const SESSION_LIVE_LEASE_MS = Number.isInteger(options.sessionLiveLeaseMs) && options.sessionLiveLeaseMs >= 0
+      ? options.sessionLiveLeaseMs : 120000;
+    const RECORDS_KEY = "mmxOpenerRecords", ACTIVITY_KEY = "mmxSessionActivity";
+    const storage = chrome.storage && chrome.storage.session ? chrome.storage.session : null;
+    let recordsReady = Promise.resolve();
+    if (storage) recordsReady = (async () => {
+      try {
+        const held = await storage.get([RECORDS_KEY, ACTIVITY_KEY]);
+        const records = held && held[RECORDS_KEY];
+        if (records && typeof records === "object") for (const [id, rec] of Object.entries(records)) {
+          const tabId = Number(id), openedAt = Number(rec && rec.opened_at);
+          // A record older than seven days is stale even if its tab id was
+          // never reused; drop it rather than trust an ancient opener.
+          if (rec && hex(rec.session_id) && Number.isInteger(tabId) && tabId >= 0 &&
+              Number.isFinite(openedAt) && Date.now() - openedAt <= 604800000)
+            createdTabs.set(tabId, {session_id: rec.session_id, opened_at: openedAt});
+        }
+        const activity = held && held[ACTIVITY_KEY];
+        if (activity && typeof activity === "object") for (const [sid, at] of Object.entries(activity))
+          if (hex(sid) && Number.isFinite(at)) sessionActivity.set(sid, at);
+      } catch (_) { /* unreadable persistence -> memory-only, fail closed */ }
+    })();
+    const persistRecords = async () => {
+      if (!storage) return;
+      try { await storage.set({[RECORDS_KEY]: Object.fromEntries(createdTabs)}); } catch (_) {}
+    };
+    const persistActivity = async () => {
+      if (!storage) return;
+      try { await storage.set({[ACTIVITY_KEY]: Object.fromEntries(sessionActivity)}); } catch (_) {}
+    };
     let busy = null, debuggerUncertain = false, observedBoot = null;
     let cleanupPromise=Promise.resolve([]);
     // Ring buffer of the last 20 error receipts this worker produced, so a
@@ -238,6 +275,7 @@
     }
     async function run(r, boot) {
       if (!valid(r,instanceId,boot)) return null;
+      await recordsReady;
       if (observedBoot !== boot) {
         documents.clear();
         errorRing.length = 0;
@@ -253,8 +291,14 @@
       if (nonces.has(r.nonce)) return receipt(r,"NONCE_REUSED");
       if (nonces.size >= 2048) return receipt(r,"NONCE_LIMIT");
       nonces.set(r.nonce,Date.parse(r.expires_at));
+      // Every accepted request is liveness for its session: an opener that
+      // keeps talking keeps its tabs protected from an orphan close.
+      const seenAt = Date.now();
+      sessionActivity.set(r.session_id, seenAt);
+      for (const [sid, at] of sessionActivity) if (seenAt - at > 86400000) sessionActivity.delete(sid);
+      await persistActivity();
       const running={boot};busy=running;
-      let attempted = false;
+      let attempted = false, orphanClose = false;
       try {
         if (r.action === "status") return receipt(r,"OK",{
           connection_id:boot,adapter_instance_id:instanceId,
@@ -272,7 +316,9 @@
           const all = await chrome.tabs.query({});
           const rows = []; let excluded = 0, omitted = 0;
           const existing = new Set(all.map(t=>t.id));
-          for (const id of documents.keys()) if (!existing.has(id)) {documents.delete(id);createdTabs.delete(id);}
+          let swept = false;
+          for (const id of documents.keys()) if (!existing.has(id)) {documents.delete(id);if(createdTabs.delete(id))swept=true;}
+          if (swept) await persistRecords();
           for (const tab of all.slice(0,512)) {
             if (tab.incognito || !url(tab.url) || !await granted(tab.url)) {excluded++;continue;}
             if (rows.length >= 100) {omitted++;continue;}
@@ -286,7 +332,8 @@
           current(r);
           attempted = true;
           const tab = await chrome.tabs.create({url:r.params.url,active:false});
-          createdTabs.set(tab.id,r.session_id);
+          createdTabs.set(tab.id,{session_id:r.session_id,opened_at:Date.now()});
+          await persistRecords();
           return receipt(r,"ACTION_DISPATCHED",{tab_id:tab.id,refresh_required:true},"APPLIED");
         }
         if (advanced && CDP.ACTIONS.has(r.action)) {
@@ -301,6 +348,23 @@
           return receipt(r,outcome.status,outcome.data,outcome.effect||"NOT_APPLIED");
         }
         const tab = await tabFor(r);
+        if (r.action === "close") {
+          // Ownership gate, before any page-world work: the bridge closes
+          // only tabs its own record says it opened. The requesting session
+          // may always close its own tab; another session's tab is closable
+          // only once that opener has been silent past the live lease (an
+          // orphan). Operator tabs and tabs with no record are never
+          // closable. The caller cannot forge this: close params stay empty
+          // and session identity is host-verified.
+          const rec = createdTabs.get(tab.id);
+          if (!rec) return receipt(r,"TAB_NOT_BRIDGE_OPENED");
+          if (rec.session_id !== r.session_id) {
+            const last = sessionActivity.get(rec.session_id);
+            if (typeof last === "number" && Date.now() - last < SESSION_LIVE_LEASE_MS)
+              return receipt(r,"TAB_OWNER_SESSION_LIVE");
+            orphanClose = true;
+          }
+        }
         if (r.action === "snapshot") {
           const response = await page(r);
           await tabFor(r);
@@ -377,16 +441,15 @@
           return receipt(r,response.ok ? "ACTION_DISPATCHED" : response.code,response.data,response.effect);
         }
         if (r.action === "navigate" && !await granted(r.params.url)) return receipt(r,"SITE_PERMISSION_REQUIRED",{origin:originPattern(r.params.url)});
-        if (r.action === "close" && createdTabs.get(tab.id) !== r.session_id) return receipt(r,"TAB_NOT_CREATED_BY_SESSION");
         await tabFor(r);
         current(r);
         attempted = true;
         documents.delete(tab.id);
         if (r.action === "navigate") await chrome.tabs.update(tab.id,{url:r.params.url});
         if (r.action === "reload") await chrome.tabs.reload(tab.id,{});
-        if (r.action === "close") {await chrome.tabs.remove(tab.id);createdTabs.delete(tab.id);}
+        if (r.action === "close") {await chrome.tabs.remove(tab.id);createdTabs.delete(tab.id);await persistRecords();}
         if (r.action === "focus") {await chrome.tabs.update(tab.id,{active:true});await chrome.windows.update(tab.windowId,{focused:true});}
-        return receipt(r,"ACTION_DISPATCHED",{refresh_required:true},"APPLIED");
+        return receipt(r,"ACTION_DISPATCHED",{refresh_required:true,...(orphanClose?{orphan_close:true}:{})},"APPLIED");
       } catch (error) {
         const allowed = new Set(["TARGET_NOT_FOUND","TARGET_UNAVAILABLE","TARGET_CHANGED","SITE_PERMISSION_REQUIRED",
           "BROWSER_PERMISSION_REQUIRED","STALE_SNAPSHOT","DOCUMENT_ID_UNAVAILABLE","PAGE_RESPONSE_INVALID","TAB_LIMIT","CONNECTION_CHANGED","REQUEST_EXPIRED",
@@ -415,7 +478,7 @@
       } finally {if(busy===running)busy=null;}
     }
     const advanced = CDP ? CDP.create(chrome,{current,granted,tabFor,connectionActive:boot=>liveBoot()===boot}) : null;
-    if (chrome.tabs.onRemoved) chrome.tabs.onRemoved.addListener(id=>{documents.delete(id);createdTabs.delete(id);});
+    if (chrome.tabs.onRemoved) chrome.tabs.onRemoved.addListener(id=>{documents.delete(id);if(createdTabs.delete(id))persistRecords();});
     return {run,uiStatus:()=>advanced?advanced.uiStatus():[],diagnostics:()=>advanced?advanced.diagnostics():null,
       transportDisconnected:()=>{documents.clear();busy=null;cleanupPromise=advanced?advanced.reset():Promise.resolve([]);return cleanupPromise;},
       releaseAll:()=>advanced?advanced.releaseAll():Promise.resolve([])};

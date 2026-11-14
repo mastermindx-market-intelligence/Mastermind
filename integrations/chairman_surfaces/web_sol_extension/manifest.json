@@ -6,7 +6,8 @@
   "permissions": [
     "nativeMessaging",
     "alarms",
-    "debugger"
+    "debugger",
+    "storage"
   ],
   "optional_permissions": [
     "tabs",

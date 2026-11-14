@@ -221,7 +221,7 @@ function fixture() {
     f.state.detachFailure=false;assert.equal((await f.run(request("screenshot"))).status,"DEBUGGER_RECONCILIATION_REQUIRED");
   }
   {
-    const f=fixture();await f.snapshot();assert.equal((await f.run(request("close"))).status,"TAB_NOT_CREATED_BY_SESSION");
+    const f=fixture();await f.snapshot();assert.equal((await f.run(request("close"))).status,"TAB_NOT_BRIDGE_OPENED");
     const opened=await f.run(request("open",{params:{url:"https://allowed.test/new"}}));assert.equal(opened.effect,"APPLIED");
     const tab={tab_id:5,url_fingerprint:hash("https://allowed.test/new")};
     await f.run(request("snapshot",tab));assert.equal((await f.run(request("close",tab))).effect,"APPLIED");
