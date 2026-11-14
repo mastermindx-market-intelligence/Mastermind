@@ -1,0 +1,9 @@
+# Input recovery, before the incremental VVIX experiment
+
+The original /tmp/volatility-phase2-20261113-lmeq3g6s scratch root no longer exists. This is an observed retention gap, not evidence that its accepted source/results vanished. No new provider request or replacement instrument is authorized by that gap.
+
+The existing phase3 ETF transfer retained source-bound copies under /tmp/entry-risk-phase3-20261114-ph851obo/etf_results/<SYMBOL>_prices.parquet. Its completed receipt identifies source_commit 68967de67a688fa19604b4916e68d5592c6ad15f, original prepared input hashes and reused forecast hashes. The inspected transfer code explicitly checks variance and return_log equality against the original prepared inputs with rtol1e-10/atol1e-14 before writing the copies. For QQQ the original prepared input SHA256 is cbef1aa4123621bbd7f1547b8ee9eb67a9f66efbc776764ddb40b9c4a9dfcfe4. These are retained input copies, not the phase3 performance results.
+
+The diagnostic may read only the variance/return_log columns of these eleven retained copies, with a parquet predicate through2019-12-31. It will record the exact retained-file hash and a hash of the filtered data actually used. It must report this lineage and the unavailable original scratch root; it does not claim a new byte-level reread of the deleted originals. No post2019 value enters target construction, fitting or evaluation.
+
+Incumbent Macro stores exist at data/cboe/vvix.parquet (vvix,date) and data/yahoo/_VIX.parquet (including close,Date). Their exact read-only filtered inputs will be hashed. No existing outlier quarantine is lifted, no index is silently substituted, and no data collector is changed. This recovery changes the storage location, not the declared instruments, targets, models, costs, holding policies or validation windows. There are no strategy outcome comparisons in this adjunct test.
