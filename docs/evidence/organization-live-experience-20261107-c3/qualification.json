@@ -1,0 +1,151 @@
+{
+  "schema": "mastermind.attended_source_qualification.v1",
+  "operation": "organization-live-experience-20261107-c3",
+  "workstream": "WS:CHAIRMAN-CONTROL-ROOM",
+  "source_base": "23c9b011e30a4acc6892a59d67a629f74b07a491",
+  "branch": "sol/web-organization-live-experience-20261107-c3",
+  "observed_date_utc": "2026-11-07",
+  "source_files_sha256": {
+    "app/mastermind_os/src/organization/OrganizationMissionView.tsx": "764eccf87a1bb679ef3ef58f00e6bd152c212e78a0e97cbfa1fd19365002df60",
+    "app/mastermind_os/src/organization/OrganizationWorkspace.mission.test.tsx": "c093dbfaca2df98db9707c43fbf8a3c9024140964d2880dac0d05e587efe83ec",
+    "app/mastermind_os/src/organization/OrganizationWorkspace.test.tsx": "1ceb9165a9628aa9d481290804ccf5cfa9d0aaf4ec61b435deacc690f68d72e5",
+    "app/mastermind_os/src/organization/OrganizationWorkspace.tsx": "2f09014d692493dec3bd20ee46c7f7320f7cc7d3ee48832d5effb9b6bc0b1034",
+    "app/mastermind_os/src/organization/incumbent-office-mount.patch": "7d9fed181245bb649cbed9358a8171ddaae603a82ff4cceb213e1f0edf7c3088",
+    "app/mastermind_os/src/organization/organization-mission.test.ts": "a4d28880cca6eef36e934460fb880689d1f53eb8a25195ebe1b9d54ddde6e93c",
+    "app/mastermind_os/src/organization/organization-mission.ts": "4a26a0fd06b676bc5a970f8ba8a3c40a97d90847d49155caf542b4446f13eec0",
+    "app/mastermind_os/src/organization/organization-workspace.css": "60a2157fb83046a832bc6154524e1d28e40122fb0cdf61438833acce5119e788"
+  },
+  "commands": [
+    {
+      "cwd": "app/mastermind_os",
+      "command": "npm run typecheck",
+      "exit_code": 0
+    },
+    {
+      "cwd": "app/mastermind_os",
+      "command": "npx vitest run src/organization",
+      "exit_code": 0,
+      "files_passed": 3,
+      "tests_passed": 71,
+      "suites": {
+        "OrganizationWorkspace.test.tsx": 12,
+        "OrganizationWorkspace.mission.test.tsx": 21,
+        "organization-mission.test.ts": 38
+      }
+    },
+    {
+      "cwd": "app/mastermind_os",
+      "command": "npm run build",
+      "exit_code": 0,
+      "warnings": [
+        "existing ineffective dynamic imports",
+        "existing large production chunks"
+      ]
+    }
+  ],
+  "host_process_receipt_pid": 70743,
+  "test_data": "committed owner-produced regression exports plus explicitly controlled mutations; not live acceptance",
+  "review": "SELF_REVIEWED",
+  "candidate_browser_acceptance": "NOT_PROVEN",
+  "app_mount": "INCUMBENT_WRITER_INTEGRATION_REQUIRED",
+  "product_acceptance": false,
+  "browser_evidence": {
+    "url": "https://mcp.mastermind-x.com/os/",
+    "visible_auth_label": "signed in",
+    "projects": "SOURCE_UNAVAILABLE after one completed Refresh Projects",
+    "asset_names": [
+      "/os/assets/index-CmhQwMIu.js",
+      "/os/assets/index-Db36Ii6P.css"
+    ],
+    "source_revision": "NOT_ESTABLISHED",
+    "screenshot": "live-projects-source-unavailable.jpg",
+    "screenshot_sha256": "66c7f90178f4b66a90cca4c805278c260acfba175e0db4d6e723464ed1cc9785"
+  },
+  "mount_patch_check": {
+    "incumbent_pr": 2180,
+    "incumbent_head": "2c0386936a49ab214802aee093b714626642acf6",
+    "command": "git apply --check --unidiff-zero incumbent-office-mount.patch",
+    "host_process_receipt_pid": 95568,
+    "exit_code": 0,
+    "applied": false
+  },
+  "historical_hosted_checks": {
+    "head_sha": "e9da9db07edc037d9efb5d0d33145d0f66be0789",
+    "does_not_qualify_later_source": true,
+    "checks": [
+      {
+        "name": "test",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42343137843/job/128315668618"
+      },
+      {
+        "name": "pytest shard ${{ matrix.index }}",
+        "status": "completed",
+        "conclusion": "skipped",
+        "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42343137843/job/128315402207"
+      },
+      {
+        "name": "PR fast checks",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42343137843/job/128315400800"
+      },
+      {
+        "name": "CodeQL",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/mastermindx-market-intelligence/Mastermind/runs/128315381266"
+      },
+      {
+        "name": "native-macos",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42343137892/job/128315016575"
+      },
+      {
+        "name": "frontend",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42343137892/job/128315016412"
+      },
+      {
+        "name": "PR test scope",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42343137843/job/128315016305"
+      },
+      {
+        "name": "Analyze (rust)",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42343134196/job/128315009087"
+      },
+      {
+        "name": "Analyze (actions)",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42343134196/job/128315009024"
+      },
+      {
+        "name": "Analyze (javascript-typescript)",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42343134196/job/128315008966"
+      },
+      {
+        "name": "Analyze (python)",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/42343134196/job/128315008844"
+      }
+    ]
+  },
+  "original_organization_observation": {
+    "state": "UNBOUND",
+    "producer": "integrations/hermes_leadership/native.py::native_handler",
+    "binding": "HostLeadershipBinding.resolve(actual_enrolled_session_id)",
+    "missing_leg": "incumbent host delivery bound to viewer authorization and current Mission revision",
+    "enrollment": "NOT_OBSERVED"
+  }
+}

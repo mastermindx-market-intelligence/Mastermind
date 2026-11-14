@@ -59,6 +59,18 @@ describe("Paperclip-inspired read-only organization consumer", () => {
     expect(screen.getByText("a".repeat(64))).toBeTruthy();
   });
 
+
+  it.each([
+    ["en", "Pending", "Not accepted"],
+    ["zh-CN", "待审查", "未验收"],
+  ] as const)("localizes supplied advisory review and acceptance (%s)", (locale, review, acceptance) => {
+    render(<OrganizationWorkspace binding={binding} missionState="CURRENT" observation={observation()} locale={locale} />);
+    expect(screen.getByText(review)).toBeTruthy();
+    expect(screen.getByText(acceptance)).toBeTruthy();
+    expect(screen.queryByText("PENDING")).toBeNull();
+    expect(screen.queryByText("NOT_ACCEPTED")).toBeNull();
+  });
+
   it("shows a truthful unbound state, not an empty-company assertion", () => {
     render(<OrganizationWorkspace binding={binding} missionState="CURRENT" />);
     expect(screen.getByRole("status").textContent).toMatch(/not evidence of no team or no work/);

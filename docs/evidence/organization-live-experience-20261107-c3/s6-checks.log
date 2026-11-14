@@ -1,0 +1,16 @@
+organization-tests exit=0 process_seconds=6.71
+ Test Files  4 passed (4)
+      Tests  86 passed (86)
+   Duration  5.43s (environment 47%, tests 27%, import 15%, transform 10%)
+
+typecheck exit=0 process_seconds=1.52
+> mastermind-os-workspace@0.1.0 typecheck
+> tsc -b --pretty false
+
+build exit=0 process_seconds=1.93
+> mastermind-os-workspace@0.1.0 build
+> tsc -p tsconfig.build.json && vite build
+[INEFFECTIVE_DYNAMIC_IMPORT] node_modules/@tauri-apps/api/core.js is dynamically imported by src/App.tsx but also statically imported by node_modules/@tauri-apps/api/event.js, src/main.tsx, dynamic import will not move module into another chunk.
+(!) Some chunks are larger than 500 kB after minification. Consider:
+[INEFFECTIVE_DYNAMIC_IMPORT] src/conversations/SourceMarkdown.tsx is dynamically imported by src/conversations/ObservedResponseMarkdown.tsx, src/conversations/ResultSourceReader.tsx, src/knowledge/KnowledgeSources.tsx, src/knowledge/library/KnowledgeLibrary.tsx but also statically imported by src/conversations/ProjectConversationHistory.tsx, src/conversations/ProjectConversations.tsx, src/discovery/SavedConversationReader.tsx, dynamic import will not move module into another chunk.
+✓ built in 485ms
