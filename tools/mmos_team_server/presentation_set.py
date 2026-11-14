@@ -314,7 +314,10 @@ def write_receipt(receipt_dir, settings_path, value_file, before, after):
     so a second apply can never O_TRUNC the first preimage/receipt and
     destroy the first undo path. F7: a symlinked receipt dir is refused like
     a symlinked settings path — no write through the link, no chmod side
-    effect on its target."""
+    effect on its target. Only the final component is fenced (REV-PRESFIX
+    F11): a symlinked PARENT is followed, as for any user-chosen path (on
+    macOS /tmp itself is a symlink); the 0700 chmod lands on the created
+    dir, never on the link's target."""
     if os.path.islink(receipt_dir):
         die(f"symlinked receipt dir refused: {receipt_dir}")
     preimage = os.path.join(receipt_dir, "preimage.bin")

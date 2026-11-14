@@ -79,7 +79,9 @@ Expected: exit 0, `"onMissingInstance": []`, `"primaryMismatch": []`, `"ok": tru
 `"conversations"` with `"byInstance"` matching the principal's count (25 on 14 Nov).
 It opens the state database with its own `mode=ro` connection (never `immutable=1`,
 which could read stale data while the server runs), reads settings.json and the roster
-state file, and prints counts, conversation IDs and the database `"journalMode"` only.
+state file, and prints counts, conversation IDs, the database `"journalMode"` and, for a
+teammate whose primary is off its roster instance, that teammate's roster name and the
+instance ids. No conversation text, title or secret.
 The main database file is never written; on a WAL-mode database with the server running
 the `-wal`/`-shm` files already exist and are the server's, and with the server stopped
 sqlite may create them when the census opens its read-only connection. Rehearsed on PF

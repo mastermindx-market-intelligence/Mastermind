@@ -70,7 +70,8 @@ principal's 14 Nov census (13 primaries on their own instances; non-primary:
 any conversations started since, plus the database `"journalMode"`. It
 opens the state database with its own `mode=ro` connection (never
 `immutable=1`), reads settings.json and the roster state file, and prints
-counts and conversation IDs only. The main database file is never written;
+counts and conversation IDs (plus, in `primaryMismatch`, the roster name and
+instance ids of a mismatched teammate; no conversation text, title or secret). The main database file is never written;
 on a WAL-mode database with the server running the `-wal`/`-shm` files
 already exist and are the server's, and with the server stopped sqlite may
 create them when the census opens its read-only connection. `"project"` is
