@@ -22,6 +22,7 @@ import uuid
 import os
 import re
 import time
+from urllib.parse import urlsplit
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from pathlib import Path
@@ -608,6 +609,30 @@ def _sanitize_payload(payload: dict) -> None:
     _sanitize_messages(payload)
 
 
+def _morph_deepseek_effort(output_config) -> str | None:
+    """Allowlist DeepSeek Anthropic effort without forwarding unsupported fields.
+
+    Every non-Morph target keeps the old sanitizer behavior. The mapping follows
+    the provider's documented low/high/max vocabulary; it does not invent a
+    stronger inference tier for an unknown client setting.
+    """
+    if not isinstance(output_config, dict):
+        return None
+    effort = output_config.get("effort")
+    if not isinstance(effort, str):
+        return None
+    return {"minimal": "low", "low": "low", "medium": "high",
+            "high": "high", "xhigh": "high", "max": "max",
+            "ultra": "max"}.get(effort.strip().lower())
+
+
+def _morph_deepseek_native(route: Route, model: str) -> bool:
+    url = urlsplit(route.base_url)
+    return (route.wire == WIRE_ANTHROPIC and url.scheme == "https"
+            and url.hostname == "api.morphllm.com"
+            and model in ("deepseek-v4.1-flash", "deepseek-v4.1-flash-1017"))
+
+
 def _session_headers(route: Route, payload: dict, admission=None) -> dict[str, str]:
     """A stable, header-safe session id for upstreams that route by session."""
     if not route.session_header:
@@ -823,6 +848,7 @@ def create_app(cfg: Settings | None = None, *,
             if "tools" in payload and (not isinstance(payload["tools"], list)
                     or any(not isinstance(tool, dict) for tool in payload["tools"])):
                 raise ValueError("invalid tools")
+            morph_deepseek_effort = _morph_deepseek_effort(payload.get("output_config"))
             _sanitize_payload(payload)
             candidates = _model_candidates(payload, cfg.aliases)
         except (ValueError, WireTranslationError):
@@ -887,6 +913,10 @@ def create_app(cfg: Settings | None = None, *,
 
         async def invoke(route, resolved, admission):
             forwarded = dict(payload, model=route.wire_model(resolved))
+            # This is after route selection: Qwen, Claude and other providers
+            # never receive DeepSeek-only effort fields they may reject.
+            if not counting and morph_deepseek_effort and _morph_deepseek_native(route, resolved):
+                forwarded["output_config"] = {"effort": morph_deepseek_effort}
             # Caller routing/provenance hints are consumed locally, not unsupported provider fields.
             metadata = forwarded.get("metadata")
             if isinstance(metadata, dict):
@@ -1150,7 +1180,8 @@ def create_app(cfg: Settings | None = None, *,
             app.state.model_policy.checkpoint()
         return JSONResponse({"error": {"type": "upstream_error", "code": code,
             "category": failure.category, "provider_code": failure.code,
-            "message": "upstream refused; request was not replayed"}}, status_code=status)
+            "message": ("upstream refused (" + failure.category + ":" + failure.code
+                        + "); request was not replayed")}}, status_code=status)
 
     async def _forward_anthropic_count(app, route, authorization, payload, *, admission=None) -> Response:
         upstream: httpx.AsyncClient = app.state.upstream
