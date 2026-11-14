@@ -1,0 +1,94 @@
+{
+  "parent": "6e185be1683a9b136afcfc08c817b3aa38d35375",
+  "stage": "source",
+  "created_at": "2026-11-14T10:38:30.554217+00:00",
+  "files": {
+    "research/apmem_shadow/phase6/native_replay.py": {
+      "sha256": "33522ba860ebb4a96271425d350f465d4c0f39692c9b18a27b43f56e7d3058dd",
+      "git_blob": "2893d014cef2632ea00ade9053d02f191845e50f",
+      "bytes": 4278
+    },
+    "research/apmem_shadow/phase6/features.py": {
+      "sha256": "181ff01f75bbd0fb74168d2c8b54948fb201ec876a876a739a859a435eeaebed",
+      "git_blob": "5f99c9c623841adfb4fdfd0f5ac26232b752c77e",
+      "bytes": 13256
+    },
+    "research/apmem_shadow/phase6/run_features.py": {
+      "sha256": "f5d483e85ed2c8bac8b1ee30b90fb63143874f82bb6cf81d4669f812223e510d",
+      "git_blob": "5ff73473de9f134dcd16bfa5c9d977be65804e48",
+      "bytes": 2984
+    },
+    "research/apmem_shadow/phase6/behavior.py": {
+      "sha256": "1c63a3b71ef623c801f42731a9bad6cf397a15f5d846c728805a9bcc8945c26c",
+      "git_blob": "baa6a76b2df4f8fa81b1fa1b5678e19a6a4c498f",
+      "bytes": 5042
+    },
+    "research/apmem_shadow/phase6/evaluate.py": {
+      "sha256": "6e849cfedd4da23fc16e4fd71c8b01eb1ccb01f926990d12586fa8409cecb4e8",
+      "git_blob": "2a509d7053ef5824f62a96a2811452f63a1daf0c",
+      "bytes": 10600
+    },
+    "research/apmem_shadow/phase6/modeling.py": {
+      "sha256": "58b6571ebe7da0fc227717f802635e203354cb12f03755eb7bea3ca49e0d315f",
+      "git_blob": "cf3b38bcc8f99c98da4e98a197f4d9a44670425f",
+      "bytes": 11339
+    },
+    "research/apmem_shadow/phase6/consumer.py": {
+      "sha256": "3625d8a8f56a103ccf865cab39416067e1fcde28a68f78d68dfc910ace549b07",
+      "git_blob": "97d2d4670a63130060e3b545589ebc30c9a0ffae",
+      "bytes": 4732
+    },
+    "research/apmem_shadow/phase6/dynamics.py": {
+      "sha256": "d945af51226653f717e0cc235da7bc584c1da1fb766742821e8f418bab3fef7c",
+      "git_blob": "b015cee2cd9ad48bb9be6f57c9507a6a8fc20134",
+      "bytes": 3748
+    },
+    "research/apmem_shadow/phase6/run_dynamics.py": {
+      "sha256": "9390293d4b089cc4814c3f36888e175191d9896d3c9ce741890d62846ee78d8e",
+      "git_blob": "c0d25f440dba7bae46b912f659d94810952c94b7",
+      "bytes": 6328
+    },
+    "research/apmem_shadow/phase6/test_features.py": {
+      "sha256": "6df218ddd44353de5bf6d5797df1b179e813738aca91ee1bd1d602e82426b8e7",
+      "git_blob": "a98587f907cd9645cd879eccb84a110934acd4cf",
+      "bytes": 6012
+    },
+    "research/apmem_shadow/phase6/test_evaluate.py": {
+      "sha256": "b9f2ff4c6a0a6638e13dd8c8626fdae1bdf5c0405d15e635086b907e4542fac0",
+      "git_blob": "5d3cbe34a7ae2aae5d4ff49dc1a89084673af9dd",
+      "bytes": 3392
+    },
+    "research/apmem_shadow/phase6/test_behavior.py": {
+      "sha256": "eca935bf5bb004a942bc092d1bca9563074415eb38d10a3af8fa04e69005dba6",
+      "git_blob": "1d3e963cc2947be618bbd52cdfd563fd632dff19",
+      "bytes": 2316
+    },
+    "research/apmem_shadow/phase6/test_modeling.py": {
+      "sha256": "70e4fabae5afa180711868e545091b31c5ba3040bd3c8ff7fdd56cb97249d884",
+      "git_blob": "92a00ca0b83ab55c75735d6ea983fb67498f5ea3",
+      "bytes": 2816
+    },
+    "research/apmem_shadow/phase6/test_dynamics_consumer.py": {
+      "sha256": "749e2450b6ae371781e18e91427495168b2ef06fd1ffa493e89a0deb3c26f26d",
+      "git_blob": "a58fcac9dc2139526bb8ccc5cfaa22239e0f281d",
+      "bytes": 6178
+    },
+    "research/evidence/nested_cohort_phase6/INPUT_MANIFEST.json": {
+      "sha256": "a6b9a474fdee6cae7197fd1c0ce529e3dae7c0829951121ea4195a3d60be2a40",
+      "git_blob": "ef6f9a71d6cbbe68ab5713a029d88672b8488dc7",
+      "bytes": 26547
+    },
+    "research/evidence/nested_cohort_phase6/SOURCE_TEST_LOG.txt": {
+      "sha256": "430f36e1d0a0155e0d76b4e51d98a512c13d9b66bc020edd4c462b5507ebe075",
+      "git_blob": "a51956e6f97ce3cebaa00c80815a9d9ccfcb87d7",
+      "bytes": 173
+    },
+    "tests/test_nested_cohort_phase6.py": {
+      "sha256": "e38d3388f9d1c63eed1ed45fcb3422c8559c7438122877ef58da08e87d66128b",
+      "git_blob": "8e35d8c3a687e00c3046dcda790201b2b8ce1cc6",
+      "bytes": 558
+    }
+  },
+  "raw_vendor_histories_published": false,
+  "production_authority": false
+}
