@@ -375,6 +375,33 @@ body.page-ag .msg {
     return out;
   }
 
+  // A readable JSON object is not evidence of an empty agenda. Qualify the
+  // display's core collection/count contract before rendering any clean state.
+  // Optional readiness annotations remain backward-compatible with legacy rows.
+  function validAgenda(a) {
+    function object(v) { return v !== null && typeof v === "object" && !Array.isArray(v); }
+    function count(v) { return Number.isSafeInteger(v) && v >= 0; }
+    function counts(v) { return object(v) && Object.keys(v).every(function (k) { return count(v[k]); }); }
+    function strings(v) { return Array.isArray(v) && v.every(function (x) { return typeof x === "string"; }); }
+    if (!object(a) || a.schema_version !== "improvement_agenda.v1" ||
+        typeof a.as_of !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(a.as_of) ||
+        !Array.isArray(a.items) || !count(a.n_items) || a.n_items !== a.items.length ||
+        !counts(a.owners) || !counts(a.class_counts)) return false;
+    if (a.readiness_input !== undefined && (!object(a.readiness_input) ||
+        (a.readiness_input.available !== undefined && typeof a.readiness_input.available !== "boolean") ||
+        (a.readiness_input.degraded !== undefined && !strings(a.readiness_input.degraded)))) return false;
+    return a.items.every(function (it) {
+      if (!object(it) || !["title", "class", "fix_type", "owner", "suggested_fix", "expected_impact"].every(function (k) {
+        return typeof it[k] === "string";
+      }) || !strings(it.evidence)) return false;
+      if (it.readiness == null) return true;
+      return object(it.readiness) &&
+        (it.readiness.state === undefined || typeof it.readiness.state === "string") &&
+        (it.readiness.depends_on === undefined || strings(it.readiness.depends_on)) &&
+        (it.readiness.unmet_dependencies === undefined || strings(it.readiness.unmet_dependencies));
+    });
+  }
+
   function render(a) {
     sub.textContent = "as of " + (a.as_of || "—") + " · " + (a.schema_version || "");
     var html = "";
@@ -402,7 +429,7 @@ body.page-ag .msg {
     .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, body: j }; }); })
     .then(function (res) {
       if (!res.ok || !res.body || typeof res.body !== "object" || Array.isArray(res.body) ||
-          res.body.available === false || res.body.read_status === "unavailable") {
+          res.body.available === false || res.body.read_status === "unavailable" || !validAgenda(res.body)) {
         var note = "agenda unavailable";
         if (res.status === 404 && res.body && res.body.available === false &&
             res.body.read_status !== "unavailable" && res.body.note === "no agenda built yet (brain.improvement_agenda.write runs in the weekly CIO job)") {
