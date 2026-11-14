@@ -116,7 +116,8 @@ def warm(tickers, background: bool = False) -> None:
     if background:
         # NON-BLOCKING: if a fetch already holds the lock (a blocking pre-warm / NAV mark is mid
         # yf.download), do NOT wait — the request serves the cache / Terminal fallback and the fresh
-        # quote lands on a later lookup. Only _INFLIGHT is touched under the (try-acquired) lock.
+        # quote lands on a later lookup. Reserve/start/rollback share this short critical section;
+        # the new worker cannot begin its download until we release it.
         if not _LOCK.acquire(blocking=False):
             return
         try:
@@ -124,17 +125,15 @@ def warm(tickers, background: bool = False) -> None:
             if not todo:
                 return
             _INFLIGHT.update(todo)
+            try:
+                threading.Thread(target=_bg_fetch, args=(todo,), daemon=True).start()
+            except RuntimeError:
+                # Roll back while we still own the lock: reacquiring it here
+                # could wait behind an unrelated provider download.
+                _INFLIGHT.difference_update(todo)
+                log.debug("yahoo_feed: background thread could not start")
         finally:
             _LOCK.release()
-        try:
-            threading.Thread(target=_bg_fetch, args=(todo,), daemon=True).start()
-        except RuntimeError:
-            # No worker owns these reservations if the runtime cannot start a
-            # thread. Keep the best-effort hot path usable and allow a later
-            # request to retry without clearing another worker's symbols.
-            with _LOCK:
-                _INFLIGHT.difference_update(todo)
-            log.debug("yahoo_feed: background thread could not start")
         return
     with _LOCK:
         # re-check freshness under the lock — a caller we queued behind may have just populated these
