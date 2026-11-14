@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -11,21 +12,26 @@ import { startGateway } from './gateway.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURE = path.join(HERE, 'fixtures/backend.mjs');
+const shellQuote = value => "'" + value.replaceAll("'", "'\"'\"'") + "'";
 async function boot(t, { enabled = true, account = 'account-a', portStatus = 'OBSERVED', t3Only = false } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'gateway-t3-proof-'));
   const profilePath = path.join(dir, 'profile.json');
   const port = path.join(dir, 'fixed-python-port');
+  const portScript = path.join(dir, 'fixed-port-source.mjs');
   const raw = JSON.stringify({ schema: 'mastermind.t3_dot_native_profile.v1',
     principal_key: 'p:tunnel:account-a', operations: ['t3_fleet_environments', 't3_thread_send'], timeout_seconds: 5 });
   await writeFile(profilePath, raw, { mode: 0o600 });
   // Hermetic fake for the fixed port only. No native client, profile, credential,
   // provider, inference, callback or external runtime is accessed by these tests.
-  await writeFile(port, `#!/usr/bin/env node
-let text='';process.stdin.on('data',x=>text+=x);process.stdin.on('end',()=>{
+  // The gateway intentionally drops host-toolchain PATH entries. A fake
+  // port must use this test's exact interpreter, not an ambient /usr/bin node.
+  await writeFile(portScript, `let text='';process.stdin.on('data',x=>text+=x);process.stdin.on('end',()=>{
  const x=JSON.parse(text);if(x.principal_key!=='p:tunnel:account-a')process.exit(7);
  console.log(JSON.stringify({schema:'mastermind.t3_dot_result.v1',status:${JSON.stringify(portStatus)},operation:x.tool,
  data:{environment_id:'fixture-env',original_arguments:x.arguments},original:{operation_id:x.arguments.operation_id},
  retry_allowed:false,parent_accepted:false}));});\n`, { mode: 0o700 });
+  await writeFile(port, '#!/bin/sh\nexec ' + shellQuote(process.execPath) + ' '
+    + shellQuote(portScript) + ' "$@"\n', { mode: 0o700 });
   await chmod(port, 0o700);
   const config = { host: '127.0.0.1', port: 0, command: process.execPath,
     args: [FIXTURE], cwd: HERE, stateDir: path.join(dir, 'state'), testMode: true,
@@ -42,7 +48,7 @@ let text='';process.stdin.on('data',x=>text+=x);process.stdin.on('end',()=>{
   await client.connect(new StreamableHTTPClientTransport(new URL(gw.url), {
     requestInit: { headers: { authorization: 'Bearer fixture-auth' } },
   }));
-  return { client, gw, profilePath };
+  return { client, gw, profilePath, port };
 }
 
 test('real MCP catalog exposes only the current authenticated account T3 grant', async t => {
@@ -110,4 +116,17 @@ test('T3-only retained output cannot outlive the installed account grant', async
   await writeFile(profilePath, '{}');
   await assert.rejects(() => client.callTool({ name: 'studio_output_page',
     arguments: { receipt_id: 'prior-receipt', offset: 0 } }), /profile is no longer current/);
+});
+
+
+test('fixed fake port uses the exact test interpreter even without a toolchain PATH', async t => {
+  const { port } = await boot(t, { t3Only: true });
+  const result = spawnSync(port, ['-B', '-m', 'fixture-only'], {
+    input: JSON.stringify({ principal_key: 'p:tunnel:account-a', tool: 't3_fleet_environments', arguments: {} }),
+    encoding: 'utf8', timeout: 5000, env: { PATH: '/no-test-interpreter-here' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const value = JSON.parse(result.stdout);
+  assert.equal(value.status, 'OBSERVED');
+  assert.equal(value.operation, 't3_fleet_environments');
 });

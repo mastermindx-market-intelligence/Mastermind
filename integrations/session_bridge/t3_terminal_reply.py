@@ -139,6 +139,6 @@ async def project(source, principal, request_ref, message_key):
         'timestamp': datetime.fromtimestamp(observed['observed_at'], timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         'cursor': None, 'data': {'request_ref': request_ref, 'read_ref': binding['read_ref'],
             'message_key': message_key, 'in_reply_to': request_ref,
-            'summary': 'The original T3 run ended without a qualified answer. Read its exact terminal status; do not infer success or restart it automatically.',
+            'summary': 'The original T3 run ended without a qualified answer. This notification establishes neither success nor permission to restart.',
             'reply_committed': True, 'parent_consumed': False}}
     return ResolvedReplyEvent(event, binding['read_ref'], binding['owner_key'])

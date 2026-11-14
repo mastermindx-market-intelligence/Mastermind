@@ -34,7 +34,8 @@ def test_terminal_status_reaches_original_subscriber_without_fabricated_answer(t
         await until(lambda: all(o.task.done() for o in monitor.observers.values()))
         packet = case.sent[-1][0]
         assert packet['data']['message_key'].startswith('t3-native-status-')
-        assert 'without a qualified answer' in packet['data']['summary']
+        assert packet['data']['summary'] == ('The original T3 run ended without a qualified answer. '
+            'This notification establishes neither success nor permission to restart.')
         reader = NativeReplyReader(case.owner, socket_path=case.owner.socket_path,
             clock=lambda: case.auth.now[0], t3_replies=case.source)
         reply = await NativeReplyReadTool(reader).handle(installed.PRINCIPAL, 'session_reply_read',

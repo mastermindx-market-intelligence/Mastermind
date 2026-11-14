@@ -96,6 +96,7 @@ def test_real_subscription_challenge_restart_native_return_and_retained_delivery
     assert event['data']['read_ref'] == case.binding['read_ref']
     assert event['data']['in_reply_to'] == case.binding['request_ref']
     assert event['data']['parent_consumed'] is False
+    assert event['data']['summary'] == 'The original T3 response is available. Parent consumption and acceptance remain unproven.'
     again = asyncio.run(case.host.observe_t3_reply(case.auth.principal, case.binding['request_ref']))
     assert again['deliveries'][0]['fresh_send'] is False and len(case.sent) == 2
     record = asyncio.run(case.host.store.read(receipt['subscription_id']))
@@ -164,7 +165,7 @@ def test_pending_question_signed_event_exact_public_read_and_duplicate(t3_host):
     event, headers = case.sent[1]
     assert event['data']['message_key'] == value['message_key']
     assert event['data']['read_ref'] == case.binding['read_ref']
-    assert 'not a completed task' in event['data']['summary']
+    assert event['data']['summary'] == 'The original T3 worker has a pending question, not a completed task.'
     assert 'Which dataset?' not in json.dumps(event)
     assert any('signature' in key.lower() for key in headers)
     reader = NativeReplyReader(case.owner, socket_path=case.owner.socket_path,
