@@ -8,7 +8,8 @@ Runs only as `fleetmint`, the one account that can read the org credential at
 
 Exit codes: 0 success; 75 transient API/network failure (the slot backs off and
 retries); 3 a state an operator must fix: a same-name registration to reconcile, or a
-credential/group the API refuses (401, 403 not rate-limited, 404, 422); 2 bad input.
+credential or runner group the API refuses; permanent HTTP status codes:
+401, 403 (not rate-limited), 404, 422. Exit 2: bad input.
 """
 import http.client
 import json
