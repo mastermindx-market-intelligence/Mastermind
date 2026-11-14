@@ -75,7 +75,7 @@ def _native_config(tmp_path):
 
 
 def _payload(messages, *, stream=False, effort="max"):
-    return {"model": DS, "stream": stream, "max_tokens": 512,
+    return {"model": DS, "stream": stream, "max_tokens": 4096,
             "thinking": {"type": "enabled", "budget_tokens": 1024},
             "output_config": {"effort": effort, "unknown_upstream_extension": "must_not_escape"},
             "tools": [{"name": "lookup", "description": "fixture",
@@ -90,6 +90,7 @@ async def _two_turns(cfg, captured):
         captured.append({"url": str(req.url), "data": data})
         assert req.url.path == "/v1/messages"  # NOT /v1/chat/completions
         assert req.url.host == "api.morphllm.com"
+        assert req.headers.get("anthropic-version") == "2023-06-01"
         assert data["model"] == "morph-dsv41flash-1017"
         assert data["thinking"] == {"type": "enabled", "budget_tokens": 1024}
         assert data["output_config"] == {"effort": "max"}
@@ -148,6 +149,7 @@ def test_only_morph_deepseek_receives_output_effort(tmp_path, monkeypatch):
     cfg = config(tmp_path)
     def handler(req):
         data = json.loads(req.content)
+        assert req.headers.get("anthropic-version") is None
         captured.append(data)
         return success_response(req)
     payload = {"model": "qwen4-max-preview", "max_tokens": 128,
@@ -186,6 +188,7 @@ def test_native_body_betas_become_header(tmp_path, monkeypatch):
         seen.append(req.headers.get("anthropic-beta"))
         assert "betas" not in data
         assert "output_config" not in data
+        assert req.headers.get("anthropic-version") == "2023-06-01"
         return success_response(req)
     payload = _payload([{"role": "user", "content": "synthetic"}], effort="unknown")
     payload["betas"] = ["interleaved-thinking-2025-05-14",
