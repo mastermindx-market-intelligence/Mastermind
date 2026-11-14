@@ -167,7 +167,8 @@ def test_api_self_directed_history_unreadable_reports_unavailable_never_an_empty
         assert data[field] is None, f"{field} must be None, not {data[field]!r}"
     assert data["history"] == []
     assert data["pending"] == []
-    assert data["error"] == "synthetic"
+    assert data["error"] == "self_directed_history_unavailable"
+    assert b"synthetic" not in raw
 
 
 # ── 4. static wiring ──────────────────────────────────────────────────────────

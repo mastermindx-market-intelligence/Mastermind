@@ -748,6 +748,28 @@ __result = {during: during, bookFlag: bookFlag, after: _accountStateInvalid() ? 
     assert out == {"during": "invalid", "bookFlag": False, "after": "valid"}
 
 
+@requires_node
+def test_failed_live_tick_repaints_invalid_account_and_preserves_marks(tmp_path):
+    payload = {
+        "portfolio": "autonomous",
+        "error": "live_marks_unavailable",
+        "account_state": INVALID,
+        "positions": [],
+        "performance": {"current_nav": None},
+    }
+    result = _run(tmp_path, r"""
+_book = {positions: [{ticker: 'SYNA', current_price: 100, verdict: 'hold', weight: 0.1}]};
+_perf = {current_nav: 1000};
+_safeRender = function(name, render) {
+  if (render === renderPositions) render();
+};
+_mergeLiveMarks(PAYLOAD);
+__result = {price: _book.positions[0].current_price, nav: _perf.current_nav};
+""".replace("PAYLOAD", json.dumps(payload)))
+    assert result["result"] == {"price": 100, "nav": 1000}
+    assert "Book unavailable — state invalid" in result["dom"]["positions"]["html"]
+
+
 SELF_IDS = ("sd-nav", "sd-nav-status", "sd-hb", "sd-cash", "sd-invested", "sd-unreal",
             "sd-return", "sd-cash-pct", "sd-gross")
 

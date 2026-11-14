@@ -1359,6 +1359,12 @@ body.page-mm #mm-nav { position: relative; z-index: 60; display: flex; align-ite
   box-shadow: 0 0 10px rgba(124,92,255,.55); border-radius: 0 2px 2px 0;
   opacity: 0; transition: width .25s ease, opacity .35s ease; pointer-events: none; }
 #mm-loadbar.active { opacity: 1; }
+#portfolio-scope-state { display: none; }
+body.page-mm.mm-pf-scope-loading .mm-pf-scoped,
+body.page-mm.mm-pf-scope-unavailable .mm-pf-scoped { display: none !important; }
+body.page-mm.mm-pf-scope-loading #portfolio-scope-state,
+body.page-mm.mm-pf-scope-unavailable #portfolio-scope-state,
+body.page-mm.mm-pf-scope-stale #portfolio-scope-state { display: block; }
 body.page-mm .mm-nav-brand { display: flex; align-items: center; gap: 8px; }
 body.page-mm .mm-logo-mark { width: 24px; height: 24px; display: block; flex: none; border-radius: 7px; box-shadow: 0 1px 5px rgba(20,30,80,.28); }
 body.page-mm .mm-logo-word { font-size: 13.5px; font-weight: 800; letter-spacing: .13em; color: var(--text); white-space: nowrap; }
@@ -2478,7 +2484,7 @@ html[data-theme="light"] body.page-mm {
 }
 </style>
 </head>
-<body class="page-mm">
+<body class="page-mm mm-pf-scope-loading">
 <div id="mm-loadbar" aria-hidden="true"></div>
 
 <!-- ── TOP NAV (Dashboard / Research view switch) ────────────────────────────── -->
@@ -2506,6 +2512,8 @@ html[data-theme="light"] body.page-mm {
 .mm-pf-awaiting{position:relative;min-height:100px}
 .mm-pf-awaiting > *{visibility:hidden}
 .mm-pf-awaiting > h2{visibility:visible}
+.mm-pf-awaiting:has(.mm-book-invalid) > *{visibility:visible}
+.mm-pf-awaiting:has(.mm-book-invalid)::after{display:none}
 .mm-eval-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
 .mm-eval-head h2{margin-bottom:8px}
 .mm-eval-badge{flex:none;border:1px solid var(--line);border-radius:20px;padding:3px 9px;font-size:10px;color:var(--muted)}
@@ -2842,6 +2850,12 @@ body.page-mm[data-mm-view="operations"]:not(.view-research):not(.view-desk):not(
   </span>
 </div>
 
+<div class="mm-section" id="portfolio-scope-state" role="status" aria-live="polite" aria-busy="true">
+  <div class="panel span12" style="grid-column:span 12">
+    <div class="mm-empty"><span class="mm-empty-icon">…</span><span class="l-en">Loading portfolio…</span><span class="l-zh">正在加载组合…</span></div>
+  </div>
+</div>
+
 <!-- Decision availability precedes the memo; its clocks are independent of live marks. -->
 <div class="mm-section" id="decision-availability-section" data-mm-views="decision" style="display:none">
   <section class="panel span12" id="decision-availability" aria-live="polite" aria-label="Decision and account status">
@@ -2851,7 +2865,7 @@ body.page-mm[data-mm-view="operations"]:not(.view-research):not(.view-desk):not(
 </div>
 
 <!-- ── AUTONOMOUS BOOK BANNER (shown only when the autonomous portfolio is active) ── -->
-<div class="grid mm-section" id="auto-banner-sec" data-mm-views="decision" style="margin-top:0;display:none">
+<div class="grid mm-section mm-pf-scoped" id="auto-banner-sec" data-mm-views="decision" style="margin-top:0;display:none">
   <div class="panel span12" id="auto-banner">
     <div class="mm-auto-banner">
       <div class="mm-auto-head">
@@ -2875,7 +2889,7 @@ body.page-mm[data-mm-view="operations"]:not(.view-research):not(.view-desk):not(
 </div>
 
 <!-- ── PERFORMANCE HEADER ─────────────────────────────────────────────────── -->
-<div class="mm-section" data-mm-views="overview performance">
+<div class="mm-section mm-pf-scoped" data-mm-views="overview performance">
   <div class="panel span12" id="performance" style="grid-column:span 12">
     <h2><span class="l-en">Performance — Simulated Account</span><span class="l-zh">业绩 — 模拟账户</span></h2>
     <p class="mm-perf-stat-sub" id="perf-evidence" role="status" aria-live="polite"></p>
@@ -2939,7 +2953,7 @@ body.page-mm[data-mm-view="operations"]:not(.view-research):not(.view-desk):not(
 </div>
 
 <!-- ── ALLOCATION ─────────────────────────────────────────────────────────── -->
-<div class="mm-section" data-mm-views="overview">
+<div class="mm-section mm-pf-scoped" data-mm-views="overview">
   <div class="panel span12" id="alloc" style="grid-column:span 12">
     <h2><span class="l-en">Allocation</span><span class="l-zh">仓位分配</span></h2>
     <div class="mm-sleeve-bar" id="sleeve-bar">
@@ -2957,7 +2971,7 @@ body.page-mm[data-mm-view="operations"]:not(.view-research):not(.view-desk):not(
 </div>
 
 <!-- ── POSITIONS ──────────────────────────────────────────────────────────── -->
-<div class="mm-section" data-mm-views="overview position">
+<div class="mm-section mm-pf-scoped" data-mm-views="overview position">
   <div class="panel span12" id="positions" style="grid-column:span 12">
     <h2><span class="l-en">Positions</span><span class="l-zh">持仓</span></h2>
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading positions…</span><span class="l-zh">加载持仓中…</span></div>
@@ -2965,7 +2979,7 @@ body.page-mm[data-mm-view="operations"]:not(.view-research):not(.view-desk):not(
 </div>
 
 <!-- ── TRADE HISTORY ──────────────────────────────────────────────────────── -->
-<div class="mm-section" data-mm-views="pending position">
+<div class="mm-section mm-pf-scoped" data-mm-views="pending position">
   <div class="panel span12" id="trades" style="grid-column:span 12">
     <h2><span class="l-en">Trade History</span><span class="l-zh">交易历史</span></h2>
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading trades…</span><span class="l-zh">加载交易中…</span></div>
@@ -2973,7 +2987,7 @@ body.page-mm[data-mm-view="operations"]:not(.view-research):not(.view-desk):not(
 </div>
 
 <!-- ── SAFETY (portfolio risk backtest; supporting detail after holdings + fills) ── -->
-<div class="mm-section" data-mm-views="overview">
+<div class="mm-section mm-pf-scoped" data-mm-views="overview">
   <div class="panel span12" id="safety" style="grid-column:span 12">
     <h2><span class="l-en">Portfolio Safety</span><span class="l-zh">组合安全度</span></h2>
     <div class="mm-empty"><span class="mm-empty-icon">🛡</span><span class="l-en">Assessing portfolio risk…</span><span class="l-zh">评估组合风险中…</span></div>
@@ -2982,7 +2996,7 @@ body.page-mm[data-mm-view="operations"]:not(.view-research):not(.view-desk):not(
 
 <!-- ── BRAIN LOG + RESEARCH (side-by-side on wide screens) ─────────────────── -->
 <!-- ── AUTONOMOUS DAILY DECISION LOG (shown only when the autonomous portfolio is active) ── -->
-<div class="mm-section" id="decisions-sec" data-mm-views="decision" style="display:none">
+<div class="mm-section mm-pf-scoped" id="decisions-sec" data-mm-views="decision" style="display:none">
   <div class="panel span12" id="decisions">
     <h2><span class="l-en">Daily Decision Log</span><span class="l-zh">每日决策日志</span></h2>
     <div class="mm-dec-sub" style="color:var(--muted);font-size:12px;margin:-2px 0 12px">
@@ -3001,7 +3015,7 @@ body.page-mm[data-mm-view="operations"]:not(.view-research):not(.view-desk):not(
      Forward-graded sizing skill: weight-IC (did bigger bets earn bigger relative returns?),
      book edge, hit-rate, conviction breakdown. Rendered from the book payload's `accountability`
      by renderSizingScorecard(); the section hides itself when the active book has no ledger. -->
-<div class="mm-section" id="sizing-sec" data-mm-views="position" style="display:none">
+<div class="mm-section mm-pf-scoped" id="sizing-sec" data-mm-views="position" style="display:none">
   <div class="panel span12" id="sizing-card"></div>
 </div>
 
@@ -3025,7 +3039,7 @@ body.page-mm[data-mm-view="operations"]:not(.view-research):not(.view-desk):not(
 </div>
 
 <!-- ── REJECTED NAMES ─────────────────────────────────────────────────────── -->
-<div class="mm-section" data-mm-views="opportunities">
+<div class="mm-section mm-pf-scoped" data-mm-views="opportunities">
   <div class="panel span12 mm-collapsible mm-collapsed" id="rejected" style="grid-column:span 12">
     <h2 class="mm-coll-h2" onclick="toggleCollapse('rejected')"><span class="mm-coll-chev">&#9654;</span><span class="l-en">Evaluated &mdash; Not Held, and Why</span><span class="l-zh">已评估 &mdash; 未持仓及原因</span> <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:6px"><span class="l-en">the discipline made visible</span><span class="l-zh">让纪律透明化</span></span></h2>
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading rejected names…</span><span class="l-zh">加载剔除标的中…</span></div>
@@ -3427,6 +3441,7 @@ var I18N = {
   'trades.title':         { en: 'Trade History', zh: '交易历史' },
   'trades.loading':       { en: 'Loading trades…', zh: '加载交易中…' },
   'trades.empty':         { en: 'No trade history yet — positions accrue here as the ledger is updated.', zh: '暂无交易历史 — 账本更新后将显示。' },
+  'trades.unavailable':   { en: 'Trade history unavailable — the portfolio ledger could not be read.', zh: '交易历史暂不可用 — 无法读取组合账本。' },
   'trades.ticker':        { en: 'Ticker', zh: '代码' },
   'trades.sleeve':        { en: 'Sleeve', zh: '仓位类型' },
   'trades.opened':        { en: 'Opened', zh: '开仓日期' },
@@ -4076,6 +4091,23 @@ var _portfolioPrefetchStarted = false;
 var _workspacePrefetchStarted = false;
 var PORTFOLIO_SNAPSHOT_MAX_AGE_MS = 30000; // never extend the origin's 30-second freshness budget
 var _liveMarks = null, _liveTimer = null, _liveFetchSeq = 0;
+var _portfolioScopeState = 'loading';
+function _performanceLoading() {
+  return { load_status: 'loading', series_status: 'loading', series: [] };
+}
+function _performanceUnavailable() {
+  return { error: 'performance_unavailable', load_status: 'unavailable', availability: {status:'unavailable', history_status:'unavailable'}, series: [] };
+}
+function _tradesLoading() {
+  return { snapshot_status: 'loading', history: null, pending: null };
+}
+function _tradesUnavailable() {
+  return { error: 'trades_unavailable', snapshot_status: 'unavailable', history: null, pending: null };
+}
+function _riskLoading() { return { report_status: 'loading' }; }
+function _riskUnavailable() {
+  return { error: 'risk_unavailable', report_status: 'unavailable', note: 'Safety report unavailable.', metrics: null, breaches: null, caveats: null };
+}
 var _runsLoaded = false, _runsLoad = null, _runsStatus = 'loading';
 var _papersLoaded = false, _papersLoad = null;
 var _calibLoaded = false, _calibLoad = null;
@@ -4086,7 +4118,7 @@ var _decisionAvailability = null; // independent persisted decision/account cloc
 var _forwardEvaluation = null;
 var _forwardEvaluationPending = true;
 var _decisionAvailabilityPending = true;
-var _decisions = [];              // autonomous Brain daily decision log (/api/decisions)
+var _decisions = [], _decisionsStatus = 'loading';              // autonomous Brain daily decision log (/api/decisions)
 var DECISION_PREVIEW_COUNT = 5, _decisionsExpanded = false;
 // run drilldown cache
 var _runLogCache = Object.create(null), _runLogLoads = Object.create(null);
@@ -4222,7 +4254,19 @@ function _equityAreaPath(vals, xOf, yOf, floor, start, end) {
 
 function renderPerformance() {
   var p = _perf || {availability: {status:'unavailable', history_status:'unavailable'}};
-  var benchmarkSymbol = p.benchmark || 'Benchmark';
+  if (p.load_status === 'loading' && !_accountStateInvalid()) {
+    var loadingIds = ['perf-nav', 'perf-ret', 'perf-spy', 'perf-day', 'perf-dd'];
+    loadingIds.forEach(function(id) { var el = E(id); if (el) el.textContent = '—'; });
+    var loadingSince = E('perf-since');
+    if (loadingSince) loadingSince.innerHTML = '<span class="l-en">Loading performance…</span><span class="l-zh">正在加载业绩…</span>';
+    var loadingBench = E('perf-bench-label');
+    if (loadingBench) loadingBench.innerHTML = '<span class="l-en">benchmark loading…</span><span class="l-zh">正在加载基准…</span>';
+    var loadingCash = E('perf-cash-lbl');
+    if (loadingCash) loadingCash.textContent = t('perf.cash_lbl') + ' —';
+    return;
+  }
+  var unavailable = p.error === 'performance_unavailable';
+  var benchmarkSymbol = unavailable ? '' : (p.benchmark || 'Benchmark');
   var benchmarkName = p.benchmark_name || benchmarkSymbol;
   var benchmarkNameZh = p.benchmark_name_zh || benchmarkName;
 
@@ -4275,16 +4319,24 @@ function renderPerformance() {
 
   // Since label
   var sinceEl = E('perf-since');
-  if (sinceEl) sinceEl.textContent = p.inception_date
-    ? t('perf.since') + ' ' + fmtDate(p.inception_date)
-    : t('perf.since_inception');
+  if (sinceEl) {
+    if (unavailable) {
+      sinceEl.innerHTML = '<span class="l-en">Performance unavailable</span>' +
+        '<span class="l-zh">业绩数据暂不可用</span>';
+    } else {
+      sinceEl.textContent = p.inception_date
+        ? t('perf.since') + ' ' + fmtDate(p.inception_date)
+        : t('perf.since_inception');
+    }
+  }
 
   // Versus the active book's own benchmark (SPY / CSI 300 / Hang Seng).
   var benchmarkLabelEl = E('perf-bench-label');
   if (benchmarkLabelEl) {
-    benchmarkLabelEl.innerHTML =
-      '<span class="l-en">vs ' + esc(benchmarkName) + '</span>' +
-      '<span class="l-zh">相对' + esc(benchmarkNameZh) + '</span>';
+    benchmarkLabelEl.innerHTML = unavailable
+      ? '<span class="l-en">benchmark unavailable</span><span class="l-zh">基准暂不可用</span>'
+      : '<span class="l-en">vs ' + esc(benchmarkName) + '</span>' +
+        '<span class="l-zh">相对' + esc(benchmarkNameZh) + '</span>';
   }
   var spyEl = E('perf-spy');
   if (spyEl) {
@@ -4356,6 +4408,14 @@ function renderEquityCurve() {
   var p = _perf;
   var series = (p && p.series) || [];
   var isZhEc = document.documentElement.getAttribute('data-lang') === 'zh';
+  if (p && p.series_status === 'loading' && !_accountStateInvalid()) {
+    var loadingRange = E('ec-range-label'); if (loadingRange) loadingRange.textContent = '';
+    var loadingPort = E('ec-leg-portfolio'); if (loadingPort) loadingPort.textContent = '—';
+    var loadingBench = E('ec-leg-bench'); if (loadingBench) loadingBench.textContent = '—';
+    wrap.innerHTML = '<div class="mm-empty" style="padding:40px 0"><span class="mm-empty-icon">…</span><span class="l-en">Loading equity curve…</span><span class="l-zh">正在加载净值曲线…</span></div><div class="mm-ec-tooltip" id="ec-tooltip"></div>';
+    return;
+  }
+  var unavailable = !!(p && p.error === 'performance_unavailable');
   // The backend emits both the data symbol and human label; use the native index name in the UI.
   var benchSymbol = (p && p.benchmark) || 'Benchmark';
   var bench = (p && (isZhEc ? p.benchmark_name_zh : p.benchmark_name)) || benchSymbol;
@@ -4403,7 +4463,7 @@ function renderEquityCurve() {
   }
 
   if (!series.length) {
-    var emptyMsg = p && p.availability && p.availability.status === 'unavailable'
+    var emptyMsg = unavailable || (p && p.availability && p.availability.status === 'unavailable')
       ? _unavailHtml() : t('ec.no_data');
     wrap.innerHTML = '<div class="mm-empty" style="padding:40px 0"><span class="mm-empty-icon">◌</span>' + emptyMsg + '</div><div class="mm-ec-tooltip" id="ec-tooltip"></div>';
     return;
@@ -5013,6 +5073,10 @@ function renderSafety() {
     return;
   }
 
+  if (d && d.report_status === 'loading') {
+    el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">…</span>' + H('Assessing portfolio risk…', '评估组合风险中…') + '</div>';
+    return;
+  }
   if (!d || (d.safety_score == null && (!d.metrics || !Object.keys(d.metrics).length))) {
     var msg = (d && d.note) ? d.note : (isZh ? '暂无足够数据评估组合安全度。' : 'Not enough data to assess portfolio safety yet.');
     el.innerHTML = head + '<div class="mm-empty"><span class="mm-empty-icon">🛡</span>' + esc(msg) + '</div>';
@@ -5577,9 +5641,18 @@ function _pendingOrdersHtml() {
 function renderTrades() {
   var el = E('trades');
   var data = _trades || {};
-  var hist = data.history || [];
-
   var h2 = '<h2><span class="l-en">Trade History</span><span class="l-zh">交易历史</span> <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:6px">' + t('trades.blotter_sub') + '</span></h2>';
+
+  if (data.snapshot_status === 'loading') {
+    el.innerHTML = h2 + '<div class="mm-empty"><span class="mm-empty-icon">…</span><span class="l-en">Loading trades…</span><span class="l-zh">加载交易中…</span></div>';
+    return;
+  }
+  if (data.error === 'trades_unavailable' || data.snapshot_status === 'unavailable') {
+    el.innerHTML = h2 + '<div class="mm-empty"><span class="mm-empty-icon">!</span>' + t('trades.unavailable') + '</div>';
+    return;
+  }
+
+  var hist = data.history || [];
   var pendHtml = _pendingOrdersHtml();
 
   if (!hist.length) {
@@ -6761,7 +6834,7 @@ window.openThesisFromPositions = function(id) { showView('research'); openThesis
 
 // ══ SELF-DIRECTED BOOK (third portfolio) ══════════════════════════════════════
 var _self = null;          // /api/self_directed   (book: positions, allocation, market, pending)
-var _selfHist = null;      // /api/self_directed/history (blotter + pending + summary)
+var _selfHist = {history_status:'loading'}; // /api/self_directed/history load truth + blotter
 // A load that has not finished yet is 'pending' (keep the neutral placeholders) — distinct from a
 // load that finished and could not read the account (render `unavailable`).
 var _selfSettled = false, _selfHistSettled = false;
@@ -6770,6 +6843,13 @@ var _selfSearchTimer = null, _selfActiveIdx = -1, _selfResults = [];
 var _selfExpanded = null;  // ticker whose thesis / quick-trade row is open
 var _selfBusy = false;     // guard against double-submit
 var _SD_PALETTE = ['var(--q1)','var(--up)','var(--q4)','var(--info)','var(--warn)','var(--q3)','var(--act)','var(--q2)'];
+
+function _selfHistoryUnavailable() {
+  return {
+    history_status: 'unavailable', error: 'self_directed_history_unavailable',
+    history: null, pending: null, realized_total: null, n_closed: null, n_buys: null, win_rate: null
+  };
+}
 
 var fmtShares = function(n) {
   if (n == null) return '—';
@@ -6783,7 +6863,8 @@ function refreshSelf() {
     fetch('/api/self_directed/history').then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }),
   ]).then(function(res) {
     if (res[0].status === 'fulfilled' && res[0].value) _self = res[0].value;
-    if (res[1].status === 'fulfilled' && res[1].value) _selfHist = res[1].value;
+    _selfHist = (res[1].status === 'fulfilled' && res[1].value)
+      ? res[1].value : _selfHistoryUnavailable();
     _selfSettled = true; _selfHistSettled = true;
     renderSelf();
   });
@@ -6826,6 +6907,8 @@ function _selfHistState(hist, settled) {
   if (!settled) return 'pending';
   if (!hist || typeof hist !== 'object') return 'unavailable';
   if (hist.status === 'unavailable') return 'unavailable';
+  if (hist.history_status === 'loading') return 'pending';
+  if (hist.history_status === 'unavailable' || hist.error === 'self_directed_history_unavailable') return 'unavailable';
   if (!Array.isArray(hist.history)) return 'unavailable';
   return 'ok';
 }
@@ -7076,11 +7159,18 @@ function renderSelfPending() {
 
 function renderSelfHistory() {
   var host = E('sd-history-host'); if (!host) return;
-  if (_selfHistState(_selfHist, _selfHistSettled) === 'unavailable') {
+  var historyState = _selfHistState(_selfHist, _selfHistSettled);
+  if (historyState === 'pending') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">…</span>' +
+      '<span class="l-en">Loading Self-Directed trade history…</span>' +
+      '<span class="l-zh">正在加载自主管理交易历史…</span></div>';
+    return;
+  }
+  if (historyState === 'unavailable') {
     host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('sd.hist_unavailable') + '</div>';
     return;
   }
-  var d = _selfHist || {}, hist = d.history || [];
+  var d = _selfHist, hist = d.history;
   if (!hist.length) { host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('sd.hist_empty') + '</div>'; return; }
   var realCls = d.n_closed ? (d.realized_total > 0 ? 'mm-pnl-pos' : d.realized_total < 0 ? 'mm-pnl-neg' : '') : '';
   var realTxt = d.n_closed ? ((d.realized_total >= 0 ? '+$' : '-$') + Math.abs(Math.round(d.realized_total)).toLocaleString()) : '—';
@@ -7441,6 +7531,25 @@ function _mmOnRoute() {
   if (viewChanged && !_mmPositionTicker) window.scrollTo(0, 0);
 }
 
+function _setPortfolioScopeState(state) {
+  _portfolioScopeState = state;
+  document.body.classList.toggle('mm-pf-scope-loading', state === 'loading');
+  document.body.classList.toggle('mm-pf-scope-unavailable', state === 'unavailable');
+  document.body.classList.toggle('mm-pf-scope-stale', state === 'stale');
+  var retry = E('mm-scope-retry');
+  if (retry && (state === 'stale' || state === 'unavailable')) retry.hidden = false;
+  var host = E('portfolio-scope-state');
+  if (!host) return;
+  host.setAttribute('aria-busy', state === 'loading' ? 'true' : 'false');
+  if (state === 'ready') { host.textContent = ''; return; }
+  var copy = state === 'loading'
+    ? '<span class="mm-empty-icon">…</span><span class="l-en">Loading portfolio…</span><span class="l-zh">正在加载组合…</span>'
+    : state === 'stale'
+      ? '<span class="mm-empty-icon">!</span><span class="l-en">Portfolio refresh unavailable — showing the last cached snapshot.</span><span class="l-zh">组合刷新暂不可用 — 当前显示上次缓存快照。</span>'
+      : '<span class="mm-empty-icon">!</span><span class="l-en">Portfolio snapshot unavailable — the selected book could not be loaded.</span><span class="l-zh">组合快照暂不可用 — 无法加载所选组合。</span>';
+  host.innerHTML = '<div class="panel span12" style="grid-column:span 12"><div class="mm-empty">' + copy + '</div></div>';
+}
+
 function _invalidateBookScopedState() {
   _book = null; _perf = null; _trades = null; _risk = null; _decisions = []; _rejected = [];
   _decisionAvailability = null; _forwardEvaluation = null; _liveMarks = null;
@@ -7589,11 +7698,13 @@ function _updateScopedPanelAvailability(pending) {
   [['performance', _perf], ['positions', _book], ['alloc', _book],
    ['trades', _trades], ['safety', _risk], ['rejected', _book]].forEach(function(pair) {
     var panel = E(pair[0]); if (!panel) return;
-    var missing = pair[1] == null;
+    var value = pair[1];
+    var phase = value && (value.load_status || value.snapshot_status || value.report_status);
+    var missing = value == null || phase === 'loading';
     var failed = missing && !pending;
     var wasAwaiting = panel.classList.contains('mm-pf-awaiting');
     if (missing) anyMissing = true;
-    if (failed) anyFailed = true;
+    if (failed || phase === 'unavailable' || (value && value.error)) anyFailed = true;
     // loading = skeleton (true geometry, no prose); failed = one named, muted reason line.
     panel.classList.toggle('mm-pf-awaiting', missing);
     panel.classList.toggle('mm-skel', missing && pending);
@@ -7628,7 +7739,13 @@ window.setPortfolio = function(id, opts) {
   _liveFetchSeq += 1;
   _liveMarks = null;
   if (id !== _portfolio) {
+    _setPortfolioScopeState('loading');
     _invalidateBookScopedState();
+    _decisionsStatus = 'loading';
+    if (id === 'self_directed') {
+      _selfHist = {history_status:'loading'};
+      _selfHistSettled = false;
+    }
     if (!opts.fromHash) _mmPositionTicker = null;
   }
   _portfolio = id;
@@ -8868,6 +8985,19 @@ function renderDecisions() {
   var more = E('dec-more');
   if (!host) return;
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  if (_decisionsStatus === 'loading') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">…</span>' +
+      '<span class="l-en">Loading decision journal…</span><span class="l-zh">正在加载决策日志…</span></div>';
+    if (more) more.hidden = true;
+    return;
+  }
+  if (_decisionsStatus === 'unavailable') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">!</span>' +
+      '<span class="l-en">Decision journal unavailable — the last load did not complete.</span>' +
+      '<span class="l-zh">决策日志暂不可用 — 最近一次加载未完成。</span></div>';
+    if (more) more.hidden = true;
+    return;
+  }
   if (!_decisions || !_decisions.length) {
     host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' +
       (isZh ? '尚无决策日志——大脑首次运行后出现。' : 'No decisions logged yet — appears after the Brain’s first run.') + '</div>';
@@ -9839,6 +9969,13 @@ function renderLiveMarksStatus() {
       : ('Archived history · frozen ' + frozenAt + ' · no live pricing')) + '</span>';
     return;
   }
+  if (d.error === 'live_marks_unavailable') {
+    host.className = 'mm-live-status';
+    host.innerHTML = '<span class="dot"></span><span>' +
+      (isZh ? '实时行情暂不可用 · 保留上次组合快照' :
+        'Live marks unavailable · keeping the last portfolio snapshot') + '</span>';
+    return;
+  }
   var hasSnapshot = rows.some(function(p) { return p.quote_source === 'terminal_snapshot'; });
   var persistedRows = rows.filter(function(p) {
     return ['portfolio_eod', 'portfolio_snapshot', 'persisted_portfolio_mark'].indexOf(p.quote_source) >= 0;
@@ -9900,24 +10037,35 @@ function renderLiveMarksStatus() {
 
 function _mergeLiveMarks(data) {
   if (!data || data.portfolio !== _portfolio) return;
+  var previousInvalid = _liveMarks && _liveMarks.portfolio === _portfolio &&
+    _liveMarks.account_state && _liveMarks.account_state.status === 'invalid';
+  if (previousInvalid && data.error && !data.account_state) {
+    // A transport failure cannot clear the last actual account-state receipt.
+    data = Object.assign({}, data, {account_state: _liveMarks.account_state});
+  }
   _liveMarks = data;
+  if (data.account_state && _portfolio !== 'self_directed') {
+    // Paint the account receipt independently of quote transport. No cached marks change.
+    _safeRender('performance-live', renderPerformance);
+    _safeRender('equity-curve-live', renderEquityCurve);
+    _safeRender('positions-live', renderPositions);
+    _safeRender('safety-live', renderSafety);
+    _safeRender('allocation-live', renderAllocation);
+    renderLiveMarksStatus();
+    return;
+  }
+  // A live-preview failure says nothing about the underlying book. Preserve the last truthful
+  // snapshot/performance/positions and update only the visible transport status.
+  if (data.error) {
+    renderLiveMarksStatus();
+    return;
+  }
   if (_portfolio === 'self_directed') {
     if (data.book) { _self = data.book; _selfSettled = true; }
     renderSelf();
   } else {
     var byTicker = {};
     (data.positions || []).forEach(function(row) { byTicker[row.ticker] = row; });
-    // D-ACCT-1: an invalid account state carries no marks at all. `_liveMarks` (this
-    // payload) holds the flag; merge nothing into the book, leave every performance
-    // value as it was, and let the renderers show the one canonical cell. The flag is
-    // never copied onto _perf/_book, so the next valid tick clears it on its own.
-    if (data.account_state) {
-      _safeRender('performance-live', renderPerformance);
-      _safeRender('equity-curve-live', renderEquityCurve);
-      _safeRender('positions-live', renderPositions);
-      renderLiveMarksStatus();
-      return;
-    }
     if (_book) {
       var published = _book.positions || [];
       var seen = {};
@@ -9964,7 +10112,11 @@ function _mergeLiveMarks(data) {
     if (!_perf) _perf = { series: [] };
     Object.assign(_perf, data.performance || {});
     _safeRender('performance-live', renderPerformance);
-    if (Object.prototype.hasOwnProperty.call(data.performance || {}, 'series')) {
+    if (previousInvalid) {
+      _safeRender('safety-live', renderSafety);
+      _safeRender('allocation-live', renderAllocation);
+    }
+    if (previousInvalid || Object.prototype.hasOwnProperty.call(data.performance || {}, 'series')) {
       _safeRender('equity-curve-live', renderEquityCurve);
     }
     _safeRender('positions-live', renderPositions);
@@ -10000,13 +10152,21 @@ function refreshLiveMarks() {
     cache: 'no-store', headers: { 'Cache-Control': 'no-cache' }
   }).then(function(r) { return r.ok ? r.json() : null; })
     .then(function(data) {
-      if (seq !== _liveFetchSeq || requestedPortfolio !== _portfolio || !data) return;
+      if (seq !== _liveFetchSeq || requestedPortfolio !== _portfolio) return;
+      if (!data) {
+        _mergeLiveMarks({portfolio: requestedPortfolio, error: 'live_marks_unavailable'});
+        _scheduleLiveMarks(60);
+        return;
+      }
       _mergeLiveMarks(data);
       _scheduleLiveMarks(data.poll_after_seconds);
     }).catch(function() {
       // Network failures retry only while this page is visible. The normal closed-market
       // response carries the exact next-open delay and never enters this retry path.
-      if (seq === _liveFetchSeq && requestedPortfolio === _portfolio) _scheduleLiveMarks(60);
+      if (seq === _liveFetchSeq && requestedPortfolio === _portfolio) {
+        _mergeLiveMarks({portfolio: requestedPortfolio, error: 'live_marks_unavailable'});
+        _scheduleLiveMarks(60);
+      }
     });
 }
 
@@ -10032,13 +10192,22 @@ function _fetchPortfolioCritical(id, onAvailability) {
     return fetch('/api/portfolio' + pf)
       .then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
   }).then(function(book) {
-      var snapshot = { portfolio: id, book: book, decisionAvailability: availability,
-                       cachedAt: Date.now(), complete: false };
-      if (book && book.account_preview) {
-        snapshot.performance = Object.assign({ series: [] }, book.account_preview);
+      var snapshot = {
+        portfolio: id,
+        book: book,
+        decisionAvailability: availability,
+        criticalStatus: book ? 'ready' : 'unavailable',
+        trades: _tradesLoading(),
+        performance: _performanceLoading(),
+        decisions: null,
+        decisionsStatus: 'loading',
+        risk: _riskLoading(),
+        cachedAt: Date.now(),
+        complete: false
+      };
+      if (book && book.account_preview && book.account_preview.availability) {
+        snapshot.performance = Object.assign(_performanceLoading(), book.account_preview, { load_status: null });
       }
-      // Legacy account previews cannot qualify unavailable performance values.
-      if (snapshot.performance && !snapshot.performance.availability) delete snapshot.performance;
       return snapshot;
     });
 }
@@ -10050,7 +10219,7 @@ function _fetchPortfolioDetails(id, base) {
       .catch(function() { return null; })
       .then(function(history) {
         return Object.assign({}, base, {
-          selfHistory: history, cachedAt: Date.now(), complete: true
+          selfHistory: history || _selfHistoryUnavailable(), cachedAt: Date.now(), complete: true
         });
       });
   }
@@ -10061,12 +10230,17 @@ function _fetchPortfolioDetails(id, base) {
     fetch('/api/decisions' + pf).then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
     fetch('/api/risk' + pf).then(function(r){ return r.ok ? r.json() : null; }).catch(function() { return null; }),
   ]).then(function(res) {
-    var dec = (res[2] && res[2].status === 'fulfilled' ? res[2].value : null) || {};
+    var tradesResponse = res[0] && res[0].status === 'fulfilled' ? res[0].value : null;
+    var performanceResponse = res[1] && res[1].status === 'fulfilled' ? res[1].value : null;
+    var decResponse = res[2] && res[2].status === 'fulfilled' ? res[2].value : null;
+    var riskResponse = res[3] && res[3].status === 'fulfilled' ? res[3].value : null;
+    var dec = decResponse || {};
     return Object.assign({}, base, {
-      trades: res[0] && res[0].status === 'fulfilled' ? res[0].value : null,
-      performance: res[1] && res[1].status === 'fulfilled' ? res[1].value : null,
-      decisions: dec.decisions || [],
-      risk: res[3] && res[3].status === 'fulfilled' ? res[3].value : null,
+      trades: tradesResponse || _tradesUnavailable(),
+      performance: performanceResponse || _performanceUnavailable(),
+      decisions: Array.isArray(dec.decisions) ? dec.decisions : null,
+      decisionsStatus: decResponse && dec.error !== 'decisions_unavailable' ? null : 'unavailable',
+      risk: riskResponse || _riskUnavailable(),
       cachedAt: Date.now(),
       complete: true,
     });
@@ -10077,6 +10251,7 @@ function _fetchPortfolioDetails(id, base) {
 function _fetchPortfolioSnapshot(id) {
   if (_portfolioPrefetches[id]) return _portfolioPrefetches[id];
   var request = _fetchPortfolioCritical(id).then(function(base) {
+    if (base && base.criticalStatus === 'unavailable') return Object.assign({}, base, { complete: true });
     return _fetchPortfolioDetails(id, base);
   });
   _portfolioPrefetches[id] = request;
@@ -10092,20 +10267,26 @@ function _applyPortfolioSnapshot(snapshot) {
     _decisionAvailability = snapshot.decisionAvailability && snapshot.decisionAvailability.portfolio_id === _portfolio
       ? snapshot.decisionAvailability : null;
   }
-  if (Object.prototype.hasOwnProperty.call(snapshot, 'decisions')) _decisions = snapshot.decisions || [];
+  if (Array.isArray(snapshot.decisions)) _decisions = snapshot.decisions;
+  if (Object.prototype.hasOwnProperty.call(snapshot, 'decisionsStatus')) _decisionsStatus = snapshot.decisionsStatus || null;
   if (Object.prototype.hasOwnProperty.call(snapshot, 'book')) _book = snapshot.book;
   if (Object.prototype.hasOwnProperty.call(snapshot, 'trades')) _trades = snapshot.trades;
   if (Object.prototype.hasOwnProperty.call(snapshot, 'performance')) _perf = snapshot.performance;
   if (Object.prototype.hasOwnProperty.call(snapshot, 'risk')) _risk = snapshot.risk;
   if (Object.prototype.hasOwnProperty.call(snapshot, 'self')) { _self = snapshot.self; _selfSettled = true; }
-  if (Object.prototype.hasOwnProperty.call(snapshot, 'selfHistory')) { _selfHist = snapshot.selfHistory; _selfHistSettled = true; }
+  if (Object.prototype.hasOwnProperty.call(snapshot, 'selfHistory')) { _selfHist = snapshot.selfHistory || _selfHistoryUnavailable(); _selfHistSettled = true; }
   _rejected = (_book && _book.rejected) ? _book.rejected : [];
   _updateScopedPanelAvailability(!snapshot.complete);
 }
 
 function _paintPortfolioSnapshot(snapshot, requestLive) {
   if (!snapshot || snapshot.portfolio !== _portfolio) return Promise.resolve();
+  if (snapshot.criticalStatus === 'unavailable') {
+    _setPortfolioScopeState((_portfolioScopeState === 'ready' || _portfolioScopeState === 'stale') ? 'stale' : 'unavailable');
+    return Promise.resolve();
+  }
   _applyPortfolioSnapshot(snapshot);
+  _setPortfolioScopeState('ready');
   _renderScoped();
   applyColl('rejected');
   _mmSyncTabs();
@@ -10125,7 +10306,19 @@ function _schedulePortfolioPrefetch() {
   function next() {
     if (i >= ids.length) return;
     var id = ids[i++];
+    // Remember the cache entry this background work starts from. The foreground fetch owns
+    // the book the reader is looking at; if it commits truth while this request is still
+    // in flight, this completion is the stale one and must not replace it.
+    var prior = _portfolioDataCache[id];
     _fetchPortfolioSnapshot(id).then(function(snapshot) {
+      if (!snapshot) return;
+      // An explicit critical failure is not book truth. Storing the unavailable envelope
+      // would replace a good snapshot with "no data", and its own timestamp would extend
+      // the cache's freshness window with work that never produced any. The self-directed
+      // critical branch carries no criticalStatus at all and stays cacheable as before.
+      if (snapshot.criticalStatus === 'unavailable') return;
+      var current = _portfolioDataCache[id];
+      if (current && current !== prior) return;   // newer foreground truth owns the entry
       _portfolioDataCache[id] = snapshot;
     }).then(function() {
       window.setTimeout(next, 180);
@@ -10220,6 +10413,17 @@ async function fetchAll(opts) {
     });
 
     if (mySeq !== _pfFetchSeq) return;
+    if (scopedSnapshot && scopedSnapshot.criticalStatus === 'unavailable') {
+      _paintPortfolioSnapshot(scopedSnapshot, false);
+      if (opts.showBar) { loadBarDone(); barFinished = true; }
+      // The selected book is truthfully unavailable, but navigation is not. Reach the very
+      // same singleton shared hydration the success path uses, so the switcher and the rest
+      // of the workspace still populate from an empty registry. It stays AFTER the
+      // unavailable paint and the load bar, so the failure remains visible while the shared
+      // group loads, and it is never hoisted above the critical first paint.
+      _hydrateShared();
+      return;
+    }
     _portfolioDataCache[requestedPortfolio] = scopedSnapshot;
     var liveRequest = _paintPortfolioSnapshot(scopedSnapshot);
     if (opts.showBar) { loadBarDone(); barFinished = true; }
