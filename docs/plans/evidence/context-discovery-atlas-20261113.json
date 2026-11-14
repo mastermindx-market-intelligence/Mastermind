@@ -1,0 +1,48 @@
+{
+  "schema": "mastermind.context_discovery_atlas_evidence.v1",
+  "type": "source_local_real_tree_canary",
+  "date": "2026-11-13",
+  "repository": "mastermindx-market-intelligence/Mastermind",
+  "observed_revision": "23c18c889621efc6a6df13c477734d98f75784a1",
+  "manifest_digest": "883ae4b04c98a14fef9dcbc26757c87d9ce7103f093f6d1ae08fa4e762d62a1d",
+  "parser": "atlas-parser-3",
+  "cold_build": {
+    "elapsed_seconds": 383.04,
+    "indexed_files": 6848,
+    "cache_hits": 56,
+    "parsed_blobs": 6792,
+    "excluded_files": 1,
+    "degraded_files": 1
+  },
+  "warm_build": {
+    "real_seconds": 12.42,
+    "indexed_files": 6848,
+    "cache_hits": 6848,
+    "parsed_blobs": 0,
+    "excluded_files": 1,
+    "degraded_files": 1
+  },
+  "degraded_file": {
+    "path": "control_plane/executive_runtime.py",
+    "reason": "BLOB_SIZE_UNSUPPORTED"
+  },
+  "real_query": {
+    "kind": "text",
+    "term": "sector rotation",
+    "limit": 4,
+    "returned": 4,
+    "truncated": true,
+    "source_line_provenance": true,
+    "source_degraded_initial_bug": "The original query missed one manifest degraded row; repaired in the following source commit",
+    "repaired_query_degraded": 1
+  },
+  "authority": "Derived source navigation only. GitHub is authoritative for tracked code and PRs; the cache cannot establish runtime or acceptance.",
+  "limits": [
+    "Cold full-tree build is too expensive for each new native session; reuse shared disposable cache",
+    "Known oversize source is not covered by this Atlas",
+    "Literal Markdown single-line matching is not semantic retrieval",
+    "No installed T3/Fable/Claude consumer or authenticated MCP service proven",
+    "No installed cross-repository / Drive / PDF coverage proven",
+    "Live PR, review, CI and Executive states must be re-read from original owners"
+  ]
+}

@@ -61,7 +61,7 @@ _JSON_TRANSPORT_QUALIFICATION_KEYS = frozenset({
     "live", "status", "portfolio_id", "active", "lifecycle",
     "data_degraded", "stockdata_present", "n_scored", "thin_evidence",
     "gate_status", "passed", "size_authority", "vetoes", "reason",
-    "write_status", "proposal_queued", "paper_saved",
+    "write_status", "proposal_queued", "paper_saved", "market_fragility",
 })
 
 
@@ -411,7 +411,7 @@ def _stock_price(t: str):
 
 
 # ---------------- READ tools ----------------
-@tool("get_regime", "Current US macro regime read (quad, growth/inflation scores, liquidity).", {})
+@tool("get_regime", "US macro regime, liquidity and descriptive gamma fragility with source-age and authority limits.", {})
 async def get_regime(args):
     keys = ["date", "quad", "quad_name", "growth_score", "inflation_score", "liquidity_overlay", "cycle_tag"]
     d, core_failed = _read_first_nonempty_mapping_checked((
@@ -441,6 +441,18 @@ async def get_regime(args):
 
     out = {k: d.get(k) for k in keys} | {"sector_rs_top": (sector_rs or [])[:6]}
     failed_sources = []
+    # Optional canonical Macro observation, re-aged at consumption. This does not
+    # recompute gamma, influence scores, or authorize trading. Preserve its data
+    # limitations and authority flags through MCP transport compaction.
+    try:
+        from brain.market_fragility_context import project_market_fragility
+        out["market_fragility"] = project_market_fragility(d.get("market_fragility"))
+    except Exception:  # noqa: BLE001 - preserve the healthy core regime
+        out["market_fragility"] = {
+            "state": "unknown", "status": "unavailable",
+            "reason": "fragility_projection_error", "trade_authority": False,
+        }
+        failed_sources.append("market_fragility")
     # E1.1 — append the market_view brief + label_vs_planes line (ADDITIVE; absent view → keys absent).
     # This replaces the ad-hoc 7-key slice so the autonomous Brain reads the same perception layer as
     # the judgment seats — the incident's root cause was the Brain seeing ONLY the label.

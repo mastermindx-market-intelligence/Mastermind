@@ -111,7 +111,7 @@ INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "term": {"type": "string", "minLength": 1, "maxLength": 1024},
             "kind": {
                 "type": "string",
-                "enum": ["any", "symbol", "heading", "reference", "import"],
+                "enum": ["any", "symbol", "heading", "reference", "import", "text"],
             },
             "limit": {"type": "integer", "minimum": 1, "maximum": 100},
         },

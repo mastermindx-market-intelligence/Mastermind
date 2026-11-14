@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import subprocess
@@ -45,6 +46,7 @@ _GIT_TIMEOUT_SECONDS = 15
 _MAX_GIT_OUTPUT_BYTES = 64 * 1024 * 1024
 _MAX_MANIFEST_FILES = 100_000
 _MAX_QUERY_RESULTS = 100
+_SECRET_LIKE = re.compile(r"(?i)\bBearer\s+\S{8,}|\bsk-(?:admin-|proj-)?[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----")
 _CACHE_LANGUAGES = frozenset({"python", "markdown"})
 
 
@@ -69,7 +71,7 @@ def _parser() -> argparse.ArgumentParser:
     query.add_argument("--term", required=True)
     query.add_argument(
         "--kind",
-        choices=("any", "symbol", "heading", "reference", "import"),
+        choices=("any", "symbol", "heading", "reference", "import", "text"),
         default="any",
     )
     query.add_argument("--limit", type=int, default=20)
@@ -452,6 +454,20 @@ def _match_record(
         for item in record["imports"]:
             if needle in str(item).casefold():
                 add("import", str(item))
+    if kind == "text" and record["language"] == "markdown":
+        # Opt-in lexical prose search. Keep old kind=any behavior unchanged.
+        # Each line maps to its original immutable Git blob line.
+        for line_number, line in enumerate(record.get("prose", "").split("\n"), 1):
+            offset = line.casefold().find(needle)
+            if offset < 0:
+                continue
+            excerpt = line[max(0, offset - 80):min(len(line), offset + max(len(term), 160))].strip()
+            if _SECRET_LIKE.search(line):
+                excerpt = "[SENSITIVE_EXCERPT_WITHHELD]"
+            if excerpt:
+                add("text", excerpt[:320], line_number, line_number)
+            if len(results) > _MAX_QUERY_RESULTS:
+                break
     return results
 
 
@@ -472,7 +488,17 @@ def query_atlas(
     ):
         raise ProjectAtlasError("query limit is outside the closed bound")
     results: list[dict[str, Any]] = []
+    # Index-build omissions are source-coverage gaps, even when every
+    # remaining cache record loads correctly. Propagate both categories.
+    initial_degraded = manifest.get("degraded", [])
+    if not isinstance(initial_degraded, list) or len(initial_degraded) > _MAX_MANIFEST_FILES:
+        raise ProjectAtlasError("manifest degradation rows are invalid")
     degraded: list[dict[str, str]] = []
+    for item in initial_degraded:
+        if (not isinstance(item, dict) or not isinstance(item.get("path"), str)
+                or not isinstance(item.get("reason"), str)):
+            raise ProjectAtlasError("manifest degradation row is invalid")
+        degraded.append({"path": item["path"], "reason": item["reason"]})
     for file_row in manifest["files"]:
         if not isinstance(file_row, dict):
             raise ProjectAtlasError("manifest file row is invalid")
@@ -491,8 +517,14 @@ def query_atlas(
         if record is None:
             degraded.append({"path": path, "reason": "CACHE_RECORD_UNAVAILABLE"})
             continue
+        # File and line ordering lets text searches retain only the first
+        # limit+1 hits, while later cache checks still disclose degradation.
+        if kind == "text" and len(results) > limit:
+            continue
         for match in _match_record(path, record, term, kind):
             results.append(match)
+            if kind == "text" and len(results) > limit:
+                break
     results.sort(
         key=lambda item: (
             item["kind"],
@@ -513,7 +545,7 @@ def query_atlas(
         "kind": kind,
         "results": results[:limit],
         "truncated": truncated,
-        "degraded": degraded,
+        "degraded": sorted(degraded, key=lambda item: (item["path"], item["reason"])),
     }
 
 
