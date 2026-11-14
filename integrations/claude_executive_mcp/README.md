@@ -42,3 +42,28 @@ The OAuth facade is issuer-preserving rather than validation-bypassing. Claude s
 `createAdapter(installed, dependencies)` is an in-process construction seam for isolated transport tests. It does not read the live installation or open a listener when imported. Only the executable entry reads the fixed existing configuration and listens on 127.0.0.1:8444. No wire or environment option chooses another upstream; tests inject local fixtures without real issuer traffic, installed services or credentials.
 
 The executable contract lives in `tests/claude_executive_mcp_adapter.test.mjs` and runs through the repository's pytest discovery using `tests/test_claude_executive_mcp_adapter_runtime.py`. The repaired source now proves issuer-consistent callback translation under isolated transport fixtures. Real Claude/IdP authentication, source acceptance, installation and the reviewed managed-session capability profile remain separate gates. Keep ENROLLMENT HELD until those applicable gates pass.
+
+## Read-only installed-auth preflight
+
+On the M2, from a trusted Mastermind checkout, run:
+
+```sh
+python3 scripts/claude_executive_auth_preflight.py
+```
+
+This uses only fixed loopback paths, never calls `/authorize` or `/oauth/token`,
+never reads or prints a bearer/client secret, never prompts for sign-in and never
+changes `~/.claude.json`, launchd, the installed Executive configuration or Auth0.
+The bounded JSON report names independent gates for the live role profile,
+`/mcp/coo` unauthorized challenge, stale localhost adapter, correct COO scopes,
+HTTPS browser authorization endpoint and explicit public/native client enrollment.
+
+`READY_FOR_INTERACTIVE_AUTH_CANARY` means only that these static and public
+readiness checks passed. It is **not** connected, installed-generation acceptance
+or proof that Claude authenticated. Only a separately authorized native Auth0
+consent and actual `executive_mandate` / `executive_state` / `executive_inbox` /
+`executive_fabric` read can prove the real consumer. `BLOCKED` must not be
+repaired by granting CEO `mastermind.executive.intent.submit` or weakening
+issuer/audience validation.
+
+Operational record: Mastermind issue #1236, Claude Executive MCP live M2 gate.
