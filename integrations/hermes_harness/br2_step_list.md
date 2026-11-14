@@ -3,11 +3,18 @@
 Branch `t3/mmos-v4-br2`. **Staged head `NEW = bcde4466e36cbfe3b8a0e704a1e509e7852fee10`**
 (on origin; one commit on `faa974f32`). This list supersedes the earlier
 b640dec1 → BR2 list: the accepted previous release is now the one **actually live at
-both ends**, so the Chairman reloads the five profiles **once**, straight from the
+both ends**, so the Chairman reloads the six profiles **once**, straight from the
 0.4.0 renders to BR2. b640dec1 is a **skipped** release — its digest is admitted
 nowhere by BR2. Method mirrored from the proven release-3 runbook
 (`integrations/hermes_harness/mcp_bridge_install.md`). Mirrored identically at
 `~/.mastermind/mmos_evidence/br2-20261114/STEP_LIST.md`.
+
+**Revision R2c (RULING BR2-R2c, doc/staging only):** step 1 now copies the staged
+`BUILD-bcde4466e.json` and checks its sha (item A); step 2 carries the per-folder handover
+check against the reviewed 13-file manifest (item C); step 3 is a six-reload table with the
+Profile 12 mismatch explained (item B); running-session and who-does-what paragraphs added
+(items D, E); the step-2 install was rehearsed under a scratch HOME (§8a); LOW-1 recorded
+once under Known findings. The six code files stay frozen.
 
 ## Constants (one constant pair; every other digest is refused)
 
@@ -92,18 +99,22 @@ runtime** python passed to `install_browser --python` is the pinned
 `~/.hermes/tools/python-3.14.9+20261021-darwin-arm64/bin/python3.14` — a different
 interpreter from the installer CLI. Every step has a rollback (§5).
 
-1. **Stage the tree + curate the build manifest** at `$NEW`. Check
-   `git rev-parse HEAD` = `$NEW` and `background.js` pins
-   `EXPECTED_CAPABILITY_DIGEST = "08c66c33…b63672a05a"`. Curate
-   `BUILD-bcde4466e.json` from the b640dec1 `BUILD.json` (keep existing paths
-   re-hashed at `$NEW`, drop gone paths, add the BR2/R2 tests:
+1. **Copy the curated build manifest into the checkout; check its sha.** The manifest
+   is already staged at
+   `~/.mastermind/mmos_dev/br2/staging/BUILD-bcde4466e.json` —
+   **sha256 `2c647e0e5823d6b5c215d676727a352edafb9f3594ffabf3ecdbba353a027182`**,
+   **71 files** (the 65-file b640dec1 browser closure re-hashed at `$NEW` + the six new
+   BR2/R2 tests). Copy it to the checkout root as `BUILD-bcde4466e.json` (step 2 reads
+   that exact name) and verify `shasum -a 256 BUILD-bcde4466e.json` equals the sha above
+   **before** running step 2. Check `git rev-parse HEAD` = `$NEW` and `background.js`
+   pins `EXPECTED_CAPABILITY_DIGEST = "08c66c33…b63672a05a"`. The manifest was generated
+   by `~/.mastermind/mmos_dev/br2/staging/make_build_bcde4466e.py` (kept beside it; reads
+   the b640dec1 `BUILD.json` read-only, re-hashes every kept path at `$NEW`, and adds
    `tests/browser_menu_playwright.cjs`, `tests/browser_snapshot_ensure_playwright.cjs`,
    `tests/browser_orphan_close_contract.cjs`, `tests/test_web_sol_browser_menu_ensure.py`,
-   `tests/test_web_sol_transport_gates.py`, `tests/browser_close_lease_r2_contract.cjs`).
-   Schema string exactly `mastermind.browser_direct_build.v1`; filename
-   `BUILD-bcde4466e.json` (step 2 reads that exact name). Verify the file count and
-   the changed runtime hashes at curation time. Rollback: delete the manifest,
-   `git checkout` back.
+   `tests/test_web_sol_transport_gates.py`, `tests/browser_close_lease_r2_contract.cjs`;
+   schema exactly `mastermind.browser_direct_build.v1`). Rollback: delete the copied
+   manifest; nothing runtime-side changed.
 2. **Build the release + register the hosts — THE RE-POINT MOMENT (§4).**
    ```bash
    /opt/homebrew/bin/python3.12 -m integrations.hermes_harness.install_browser \
@@ -118,17 +129,64 @@ interpreter from the installer CLI. Every step has a rollback (§5).
    today (the installer backs up and re-points from the prior source). Default
    `update_loaded=False` never rewrites a loaded folder. Check: stdout
    `state=INSTALLED_PENDING_CHROME_LOAD`, `source_commit=$NEW`, all six `chrome[]`
-   rows `ok:true`, every loaded row `activation:CHROME_RELOAD_REQUIRED`; the five
-   loaded 0.4.0 folders byte-identical before/after; `STAGING/Chrome-<alias>/instance_config.js`
-   carries digest `08c66c33…`; manifest permissions include `storage`.
-3. **Operator extension reloads, profile by profile** (human action; ⟳ alone re-reads
-   the old loaded folder and is not enough). Remove the extension, Load unpacked from
-   `STAGING/Chrome-<alias>`. The manifest `key` keeps the id and `allowed_origins`
-   unchanged. Remove+load **clears `chrome.storage.session`** (opener records +
-   activity ledger): a tab the bridge opened before the reload then refuses close with
-   `TAB_NOT_BRIDGE_OPENED` (fail-closed) and must be closed by hand; records rebuild on
-   the next open. One profile at a time, confirming the previous still answers. Do all
-   five. The loaded version string stays `0.4.1`; the observable change is `read`+`menu`.
+   rows `ok:true`; the five LOADED rows `activation:CHROME_RELOAD_REQUIRED` and
+   `mastermindx` (Profile 12) `activation:CHROME_LOAD_REQUIRED` (its pre-existing
+   `PROFILE_IDENTITY_MISMATCH` — see step 3, not a failure of this release); the five
+   loaded 0.4.0 folders byte-identical before/after; manifest permissions include
+   `storage`.
+   **Per-folder handover check — compare each rendered `STAGING/Chrome-<alias>` folder
+   file-by-file against the reviewed 13-file manifest**
+   (`~/.mastermind/mmos_dev/br2/staging/extension-sha256.txt`). The 12 source files
+   (`background.js`, `browser.html`, `browser_cdp.js`, `browser_control.js`,
+   `browser_page.js`, `browser_settings.js`, `census.css`, `census.html`, `census.js`,
+   `census_core.js`, `content.js`, `manifest.json`) must match their reviewed sha256
+   exactly. `instance_config.js` is the generated 13th file and **differs per profile by
+   design** in exactly two fields — `instanceId` and `nativeHost` (both derived from that
+   profile's instance id). Its `capabilityDigest` field must equal
+   `08c66c330c9d3cd6728ff67628aa314afd446389b6bd394a93a9f8b63672a05a`;
+   `schema`, `protocolMajor`, `clientPackageVersion`, `nativePackageVersion` and
+   `extensionPackageVersion` are constant across profiles. **A folder that differs
+   anywhere else is not handed to the Chairman.** Rehearsed file-by-file on all six
+   rendered folders (§8a; `logs/install-rehearsal-r2c.txt`).
+3. **Operator extension reloads — SIX profiles, one at a time** (human action; ⟳ alone
+   re-reads the old loaded folder and is not enough). Remove the extension, then Load
+   unpacked from the staged folder named below. The manifest `key` keeps the id and
+   `allowed_origins` unchanged. Remove+load **clears `chrome.storage.session`** (opener
+   records + activity ledger): a tab the bridge opened before the reload then refuses
+   close with `TAB_NOT_BRIDGE_OPENED` (fail-closed) and must be closed by hand; records
+   rebuild on the next open. Confirm the previous profile still answers before moving to
+   the next. The loaded version string stays `0.4.1`; the observable change is `read`+`menu`
+   (which appear only after step 4). **The two profiles no operator works in go first**
+   (Personal default, MastermindX), then the four ChatGPT fleet profiles.
+
+   | Order | Profile name (as the Chairman sees it) | Chrome profile directory | Load unpacked from | One read-only check after |
+   |---|---|---|---|---|
+   | 1 | Person 1 · Personal default | `Default` | `STAGING/Chrome-personal-default` | read-only `status` answers OK; `bridge_release_commit` still `5aa30969…`, `read`/`menu` absent (old pin) |
+   | 2 | Chris · MastermindX (general agent) | `Profile 12` | `STAGING/Chrome-mastermindx` | read-only `status` answers OK; old pin, `read`/`menu` absent — see the mismatch note below |
+   | 3 | ChatGPT1 | `Profile 17` | `STAGING/Chrome-chatgpt1` | read-only `status` answers OK; old pin, `read`/`menu` absent |
+   | 4 | ChatGPT2 | `Profile 18` | `STAGING/Chrome-chatgpt2` | read-only `status` answers OK; old pin, `read`/`menu` absent |
+   | 5 | ChatGPT3 | `Profile 19` | `STAGING/Chrome-chatgpt3` | read-only `status` answers OK; old pin, `read`/`menu` absent |
+   | 6 | ChatGPT4 | `Profile 20` | `STAGING/Chrome-chatgpt4` | read-only `status` answers OK; old pin, `read`/`menu` absent |
+
+   `STAGING=~/Downloads/Mastermind-Browser-0.6.0-bcde4466e`. The installer renders **one
+   staged folder per alias (six folders)**; each carries the same 12 source bytes plus its
+   own `instance_config.js` (`instanceId`/`nativeHost` for that profile). The check is a
+   read-only `status` in that profile's session — it confirms the reloaded profile still
+   answers on the old pin; `read`/`menu` are correctly absent until step 4. (The full
+   six-profile `CONNECTED` verification is step 5's `browsers probe:true`.)
+
+   **Default and Profile 12 share `Chrome-Default` — and Profile 12's pre-existing
+   `PROFILE_IDENTITY_MISMATCH`.** In the *current* loaded state both Default and Profile 12
+   load the one old folder `~/Downloads/Mastermind-Browser-0.4.0/Chrome-Default`, whose
+   `instance_config.js` `instanceId` is Default's. Profile 12's registration therefore
+   reports `PROFILE_IDENTITY_MISMATCH` (the loaded folder's identity is Default's, not its
+   own). This is **pre-existing** (`logs/real-state-read-only.txt`) and **unrelated to this
+   release**; it is why step 2 reports Profile 12 `activation:CHROME_LOAD_REQUIRED` rather
+   than `CHROME_RELOAD_REQUIRED`. It is **not** a reload failure: at step 3 Profile 12 is
+   removed and loaded from its **own** staged folder `Chrome-mastermindx` (which carries
+   Profile 12's `instanceId`), after which it answers `status` normally like every other
+   profile. Do not treat the step-2 mismatch label as a failure of this release or try to
+   "fix" the shared old folder here.
 4. **Switch the pin — LAST** (the only behavior-changing act). Never hand-edit the flat
    pin or `.claude.json`.
    ```bash
@@ -152,9 +210,36 @@ interpreter from the installer CLI. Every step has a rollback (§5).
    `fabric-unified-router-worker` untouched, one `.claude.json.previous.<16hex>` backup
    each); `PIN_SWITCHED`, fresh session `bridge_release_commit=$NEW`, enum 45 incl
    `read`+`menu`; old sessions keep answering `5aa30969…` (rehearsal [5]).
-5. **Verify in a fresh session** (read-only): `browsers probe:true` five profiles
+
+   **Sessions already running at step 4(c).** Any session that resolved the flat
+   `5aa30969` pin before the repoint keeps its already-loaded `5aa30969` files and keeps
+   working — the switch only changes where *new* spawns resolve `current`. On this machine
+   that covers, in general terms, any open T3 or Claude session that has the browser tool
+   loaded (no names): each stays on `5aa30969` and continues to answer the 40 common
+   actions. Such a session does **not** get `read` or `menu` until it restarts and resolves
+   the new pin, and **nothing it does fails because of the switch** — its own bridge still
+   advertises enum 43 and refuses `read`/`menu` at its argument gate, exactly as before
+   (rehearsal [5]: a running old server is unchanged across the repoint). The new actions
+   appear only in sessions started after step 4(c).
+5. **Verify in a fresh session** (read-only): `browsers probe:true` six profiles
    `CONNECTED` on `$NEW`; enum 45 incl `read`+`menu`; one old session still answers on
    `5aa30969…` with `read`/`menu` absent (correct for its pin).
+
+**Who does what, and why the waits are safe.** Steps 1, 2, 4 and 5 are the principal's
+(author-only staging, the guarded install, the guarded pin migration/registration/switch,
+and the read-only verification); **only step 3 — the six remove+Load-unpacked reloads —
+needs the Chairman**, because reloading an extension is a person's act in Chrome. A gap of
+hours or days between step 2 and step 3 is safe: after step 2 the host manifests point into
+BR2, but a running host keeps serving on its open channel and the next BR2 spawn still
+admits the 0.4.0 extension digest `e0216d3d…`, so every not-yet-reloaded profile keeps
+working with `read`/`menu` simply absent (rehearsal [2]: L1 old client and L2 new client
+both `status OK`, nothing but `status` reached the 0.4.0 extension). Nothing decays while
+waiting. A gap of hours or days between step 3 and step 4 is equally safe: a reloaded BR2
+profile answers an old-pin session on the previous digest `e0216d3d…` (intersection = the
+40 common actions), and the pin switch is **last**, so no new-pin session exists until the
+principal runs step 4(c) (rehearsal L3, and [5]: a running old server is unchanged across
+the repoint). The release sits in a stable either-end state until the next person/step
+acts; there is no timer that expires.
 
 ---
 
@@ -172,7 +257,7 @@ absent wherever either end is still on `e0216d3d…`.
 |---|---|---|---|
 | after step 2 (host re-point) | old | — (none reloaded yet) | works; host b640dec1 alive or BR2 on respawn, either admits `e0216d3d…`; `read`/`menu` absent |
 | during step 3, per profile done | old | works; BR2 host admits the old client on previous digest `e0216d3d…`, intersection = client 40 ∩ ext 42 = 40; `read`/`menu` absent (client side) | works as the row above |
-| after step 3, before step 4 | old | works; `read`/`menu` absent (old client) | none left — step 3 does all five |
+| after step 3, before step 4 | old | works; `read`/`menu` absent (old client) | none left — step 3 does all six |
 | after step 4(c) repoint | old | works, unchanged; `read`/`menu` absent | none (by the step-3 gate) |
 | after step 4(c) repoint | new | works; `read`+`menu` admitted and executed (both ends `08c66c33…`) | none (by the step-3 gate) |
 | step 5 verify | old / new | works / works + `read`+`menu` | none |
@@ -240,11 +325,15 @@ under a still-BR2 profile breaks that profile.
 **Undo whole-tree comparison (ruling 16):** the rehearsal (§8) hashed the real
 `~/.t3/mcp/mmx-browser` pin tree (3 files) and all real `NativeMessagingHosts`
 (29 files) before and after — **zero difference** — and the scratch whole-tree undo
-was zero-difference (9 files; `runtimes/`+`current` remain by design). This lane wrote
-nothing under `BASE`, `~/.t3`, any Chrome folder, `~/Downloads`, or any provider home;
-every install step above is the principal's. The b640dec1 release directory and the
-0.4.0 loaded folders are never modified by any step, so the bytes every undo needs
-always exist.
+was zero-difference (9 files; `runtimes/`+`current` remain by design). The **step-2 install
+rehearsal (§8a)** independently restored a 446-file scratch HOME to **zero difference**
+after the step-2 undo, with every real root unchanged. This lane wrote nothing under
+`BASE`, `~/.t3`, any Chrome folder, `~/Downloads`, or any provider home; every install step
+above is the principal's. The b640dec1 release directory and the 0.4.0 loaded folders are
+never modified by any step, so the bytes every undo needs always exist. (On the real
+machine `deployments-v2.json` already exists, so the installer writes its own `.previous`
+backup and the step-2 undo restores it; the §8a scratch started without an inventory and
+deleted the new-only file instead — same zero-difference result.)
 
 ---
 
@@ -296,16 +385,25 @@ write.)
   Bundle digest `c3a61dea0012c9867b1d9d5cced865f864eaf03c3b812009e88460379dac2426`
   rendered at `bcde4466e` (`logs/restage-r2b.txt`); `instance_config.js` digest
   `08c66c33…`; manifest permissions include `storage`.
-- **Expected load folder names** (the principal creates these from the reviewed staged
-  folder; this lane does not). `STAGING=~/Downloads/Mastermind-Browser-0.6.0-bcde4466e`,
-  five distinct renders, one per loaded alias:
-  - `STAGING/Chrome-Default` (personal-default; mastermindx shares it)
-  - `STAGING/Chrome-chatgpt1`
-  - `STAGING/Chrome-chatgpt2`
-  - `STAGING/Chrome-chatgpt3`
-  - `STAGING/Chrome-ChatGPT4`
-  The Chairman removes + Load unpacked from each at step 3. The id and
-  `allowed_origins` are unchanged (manifest `key`).
+- **Staged folder names — SIX, one per alias** (the installer renders these; this lane
+  does not). `STAGING=~/Downloads/Mastermind-Browser-0.6.0-bcde4466e`. `install_browser`
+  names each rendered folder `Chrome-<alias>`, so there are **six** staged folders, each
+  with the same 12 source bytes plus its own `instance_config.js` (`instanceId`/`nativeHost`
+  for that profile):
+  - `STAGING/Chrome-personal-default` (Default)
+  - `STAGING/Chrome-mastermindx` (Profile 12)
+  - `STAGING/Chrome-chatgpt1` (Profile 17)
+  - `STAGING/Chrome-chatgpt2` (Profile 18)
+  - `STAGING/Chrome-chatgpt3` (Profile 19)
+  - `STAGING/Chrome-chatgpt4` (Profile 20)
+  The Chairman removes + Load unpacked from each at step 3 (six reloads). The id and
+  `allowed_origins` are unchanged (manifest `key`). **Do not confuse these six staged
+  folders with the five distinct currently-loaded OLD folders** (`…0.4.0/Chrome-Default`
+  shared by Default + Profile 12, `…0.5.0/Chrome-chatgpt1/2/3`, `…0.4.0/Chrome-ChatGPT4`):
+  those old folders are what Chrome loads today and are never modified by any step. The
+  sharing of the old `Chrome-Default` is the source of Profile 12's pre-existing
+  `PROFILE_IDENTITY_MISMATCH` (step 3); after reload, Default and Profile 12 each load
+  their **own** staged folder. Verified file-by-file on all six (§8a).
 
 ---
 
@@ -388,6 +486,71 @@ scratch whole tree and every real root ([6]/[7]).
 
 ---
 
+## 8a. Step-2 install rehearsal under a scratch HOME (RULING BR2-R2c item A)
+
+Driver `~/.mastermind/mmos_dev/br2/rehearsal_r2c_install.py` ran step 2's **exact**
+`install_browser` command (same flags; paths re-rooted) under a scratch HOME
+`~/.mastermind/mmos_dev/br2/rehearsal-r2c/home` whose path shape matches the real one:
+install base with a **b640dec1 release copy** the six host manifests start pointing into
+(plus a 5aa30969 release copy for the live pin's `source_root`), Chrome
+`NativeMessagingHosts` + per-profile `Secure Preferences`, a `Downloads` staging root, the
+**copied enrollment** (re-rooted to scratch), and a flat mmx pin. The installer read source
+from the checkout (read-only) and wrote **only** under the scratch HOME; `--python` is the
+real pinned interpreter path but is only resolved and embedded in wrappers, never executed.
+Log: `logs/install-rehearsal-r2c.txt`.
+
+```
+[install] rc=0  state=INSTALLED_PENDING_CHROME_LOAD  source_commit=bcde4466e…
+  chrome[personal-default] Default    activation=CHROME_RELOAD_REQUIRED
+  chrome[mastermindx]      Profile 12 activation=CHROME_LOAD_REQUIRED   (pre-existing mismatch)
+  chrome[chatgpt1]         Profile 17 activation=CHROME_RELOAD_REQUIRED
+  chrome[chatgpt2]         Profile 18 activation=CHROME_RELOAD_REQUIRED
+  chrome[chatgpt3]         Profile 19 activation=CHROME_RELOAD_REQUIRED
+  chrome[chatgpt4]         Profile 20 activation=CHROME_RELOAD_REQUIRED
+scratch whole-tree AFTER: 733 files; +287 added, -0 removed, ~6 changed
+[install] changed files == the 6 re-pointed NMH manifests (now -> releases/bcde4466e)
+[install] 5 loaded folders byte-identical before/after (update_loaded=False)
+  [C] Chrome-{personal-default,mastermindx,chatgpt1,chatgpt2,chatgpt3,chatgpt4}:
+      12 sources byte-match reviewed manifest; instance_config capabilityDigest=08c66c33…;
+      instanceId/nativeHost per-profile
+[C] folders=6/6 match (six rendered folders; five distinct OLD loaded folders)
+[undo] restored 6 install-created .previous backups (the 6 NMH manifests)
+[undo] deleted new-only releases/NEW, packages/NEW, installation-NEW.json, STAGING, deployments-v2.json
+scratch install undo whole-tree comparison: 446 files, ZERO DIFFERENCE
+real pin (3 files) before == after
+real NativeMessagingHosts (29 files) before == after
+real b640dec1 BUILD.json (1 files) before == after
+real loaded personal-default/chatgpt1/chatgpt2/chatgpt3/chatgpt4 before == after
+ZERO DIFFERENCE on every real root — the install wrote only scratch
+INSTALL REHEARSAL R2c PASSED
+```
+
+What this adds beyond §8: the **actual guarded installer** runs end-to-end on a faithful
+scratch start (not a stand-in), re-points exactly the six host manifests, leaves the five
+loaded folders byte-identical, renders six per-alias folders that each match the reviewed
+13-file manifest (item C), and the **step-2 undo** restores the whole 446-file scratch tree
+to zero difference — with every real root (pin, NMH, b640dec1 BUILD, five loaded folders)
+unchanged. The build manifest itself: `BUILD-bcde4466e.json`, 71 files, sha256
+`2c647e0e5823d6b5c215d676727a352edafb9f3594ffabf3ecdbba353a027182`
+(`logs/build-manifest-r2c.txt`).
+
+---
+
+## Known findings
+
+- **LOW-1 — pre-existing test-harness race (reviewer `REVIEW-R2.md`: APPROVE, HIGH=0 MED=0
+  LOW=1).** `tests/test_web_sol_transport_compat.py:195`: `HostHarness.start()` returns the
+  instant the socket FILE exists, but `open_private_server` binds the file, then
+  chmod/lstat/lock-write/fsync, and only then `listen()`s
+  (`_web_sol_native_host_impl.py:795-815`); a connect in that gap gets `ECONNREFUSED`.
+  **Reviewer's fix:** poll with a real connect probe (or one retry on `ECONNREFUSED`) in
+  `start()` instead of `destination.exists()`. This is **pre-existing**, not in the BR2 diff,
+  and that file is **frozen** this round — recorded here once, not acted on. (The R2
+  rehearsal driver hit the same bind→listen window and retries a refused connect; that is a
+  rehearsal-tool correction, not a code change.)
+
+---
+
 ## 9. Proof inventory and what is NOT proven
 
 Proven (accepted base faa974f32..bcde4466e, frozen this round; logs in
@@ -395,14 +558,19 @@ Proven (accepted base faa974f32..bcde4466e, frozen this round; logs in
 `test_web_sol_transport_compat.py` 12/12 (`green-r2-*`, `verify-previous-digest.txt`);
 close-lease contract `browser_close_lease_r2_contract.cjs` (CHANGE 2: 90-min lease,
 `opened_at` fallback, owner-alive/unknown refusals before any `chrome.tabs.remove`);
-the full-hop scratch rehearsal (§8, PASS, zero-diff). The 13-file manifest re-verified
-13/13 this round.
+the full-hop scratch rehearsal (§8, PASS, zero-diff); and the **step-2 install rehearsal
+under a scratch HOME** (§8a, PASS — the actual guarded installer, six host manifests
+re-pointed, five loaded folders byte-identical, six per-alias folders matching the reviewed
+13-file manifest, step-2 undo zero-difference on a 446-file scratch tree, every real root
+unchanged). The 13-file manifest re-verified 13/13 this round; the curated build manifest
+`BUILD-bcde4466e.json` is 71 files, sha256
+`2c647e0e5823d6b5c215d676727a352edafb9f3594ffabf3ecdbba353a027182`.
 
 **NOT proven (honest):**
 - **Nothing was tried on a ChatGPT page.** The real ChatGPT menu/read shapes are
   unproven; items are proven only on fixtures of the same shape. Real popover/submenu
   timing, shadow DOM or React-portal menus on chatgpt.com may differ.
-- The **operator reload journey (step 3)** and **step 5's five-profile `CONNECTED`**
+- The **operator reload journey (step 3)** and **step 5's six-profile `CONNECTED`**
   are not exercised here — no Chrome runs on the scratch instance ids; those are the
   principal's on the real machine. The transport rows they rely on are proven at
   protocol level (§8 + the compat suite).
