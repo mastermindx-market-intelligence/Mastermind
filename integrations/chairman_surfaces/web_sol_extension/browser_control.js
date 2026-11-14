@@ -79,11 +79,21 @@
     // claim. Records and session liveness persist in chrome.storage.session
     // so they survive a service-worker restart; a browser restart clears
     // that storage, and without the storage API the maps are memory-only.
-    // Both losses fail CLOSED: no record, no close.
+    // Both losses fail CLOSED: no record, no close. Losing only the activity
+    // ledger never orphans a tab by itself: when the owner's activity is
+    // unknown, the record's own opened_at is its last activity, and a tab is
+    // an orphan only when a KNOWN time is older than the live lease.
     const createdTabs = new Map();
     const sessionActivity = new Map();
+    // The live lease is a 90-minute CONSTANT: an operator that opened its
+    // tab through the bridge and then waits on a long answer makes no bridge
+    // request for many minutes, and 90 minutes sits above the longest lawful
+    // poll interval (60 minutes). Nothing a caller, an environment variable
+    // or a file can set shortens it — close params stay empty. The
+    // constructor option exists for tests only; the shipped entry point
+    // (background.js) passes no options.
     const SESSION_LIVE_LEASE_MS = Number.isInteger(options.sessionLiveLeaseMs) && options.sessionLiveLeaseMs >= 0
-      ? options.sessionLiveLeaseMs : 120000;
+      ? options.sessionLiveLeaseMs : 5400000;
     const RECORDS_KEY = "mmxOpenerRecords", ACTIVITY_KEY = "mmxSessionActivity";
     const storage = chrome.storage && chrome.storage.session ? chrome.storage.session : null;
     let recordsReady = Promise.resolve();
@@ -365,8 +375,13 @@
           const rec = createdTabs.get(tab.id);
           if (!rec) return receipt(r,"TAB_NOT_BRIDGE_OPENED");
           if (rec.session_id !== r.session_id) {
+            // Unknown activity is never an orphan: the record's own
+            // opened_at is the owner's last activity when the ledger has
+            // no entry for it. Only a KNOWN time older than the lease
+            // makes the tab closable; a non-finite time fails closed.
             const last = sessionActivity.get(rec.session_id);
-            if (typeof last === "number" && Date.now() - last < SESSION_LIVE_LEASE_MS)
+            const lastSeen = typeof last === "number" ? last : rec.opened_at;
+            if (!Number.isFinite(lastSeen) || Date.now() - lastSeen < SESSION_LIVE_LEASE_MS)
               return receipt(r,"TAB_OWNER_SESSION_LIVE");
             orphanClose = true;
           }

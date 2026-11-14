@@ -6,7 +6,10 @@ exactly one previous bridge release's transport capability digest alongside
 its own, and holds every admitted connection to the action set that digest
 describes. Whatever ordering of client upgrade, extension reload and host
 respawn the fleet goes through, an old peer keeps its old actions and the new
-action ``menu`` exists only where both ends of the connection describe it.
+actions ``read`` and ``menu`` exist only where both ends of the connection
+describe them. The accepted previous release is 5aa30969 (0.4.0) — the
+release running at BOTH ends when BR2 switches (RULING BR2-R2 class rule);
+b640dec1 was only staged and is a skipped release, admitted nowhere.
 
 The previous-release client module is byte-identical to the current one
 (verified against release roots), so a client whose protocol module reports
@@ -36,20 +39,25 @@ from integrations.chairman_surfaces import web_sol_protocol as wsp
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTANCE = "a" * 64
-# The 41 browser actions of release b640dec1461a29cd5e42910c992973f50597d93f:
-# the current set minus ``menu`` and nothing else.
+# The 40 browser actions of release 5aa30969241163b4abb3e025bc9e52123ee4b478
+# (0.4.0): the current set minus ``read`` and ``menu`` and nothing else.
 PREVIOUS_ACTION_NAMES = frozenset({
     "accessibility", "back", "capture", "cdp", "cdp_attach", "cdp_detach",
     "cdp_status", "click", "close", "diagnostics", "dialog", "dom", "download",
     "downloads", "emulate", "evaluate", "events", "fill", "focus", "forward",
     "frames", "interact", "locate", "navigate", "network", "open", "pdf",
-    "press", "read", "reload", "response_body", "result", "route", "screenshot",
+    "press", "reload", "response_body", "result", "route", "screenshot",
     "scroll", "select", "snapshot", "status", "tabs", "upload", "wait",
 })
 PREVIOUS_DIGEST = (
+    "e0216d3d9e9f05edef32ff642cb82a1281b1a9766d5cc35f694c88e0ef0bb0bb"
+)
+PREVIOUS_COMMIT = "5aa30969241163b4abb3e025bc9e52123ee4b478"
+# b640dec1 was staged but never went live as a pin or a loaded extension;
+# its digest is a skipped release and is admitted nowhere (RULING BR2-R2).
+SKIPPED_DIGEST = (
     "1c40ec98d1086a8f8005151757b040698057019f5e9169cace91e393b6f60d40"
 )
-PREVIOUS_COMMIT = "b640dec1461a29cd5e42910c992973f50597d93f"
 UNKNOWN_DIGEST = "ab" * 32
 
 
@@ -275,12 +283,12 @@ def test_previous_release_constants_name_exactly_one_admitted_digest():
     assert all(c in "0123456789abcdef" for c in PREVIOUS_DIGEST)
 
 
-def test_previous_action_set_is_the_old_forty_one_without_menu():
+def test_previous_action_set_is_the_old_forty_without_read_and_menu():
     assert browser.PREVIOUS_ACTIONS == PREVIOUS_ACTION_NAMES
-    assert browser.PREVIOUS_ACTIONS == browser.ACTIONS - {"menu"}
-    assert len(browser.PREVIOUS_ACTIONS) == 41
+    assert browser.PREVIOUS_ACTIONS == browser.ACTIONS - {"read", "menu"}
+    assert len(browser.PREVIOUS_ACTIONS) == 40
     assert "menu" not in browser.PREVIOUS_ACTIONS
-    assert "read" in browser.PREVIOUS_ACTIONS
+    assert "read" not in browser.PREVIOUS_ACTIONS
     assert "status" in browser.PREVIOUS_ACTIONS
 
 
@@ -289,11 +297,11 @@ def test_action_set_lookup_admits_current_and_previous_only():
     assert wsp.transport_capability_action_set(current) == browser.ACTIONS
     admitted = wsp.transport_capability_action_set(PREVIOUS_DIGEST)
     assert admitted == browser.PREVIOUS_ACTIONS
-    for foreign in (UNKNOWN_DIGEST, "", None, PREVIOUS_DIGEST.upper()):
+    for foreign in (UNKNOWN_DIGEST, SKIPPED_DIGEST, "", None, PREVIOUS_DIGEST.upper()):
         assert wsp.transport_capability_action_set(foreign) is None
 
 
-def test_old_client_connects_and_menu_is_refused_without_forwarding(socket_dir):
+def test_old_client_connects_and_read_and_menu_are_refused_without_forwarding(socket_dir):
     harness = HostHarness(socket_dir, extension_digest=wsp.transport_capability_digest())
     harness.start()
     try:
@@ -306,6 +314,19 @@ def test_old_client_connects_and_menu_is_refused_without_forwarding(socket_dir):
             )
             refused = browser.validate_receipt(native.read_frame(reader))
             assert refused["action"] == "menu"
+            assert refused["effect"] == "NOT_APPLIED"
+            assert refused["status"] == "ACTION_UNAVAILABLE"
+            assert refused["data"]["reason"] == "transport_capability_mismatch"
+        assert [doc.get("action") for doc in harness.extension.forwarded] == []
+        # Each request is its own connection; the refusal closed that one,
+        # not the session. A fresh old-digest connection asks for `read`.
+        connection, reader, writer, boot = _raw_connect(PREVIOUS_DIGEST)
+        with connection:
+            native.write_frame(
+                writer, _browser_request("read", boot=boot, params={"offset": 0})
+            )
+            refused = browser.validate_receipt(native.read_frame(reader))
+            assert refused["action"] == "read"
             assert refused["effect"] == "NOT_APPLIED"
             assert refused["status"] == "ACTION_UNAVAILABLE"
             assert refused["data"]["reason"] == "transport_capability_mismatch"
@@ -395,12 +416,46 @@ def test_third_digest_is_refused_at_the_handshake(socket_dir):
         harness.stop()
 
 
-def test_old_extension_holds_menu_back_from_a_new_client(socket_dir):
+def test_skipped_release_digest_is_refused_at_the_handshake(socket_dir):
+    # b640dec1 (1c40ec98...) was staged but never live at either end. Under
+    # RULING BR2-R2 it is a skipped release: the host must refuse its digest
+    # exactly like any unknown one, not admit it as a second previous.
+    harness = HostHarness(socket_dir, extension_digest=wsp.transport_capability_digest())
+    harness.start()
+    try:
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        connection.settimeout(5.0)
+        connection.connect(str(wsi.socket_path(INSTANCE)))
+        with connection:
+            writer = connection.makefile("wb", buffering=0)
+            reader = connection.makefile("rb", buffering=0)
+            native.write_frame(
+                writer,
+                wsp.build_transport_hello(
+                    role="client",
+                    adapter_instance_id=INSTANCE,
+                    client_package_version=wsp.WEB_SOL_PACKAGE_VERSION,
+                    native_package_version=wsp.WEB_SOL_PACKAGE_VERSION,
+                    extension_package_version=wsp.WEB_SOL_PACKAGE_VERSION,
+                    capability_digest=SKIPPED_DIGEST,
+                    boot_nonce=None,
+                    challenge_nonce=secrets.token_urlsafe(24),
+                ),
+            )
+            with pytest.raises(native.NativeHostError):
+                native.read_frame(reader)
+        assert harness.extension.forwarded == []
+    finally:
+        harness.stop()
+
+
+def test_old_extension_holds_read_and_menu_back_from_a_new_client(socket_dir):
     # The host-respawn window: the extension still runs the previous release
-    # while a new-session client presents the new digest. The connection is
-    # admitted on both digests, but `menu` does not exist in the extension's
-    # set, so the host refuses it instead of forwarding it to a worker that
-    # cannot execute it. Old actions keep flowing.
+    # (0.4.0) while a new-session client presents the new digest. The
+    # connection is admitted on both digests, but `read` and `menu` do not
+    # exist in the extension's set, so the host refuses them instead of
+    # forwarding them to a worker that cannot execute them. Old actions keep
+    # flowing.
     harness = HostHarness(socket_dir, extension_digest=PREVIOUS_DIGEST)
     harness.start()
     try:
@@ -420,6 +475,17 @@ def test_old_extension_holds_menu_back_from_a_new_client(socket_dir):
         assert refused["effect"] == "NOT_APPLIED"
         assert refused["status"] == "ACTION_UNAVAILABLE"
         assert refused["data"]["reason"] == "transport_capability_mismatch"
+        refused_read = client.browser_via_extension(
+            INSTANCE, session_id="b" * 64, operation_key="read-operation",
+            action="read", connection_id=status["transport_boot_nonce"],
+            tab_id=17, url_fingerprint="c" * 64,
+            snapshot_id="snapshot-observation-001", ref="e1",
+            params={"offset": 0},
+        )
+        assert refused_read["action"] == "read"
+        assert refused_read["effect"] == "NOT_APPLIED"
+        assert refused_read["status"] == "ACTION_UNAVAILABLE"
+        assert refused_read["data"]["reason"] == "transport_capability_mismatch"
         assert [doc.get("action") for doc in harness.extension.forwarded] == ["status"]
     finally:
         harness.stop()
@@ -454,6 +520,7 @@ def test_extension_source_pins_the_current_digest_and_a_stable_id():
         in background
     )
     assert PREVIOUS_DIGEST not in background
+    assert SKIPPED_DIGEST not in background
     manifest = __import__("json").loads((extension / "manifest.json").read_text())
     # The key keeps the extension id (and therefore the native host manifests'
     # allowed_origins) stable across staging folders, so a reload can move to

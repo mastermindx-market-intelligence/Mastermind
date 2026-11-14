@@ -304,17 +304,21 @@ def transport_capability_digest() -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-# Transport compatibility with the immediately previous bridge release. The
-# native host admits exactly one previous digest alongside its own so a fleet
-# can cross the release one profile and one session at a time (ruling 16: a
-# method that makes running sessions fail is not installed while other
-# programmes have operators at work). The commit names the release this
-# digest belongs to; there is no wildcard and no "any older".
+# Transport compatibility with the accepted previous bridge release: the
+# release running at BOTH ends at the time of the switch (RULING BR2-R2
+# class rule), never one only staged. The native host admits exactly one
+# previous digest alongside its own so a fleet can cross the release one
+# profile and one session at a time (ruling 16: a method that makes running
+# sessions fail is not installed while other programmes have operators at
+# work). The commit names the release this digest belongs to; there is no
+# wildcard and no "any older". b640dec1 (1c40ec98...) was staged but never
+# live as a pin or a loaded extension; it is a skipped release and is
+# admitted nowhere.
 PREVIOUS_TRANSPORT_CAPABILITY_RELEASE_COMMIT = (
-    "b640dec1461a29cd5e42910c992973f50597d93f"
+    "5aa30969241163b4abb3e025bc9e52123ee4b478"
 )
 PREVIOUS_TRANSPORT_CAPABILITY_DIGEST = (
-    "1c40ec98d1086a8f8005151757b040698057019f5e9169cace91e393b6f60d40"
+    "e0216d3d9e9f05edef32ff642cb82a1281b1a9766d5cc35f694c88e0ef0bb0bb"
 )
 
 
