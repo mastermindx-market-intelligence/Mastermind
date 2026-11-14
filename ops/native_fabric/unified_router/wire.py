@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from ops.native_fabric.unified_router.model_policy import normalized_usage
+
 
 class WireTranslationError(ValueError):
     pass
@@ -18,6 +20,31 @@ class WireTranslationError(ValueError):
 def _require(condition: bool, reason: str) -> None:
     if not condition:
         raise WireTranslationError(reason)
+
+
+def _arguments(raw: Any) -> dict:
+    """Malformed tool inputs are not executable replacements or log material."""
+    try:
+        if raw is None or raw == "":
+            raw = "{}"
+        _require(isinstance(raw, (str, dict)), "FABRIC_TRANSLATE_TOOL_ARGUMENTS")
+        value = raw if isinstance(raw, dict) else json.loads(raw)
+    except (TypeError, ValueError):
+        raise WireTranslationError("FABRIC_TRANSLATE_TOOL_ARGUMENTS") from None
+    _require(isinstance(value, dict), "FABRIC_TRANSLATE_TOOL_ARGUMENTS")
+    return value
+
+
+def _message_usage(usage: Any) -> dict:
+    """One accounting definition for client Messages usage and admission."""
+    counted = normalized_usage(usage, "openai")
+    if counted is None:
+        return {"input_tokens": 0, "output_tokens": 0}
+    result = {"input_tokens": counted["uncached_input"],
+              "output_tokens": counted["output"]}
+    if counted["cached_input"]:
+        result["cache_read_input_tokens"] = counted["cached_input"]
+    return result
 
 
 def _inline_context_text(content: Any) -> str:
@@ -267,23 +294,23 @@ def openai_to_anthropic(payload: dict, *, model: str, message_id: str | None = N
     for call in tool_calls:
         _require(isinstance(call, dict), "FABRIC_TRANSLATE_TOOL_CALL")
         function = call.get("function") or {}
-        try:
-            arguments = json.loads(function.get("arguments") or "{}")
-        except ValueError:
-            raise WireTranslationError("FABRIC_TRANSLATE_TOOL_ARGUMENTS") from None
+        arguments = _arguments(function.get("arguments"))
+        _require(bool(call.get("id")) and bool(function.get("name")),
+                 "FABRIC_TRANSLATE_TOOL_IDENTITY")
         content.append({"type": "tool_use", "id": call.get("id", ""),
                         "name": function.get("name", ""), "input": arguments})
     if not content:
         content.append({"type": "text", "text": ""})
     finish = payload["choices"][0].get("finish_reason")
+    _require(finish in {"stop", "length", "tool_calls", "function_call", "content_filter"},
+             "FABRIC_STREAM_INCOMPLETE")
     stop_reason = {"tool_calls": "tool_use", "function_call": "tool_use",
                    "length": "max_tokens"}.get(finish, "end_turn")
     usage = payload.get("usage") or {}
     return {"id": message_id or payload.get("id") or "msg_fabric", "type": "message",
             "role": "assistant", "model": model, "content": content,
             "stop_reason": stop_reason, "stop_sequence": None,
-            "usage": {"input_tokens": usage.get("prompt_tokens", 0),
-                      "output_tokens": usage.get("completion_tokens", 0)}}
+            "usage": _message_usage(usage)}
 
 
 class OpenAIStreamTranslator:
@@ -335,7 +362,7 @@ class OpenAIStreamTranslator:
                 function = call.get("function") or {}
                 if tool is None:
                     tool = self._tools[index] = {
-                        "id": call.get("id", f"toolu_{index}"),
+                        "id": call.get("id", ""),
                         "name": function.get("name", ""),
                         "arguments": "", "emitted": False}
                 if call.get("id"):
@@ -349,7 +376,8 @@ class OpenAIStreamTranslator:
         return out
 
     def finish(self) -> list[tuple[str, str]]:
-        _require(self._finish is not None, "FABRIC_STREAM_INCOMPLETE")
+        _require(self._finish in {"stop", "length", "tool_calls", "function_call", "content_filter"},
+                 "FABRIC_STREAM_INCOMPLETE")
         out: list[tuple[str, str]] = []
         block_index = 1 if self._text_open else 0
         if self._text_open:
@@ -358,10 +386,9 @@ class OpenAIStreamTranslator:
             self._text_open = False
         for index in sorted(self._tools):
             tool = self._tools[index]
-            try:
-                arguments = json.loads(tool["arguments"] or "{}")
-            except ValueError:
-                raise WireTranslationError("FABRIC_TRANSLATE_TOOL_ARGUMENTS") from None
+            arguments = _arguments(tool["arguments"])
+            _require(bool(tool["id"]) and bool(tool["name"]),
+                     "FABRIC_TRANSLATE_TOOL_IDENTITY")
             out.append(self._events("content_block_start", {
                 "type": "content_block_start", "index": block_index,
                 "content_block": {"type": "tool_use", "id": tool["id"],
@@ -379,7 +406,7 @@ class OpenAIStreamTranslator:
         out.append(self._events("message_delta", {
             "type": "message_delta", "delta": {"stop_reason": stop_reason,
                                                "stop_sequence": None},
-            "usage": {"output_tokens": self._usage.get("completion_tokens", 0)}}))
+            "usage": _message_usage(self._usage)}))
         out.append(self._events("message_stop", {"type": "message_stop"}))
         return out
 
@@ -498,6 +525,11 @@ def responses_to_anthropic(payload: dict, *, model: str) -> dict:
     """OpenAI Responses response -> Anthropic Messages response (closed)."""
     _require(isinstance(payload, dict) and isinstance(payload.get("output"), list),
              "FABRIC_TRANSLATE_RESPONSE")
+    _require(payload.get("status") in {"completed", "incomplete"},
+             "FABRIC_STREAM_INCOMPLETE")
+    if payload.get("status") == "incomplete":
+        _require((payload.get("incomplete_details") or {}).get("reason") == "max_output_tokens",
+                 "FABRIC_UPSTREAM_INCOMPLETE")
     content: list[dict] = []
     finish = "end_turn"
     for item in payload["output"]:
@@ -511,11 +543,9 @@ def responses_to_anthropic(payload: dict, *, model: str) -> dict:
                     if isinstance(text, str) and text:
                         content.append({"type": "text", "text": text})
         elif kind == "function_call":
-            try:
-                arguments = json.loads(item.get("arguments") or "{}")
-            except ValueError:
-                raise WireTranslationError(
-                    "FABRIC_TRANSLATE_TOOL_ARGUMENTS") from None
+            arguments = _arguments(item.get("arguments"))
+            _require(bool(item.get("call_id")) and bool(item.get("name")),
+                     "FABRIC_TRANSLATE_TOOL_IDENTITY")
             content.append({"type": "tool_use", "id": item.get("call_id", ""),
                             "name": item.get("name", ""), "input": arguments})
             finish = "tool_use"
@@ -526,14 +556,13 @@ def responses_to_anthropic(payload: dict, *, model: str) -> dict:
     if not content:
         content.append({"type": "text", "text": ""})
     status = payload.get("status")
-    if status == "incomplete" and finish != "tool_use":
+    if status == "incomplete":
         finish = "max_tokens"
     usage = payload.get("usage") or {}
     return {"id": payload.get("id") or "msg_fabric", "type": "message",
             "role": "assistant", "model": model, "content": content,
             "stop_reason": finish, "stop_sequence": None,
-            "usage": {"input_tokens": usage.get("input_tokens", 0),
-                      "output_tokens": usage.get("output_tokens", 0)}}
+            "usage": _message_usage(usage)}
 
 
 class ResponsesStreamTranslator:
@@ -562,11 +591,7 @@ class ResponsesStreamTranslator:
             content.append({"type": "text", "text": text})
         for call_id in self._order:
             tool = self._calls[call_id]
-            try:
-                arguments = json.loads(tool["arguments"] or "{}")
-            except ValueError:
-                raise WireTranslationError(
-                    "FABRIC_TRANSLATE_TOOL_ARGUMENTS") from None
+            arguments = _arguments(tool["arguments"])
             content.append({"type": "tool_use", "id": tool["id"],
                             "name": tool["name"], "input": arguments})
         if not content:
@@ -576,8 +601,7 @@ class ResponsesStreamTranslator:
                 "stop_reason": self._finish or (
                     "tool_use" if self._order else "end_turn"),
                 "stop_sequence": None,
-                "usage": {"input_tokens": self._usage.get("input_tokens", 0),
-                          "output_tokens": self._usage.get("output_tokens", 0)}}
+                "usage": _message_usage(self._usage)}
 
     def _events(self, event: str, data: dict) -> tuple[str, str]:
         return event, json.dumps(data, separators=(",", ":"))
@@ -594,7 +618,9 @@ class ResponsesStreamTranslator:
         out: list[tuple[str, str]] = []
         kind = event.get("type")
         if kind in {"error", "response.failed"}:
+            self.completed = False
             raise WireTranslationError("FABRIC_UPSTREAM_STREAM_ERROR")
+        _require(not self.completed, "FABRIC_STREAM_INVALID")
         if kind == "response.output_text.delta":
             piece = event.get("delta")
             if isinstance(piece, str) and piece:
@@ -610,21 +636,32 @@ class ResponsesStreamTranslator:
                     "delta": {"type": "text_delta", "text": piece}}))
         elif kind == "response.output_item.added":
             item = event.get("item") or {}
+            _require(isinstance(item, dict), "FABRIC_TRANSLATE_TOOL_CALL")
             if item.get("type") == "function_call":
-                call_id = str(item.get("call_id") or item.get("id")
-                              or f"toolu_{len(self._calls)}")
+                call_id = item.get("call_id")
+                item_id = item.get("id")
+                _require(item_id is None or (isinstance(item_id, str) and bool(item_id)
+                         and item_id not in self._item_to_call), "FABRIC_TRANSLATE_TOOL_IDENTITY")
+                _require(isinstance(call_id, str) and bool(call_id)
+                         and call_id not in self._calls
+                         and isinstance(item.get("name"), str) and bool(item["name"]),
+                         "FABRIC_TRANSLATE_TOOL_IDENTITY")
                 self._calls[call_id] = {"id": call_id, "name": item.get("name", ""),
                                         "arguments": item.get("arguments") or ""}
                 self._order.append(call_id)
-                if item.get("id"):
-                    self._item_to_call[str(item["id"])] = call_id
+                if item_id:
+                    self._item_to_call[item_id] = call_id
         elif kind == "response.function_call_arguments.delta":
-            call_id = str(event.get("call_id") or self._item_to_call.get(
-                str(event.get("item_id") or ""), ""))
+            by_item = self._item_to_call.get(str(event.get("item_id") or ""))
+            direct = event.get("call_id")
+            if event.get("item_id"):
+                _require(by_item is not None and (not direct or direct == by_item),
+                         "FABRIC_TRANSLATE_TOOL_IDENTITY")
+            call_id = str(direct or by_item or "")
             tool = self._calls.get(call_id)
             _require(tool is not None, "FABRIC_TRANSLATE_TOOL_IDENTITY")
-            if tool is not None and isinstance(event.get("delta"), str):
-                tool["arguments"] += event["delta"]
+            _require(isinstance(event.get("delta"), str), "FABRIC_TRANSLATE_TOOL_ARGUMENTS")
+            tool["arguments"] += event["delta"]
         usage = event.get("usage")
         if isinstance(usage, dict):
             self._usage = usage
@@ -656,11 +693,7 @@ class ResponsesStreamTranslator:
             self._block_index += 1
         for call_id in self._order:
             tool = self._calls[call_id]
-            try:
-                arguments = json.loads(tool["arguments"] or "{}")
-            except ValueError:
-                raise WireTranslationError(
-                    "FABRIC_TRANSLATE_TOOL_ARGUMENTS") from None
+            arguments = _arguments(tool["arguments"])
             out.append(self._events("content_block_start", {
                 "type": "content_block_start", "index": self._block_index,
                 "content_block": {"type": "tool_use", "id": tool["id"],
@@ -677,6 +710,7 @@ class ResponsesStreamTranslator:
         out.append(self._events("message_delta", {
             "type": "message_delta", "delta": {"stop_reason": stop_reason,
                                                "stop_sequence": None},
-            "usage": {"output_tokens": self._usage.get("output_tokens", 0)}}))
+            "usage": _message_usage(self._usage)}))
         out.append(self._events("message_stop", {"type": "message_stop"}))
         return out
+

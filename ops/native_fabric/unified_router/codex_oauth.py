@@ -171,7 +171,7 @@ def _write_auth_atomic(auth_store: Path, document: dict) -> None:
             os.unlink(name)
 
 
-def bench_row(auth_store: Path, pool: str, account_id: str, *, reset_at: float,
+def bench_row(auth_store: Path, pool: str, account_id: str, *, reset_at: float | None,
               reason: str) -> float:
     """Record an upstream usage-limit refusal on the incumbent row.
 
@@ -179,7 +179,8 @@ def bench_row(auth_store: Path, pool: str, account_id: str, *, reset_at: float,
     ``last_error_reset_at``) so every consumer of the pool sees the same
     bench; the merge is limited to those three fields of exactly one row.
     """
-    if not math.isfinite(reset_at) or reset_at <= 0:
+    if reset_at is not None and (type(reset_at) not in (int, float)
+                                 or not math.isfinite(reset_at) or reset_at <= 0):
         raise OAuthPoolError("invalid account retry deadline")
     with _auth_lock(auth_store):
         document = json.loads(auth_store.read_text(encoding="utf-8"))
@@ -196,17 +197,22 @@ def bench_row(auth_store: Path, pool: str, account_id: str, *, reset_at: float,
                         # Preserve the stronger incumbent hold; this response
                         # cannot establish the missing quota-reset observation.
                         return 0.0
-                    reset_at = max(previous, reset_at)
+                    reset_at = max(previous, reset_at) if reset_at is not None else None
                     entry["last_status"] = "exhausted"
                     entry["last_status_at"] = time.time()
                     entry["last_error_code"] = 429
                     entry["last_error_reason"] = reason
-                    entry["last_error_reset_at"] = reset_at
+                    if reset_at is None:
+                        # A 429 with no valid reset is exhausted until an owner
+                        # or later authoritative observation clears the hold.
+                        entry.pop("last_error_reset_at", None)
+                    else:
+                        entry["last_error_reset_at"] = reset_at
                     break
             else:
                 raise OAuthPoolError("account row vanished from the pool")
             _write_auth_atomic(auth_store, document)
-            return reset_at
+            return reset_at or 0.0
         raise OAuthPoolError("account pool vanished")
 
 
@@ -292,3 +298,4 @@ def refresh_account(auth_store: Path, pool: str, account: OAuthAccount, *,
         _write_auth_atomic(auth_store, document)
         return OAuthAccount(account.id, account.label, access, refresh,
                             exhausted_until, exhausted_unknown)
+
