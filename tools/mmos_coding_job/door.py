@@ -141,9 +141,6 @@ DEV_T3_PORT_LAST = 3810
 # team server (3780).
 RESERVED_NEIGHBOUR_PORTS = frozenset({3100, 3179, 3773, 3774, 3780})
 
-DEV_T3_PORT_FIRST = 3790
-DEV_T3_PORT_LAST = 3810
-
 
 # ---------------------------------------------------------------------------
 # Config
@@ -154,6 +151,15 @@ class DoorConfig:
     """The door's JSON config; every boundary enforced at load."""
 
     def __init__(self, values: dict):
+        # T4d prep: a prepared example config carries `enabled: false`.  That
+        # is a REAL refusal — no door can be constructed from a disabled
+        # config.  Switching it on is a deliberate principal act (remove the
+        # flag); absent or true means "not blocked by this flag", and every
+        # other boundary below still applies.
+        if values.get("enabled") is False:
+            raise ValueError(
+                "door config is disabled (enabled=false): a prepared example, "
+                "not a runnable door — the principal switches it on")
         self.scratch_root = Path(values["scratch_root"]).expanduser()
         self.paperclip_base = loopback_only(
             values["paperclip_base_url"], "paperclip_base_url")
@@ -215,10 +221,35 @@ class DoorConfig:
                     "refusing to run the pairing CLI against a default")
         self.t3_home_dir = str(values["t3"]["home_dir"])
         self.t3_port = int(values["t3"]["port"])
-        if not (DEV_T3_PORT_FIRST <= self.t3_port <= DEV_T3_PORT_LAST):
+        # T4d prep: the dev T3 port range is an EXPLICIT opt-in so a lane can
+        # pin its own dev range (PF: 3830-3839).  The DEFAULT stays 3790-3810
+        # and every refusal below is unchanged; a malformed range is refused,
+        # never silently widened.  Any real/neighbour port outside the
+        # configured range stays refused — the range can never be used to
+        # reach a live service or another lane's port.
+        dev_range = values["t3"].get("dev_port_range")
+        if dev_range is None:
+            self.t3_dev_port_first = DEV_T3_PORT_FIRST
+            self.t3_dev_port_last = DEV_T3_PORT_LAST
+        else:
+            if (not isinstance(dev_range, (list, tuple))
+                    or len(dev_range) != 2
+                    or any(type(p) is not int for p in dev_range)):
+                raise ValueError(
+                    "t3.dev_port_range must be a [first, last] pair of "
+                    f"integer ports, got {dev_range!r}")
+            first, last = dev_range
+            if not (1 <= first <= last <= 65535):
+                raise ValueError(
+                    "t3.dev_port_range must satisfy 1 <= first <= last <= "
+                    f"65535, got {dev_range!r}")
+            self.t3_dev_port_first = first
+            self.t3_dev_port_last = last
+        if not (self.t3_dev_port_first <= self.t3_port
+                <= self.t3_dev_port_last):
             raise ValueError(
                 f"t3.port must be a dev-server port "
-                f"({DEV_T3_PORT_FIRST}-{DEV_T3_PORT_LAST}), "
+                f"({self.t3_dev_port_first}-{self.t3_dev_port_last}), "
                 f"got {self.t3_port}")
         base_port = urllib.parse.urlsplit(self.t3_proof_base).port
         if base_port != self.t3_port:

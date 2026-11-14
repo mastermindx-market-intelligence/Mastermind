@@ -131,6 +131,86 @@ def test_config_requires_the_dev_server_pin(scratch):
             "proof_base_url": "http://127.0.0.1:3801"}))  # != port 3800
 
 
+# ---------------------------------------------------------------------------
+# T4d prep: the dev T3 port range is an EXPLICIT opt-in so a lane can pin its
+# own dev range (PF: 3830-3839).  The DEFAULT stays 3790-3810 and every
+# refusal stays.  These tests fail on the pre-T4d door (the range is hardcoded
+# and `dev_port_range` is ignored).
+# ---------------------------------------------------------------------------
+
+
+def test_t4d_dev_port_range_is_explicit_opt_in_default_unchanged(scratch):
+    # DEFAULT stays 3790-3810: a PF port is refused without explicit config.
+    with pytest.raises(ValueError, match="dev-server port"):
+        door_mod.DoorConfig(_config(scratch, {
+            "port": 3830, "proof_base_url": "http://127.0.0.1:3830"}))
+    # The canonical dead dev port stays legal by default (no range field).
+    door_mod.DoorConfig(_config(scratch, {
+        "port": 3799, "proof_base_url": "http://127.0.0.1:3799"}))
+    # An EXPLICIT PF range admits its own ports.
+    cfg = door_mod.DoorConfig(_config(scratch, {
+        "port": 3830, "proof_base_url": "http://127.0.0.1:3830",
+        "dev_port_range": [3830, 3839]}))
+    assert cfg.t3_port == 3830
+    assert (cfg.t3_dev_port_first, cfg.t3_dev_port_last) == (3830, 3839)
+    door_mod.DoorConfig(_config(scratch, {
+        "port": 3839, "proof_base_url": "http://127.0.0.1:3839",
+        "dev_port_range": [3830, 3839]}))
+    # Just outside the configured range is still refused.
+    for port in (3829, 3840):
+        with pytest.raises(ValueError, match="dev-server port"):
+            door_mod.DoorConfig(_config(scratch, {
+                "port": port, "proof_base_url": f"http://127.0.0.1:{port}",
+                "dev_port_range": [3830, 3839]}))
+    # A malformed range is refused, never silently widened to a default.
+    for bad in ([3839, 3830], [3830], "3830-3839", [3830, 3839, 3840],
+                [0, 70000], [3830, True], [3830.0, 3839.0]):
+        with pytest.raises(ValueError, match="dev_port_range"):
+            door_mod.DoorConfig(_config(scratch, {
+                "port": 3830, "proof_base_url": "http://127.0.0.1:3830",
+                "dev_port_range": bad}))
+
+
+def test_t4d_real_ports_stay_refused_under_the_pf_range(scratch):
+    # The PF door points at 3830-3839.  Every real / neighbour port must stay
+    # refused as a T3 target under that range — the configurable range can
+    # never be used to reach a live service or another lane's port.
+    for port in (3773, 3774, 3780, 3100, 3190, 3193, 3796, 3800):
+        with pytest.raises(ValueError, match="dev-server port"):
+            door_mod.DoorConfig(_config(scratch, {
+                "port": port, "proof_base_url": f"http://127.0.0.1:{port}",
+                "dev_port_range": [3830, 3839]}))
+    # The reserved Paperclip neighbour refusals are unchanged (F9): these are
+    # refused as Paperclip targets even when explicitly allowlisted.
+    for port in (3100, 3179, 3773, 3774, 3780):
+        values = _config(scratch)
+        values["paperclip_base_url"] = f"http://127.0.0.1:{port}"
+        values["paperclip_allowed"] = [f"127.0.0.1:{port}"]
+        with pytest.raises(ValueError, match="reserved"):
+            door_mod.DoorConfig(values)
+
+
+def test_t4d_a_disabled_config_is_refused(scratch):
+    # `enabled: false` is a REAL refusal, not an inert label: a prepared
+    # example can never construct a runnable door.  The principal switches
+    # it on by removing the flag (a deliberate act), never by accident.
+    values = _config(scratch)
+    values["enabled"] = False
+    with pytest.raises(ValueError, match="disabled"):
+        door_mod.DoorConfig(values)
+    # The example shipped in the repo is disabled and is refused as-is.
+    example = (Path(HERE) / ".." / "integrations" / "mmos" / "pf"
+               / "t4d_door.pf.example.json").resolve()
+    data = json.loads(example.read_text(encoding="utf-8"))
+    assert data["enabled"] is False
+    with pytest.raises(ValueError, match="disabled"):
+        door_mod.DoorConfig(data)
+    # `enabled: true` (or absent) is not a refusal — the flag only blocks when
+    # explicitly false; every other boundary still applies.
+    values["enabled"] = True
+    door_mod.DoorConfig(values)
+
+
 def test_admit_replay_conflict_wait_and_unfrozen_round_trip(scratch,
                                                             monkeypatch):
     """The whole admission lane over the real operator socket: freeze →
