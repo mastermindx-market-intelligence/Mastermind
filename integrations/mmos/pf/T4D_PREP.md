@@ -34,18 +34,25 @@ V4 §17/§18, `tools/mmos_coding_job/{door,journey,envelope}.py`,
   (no regression). Commands run one file at a time:
   `TMPDIR=/tmp env -u PYTHONPATH /opt/homebrew/bin/python3.12 -m pytest -q -p no:cacheprovider <file>`.
 
-**Port nuance (honest).** 3796 and 3800 sit *inside* the DEFAULT 3790–3810.
-They are the old T4b/T4c dev T3 ports (`journey.py:68` uses 3796). Under the
-default they stay legal exactly as today, so the pairing-target test
-(`test_t3_live_proof_pairing_target.py:246` builds a successful default-range
-config on 3796) and the journey are unchanged. Under the PF range 3830–3839
-all eight real ports — 3773, 3774, 3780, 3100, 3190, 3193, 3796, 3800 — are
-refused; `test_t4d_real_ports_stay_refused_under_the_pf_range` pins this. A
-hard reservation of 3796/3800 under *every* config was **not** done: it would
-break that pairing-target test and the journey default, so it is not small and
-safe. If the principal wants them refused under every config, the follow-up is
-a `RESERVED_T3_PORTS` check after the base==port check, plus a port bump in
-that test and in `journey.py`.
+**Port nuance (refreshed — REV-CODE F2/F3/F6).** 3796 and 3800 sit *inside*
+the historical DEFAULT 3790–3810, but they are no longer legal anywhere:
+3796 is another lane's listener (BRIEF §4) and 3800 is reserved. The dev
+stack moved to **3794** (`journey.py:68` `DEV_T3_PORT = 3794`), and the
+pairing-target test builds its config on 3794
+(`test_t3_live_proof_pairing_target.py`), so neither depends on 3796/3800.
+They are refused as **T3 targets under EVERY config** — the default range
+included — via `CUSTOM_RANGE_REFUSED_PORTS` (`door.py`); a configured range
+widens dev ports, never the real ones
+(`test_t4d_real_ports_stay_refused_under_the_pf_range`,
+`test_pf3_3796_and_3800_refused_under_every_config`). **REV-CODE F2** adds
+them to `RESERVED_NEIGHBOUR_PORTS`, so they are also refused as **Paperclip
+targets** (`paperclip_allowed` / `paperclip_base_url`) even when explicitly
+allowlisted (`test_f9_reserved_neighbour_ports_are_refused_even_if_listed`).
+**REV-CODE F3** adds them to `FORBIDDEN_PORTS` in `tools/mmos_dev/t3_dev.sh`
+(keeping 3773/3774); `tests/test_t3_dev_port_guards.py` proves the launcher
+never probes or picks them. The earlier "hard reservation was not done"
+caveat is superseded: it is done, and the journey/pairing test were already
+on 3794, so nothing broke.
 
 ## The three owed items (plan V4 §18.4)
 
@@ -163,6 +170,19 @@ and never at production.
 **Smallest change.** A config value only. The example sets `scratch_root` to
 `~/.mastermind/mmos_dev/pf/t4d/exec`. The production Executive is not touched
 without the Chairman's word (§17.4, §18.4).
+
+**Built (verified — REV-CODE F6).** Nothing to build: the store is
+scratch-local by construction and stays so. `scratch_root` is required with
+no default (`door.py`), and every state path derives from it — the Executive
+sqlite (`scratch_root/runtime/data/control_plane/executive.sqlite3`), the
+adapter store, the frozen record, the launch census and the delivery sidecar
+(`scratch_root/run/delivery`). No production Executive path exists in the
+door. The example config points `scratch_root` at the PF-local
+`~/.mastermind/mmos_dev/pf/t4d/exec`; the switch-on act (step 4) is the
+principal pointing a real config at a PF-owned dir, never production. The
+delivery transport's state dir is likewise scratch-local, so the bearer
+token file (a separate keys dir) and the dedupe sidecar never land in a
+production store.
 
 ### Reconcile cadence (done in T4c — verified)
 
