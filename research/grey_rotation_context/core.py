@@ -177,6 +177,8 @@ def event_context(event: Mapping[str, Any], *, expected_identity: Mapping[str, A
         raise ContractError("signal was not known by the economic decision session")
     if (event.get("field_origin") or {}).get("signal_known_ts") == "artifact_absent":
         raise ContractError("non-null known time contradicts its absent-field provenance")
+    if event.get("final") is True and event.get("bar_state") == "provisional":
+        raise ContractError("final flag contradicts provisional bar state")
     if event.get("final") is True:
         if signal_close_at is None and session(known) == day:
             return {**out, "status": "CLOSE_TIME_UNQUALIFIED", "reason": "same-day finality needs the exchange close instant"}
@@ -203,7 +205,8 @@ def cohort_snapshot(rows: Sequence[Mapping[str, Any]], *, origin: str, decision_
     No alphabetical placeholder is promoted into a production identity rule.
     """
     t, clock = session(origin), instant(decision_at)
-    if minimum_peers < 1 or clock.date() < t.date():
+    if (not isinstance(minimum_peers, Integral) or isinstance(minimum_peers, bool)
+            or minimum_peers < 1 or clock.date() < t.date()):
         raise ContractError("invalid minimum/calendar")
     groups = {(r.get("group_id"), r.get("membership_vintage")) for r in rows}
     if len(groups) != 1 or any(not k for k in next(iter(groups), (None, None))):
@@ -284,14 +287,17 @@ def paired_breadth_change(before: Mapping, after: Mapping) -> dict:
     if before.get("focal_issuer_excluded") != after.get("focal_issuer_excluded"):
         raise ContractError("focal-issuer exclusion changed")
     a, b = before["issuer_states"], after["issuer_states"]
-    shared = sorted(k for k in a.keys() & b.keys() if a[k] is not None and b[k] is not None)
+    defined_pairs = [k for k in a.keys() & b.keys() if a[k] is not None and b[k] is not None]
+    representative_changed = sorted(k for k in defined_pairs if a[k]["ticker"] != b[k]["ticker"])
+    shared = sorted(k for k in defined_pairs if k not in representative_changed)
     n = len(shared)
     old = sum(a[k]["below20"] for k in shared)/n if n else None
     new = sum(b[k]["below20"] for k in shared)/n if n else None
-    return {"common_defined_issuers": n, "paired_floor_change": new-old if n else None,
+    return {"common_defined_issuers": n, "representative_changed_issuers": representative_changed,
+            "paired_floor_change": new-old if n else None,
             "raw_floor_change": after["floor_share"]-before["floor_share"]
             if before["floor_share"] is not None and after["floor_share"] is not None else None,
-            "roster_or_definition_changed": set(a) != set(b) or
+            "roster_or_definition_changed": bool(representative_changed) or set(a) != set(b) or
             any((a.get(k) is None) != (b.get(k) is None) for k in a.keys() | b.keys()),
             "membership_vintage_changed": before.get("membership_vintage") != after.get("membership_vintage"),
             "authority": dict(AUTHORITY)}
