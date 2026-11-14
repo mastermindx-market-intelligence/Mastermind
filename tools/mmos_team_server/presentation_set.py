@@ -163,6 +163,13 @@ def guard_settings(path, real_root_ok):
     return expanded
 
 
+def _no_surrogates(field, s):
+    """F10: a lone surrogate cannot be encoded as UTF-8; refuse it here,
+    cleanly, instead of crashing with UnicodeEncodeError at the write."""
+    if any(0xD800 <= ord(ch) <= 0xDFFF for ch in s):
+        die(f"{field} contains a lone surrogate; not valid UTF-8 text")
+
+
 def validate_value(value):
     """The presentation schema (contracts PresentationSettings): productName
     nonempty string, teamMode bool, lockedProviderProjectIds list of nonempty
@@ -178,12 +185,15 @@ def validate_value(value):
     name = value["productName"]
     if not isinstance(name, str) or not name.strip():
         die("productName must be a nonempty string")
+    _no_surrogates("productName", name)
     if not isinstance(value["teamMode"], bool):
         die("teamMode must be a boolean")
     locked = value["lockedProviderProjectIds"]
     if not isinstance(locked, list) or any(
             not isinstance(p, str) or not p.strip() for p in locked):
         die("lockedProviderProjectIds must be a list of nonempty strings")
+    for p in locked:
+        _no_surrogates("lockedProviderProjectIds", p)
     links = value["links"]
     if not isinstance(links, list):
         die("links must be a list")
@@ -196,6 +206,8 @@ def validate_value(value):
             die(f"links[{i}].label must be a nonempty string")
         if not isinstance(link["url"], str) or not LINK_URL_RE.match(link["url"].strip()):
             die(f"links[{i}].url must be an http(s) URL with a host")
+        for key in ("id", "label", "url"):
+            _no_surrogates(f"links[{i}].{key}", link[key])
 
 
 def scan_members(text):
@@ -271,9 +283,12 @@ def build_new_text(text, spans, close_idx, last_end, value):
         return text[:vs] + vt + text[ve:]
     member = '"presentation": ' + vt
     if last_end is None:
-        # empty object: mirror the whitespace that sat before the brace
-        trail = " " if text[1:close_idx].strip() == "" and close_idx > 1 else ""
-        return text[:close_idx] + member + trail + text[close_idx:]
+        # empty object (F6): keep the interior whitespace before the member
+        # and mirror it after, so every original byte — including {  },
+        # {\n}, {\t} and any leading whitespace — stays outside the member
+        open_idx = text.index("{")
+        interior = text[open_idx + 1:close_idx]
+        return text[:close_idx] + member + interior + text[close_idx:]
     sep = "\n  " if "\n" in text else " "
     return text[:last_end] + "," + sep + member + text[last_end:]
 
@@ -297,7 +312,11 @@ def write_receipt(receipt_dir, settings_path, value_file, before, after):
 
     F4: a dir that already holds a receipt is refused — fresh dir per apply,
     so a second apply can never O_TRUNC the first preimage/receipt and
-    destroy the first undo path."""
+    destroy the first undo path. F7: a symlinked receipt dir is refused like
+    a symlinked settings path — no write through the link, no chmod side
+    effect on its target."""
+    if os.path.islink(receipt_dir):
+        die(f"symlinked receipt dir refused: {receipt_dir}")
     preimage = os.path.join(receipt_dir, "preimage.bin")
     rp = os.path.join(receipt_dir, "receipt.json")
     if os.path.lexists(rp) or os.path.lexists(preimage):

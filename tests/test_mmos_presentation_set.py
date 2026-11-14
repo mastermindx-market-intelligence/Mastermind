@@ -642,6 +642,75 @@ def test_apply_refuses_reused_receipt_dir(settings, value_file, tmp_path):
     assert do_apply(settings, vf2, tmp_path / "receipts2").returncode == 0
 
 
+# ---------------------------------------------------------------------------
+# F6: an empty object with interior whitespace ({  }, {\n}, {\t}) must be
+# accepted, and the interior whitespace preserved on insert (every original
+# byte stays outside the presentation member).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("data", [b"{  }", b"{\n}", b"{\t}", b"{}", b"{ }",
+                                  b"  {  }"])
+def test_empty_object_interior_whitespace_preserved(tmp_path, value_file,
+                                                    data):
+    p = tmp_path / "settings.json"
+    p.write_bytes(data)
+    p.chmod(0o600)
+    r = do_apply(p, value_file, tmp_path / "receipts")
+    assert r.returncode == 0, r.stderr
+    new = p.read_bytes()
+    assert json.loads(new)["presentation"] == VALUE
+    # independent reconstruction: removing the inserted member (and its
+    # leading whitespace/comma) must reproduce the original byte for byte
+    text2, spans2, _c2, _l2 = scan_members(new)
+    _vs, ve = spans2["presentation"]
+    key_start = text2.rfind('"presentation"', 0, _vs)
+    ins_start = key_start
+    while ins_start > 0 and text2[ins_start - 1] in " \t\r\n,":
+        ins_start -= 1
+    assert (text2[:ins_start] + text2[ve:]).encode("utf-8") == data
+
+
+# ---------------------------------------------------------------------------
+# F7: a symlinked receipt dir is refused like a symlinked settings path —
+# no write through the link and no chmod side effect on its target.
+# ---------------------------------------------------------------------------
+
+def test_symlinked_receipt_dir_refused(settings, value_file, tmp_path):
+    target = tmp_path / "wide_target"
+    target.mkdir()
+    target.chmod(0o755)
+    rlink = tmp_path / "rcpt_link"
+    rlink.symlink_to(target, target_is_directory=True)
+    before = settings.read_bytes()
+    r = do_apply(settings, value_file, rlink)
+    assert r.returncode != 0
+    assert settings.read_bytes() == before
+    assert stat.S_IMODE(target.stat().st_mode) == 0o755
+    assert not list(target.iterdir())
+
+
+# ---------------------------------------------------------------------------
+# F10: a lone surrogate in any value string is a clean refusal in
+# validate_value — no UnicodeEncodeError traceback, nothing written.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("field", ["productName", "locked", "label"])
+def test_lone_surrogate_refused_cleanly(settings, value_file, tmp_path, field):
+    bad = json.loads(json.dumps(VALUE))
+    if field == "productName":
+        bad["productName"] = "\ud800"
+    elif field == "locked":
+        bad["lockedProviderProjectIds"] = ["\ud800"]
+    else:
+        bad["links"][0]["label"] = "\ud800"
+    value_file.write_text(json.dumps(bad), encoding="utf-8")
+    before = settings.read_bytes()
+    r = do_apply(settings, value_file, tmp_path / "receipts")
+    assert r.returncode != 0
+    assert "Traceback" not in r.stderr
+    assert settings.read_bytes() == before
+
+
 def test_env_root_absent_allows_unrelated_tmp_file(tmp_path, value_file,
                                                    monkeypatch):
     # override pointing at a nonexistent dir: no identity to fence, and an
