@@ -250,6 +250,7 @@ def test_door_executor_pins_base_and_home_and_survives_refusal(
         # allowlist — this config names the legal dev target
         "paperclip_allowed": ["127.0.0.1:3190"],
         "paperclip_company_id": "c",
+        "paperclip_service_agent_id": "ag-pf-delivery",
         "t3": {
             "proof_base_url": "http://127.0.0.1:3796",
             "home_dir": str(tmp_path / "t3home"),  # no runtime state at all

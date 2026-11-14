@@ -37,6 +37,7 @@ def _config_t4c(scratch, **overrides):
         "paperclip_base_url": "http://127.0.0.1:3199",
         "paperclip_allowed": ["127.0.0.1:3199"],
         "paperclip_company_id": "cmp-test",
+        "paperclip_service_agent_id": "ag-pf-delivery",
         "teammates": ["ag-1"],
         "t3": {
             "proof_base_url": "http://127.0.0.1:3799",

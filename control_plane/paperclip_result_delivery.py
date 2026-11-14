@@ -134,31 +134,35 @@ def _comment_rows(value: Any) -> list[Any]:
 
 
 def _comment_row_is_own_delivery(
-    row: Any, marker: str, request_id: str,
+    row: Any, marker: str, request_id: str, service_agent_id: str,
 ) -> bool:
     """T4c repair round 1, R2 (panel MED, 2026-11-11): a comment row counts
     as THIS transport's own earlier delivery only when the row itself says
     so — never a bare marker substring, which any comment author could
     forge (the attempt id is public: the worker prompt names it).
 
-    The transport posts its delivery comment through the instance-role
-    channel, which the dev instance stamps as the board actor —
-    ``authorType "user"``, ``authorAgentId`` unset (observed live
-    2026-11-11: ``authorUserId "local-board"``) — and carries the
-    deterministic ``clientRequestId`` this module computes (uuid5 keyed on
-    the attempt, so a retried delivery re-uses the same request id).  A row
-    matches only when BOTH hold: agent-channel posts always carry
-    ``authorAgentId`` (the H2 attribution shape) and a board user without
-    the exact request id matches neither.  Anything else — even with the
-    marker in its body — is another author's word and suppresses nothing.
+    PF-3 item 1: the delivery writer is a DEDICATED SERVICE AGENT, never
+    the board.  A row is ours only when ALL THREE hold:
+
+    * its body is a string containing the return marker;
+    * ``authorAgentId`` equals this transport's ``service_agent_id``
+      exactly — a board-user row (``authorType "user"``, no
+      ``authorAgentId``) is NEVER ours whatever its request id, and
+      another agent's row is never ours;
+    * ``clientRequestId`` equals the deterministic uuid5 this module
+      computes (keyed on the attempt, so a retried delivery re-uses the
+      same request id).
+
+    Anything else — even with the marker and our request id in it — is
+    another author's word and suppresses nothing.
     """
     if not isinstance(row, Mapping):
         return False
     body = row.get("body")
     if type(body) is not str or marker not in body:
         return False
-    if row.get("authorType") != "user" or row.get("authorAgentId"):
-        return False  # agent-authored (or unknown-shape) — not our row
+    if row.get("authorAgentId") != service_agent_id:
+        return False  # board-user (no agent id) or another agent — not ours
     return str(row.get("clientRequestId") or "") == request_id
 
 
@@ -283,23 +287,32 @@ def build_return_document(payload: Mapping[str, Any], attempt_id: str) -> str:
 class PaperclipResultDeliveryTransport:
     """Write one verified result onto the Paperclip task that asked for it.
 
-    ``base_url`` must be loopback (ValueError otherwise).  ``headers`` are the
-    per-request auth headers (the dev instance's ``x-instance-role:
-    local_trusted`` convention); they are sent as headers only and never
-    appear in a body, a receipt or a log.  ``documents`` toggles the issue
-    document write.  ``state_dir`` holds the durable dedupe sidecar.
+    ``base_url`` must be loopback (ValueError otherwise).  ``headers`` are
+    the per-request auth headers (they may carry an authorization header);
+    they are sent as headers only and no value from them ever appears in a
+    body, a receipt, an error text or a log — every reason this transport
+    produces is scrubbed of the configured header values.
+    ``service_agent_id`` (PF-3 item 1) is the REQUIRED dedicated service
+    agent the delivery is attributed to — never the board; the exactly-once
+    scan counts only rows authored by this agent.  ``documents`` toggles
+    the issue document write.  ``state_dir`` holds the durable dedupe
+    sidecar.
     """
 
     def __init__(
         self,
         *,
         base_url: str,
+        service_agent_id: str,
         headers: Mapping[str, str] | None = None,
         documents: bool = True,
         state_dir: str | os.PathLike[str],
         timeout: float = 30.0,
     ) -> None:
         self._base_url = _loopback_base(base_url)
+        if type(service_agent_id) is not str or not service_agent_id.strip():
+            raise ValueError("service_agent_id must be a non-empty string")
+        self._service_agent_id = service_agent_id
         if headers is None:
             headers = {}
         if not isinstance(headers, Mapping):
@@ -312,11 +325,28 @@ class PaperclipResultDeliveryTransport:
                 raise ValueError(f"header {name!r} value must be a string")
             clean[name] = value
         self._headers = clean
+        # PF-3 item 1: every reason/error text is scrubbed of these values
+        # (longest first, so an overlapping shorter value cannot leave a
+        # fragment of a longer one behind).
+        self._header_values = tuple(sorted(
+            {value for value in clean.values() if value},
+            key=len, reverse=True))
         self._documents = bool(documents)
         if state_dir is None or not str(state_dir).strip():
             raise ValueError("state_dir must name a directory")
         self._state_dir = Path(state_dir)
         self._timeout = float(timeout)
+
+    def _scrub(self, text: str) -> str:
+        """Remove every configured header value from a reason/error text."""
+        for value in self._header_values:
+            text = text.replace(value, "[redacted-header]")
+            # exception texts often carry the %r form (a newline becomes
+            # a literal \n), which the raw replace above cannot match
+            escaped = repr(value)[1:-1]
+            if escaped != value:
+                text = text.replace(escaped, "[redacted-header]")
+        return text
 
     # --- HTTP ------------------------------------------------------------
 
@@ -347,8 +377,14 @@ class PaperclipResultDeliveryTransport:
             raise _TransportError(f"{method} {path} -> HTTP {exc.code}") from None
         except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
             reason = getattr(exc, "reason", None) or type(exc).__name__
+            raise _TransportError(self._scrub(
+                f"{method} {path} unreachable: {reason}")) from None
+        except Exception as exc:
+            # PF-3 item 1: an unexpected exception (e.g. http.client's
+            # ValueError quoting an invalid header VALUE) must never carry
+            # its text into a receipt — type name only.
             raise _TransportError(
-                f"{method} {path} unreachable: {reason}") from None
+                f"{method} {path} -> {type(exc).__name__}") from None
         if not 200 <= status < 300:
             raise _TransportError(f"{method} {path} -> HTTP {status}")
         if not raw:
@@ -436,8 +472,11 @@ class PaperclipResultDeliveryTransport:
         code: str,
         reason: str,
     ) -> dict[str, Any]:
+        # PF-3 item 1: no configured header value ever reaches a receipt —
+        # including the last-resort fence's str(exc) in ``deliver``.
         return self._receipt(
-            payload, state="refused", refusal_code=code, reason=reason)
+            payload, state="refused", refusal_code=code,
+            reason=self._scrub(reason))
 
     # --- the protocol ----------------------------------------------------
 
@@ -483,8 +522,8 @@ class PaperclipResultDeliveryTransport:
         marks = self._marks(attempt_id)
         # R2: the request id this transport posts its delivery comment
         # with — deterministic per attempt, so the dedupe scan below can
-        # demand it echoed on a board-authored row (see
-        # ``_comment_row_is_own_delivery``).
+        # demand it echoed on a row authored by THIS service agent (see
+        # ``_comment_row_is_own_delivery``, PF-3 item 1).
         request_id = str(uuid.uuid5(
             uuid.NAMESPACE_URL, f"paperclip-return:{attempt_id}"))
 
@@ -499,7 +538,8 @@ class PaperclipResultDeliveryTransport:
             except _TransportError as exc:
                 return self._refused(
                     payload, "COMMENTS_READ_FAILED", exc.reason)
-            if any(_comment_row_is_own_delivery(row, marker, request_id)
+            if any(_comment_row_is_own_delivery(
+                    row, marker, request_id, self._service_agent_id)
                    for row in _comment_rows(listing)):
                 comment_posted = True
                 already_delivered = True

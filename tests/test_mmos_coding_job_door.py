@@ -58,6 +58,7 @@ def _make_door(scratch: Path):
         "paperclip_base_url": "http://127.0.0.1:3199",  # deliberately dead
         "paperclip_allowed": ["127.0.0.1:3199"],
         "paperclip_company_id": "cmp-test",
+        "paperclip_service_agent_id": "ag-pf-delivery",
         "teammates": ["ag-1"],
         "t3": {
             # A dead port INSIDE the dev range: the pairing CLI leg is pinned
@@ -81,6 +82,7 @@ def _config(scratch, t3_overrides=None):
         "paperclip_base_url": "http://127.0.0.1:3190",
         "paperclip_allowed": ["127.0.0.1:3190"],
         "paperclip_company_id": "c",
+        "paperclip_service_agent_id": "ag-pf-delivery",
         "teammates": ["ag-1"],
         "t3": {
             "proof_base_url": "http://127.0.0.1:3800",
@@ -129,6 +131,47 @@ def test_config_requires_the_dev_server_pin(scratch):
     with pytest.raises(ValueError, match="same dev server"):
         door_mod.DoorConfig(_config(scratch, {
             "proof_base_url": "http://127.0.0.1:3801"}))  # != port 3800
+
+
+# ---------------------------------------------------------------------------
+# PF-3 item 1: the delivery writer identity is config law, and no header
+# value ever reaches an error text at the door's Paperclip client boundary.
+# ---------------------------------------------------------------------------
+
+
+def test_pf3_config_requires_service_agent_id_when_delivering(scratch):
+    """A config that would deliver without a writer identity refuses at
+    load with a typed ValueError naming the field; a config that does not
+    deliver (register_transport false) does not require it."""
+    values = _config(scratch)
+    del values["paperclip_service_agent_id"]
+    with pytest.raises(ValueError, match="paperclip_service_agent_id"):
+        door_mod.DoorConfig(values)
+    for bad in ("", "   ", None, 7):
+        values["paperclip_service_agent_id"] = bad
+        with pytest.raises(ValueError, match="paperclip_service_agent_id"):
+            door_mod.DoorConfig(values)
+    values = _config(scratch)
+    del values["paperclip_service_agent_id"]
+    values["register_transport"] = False
+    cfg = door_mod.DoorConfig(values)
+    assert cfg.register_transport is False
+
+
+def test_pf3_client_error_never_leaks_header_values(scratch):
+    """http.client's putheader rejects a newline-bearing header value with
+    a ValueError that QUOTES the value — before any connection is made.
+    The door's client logs str(exc) into logs, blocker reasons and the
+    frozen record, so the text must be scrubbed at the client boundary."""
+    sentinel = "SENTINEL-DOOR-4c8f"
+    values = _config(scratch)
+    values["paperclip_headers"] = {
+        "authorization": f"Bearer {sentinel}\ninjected"}
+    client = door_mod.PaperclipLoopbackClient(door_mod.DoorConfig(values))
+    with pytest.raises(Exception) as caught:
+        client.add_comment("iss-1", "[coding-job] probe")
+    assert sentinel not in str(caught.value), \
+        "the client's exception text quoted a header value"
 
 
 # ---------------------------------------------------------------------------

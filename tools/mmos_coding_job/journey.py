@@ -67,6 +67,11 @@ _spec.loader.exec_module(wc)
 DEV_PAPERCLIP = "http://127.0.0.1:3190"
 DEV_T3_PORT = 3796
 DEAD_DEV_T3_PORT = 3799  # inside the dev range, never started: for `wait`
+# PF-3 item 1: the result transport delivers as a dedicated service agent,
+# never the board.  This is the dev-journey placeholder identity; the
+# principal provisions the real agent on the instance at switch-on and the
+# door config names it (paperclip_service_agent_id is required to deliver).
+DEV_SERVICE_AGENT_ID = "ag-journey-delivery"
 DEV_T3_HOME = "~/.mastermind/mmos-dev/t3/home"
 PAPERCLIP_STATE = Path(
     "~/.mastermind/mmos-dev/paperclip/instances/mmos-dev/"
@@ -195,8 +200,10 @@ def door_config(scratch: Path, *, crash_mode=None, fleet_limit=None,
         "paperclip_allowed": ["127.0.0.1:3190"],
         "paperclip_company_id": COMPANY["id"],
         # the dev instance's implicit board actor (its local-trusted surface);
-        # the door's result/blocker comments ride the same header
+        # the door's blocker comments ride the same header.  PF-3 item 1:
+        # the RESULT transport delivers as the dedicated service agent.
         "paperclip_headers": {"x-instance-role": "local_trusted"},
+        "paperclip_service_agent_id": DEV_SERVICE_AGENT_ID,
         # R4b finding 10: the enrolled-teammate roster; the journey's tasks
         # are assigned to the journey teammate before the reply is posted
         "teammates": teammates or [COMPANY["agent_id"]],

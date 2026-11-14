@@ -214,6 +214,10 @@ class DoorConfig:
                 f"{sorted(allowed_targets)}")
         self.paperclip_company_id = str(values["paperclip_company_id"])
         self.paperclip_headers = dict(values.get("paperclip_headers") or {})
+        # PF-3 item 1: the dedicated service agent the result transport
+        # delivers as — never the board.  Required when the transport
+        # delivers (validated below, once register_transport is known).
+        self.paperclip_service_agent_id = values.get("paperclip_service_agent_id")
         # F10 (R4b review): the enrolled-teammate roster — the door freezes
         # only issues assigned to one of these agents, and admits only when
         # the task itself shows the request from the assignee.
@@ -276,6 +280,16 @@ class DoorConfig:
         self.t3_project_id = str(values["t3"]["project_id"])
         self.t3_model_selection = str(values["t3"]["model_selection"])
         self.register_transport = bool(values.get("register_transport", True))
+        # PF-3 item 1: a config that would deliver without a writer identity
+        # refuses at load — delivering as the board is the defect removed.
+        if self.register_transport:
+            agent_id = self.paperclip_service_agent_id
+            if type(agent_id) is not str or not agent_id.strip():
+                raise ValueError(
+                    "paperclip_service_agent_id is required when "
+                    "register_transport delivers: the dedicated service "
+                    "agent the result delivery is attributed to (a "
+                    "non-empty string), never the board")
         self.crash_mode = values.get("crash_mode") or None
         self.intake_poll_seconds = float(values.get("intake_poll_seconds", 2.0))
         # F12 (R4b review): a WAIT is retried by the door itself once this
@@ -312,6 +326,13 @@ class DoorConfig:
 # ---------------------------------------------------------------------------
 
 
+class PaperclipClientError(RuntimeError):
+    """A dev-Paperclip request failure whose text is scrubbed of every
+    configured header value (PF-3 item 1).  The original exception's type
+    name rides in the message; no secret ever reaches a log, a blocker
+    reason or the frozen record."""
+
+
 class PaperclipLoopbackClient:
     """The DOOR's reader/writer against the dev Paperclip (stdlib urllib).
 
@@ -323,6 +344,24 @@ class PaperclipLoopbackClient:
     def __init__(self, config: DoorConfig, timeout: int = 20):
         self._config = config
         self._timeout = timeout
+        # PF-3 item 1: header values (an authorization header may now ride
+        # here) are scrubbed from every error text at this boundary —
+        # longest first, so an overlapping shorter value cannot leave a
+        # fragment of a longer one behind.
+        self._header_values = tuple(sorted(
+            {value for value in config.paperclip_headers.values()
+             if type(value) is str and value},
+            key=len, reverse=True))
+
+    def _scrub(self, text: str) -> str:
+        for value in self._header_values:
+            text = text.replace(value, "[redacted-header]")
+            # exception texts often carry the %r form (a newline becomes
+            # a literal \n), which the raw replace above cannot match
+            escaped = repr(value)[1:-1]
+            if escaped != value:
+                text = text.replace(escaped, "[redacted-header]")
+        return text
 
     def _request(self, method: str, path: str, body=None):
         url = f"{self._config.paperclip_base}{path}"
@@ -332,9 +371,16 @@ class PaperclipLoopbackClient:
             headers["content-type"] = "application/json"
         req = urllib.request.Request(url, data=data, method=method,
                                      headers=headers)
-        with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-            raw = resp.read()
-            return json.loads(raw) if raw else {}
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                raw = resp.read()
+                return json.loads(raw) if raw else {}
+        except Exception as exc:
+            # http.client's putheader ValueError QUOTES an invalid header
+            # value; every caller logs str(exc) into a log/blocker/frozen
+            # record, so the text is scrubbed here, at the one boundary.
+            raise PaperclipClientError(self._scrub(
+                f"{type(exc).__name__}: {exc}")) from None
 
     def issue(self, issue_id):
         return self._request("GET", f"/api/issues/{issue_id}")
@@ -1935,6 +1981,7 @@ class CodingJobDoor:
             )
             registry.register(CARRIER_KIND, PaperclipResultDeliveryTransport(
                 base_url=self.config.paperclip_base,
+                service_agent_id=self.config.paperclip_service_agent_id,
                 headers=self.config.paperclip_headers,
                 state_dir=self.root / "run" / "delivery"))
         install_execution_return_seam(
@@ -2098,6 +2145,7 @@ class CodingJobDoor:
             )
             registry.register(CARRIER_KIND, PaperclipResultDeliveryTransport(
                 base_url=self.config.paperclip_base,
+                service_agent_id=self.config.paperclip_service_agent_id,
                 headers=self.config.paperclip_headers,
                 state_dir=self.root / "run" / "delivery"))
         wiring = install_execution_return_seam(

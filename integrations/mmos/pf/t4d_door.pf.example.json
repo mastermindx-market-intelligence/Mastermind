@@ -5,6 +5,7 @@
   "paperclip_allowed": ["127.0.0.1:3196"],
   "paperclip_company_id": "PFD",
   "paperclip_headers": {},
+  "paperclip_service_agent_id": "PLACEHOLDER_PF_SERVICE_AGENT_ID",
   "teammates": ["PLACEHOLDER_PF_AGENT_ID"],
   "repository": "mastermindx-market-intelligence/Mastermind",
   "register_transport": true,

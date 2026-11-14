@@ -39,6 +39,9 @@ ISSUE = "iss-1"
 ATTEMPT = "ATT-1"
 BRANCH = "t3/mmos-t4b-job-abc12345"
 DEV_HEADERS = {"x-instance-role": "local_trusted"}
+# PF-3 item 1: the delivery writer is a dedicated service agent, never the
+# board.  The fake instance stamps its posts with this agent attribution.
+SERVICE_AGENT = "ag-pf-delivery"
 
 
 # --- the fake Paperclip instance -------------------------------------------
@@ -128,19 +131,18 @@ class FakePaperclip:
                     return
                 with self._lock:
                     rows = self.comments.setdefault(issue, [])
-                    # the created row echoes the request id and carries the
-                    # author the real dev instance stamps on instance-role
-                    # posts (observed live 2026-11-11): the board actor —
-                    # authorType "user", authorAgentId null, authorUserId
-                    # "local-board".  Agent-channel posts (the teammate
-                    # heartbeat) are authorType "agent" with authorAgentId
-                    # set — the H2 attribution shape.
+                    # PF-3 item 1: the delivery channel is a dedicated
+                    # service agent, so the instance stamps agent
+                    # attribution — authorType "agent", authorAgentId the
+                    # service agent (the H2 attribution shape).  Board-user
+                    # posts (authorType "user", authorAgentId null) are a
+                    # DIFFERENT actor and never this transport's delivery.
                     row = {"id": f"cmt-{len(rows) + 1}",
                            "body": body.get("body", ""),
                            "clientRequestId": body.get("clientRequestId"),
-                           "authorType": "user",
-                           "authorAgentId": None,
-                           "authorUserId": "local-board"}
+                           "authorType": "agent",
+                           "authorAgentId": SERVICE_AGENT,
+                           "authorUserId": None}
                     rows.append(row)
                 self._send(handler, 201, row)
                 return
@@ -242,6 +244,7 @@ def _origin(ids: dict[str, str] | None = None) -> OriginRef:
 
 def _transport(paperclip: FakePaperclip, tmp_path, **kwargs: Any
                ) -> PaperclipResultDeliveryTransport:
+    kwargs.setdefault("service_agent_id", SERVICE_AGENT)
     return PaperclipResultDeliveryTransport(
         base_url=paperclip.base_url, headers=DEV_HEADERS,
         state_dir=tmp_path, **kwargs)
@@ -318,7 +321,8 @@ def test_a_fresh_transport_dedupes_from_the_issue_comments(paperclip, tmp_path):
     authority — a new process with an empty state dir still posts once.
     T4c repair round 1, R2: the scan counts only THIS transport's own
     earlier delivery (the deterministic uuid5 clientRequestId it posts
-    with, echoed on a board-authored row), never a bare marker string."""
+    with, echoed on a row authored by THIS service agent — PF-3 item 1),
+    never a bare marker string."""
     _deliver(_transport(paperclip, tmp_path))
     fresh = _transport(paperclip, tmp_path / "other-state")
     receipt = _deliver(fresh)
@@ -336,9 +340,9 @@ def test_r2_a_forged_marker_in_another_authors_comment_does_not_suppress(
     attempt id is public (the worker prompt names it).  A row now counts
     only when it is this transport's OWN delivery: the deterministic
     clientRequestId this code posts with (uuid5 keyed on the attempt),
-    echoed on a board-authored row.  Agent posts carry authorAgentId (the
-    H2 attribution shape) and a board user without the request id matches
-    neither, so neither can suppress a delivery."""
+    echoed on a row authored by THIS service agent (PF-3 item 1).  Another
+    agent's row carries a different authorAgentId and a board-user row has
+    none, so neither can suppress a delivery."""
     marker = f"{PAPERCLIP_RETURN_MARKER_PREFIX} {ATTEMPT}"
 
     # a teammate agent forges the marker (agent-authored, right marker,
@@ -379,17 +383,18 @@ def test_r2_a_genuine_earlier_delivery_row_still_dedupes(
         paperclip, tmp_path):
     """R2's other leg: the authenticated scan must still find the
     transport's own earlier delivery — the exact row shape this transport
-    posts (uuid5 clientRequestId, board-authored), planted by hand as a
-    crashed predecessor's POST-success/response-lost window would leave
-    it: no sidecar, the row already on the issue."""
+    posts (uuid5 clientRequestId, authored by THIS service agent — PF-3
+    item 1), planted by hand as a crashed predecessor's POST-success/
+    response-lost window would leave it: no sidecar, the row already on
+    the issue."""
     expected_request_id = str(uuid.uuid5(
         uuid.NAMESPACE_URL, f"paperclip-return:{ATTEMPT}"))
     paperclip.comments.setdefault(ISSUE, []).append({
         "id": "cmt-real-1",
         "body": build_return_comment(_record(), ATTEMPT),
         "clientRequestId": expected_request_id,
-        "authorType": "user", "authorAgentId": None,
-        "authorUserId": "local-board",
+        "authorType": "agent", "authorAgentId": SERVICE_AGENT,
+        "authorUserId": None,
         "createdAt": "2026-11-11T03:00:00Z"})
 
     transport = _transport(paperclip, tmp_path)
@@ -460,7 +465,8 @@ def test_document_failure_after_the_comment_refuses_without_reposting(
 def test_non_loopback_base_url_is_refused_at_construction(base, tmp_path):
     with pytest.raises(ValueError, match="non-loopback"):
         PaperclipResultDeliveryTransport(
-            base_url=base, headers=DEV_HEADERS, state_dir=tmp_path)
+            base_url=base, headers=DEV_HEADERS, state_dir=tmp_path,
+            service_agent_id=SERVICE_AGENT)
 
 
 @pytest.mark.parametrize("base", [
@@ -468,7 +474,111 @@ def test_non_loopback_base_url_is_refused_at_construction(base, tmp_path):
 ])
 def test_loopback_bases_construct(base, tmp_path):
     PaperclipResultDeliveryTransport(
-        base_url=base, headers=DEV_HEADERS, state_dir=tmp_path)
+        base_url=base, headers=DEV_HEADERS, state_dir=tmp_path,
+        service_agent_id=SERVICE_AGENT)
+
+
+# --- PF-3 item 1: the service-agent writer identity -------------------------
+
+
+def test_service_agent_id_is_required(paperclip, tmp_path):
+    """The transport cannot be built without a writer identity: delivering
+    as the board is exactly the defect PF-3 item 1 removes."""
+    with pytest.raises(TypeError):
+        PaperclipResultDeliveryTransport(
+            base_url=paperclip.base_url, headers=DEV_HEADERS,
+            state_dir=tmp_path)
+
+
+@pytest.mark.parametrize("bad", ["", "   ", None, 7, ["ag-x"]])
+def test_service_agent_id_must_be_a_non_empty_string(bad, tmp_path):
+    with pytest.raises(ValueError, match="service_agent_id"):
+        PaperclipResultDeliveryTransport(
+            base_url="http://127.0.0.1:3190", headers=DEV_HEADERS,
+            state_dir=tmp_path, service_agent_id=bad)
+
+
+def test_board_user_row_with_our_request_id_is_not_ours(paperclip, tmp_path):
+    """Owed (a): a board-user comment carrying OUR deterministic
+    clientRequestId and the marker is still NOT our delivery — the board
+    is a different actor.  The transport must post the real result."""
+    marker = f"{PAPERCLIP_RETURN_MARKER_PREFIX} {ATTEMPT}"
+    our_request_id = str(uuid.uuid5(
+        uuid.NAMESPACE_URL, f"paperclip-return:{ATTEMPT}"))
+    paperclip.comments.setdefault(ISSUE, []).append({
+        "id": "cmt-board-1", "body": f"[coding-job] {marker}\nboard paste",
+        "clientRequestId": our_request_id,
+        "authorType": "user", "authorAgentId": None,
+        "authorUserId": "local-board", "createdAt": "2026-11-14T01:00:00Z"})
+
+    receipt = _deliver(_transport(paperclip, tmp_path))
+    assert receipt["state"] == "delivered"
+    assert receipt.get("note") is None, "a board row must not suppress delivery"
+    assert len(paperclip.comment_posts()) == 1
+
+
+def test_foreign_agent_row_with_our_request_id_is_not_ours(paperclip, tmp_path):
+    """Owed (b): another agent's comment with OUR clientRequestId and the
+    marker is NOT our delivery — only THIS service agent's row counts."""
+    marker = f"{PAPERCLIP_RETURN_MARKER_PREFIX} {ATTEMPT}"
+    our_request_id = str(uuid.uuid5(
+        uuid.NAMESPACE_URL, f"paperclip-return:{ATTEMPT}"))
+    paperclip.comments.setdefault(ISSUE, []).append({
+        "id": "cmt-other-1", "body": f"[coding-job] {marker}\nother agent",
+        "clientRequestId": our_request_id,
+        "authorType": "agent", "authorAgentId": "ag-someone-else",
+        "authorUserId": None, "createdAt": "2026-11-14T01:00:00Z"})
+
+    receipt = _deliver(_transport(paperclip, tmp_path))
+    assert receipt["state"] == "delivered"
+    assert receipt.get("note") is None, "a foreign agent row must not suppress"
+    assert len(paperclip.comment_posts()) == 1
+
+
+def test_restart_dedupe_same_and_fresh_state_dir_posts_exactly_once(
+        paperclip, tmp_path):
+    """Owed (c): our service agent's row IS ours.  Across a restart — a new
+    transport instance on the SAME state dir, and another on a FRESH empty
+    state dir — exactly one comment is ever posted."""
+    first = _deliver(_transport(paperclip, tmp_path))
+    assert first["state"] == "delivered"
+
+    same_state = _deliver(_transport(paperclip, tmp_path))
+    assert same_state["state"] == "delivered"
+    assert same_state.get("note") == "already-delivered"
+
+    fresh_state = _deliver(_transport(paperclip, tmp_path / "fresh-empty"))
+    assert fresh_state["state"] == "delivered"
+    assert fresh_state.get("note") == "already-delivered"
+
+    assert len(paperclip.comment_posts()) == 1, "exactly one comment, ever"
+    assert len(paperclip.comments[ISSUE]) == 1
+
+
+def test_ruling19_written_mark_is_never_rederived_away(paperclip, tmp_path):
+    """Owed (d), ruling 19: once the 'comment' mark is written it is never
+    re-derived away.  A later comments listing that LACKS our row (or holds
+    only foreign rows) causes no second post and no mark removal/rewrite."""
+    transport = _transport(paperclip, tmp_path)
+    assert _deliver(transport)["state"] == "delivered"
+    marks_path = tmp_path / "paperclip_result_delivery_marks.jsonl"
+    before = marks_path.read_bytes()
+    assert transport._marks(ATTEMPT) == {"comment", "document"}
+
+    # the listing now holds only a foreign row — our own row is gone
+    paperclip.comments[ISSUE] = [{
+        "id": "cmt-foreign", "body": "unrelated board chatter",
+        "clientRequestId": str(uuid.uuid4()),
+        "authorType": "user", "authorAgentId": None,
+        "authorUserId": "local-board", "createdAt": "2026-11-14T02:00:00Z"}]
+
+    restarted = _transport(paperclip, tmp_path)
+    receipt = _deliver(restarted)
+    assert receipt["state"] == "delivered"
+    assert receipt.get("note") == "already-delivered"
+    assert len(paperclip.comment_posts()) == 1, "no second post"
+    assert restarted._marks(ATTEMPT) == {"comment", "document"}
+    assert marks_path.read_bytes() == before, "the mark is never rewritten"
 
 
 # --- 5. the registry's existing unknown-kind law ----------------------------
@@ -545,3 +655,49 @@ def test_no_token_material_in_bodies_or_headers(paperclip, tmp_path):
         assert "Bearer" not in text
         assert "authorization" not in text.lower()
         assert "x-instance-role" not in text
+
+
+# --- PF-3 item 1: header values never leak ----------------------------------
+
+
+def test_header_values_never_leak_after_failed_and_successful_delivery(
+        paperclip, tmp_path, capsys):
+    """An authorization header value must never appear in captured
+    stdout/stderr, in any receipt, or in ANY file under the state dir —
+    after a failed AND a successful delivery (fake HTTP layer)."""
+    sentinel = "SENTINEL-AUTH-9f3e2d1c"
+    headers = {"x-instance-role": "local_trusted",
+               "authorization": f"Bearer {sentinel}"}
+    transport = PaperclipResultDeliveryTransport(
+        base_url=paperclip.base_url, headers=headers,
+        state_dir=tmp_path, service_agent_id=SERVICE_AGENT)
+
+    paperclip.fail_next_comment_post = True
+    refused = _deliver(transport)
+    assert refused["state"] == "refused"
+    delivered = _deliver(transport)
+    assert delivered["state"] == "delivered"
+
+    captured = capsys.readouterr()
+    blob = captured.out + captured.err
+    blob += json.dumps(refused) + json.dumps(delivered)
+    for path in sorted(tmp_path.rglob("*")):
+        if path.is_file():
+            blob += path.read_text(encoding="utf-8", errors="replace")
+    assert sentinel not in blob, "a header value leaked to output or state"
+    assert "Bearer" not in blob
+
+
+def test_invalid_header_value_never_leaks_into_the_receipt(paperclip, tmp_path):
+    """http.client rejects a header value containing a newline with a
+    ValueError that QUOTES the value.  That exception text must never reach
+    the receipt reason (the last-resort fence embeds str(exc))."""
+    sentinel = "SENTINEL-INVALID-7b1a"
+    headers = {"authorization": f"Bearer {sentinel}\ninjected"}
+    transport = PaperclipResultDeliveryTransport(
+        base_url=paperclip.base_url, headers=headers,
+        state_dir=tmp_path, service_agent_id=SERVICE_AGENT)
+    receipt = _deliver(transport)
+    assert receipt["state"] == "refused"
+    assert sentinel not in json.dumps(receipt), \
+        "the invalid-header exception quoted the secret into the receipt"
