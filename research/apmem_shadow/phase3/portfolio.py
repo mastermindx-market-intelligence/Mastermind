@@ -162,7 +162,9 @@ def simulate(market: Market, events: pd.DataFrame, policy: Policy,
                 trades.append({'event_id':p['event_id'],'ticker':market.names[k],
                                'origin':p['origin'],'entry_date':p['entry_date'],'exit_date':str(day.date()),
                                'reason':reason,'days_held':i-p['entry_index']+1,
-                               'net_return_on_committed_cash':p['received']/p['spent']-1})
+                               'net_return_on_committed_cash':p['received']/p['spent']-1,
+                               'spent_equity_units':p['spent'],'received_equity_units':p['received'],
+                               'pnl_equity_units':p['received']-p['spent']})
                 del positions[k]
 
         # Only known opening exits may release capital before new opening entries.
